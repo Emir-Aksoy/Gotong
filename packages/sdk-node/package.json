@@ -1,0 +1,32 @@
+{
+  "name": "@aipehub/sdk-node",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "AipeHub Node SDK — connect agents to a remote Hub over WebSocket.",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/protocol": "workspace:*",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@aipehub/transport-ws": "workspace:*",
+    "@types/ws": "^8.5.13",
+    "vitest": "^2.0.0"
+  }
+}

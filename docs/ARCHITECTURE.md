@@ -1,6 +1,11 @@
-# AipeHub Architecture (v0)
+# AipeHub Architecture (v0.1)
 
-This document records the design decisions for the first version. It is the source of truth when the code disagrees with itself.
+This document records the design decisions for the framework. It is the source of truth when the code disagrees with itself.
+
+| Version | Lands |
+|---|---|
+| v0.0 | Embeddable library: Hub, three dispatch strategies, transcript, FileStorage, web UI |
+| v0.1 | **Wire protocol + WebSocket transport + Node SDK** — remote agents can connect from another process/machine |
 
 ## 1. Philosophy
 
@@ -108,9 +113,13 @@ const web = await serveWeb(hub, { port: 3000 })
 // later: await web.close()
 ```
 
-## 8. Deployment shape (v0)
+## 8. Deployment shapes
 
-Single-process embeddable library:
+AipeHub supports two deployment shapes with the *same* Hub API in both. Local and remote agents register into the same `Registry`; the scheduler does not distinguish them.
+
+### 8a. Embedded — everything in one process
+
+Library mode. Agents are in-process objects.
 
 ```ts
 import { Hub, FileStorage } from '@aipehub/core'
@@ -126,19 +135,54 @@ await hub.dispatch({
 })
 ```
 
-A future version may add a `transport/` layer so participants can connect across processes (websocket / gRPC). The Hub interface stays the same.
+### 8b. Distributed — agents in other processes (v0.1)
 
-## 9. What is explicitly NOT in v0
+The Hub process opens a WebSocket transport. Remote agents speak the wire protocol defined in [PROTOCOL.md](./PROTOCOL.md). Hub-side they appear in the registry as `RemoteAgentParticipant`s — capability matching, broadcast races, and explicit dispatch all work uniformly.
 
-- LLM provider abstractions (agents bring their own)
+```ts
+// host process
+import { Hub } from '@aipehub/core'
+import { serveWebSocket } from '@aipehub/transport-ws'
+
+const hub = new Hub()
+await hub.start()
+const ws = await serveWebSocket(hub, {
+  port: 4000,
+  authenticate: (apiKey) => apiKey === process.env.AIPE_API_KEY,
+})
+// hub.dispatch(...) just works — remote agents look identical to local ones
+```
+
+```ts
+// worker process — Node SDK
+import { AgentParticipant, connect } from '@aipehub/sdk-node'
+
+class MyAgent extends AgentParticipant {
+  constructor() { super({ id: 'a1', capabilities: ['draft'] }) }
+  protected async handleTask(task) { return { text: '…' } }
+}
+
+const session = await connect({
+  url: 'ws://hub.example.com:4000',
+  agents: [new MyAgent()],
+  apiKey: process.env.AIPE_API_KEY,
+})
+```
+
+SDKs in other languages (Python is next) will speak the same JSON protocol. See [PROTOCOL.md](./PROTOCOL.md) for frame definitions, the state machine, heartbeat, and disconnect semantics.
+
+## 9. What is explicitly NOT in v0.1 (yet)
+
+- LLM provider abstractions (agents still bring their own)
 - Tool registries / skills marketplaces
 - Browser automation
-- Multi-tenant auth
-- Network transport (single-process only)
+- Multi-tenant auth — v0.1 has API-key auth only; per-agent identity tokens are v0.4
+- Python / Go / browser SDKs — only Node SDK ships in v0.1
 - A scheduler that understands cost, latency, or priority
 - Persistent pending tasks across restarts (only transcript persists; see §11)
+- Reconnect that preserves in-flight tasks (current behavior: failed with `remote_disconnect`)
 
-These are intentional cuts. The v0 surface is the smallest API that proves the abstraction holds.
+These are intentional cuts. The surface is meant to stay small until each feature has a concrete use case demanding it.
 
 ## 10. Module map
 
@@ -166,11 +210,26 @@ packages/web/
   static/app.js         vanilla-JS client; connects to /api/stream
   static/styles.css
 
+packages/protocol/      wire-protocol types, constants, and codec — zero runtime
+  src/frames.ts         ClientFrame / ServerFrame discriminated unions
+  src/constants.ts      PROTOCOL_VERSION, heartbeat / timeout defaults
+  src/codec.ts          decodeFrame / encodeFrame
+
+packages/transport-ws/  Hub-side WebSocket transport
+  src/server.ts         serveWebSocket(hub, opts)
+  src/session.ts        per-connection state machine (AWAIT_HELLO → READY → DEAD)
+  src/remote-participant.ts  RemoteAgentParticipant — Participant that proxies over WS
+
+packages/sdk-node/      Node SDK for remote agents
+  src/session.ts        connect(opts) + auto-reconnect with exponential backoff
+  src/index.ts          re-exports AgentParticipant for one-stop import
+
 examples/
   hello-collab/         capability + explicit dispatch, mock human auto-approves
   broadcast-claim/      broadcast strategy: three reviewers race, losers get cancelled
   persist-and-resume/   FileStorage round-trip: seq continues across restarts
   web-demo/             web UI in front of a perpetual writer + alice loop
+  remote-agent/         host + worker in separate processes over the wire protocol
 ```
 
 ## 11. Asynchrony — what is and is not synchronized
@@ -184,6 +243,10 @@ A few semantic edges that matter once you build something real on top of the Hub
 ### Broadcast cancel notifications race with `dispatch()` resolution
 
 When a broadcast winner is decided, `dispatch()` resolves immediately with the winner's result. The losers' `onTaskCancelled` callbacks are scheduled but not necessarily run yet. Demos that print "winner!" right after `await dispatch(...)` often see the cancel log lines arrive afterward in non-deterministic order. This is OK by design — cancels are best-effort notifications, not part of the task-result contract. If you need them ordered, sleep a tick before reading.
+
+### Remote disconnect fails in-flight tasks
+
+When a WebSocket session drops, the Hub-side `RemoteAgentParticipant` resolves every outstanding `onTask` promise as `{ kind: 'failed', error: 'remote_disconnect' }` and unregisters itself. The dispatcher's `await hub.dispatch(...)` will return that failure result rather than hang. The transcript records a `participant_left` entry per disconnected agent. A future protocol revision may add a `RESUME` frame with the prior `sessionId` to recover in-flight tasks across a brief disconnect — out of scope for v0.1.
 
 ### Transcript persistence is fire-and-forget per append
 

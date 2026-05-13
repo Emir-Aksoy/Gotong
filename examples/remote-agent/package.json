@@ -1,0 +1,18 @@
+{
+  "name": "@aipehub/example-remote-agent",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Cross-process demo: Hub in one process, agents in another, connected over the wire protocol.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "host": "tsx src/host.ts",
+    "worker": "tsx src/worker.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/transport-ws": "workspace:*",
+    "@aipehub/sdk-node": "workspace:*"
+  }
+}
