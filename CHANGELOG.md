@@ -4,6 +4,107 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.0`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — workflow engine + CI (v2.1)
+
+The pluggable workflow layer the Hub deliberately doesn't bundle. The
+Hub stays "dumb dispatcher"; `@aipehub/workflow` is a separate package
+the host loads at boot. Workflows are YAML files; their runtime state is
+JSON on disk; nothing about the Hub had to change.
+
+### Added — `@aipehub/workflow` (new package, file-first)
+
+- **YAML schema `aipehub.workflow/v1`** with: `trigger.capability`,
+  ordered `steps[]`, optional `output` expression, optional
+  workflow-level `onFailure` (`halt` / `continue`). Steps are either
+  simple (one `dispatch`) or `parallel: true` with fan-out branches.
+- **Reference syntax** in payloads / output: `$trigger.payload[.path]`,
+  `$stepId.output[.path]`, `$stepId.branchId.output`. Type-preserving on
+  full substitution; JSON-stringified on inline templating.
+- **`WorkflowRunner extends AgentParticipant`** — registers as
+  `workflow:<id>` with one capability (the trigger). The Hub treats it
+  as an ordinary agent; it just happens to make N inner dispatches.
+- **File-first persistence**: every run writes
+  `<space>/workflows/runs/<runId>.json` atomically (tmp + rename) after
+  each step. Operators can `jq` the directory to inspect or recover.
+- **`when:` predicate (v0.2)** on simple steps AND parallel steps —
+  strict typed `==`/`!=`, `&&`/`||`/`!`, parentheses, `$ref` operands.
+  No arithmetic, no `<`/`>`, no functions. Bad predicates are caught at
+  `parseWorkflow` time, not at first dispatch. Missing refs resolve to
+  `undefined` (same as "step not run yet"). Skipped steps record
+  `status: 'skipped'`; downstream refs see `undefined`.
+- **Resume from disk (v0.3)** — host boot scans `runs/` and continues
+  any run still marked `'running'`. Already-`done` steps replay from
+  their persisted output without re-dispatching; mid-flight or crashed
+  steps are dropped and re-run fresh. Runs whose workflow has been
+  removed since are closed out as `failed` so they stop pretending to
+  still be running in the admin history.
+- **Branch-level `when:` (v0.4)** — each parallel branch can be gated
+  independently. Skipped branches don't dispatch, don't appear in
+  `subTaskIds`, contribute `undefined` to the step's output map, and
+  don't count as failures. Parent-step `when: false` short-circuits
+  before inner branch predicates evaluate.
+- **`RunStore`** — atomic write, JSON read, `listRunIds`, `listRuns`
+  with optional `workflowId` filter + `limit`, all under a single
+  `<space>/workflows/` tree.
+
+### Added — host integration
+
+- **`@aipehub/host`** scans `AIPE_WORKFLOWS_DIR` (default
+  `<space>/workflows/definitions/`) at boot and registers a runner per
+  file. Default participant id is `workflow:<id>`.
+- **`WorkflowController`** is the duck-typed `WorkflowSurface` the Web
+  layer talks to. Methods: `list`, `importFromText`, `remove`,
+  `listRuns`, `readRun`, `resumeRunningRuns`. The Web package does NOT
+  take a runtime dependency on `@aipehub/workflow` — the controller is
+  passed in via `serveWeb({ workflows })`.
+- **HTTP API**:
+  - `GET    /api/admin/workflows`              — list loaded workflows
+  - `POST   /api/admin/workflows/import`       — paste YAML / JSON
+  - `DELETE /api/admin/workflows/:id`          — unregister + unlink
+  - `GET    /api/admin/workflows/runs?workflowId=&limit=` — history list
+  - `GET    /api/admin/workflows/runs/:id`     — full run detail
+  - All endpoints respond 404 when the host wasn't built with
+    workflows enabled — admin UI auto-hides the panel.
+
+### Added — admin UI
+
+- New "工作流" section on `/admin` with cards for each loaded workflow
+  (trigger capability + step count + file path).
+- **"导入工作流" modal** — file upload OR paste, surfaces schema errors
+  verbatim.
+- **"移除" button** on each card — unregisters + deletes the YAML.
+- **"历史" button** opens a two-pane modal: list of recent runs (newest
+  first, status / time / step count) + click-to-view detail showing
+  trigger payload, per-step status + timing + sub-task ids + output,
+  plus the final output / error.
+- SSE-driven: `participant_joined` / `participant_left` for any id
+  starting with `workflow:` triggers a refresh.
+
+### Added — `templates/workflows/`
+
+Four reference workflows, each callable as one trigger capability:
+
+- `editorial-flow.yaml`            — writer → reviewer (2 steps)
+- `admin-task-flow.yaml`           — parse → split → [parallel: draft +
+  dispatch] → report → archive (5 steps)
+- `admin-report-restyle-flow.yaml` — single-step restyle
+- `industry-enablement-flow.yaml`  — 5-step traditional-industry AI
+  enablement consult
+
+### Added — CI
+
+`.github/workflows/ci.yml` — Node 20/22 × `pnpm -r build/typecheck/test`,
+plus Python 3.10/3.11/3.12 × `pytest` for `python-sdk`. Concurrency
+cancels in-flight PR runs; `main` post-merge runs always finish.
+
+### Tests
+
+- `@aipehub/workflow`: 82 tests (schema, resolver, runner, predicate,
+  run-store, template parse smoke-check).
+- `@aipehub/host`: 19 tests (loader, controller — import / remove /
+  history / resume orchestration).
+- Workspace total: **316 passed / 2 skipped**.
+
 ## Unreleased — managed agents + encrypted API keys + template library (v2.1)
 
 The "普通人 60 秒上线一个 agent" milestone. Adds host-managed LLM

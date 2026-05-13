@@ -25,7 +25,7 @@ separate package:
 | **Is** | A YAML/JSON schema + a runner that turns one inbound task into N sequential / parallel `hub.dispatch()` calls and returns the last step's output |
 | **Is** | An `AgentParticipant` — registered with the Hub like any other agent |
 | **Is** | File-first — workflow definitions are `.yaml` files; running state is `.json` files under `.aipehub/workflows/runs/` |
-| **Isn't** | A DAG compiler with conditional branching (v0.2) |
+| **Isn't** | A general-purpose DAG compiler — workflows are a list of steps with optional fan-out, not arbitrary graphs |
 | **Isn't** | A long-running scheduler (no cron, no delays) |
 | **Isn't** | A modification to Hub core |
 
@@ -94,8 +94,21 @@ appears in the transcript with `from: workflow:editorial-flow`.
 ```
 
 Each run gets its own JSON file. The runner writes it on start, updates it after
-every step, and finalizes it at the end. Crash mid-run? The file is still there
-for inspection (resume is v0.2).
+every step, and finalizes it at the end. Crash mid-run? On the next host boot
+`WorkflowController.resumeRunningRuns()` picks the run back up from the last
+completed step (see the runner's `resumeRun(state)` method) — re-dispatched
+steps don't double-charge already-`done` records, and runs whose workflow has
+since been removed get closed out cleanly instead of pretending to still run
+in the admin history.
+
+## Features by version
+
+| Version | Added |
+|---|---|
+| v0.1 | YAML schema, sequential + parallel steps, `$ref` resolver, file-first persistence, `RunStore`, host autoload, admin UI import / remove |
+| v0.2 | `when:` predicates on simple and parallel steps (strict typed `==`/`!=`, `&&`/`||`/`!`, parens). Bad predicates rejected at `parseWorkflow` time |
+| v0.3 | Resume interrupted runs — host scans `runs/` on boot, continues anything still `'running'` from the first incomplete step |
+| v0.4 | Branch-level `when:` — each parallel branch can be gated independently; skipped branches contribute `undefined` and don't appear in `subTaskIds` |
 
 ## Schema reference
 

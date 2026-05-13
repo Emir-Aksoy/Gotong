@@ -61,13 +61,11 @@ list keeps the checklist honest.
 - [ ] Enable GitHub Discussions; seed categories: Q&A, Show & Tell, Ideas.
 - [ ] Add `.github/dependabot.yml` for npm + pnpm + GitHub Actions
       updates.
-- [ ] Decide on a CI provider (GitHub Actions is the obvious choice
-      since everything else lives on GitHub) and stand up:
-  - typecheck
-  - vitest (workspace-wide)
-  - python sdk tests (pytest)
-  - manifest template parse check (already exists as a test, just make
-    sure CI runs `pnpm -r test`)
+- [x] Decide on a CI provider — GitHub Actions, live in
+      `.github/workflows/ci.yml`. Two jobs: Node 20/22 (`pnpm -r build
+      typecheck test`) + Python 3.10/3.11/3.12 (`pytest python-sdk`).
+      Concurrency cancels in-flight PR runs but lets post-merge `main`
+      runs finish. Template parse check is covered by `pnpm -r test`.
 
 ## Operational
 
