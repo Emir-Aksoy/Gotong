@@ -23,11 +23,24 @@
       <button id="lang-toggle" class="lang-toggle" type="button" title="切换语言 / Switch language">EN</button>
     </header>
 
+    <!-- Primary navigation. Each tab maps to a `data-tab` value carried
+         by the sections below; URL hash (#overview / #agents / ...)
+         keeps the active tab across reloads without touching
+         localStorage — same "no client state outside cookies" rule
+         the rest of the app follows. -->
+    <nav id="admin-tabbar" class="tabbar" aria-label="主导航">
+      <button class="tabbar-btn" type="button" data-tab="overview"  data-i18n="tabOverview">总览</button>
+      <button class="tabbar-btn" type="button" data-tab="agents"    data-i18n="tabAgents">智能体</button>
+      <button class="tabbar-btn" type="button" data-tab="workflows" data-i18n="tabWorkflows">工作流</button>
+      <button class="tabbar-btn" type="button" data-tab="tasks"     data-i18n="tabTasks">任务</button>
+      <button class="tabbar-btn" type="button" data-tab="activity"  data-i18n="tabActivity">活动</button>
+    </nav>
+
     <main id="main-grid" class="admin-grid">
       <!-- Room health banner — single-glance signal of "is the room
            healthy right now?" Numbers come from /api/state +
            /api/leaderboard?from=<7d>; no new backend endpoint. -->
-      <section id="room-health" class="room-health">
+      <section id="room-health" class="room-health" data-tab="overview">
         <div class="health-card">
           <div class="health-label" data-i18n="healthToday">今日任务</div>
           <div class="health-value" id="health-today-tasks">—</div>
@@ -49,12 +62,12 @@
         </div>
       </section>
 
-      <section id="pending-apps" class="pending-apps">
+      <section id="pending-apps" class="pending-apps" data-tab="overview">
         <h2 data-i18n="pendingAgents">待批准的接入申请</h2>
         <div id="pending-apps-list"></div>
       </section>
 
-      <section id="managed-agents" class="managed-agents">
+      <section id="managed-agents" class="managed-agents" data-tab="agents">
         <h2>
           <span data-i18n="managedAgentsTitle">智能体</span>
           <span id="ma-summary" class="lb-summary"></span>
@@ -157,7 +170,7 @@
       </div>
 
       <!-- Workflows (v2.1) — hidden when the host has no workflow surface -->
-      <section id="workflows" class="managed-agents" hidden>
+      <section id="workflows" class="managed-agents" data-tab="workflows" hidden>
         <h2>
           <span data-i18n="workflowsTitle">工作流</span>
           <span id="wf-summary" class="lb-summary"></span>
@@ -279,7 +292,7 @@
         </div>
       </div>
 
-      <section id="leaderboard-section" class="leaderboard-section">
+      <section id="leaderboard-section" class="leaderboard-section" data-tab="overview">
         <h2>
           <span data-i18n="leaderboardTitle">贡献榜</span>
           <select id="lb-window" class="lb-window-select" aria-label="时段">
@@ -293,7 +306,7 @@
         <div id="leaderboard-list"></div>
       </section>
 
-      <section id="participants">
+      <section id="participants" data-tab="activity">
         <h2 data-i18n="participants">当前在场</h2>
         <div id="participants-list"></div>
         <h2 style="margin-top:1.2rem" data-i18n="knownRoster">空间档案</h2>
@@ -305,12 +318,12 @@
         </div>
       </section>
 
-      <section id="transcript">
+      <section id="transcript" data-tab="activity">
         <h2><span data-i18n="transcript">消息流</span> <span id="transcript-count" class="count"></span></h2>
         <ol id="transcript-list"></ol>
       </section>
 
-      <section id="controls">
+      <section id="controls" data-tab="tasks">
         <details open class="panel">
           <summary data-i18n="tasksPanel">任务面板</summary>
           <div id="tasks-filters" class="tasks-filters">

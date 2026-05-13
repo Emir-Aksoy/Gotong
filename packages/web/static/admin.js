@@ -1276,9 +1276,74 @@
     window.location.href = '/admin'
   }
 
+  // ── Tab navigation ───────────────────────────────────────────────────
+  //
+  // The admin console used to be a tall single-page scroll of every
+  // section. With managed agents + workflows + tasks + transcript +
+  // leaderboard + pending applications all on one page, finding the
+  // thing you wanted got expensive. We split sections into 5 tabs:
+  // overview / agents / workflows / tasks / activity.
+  //
+  // Active tab lives in the URL hash (`/admin#agents`) so refreshes
+  // remember the user's position without touching localStorage — same
+  // "browser stays state-less except for the HttpOnly cookie" rule the
+  // rest of the app follows.
+  //
+  // All sections stay in the DOM at all times; tab switches just flip
+  // a `tab-hidden` class. Keeping them in the DOM means cross-tab
+  // interactions (e.g. clicking a task_result row in Activity auto-
+  // fills the eval form in Tasks) keep working without rewiring.
+  const TABS = ['overview', 'agents', 'workflows', 'tasks', 'activity']
+
+  function activeTabFromHash() {
+    const h = (location.hash || '').replace(/^#/, '')
+    return TABS.includes(h) ? h : 'overview'
+  }
+
+  function setActiveTab(name) {
+    if (!TABS.includes(name)) name = 'overview'
+    document.querySelectorAll('.tabbar-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.tab === name)
+    })
+    document.querySelectorAll('section[data-tab]').forEach((sec) => {
+      sec.classList.toggle('tab-hidden', sec.dataset.tab !== name)
+    })
+    // Mirror the active tab onto `<body>` so CSS can flatten the
+    // 3-col admin grid for tabs that don't fill all three columns
+    // (Tasks would otherwise hug the right edge; Activity would
+    // leave an empty third column). Overview keeps the original
+    // 3-col layout.
+    document.body.dataset.activeTab = name
+  }
+
+  function gotoTab(name) {
+    if (!TABS.includes(name)) name = 'overview'
+    // Use replace so the back button doesn't pile up tab clicks; users
+    // who land here from a deep link still get URL-based persistence.
+    if (location.hash.replace(/^#/, '') !== name) {
+      // setting hash fires hashchange → setActiveTab via the listener
+      location.hash = name
+    } else {
+      setActiveTab(name)
+    }
+  }
+
   document.addEventListener('DOMContentLoaded', async () => {
     resolveDom()
     updateDispatchVisibility()
+
+    // Tabbar wiring. Initial tab comes from URL hash; clicks update
+    // both the DOM and the hash so deep-linking just works.
+    setActiveTab(activeTabFromHash())
+    document.querySelectorAll('.tabbar-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const tab = btn.dataset.tab
+        if (tab) gotoTab(tab)
+      })
+    })
+    window.addEventListener('hashchange', () => {
+      setActiveTab(activeTabFromHash())
+    })
 
     dom.dStrategy.addEventListener('change', updateDispatchVisibility)
     dom.dispatchForm.addEventListener('submit', submitDispatch)
@@ -1421,18 +1486,24 @@
 
     document.addEventListener('click', async (e) => {
       const target = e.target
-      // Click a task_result row → autofill evaluation form
+      // Click a task_result row → autofill evaluation form + jump to
+      // the Tasks tab (the eval form lives there now after the tab
+      // split, otherwise the autofill would be invisible).
       if (target instanceof HTMLElement && target.dataset.taskid) {
         dom.eTask.value = target.dataset.taskid
+        gotoTab('tasks')
         return
       }
       if (!(target instanceof HTMLElement)) return
       const act = target.dataset.act
       const id = target.dataset.id
       if (!act || !id) return
-      // copy task id to the evaluation form on click
+      // copy task id to the evaluation form on click — same cross-tab
+      // jump as the transcript-row case above so the autofill is
+      // actually visible in the Tasks tab.
       if (act === 'copy-task-id') {
         dom.eTask.value = id
+        gotoTab('tasks')
         return
       }
       if (target instanceof HTMLButtonElement) target.disabled = true
