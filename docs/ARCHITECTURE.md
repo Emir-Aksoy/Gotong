@@ -10,7 +10,8 @@ This document records the design decisions for the framework. It is the source o
 | v0.3 | `SqliteStorage` — durable transcript persistence backed by SQLite (`better-sqlite3` optional peer dep). FileStorage stays the no-dependency default. |
 | v0.4 | Per-agent identity at HELLO — `authenticate` can return `{ ok: true, allowedAgents: ['a1', 'a2'] }` to bind an API key to a specific set of agent ids. A leaked key cannot impersonate any other agent. New `forbidden_agent` REJECT code. Back-compat: boolean return still works. |
 | v0.5 | Python SDK (`python-sdk/`, package name `aipehub`) — second language client. `AgentParticipant` + `connect()` mirror the Node SDK; tests pass against a fake Hub server; `examples/remote-python` runs a Node host + Python worker end-to-end over the same wire protocol. |
-| v0.6 | **CLI human adapter** — `examples/cli-human` shows the terminal driving a `HumanParticipant`: tasks render to stdout, responses come back through readline (`AIPE_AUTO=1` skips the prompt for CI / non-TTY). Reference pattern for any UI / chat / IM adapter built on `human.next()` / `human.complete()` / `human.reject()`. |
+| v0.6 | CLI human adapter — `examples/cli-human` shows the terminal driving a `HumanParticipant`: tasks render to stdout, responses come back through readline (`AIPE_AUTO=1` skips the prompt for CI / non-TTY). Reference pattern for any UI / chat / IM adapter built on `human.next()` / `human.complete()` / `human.reject()`. |
+| v0.7 | **`PriorityQueueScheduler` + deadlines** — wraps an inner scheduler with a global priority queue (`(priority desc, createdAt asc)` ordering), bounded concurrency, and deadline enforcement (`deadlineMs`). Tasks past deadline at submit-time or while-queued resolve as `failed` with `error: 'deadline_expired'` and never reach a participant. `Task.priority` added to the wire type (default 0, ignored by `DefaultScheduler`). |
 
 ## 1. Philosophy
 
@@ -74,6 +75,8 @@ The first version ships three task-routing strategies, configurable per task:
 - Human tasks default to either `explicit` (when the dispatcher knows who) or `broadcast` (when any qualified human will do). Configurable per call.
 
 Schedulers are pluggable — `Scheduler` is an interface, and the built-in strategies are three classes implementing it. A custom scheduler can implement any policy (load-balanced, cost-aware, priority queue, etc.).
+
+**`PriorityQueueScheduler`** (v0.7) is a built-in wrapper. Pass it via `Hub({ schedulerFactory: ... })` to add a global priority queue (`(priority desc, createdAt asc)` ordering) plus `maxConcurrent` back-pressure on top of any inner scheduler. It also enforces `Task.deadlineMs`: tasks past their deadline at submit-time or while waiting in the queue resolve as `failed` with `error: 'deadline_expired'` without ever reaching a participant.
 
 ## 5. Transcript
 
@@ -254,6 +257,7 @@ packages/core/src/
   bus.ts                MessageBus — pub/sub graph + async dispatch
   registry.ts           Participant registry — who's online, capabilities, load
   scheduler.ts          Scheduler interface + DefaultScheduler (three strategies)
+  priority-scheduler.ts PriorityQueueScheduler — wraps any Scheduler, adds priority queue + deadline (v0.7)
   transcript.ts         append-only event log
   storage/
     index.ts            Storage interface + re-exports

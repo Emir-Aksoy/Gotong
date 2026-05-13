@@ -32,7 +32,19 @@ export interface Task {
   strategy: DispatchStrategy
   payload: unknown
   title?: string
+  /**
+   * Wall-clock deadline (ms since epoch). If set and `Date.now() > deadlineMs`
+   * when the scheduler is about to dispatch (or dequeue) the task, the task
+   * resolves with a `failed` TaskResult and `error: 'deadline_expired'`
+   * without ever reaching a participant.
+   */
   deadlineMs?: number
+  /**
+   * Relative ordering hint for priority-aware schedulers. Higher = more
+   * urgent. Default is 0. Ignored by `DefaultScheduler`; honored by
+   * `PriorityQueueScheduler` (v0.7).
+   */
+  priority?: number
   createdAt: number
 }
 

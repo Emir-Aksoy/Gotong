@@ -9,6 +9,11 @@ export { Registry } from './registry.js'
 export { DefaultScheduler } from './scheduler.js'
 export type { Scheduler, TaskInvoker, CancelNotifier } from './scheduler.js'
 
+export {
+  PriorityQueueScheduler,
+  type PriorityQueueSchedulerOptions,
+} from './priority-scheduler.js'
+
 export { Transcript } from './transcript.js'
 
 export { InMemoryStorage, FileStorage, SqliteStorage } from './storage/index.js'

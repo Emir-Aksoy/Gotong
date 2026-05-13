@@ -186,6 +186,12 @@ export class Hub {
     payload: unknown
     title?: string
     deadlineMs?: number
+    /**
+     * Scheduling priority hint, used by priority-aware schedulers (e.g.
+     * `PriorityQueueScheduler`). Higher = more urgent. Default 0.
+     * Ignored by the default scheduler.
+     */
+    priority?: number
   }): Promise<TaskResult> {
     const task: Task = {
       id: this.idGen(),
@@ -194,6 +200,7 @@ export class Hub {
       payload: opts.payload,
       title: opts.title,
       deadlineMs: opts.deadlineMs,
+      priority: opts.priority,
       createdAt: this.now(),
     }
     this.transcript.append({ ts: task.createdAt, kind: 'task', data: task })
