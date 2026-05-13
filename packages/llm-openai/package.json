@@ -1,0 +1,32 @@
+{
+  "name": "@aipehub/llm-openai",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "AipeHub LLM provider for OpenAI — wraps openai and implements LlmProvider.",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aipehub/llm": "workspace:*"
+  },
+  "peerDependencies": {
+    "openai": "^4.70.0"
+  },
+  "devDependencies": {
+    "openai": "^4.70.0",
+    "vitest": "^2.0.0"
+  }
+}

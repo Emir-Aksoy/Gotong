@@ -1,0 +1,28 @@
+{
+  "name": "@aipehub/llm",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "AipeHub LLM agent base — provider interface and LlmAgent for building LLM-backed participants.",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0"
+  }
+}

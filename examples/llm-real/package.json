@@ -1,0 +1,19 @@
+{
+  "name": "@aipehub/example-llm-real",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "LlmAgent + Anthropic / OpenAI providers — Claude drafts, GPT reviews. Requires API keys.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/llm": "workspace:*",
+    "@aipehub/llm-anthropic": "workspace:*",
+    "@aipehub/llm-openai": "workspace:*",
+    "@anthropic-ai/sdk": "^0.32.0",
+    "openai": "^4.70.0"
+  }
+}

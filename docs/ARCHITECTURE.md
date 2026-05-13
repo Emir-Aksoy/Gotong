@@ -1,11 +1,12 @@
-# AipeHub Architecture (v0.1)
+# AipeHub Architecture (v0.2)
 
 This document records the design decisions for the framework. It is the source of truth when the code disagrees with itself.
 
 | Version | Lands |
 |---|---|
 | v0.0 | Embeddable library: Hub, three dispatch strategies, transcript, FileStorage, web UI |
-| v0.1 | **Wire protocol + WebSocket transport + Node SDK** — remote agents can connect from another process/machine |
+| v0.1 | Wire protocol + WebSocket transport + Node SDK — remote agents can connect from another process/machine |
+| v0.2 | **`LlmAgent` base class + neutral `LlmProvider` interface + Anthropic / OpenAI providers** — drop in an LLM-backed agent without coupling the Hub to any vendor SDK |
 
 ## 1. Philosophy
 
@@ -171,20 +172,71 @@ const session = await connect({
 
 SDKs in other languages (Python is next) will speak the same JSON protocol. See [PROTOCOL.md](./PROTOCOL.md) for frame definitions, the state machine, heartbeat, and disconnect semantics.
 
-## 9. What is explicitly NOT in v0.1 (yet)
+## 9. LlmAgent — vendor-neutral LLM participants (v0.2)
 
-- LLM provider abstractions (agents still bring their own)
-- Tool registries / skills marketplaces
+The Hub does not call LLMs. `LlmAgent` does — it's a thin `AgentParticipant` subclass that wires a Task into an `LlmProvider` and turns the model's response into a `TaskResult`. The provider is the only place vendor SDKs are imported.
+
+```
+Hub                                         (knows nothing about LLMs)
+ └── LlmAgent                                (translates Task ↔ LlmRequest/Response)
+       └── LlmProvider                       (translates neutral ↔ vendor SDK)
+              ├── AnthropicProvider          → @anthropic-ai/sdk
+              ├── OpenAIProvider             → openai
+              └── MockLlmProvider            (in-process, no network)
+```
+
+**Neutral wire types** (zero vendor coupling — these live in `@aipehub/llm`):
+
+```ts
+interface LlmProvider {
+  readonly name: string                                          // 'anthropic' | 'openai' | …
+  complete(req: LlmRequest): Promise<LlmResponse>
+}
+interface LlmRequest {
+  system?: string                                                // top-level, Anthropic-style
+  messages: { role: 'user' | 'assistant'; content: string }[]
+  maxTokens?: number
+  temperature?: number
+  model?: string                                                 // per-request model override
+}
+interface LlmResponse {
+  text: string
+  stopReason: 'end_turn' | 'max_tokens' | 'error'
+  usage?: { inputTokens: number; outputTokens: number }
+  raw?: unknown                                                  // vendor envelope (escape hatch)
+}
+```
+
+**Two override points on `LlmAgent`** — almost every customization needs only one of these:
+
+| Hook | Use it for |
+|---|---|
+| `buildRequest(task): LlmRequest` | Prompt assembly. Default reads `{ prompt }`, `{ topic }`, `{ history }` from `task.payload` and injects the agent-level `system`. Override to inject retrieved context, few-shot examples, tool descriptions. |
+| `parseResponse(response, task): unknown` | Output shaping. Default returns `{ text, stopReason, by, usage }`. Override to parse JSON, extract code blocks, validate with re-prompt on failure. |
+
+For full control (multi-step reasoning, custom retry, streaming) override `handleTask(task)` directly — same escape hatch any `AgentParticipant` already has.
+
+**Provider error semantics.** Providers throw on transport / auth / rate-limit errors; `AgentParticipant.onTask` catches the throw and produces a `failed` `TaskResult` with the error message. A `stopReason: 'error'` on a successful response is a soft failure — the provider got a response body but the model bailed (refusal, content filter, unknown reason); the caller sees the partial text plus the stop reason and decides what to do.
+
+**Why providers are separate packages.** `@anthropic-ai/sdk` and `openai` are both ~1MB+ peer dependencies. Most users only want one vendor; bundling both into a `@aipehub/llm` mega-package would punish everyone for the polyglot case. Splitting also lets each provider track its vendor SDK's version independently.
+
+**Streaming, tool calls, and JSON mode** are NOT in v0.2 — see §10. The neutral `LlmResponse` is a finished, text-only completion.
+
+## 10. What is explicitly NOT in v0.2 (yet)
+
+- LLM streaming — `LlmResponse` is non-streaming. Streaming would change the wire protocol (chunk RESULT frames) and `LlmProvider.complete` (return an async iterable). Independent v0.3+ work.
+- Tool / function calling inside `LlmAgent` — the agent passes through `task.payload` and returns text; multi-turn tool loops are app code today. Roadmap item.
 - Browser automation
-- Multi-tenant auth — v0.1 has API-key auth only; per-agent identity tokens are v0.4
-- Python / Go / browser SDKs — only Node SDK ships in v0.1
+- Multi-tenant auth — v0.2 still has only API-key auth at the WebSocket transport layer; per-agent identity tokens are v0.4
+- Python / Go / browser SDKs — only Node SDK ships
 - A scheduler that understands cost, latency, or priority
-- Persistent pending tasks across restarts (only transcript persists; see §11)
+- Persistent pending tasks across restarts (only transcript persists; see §12)
 - Reconnect that preserves in-flight tasks (current behavior: failed with `remote_disconnect`)
+- SqliteStorage — `InMemoryStorage` and `FileStorage` only
 
 These are intentional cuts. The surface is meant to stay small until each feature has a concrete use case demanding it.
 
-## 10. Module map
+## 11. Module map
 
 ```
 packages/core/src/
@@ -224,15 +276,28 @@ packages/sdk-node/      Node SDK for remote agents
   src/session.ts        connect(opts) + auto-reconnect with exponential backoff
   src/index.ts          re-exports AgentParticipant for one-stop import
 
+packages/llm/           LlmAgent base + neutral LlmProvider interface (v0.2)
+  src/types.ts          LlmProvider, LlmRequest, LlmResponse — zero vendor coupling
+  src/agent.ts          LlmAgent — buildRequest / parseResponse override points
+  src/mock.ts           MockLlmProvider — deterministic in-process provider for tests/demos
+
+packages/llm-anthropic/ Anthropic Claude provider — peer dep @anthropic-ai/sdk
+  src/provider.ts       AnthropicProvider — translates LlmRequest ↔ messages.create
+
+packages/llm-openai/    OpenAI provider — peer dep openai
+  src/provider.ts       OpenAIProvider — translates LlmRequest ↔ chat.completions.create
+
 examples/
   hello-collab/         capability + explicit dispatch, mock human auto-approves
   broadcast-claim/      broadcast strategy: three reviewers race, losers get cancelled
   persist-and-resume/   FileStorage round-trip: seq continues across restarts
   web-demo/             web UI in front of a perpetual writer + alice loop
   remote-agent/         host + worker in separate processes over the wire protocol
+  llm-mock/             LlmAgent + MockLlmProvider — no API key needed
+  llm-real/             LlmAgent + Anthropic & OpenAI — Claude writes, GPT reviews
 ```
 
-## 11. Asynchrony — what is and is not synchronized
+## 12. Asynchrony — what is and is not synchronized
 
 A few semantic edges that matter once you build something real on top of the Hub. Each is a deliberate v0 choice, not an oversight.
 
