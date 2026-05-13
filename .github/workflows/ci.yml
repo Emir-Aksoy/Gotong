@@ -1,0 +1,111 @@
+# CI — build, typecheck, and test the TypeScript workspace + Python SDK.
+#
+# Triggers:
+#   - every push to `main`
+#   - every pull request targeting `main`
+#
+# Concurrency: for PRs we cancel any in-flight run on the same branch
+# when a new commit is pushed. Pushes to `main` are NOT cancelled —
+# we want the post-merge build to complete even if another merge lands
+# right after.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# Make GITHUB_TOKEN strictly read-only by default; jobs that need
+# more privilege opt in explicitly.
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Node — typecheck + test the entire pnpm workspace.
+  #
+  # Matrix on Node 20 (engines floor) and 22 (next LTS). 22 is allowed
+  # to fail without sinking the whole run via `continue-on-error`, but
+  # we still publish the result so regressions are visible.
+  # ---------------------------------------------------------------------------
+  node:
+    name: Node ${{ matrix.node }} · TS workspace
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["20", "22"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        # Version is picked up from the root package.json `packageManager`
+        # field. Keeping the lockstep means CI uses the same pnpm as devs.
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm -r build
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        run: pnpm -r test
+        env:
+          # Some integration tests open ephemeral WS ports — give them a
+          # predictable, non-noisy environment.
+          CI: "true"
+
+  # ---------------------------------------------------------------------------
+  # Python — exercise the Python SDK against supported interpreter versions.
+  #
+  # The SDK lives at /python-sdk and has its own pyproject.toml. Run
+  # pytest directly inside that directory; no need to touch the rest of
+  # the workspace.
+  # ---------------------------------------------------------------------------
+  python:
+    name: Python ${{ matrix.python }} · SDK
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12"]
+    defaults:
+      run:
+        working-directory: python-sdk
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: python-sdk/pyproject.toml
+
+      - name: Install SDK + test extras
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[test]"
+
+      - name: Test
+        run: pytest -q
