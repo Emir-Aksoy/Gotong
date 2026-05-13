@@ -108,6 +108,24 @@ export interface Branch {
   id: string
   description?: string
   dispatch: DispatchSpec
+  /**
+   * Optional per-branch predicate. Evaluated **before** dispatch. A
+   * `false` branch:
+   *   - is NOT dispatched (no Hub task created),
+   *   - contributes `undefined` to the parallel step's
+   *     `{ branchId → output }` map,
+   *   - does not appear in `subTaskIds`,
+   *   - and is not counted as a failure.
+   *
+   * Same grammar as `Step.when` — strict typed `==`/`!=`, `&&`/`||`/`!`,
+   * parens, `$trigger.payload.*` and `$stepId.output.*` refs. No
+   * arithmetic / `<`/`>` / function calls.
+   *
+   * Stacks with the parent `ParallelStep.when`: if the whole step's
+   * `when` is false, no branch's `when` is evaluated (the whole step
+   * is skipped).
+   */
+  when?: string
 }
 
 /**

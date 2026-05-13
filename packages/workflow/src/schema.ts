@@ -232,8 +232,10 @@ function validateBranch(raw: unknown, path: string, seenIds: Set<string>): Branc
     throw new WorkflowSchemaError(`${path}.dispatch is required`)
   }
   const dispatch = validateDispatchSpec(b.dispatch, `${path}.dispatch`)
+  const when = validateWhen(b.when, `${path}.when`)
   const out: Branch = { id: b.id, dispatch }
   if (typeof b.description === 'string') out.description = b.description
+  if (when !== undefined) out.when = when
   return out
 }
 

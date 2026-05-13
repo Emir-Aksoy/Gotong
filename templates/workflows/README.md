@@ -113,6 +113,29 @@ workflow:
   dispatch: ...
 ```
 
+**v0.4 起每个并行分支也可以单独加 `when:`**：
+
+```yaml
+- id: fanout
+  parallel: true
+  branches:
+    - id: send-email
+      when: $trigger.payload.notify_email == true
+      dispatch: ...
+    - id: send-slack
+      when: $trigger.payload.notify_slack == true
+      dispatch: ...
+```
+
+被跳过的分支：
+
+- 不会派发任何任务（`subTaskIds` 里不会出现）
+- `$fanout.output.<branchId>` 解析为 `undefined`
+- 不算失败（不会触发 `onFailure`）
+
+如果 `parallel` 步本身的 `when` 为 false，整个 step 跳过，里头的分支
+predicate 根本不会评估。
+
 支持的语法（故意小而精）：
 
 | 类型 | 语法 |

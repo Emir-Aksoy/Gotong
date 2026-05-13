@@ -92,6 +92,12 @@ export class WorkflowRunner extends AgentParticipant {
    * by the schema validator at parseWorkflow time.
    */
   private readonly whenPredicates = new Map<string, CompiledPredicate>()
+  /**
+   * Pre-compiled `when` predicates for individual parallel-branch
+   * entries. Keyed by `${stepId}::${branchId}`. Same compile-once
+   * lifecycle as `whenPredicates`.
+   */
+  private readonly branchWhenPredicates = new Map<string, CompiledPredicate>()
 
   constructor(opts: WorkflowRunnerOptions) {
     super({
@@ -106,6 +112,16 @@ export class WorkflowRunner extends AgentParticipant {
     for (const step of opts.definition.steps) {
       if (step.when) {
         this.whenPredicates.set(step.id, parsePredicate(step.when))
+      }
+      if ('parallel' in step && step.parallel === true) {
+        for (const branch of step.branches) {
+          if (branch.when) {
+            this.branchWhenPredicates.set(
+              branchPredicateKey(step.id, branch.id),
+              parsePredicate(branch.when),
+            )
+          }
+        }
       }
     }
   }
@@ -365,21 +381,15 @@ export class WorkflowRunner extends AgentParticipant {
     record.attempts = 1
 
     const results = await Promise.all(
-      step.branches.map((b) => this.runBranch(b, ctx)),
+      step.branches.map((b) => this.runBranch(step.id, b, ctx)),
     )
 
     const branchOutputs: Record<string, unknown> = {}
     const failures: string[] = []
     for (let i = 0; i < step.branches.length; i++) {
       const branch = step.branches[i]!
-      const r = results[i]!
-      record.subTaskIds.push(r.taskId)
-      if (r.kind === 'ok') {
-        branchOutputs[branch.id] = r.output
-      } else {
-        branchOutputs[branch.id] = undefined
-        failures.push(`branch '${branch.id}': ${describeFailure(r)}`)
-      }
+      const outcome = results[i]!
+      this.applyBranchOutcome(branch, outcome, record, branchOutputs, failures)
     }
     record.endedAt = this.now()
     record.output = branchOutputs
@@ -390,25 +400,22 @@ export class WorkflowRunner extends AgentParticipant {
     }
 
     // Retry policy at the parallel level retries the whole step. Keep it
-    // simple in v0.1: a parallel `retry` means "re-run the whole fan-out".
+    // simple in v0.1: a parallel `retry` means "re-run the whole fan-out"
+    // — but skipped branches stay skipped (their `when` is still false),
+    // so a retry only ever re-dispatches the branches that ran last time.
     if (policy.action === 'retry') {
       let remaining = policy.max
       while (remaining > 0 && failures.length > 0) {
         remaining -= 1
         record.attempts += 1
         const retryResults = await Promise.all(
-          step.branches.map((b) => this.runBranch(b, ctx)),
+          step.branches.map((b) => this.runBranch(step.id, b, ctx)),
         )
         failures.length = 0
         for (let i = 0; i < step.branches.length; i++) {
           const branch = step.branches[i]!
-          const r = retryResults[i]!
-          record.subTaskIds.push(r.taskId)
-          if (r.kind === 'ok') {
-            branchOutputs[branch.id] = r.output
-          } else {
-            failures.push(`branch '${branch.id}': ${describeFailure(r)}`)
-          }
+          const outcome = retryResults[i]!
+          this.applyBranchOutcome(branch, outcome, record, branchOutputs, failures)
         }
       }
       if (failures.length === 0) {
@@ -427,11 +434,67 @@ export class WorkflowRunner extends AgentParticipant {
     return record
   }
 
+  /**
+   * Outcome of running one branch. Three shapes:
+   *   - `ran`         — the branch dispatched and we got a TaskResult
+   *   - `skipped`     — branch-level `when` was false → no dispatch
+   *   - `when-error`  — `when` evaluation threw → treated as a failure
+   */
   private async runBranch(
+    stepId: string,
     branch: Branch,
     ctx: ResolutionContext,
-  ): Promise<TaskResult> {
-    return this.dispatchOne(branch.dispatch, ctx)
+  ): Promise<BranchOutcome> {
+    const pred = this.branchWhenPredicates.get(branchPredicateKey(stepId, branch.id))
+    if (pred) {
+      let passed: boolean
+      try {
+        passed = pred.eval(ctx)
+      } catch (err) {
+        return {
+          kind: 'when-error',
+          error: `when '${pred.source}' threw: ${err instanceof Error ? err.message : String(err)}`,
+        }
+      }
+      if (!passed) {
+        return { kind: 'skipped' }
+      }
+    }
+    const result = await this.dispatchOne(branch.dispatch, ctx)
+    return { kind: 'ran', result }
+  }
+
+  /**
+   * Funnel a branch outcome into the running parallel-step record:
+   * write to `branchOutputs`, possibly add a sub-task id, possibly log
+   * a failure. Shared between the first attempt and retry passes so the
+   * "skipped branches stay skipped" property holds without copying the
+   * logic.
+   */
+  private applyBranchOutcome(
+    branch: Branch,
+    outcome: BranchOutcome,
+    record: StepRecord,
+    branchOutputs: Record<string, unknown>,
+    failures: string[],
+  ): void {
+    if (outcome.kind === 'skipped') {
+      branchOutputs[branch.id] = undefined
+      return
+    }
+    if (outcome.kind === 'when-error') {
+      branchOutputs[branch.id] = undefined
+      failures.push(`branch '${branch.id}': ${outcome.error}`)
+      return
+    }
+    const r = outcome.result
+    record.subTaskIds.push(r.taskId)
+    if (r.kind === 'ok') {
+      branchOutputs[branch.id] = r.output
+    } else {
+      branchOutputs[branch.id] = undefined
+      failures.push(`branch '${branch.id}': ${describeFailure(r)}`)
+    }
   }
 
   private async dispatchOne(
@@ -464,4 +527,23 @@ function describeFailure(r: TaskResult): string {
   if (r.kind === 'cancelled') return `cancelled: ${r.reason}`
   if (r.kind === 'no_participant') return `no participant: ${r.reason}`
   return 'unexpected ok in failure path'
+}
+
+/**
+ * Discriminated outcome of `runBranch`. Kept module-private — the
+ * parallel step caller funnels each shape into `applyBranchOutcome`.
+ */
+type BranchOutcome =
+  | { kind: 'ran'; result: TaskResult }
+  | { kind: 'skipped' }
+  | { kind: 'when-error'; error: string }
+
+/**
+ * Compose the lookup key for a branch's compiled `when` predicate.
+ * Using `::` keeps it cheap and unambiguous — branch / step ids may
+ * contain `:` but never `::` (single colons are reserved inside ids,
+ * not adjacent pairs).
+ */
+function branchPredicateKey(stepId: string, branchId: string): string {
+  return `${stepId}::${branchId}`
 }

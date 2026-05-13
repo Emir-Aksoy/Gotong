@@ -752,3 +752,171 @@ workflow:
     ).rejects.toThrow(/does not match this runner/)
   })
 })
+
+describe('WorkflowRunner — branch-level `when` (P2)', () => {
+  // Each test builds the same fan-out: two branches a + b, each
+  // gated by a different `when` reading from $trigger.payload.
+  const FANOUT_YAML = `
+schema: aipehub.workflow/v1
+workflow:
+  id: fanout-when
+  trigger: { capability: go }
+  steps:
+    - id: fan
+      parallel: true
+      branches:
+        - id: a
+          when: $trigger.payload.do_a == true
+          dispatch:
+            strategy: { kind: capability, capabilities: [a] }
+            payload: { hi: "from a" }
+        - id: b
+          when: $trigger.payload.do_b == true
+          dispatch:
+            strategy: { kind: capability, capabilities: [b] }
+            payload: { hi: "from b" }
+`
+
+  it('skips both branches → step is done with output = { a: undefined, b: undefined }', async () => {
+    const def = parseWorkflow(FANOUT_YAML)
+    const { hub, calls } = makeStubHub(() => ok(nextTaskId(), 'unused', 'bot'))
+    const runner = new WorkflowRunner({ definition: def, hub })
+
+    const out = await runner.onTask(makeTask({ do_a: false, do_b: false }))
+    if (out.kind !== 'ok') throw new Error('expected ok')
+    expect(calls).toHaveLength(0)
+    expect(out.output).toEqual({ a: undefined, b: undefined })
+  })
+
+  it('runs only the un-gated branch when one when is false', async () => {
+    const def = parseWorkflow(FANOUT_YAML)
+    const { hub, calls } = makeStubHub((c) => {
+      const cap = c.strategy.kind === 'capability' ? c.strategy.capabilities[0] : '?'
+      return ok(nextTaskId(), `${cap}-output`, `${cap}-bot`)
+    })
+    const runner = new WorkflowRunner({ definition: def, hub })
+
+    const out = await runner.onTask(makeTask({ do_a: true, do_b: false }))
+    if (out.kind !== 'ok') throw new Error('expected ok')
+    expect(calls).toHaveLength(1)
+    expect((calls[0]!.strategy as { capabilities: string[] }).capabilities).toEqual(['a'])
+    expect(out.output).toEqual({ a: 'a-output', b: undefined })
+  })
+
+  it('skipped branches do not appear in subTaskIds (no Hub dispatch happened)', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'aipehub-branch-when-'))
+    try {
+      const def = parseWorkflow(FANOUT_YAML)
+      const store = new RunStore(tmp)
+      store.ensureDirs()
+      const { hub } = makeStubHub((c) => {
+        const cap = c.strategy.kind === 'capability' ? c.strategy.capabilities[0] : '?'
+        return ok(`task-${cap}`, `${cap}-out`, `${cap}-bot`)
+      })
+      const runner = new WorkflowRunner({ definition: def, hub, runStore: store })
+
+      await runner.onTask(makeTask({ do_a: true, do_b: false }))
+      const runIds = await store.listRunIds()
+      const state = await store.read(runIds[0]!)
+      const fanRecord = state!.steps.find((s) => s.stepId === 'fan')!
+      expect(fanRecord.status).toBe('done')
+      expect(fanRecord.subTaskIds).toEqual(['task-a'])
+      expect(fanRecord.output).toEqual({ a: 'a-out', b: undefined })
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('a parent-step `when: false` short-circuits before branch predicates evaluate', async () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: fanout-gated
+  trigger: { capability: go }
+  steps:
+    - id: fan
+      parallel: true
+      when: $trigger.payload.run_fan == true
+      branches:
+        - id: a
+          when: $trigger.payload.do_a == true
+          dispatch:
+            strategy: { kind: capability, capabilities: [a] }
+            payload: 1
+`
+    const def = parseWorkflow(yaml)
+    const { hub, calls } = makeStubHub(() => ok(nextTaskId(), 'x', 'b'))
+    const runner = new WorkflowRunner({ definition: def, hub })
+
+    const out = await runner.onTask(makeTask({ run_fan: false, do_a: true }))
+    if (out.kind !== 'ok') throw new Error('expected ok')
+    expect(calls).toHaveLength(0)
+    // Parent step status is 'skipped' → $fan.output is undefined for
+    // anything downstream (we only have one step here, so out.output
+    // falls back to lastStepOutput which is undefined).
+    expect(out.output).toBeUndefined()
+  })
+
+  it('a runtime `when` error in a branch is logged as a failure (no Hub call)', async () => {
+    // `$missing.output` for an unknown step → undefined → comparison
+    // works (it's just "not equal to true"), so we need a different
+    // trigger. Use a ref into a parallel step's branches map which is
+    // an actual lookupRef error.
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: branch-when-error
+  trigger: { capability: go }
+  steps:
+    - id: pre
+      parallel: true
+      branches:
+        - id: a
+          dispatch:
+            strategy: { kind: capability, capabilities: [a] }
+            payload: 1
+    - id: fan
+      parallel: true
+      branches:
+        - id: x
+          when: $pre.zzz.output == "ok"
+          dispatch:
+            strategy: { kind: capability, capabilities: [x] }
+            payload: 1
+`
+    const def = parseWorkflow(yaml)
+    const { hub, calls } = makeStubHub((c) => {
+      const cap = c.strategy.kind === 'capability' ? c.strategy.capabilities[0] : '?'
+      return ok(nextTaskId(), `${cap}-out`, `${cap}-bot`)
+    })
+    const runner = new WorkflowRunner({ definition: def, hub })
+
+    const out = await runner.onTask(makeTask({}))
+    // Only `pre.a` ran; `fan.x` was gated by a broken predicate.
+    expect(calls).toHaveLength(1)
+    // The fan step's failure mode defaults to halt → workflow fails.
+    expect(out.kind).toBe('failed')
+    if (out.kind !== 'failed') throw new Error('expected failed')
+    expect(out.error).toMatch(/branch 'x'/)
+    expect(out.error).toMatch(/when '\$pre\.zzz\.output == "ok"' threw/)
+  })
+
+  it('schema rejects an invalid branch-level `when` at parse time', () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: bad-branch-when
+  trigger: { capability: go }
+  steps:
+    - id: fan
+      parallel: true
+      branches:
+        - id: a
+          when: $trigger.payload.x ==
+          dispatch:
+            strategy: { kind: capability, capabilities: [a] }
+            payload: 1
+`
+    expect(() => parseWorkflow(yaml)).toThrow(/branches\[0\]\.when is not a valid predicate/)
+  })
+})
