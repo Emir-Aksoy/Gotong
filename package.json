@@ -20,6 +20,7 @@
     "demo:persist:sqlite:fresh": "pnpm --filter @aipehub/example-persist-and-resume start fresh --sqlite",
     "demo:persist:sqlite:resume": "pnpm --filter @aipehub/example-persist-and-resume start resume --sqlite",
     "demo:remote": "pnpm --filter @aipehub/example-remote-agent start",
+    "demo:remote:python": "pnpm --filter @aipehub/example-remote-python start",
     "demo:llm": "pnpm --filter @aipehub/example-llm-mock start",
     "demo:llm:real": "pnpm --filter @aipehub/example-llm-real start",
     "test": "pnpm -r test"

@@ -16,3 +16,13 @@ aipe-data/
 **/aipe-data/
 *.sqlite
 *.sqlite-journal
+*.db
+*.db-wal
+*.db-shm
+
+# Python — local virtualenvs, build artefacts, caches
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/

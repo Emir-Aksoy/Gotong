@@ -78,6 +78,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/transport-ws
 
+  examples/remote-python:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/transport-ws':
+        specifier: workspace:*
+        version: link:../../packages/transport-ws
+
   examples/web-demo:
     dependencies:
       '@aipehub/core':

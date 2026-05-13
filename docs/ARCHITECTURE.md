@@ -8,7 +8,8 @@ This document records the design decisions for the framework. It is the source o
 | v0.1 | Wire protocol + WebSocket transport + Node SDK — remote agents can connect from another process/machine |
 | v0.2 | `LlmAgent` base class + neutral `LlmProvider` interface + Anthropic / OpenAI providers — drop in an LLM-backed agent without coupling the Hub to any vendor SDK |
 | v0.3 | `SqliteStorage` — durable transcript persistence backed by SQLite (`better-sqlite3` optional peer dep). FileStorage stays the no-dependency default. |
-| v0.4 | **Per-agent identity at HELLO** — `authenticate` can return `{ ok: true, allowedAgents: ['a1', 'a2'] }` to bind an API key to a specific set of agent ids. A leaked key cannot impersonate any other agent. New `forbidden_agent` REJECT code. Back-compat: boolean return still works. |
+| v0.4 | Per-agent identity at HELLO — `authenticate` can return `{ ok: true, allowedAgents: ['a1', 'a2'] }` to bind an API key to a specific set of agent ids. A leaked key cannot impersonate any other agent. New `forbidden_agent` REJECT code. Back-compat: boolean return still works. |
+| v0.5 | **Python SDK** (`python-sdk/`, package name `aipehub`) — second language client. `AgentParticipant` + `connect()` mirror the Node SDK; tests pass against a fake Hub server; `examples/remote-python` runs a Node host + Python worker end-to-end over the same wire protocol. |
 
 ## 1. Philosophy
 
@@ -235,7 +236,7 @@ For full control (multi-step reasoning, custom retry, streaming) override `handl
 - Tool / function calling inside `LlmAgent` — the agent passes through `task.payload` and returns text; multi-turn tool loops are app code today. Roadmap item.
 - Browser automation
 - Multi-tenant auth — v0.2 still has only API-key auth at the WebSocket transport layer; per-agent identity tokens are v0.4
-- Python / Go / browser SDKs — only Node SDK ships
+- Go / browser SDKs — Python landed in v0.5; the rest are still missing
 - A scheduler that understands cost, latency, or priority
 - Persistent pending tasks across restarts (only transcript persists; see §12)
 - Reconnect that preserves in-flight tasks (current behavior: failed with `remote_disconnect`)
@@ -303,6 +304,14 @@ examples/
   remote-agent/         host + worker in separate processes over the wire protocol
   llm-mock/             LlmAgent + MockLlmProvider — no API key needed
   llm-real/             LlmAgent + Anthropic & OpenAI — Claude writes, GPT reviews
+  remote-python/        Node Hub + Python worker (cross-language) — v0.5
+
+python-sdk/             Python SDK (PyPI name: aipehub) — v0.5
+  src/aipehub/
+    protocol.py         frame constants + outbound builders (mirrors @aipehub/protocol)
+    agent.py            AgentParticipant — sync or async handle_task
+    session.py          connect() + Session state machine (mirrors @aipehub/sdk-node)
+  tests/                pytest-asyncio against a real websockets fake-Hub
 ```
 
 ## 12. Asynchrony — what is and is not synchronized

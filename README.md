@@ -26,6 +26,7 @@ pnpm demo:persist:fresh && pnpm demo:persist:resume               # JSONL transc
 pnpm demo:persist:sqlite:fresh && pnpm demo:persist:sqlite:resume # SQLite transcript across restarts
 pnpm demo:web           # web UI + writer agent + alice (browse to localhost:3000)
 pnpm demo:remote        # host + worker in separate processes over WebSocket
+pnpm demo:remote:python # Node host + Python worker (cross-language demo)
 pnpm demo:llm           # LlmAgent + mock provider (no API key needed)
 pnpm demo:llm:real      # LlmAgent + real Claude/GPT (needs ANTHROPIC_API_KEY/OPENAI_API_KEY)
 ```
@@ -125,6 +126,7 @@ Override `buildRequest(task)` to customize prompt assembly (retrieved context, f
 | `@aipehub/llm` | `LlmAgent` base class + `LlmProvider` interface + `MockLlmProvider` |
 | `@aipehub/llm-anthropic` | Anthropic Claude provider (peer dep: `@anthropic-ai/sdk`) |
 | `@aipehub/llm-openai` | OpenAI provider (peer dep: `openai`) |
+| `aipehub` (PyPI, in `python-sdk/`) | Python SDK — connect Python agents to a Hub over the same wire protocol |
 
 ## License
 
