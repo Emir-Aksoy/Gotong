@@ -30,7 +30,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { RunState } from './types.js'
+import type { RunState, RunSummary } from './types.js'
 
 const SUBDIR_RUNS = 'runs'
 const SUBDIR_DEFINITIONS = 'definitions'
@@ -104,6 +104,56 @@ export class RunStore {
     return files
       .filter((f) => f.endsWith('.json') && !f.endsWith('.tmp'))
       .map((f) => f.slice(0, -'.json'.length))
+  }
+
+  /**
+   * Load summary metadata for every run on disk, optionally filtered to
+   * a single `workflowId`. Returns rows sorted by `startedAt` descending
+   * (newest first); apply `limit` after sorting to keep the most recent.
+   *
+   * The full per-step output is dropped from each row — pages of 100s of
+   * runs would otherwise carry MBs of payload. Use `read(runId)` to
+   * fetch the complete `RunState` when the admin clicks one row.
+   *
+   * Files that fail to parse are quietly skipped. A half-written `.tmp`
+   * is filtered out by the `.json` suffix check; an intact-but-corrupt
+   * `.json` would have already failed `read()` so we log to stderr and
+   * move on rather than abort the whole list.
+   */
+  async listRuns(opts?: {
+    workflowId?: string
+    limit?: number
+  }): Promise<RunSummary[]> {
+    if (!existsSync(this.runsDir)) return []
+    const ids = await this.listRunIds()
+    const out: RunSummary[] = []
+    for (const id of ids) {
+      let state: RunState | null
+      try {
+        state = await this.read(id)
+      } catch (err) {
+        console.error(`[aipehub-workflow] skipping unreadable run ${id}: ${err instanceof Error ? err.message : String(err)}`)
+        continue
+      }
+      if (!state) continue
+      if (opts?.workflowId && state.workflowId !== opts.workflowId) continue
+      const row: RunSummary = {
+        runId: state.runId,
+        workflowId: state.workflowId,
+        triggeredByTaskId: state.triggeredByTaskId,
+        status: state.status,
+        startedAt: state.startedAt,
+        stepCount: state.steps.length,
+      }
+      if (state.endedAt !== undefined) row.endedAt = state.endedAt
+      if (state.error !== undefined) row.error = state.error
+      out.push(row)
+    }
+    out.sort((a, b) => b.startedAt - a.startedAt)
+    if (opts?.limit !== undefined && opts.limit >= 0) {
+      out.length = Math.min(out.length, opts.limit)
+    }
+    return out
   }
 
   /**

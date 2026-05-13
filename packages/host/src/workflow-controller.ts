@@ -40,6 +40,8 @@ import {
   WorkflowRunner,
   parseWorkflow,
   workflowParticipantId,
+  type RunState,
+  type RunSummary,
   type WorkflowDefinition,
 } from '@aipehub/workflow'
 
@@ -92,6 +94,13 @@ export class WorkflowController {
   private readonly definitionsDir: string
   private readonly spaceRoot: string
   /**
+   * Shared `RunStore` for read-side endpoints (history list / detail).
+   * Writes still happen through each `WorkflowRunner`'s own store, but
+   * they all point at the same directory under `spaceRoot/workflows/`,
+   * so one shared reader sees everything.
+   */
+  private readonly runStore: RunStore
+  /**
    * id → metadata for live runners we know about. The Hub's registry is
    * authoritative on participant existence; this map carries the
    * additional info (file path, definition summary) the UI needs.
@@ -105,6 +114,7 @@ export class WorkflowController {
     this.hub = opts.hub
     this.definitionsDir = opts.definitionsDir
     this.spaceRoot = opts.spaceRoot
+    this.runStore = new RunStore(opts.spaceRoot)
   }
 
   /** Called by `createWorkflowController` for each boot-time loaded workflow. */
@@ -127,6 +137,22 @@ export class WorkflowController {
     // stable sort by id
     out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     return out
+  }
+
+  /**
+   * List recorded workflow runs from disk. Pass `workflowId` to filter
+   * to one workflow; pass `limit` to cap the result count (newest first).
+   */
+  async listRuns(opts?: { workflowId?: string; limit?: number }): Promise<RunSummary[]> {
+    return this.runStore.listRuns(opts)
+  }
+
+  /**
+   * Load the full `RunState` for one run, or `null` if no such run is
+   * recorded on disk.
+   */
+  async readRun(runId: string): Promise<RunState | null> {
+    return this.runStore.read(runId)
   }
 
   /**

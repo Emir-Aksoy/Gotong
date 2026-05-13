@@ -177,6 +177,25 @@ export interface StepRecord {
   subTaskIds: string[]
 }
 
+/**
+ * Slimmed-down projection of `RunState` for listing many runs at once
+ * (admin "run history" view). Skips the heavy `triggerPayload` /
+ * `finalOutput` / per-step output blobs so a directory of 1k runs fits
+ * comfortably in one HTTP response.
+ */
+export interface RunSummary {
+  runId: string
+  workflowId: string
+  triggeredByTaskId: string
+  status: RunStatus
+  startedAt: number
+  endedAt?: number
+  /** Number of step records present (≤ workflow.steps for in-progress runs). */
+  stepCount: number
+  /** Final-error reason if `status === 'failed'`. */
+  error?: string
+}
+
 // --- Errors ----------------------------------------------------------------
 
 export class WorkflowSchemaError extends Error {

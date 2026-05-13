@@ -148,6 +148,32 @@
         </p>
       </section>
 
+      <!-- Modal: workflow run history (list + detail panes) -->
+      <div id="wf-runs-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card modal-card-wide" role="dialog" aria-modal="true">
+          <header class="modal-head">
+            <h3>
+              <span data-i18n="workflowRunsTitle">运行历史</span>
+              <span id="wf-runs-target" class="lb-summary"></span>
+            </h3>
+            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+          </header>
+          <div class="dispatch-form wf-runs-body">
+            <div class="wf-runs-cols">
+              <div class="wf-runs-list-col">
+                <div id="wf-runs-list" class="wf-runs-list"></div>
+                <p id="wf-runs-empty" class="hint" hidden data-i18n="workflowRunsEmpty">还没有跑过这条工作流。</p>
+              </div>
+              <div id="wf-run-detail" class="wf-run-detail">
+                <p class="hint" data-i18n="workflowRunsPickHint">从左侧点一行查看明细。</p>
+              </div>
+            </div>
+            <p id="wf-runs-msg" class="form-msg"></p>
+          </div>
+        </div>
+      </div>
+
       <!-- Modal: import a workflow -->
       <div id="wf-import-modal" class="modal" hidden>
         <div class="modal-backdrop" data-act="close-modal"></div>

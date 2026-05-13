@@ -973,3 +973,120 @@ body.admin main.admin-grid {
   font-size: 0.78rem;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
+
+/* Workflow run history modal */
+.modal-card-wide {
+  width: min(64rem, 100% - 2rem);
+}
+.wf-runs-body { padding: 0.6rem 1rem 1rem; }
+.wf-runs-cols {
+  display: grid;
+  grid-template-columns: minmax(16rem, 22rem) 1fr;
+  gap: 0.8rem;
+  min-height: 24rem;
+}
+.wf-runs-list-col {
+  border: 1px solid #eee;
+  border-radius: 6px;
+  background: #fafafa;
+  max-height: 30rem;
+  overflow: auto;
+}
+.wf-runs-list { display: flex; flex-direction: column; }
+.wf-run-row {
+  text-align: left;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto auto;
+  gap: 0.15rem 0.45rem;
+  padding: 0.5rem 0.7rem;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #eee;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+}
+.wf-run-row:hover { background: #f0f4f8; }
+.wf-run-row-active { background: #e7f1fa; }
+.wf-run-row-active:hover { background: #e7f1fa; }
+.wf-run-time {
+  grid-column: 2 / 3;
+  grid-row: 1 / 2;
+  font-size: 0.8rem;
+  color: #333;
+}
+.wf-run-meta {
+  grid-column: 2 / 3;
+  grid-row: 2 / 3;
+  font-size: 0.7rem;
+  color: #888;
+}
+.wf-run-id {
+  grid-column: 3 / 4;
+  grid-row: 1 / 3;
+  align-self: center;
+  font-size: 0.65rem;
+  color: #999;
+  max-width: 6rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.wf-run-status {
+  grid-column: 1 / 2;
+  grid-row: 1 / 3;
+  align-self: center;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+  background: #eee;
+  color: #555;
+}
+.wf-run-running { background: #fff4d4; color: #8a6500; }
+.wf-run-done { background: #d6ecdb; color: #1a6a3a; }
+.wf-run-failed { background: #f5d3d3; color: #8b2a2a; }
+.wf-run-skipped { background: #e9e9e9; color: #888; }
+.wf-run-cancelled { background: #e9e9e9; color: #888; }
+
+.wf-run-detail {
+  border: 1px solid #eee;
+  border-radius: 6px;
+  background: #fff;
+  padding: 0.6rem 0.8rem;
+  max-height: 30rem;
+  overflow: auto;
+  font-size: 0.85rem;
+}
+.wf-run-detail h4 {
+  margin: 0 0 0.4rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.wf-step {
+  border: 1px solid #eee;
+  border-radius: 5px;
+  padding: 0.4rem 0.55rem;
+  margin: 0.4rem 0;
+  background: #fafafa;
+}
+.wf-step header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-bottom: 0.25rem;
+}
+.wf-step-meta { font-size: 0.7rem; color: #888; margin-left: auto; }
+.wf-pre {
+  background: #f4f4f4;
+  border-radius: 4px;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.72rem;
+  overflow: auto;
+  max-height: 12rem;
+  margin: 0.3rem 0 0;
+}

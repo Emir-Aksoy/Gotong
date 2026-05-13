@@ -27,6 +27,14 @@
   const wf = {
     available: null,
     workflows: [],
+    // Run history modal state. `workflowId` is set when an admin clicks
+    // "view history" on a card; `runs` is the most-recent N rows we
+    // fetched; `selectedRunId` is whichever row the admin opened.
+    runs: {
+      workflowId: null,
+      rows: [],
+      selectedRunId: null,
+    },
   }
 
   const state = {
@@ -115,6 +123,13 @@
       wfImportText: $('wf-import-text'),
       wfImportSubmit: $('wf-import-submit'),
       wfImportMsg: $('wf-import-msg'),
+      // Run history modal (v0.3)
+      wfRunsModal: $('wf-runs-modal'),
+      wfRunsTarget: $('wf-runs-target'),
+      wfRunsList: $('wf-runs-list'),
+      wfRunsEmpty: $('wf-runs-empty'),
+      wfRunDetail: $('wf-run-detail'),
+      wfRunsMsg: $('wf-runs-msg'),
       // Room health banner (v2.1+)
       hToday: $('health-today-tasks'),
       hOnline: $('health-online'),
@@ -745,6 +760,9 @@
           <strong>${name}</strong>
           <code>${escapeHtml(w.participantId)}</code>
           <button type="button" class="ma-btn ma-btn-secondary"
+                  data-act="open-workflow-runs"
+                  data-id="${escapeHtml(w.id)}">${escapeHtml(t.workflowRunsBtn)}</button>
+          <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="remove-workflow"
                   data-id="${escapeHtml(w.id)}">${escapeHtml(t.workflowRemoveBtn)}</button>
         </header>
@@ -821,6 +839,134 @@
       dom.wfImportMsg.textContent = t.failedAlert(err.message || String(err))
       dom.wfImportMsg.classList.add('err')
     }
+  }
+
+  // --- workflow run history ---------------------------------------------
+  //
+  // The runs modal is two panes: a left-side list of recent runs (sorted
+  // newest-first) and a right-side detail view. Clicking a row pulls the
+  // full `RunState` from /api/admin/workflows/runs/:id; the detail
+  // renders each step with its status + timing + sub-task ids.
+
+  async function openWorkflowRunsModal(workflowId) {
+    wf.runs.workflowId = workflowId
+    wf.runs.selectedRunId = null
+    wf.runs.rows = []
+    if (dom.wfRunsTarget) dom.wfRunsTarget.textContent = workflowId
+    if (dom.wfRunsMsg) dom.wfRunsMsg.textContent = ''
+    if (dom.wfRunsList) dom.wfRunsList.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
+    if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = true
+    if (dom.wfRunDetail) dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml(t.workflowRunsPickHint)}</p>`
+    if (dom.wfRunsModal) dom.wfRunsModal.hidden = false
+    try {
+      const url = `/api/admin/workflows/runs?workflowId=${encodeURIComponent(workflowId)}&limit=100`
+      const r = await fetch(url)
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        dom.wfRunsList.innerHTML = ''
+        dom.wfRunsMsg.textContent = t.failedAlert(body.error || `${r.status}`)
+        dom.wfRunsMsg.classList.add('err')
+        return
+      }
+      const body = await r.json()
+      wf.runs.rows = body.runs || []
+      renderWorkflowRunsList()
+    } catch (err) {
+      dom.wfRunsList.innerHTML = ''
+      dom.wfRunsMsg.textContent = t.failedAlert(err.message || String(err))
+      dom.wfRunsMsg.classList.add('err')
+    }
+  }
+
+  function closeWorkflowRunsModal() {
+    if (dom.wfRunsModal) dom.wfRunsModal.hidden = true
+  }
+
+  function renderWorkflowRunsList() {
+    if (!dom.wfRunsList) return
+    if (wf.runs.rows.length === 0) {
+      dom.wfRunsList.innerHTML = ''
+      if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = false
+      return
+    }
+    if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = true
+    dom.wfRunsList.innerHTML = wf.runs.rows.map((row) => {
+      const dur = row.endedAt ? `${row.endedAt - row.startedAt}ms` : '—'
+      const selected = row.runId === wf.runs.selectedRunId ? ' wf-run-row-active' : ''
+      return `<button type="button" class="wf-run-row${selected}"
+                      data-act="open-workflow-run"
+                      data-run-id="${escapeHtml(row.runId)}">
+        <span class="wf-run-status wf-run-${escapeHtml(row.status)}">${escapeHtml(row.status)}</span>
+        <span class="wf-run-time">${escapeHtml(new Date(row.startedAt).toLocaleString())}</span>
+        <span class="wf-run-meta">${escapeHtml(t.workflowRunStepCount(row.stepCount))} · ${escapeHtml(dur)}</span>
+        <code class="wf-run-id">${escapeHtml(row.runId)}</code>
+      </button>`
+    }).join('')
+  }
+
+  async function openWorkflowRunDetail(runId) {
+    wf.runs.selectedRunId = runId
+    renderWorkflowRunsList()
+    if (!dom.wfRunDetail) return
+    dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
+    try {
+      const r = await fetch(`/api/admin/workflows/runs/${encodeURIComponent(runId)}`)
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml(body.error || `${r.status}`)}</p>`
+        return
+      }
+      const body = await r.json()
+      renderWorkflowRunDetail(body.run)
+    } catch (err) {
+      dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml(err.message || String(err))}</p>`
+    }
+  }
+
+  function renderWorkflowRunDetail(run) {
+    if (!dom.wfRunDetail) return
+    const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t.workflowRunStillRunning
+    const finalBlock =
+      run.status === 'failed'
+        ? `<p class="form-msg err">${escapeHtml(run.error || '')}</p>`
+        : run.finalOutput !== undefined
+          ? `<details open><summary>${escapeHtml(t.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml(JSON.stringify(run.finalOutput, null, 2))}</pre></details>`
+          : ''
+    const steps = (run.steps || []).map((s) => {
+      const sDur = s.endedAt ? `${s.endedAt - s.startedAt}ms` : '—'
+      const subtasks = (s.subTaskIds || []).length
+        ? `<small class="hint">${escapeHtml(t.workflowRunSubTasks)}: ${s.subTaskIds.map(escapeHtml).join(', ')}</small>`
+        : ''
+      const out = s.output !== undefined
+        ? `<details><summary>${escapeHtml(t.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml(JSON.stringify(s.output, null, 2))}</pre></details>`
+        : ''
+      const err = s.error
+        ? `<p class="form-msg err">${escapeHtml(s.error)}</p>`
+        : ''
+      return `<article class="wf-step">
+        <header>
+          <span class="wf-run-status wf-run-${escapeHtml(s.status)}">${escapeHtml(s.status)}</span>
+          <strong>${escapeHtml(s.stepId)}</strong>
+          <span class="wf-step-meta">${escapeHtml(sDur)} · ${escapeHtml(t.workflowRunAttempts(s.attempts || 1))}</span>
+        </header>
+        ${err}
+        ${subtasks}
+        ${out}
+      </article>`
+    }).join('')
+    const payloadBlock = run.triggerPayload !== undefined
+      ? `<details><summary>${escapeHtml(t.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>`
+      : ''
+    dom.wfRunDetail.innerHTML = `
+      <h4>
+        <span class="wf-run-status wf-run-${escapeHtml(run.status)}">${escapeHtml(run.status)}</span>
+        <code>${escapeHtml(run.runId)}</code>
+      </h4>
+      <p class="hint">${escapeHtml(t.workflowRunDuration)}: ${escapeHtml(dur)} · ${escapeHtml(t.workflowRunTriggeredBy)}: <code>${escapeHtml(run.triggeredByTaskId)}</code></p>
+      ${payloadBlock}
+      ${steps || `<p class="empty">${escapeHtml(t.workflowRunNoSteps)}</p>`}
+      ${finalBlock}
+    `
   }
 
   async function exportAgent(id) {
@@ -1012,6 +1158,7 @@
         if (!dom.maImportModal.hidden) closeImportModal()
         if (!dom.maKeysModal.hidden) closeKeysModal()
         if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal()
+        if (dom.wfRunsModal && !dom.wfRunsModal.hidden) closeWorkflowRunsModal()
       }
       const act = target.dataset.act
       // Provider key actions live in the keys modal — they take a
@@ -1039,6 +1186,11 @@
         removeAgent(id)
       } else if (act === 'remove-workflow') {
         removeWorkflow(id)
+      } else if (act === 'open-workflow-runs') {
+        openWorkflowRunsModal(id)
+      } else if (act === 'open-workflow-run') {
+        const runId = target.dataset.runId
+        if (runId) openWorkflowRunDetail(runId)
       }
     })
     // ESC closes any open modal
@@ -1048,6 +1200,7 @@
       if (!dom.maImportModal.hidden) closeImportModal()
       if (!dom.maKeysModal.hidden) closeKeysModal()
       if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal()
+      if (dom.wfRunsModal && !dom.wfRunsModal.hidden) closeWorkflowRunsModal()
     })
     refreshManagedAgents().catch((err) => console.warn('initial agents refresh:', err))
     refreshWorkflows().catch((err) => console.warn('initial workflows refresh:', err))

@@ -140,6 +140,16 @@ export interface WorkflowSurface {
    * the runner are not cancelled; the Hub finishes them normally.
    */
   remove(id: string): Promise<void>
+  /**
+   * List recorded runs from disk, newest first. Pass `workflowId` to
+   * narrow to a single workflow. `limit` caps the result count.
+   */
+  listRuns(opts?: { workflowId?: string; limit?: number }): Promise<WorkflowRunSummary[]>
+  /**
+   * Full run record for a given runId, including per-step output and
+   * `finalOutput` / `error`. Returns `null` when no such run exists.
+   */
+  readRun(runId: string): Promise<unknown>
 }
 
 export interface WorkflowSummary {
@@ -154,6 +164,23 @@ export interface WorkflowSummary {
    * `null` if the runner was registered programmatically (no file).
    */
   file: string | null
+}
+
+/**
+ * Slim projection of a workflow run for the admin "run history" list.
+ * Structurally compatible with `@aipehub/workflow`'s `RunSummary` type
+ * but duplicated here so the Web layer stays decoupled from the
+ * workflow runtime.
+ */
+export interface WorkflowRunSummary {
+  runId: string
+  workflowId: string
+  triggeredByTaskId: string
+  status: 'running' | 'done' | 'failed' | 'cancelled'
+  startedAt: number
+  endedAt?: number
+  stepCount: number
+  error?: string
 }
 
 export interface WebServerHandle {
@@ -827,6 +854,55 @@ async function handle(
       sendJson(res, { ok: true, workflow: summary })
     } catch (err) {
       sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+    return
+  }
+
+  // List recorded workflow runs. Both /runs and /runs/:id are wired
+  // before the catch-all DELETE /:id route so a runId can never get
+  // routed as a workflow id.
+  if (method === 'GET' && path === '/api/admin/workflows/runs') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.workflows) {
+      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
+      return
+    }
+    const workflowIdRaw = url.searchParams.get('workflowId') ?? undefined
+    const limitRaw = url.searchParams.get('limit')
+    const opts: { workflowId?: string; limit?: number } = {}
+    if (workflowIdRaw) opts.workflowId = workflowIdRaw
+    if (limitRaw !== null) {
+      const n = Number(limitRaw)
+      if (Number.isFinite(n) && n >= 0) opts.limit = Math.min(1000, Math.floor(n))
+    }
+    try {
+      const runs = await ctx.workflows.listRuns(opts)
+      sendJson(res, { runs })
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
+    }
+    return
+  }
+
+  const readRunMatch = path.match(/^\/api\/admin\/workflows\/runs\/([^/]+)$/)
+  if (method === 'GET' && readRunMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.workflows) {
+      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
+      return
+    }
+    const runId = decodeURIComponent(readRunMatch[1]!)
+    try {
+      const run = await ctx.workflows.readRun(runId)
+      if (run == null) {
+        sendJson(res, { error: `unknown run '${runId}'` }, 404)
+        return
+      }
+      sendJson(res, { run })
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
     }
     return
   }

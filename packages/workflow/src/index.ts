@@ -25,6 +25,7 @@ export type {
   StepFailurePolicy,
   RunState,
   RunStatus,
+  RunSummary,
   StepRecord,
 } from './types.js'
 

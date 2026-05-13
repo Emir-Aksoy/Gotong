@@ -1,10 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { Hub, InMemoryStorage } from '@aipehub/core'
+import { RunStore } from '@aipehub/workflow'
 
 import { WorkflowController, createWorkflowController } from '../src/workflow-controller.js'
 import { loadWorkflows } from '../src/workflow-loader.js'
@@ -50,7 +51,6 @@ describe('WorkflowController', () => {
 
   it('createWorkflowController pre-populates from a boot report', async () => {
     // Drive the loader through a fake boot.
-    const { mkdirSync, writeFileSync } = await import('node:fs')
     mkdirSync(definitionsDir, { recursive: true })
     writeFileSync(join(definitionsDir, 'editorial.yaml'), SAMPLE)
     const report = await loadWorkflows({ hub, dir: definitionsDir, spaceRoot: tmp })
@@ -144,6 +144,72 @@ describe('WorkflowController', () => {
       const summary = await c.importFromText(SAMPLE)
       expect(summary.id).toBe('editorial')
       expect(hub.registry.get('workflow:editorial')).toBeDefined()
+    })
+  })
+
+  describe('listRuns() / readRun() — run history pass-through', () => {
+    // The controller is a thin wrapper around RunStore — these tests
+    // just confirm the wiring is correct (data flows in/out, the
+    // workflowId filter is honoured, missing ids return null).
+
+    it('returns runs written through the same space root', async () => {
+      const store = new RunStore(tmp)
+      store.ensureDirs()
+      await store.write({
+        runId: 'r_1',
+        workflowId: 'editorial',
+        triggeredByTaskId: 't_1',
+        triggerPayload: { topic: 'hi' },
+        steps: [],
+        startedAt: 100,
+        endedAt: 200,
+        status: 'done',
+      })
+      await store.write({
+        runId: 'r_2',
+        workflowId: 'other',
+        triggeredByTaskId: 't_2',
+        triggerPayload: {},
+        steps: [],
+        startedAt: 300,
+        status: 'running',
+      })
+
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+
+      const all = await c.listRuns()
+      expect(all.map((r) => r.runId)).toEqual(['r_2', 'r_1'])
+
+      const onlyEditorial = await c.listRuns({ workflowId: 'editorial' })
+      expect(onlyEditorial.map((r) => r.runId)).toEqual(['r_1'])
+    })
+
+    it('readRun() returns the full state, or null when missing', async () => {
+      const store = new RunStore(tmp)
+      store.ensureDirs()
+      await store.write({
+        runId: 'r_x',
+        workflowId: 'editorial',
+        triggeredByTaskId: 't_x',
+        triggerPayload: { hi: 1 },
+        steps: [
+          { stepId: 'draft', startedAt: 1, endedAt: 2, status: 'done', attempts: 1, subTaskIds: ['sub_a'], output: 'ok' },
+        ],
+        startedAt: 1,
+        endedAt: 3,
+        status: 'done',
+        finalOutput: 'final',
+      })
+
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+
+      const got = await c.readRun('r_x')
+      expect(got).not.toBeNull()
+      expect(got!.runId).toBe('r_x')
+      expect(got!.steps).toHaveLength(1)
+      expect(got!.finalOutput).toBe('final')
+
+      expect(await c.readRun('nope')).toBeNull()
     })
   })
 })
