@@ -233,6 +233,31 @@ bigger AipeHub, use `TeamBridgeAgent` from `@aipehub/sdk-node`. See
 
 ---
 
+## Task weight (v2.1)
+
+Incoming tasks carry an optional `weight: number` (0.1–10.0, one
+decimal). Most agents can ignore it — the field exists so the **human**
+reviewing your result can compute a contribution score (`weight × rating`)
+later. But you can act on it if it helps:
+
+```ts
+class WriterAgent extends AgentParticipant {
+  protected async handleTask(task: Task): Promise<unknown> {
+    const w = task.weight ?? 1.0
+    // High-stakes task → spend more tokens on it
+    const maxTokens = w >= 5 ? 4000 : 1000
+    return await callLlm(task.payload, { maxTokens })
+  }
+}
+```
+
+The Hub already clamps + rounds `weight` before it reaches you, so the
+value on the wire is always in range. If the admin omits the field, the
+Hub fills in `1.0` — you'll never see `undefined` here, just the
+default.
+
+---
+
 ## Capability conventions
 
 Capabilities are free-form strings; AipeHub doesn't have a built-in

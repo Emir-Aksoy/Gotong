@@ -234,19 +234,29 @@ For full control (multi-step reasoning, custom retry, streaming) override `handl
 
 **Streaming, tool calls, and JSON mode** are NOT in v0.2 — see §10. The neutral `LlmResponse` is a finished, text-only completion.
 
-## 10. What is explicitly NOT in v0.2 (yet)
+## 10. What is and isn't in scope (as of v2.1)
 
-- LLM streaming — `LlmResponse` is non-streaming. Streaming would change the wire protocol (chunk RESULT frames) and `LlmProvider.complete` (return an async iterable). Independent v0.3+ work.
-- Tool / function calling inside `LlmAgent` — the agent passes through `task.payload` and returns text; multi-turn tool loops are app code today. Roadmap item.
-- Browser automation
-- Multi-tenant auth — v0.2 still has only API-key auth at the WebSocket transport layer; per-agent identity tokens are v0.4
-- Go / browser SDKs — Python landed in v0.5; the rest are still missing
-- A scheduler that understands cost, latency, or priority
-- Persistent pending tasks across restarts (only transcript persists; see §12)
-- Reconnect that preserves in-flight tasks (current behavior: failed with `remote_disconnect`)
-- SqliteStorage — `InMemoryStorage` and `FileStorage` only
+Since v0.2 the project has filled in a number of items that used to be on this "not yet" list. The table below is the **current** state, not historical.
 
-These are intentional cuts. The surface is meant to stay small until each feature has a concrete use case demanding it.
+| Feature | Status | Where it lives |
+|---|---|---|
+| Python SDK | ✅ shipped (v0.5) | `python-sdk/`, package name `aipehub` on PyPI |
+| `SqliteStorage` | ✅ shipped (v0.3) | `packages/core/src/storage/sqlite.ts`, peer dep `better-sqlite3` |
+| Per-agent identity at HELLO | ✅ shipped (v0.4) | `authenticate(apiKey) → { ok, allowedAgents? }`; new `forbidden_agent` REJECT code |
+| Priority queue + deadlines | ✅ shipped (v0.7) | `PriorityQueueScheduler` wraps any inner scheduler; `Task.priority`, `Task.deadlineMs`; `error: 'deadline_expired'` |
+| Host-managed LLM agents (no code) | ✅ shipped (v2.1) | `LocalAgentPool` in `@aipehub/host`; YAML/JSON manifest in admin UI |
+| Encrypted API-key storage | ✅ shipped (v2.1) | AES-256-GCM in `<space>/secrets.enc.json`; master key file or `AIPE_SECRET_KEY` env |
+| Contribution scoring + leaderboard | ✅ shipped (v2.1) | `Task.weight`, `Evaluation.rating`, `hub.leaderboard(...)`, per-publisher opt-out |
+| Template library (built-in + community) | ✅ shipped (v2.1) | `templates/{,community}/{agents,teams}/`; manifest parser in `@aipehub/web` |
+| **LLM streaming** | ❌ not yet | `LlmResponse` is non-streaming. Would require chunked RESULT frames + async iterable on `LlmProvider.complete`. |
+| **Tool / function calling inside `LlmAgent`** | ❌ not yet | `LlmAgent` passes `task.payload` through, returns text. Multi-turn tool loops are app code today. |
+| **Persistent pending tasks across restarts** | ❌ not yet | Only the transcript is persisted. A pending-tasks table on `SqliteStorage` is sketched but not wired. See §12. |
+| **Reconnect that preserves in-flight tasks** | ❌ not yet | Disconnect fails outstanding tasks as `remote_disconnect`. A `RESUME` frame with prior `sessionId` is reserved on the wire but not implemented. |
+| **Go / Rust / browser SDKs** | ❌ not yet | Wire protocol is stable and language-agnostic — community ports welcome. |
+| **Cost-aware / latency-aware scheduling** | ❌ not yet | `PriorityQueueScheduler` handles ordering and back-pressure; richer policies (cost ceiling, P99-latency target, agent health weighting) are roadmap. |
+| **Browser automation as a built-in capability** | ❌ not yet | Out of scope for the core; would belong in a separate agent package. |
+
+These cuts are deliberate. The surface stays small until each feature has a concrete use case demanding it.
 
 ## 11. Module map
 

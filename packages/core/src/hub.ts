@@ -9,9 +9,11 @@ import { Transcript } from './transcript.js'
 import type {
   AdmissionDecision,
   ChannelId,
+  ContributionRow,
   DispatchStrategy,
   Evaluation,
   HubEvent,
+  Leaderboard,
   Message,
   Participant,
   ParticipantId,
@@ -323,11 +325,16 @@ export class Hub {
     const byId = new Map<TaskId, TaskView>()
     for (const e of this.transcript.all()) {
       if (e.kind === 'task') {
+        // `weight` defaults to 1.0 for any task that was dispatched before
+        // v2.1 added the field (or by a caller that omits it). Keeping the
+        // default here — rather than mutating the persisted task — means
+        // legacy transcripts replay byte-for-byte.
         byId.set(e.data.id, {
           id: e.data.id,
           task: e.data,
           status: 'pending',
           createdAt: e.data.createdAt,
+          weight: e.data.weight ?? 1.0,
         })
       } else if (e.kind === 'task_result') {
         const view = byId.get(e.data.taskId)
@@ -336,15 +343,118 @@ export class Hub {
         else if (e.data.kind === 'cancelled') view.status = 'cancelled'
         else view.status = 'failed'
         view.result = e.data
-        view.completedAt = e.data.ts
+        // `completedAt` is the moment the Hub recorded the result, not the
+        // moment the agent self-reported it. The entry-level `ts` flows
+        // through `hub.now()`, which is overridable in tests and immune to
+        // clock skew on remote agents. (Pre-v2.1 this read `e.data.ts`.)
+        view.completedAt = e.ts
       } else if (e.kind === 'evaluation') {
         const view = byId.get(e.data.taskId)
         if (!view) continue
         if (!view.evaluations) view.evaluations = []
         view.evaluations.push(e.data)
+        // "Latest rated wins" — re-evaluating overrides the contribution
+        // score. Comment-only evaluations leave the previous score in place.
+        if (typeof e.data.rating === 'number') {
+          view.effectiveRating = e.data.rating
+          view.contribution = round1((view.weight ?? 1.0) * e.data.rating)
+        }
       }
     }
     return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt)
+  }
+
+  /**
+   * Aggregate per-participant contribution scores over a time window.
+   *
+   * Counted: completed tasks (`status === 'done'`, `result.kind === 'ok'`)
+   * whose `completedAt` falls in `[from, to)` and whose latest evaluation
+   * carries a numeric `rating`. Each such task contributes
+   * `weight × rating` to its handler's row. Failed / cancelled / unrated
+   * tasks are not counted toward `totalContribution`; unrated-but-done
+   * ones bump `unratedTaskCount` so admins can see the backlog of
+   * "completed, awaiting review."
+   *
+   * Pure read — derived on the fly from the transcript every call. Cheap
+   * for the "small体验版" scale this codebase targets; if you grow past a
+   * few thousand completed tasks per page-load, cache the result.
+   *
+   *   const lb = hub.leaderboard({ from: weekAgo, to: now })
+   *   lb.rows[0]  // top contributor
+   */
+  leaderboard(opts: { from?: number; to?: number } = {}): Leaderboard {
+    const from = opts.from ?? 0
+    const to = opts.to ?? this.now() + 1
+    interface Accum {
+      row: ContributionRow
+      sumRating: number
+    }
+    const acc = new Map<ParticipantId, Accum>()
+    let unratedTaskCount = 0
+    let totalTaskCount = 0
+
+    for (const v of this.tasks()) {
+      if (v.status !== 'done' || v.result?.kind !== 'ok') continue
+      const completedAt = v.completedAt ?? v.createdAt
+      if (completedAt < from || completedAt >= to) continue
+      // Per-task opt-out: the publisher chose not to have this task
+      // shape the scoreboard. Drop it cleanly — not counted as rated,
+      // not counted as unrated. The task still appears in `hub.tasks()`
+      // and the transcript; the leaderboard simply doesn't see it.
+      if (v.task.countContribution === false) continue
+      totalTaskCount += 1
+      if (v.effectiveRating == null || v.contribution == null) {
+        unratedTaskCount += 1
+        continue
+      }
+      const by = v.result.by
+      const weight = v.weight ?? 1.0
+      let a = acc.get(by)
+      if (!a) {
+        a = {
+          row: {
+            participantId: by,
+            taskCount: 0,
+            totalWeight: 0,
+            totalContribution: 0,
+            averageRating: 0,
+            lastActivityTs: 0,
+            byCapability: {},
+          },
+          sumRating: 0,
+        }
+        acc.set(by, a)
+      }
+      a.row.taskCount += 1
+      a.row.totalWeight += weight
+      a.row.totalContribution += v.contribution
+      a.sumRating += v.effectiveRating
+      if (completedAt > a.row.lastActivityTs) a.row.lastActivityTs = completedAt
+      for (const cap of capabilitiesOfStrategy(v.task.strategy)) {
+        const cur = a.row.byCapability[cap] ?? { count: 0, contribution: 0 }
+        cur.count += 1
+        cur.contribution = round1(cur.contribution + v.contribution)
+        a.row.byCapability[cap] = cur
+      }
+    }
+
+    const rows: ContributionRow[] = []
+    for (const { row, sumRating } of acc.values()) {
+      row.averageRating = row.taskCount > 0 ? round1(sumRating / row.taskCount) : 0
+      row.totalContribution = round1(row.totalContribution)
+      row.totalWeight = round1(row.totalWeight)
+      rows.push(row)
+    }
+    // Sort by contribution desc; tie-break by lastActivityTs desc so a
+    // recently-active id ranks above a long-idle one with the same score.
+    rows.sort((a, b) => {
+      if (b.totalContribution !== a.totalContribution) {
+        return b.totalContribution - a.totalContribution
+      }
+      return b.lastActivityTs - a.lastActivityTs
+    })
+
+    return { from, to, rows, unratedTaskCount, totalTaskCount }
   }
 
   /**
@@ -373,6 +483,8 @@ export class Hub {
       payload,
       title: orig.title ? `retry: ${orig.title}` : undefined,
       priority: orig.priority,
+      weight: orig.weight,
+      countContribution: orig.countContribution,
     })
   }
 
@@ -383,6 +495,13 @@ export class Hub {
    * transcript as an `evaluation` entry; no state is mutated. The caller
    * is responsible for cross-referencing `taskId` with an earlier
    * `task_result` entry — the hub does not validate the link.
+   *
+   * `rating` is clamped to `[0, 5]` and rounded to one decimal place so
+   * the persisted value is always well-formed; an out-of-range or
+   * non-finite input is silently coerced rather than rejected (callers
+   * are often web forms — friendlier to coerce than to 400). Pass
+   * `undefined` for a comment-only evaluation; the contribution score on
+   * the task view is then left unchanged by this entry.
    */
   evaluate(opts: {
     taskId: TaskId
@@ -393,7 +512,7 @@ export class Hub {
     const ev: Evaluation = {
       taskId: opts.taskId,
       by: opts.by,
-      rating: opts.rating,
+      rating: sanitizeRating(opts.rating),
       comment: opts.comment,
     }
     this.transcript.append({ ts: this.now(), kind: 'evaluation', data: ev })
@@ -440,6 +559,20 @@ export class Hub {
      * Ignored by the default scheduler.
      */
     priority?: number
+    /**
+     * Contribution-system weight in [0.1, 10.0], one decimal place; default
+     * 1.0 when omitted. Clamped + rounded by the Hub before being written
+     * to the transcript so the persisted Task is always well-formed.
+     */
+    weight?: number
+    /**
+     * Per-task contribution-system opt-out. `false` keeps the task out of
+     * `Hub.leaderboard()` aggregation entirely (no contribution, no
+     * unrated-bookkeeping). Defaults to `true` (counted). The Web layer
+     * sets this from the logged-in publisher's preference; callers in
+     * tests or programmatic use can pass it directly.
+     */
+    countContribution?: boolean
   }): Promise<TaskResult> {
     const task: Task = {
       id: this.idGen(),
@@ -449,6 +582,8 @@ export class Hub {
       title: opts.title,
       deadlineMs: opts.deadlineMs,
       priority: opts.priority,
+      weight: sanitizeWeight(opts.weight),
+      countContribution: opts.countContribution,
       createdAt: this.now(),
     }
     this.transcript.append({ ts: task.createdAt, kind: 'task', data: task })
@@ -483,4 +618,66 @@ export interface TaskView {
   evaluations?: Evaluation[]
   createdAt: number
   completedAt?: number
+  /**
+   * Task weight in [0.1, 10.0], 1 decimal — always present on a derived
+   * view. For tasks written before v2.1 (no `weight` field on disk) this
+   * defaults to 1.0 so the contribution math still works.
+   */
+  weight?: number
+  /** Most recent numeric rating across `evaluations[]`, if any. */
+  effectiveRating?: number
+  /**
+   * `weight × effectiveRating`, rounded to 1 decimal. Set iff
+   * `effectiveRating` is set. Undefined for completed-but-unrated tasks.
+   */
+  contribution?: number
+}
+
+// --- module-level helpers (v2.1 contribution system) ---------------------
+
+/**
+ * Sanitise a task weight: clamp to `[0.1, 10.0]`, round to one decimal,
+ * default to `1.0` for missing / non-finite input. The result is always a
+ * finite number safe to multiply by a rating.
+ */
+function sanitizeWeight(w?: number): number {
+  if (w == null || !Number.isFinite(w)) return 1.0
+  const r = round1(w)
+  if (r < 0.1) return 0.1
+  if (r > 10.0) return 10.0
+  return r
+}
+
+/**
+ * Sanitise an evaluation rating: clamp to `[0, 5]`, round to one decimal,
+ * preserve `undefined` for comment-only evaluations. The Hub never
+ * rejects an evaluation just because the rating is out of range — it
+ * coerces and moves on (the input is usually a web form).
+ */
+function sanitizeRating(r?: number): number | undefined {
+  if (r == null || !Number.isFinite(r)) return undefined
+  const v = round1(r)
+  if (v < 0) return 0
+  if (v > 5) return 5
+  return v
+}
+
+/**
+ * Round a number to one decimal place. Avoids accumulating
+ * floating-point error in the totals (`0.1 + 0.2 === 0.30000000000000004`
+ * would be misleading on a leaderboard).
+ */
+function round1(n: number): number {
+  return Math.round(n * 10) / 10
+}
+
+/**
+ * Capabilities a task was routed under, for the leaderboard's
+ * `byCapability` breakdown. `explicit` dispatches contribute under no
+ * capability — they're personal routing, not skill-based.
+ */
+function capabilitiesOfStrategy(s: import('./types.js').DispatchStrategy): string[] {
+  if (s.kind === 'capability') return [...s.capabilities]
+  if (s.kind === 'broadcast' && s.capabilities) return [...s.capabilities]
+  return []
 }

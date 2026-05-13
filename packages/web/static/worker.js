@@ -6,7 +6,9 @@
  */
 (() => {
   const { $, t, applyStaticI18n, onLangChange, escapeHtml, summarize, isBadResult,
-          fetchJson, connectStream, syncLangFromConfig } = window.AipeHub
+          fetchJson, connectStream, syncLangFromConfig,
+          fetchLeaderboard, renderLeaderboard, attachCapChips,
+          attachContribToggle, applyContribToggleState } = window.AipeHub
 
   const state = {
     participants: [],
@@ -17,6 +19,8 @@
   }
 
   let dom = null
+  // Per-tab leaderboard window; defaults to "all time". No persistence.
+  let lbWindow = 'all'
 
   function resolveDom() {
     dom = {
@@ -32,6 +36,11 @@
       participantsList: $('participants-list'),
       transcriptList: $('transcript-list'),
       transcriptCount: $('transcript-count'),
+      lbWindow: $('lb-window'),
+      lbList: $('leaderboard-list'),
+      lbSummary: $('lb-summary'),
+      contribToggle: $('contrib-toggle'),
+      contribToggleInput: $('contrib-toggle-input'),
     }
   }
 
@@ -51,6 +60,10 @@
     if (me.role === 'worker') {
       state.myId = me.id
       state.myCaps = me.capabilities || []
+      // Sync the contribution-toggle to the saved preference. The toggle
+      // is only meaningful for a signed-in worker — hidden in the join
+      // view (showJoinForm / showWorkbench handle visibility).
+      applyContribToggleState(dom.contribToggle, dom.contribToggleInput, me.contributionOptOut === true)
     } else {
       state.myId = null
       state.myCaps = []
@@ -93,6 +106,7 @@
     dom.leaveBtn.hidden = true
     dom.meLabel.hidden = true
     dom.roleBadge.hidden = true
+    if (dom.contribToggle) dom.contribToggle.hidden = true
   }
 
   function showWorkbench() {
@@ -100,6 +114,7 @@
     dom.leaveBtn.hidden = false
     dom.meLabel.hidden = false
     dom.roleBadge.hidden = false
+    if (dom.contribToggle) dom.contribToggle.hidden = false
     const capsStr = (state.myCaps || []).join(',')
     dom.meLabel.textContent = capsStr ? `${state.myId} · ${capsStr}` : state.myId || ''
   }
@@ -111,6 +126,16 @@
     renderParticipants()
     renderMyTasks()
     renderTranscript()
+    // Pull leaderboard for the current window — workers see the same
+    // numbers admins do (visibility is the feature). Silent on failure
+    // so a hiccup doesn't break the rest of the page.
+    refreshLeaderboard().catch((err) => console.warn('leaderboard refresh failed:', err))
+  }
+
+  async function refreshLeaderboard() {
+    if (!dom?.lbList) return
+    const lb = await fetchLeaderboard(lbWindow)
+    renderLeaderboard(dom.lbList, lb, dom.lbSummary)
   }
 
   function renderParticipants() {
@@ -241,6 +266,16 @@
     })
 
     dom.leaveBtn.addEventListener('click', leave)
+
+    if (dom.lbWindow) {
+      dom.lbWindow.addEventListener('change', () => {
+        lbWindow = dom.lbWindow.value
+        refreshLeaderboard().catch((err) => console.warn('leaderboard switch failed:', err))
+      })
+    }
+
+    attachContribToggle(dom.contribToggle, dom.contribToggleInput)
+    attachCapChips(dom.joinCaps)
 
     document.addEventListener('click', async (e) => {
       const target = e.target

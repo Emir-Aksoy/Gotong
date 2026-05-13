@@ -1,0 +1,33 @@
+# 翻译团队 — 双向翻译 + 校对
+#
+# 派发示例：
+#   capability=translate → translator-zh-en 一稿翻译
+#   capability=proofread → proofreader 找翻译里的错
+schema: aipehub.team/v1
+
+team:
+  name: 翻译团队
+  description: 中英互译 + 译文校对的两步流水线。
+  agents:
+    - id: translator-zh-en
+      displayName: 中英互译
+      capabilities: [translate]
+      kind: llm
+      provider: openai
+      model: gpt-4-turbo
+      weightDefault: 1.0
+      system: |
+        你是中英互译助手。自动判断方向，直接输出译文，
+        保留人名/地名/代码原文，不要解释、不要加前缀。
+
+    - id: proofreader
+      displayName: 译文校对
+      capabilities: [proofread]
+      kind: llm
+      provider: anthropic
+      model: claude-opus-4-7
+      weightDefault: 1.5
+      system: |
+        你是翻译校对员。输入是 {original, translation} 两段，
+        你输出 JSON: {"errors": [{ "where": "...", "fix": "..." }]}。
+        没问题时 errors 为空数组。

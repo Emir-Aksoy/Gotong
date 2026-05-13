@@ -7,10 +7,21 @@ export type {
   SpaceConfig,
   AdminRecord,
   AgentRecord,
+  ManagedAgentSpec,
+  ManagedAgentLifecycle,
   WorkerRecord,
   SessionRecord,
   PersistedPendingApp,
 } from './space.js'
+
+export {
+  encryptSecret,
+  decryptSecret,
+  loadOrCreateMasterKey,
+  emptySecretsFile,
+  SECRETS_FILE_VERSION,
+} from './secrets.js'
+export type { EncryptedSecret, SecretsFile } from './secrets.js'
 
 export { MessageBus } from './bus.js'
 export type { Deliverer } from './bus.js'
@@ -59,4 +70,7 @@ export type {
   AdmissionDecision,
   // evaluation (v1.1)
   Evaluation,
+  // contribution / leaderboard (v2.1)
+  ContributionRow,
+  Leaderboard,
 } from './types.js'

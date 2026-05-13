@@ -1,0 +1,52 @@
+# Reproducible Docker builds — never ship local state.
+
+# Node / pnpm / package caches
+**/node_modules
+**/.pnpm-store
+.pnpm-debug.log
+npm-debug.log*
+
+# Build outputs (Dockerfile rebuilds from source)
+**/dist
+**/*.tsbuildinfo
+
+# Workspace state (this is what `AIPE_SPACE` points at — never bake it in)
+.aipehub
+.aipehub-*
+**/.aipehub
+**/.aipehub-*
+
+# Editor / OS noise
+.DS_Store
+.idea
+.vscode
+*.swp
+
+# Git
+.git
+.gitignore
+.github
+
+# Tests / examples — Dockerfile copies packages/ explicitly; examples
+# bring extra deps we don't need at runtime
+examples
+templates
+python-sdk
+docs
+*.md
+CHANGELOG.md
+CONTRIBUTING.md
+SECURITY.md
+LICENSE-NOTICES*.md
+
+# Coverage / debug
+coverage
+.nyc_output
+*.log
+
+# Local secrets (defence in depth — these should never be in the repo anyway)
+.env
+.env.*
+*.pem
+*.key
+runtime/secret.key

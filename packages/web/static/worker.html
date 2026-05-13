@@ -15,6 +15,10 @@
       <span id="conn" class="conn" data-status="pending" data-i18n="connecting">连接中…</span>
       <span id="role-badge" class="role-badge role-worker" hidden data-i18n="workerBadge">工人</span>
       <span id="me-label" class="me-label" hidden></span>
+      <label id="contrib-toggle" class="contrib-toggle" hidden title="是否将我派发的任务计入贡献榜">
+        <input type="checkbox" id="contrib-toggle-input" />
+        <span class="contrib-toggle-label" data-i18n="contribToggleLabel">我派发的任务计入贡献榜</span>
+      </label>
       <button id="leave-btn" class="leave-btn" type="button" hidden data-i18n="leaveButton">离开</button>
       <button id="lang-toggle" class="lang-toggle" type="button" title="切换语言 / Switch language">EN</button>
     </header>
@@ -41,6 +45,17 @@
       <section id="participants">
         <h2 data-i18n="participants">参与者</h2>
         <div id="participants-list"></div>
+        <h2 style="margin-top:1.2rem">
+          <span data-i18n="leaderboardTitle">贡献榜</span>
+          <select id="lb-window" class="lb-window-select" aria-label="时段">
+            <option value="all" data-i18n="lbWindowAll">不限时段</option>
+            <option value="today" data-i18n="lbWindowToday">今天</option>
+            <option value="week" data-i18n="lbWindowWeek">近 7 天</option>
+            <option value="month" data-i18n="lbWindowMonth">近 30 天</option>
+          </select>
+        </h2>
+        <div id="leaderboard-list" class="leaderboard-list-compact"></div>
+        <p id="lb-summary" class="lb-summary"></p>
       </section>
       <section id="my-tasks">
         <h2 data-i18n="myTasksLabel">派给我的任务</h2>

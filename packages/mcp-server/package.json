@@ -1,0 +1,37 @@
+{
+  "name": "@aipehub/mcp-server",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "MCP (Model Context Protocol) bridge for AipeHub — lets Claude Desktop / Cursor / any MCP client dispatch tasks, read participants, and review leaderboards on a running Hub.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AipeHub/AipeHub.git",
+    "directory": "packages/mcp-server"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "aipehub-mcp": "./bin/aipehub-mcp.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "bin", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "tsx src/main.ts",
+    "prepack": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^3.25.0"
+  }
+}

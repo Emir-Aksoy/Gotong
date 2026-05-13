@@ -3,6 +3,14 @@ import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
+import {
+  decryptSecret,
+  emptySecretsFile,
+  encryptSecret,
+  loadOrCreateMasterKey,
+  type EncryptedSecret,
+  type SecretsFile,
+} from './secrets.js'
 import { FileStorage } from './storage/file.js'
 import type { ParticipantId } from './types.js'
 
@@ -46,12 +54,16 @@ export class Space {
     agents: '',
     workers: '',
     transcript: '',
+    secrets: '',
     runtime: {
       pendingApps: '',
       adminSessions: '',
       workerSessions: '',
+      secretKey: '',
     },
   }
+  /** Cached master key — lazily loaded the first time secrets are touched. */
+  private masterKey: Buffer | null = null
 
   private constructor(root: string) {
     this.root = root
@@ -61,9 +73,11 @@ export class Space {
     this.paths.agents = join(root, 'agents.json')
     this.paths.workers = join(root, 'workers.json')
     this.paths.transcript = join(root, 'transcript.jsonl')
+    this.paths.secrets = join(root, 'secrets.enc.json')
     this.paths.runtime.pendingApps = join(root, 'runtime', 'pending-apps.json')
     this.paths.runtime.adminSessions = join(root, 'runtime', 'admin-sessions.json')
     this.paths.runtime.workerSessions = join(root, 'runtime', 'worker-sessions.json')
+    this.paths.runtime.secretKey = join(root, 'runtime', 'secret.key')
   }
 
   /**
@@ -191,6 +205,22 @@ export class Space {
     await writeJsonAtomic(this.paths.admins, { admins: next })
     return true
   }
+  /**
+   * Toggle an admin's "don't count my dispatches in the contribution
+   * leaderboard" preference. Returns the updated record on success, null
+   * if the id is unknown.
+   */
+  async setAdminContributionOptOut(
+    id: ParticipantId,
+    value: boolean,
+  ): Promise<AdminRecord | null> {
+    const admins = await this.admins()
+    const idx = admins.findIndex((a) => a.id === id)
+    if (idx < 0) return null
+    admins[idx] = { ...admins[idx]!, contributionOptOut: value }
+    await writeJsonAtomic(this.paths.admins, { admins })
+    return admins[idx]!
+  }
   /** Return the matched admin (without sensitive fields) on success, null on fail. */
   async verifyAdminToken(token: string | undefined): Promise<AdminRecord | null> {
     if (!token) return null
@@ -224,6 +254,10 @@ export class Space {
     const next = agents.filter((a) => a.id !== id)
     if (next.length === agents.length) return false
     await writeJsonAtomic(this.paths.agents, { agents: next })
+    // If this agent had a per-agent override key, drop it too so an
+    // abandoned key doesn't linger in secrets.enc.json after the record
+    // is gone. Best-effort: the file may not exist on a fresh space.
+    await this.removeAgentApiKey(id).catch(() => { /* ignore */ })
     return true
   }
   async touchAgent(id: ParticipantId): Promise<void> {
@@ -265,6 +299,18 @@ export class Space {
     if (next.length === workers.length) return false
     await writeJsonAtomic(this.paths.workers, { workers: next })
     return true
+  }
+  /** Worker counterpart of {@link setAdminContributionOptOut}. */
+  async setWorkerContributionOptOut(
+    id: ParticipantId,
+    value: boolean,
+  ): Promise<WorkerRecord | null> {
+    const workers = await this.workers()
+    const idx = workers.findIndex((w) => w.id === id)
+    if (idx < 0) return null
+    workers[idx] = { ...workers[idx]!, contributionOptOut: value }
+    await writeJsonAtomic(this.paths.workers, { workers })
+    return workers[idx]!
   }
   async touchWorker(id: ParticipantId): Promise<void> {
     const workers = await this.workers()
@@ -345,6 +391,126 @@ export class Space {
   storage(): FileStorage {
     return new FileStorage(this.paths.transcript)
   }
+
+  // --- secrets (v2.1) -------------------------------------------------------
+
+  /**
+   * Lazy master-key load. The key is cached on the Space instance — it's
+   * needed on every spawn, and re-reading the file or env var on each
+   * call would be wasteful. Tests should construct a fresh Space when
+   * they want a different key.
+   */
+  private async getMasterKey(): Promise<Buffer> {
+    if (this.masterKey) return this.masterKey
+    this.masterKey = await loadOrCreateMasterKey(this.paths.runtime.secretKey)
+    return this.masterKey
+  }
+
+  /**
+   * Read `secrets.enc.json`. Returns an empty file shape if it doesn't
+   * exist yet — a fresh space starts with no keys configured.
+   */
+  private async readSecretsFile(): Promise<SecretsFile> {
+    try {
+      const raw = await readFile(this.paths.secrets, 'utf8')
+      const parsed = JSON.parse(raw) as Partial<SecretsFile>
+      return {
+        version: 1,
+        providers: parsed.providers ?? {},
+        agents: parsed.agents ?? {},
+      }
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return emptySecretsFile()
+      throw err
+    }
+  }
+
+  private async writeSecretsFile(file: SecretsFile): Promise<void> {
+    await writeJsonAtomic(this.paths.secrets, file)
+  }
+
+  /**
+   * List which provider-level keys are configured (workspace defaults),
+   * **without** returning the plaintext. UI calls this to render
+   * "anthropic ✓ openai ✗" badges. Values are timestamps of the most
+   * recent set, useful for "last rotated" displays.
+   */
+  async listProviderApiKeys(): Promise<Record<string, string>> {
+    const file = await this.readSecretsFile()
+    const out: Record<string, string> = {}
+    for (const [provider, enc] of Object.entries(file.providers)) {
+      out[provider] = enc.updatedAt
+    }
+    return out
+  }
+
+  /** Decrypt and return a workspace-level provider key, or null. */
+  async getProviderApiKey(provider: string): Promise<string | null> {
+    const file = await this.readSecretsFile()
+    const enc = file.providers[provider]
+    if (!enc) return null
+    const key = await this.getMasterKey()
+    return decryptSecret(key, enc)
+  }
+
+  /** Set / replace a workspace-level provider key. */
+  async setProviderApiKey(provider: string, plaintext: string): Promise<void> {
+    if (!plaintext || plaintext.length === 0) {
+      throw new Error('setProviderApiKey: plaintext must be a non-empty string')
+    }
+    const key = await this.getMasterKey()
+    const enc = encryptSecret(key, plaintext)
+    const file = await this.readSecretsFile()
+    file.providers[provider] = enc
+    await this.writeSecretsFile(file)
+  }
+
+  /** Remove a workspace-level provider key. Returns true if one was removed. */
+  async removeProviderApiKey(provider: string): Promise<boolean> {
+    const file = await this.readSecretsFile()
+    if (!file.providers[provider]) return false
+    delete file.providers[provider]
+    await this.writeSecretsFile(file)
+    return true
+  }
+
+  /** Like {@link listProviderApiKeys} but for per-agent overrides. */
+  async listAgentApiKeys(): Promise<Record<string, string>> {
+    const file = await this.readSecretsFile()
+    const out: Record<string, string> = {}
+    for (const [id, enc] of Object.entries(file.agents)) out[id] = enc.updatedAt
+    return out
+  }
+
+  /** Decrypt and return a per-agent key, or null. */
+  async getAgentApiKey(agentId: ParticipantId): Promise<string | null> {
+    const file = await this.readSecretsFile()
+    const enc = file.agents[agentId]
+    if (!enc) return null
+    const key = await this.getMasterKey()
+    return decryptSecret(key, enc)
+  }
+
+  /** Set / replace a per-agent key. */
+  async setAgentApiKey(agentId: ParticipantId, plaintext: string): Promise<void> {
+    if (!plaintext || plaintext.length === 0) {
+      throw new Error('setAgentApiKey: plaintext must be a non-empty string')
+    }
+    const key = await this.getMasterKey()
+    const enc = encryptSecret(key, plaintext)
+    const file = await this.readSecretsFile()
+    file.agents[agentId] = enc
+    await this.writeSecretsFile(file)
+  }
+
+  /** Remove a per-agent key (and called automatically by `removeAgent`). */
+  async removeAgentApiKey(agentId: ParticipantId): Promise<boolean> {
+    const file = await this.readSecretsFile()
+    if (!file.agents[agentId]) return false
+    delete file.agents[agentId]
+    await this.writeSecretsFile(file)
+    return true
+  }
 }
 
 // --- types -----------------------------------------------------------------
@@ -390,6 +556,15 @@ export interface AdminRecord {
   displayName: string
   tokenHash: string
   createdAt: string
+  /**
+   * If true, the contribution leaderboard ignores tasks this admin
+   * dispatches. Personal preference — does **not** affect contributions
+   * the admin themselves earns by completing other people's tasks. The
+   * Web layer reads this when a logged-in admin POSTs to
+   * `/api/admin/dispatch` and stamps `Task.countContribution` on the
+   * outgoing task. Defaults to false (= "count my dispatches").
+   */
+  contributionOptOut?: boolean
 }
 
 export interface AgentRecord {
@@ -398,6 +573,58 @@ export interface AgentRecord {
   apiKeyHash?: string
   createdAt: string
   lastSeen?: string
+  /**
+   * Optional managed-agent spec (v2.1). When present, the **host process**
+   * is expected to spawn an in-process agent that matches this spec on
+   * boot and on `AgentSupervisor.start(record)`. The agent appears to the
+   * Hub like any other registered participant — humans don't see the
+   * difference.
+   *
+   * Absent `managed` means "I'm an externally-connected agent (SDK over
+   * WS); just an allowlist entry to remember the id + caps." Both shapes
+   * coexist in `agents.json`.
+   */
+  managed?: ManagedAgentSpec
+  /**
+   * Optional human-readable display name, shown in the admin UI alongside
+   * the id. Useful when the id is opaque (e.g. `writer-zh-1`) but you
+   * want "中文写作助手" in the list. Free text, no business logic.
+   */
+  displayName?: string
+}
+
+/**
+ * Recipe for an agent the **host** will spawn in-process and keep alive.
+ * The `kind` discriminator gives us room to grow (webhook-driven agents,
+ * shell-command agents, …); today only `llm` exists.
+ *
+ * **Why providers are strings, not classes**: the agents.json file must
+ * be readable & writable by people who can't reach into the running
+ * process. The host's `AgentSupervisor` maps a provider string to a
+ * concrete `LlmProvider` implementation at spawn time. Unknown providers
+ * fail loudly with a clear error.
+ */
+export interface ManagedAgentSpec {
+  kind: 'llm'
+  /**
+   * Provider name. Mapped to a concrete `LlmProvider` by the host. API
+   * keys come from the host's environment — never from this file. The
+   * three built-in providers are:
+   *   - `'anthropic'` — needs `ANTHROPIC_API_KEY`
+   *   - `'openai'`    — needs `OPENAI_API_KEY`
+   *   - `'mock'`      — no key needed; canned responses for testing
+   */
+  provider: 'anthropic' | 'openai' | 'mock'
+  /** Model id understood by the provider (e.g. `claude-opus-4-7`). */
+  model?: string
+  /** System prompt. Free-form. Length is not limited by the Hub. */
+  system: string
+  /**
+   * Default weight the host stamps on outgoing tasks **dispatched by this
+   * agent** (if/when agents can dispatch). Does not affect tasks the
+   * agent receives. Same range as `Task.weight`: [0.1, 10.0], 1 decimal.
+   */
+  weightDefault?: number
 }
 
 export interface WorkerRecord {
@@ -406,6 +633,15 @@ export interface WorkerRecord {
   tokenHash: string
   createdAt: string
   lastSeen?: string
+  /**
+   * If true, the contribution leaderboard ignores tasks this worker
+   * dispatches. Same semantics as `AdminRecord.contributionOptOut` —
+   * personal preference, only affects their own outgoing dispatches.
+   * Workers can't dispatch tasks through the Web UI today (no
+   * `/api/worker/dispatch` route), but the field is wired through the
+   * Hub already so it kicks in the moment that route exists.
+   */
+  contributionOptOut?: boolean
 }
 
 export interface SessionRecord {
@@ -419,6 +655,36 @@ export interface PersistedPendingApp {
   agents: ReadonlyArray<{ id: ParticipantId; capabilities: readonly string[] }>
   meta?: Readonly<Record<string, unknown>>
   pendingSince: number
+}
+
+/**
+ * Lifecycle hooks the Web layer calls when an admin creates / edits /
+ * removes a managed agent through the HTTP API. The host implements
+ * this interface via its `AgentSupervisor`; the Web layer talks to that
+ * interface, so `@aipehub/web` never has to import `@aipehub/llm-*`
+ * directly. Pass an implementation on `serveWeb({ lifecycle })`.
+ *
+ * Implementations should be **idempotent**: `start` on an already-running
+ * id is a reload; `stop` on a missing id is a no-op. The Web layer
+ * doesn't pre-check, just calls.
+ */
+export interface ManagedAgentLifecycle {
+  /** Spawn (or restart) a managed agent from its persisted record. */
+  start(record: AgentRecord): Promise<void>
+  /** Tear down a managed agent by id. */
+  stop(id: ParticipantId): Promise<void>
+  /**
+   * Which provider strings can actually be spawned right now. A provider
+   * is available if any of three sources supplies an API key:
+   *   - the per-provider workspace-level key (encrypted on disk)
+   *   - the host's environment variable
+   *   - `mock` — always available, needs no key
+   *
+   * Async because the check reads the encrypted-secrets file. The UI
+   * uses the result to surface "key not set" hints on the agent-create
+   * form (it still allows saving — an agent can carry its own key).
+   */
+  availableProviders(): Promise<readonly string[]>
 }
 
 // --- helpers ---------------------------------------------------------------

@@ -1,0 +1,66 @@
+# Quickest path to a running AipeHub host:
+#
+#   docker compose up         # foreground, Ctrl-C stops
+#   docker compose up -d      # detached
+#   docker compose logs -f    # tail the first-run admin URL
+#
+# The `./data` directory on the host is bind-mounted into the container as
+# /data and holds the workspace (transcript.jsonl, agents.json,
+# secrets.enc.json, etc). Back THAT up; everything else is rebuildable.
+#
+# For a production deployment behind a TLS-terminating reverse proxy:
+#   - set AIPE_COOKIE_SECURE=1
+#   - set AIPE_ALLOWED_HOSTS=hub.example.com,hub-ws.example.com
+#   - bind ports to 127.0.0.1 (e.g. "127.0.0.1:3000:3000") so only the
+#     proxy can reach them
+#   - see docs/DEPLOY.md for the full Caddy + systemd pattern
+
+services:
+  aipehub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aipehub/host:local
+    container_name: aipehub-host
+    restart: unless-stopped
+
+    # Web (browser) + WebSocket (remote agents). On a public deployment,
+    # change the host side to "127.0.0.1:3000" so only the local reverse
+    # proxy can reach them.
+    ports:
+      - "3000:3000"
+      - "4000:4000"
+
+    volumes:
+      - ./data:/data
+
+    environment:
+      # Use these defaults for local / LAN dev. See docs/DEPLOY.md for
+      # production overrides.
+      AIPE_SPACE: /data
+      AIPE_HOST: 0.0.0.0
+      AIPE_WEB_PORT: "3000"
+      AIPE_WS_PORT: "4000"
+      AIPE_GATING: admin-approval
+      AIPE_COOKIE_SECURE: "0"
+
+      # Optional — uncomment to give managed agents a default LLM key.
+      # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+
+      # Optional — for KMS-mounted master key setups. Skip and the host
+      # will use ./data/runtime/secret.key (chmod 600).
+      # AIPE_SECRET_KEY: ${AIPE_SECRET_KEY:-}
+
+    # Healthcheck is also declared inside the image; this re-states it
+    # so `docker compose ps` shows the status column quickly.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:'+process.env.AIPE_WEB_PORT+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3

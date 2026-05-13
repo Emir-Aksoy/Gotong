@@ -1,0 +1,54 @@
+# GitHub-native dependency update bot. We keep the cadence loose
+# (weekly, not daily) and group routine bumps so the PR queue stays
+# scannable.
+
+version: 2
+updates:
+  # 1. npm / pnpm — the workspace root + each package picks this up
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "08:00"
+      timezone: "Asia/Singapore"
+    open-pull-requests-limit: 5
+    groups:
+      # Group routine patch / minor bumps into one PR per week.
+      patch-and-minor:
+        update-types: ["minor", "patch"]
+      # Type packages move together with the runtimes; pull them into a
+      # single PR so the changeset stays focused.
+      types:
+        patterns: ["@types/*"]
+        update-types: ["minor", "patch"]
+      # Test tooling
+      test-tooling:
+        patterns: ["vitest", "@vitest/*", "tsx"]
+    # Surface MAJOR bumps as separate PRs — they almost always need
+    # human attention.
+    ignore:
+      # Pin TypeScript / Node @types to whatever the engines field
+      # supports. Bot has been known to push beyond Node 20.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+
+  # 2. GitHub Actions (CI workflows in .github/workflows/, when those land)
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns: ["*"]
+
+  # 3. Python (python-sdk only — its venv is gitignored, but pyproject
+  # / requirements files in the dist are tracked).
+  - package-ecosystem: "pip"
+    directory: "/python-sdk"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3

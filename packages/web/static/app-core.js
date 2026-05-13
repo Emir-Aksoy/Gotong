@@ -82,6 +82,94 @@
       knownRoster: '空间档案',
       knownAdmins: '管理员',
       knownWorkers: '工人',
+      // --- contribution system (v2.1) ---
+      dispatchWeight: '权重（0.1-10，1 位小数，默认 1.0）',
+      weightLabel: '权重',
+      ratingLabel: '评分',
+      contributionLabel: '贡献',
+      unrated: '未评',
+      leaderboardTitle: '贡献榜',
+      lbWindowAll: '不限时段',
+      lbWindowToday: '今天',
+      lbWindowWeek: '近 7 天',
+      lbWindowMonth: '近 30 天',
+      lbEmpty: '本时段还没有已评价的贡献',
+      lbColRank: '名次',
+      lbColId: '参与者',
+      lbColScore: '贡献分',
+      lbColTasks: '任务数',
+      lbColAvg: '平均评分',
+      lbColLastSeen: '最近完成',
+      lbColCaps: '能力侧重',
+      lbSummary: (total, unrated) =>
+        unrated > 0
+          ? `本时段已完成 ${total} 条任务，其中 ${unrated} 条尚未评分`
+          : `本时段已完成 ${total} 条任务，全部评分完毕`,
+      contribToggleLabel: '我派发的任务计入贡献榜',
+      contribToggleTitleOn: '已开启：我派发的任务会被计入贡献榜（不影响我接受的任务）',
+      contribToggleTitleOff: '已关闭：我派发的任务不会计入贡献榜（不影响我接受的任务）',
+      // --- room health banner (admin v2.1+) ---
+      healthToday: '今日任务',
+      healthTodaySub: '含已完成 / 进行中',
+      healthOnline: '在线',
+      healthOnlineSub: (agents, humans) => `${agents} 个智能体 · ${humans} 个人`,
+      healthUnrated: '待评估',
+      healthUnratedSub: '近 7 天',
+      healthTop3: '本周 Top 3 贡献者',
+      healthTop3Empty: '近 7 天暂无已评分贡献',
+      commonCaps: '常用：',
+      // --- managed agents (v2.1) ---
+      managedAgentsTitle: '智能体',
+      newAgent: '+ 创建',
+      importAgent: '导入',
+      doImport: '导入',
+      editAgent: '编辑智能体',
+      save: '保存',
+      saveOk: '已保存',
+      savedWithWarning: (err) => `已保存，但启动失败：${err}`,
+      edit: '编辑',
+      export_: '导出',
+      remove: '移除',
+      online: '在线',
+      offline: '离线',
+      externalAgent: '外部 SDK 接入',
+      providerDisabled: '未配置 API key',
+      agentId: 'ID（唯一标识）',
+      agentDisplayName: '显示名（可选）',
+      agentCaps: '能力（逗号分隔）',
+      agentProvider: 'Provider',
+      agentModel: 'Model（可选）',
+      agentSystem: '系统提示词（system prompt）',
+      agentWeightDefault: '默认任务权重（可选，0.1-10）',
+      editWarning: '⚠️ 修改已存在的智能体会重启它；建议先停止再修改。',
+      templatesHint: '在公网模板库下载标准 agent / team 文件，复制内容到「导入」即可：',
+      importHint: '支持 YAML 或 JSON。可上传文件，或粘贴。',
+      uploadFile: '上传文件',
+      orPaste: '或粘贴内容',
+      importEmpty: '请上传文件或粘贴内容',
+      importDone: (created, skipped, errors) =>
+        `导入完成：新建 ${created} 个${skipped ? `，跳过 ${skipped} 个（id 已存在）` : ''}${errors ? `，${errors} 个启动失败` : ''}`,
+      confirmRemoveAgent: (id) => `确定要移除智能体 "${id}" 吗？此操作不可恢复。`,
+      maEmpty: '尚未注册智能体',
+      maSummary: (managed, online, external) =>
+        `本地托管 ${managed} 个（在线 ${online}）${external > 0 ? ` · 外部接入 ${external} 个` : ''}`,
+      apiKeysBtn: 'API Key 管理',
+      apiKeysModalTitle: '工作区 API Key',
+      apiKeysHint: '这里设置的 key 会被加密存到 secrets.enc.json；明文不写回任何 GET 响应。每个 agent 也可在自己的「编辑」表单里配私有 key，会优先生效。',
+      apiKeySet: '已配置',
+      apiKeyEnv: '来自环境变量',
+      apiKeyMissing: '未配置',
+      apiKeyUpdated: (ts) => `· 更新于 ${new Date(ts).toLocaleString()}`,
+      setKey: '设置',
+      updateKey: '更新',
+      clearKey: '清空',
+      keyEnterHere: '粘贴 key，回车保存',
+      keySetOk: '已保存（加密）',
+      keyRemoved: '已移除',
+      keyWarnRestart: '已保存。要让已运行 agent 生效，请编辑 agent 再保存（会重启）。',
+      agentApiKey: '私有 API Key（可选，加密保存）',
+      agentApiKeyHint: '留空 → 使用工作区默认；点「清空」可移除本 agent 的私有 key',
+      agentApiKeyHintEdit: '已配私有 key。留空保持不变；输入新值会更新；点「清空」按钮可移除。',
       failedAlert: (msg) => `失败：${msg}`,
       errorAlert: (msg) => `错误：${msg}`,
       sumJoined: (id, kind, caps) =>
@@ -175,6 +263,94 @@
       knownRoster: 'Roster on disk',
       knownAdmins: 'Admins',
       knownWorkers: 'Workers',
+      // --- contribution system (v2.1) ---
+      dispatchWeight: 'Weight (0.1–10, 1 decimal, default 1.0)',
+      weightLabel: 'weight',
+      ratingLabel: 'rating',
+      contributionLabel: 'score',
+      unrated: 'unrated',
+      leaderboardTitle: 'Leaderboard',
+      lbWindowAll: 'all time',
+      lbWindowToday: 'today',
+      lbWindowWeek: 'last 7 days',
+      lbWindowMonth: 'last 30 days',
+      lbEmpty: 'no rated contributions in this window yet',
+      lbColRank: '#',
+      lbColId: 'participant',
+      lbColScore: 'score',
+      lbColTasks: 'tasks',
+      lbColAvg: 'avg',
+      lbColLastSeen: 'last',
+      lbColCaps: 'caps',
+      lbSummary: (total, unrated) =>
+        unrated > 0
+          ? `${total} completed task(s) in window — ${unrated} still awaiting review`
+          : `${total} completed task(s) in window — all rated`,
+      contribToggleLabel: 'My dispatches feed the leaderboard',
+      // --- room health banner (admin v2.1+) ---
+      healthToday: "Today's tasks",
+      healthTodaySub: 'done + in-flight',
+      healthOnline: 'Online',
+      healthOnlineSub: (agents, humans) => `${agents} agents · ${humans} humans`,
+      healthUnrated: 'Unrated',
+      healthUnratedSub: 'last 7 days',
+      healthTop3: 'Top 3 contributors (7d)',
+      healthTop3Empty: 'No rated contributions in the last 7 days',
+      commonCaps: 'Common:',
+      contribToggleTitleOn: 'On: tasks I dispatch are counted in the leaderboard (tasks I receive are unaffected)',
+      contribToggleTitleOff: 'Off: tasks I dispatch are excluded from the leaderboard (tasks I receive are unaffected)',
+      // --- managed agents (v2.1) ---
+      managedAgentsTitle: 'Agents',
+      newAgent: '+ New',
+      importAgent: 'Import',
+      doImport: 'Import',
+      editAgent: 'Edit agent',
+      save: 'Save',
+      saveOk: 'Saved',
+      savedWithWarning: (err) => `Saved, but spawn failed: ${err}`,
+      edit: 'Edit',
+      export_: 'Export',
+      remove: 'Remove',
+      online: 'online',
+      offline: 'offline',
+      externalAgent: 'external (SDK)',
+      providerDisabled: 'API key not set',
+      agentId: 'ID (unique)',
+      agentDisplayName: 'Display name (optional)',
+      agentCaps: 'Capabilities (comma-separated)',
+      agentProvider: 'Provider',
+      agentModel: 'Model (optional)',
+      agentSystem: 'System prompt',
+      agentWeightDefault: 'Default task weight (optional, 0.1-10)',
+      editWarning: '⚠️ Editing restarts the agent; consider stopping ongoing tasks first.',
+      templatesHint: 'Download standard agent / team files from the public template library, then paste here:',
+      importHint: 'Accepts YAML or JSON. Upload a file or paste content.',
+      uploadFile: 'Upload file',
+      orPaste: 'Or paste content',
+      importEmpty: 'Upload a file or paste content',
+      importDone: (created, skipped, errors) =>
+        `Import done: ${created} created${skipped ? `, ${skipped} skipped (id exists)` : ''}${errors ? `, ${errors} spawn failed` : ''}`,
+      confirmRemoveAgent: (id) => `Remove agent "${id}"? Cannot be undone.`,
+      maEmpty: 'No agents registered yet',
+      maSummary: (managed, online, external) =>
+        `${managed} managed (${online} online)${external > 0 ? ` · ${external} external` : ''}`,
+      apiKeysBtn: 'API Keys',
+      apiKeysModalTitle: 'Workspace API Keys',
+      apiKeysHint: 'Keys here are encrypted into secrets.enc.json; plaintext never appears in any GET response. Each agent can also carry its own override key in its edit form — that takes priority.',
+      apiKeySet: 'configured',
+      apiKeyEnv: 'from environment',
+      apiKeyMissing: 'not set',
+      apiKeyUpdated: (ts) => `· updated ${new Date(ts).toLocaleString()}`,
+      setKey: 'Set',
+      updateKey: 'Update',
+      clearKey: 'Clear',
+      keyEnterHere: 'paste key, hit enter',
+      keySetOk: 'Saved (encrypted)',
+      keyRemoved: 'Removed',
+      keyWarnRestart: 'Saved. To apply to a running agent, edit + save it (which restarts it).',
+      agentApiKey: 'Private API key (optional, encrypted)',
+      agentApiKeyHint: 'Empty → workspace default; "Clear" removes this agent\'s own key',
+      agentApiKeyHintEdit: 'A private key is set. Empty = unchanged; new value = update; "Clear" removes it.',
       failedAlert: (msg) => `failed: ${msg}`,
       errorAlert: (msg) => `error: ${msg}`,
       sumJoined: (id, kind, caps) =>
@@ -324,6 +500,257 @@
     return () => es.close()
   }
 
+  // --- contribution system (v2.1) ----------------------------------------
+
+  /**
+   * Convert a window preset (`all` / `today` / `week` / `month`) to a
+   * `?from=&to=` URL query suffix understood by /api/leaderboard.
+   * `today` is "since local midnight"; week/month are rolling.
+   */
+  function windowToQuery(win) {
+    const now = Date.now()
+    switch (win) {
+      case 'today': {
+        const d = new Date()
+        d.setHours(0, 0, 0, 0)
+        return `?from=${d.getTime()}&to=${now + 1}`
+      }
+      case 'week':
+        return `?from=${now - 7 * 24 * 3600 * 1000}&to=${now + 1}`
+      case 'month':
+        return `?from=${now - 30 * 24 * 3600 * 1000}&to=${now + 1}`
+      case 'all':
+      default:
+        return ''
+    }
+  }
+
+  /**
+   * GET /api/leaderboard with the given window preset. Resolves to the
+   * Leaderboard object verbatim (rows already sorted by score desc).
+   */
+  function fetchLeaderboard(win) {
+    return fetchJson(`/api/leaderboard${windowToQuery(win)}`)
+  }
+
+  /**
+   * Render a Leaderboard into a container as a compact HTML table.
+   * Workers and admins both call this; layout is identical between the
+   * two surfaces. Empty windows render a single "no contributions yet"
+   * row so the panel doesn't collapse to zero-height.
+   */
+  function renderLeaderboard(container, lb, summaryEl) {
+    if (!container) return
+    const rows = lb?.rows ?? []
+    if (summaryEl) {
+      summaryEl.textContent = t.lbSummary(lb?.totalTaskCount ?? 0, lb?.unratedTaskCount ?? 0)
+    }
+    if (rows.length === 0) {
+      container.innerHTML = `<p class="empty">${escapeHtml(t.lbEmpty)}</p>`
+      return
+    }
+    const head =
+      `<thead><tr>` +
+        `<th>${escapeHtml(t.lbColRank)}</th>` +
+        `<th>${escapeHtml(t.lbColId)}</th>` +
+        `<th class="num">${escapeHtml(t.lbColScore)}</th>` +
+        `<th class="num">${escapeHtml(t.lbColTasks)}</th>` +
+        `<th class="num">${escapeHtml(t.lbColAvg)}</th>` +
+        `<th>${escapeHtml(t.lbColCaps)}</th>` +
+        `<th>${escapeHtml(t.lbColLastSeen)}</th>` +
+      `</tr></thead>`
+    const body = rows.map((row, i) => {
+      const caps = Object.entries(row.byCapability || {})
+        .sort((a, b) => b[1].contribution - a[1].contribution)
+        .map(([cap, v]) => `<span class="cap">${escapeHtml(cap)}·${formatScore(v.contribution)}</span>`)
+        .join('') || `<em class="empty">–</em>`
+      const lastSeen = row.lastActivityTs
+        ? new Date(row.lastActivityTs).toLocaleString()
+        : ''
+      return (
+        `<tr>` +
+          `<td class="lb-rank">${i + 1}</td>` +
+          `<td class="lb-id"><strong>${escapeHtml(row.participantId)}</strong></td>` +
+          `<td class="num lb-score">${formatScore(row.totalContribution)}</td>` +
+          `<td class="num">${row.taskCount}</td>` +
+          `<td class="num">${formatScore(row.averageRating)}</td>` +
+          `<td class="lb-caps">${caps}</td>` +
+          `<td class="lb-last">${escapeHtml(lastSeen)}</td>` +
+        `</tr>`
+      )
+    }).join('')
+    container.innerHTML = `<table class="leaderboard-table">${head}<tbody>${body}</tbody></table>`
+  }
+
+  /**
+   * Format a contribution number for display: at most 1 decimal place,
+   * trailing zero trimmed (so 10.0 → "10", 4.5 → "4.5").
+   */
+  function formatScore(n) {
+    if (typeof n !== 'number' || !Number.isFinite(n)) return '–'
+    const r = Math.round(n * 10) / 10
+    return Number.isInteger(r) ? String(r) : r.toFixed(1)
+  }
+
+  /**
+   * Wire up the contribution opt-out toggle in the header. Pass the
+   * label-wrapper element (the `<label id="contrib-toggle">`) plus the
+   * checkbox `<input>`. We POST /api/me/contribution-opt-out on every
+   * change; the server is the source of truth. The toggle is set to
+   * the value last returned by /api/whoami.
+   *
+   * Convention: the checkbox represents the *positive* "count me" state
+   * because that's what users want to keep on by default. So
+   * `checkbox.checked === !contributionOptOut`.
+   */
+  function attachContribToggle(toggleEl, inputEl) {
+    if (!toggleEl || !inputEl) return
+    inputEl.addEventListener('change', async () => {
+      const value = !inputEl.checked   // checkbox on -> opt-out off
+      try {
+        const r = await fetchJson('/api/me/contribution-opt-out', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ value }),
+        })
+        applyContribToggleState(toggleEl, inputEl, r?.contributionOptOut === true)
+      } catch (err) {
+        // revert the visual on failure
+        inputEl.checked = !inputEl.checked
+        alert(t.failedAlert(err.message || String(err)))
+      }
+    })
+  }
+
+  /** Render the toggle's checked-state and tooltip for a given optOut value. */
+  function applyContribToggleState(toggleEl, inputEl, optOut) {
+    if (!toggleEl || !inputEl) return
+    inputEl.checked = !optOut
+    toggleEl.title = optOut ? t.contribToggleTitleOff : t.contribToggleTitleOn
+    toggleEl.classList.toggle('contrib-toggle-off', optOut)
+  }
+
+  /**
+   * Common capability strings — surface in <datalist> + a one-click "chip"
+   * row underneath every `capabilities` input across admin and worker
+   * UIs. Purely a UX prop: nothing in the Hub or scheduler knows about
+   * this list. Picked to be:
+   *   - verb-like, kebab-case
+   *   - covers the most common patterns from `templates/` and
+   *     `templates/community/`
+   *   - small enough to be skimmable (≤ 24 entries)
+   *
+   * Users can still type any string — chips are suggestions, not a
+   * controlled vocabulary.
+   */
+  const CAPABILITY_SUGGESTIONS = [
+    'draft', 'review', 'summarize', 'translate', 'improve-prose',
+    'code', 'code-review', 'debug', 'refactor', 'test', 'document',
+    'analyze', 'classify', 'extract', 'stats',
+    'tutor', 'explain', 'coach',
+    'approve', 'evaluate', 'interview', 'story', 'prompt-design', 'tech-doc',
+  ]
+
+  /**
+   * Mount a chip-row of common capabilities next to an `<input>` whose
+   * value is a comma-separated capability list. Each chip click toggles
+   * its capability in the input. Idempotent — calling twice no-ops.
+   *
+   * Renders into the element passed as `container`. Falls back to
+   * `input.parentNode` if no container is given.
+   */
+  function attachCapChips(input, container) {
+    if (!input) return
+    ensureCapDatalist()
+    input.setAttribute('list', 'cap-datalist')
+    const host = container || input.parentNode
+    if (!host || host.querySelector('.cap-chips')) return // already mounted
+    const row = document.createElement('div')
+    row.className = 'cap-chips'
+
+    const label = document.createElement('span')
+    label.className = 'cap-chips-label'
+    label.textContent = t.commonCaps ?? '常用：'
+    row.appendChild(label)
+
+    const chipFor = (cap) => {
+      const b = document.createElement('button')
+      b.type = 'button'
+      b.className = 'cap-chip'
+      b.dataset.cap = cap
+      b.textContent = cap
+      b.title = cap
+      return b
+    }
+    for (const cap of CAPABILITY_SUGGESTIONS) row.appendChild(chipFor(cap))
+
+    function syncChipState() {
+      const set = new Set(parseCapsInput(input.value))
+      for (const chip of row.querySelectorAll('.cap-chip')) {
+        if (set.has(chip.dataset.cap)) chip.classList.add('cap-chip-active')
+        else chip.classList.remove('cap-chip-active')
+      }
+    }
+
+    row.addEventListener('click', (e) => {
+      const chip = e.target.closest('.cap-chip')
+      if (!chip) return
+      const cap = chip.dataset.cap
+      const caps = parseCapsInput(input.value)
+      const idx = caps.indexOf(cap)
+      if (idx === -1) caps.push(cap)
+      else caps.splice(idx, 1)
+      input.value = caps.join(', ')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      syncChipState()
+    })
+
+    // Live re-sync when the user edits the input by hand.
+    input.addEventListener('input', syncChipState)
+    onLangChange(() => { label.textContent = t.commonCaps ?? '常用：' })
+
+    host.appendChild(row)
+    syncChipState()
+  }
+
+  function parseCapsInput(value) {
+    return String(value || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+  }
+
+  function ensureCapDatalist() {
+    if (document.getElementById('cap-datalist')) return
+    const dl = document.createElement('datalist')
+    dl.id = 'cap-datalist'
+    for (const cap of CAPABILITY_SUGGESTIONS) {
+      const opt = document.createElement('option')
+      opt.value = cap
+      dl.appendChild(opt)
+    }
+    // Body is fine — datalist is invisible and just an id-based lookup.
+    document.body.appendChild(dl)
+  }
+
+  /**
+   * Inline metrics shown on a task card: "权重 2.0 · 评分 4.5 · 贡献 9.0"
+   * (or "权重 2.0 · 未评" if no rating yet). Returns a safe HTML string
+   * already escaped — callers should drop it into innerHTML as-is.
+   */
+  function taskMetricsHtml(view) {
+    const parts = []
+    const w = view.weight ?? view.task?.weight ?? 1.0
+    parts.push(`<span class="metric metric-weight">${escapeHtml(t.weightLabel)} ${formatScore(w)}</span>`)
+    if (typeof view.effectiveRating === 'number') {
+      parts.push(`<span class="metric metric-rating">${escapeHtml(t.ratingLabel)} ${formatScore(view.effectiveRating)}/5</span>`)
+      parts.push(`<span class="metric metric-contribution">${escapeHtml(t.contributionLabel)} ${formatScore(view.contribution ?? 0)}</span>`)
+    } else if (view.status === 'done') {
+      parts.push(`<span class="metric metric-unrated">${escapeHtml(t.unrated)}</span>`)
+    }
+    return parts.join('')
+  }
+
   // --- expose -------------------------------------------------------------
 
   window.AipeHub = {
@@ -340,6 +767,17 @@
     fetchJson,
     connectStream,
     $,
+    // contribution system (v2.1)
+    fetchLeaderboard,
+    renderLeaderboard,
+    windowToQuery,
+    formatScore,
+    taskMetricsHtml,
+    attachContribToggle,
+    applyContribToggleState,
+    // Capability suggestion chips (v2.1+)
+    CAPABILITY_SUGGESTIONS,
+    attachCapChips,
     /**
      * Synchronise language with what the server says is the space default.
      * Pages call this once on boot after fetching /api/state.

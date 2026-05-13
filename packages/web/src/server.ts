@@ -7,13 +7,25 @@ import { fileURLToPath } from 'node:url'
 import {
   HumanParticipant,
   type AdminRecord,
+  type AgentRecord,
   type DispatchStrategy,
   type Hub,
+  type ManagedAgentLifecycle,
+  type ManagedAgentSpec,
   type ParticipantId,
   type Space,
   type TaskId,
   type WorkerRecord,
 } from '@aipehub/core'
+
+import {
+  AGENT_SCHEMA_V1,
+  TEAM_SCHEMA_V1,
+  ManifestError,
+  parseManifest,
+  renderAgentManifest,
+  type ParsedAgent,
+} from './manifest.js'
 
 /**
  * Reference web UI for AipeHub (v2.0 — file-first).
@@ -85,6 +97,16 @@ export interface WebServerOptions {
    * to disable.
    */
   adminLoginRateLimit?: { max: number; windowSec: number }
+  /**
+   * Optional managed-agent lifecycle. The host process passes its
+   * `AgentSupervisor` here; the Web layer then calls `lifecycle.start
+   * (record)` after persisting a new agent and `lifecycle.stop(id)`
+   * before removing one. Without this, the agent management API still
+   * **persists** records to disk, but no live participant is registered
+   * on the Hub — useful for embedded use without a supervisor (e.g.
+   * tests).
+   */
+  lifecycle?: ManagedAgentLifecycle
 }
 
 export interface WebServerHandle {
@@ -139,6 +161,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     cookieSecure,
     allowedHosts,
     adminLoginLimiter,
+    lifecycle: opts.lifecycle,
   }
 
   const server = createServer((req, res) => {
@@ -194,6 +217,7 @@ interface HandlerCtx {
   cookieSecure: boolean
   allowedHosts: Set<string> | undefined
   adminLoginLimiter: RateLimiter
+  lifecycle: ManagedAgentLifecycle | undefined
 }
 
 /**
@@ -342,9 +366,14 @@ async function handle(
 
   // --- who am I -----------------------------------------------------------
   if (method === 'GET' && path === '/api/whoami') {
-    const admin = await ctx.space.findAdminSession(readCookie(req, ADMIN_COOKIE))
-    if (admin) {
-      sendJson(res, { role: 'admin', id: admin.principalId })
+    const adminSession = await ctx.space.findAdminSession(readCookie(req, ADMIN_COOKIE))
+    if (adminSession) {
+      const adminRow = (await ctx.space.admins()).find((a) => a.id === adminSession.principalId)
+      sendJson(res, {
+        role: 'admin',
+        id: adminSession.principalId,
+        contributionOptOut: adminRow?.contributionOptOut ?? false,
+      })
       return
     }
     const workerSession = await ctx.space.findWorkerSession(readCookie(req, WORKER_COOKIE))
@@ -358,11 +387,44 @@ async function handle(
         if (!ctx.hub.participant(worker.id)) {
           ctx.hub.register(new HumanParticipant({ id: worker.id, capabilities: worker.capabilities }))
         }
-        sendJson(res, { role: 'worker', id: worker.id, capabilities: worker.capabilities })
+        sendJson(res, {
+          role: 'worker',
+          id: worker.id,
+          capabilities: worker.capabilities,
+          contributionOptOut: worker.contributionOptOut ?? false,
+        })
         return
       }
     }
     sendJson(res, { role: 'guest' })
+    return
+  }
+
+  // --- self-service contribution opt-out toggle --------------------------
+  // Both admins and workers can flip their own preference. Affects only
+  // tasks **they publish** afterward (per spec: opt-out is publisher-
+  // scoped). Already-dispatched tasks keep whatever stamp they had.
+  if (method === 'POST' && path === '/api/me/contribution-opt-out') {
+    const body = (await readJsonBody(req).catch(() => ({}))) as { value?: boolean }
+    if (typeof body.value !== 'boolean') {
+      sendJson(res, { error: 'body must be { value: boolean }' }, 400)
+      return
+    }
+    const adminSession = await ctx.space.findAdminSession(readCookie(req, ADMIN_COOKIE))
+    if (adminSession) {
+      const updated = await ctx.space.setAdminContributionOptOut(adminSession.principalId, body.value)
+      if (!updated) { sendJson(res, { error: 'unknown admin' }, 404); return }
+      sendJson(res, { ok: true, role: 'admin', contributionOptOut: updated.contributionOptOut ?? false })
+      return
+    }
+    const workerSession = await ctx.space.findWorkerSession(readCookie(req, WORKER_COOKIE))
+    if (workerSession) {
+      const updated = await ctx.space.setWorkerContributionOptOut(workerSession.principalId, body.value)
+      if (!updated) { sendJson(res, { error: 'unknown worker' }, 404); return }
+      sendJson(res, { ok: true, role: 'worker', contributionOptOut: updated.contributionOptOut ?? false })
+      return
+    }
+    sendJson(res, { error: 'sign in first' }, 401)
     return
   }
 
@@ -457,6 +519,326 @@ async function handle(
     return
   }
 
+  // --- admin: workspace API-key secrets (v2.1) ---------------------------
+  // Three endpoints let an admin manage workspace-level provider API
+  // keys (anthropic, openai, …) through the browser. Keys are encrypted
+  // at rest with AES-256-GCM (see `@aipehub/core/secrets.ts`). The
+  // plaintext NEVER appears in a GET response — only the "is configured"
+  // status. Listing per-agent overrides goes through the same secrets
+  // file but its plaintext is set / cleared via the agent edit form.
+
+  if (method === 'GET' && path === '/api/admin/secrets') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const providers = await ctx.space.listProviderApiKeys()
+    const agents = await ctx.space.listAgentApiKeys()
+    // The env-derived defaults are also surfaced so the UI can show
+    // "anthropic ✓ (from environment)" vs "✓ (workspace key)".
+    sendJson(res, {
+      providers,
+      agents,
+      env: {
+        anthropic: !!process.env.ANTHROPIC_API_KEY,
+        openai: !!process.env.OPENAI_API_KEY,
+      },
+    })
+    return
+  }
+
+  const setSecretMatch = path.match(/^\/api\/admin\/secrets\/([^/]+)$/)
+  if (method === 'PUT' && setSecretMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const provider = decodeURIComponent(setSecretMatch[1]!)
+    if (provider !== 'anthropic' && provider !== 'openai') {
+      sendJson(res, { error: `unknown provider '${provider}'` }, 400)
+      return
+    }
+    const body = (await readJsonBody(req).catch(() => ({}))) as { apiKey?: string }
+    if (typeof body.apiKey !== 'string' || body.apiKey.length === 0) {
+      sendJson(res, { error: 'body must be { apiKey: "..." }' }, 400)
+      return
+    }
+    await ctx.space.setProviderApiKey(provider, body.apiKey)
+    // Spawning of already-running agents doesn't pick up new keys until
+    // they're restarted; tell the operator clearly. Future managed
+    // agents will see the new key automatically.
+    sendJson(res, { ok: true, note: 'workspace key updated; restart affected agents to apply' })
+    return
+  }
+
+  if (method === 'DELETE' && setSecretMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const provider = decodeURIComponent(setSecretMatch[1]!)
+    const ok = await ctx.space.removeProviderApiKey(provider)
+    if (!ok) { sendJson(res, { error: `no key set for '${provider}'` }, 404); return }
+    sendJson(res, { ok: true })
+    return
+  }
+
+  // --- admin: managed agents (v2.1) --------------------------------------
+  // Six routes that let an admin manage the host's in-process LLM-agent
+  // pool from the browser. The pool is materialised by an `AgentSupervisor`
+  // running in the host process; we talk to it via the optional `lifecycle`
+  // hook passed on `serveWeb({ lifecycle })`. Without a lifecycle these
+  // endpoints still persist records (so the next host boot would replay
+  // them) but no live participant is spawned in this process — useful
+  // for embedded tests.
+
+  // List all managed agents currently in agents.json. Public to admins.
+  if (method === 'GET' && path === '/api/admin/agents') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const agents = await ctx.space.agents()
+    const liveIds = new Set(ctx.hub.participants().map((p) => p.id))
+    sendJson(res, {
+      agents: agents.map((a) => ({
+        id: a.id,
+        allowedCapabilities: a.allowedCapabilities,
+        displayName: a.displayName,
+        managed: a.managed,             // undefined for externally-connected agents
+        createdAt: a.createdAt,
+        lastSeen: a.lastSeen,
+        online: liveIds.has(a.id),
+      })),
+    })
+    return
+  }
+
+  // What providers can the host actually spawn right now (based on env)?
+  if (method === 'GET' && path === '/api/admin/agents/providers') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    // No lifecycle → no managed agents possible → empty list.
+    const providers = ctx.lifecycle ? await ctx.lifecycle.availableProviders() : []
+    sendJson(res, { providers })
+    return
+  }
+
+  // Create one managed agent. Body = ParsedAgent shape (id / caps /
+  // managed). On success the lifecycle.start spawns the live LlmAgent.
+  if (method === 'POST' && path === '/api/admin/agents') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const body = (await readJsonBody(req).catch(() => ({}))) as Record<string, unknown>
+    let parsed: ParsedAgent
+    try {
+      parsed = validateAgentBody(body)
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
+      return
+    }
+    if ((await ctx.space.agents()).some((a) => a.id === parsed.id)) {
+      sendJson(res, { error: `agent '${parsed.id}' already exists; use PUT to edit` }, 409)
+      return
+    }
+    // Provider availability check is **soft** now: a missing key is OK
+    // because the caller can attach a per-agent override on this same
+    // POST via the `apiKey` field. We only block if neither workspace
+    // default, env, nor per-agent override is present.
+    if (ctx.lifecycle) {
+      const avail = new Set(await ctx.lifecycle.availableProviders())
+      const hasApiKey = typeof (body as { apiKey?: unknown }).apiKey === 'string' && (body as { apiKey?: string }).apiKey!.length > 0
+      if (!avail.has(parsed.managed.provider) && !hasApiKey) {
+        sendJson(
+          res,
+          { error: `provider '${parsed.managed.provider}' has no API key (set a workspace default or attach one to this agent)` },
+          400,
+        )
+        return
+      }
+    }
+    const record = await ctx.space.upsertAgent({
+      id: parsed.id,
+      allowedCapabilities: parsed.capabilities,
+      displayName: parsed.displayName,
+      managed: parsed.managed,
+    })
+    // If the body carries a per-agent apiKey, save it before spawning
+    // so the pool's resolveApiKey() finds it. The plaintext is encrypted
+    // on disk; it never appears in any subsequent response.
+    const inlineKey = (body as { apiKey?: string }).apiKey
+    if (typeof inlineKey === 'string' && inlineKey.length > 0) {
+      await ctx.space.setAgentApiKey(parsed.id, inlineKey)
+    }
+    if (ctx.lifecycle) {
+      try {
+        await ctx.lifecycle.start(record)
+      } catch (err) {
+        // Persist the record but tell the caller spawn failed — they can
+        // edit + retry without re-uploading the manifest.
+        sendJson(res, {
+          ok: false,
+          warning: 'persisted but failed to spawn',
+          error: err instanceof Error ? err.message : String(err),
+        }, 500)
+        return
+      }
+    }
+    sendJson(res, { ok: true, agent: publicAgent(record, ctx.hub) })
+    return
+  }
+
+  // Bulk import from a manifest (YAML or JSON in the request body — the
+  // parser sniffs the format). Returns the list of created agents.
+  if (method === 'POST' && path === '/api/admin/agents/import') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const raw = await readTextBody(req).catch(() => '')
+    if (!raw) { sendJson(res, { error: 'empty body' }, 400); return }
+    let manifest
+    try {
+      manifest = parseManifest(raw)
+    } catch (err) {
+      const msg = err instanceof ManifestError ? err.message : (err instanceof Error ? err.message : String(err))
+      sendJson(res, { error: msg }, 400)
+      return
+    }
+    const existing = new Set((await ctx.space.agents()).map((a) => a.id))
+    const skipped: string[] = []
+    const created: AgentRecord[] = []
+    const avail = ctx.lifecycle ? new Set(await ctx.lifecycle.availableProviders()) : null
+    for (const a of manifest.agents) {
+      if (existing.has(a.id)) { skipped.push(a.id); continue }
+      // Import doesn't carry per-agent keys (templates never embed them),
+      // so we still hard-block on missing keys. Hint how to fix.
+      if (avail && !avail.has(a.managed.provider)) {
+        sendJson(res, {
+          error: `agent '${a.id}' uses provider '${a.managed.provider}' but no key is configured — set the workspace default first, then re-import`,
+        }, 400)
+        return
+      }
+      const rec = await ctx.space.upsertAgent({
+        id: a.id,
+        allowedCapabilities: a.capabilities,
+        displayName: a.displayName,
+        managed: a.managed,
+      })
+      created.push(rec)
+      existing.add(a.id)
+    }
+    // Best-effort spawn pass. Failures are collected but don't roll back
+    // the persisted records — operator can retry via the edit path.
+    const spawnErrors: { id: string; error: string }[] = []
+    if (ctx.lifecycle) {
+      for (const rec of created) {
+        try { await ctx.lifecycle.start(rec) }
+        catch (err) {
+          spawnErrors.push({ id: rec.id, error: err instanceof Error ? err.message : String(err) })
+        }
+      }
+    }
+    sendJson(res, {
+      ok: true,
+      created: created.map((r) => publicAgent(r, ctx.hub)),
+      skipped,
+      spawnErrors,
+      team: manifest.schema === TEAM_SCHEMA_V1
+        ? { name: manifest.teamName, description: manifest.teamDescription }
+        : undefined,
+    })
+    return
+  }
+
+  // Edit one. Same body shape as POST. Lifecycle.start on the new
+  // record reloads the live agent (stop+start).
+  const editAgentMatch = path.match(/^\/api\/admin\/agents\/([^/]+)$/)
+  if (method === 'PUT' && editAgentMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const id = decodeURIComponent(editAgentMatch[1]!)
+    const body = (await readJsonBody(req).catch(() => ({}))) as Record<string, unknown>
+    // Lock id from the URL — body can't rename. Saves a class of bugs.
+    body.id = id
+    let parsed: ParsedAgent
+    try {
+      parsed = validateAgentBody(body)
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
+      return
+    }
+    const existing = (await ctx.space.agents()).find((a) => a.id === id)
+    if (!existing) { sendJson(res, { error: `unknown agent '${id}'` }, 404); return }
+    if (ctx.lifecycle) {
+      const avail = new Set(await ctx.lifecycle.availableProviders())
+      const hasInlineKey = typeof (body as { apiKey?: unknown }).apiKey === 'string' && (body as { apiKey?: string }).apiKey!.length > 0
+      const hasStoredKey = (await ctx.space.getAgentApiKey(id).catch(() => null)) !== null
+      if (!avail.has(parsed.managed.provider) && !hasInlineKey && !hasStoredKey) {
+        sendJson(
+          res,
+          { error: `provider '${parsed.managed.provider}' has no API key` },
+          400,
+        )
+        return
+      }
+    }
+    const record = await ctx.space.upsertAgent({
+      id,
+      allowedCapabilities: parsed.capabilities,
+      displayName: parsed.displayName,
+      managed: parsed.managed,
+    })
+    // PUT can rotate (or remove) the per-agent key. `apiKey: ""` means
+    // "remove the override and fall back to workspace / env".
+    const editKey = (body as { apiKey?: string }).apiKey
+    if (typeof editKey === 'string') {
+      if (editKey.length === 0) {
+        await ctx.space.removeAgentApiKey(id).catch(() => { /* no-op */ })
+      } else {
+        await ctx.space.setAgentApiKey(id, editKey)
+      }
+    }
+    if (ctx.lifecycle) {
+      try {
+        await ctx.lifecycle.start(record)   // reload semantics: stop+start
+      } catch (err) {
+        sendJson(res, { ok: false, error: err instanceof Error ? err.message : String(err) }, 500)
+        return
+      }
+    }
+    sendJson(res, { ok: true, agent: publicAgent(record, ctx.hub) })
+    return
+  }
+
+  // Remove. Lifecycle.stop first so the live agent leaves the registry,
+  // then erase from agents.json. A managed agent that fails to stop
+  // (e.g. its provider is mid-call) is still removed from disk — the
+  // next boot won't bring it back.
+  if (method === 'DELETE' && editAgentMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const id = decodeURIComponent(editAgentMatch[1]!)
+    if (ctx.lifecycle) {
+      await ctx.lifecycle.stop(id).catch((err) => console.error(`[aipehub-web] stop ${id}:`, err))
+    }
+    const ok = await ctx.space.removeAgent(id)
+    if (!ok) { sendJson(res, { error: `unknown agent '${id}'` }, 404); return }
+    sendJson(res, { ok: true })
+    return
+  }
+
+  // Download one agent as a v1 manifest. JSON only (YAML round-trip is
+  // not needed for export — the user can convert if they like).
+  const exportAgentMatch = path.match(/^\/api\/admin\/agents\/([^/]+)\/export$/)
+  if (method === 'GET' && exportAgentMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const id = decodeURIComponent(exportAgentMatch[1]!)
+    const rec = (await ctx.space.agents()).find((a) => a.id === id)
+    if (!rec) { sendJson(res, { error: `unknown agent '${id}'` }, 404); return }
+    if (!rec.managed) {
+      sendJson(res, { error: `agent '${id}' is externally-connected (no managed spec to export)` }, 400)
+      return
+    }
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'content-disposition': `attachment; filename="${encodeURIComponent(id)}.aipehub-agent.json"`,
+    })
+    res.end(JSON.stringify(renderAgentManifest(rec), null, 2))
+    return
+  }
+
   // --- admin: applications -----------------------------------------------
   if (method === 'GET' && path === '/api/admin/applications') {
     const admin = await requireAdmin(ctx, req, res)
@@ -497,16 +879,64 @@ async function handle(
       payload?: unknown
       title?: string
       priority?: number
+      weight?: number
+      countContribution?: boolean
+      /**
+       * If `true`, the server awaits the dispatch result before answering
+       * (subject to `timeoutMs`). Default `false` keeps the historic
+       * fire-and-forget behaviour for the admin SPA. The MCP server uses
+       * `wait: true` so a tool call can return the actual TaskResult.
+       */
+      wait?: boolean
+      /** Max ms to wait when `wait: true`. Defaults to 60_000. Clamped to [1000, 600_000]. */
+      timeoutMs?: number
     }
     if (!body?.strategy) { sendJson(res, { error: 'missing strategy' }, 400); return }
-    ctx.hub.dispatch({
+    // The publisher's saved preference defaults the task's flag. An
+    // explicit `countContribution` in the request body overrides per-call
+    // (lets future UI offer "ad-hoc opt-out for this one task" without
+    // toggling the global switch). `false` from preference + `true` from
+    // request body == counted; vice versa == opted-out.
+    const publisherDefault = admin.contributionOptOut ? false : true
+    const countContribution =
+      typeof body.countContribution === 'boolean' ? body.countContribution : publisherDefault
+    const dispatchOpts = {
       from: admin.id,
       strategy: body.strategy,
       payload: body.payload ?? {},
       title: body.title,
       priority: body.priority,
-    }).catch((err) => console.error('[aipehub-web] dispatch failed:', err))
+      weight: body.weight,
+      countContribution,
+    }
+    if (body.wait === true) {
+      const rawTimeout = typeof body.timeoutMs === 'number' ? body.timeoutMs : 60_000
+      const timeoutMs = Math.max(1000, Math.min(600_000, rawTimeout))
+      try {
+        const result = await Promise.race([
+          ctx.hub.dispatch(dispatchOpts),
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('dispatch wait timeout')), timeoutMs),
+          ),
+        ])
+        sendJson(res, { ok: true, result })
+      } catch (err) {
+        sendJson(res, { ok: false, error: err instanceof Error ? err.message : String(err) }, 504)
+      }
+      return
+    }
+    ctx.hub.dispatch(dispatchOpts).catch((err) => console.error('[aipehub-web] dispatch failed:', err))
     sendJson(res, { ok: true })
+    return
+  }
+
+  // --- leaderboard (visible to admins AND workers — visibility is the
+  //     point: "everyone sees everyone's contributions"). Optional `from`
+  //     / `to` query params; default = all-time. ------------------------
+  if (method === 'GET' && path === '/api/leaderboard') {
+    const from = parseTsParam(url.searchParams.get('from'))
+    const to = parseTsParam(url.searchParams.get('to'))
+    sendJson(res, ctx.hub.leaderboard({ from, to }))
     return
   }
 
@@ -833,7 +1263,89 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
   })
 }
 
+/**
+ * Read the body as raw text. Used by /api/admin/agents/import which
+ * accepts either YAML or JSON. Same 1MB cap as `readJsonBody` so a
+ * runaway upload can't OOM the server.
+ */
+function readTextBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let buf = ''
+    req.on('data', (chunk) => {
+      buf += chunk
+      if (buf.length > 1_000_000) {
+        req.destroy()
+        reject(new Error('body too large'))
+      }
+    })
+    req.on('end', () => resolve(buf))
+    req.on('error', reject)
+  })
+}
+
+/**
+ * Validate the POST/PUT body for /api/admin/agents. Accepts the same
+ * `agent: {...}` shape as the v1 manifest (without the schema wrapper)
+ * — that way the admin UI form posts the same fields it'd write into a
+ * YAML file.
+ */
+function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
+  if (typeof body.id !== 'string' || body.id.length === 0) {
+    throw new ManifestError(`id is required`)
+  }
+  if (body.id.length > 80) throw new ManifestError(`id too long`)
+  if (!/^[a-zA-Z0-9_.:-]+$/.test(body.id)) {
+    throw new ManifestError(`id may only contain letters, digits, '_', '.', ':', '-'`)
+  }
+  const caps = body.capabilities
+  if (!Array.isArray(caps)) throw new ManifestError(`capabilities must be an array`)
+  const capabilities: string[] = []
+  for (const c of caps) {
+    if (typeof c !== 'string' || c.length === 0) throw new ManifestError(`capabilities must contain non-empty strings`)
+    capabilities.push(c)
+  }
+  const provider = body.provider
+  if (provider !== 'anthropic' && provider !== 'openai' && provider !== 'mock') {
+    throw new ManifestError(`provider must be 'anthropic', 'openai' or 'mock'`)
+  }
+  const system = body.system
+  if (typeof system !== 'string' || system.length === 0) throw new ManifestError(`system is required`)
+  const managed: ManagedAgentSpec = { kind: 'llm', provider, system }
+  if (typeof body.model === 'string' && body.model.length > 0) managed.model = body.model
+  if (typeof body.weightDefault === 'number' && Number.isFinite(body.weightDefault)) {
+    managed.weightDefault = body.weightDefault
+  }
+  const out: ParsedAgent = { id: body.id, capabilities, managed }
+  if (typeof body.displayName === 'string') out.displayName = body.displayName
+  return out
+}
+
+/** Public-safe projection of an AgentRecord for the API. */
+function publicAgent(rec: AgentRecord, hub: Hub) {
+  return {
+    id: rec.id,
+    allowedCapabilities: rec.allowedCapabilities,
+    displayName: rec.displayName,
+    managed: rec.managed,
+    createdAt: rec.createdAt,
+    lastSeen: rec.lastSeen,
+    online: hub.participant(rec.id) != null,
+  }
+}
+
 function sendJson(res: ServerResponse, data: unknown, status = 200): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
   res.end(JSON.stringify(data))
+}
+
+/**
+ * Parse a `?from=` / `?to=` query param as a UNIX-ms timestamp. Returns
+ * `undefined` for missing or unparseable inputs so the Hub's defaults
+ * (`from=0`, `to=now+1`) take over.
+ */
+function parseTsParam(raw: string | null): number | undefined {
+  if (raw == null || raw === '') return undefined
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return undefined
+  return n
 }

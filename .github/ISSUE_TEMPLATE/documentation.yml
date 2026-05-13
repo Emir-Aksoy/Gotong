@@ -1,0 +1,39 @@
+name: 📚 Documentation
+description: Wrong, missing, or unclear in the docs
+title: "[docs] "
+labels: ["documentation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Doc fixes are some of the most useful PRs we get — typo PRs welcome too, no issue needed first.
+  - type: input
+    id: where
+    attributes:
+      label: Which doc?
+      description: File path or URL. `docs/HUMAN.md`, `README.md`, `docs/zh/OVERVIEW.md`, `packages/sdk-node/README.md`, etc.
+      placeholder: "docs/AGENT.md"
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What's wrong / missing / unclear?
+      description: Quote the line or section if possible. If it's a missing section, describe what you tried to look up.
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested fix (optional)
+      description: A rewrite, a missing example, a link to the right answer.
+  - type: dropdown
+    id: lang
+    attributes:
+      label: Language
+      options:
+        - "English"
+        - "中文"
+        - "Both / not sure"
+    validations:
+      required: true

@@ -4,6 +4,221 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.0`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — managed agents + encrypted API keys + template library (v2.1)
+
+The "普通人 60 秒上线一个 agent" milestone. Adds host-managed LLM
+agents, three import paths (UI form / paste / file upload), encrypted
+on-disk API-key management, and a public template library for
+community-shared agent + team configs.
+
+### Added — encrypted API keys (UI input + at-rest crypto)
+
+- **`<space>/secrets.enc.json`** holds workspace-level provider keys
+  (anthropic, openai, …) and optional per-agent overrides, all encrypted
+  with AES-256-GCM.
+- **`<space>/runtime/secret.key`** holds the AES master key (32 bytes,
+  hex, `0600`). Operators can override with `AIPE_SECRET_KEY` env (64
+  hex chars) for KMS-mounted setups.
+- **Two-tier resolution at spawn** in priority order: (1) per-agent key
+  → (2) workspace default → (3) `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`
+  env. Mock provider needs no key.
+- **API:**
+  - `GET /api/admin/secrets` — status only (timestamps, env-detection),
+    **never plaintext**
+  - `PUT /api/admin/secrets/:provider { apiKey }` — set / rotate
+  - `DELETE /api/admin/secrets/:provider` — remove
+  - `POST /api/admin/agents { ..., apiKey? }` — optional inline
+    per-agent override
+  - `PUT /api/admin/agents/:id { ..., apiKey? }` — same, plus `apiKey: ""`
+    clears the override
+- **Admin UI**: "API Key 管理" button opens a modal listing each provider
+  with badges (✓ workspace / ✓ env / ✗ missing) and Set/Update/Clear
+  buttons. Agent create/edit form gains a "私有 API Key（可选）" password
+  input + a "清空" button.
+- **Auto-cleanup**: `Space.removeAgent(id)` drops the agent's encrypted
+  override key in the same transaction so an orphaned key never lingers.
+- **Tests**: 14 cases covering encrypt/decrypt round-trip, wrong-key
+  rejection, tamper detection, fresh-IV property, master-key
+  bootstrapping (env > file > generate), `Space.setProviderApiKey` /
+  `getProviderApiKey` / `removeProviderApiKey` and the agent
+  counterparts (including auto-cleanup on `removeAgent`).
+
+### Added — host-managed agents
+
+- **`AgentRecord.managed?: ManagedAgentSpec`** — optional spec stored in
+  `agents.json`. `kind: 'llm'` agents carry `provider` (anthropic /
+  openai / mock), `model`, `system` prompt, and `weightDefault`. API
+  keys never go to disk — only the provider name; keys stay in `process.env`.
+- **`AgentSupervisor`** in `@aipehub/host`: on boot, replays `agents.json`
+  into live `LlmAgent` participants registered on the Hub. Same on
+  every create / edit. `displayName` field added for human-friendly
+  identifiers.
+- **`ManagedAgentLifecycle`** interface exported from `@aipehub/core` so
+  the Web layer talks to the supervisor without importing
+  `@aipehub/llm-*` directly. `serveWeb({ lifecycle })` plugs the host's
+  supervisor in.
+- **Host package** now depends on `@aipehub/llm`, `@aipehub/llm-anthropic`,
+  `@aipehub/llm-openai` so a single `pnpm host` brings everything online.
+
+### Added — manifest format + parser
+
+- **`aipehub.agent/v1`** (single agent) and **`aipehub.team/v1`**
+  (multiple agents bundled) schemas, accepted as YAML or JSON.
+- Parser in `@aipehub/web/manifest.ts` returns a typed `ParsedManifest`,
+  fails loudly with `ManifestError`-class messages that the admin UI
+  surfaces verbatim. New `yaml` dependency.
+
+### Added — Web API (6 new endpoints)
+
+- `GET /api/admin/agents` — list all (managed + externally-connected)
+- `GET /api/admin/agents/providers` — which provider strings the host
+  can actually spawn (i.e. has env keys for)
+- `POST /api/admin/agents` — create one from form fields
+- `POST /api/admin/agents/import` — bulk import a manifest (YAML or JSON
+  in request body)
+- `PUT /api/admin/agents/:id` — edit one (stop + restart the live agent)
+- `DELETE /api/admin/agents/:id` — remove
+- `GET /api/admin/agents/:id/export` — download as v1 JSON manifest
+
+### Added — Admin UI
+
+- New "智能体" section spanning the page top. Card grid with id /
+  provider / online state / caps; three per-card actions (编辑 / 导出 /
+  移除).
+- "+ 创建" modal — id / displayName / capabilities / provider (greyed
+  out for missing env keys) / model / system prompt / weightDefault.
+  Edit form is the same component pre-filled, with a "建议先停止再修改"
+  warning.
+- "导入" modal — file upload OR textarea paste. Server-side parser is
+  format-agnostic (sniffs YAML vs JSON).
+- A standing hint links to the public template library on GitHub.
+
+### Added — `templates/` directory (public library)
+
+- `templates/agents/`: writer-zh, reviewer-zh, summarizer-zh,
+  translator-zh-en, code-reviewer (5 standard agents)
+- `templates/teams/`: editorial-zh, translator-team, code-review-team
+  (3 standard teams)
+- `templates/README.md` walks through "open raw URL → copy → paste into
+  admin UI"; `templates/CONTRIBUTING.md` shows how to PR new templates.
+
+### Added — `templates/community/` (third-party adapted set)
+
+A second tree under `templates/community/` collects agents adapted
+from major open-source prompt libraries with clean commercial licenses.
+Designed to be uploaded to a CDN later so users can pull them with one
+URL paste in the admin UI.
+
+- **Sources & licenses** (full verbatim in
+  [`templates/community/LICENSE-NOTICES.md`](templates/community/LICENSE-NOTICES.md)):
+  - [`f/awesome-chatgpt-prompts`](https://github.com/f/awesome-chatgpt-prompts) — **CC0 1.0** (public domain) — 10 agents + 1 team
+  - [`PlexPt/awesome-chatgpt-prompts-zh`](https://github.com/PlexPt/awesome-chatgpt-prompts-zh) — **MIT** — 1 agent
+- **Rejected** upstream sources marked non-commercial, research-only,
+  or unlicensed.
+- **Adaptation rules** documented in `templates/community/README.md`:
+  removed conversational openers ("my first request is …"), reshaped
+  for AipeHub's single-turn task-payload → TaskResult model, added
+  structured output sections, tuned capabilities + model + weight.
+- **Files**: `linux-terminal`, `javascript-console`, `sql-terminal`,
+  `english-improver`, `storyteller`, `math-tutor`, `tech-writer`,
+  `career-counselor`, `statistician`, `prompt-engineer`,
+  `interviewer-zh` + `tech-content-team` (3-agent pipeline).
+- Each file's header carries `# Source` / `# Upstream` /
+  `# License` / `# Adapted` lines so downstream forks can trace
+  provenance.
+
+### Added — tests
+
+- `packages/web/tests/manifest.test.ts` — **37 cases** (was 25) covering
+  YAML / JSON parsing, agent + team schemas, error surface, render
+  round-trip, and a smoke check that **every committed template file
+  parses cleanly** — now walks both `templates/{agents,teams}/` and
+  `templates/community/{agents,teams}/` so any PR adding a new community
+  template gets coverage automatically.
+
+## Unreleased — contribution scoreboard (v2.1)
+
+Everyone in a room — humans **and** agents — now sees how much each
+participant has gotten done. The Hub gains the data, the Web UI gains
+two new panels, and **every participant can opt their own dispatches
+out of the score**.
+
+### Added — per-publisher opt-out
+
+- **`Task.countContribution?: boolean`** — when `false` the leaderboard
+  pretends the task doesn't exist (not counted as rated, not counted as
+  unrated). Defaults `true` / `undefined`. The flag is set at dispatch
+  time and lives in the transcript.
+- **`AdminRecord.contributionOptOut?: boolean`** +
+  **`WorkerRecord.contributionOptOut?: boolean`** — persistent personal
+  preference. Stored in `admins.json` / `workers.json`. Defaults to
+  false (counted).
+- **`Space.setAdminContributionOptOut(id, value)`** +
+  **`Space.setWorkerContributionOptOut(id, value)`** — toggle methods.
+- **`GET /api/whoami`** now returns `contributionOptOut: boolean`.
+- **`POST /api/me/contribution-opt-out { value: boolean }`** — self-service
+  toggle for the logged-in admin or worker.
+- **`POST /api/admin/dispatch`** reads the admin's saved preference as
+  the default for `Task.countContribution`. A `countContribution` field
+  in the request body overrides per-call (for future ad-hoc UI).
+- **`Hub.retry()`** preserves the original task's `countContribution`
+  flag — retried tasks inherit the original opt-out posture.
+- **UI** — a header toggle on both admin and worker pages: "我派发的任务
+  计入贡献榜 / My dispatches feed the leaderboard". Switches the
+  preference in one click; tooltip explains that **only outgoing tasks
+  are affected — tasks you receive still count toward your own score**.
+
+### Added — task weight + rating + per-task contribution
+
+### Added — task weight + rating + per-task contribution
+
+- **`Task.weight`** (`0.1`–`10.0`, one decimal, default `1.0`). Set by the
+  admin at dispatch time; clamped + rounded by the Hub so the stored
+  task is always well-formed. Carried through `retry()` so retried tasks
+  inherit the original stakes.
+- **`Evaluation.rating`** is now formalised as `0`–`5` with one decimal of
+  precision. The Hub clamps and rounds incoming values in `evaluate(...)`;
+  out-of-range inputs are coerced rather than rejected (web forms get
+  the polite treatment). `undefined` keeps "comment-only" evaluations
+  working — they leave the contribution score unchanged.
+- **`TaskView`** gains `weight`, `effectiveRating` (latest numeric rating),
+  and `contribution` (= `weight × effectiveRating`). Comment-only
+  re-evaluations preserve the previous score; a rating re-evaluation
+  overwrites it ("latest rated wins").
+- **`Hub.leaderboard({ from?, to? })`** — new pure derivation over the
+  transcript. Returns `Leaderboard { from, to, rows, unratedTaskCount,
+  totalTaskCount }` where each row aggregates `taskCount`, `totalWeight`,
+  `totalContribution`, `averageRating`, `lastActivityTs`, and a
+  `byCapability` breakdown (capability → contribution). Sorted by
+  contribution desc with tie-break on `lastActivityTs` desc.
+- **`TaskView.completedAt`** now reflects the transcript-entry `ts`
+  (driven by `hub.now()`) rather than the agent-reported `result.ts`.
+  Matters for time-window filtering and tie-breaking under simulated
+  clocks; legacy transcripts replay unchanged.
+
+### Added — Web UI
+
+- `POST /api/admin/dispatch` accepts a `weight` field.
+- `GET /api/leaderboard?from=&to=` returns the leaderboard. Public to
+  both admins and workers — visibility is the point ("everyone sees
+  everyone's contributions").
+- **Admin panel**: dispatch form has a new "权重" input; evaluation form
+  upgraded to `step=0.1` with `[0, 5]` range. Task cards now show
+  `权重 / 评分 / 贡献` metric badges. A "贡献榜" section spans the full
+  page with a time-window selector (today / week / month / all).
+- **Worker panel**: a compact leaderboard appears under "参与者". Same
+  data, same window selector. Workers see the same totals admins see.
+- New i18n keys for `dispatchWeight`, `weightLabel`, `ratingLabel`,
+  `contributionLabel`, `unrated`, `leaderboardTitle`, `lbWindow*`,
+  `lbCol*`, `lbSummary` in both zh and en.
+
+### Added — tests
+
+- `packages/core/tests/contributions.test.ts` — 14 cases covering weight
+  defaulting / clamping / rounding, rating sanitisation, latest-rated-
+  wins, time-window filtering, tie-breaking, byCapability breakdown,
+  and retry weight preservation.
+
 ## Unreleased — public-deployment hardening
 
 Targets the "open-source it + run a public体验版" milestone.

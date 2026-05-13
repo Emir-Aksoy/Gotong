@@ -14,14 +14,162 @@
       <span class="subtitle" data-i18n="adminTitle">管理员控制台</span>
       <span id="conn" class="conn" data-status="pending" data-i18n="connecting">连接中…</span>
       <span class="role-badge role-admin" data-i18n="adminBadge">管理员</span>
+      <label id="contrib-toggle" class="contrib-toggle" title="是否将我派发的任务计入贡献榜">
+        <input type="checkbox" id="contrib-toggle-input" />
+        <span class="contrib-toggle-label" data-i18n="contribToggleLabel">我派发的任务计入贡献榜</span>
+      </label>
       <button id="logout-btn" class="leave-btn" type="button" data-i18n="logout">退出</button>
       <button id="lang-toggle" class="lang-toggle" type="button" title="切换语言 / Switch language">EN</button>
     </header>
 
     <main id="main-grid" class="admin-grid">
+      <!-- Room health banner — single-glance signal of "is the room
+           healthy right now?" Numbers come from /api/state +
+           /api/leaderboard?from=<7d>; no new backend endpoint. -->
+      <section id="room-health" class="room-health">
+        <div class="health-card">
+          <div class="health-label" data-i18n="healthToday">今日任务</div>
+          <div class="health-value" id="health-today-tasks">—</div>
+          <div class="health-sub" id="health-today-sub" data-i18n="healthTodaySub">含已完成 / 进行中</div>
+        </div>
+        <div class="health-card">
+          <div class="health-label" data-i18n="healthOnline">在线</div>
+          <div class="health-value" id="health-online">—</div>
+          <div class="health-sub" id="health-online-sub">—</div>
+        </div>
+        <div class="health-card">
+          <div class="health-label" data-i18n="healthUnrated">待评估</div>
+          <div class="health-value" id="health-unrated">—</div>
+          <div class="health-sub" data-i18n="healthUnratedSub">近 7 天</div>
+        </div>
+        <div class="health-card health-card-wide">
+          <div class="health-label" data-i18n="healthTop3">本周 Top 3 贡献者</div>
+          <ol class="health-top3" id="health-top3"></ol>
+        </div>
+      </section>
+
       <section id="pending-apps" class="pending-apps">
         <h2 data-i18n="pendingAgents">待批准的接入申请</h2>
         <div id="pending-apps-list"></div>
+      </section>
+
+      <section id="managed-agents" class="managed-agents">
+        <h2>
+          <span data-i18n="managedAgentsTitle">智能体</span>
+          <span id="ma-summary" class="lb-summary"></span>
+          <button type="button" id="ma-keys-btn" class="ma-btn ma-btn-secondary" data-i18n="apiKeysBtn">API Key 管理</button>
+          <button type="button" id="ma-new-btn" class="ma-btn" data-i18n="newAgent">+ 创建</button>
+          <button type="button" id="ma-import-btn" class="ma-btn" data-i18n="importAgent">导入</button>
+        </h2>
+        <div id="managed-agents-list" class="managed-agents-list"></div>
+        <p class="hint">
+          <span data-i18n="templatesHint">从公网模板库找标准 agent / team 文件，复制内容到「导入」即可：</span>
+          <a href="https://github.com/AipeHub/aipehub-templates" target="_blank" rel="noopener">github.com/AipeHub/aipehub-templates</a>
+        </p>
+      </section>
+
+      <!-- Modal: workspace API-key manager -->
+      <div id="ma-keys-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card" role="dialog" aria-modal="true">
+          <header class="modal-head">
+            <h3 data-i18n="apiKeysModalTitle">工作区 API Key</h3>
+            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+          </header>
+          <div class="dispatch-form">
+            <p class="hint" data-i18n="apiKeysHint">这里设置的 key 会被加密存到 <code>&lt;space&gt;/secrets.enc.json</code>；明文不写回任何 GET 响应。每个 agent 也可在自己的「编辑」表单里配私有 key，会优先生效。</p>
+            <div id="ma-keys-list" class="keys-list"></div>
+            <p id="ma-keys-msg" class="form-msg"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: create / edit a managed agent -->
+      <div id="ma-form-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card" role="dialog" aria-modal="true">
+          <header class="modal-head">
+            <h3 id="ma-form-title" data-i18n="newAgent">创建智能体</h3>
+            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+          </header>
+          <form id="ma-form" class="dispatch-form">
+            <p id="ma-form-edit-warning" class="form-msg" hidden data-i18n="editWarning">⚠️ 修改已存在的智能体可能影响进行中的会话；建议先停止再修改。</p>
+            <label>
+              <span data-i18n="agentId">ID（唯一）</span>
+              <input id="ma-id" autocomplete="off" required maxlength="80" />
+            </label>
+            <label>
+              <span data-i18n="agentDisplayName">显示名（可选）</span>
+              <input id="ma-display-name" autocomplete="off" maxlength="80" />
+            </label>
+            <label>
+              <span data-i18n="agentCaps">能力（逗号分隔）</span>
+              <input id="ma-caps" autocomplete="off" required placeholder="draft, review" />
+            </label>
+            <label>
+              <span data-i18n="agentProvider">Provider</span>
+              <select id="ma-provider"></select>
+            </label>
+            <label>
+              <span data-i18n="agentModel">Model（可选）</span>
+              <input id="ma-model" autocomplete="off" placeholder="claude-opus-4-7" />
+            </label>
+            <label>
+              <span data-i18n="agentSystem">System Prompt</span>
+              <textarea id="ma-system" rows="6" required></textarea>
+            </label>
+            <label>
+              <span data-i18n="agentWeightDefault">默认任务权重（可选，0.1-10）</span>
+              <input id="ma-weight" type="number" step="0.1" min="0.1" max="10" />
+            </label>
+            <label>
+              <span data-i18n="agentApiKey">私有 API Key（可选，加密保存）</span>
+              <input id="ma-api-key" type="password" autocomplete="off" />
+              <small id="ma-api-key-hint" class="hint" data-i18n="agentApiKeyHint">留空 → 使用工作区默认；点「清空」可移除本 agent 的私有 key</small>
+              <button type="button" id="ma-api-key-clear" class="ma-btn ma-btn-secondary" hidden data-i18n="clearKey">清空</button>
+            </label>
+            <button type="submit" data-i18n="save">保存</button>
+            <p id="ma-form-msg" class="form-msg"></p>
+          </form>
+        </div>
+      </div>
+
+      <!-- Modal: import a manifest (file or paste) -->
+      <div id="ma-import-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card" role="dialog" aria-modal="true">
+          <header class="modal-head">
+            <h3 data-i18n="importAgent">导入</h3>
+            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+          </header>
+          <div class="dispatch-form">
+            <p class="hint" data-i18n="importHint">支持 YAML 或 JSON。可上传 .yaml / .json 文件，或直接粘贴。</p>
+            <label>
+              <span data-i18n="uploadFile">上传文件</span>
+              <input id="ma-import-file" type="file" accept=".yaml,.yml,.json" />
+            </label>
+            <label>
+              <span data-i18n="orPaste">或粘贴内容</span>
+              <textarea id="ma-import-text" rows="10" placeholder="schema: aipehub.team/v1&#10;team:&#10;  name: ..."></textarea>
+            </label>
+            <button type="button" id="ma-import-submit" data-i18n="doImport">导入</button>
+            <p id="ma-import-msg" class="form-msg"></p>
+          </div>
+        </div>
+      </div>
+
+      <section id="leaderboard-section" class="leaderboard-section">
+        <h2>
+          <span data-i18n="leaderboardTitle">贡献榜</span>
+          <select id="lb-window" class="lb-window-select" aria-label="时段">
+            <option value="all" data-i18n="lbWindowAll">不限时段</option>
+            <option value="today" data-i18n="lbWindowToday">今天</option>
+            <option value="week" data-i18n="lbWindowWeek">近 7 天</option>
+            <option value="month" data-i18n="lbWindowMonth">近 30 天</option>
+          </select>
+          <span id="lb-summary" class="lb-summary"></span>
+        </h2>
+        <div id="leaderboard-list"></div>
       </section>
 
       <section id="participants">
@@ -84,6 +232,10 @@
               <span data-i18n="dispatchPriority">优先级（整数，可选）</span>
               <input id="d-priority" autocomplete="off" type="number" />
             </label>
+            <label>
+              <span data-i18n="dispatchWeight">权重（0.1-10，1 位小数，默认 1.0）</span>
+              <input id="d-weight" autocomplete="off" type="number" min="0.1" max="10" step="0.1" placeholder="1.0" />
+            </label>
             <button type="submit" data-i18n="dispatchButton">派发</button>
             <p id="dispatch-msg" class="form-msg"></p>
           </form>
@@ -98,8 +250,8 @@
               <input id="e-task" autocomplete="off" required />
             </label>
             <label>
-              <span data-i18n="evaluateRating">评分（1-5，可选）</span>
-              <input id="e-rating" type="number" min="1" max="5" autocomplete="off" />
+              <span data-i18n="evaluateRating">评分（0-5，1 位小数，可选）</span>
+              <input id="e-rating" type="number" min="0" max="5" step="0.1" autocomplete="off" />
             </label>
             <label>
               <span data-i18n="evaluateComment">评语（可选）</span>

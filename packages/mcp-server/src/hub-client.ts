@@ -1,0 +1,185 @@
+/**
+ * Thin HTTP client for the AipeHub admin API. Used by the MCP server
+ * to translate MCP tool calls into REST calls against a running Hub.
+ *
+ * Auth is a Bearer admin token. We never store / cache responses — every
+ * tool call is a fresh round-trip. That keeps the MCP server stateless
+ * and lets multiple MCP clients hit the same Hub concurrently without
+ * coordination.
+ *
+ * Errors are wrapped into `HubClientError` with `status` + `body`
+ * preserved so the caller (MCP tool handler) can surface a useful
+ * message to the LLM.
+ */
+
+export interface HubClientOptions {
+  /** Base URL of the Hub web server, e.g. `http://127.0.0.1:3000`. No trailing slash. */
+  baseUrl: string
+  /** Admin Bearer token (printed once at first host launch). */
+  adminToken: string
+  /** Per-request fetch timeout in ms. Default 65s — slightly above the dispatch wait timeout. */
+  timeoutMs?: number
+}
+
+export class HubClientError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+    readonly body: unknown,
+  ) {
+    super(message)
+    this.name = 'HubClientError'
+  }
+}
+
+export class HubClient {
+  constructor(private readonly opts: HubClientOptions) {
+    if (!opts.baseUrl) throw new Error('HubClient: baseUrl is required')
+    if (!opts.adminToken) throw new Error('HubClient: adminToken is required')
+  }
+
+  /** Health check — returns true if the Hub answers on /healthz. */
+  async ping(): Promise<boolean> {
+    try {
+      const r = await this.raw('GET', '/healthz', null, { auth: false })
+      return r.status === 200
+    } catch {
+      return false
+    }
+  }
+
+  /** Full state snapshot — participants + transcript tail + tasks + pending applications. */
+  async state(): Promise<HubState> {
+    return this.get<HubState>('/api/state')
+  }
+
+  /**
+   * Dispatch a task and wait for the result. Uses the `wait: true` /
+   * `timeoutMs` extension on `/api/admin/dispatch` so we get a concrete
+   * `TaskResult` back instead of fire-and-forget.
+   */
+  async dispatchAndWait(body: DispatchBody, waitTimeoutMs = 60_000): Promise<DispatchResult> {
+    return this.post<DispatchResult>('/api/admin/dispatch', {
+      ...body,
+      wait: true,
+      timeoutMs: waitTimeoutMs,
+    })
+  }
+
+  async leaderboard(opts: { from?: number; to?: number } = {}): Promise<Leaderboard> {
+    const qs = new URLSearchParams()
+    if (opts.from != null) qs.set('from', String(opts.from))
+    if (opts.to != null) qs.set('to', String(opts.to))
+    const path = qs.size > 0 ? `/api/leaderboard?${qs}` : '/api/leaderboard'
+    return this.get<Leaderboard>(path)
+  }
+
+  async evaluate(body: { taskId: string; rating?: number; comment?: string }): Promise<{ ok: true }> {
+    return this.post<{ ok: true }>('/api/admin/evaluate', body)
+  }
+
+  // --- internals ------------------------------------------------------
+
+  private async get<T>(path: string): Promise<T> {
+    const r = await this.raw('GET', path, null)
+    return this.unwrap<T>(r, path)
+  }
+
+  private async post<T>(path: string, body: unknown): Promise<T> {
+    const r = await this.raw('POST', path, body)
+    return this.unwrap<T>(r, path)
+  }
+
+  private async raw(
+    method: string,
+    path: string,
+    body: unknown,
+    { auth = true }: { auth?: boolean } = {},
+  ): Promise<Response> {
+    const url = `${this.opts.baseUrl}${path}`
+    const headers: Record<string, string> = { accept: 'application/json' }
+    if (auth) headers.authorization = `Bearer ${this.opts.adminToken}`
+    if (body !== null && body !== undefined) headers['content-type'] = 'application/json'
+    const ctrl = new AbortController()
+    const t = setTimeout(() => ctrl.abort(new Error('hub-client request timeout')), this.opts.timeoutMs ?? 65_000)
+    try {
+      return await fetch(url, {
+        method,
+        headers,
+        body: body !== null && body !== undefined ? JSON.stringify(body) : undefined,
+        signal: ctrl.signal,
+      })
+    } finally {
+      clearTimeout(t)
+    }
+  }
+
+  private async unwrap<T>(r: Response, path: string): Promise<T> {
+    const text = await r.text()
+    let parsed: unknown
+    try { parsed = text.length > 0 ? JSON.parse(text) : null } catch { parsed = text }
+    if (!r.ok) {
+      const msg = (parsed && typeof parsed === 'object' && 'error' in parsed && typeof parsed.error === 'string')
+        ? parsed.error
+        : `Hub returned ${r.status} for ${path}`
+      throw new HubClientError(msg, r.status, parsed)
+    }
+    return parsed as T
+  }
+}
+
+// --- response shape echoes ---
+// We don't import these from @aipehub/core so the MCP server stays a
+// pure HTTP client with zero workspace deps. The fields we use are
+// stable across v2.x; if they drift we'd notice in the integration smoke.
+
+export interface HubState {
+  participants: Array<{ id: string; kind: 'agent' | 'human'; capabilities: string[]; load: number }>
+  transcript: Array<{ seq: number; ts: number; kind: string; data: unknown }>
+  tasks?: Array<unknown>
+  pendingApplications?: Array<unknown>
+  known?: { admins: unknown[]; workers: unknown[] }
+  config?: { defaultLang?: string }
+}
+
+export interface DispatchBody {
+  strategy:
+    | { kind: 'direct'; recipient: string }
+    | { kind: 'capability'; capabilities: string[] }
+    | { kind: 'broadcast'; capabilities?: string[] }
+  payload?: unknown
+  title?: string
+  weight?: number
+  priority?: number
+  countContribution?: boolean
+}
+
+export interface DispatchResult {
+  ok: boolean
+  result?: {
+    kind: 'ok' | 'failed' | 'cancelled' | 'no_participant'
+    taskId: string
+    by?: string
+    ts: number
+    output?: unknown
+    error?: string
+    reason?: string
+  }
+  error?: string
+}
+
+export interface Leaderboard {
+  from: number
+  to: number
+  rows: Array<{
+    participantId: string
+    taskCount: number
+    totalWeight: number
+    totalContribution: number
+    averageRating: number
+    lastActivityTs: number
+    byCapability: Record<string, { count: number; contribution: number }>
+  }>
+  unratedTaskCount: number
+  totalTaskCount: number
+}

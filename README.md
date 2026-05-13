@@ -1,5 +1,7 @@
 # AipeHub
 
+[English](README.md) · [中文文档](docs/zh/README.md)
+
 **AI + Person + Hub** — a TypeScript framework for orchestrating agent clusters and humans as first-class collaborative participants.
 
 AipeHub is not an agent. It is a **communication space**: a registry, a message bus, a task router, and an append-only transcript. Agents — local or remote — and humans plug in through adapters and talk to each other; the Hub keeps the signals flowing.
@@ -20,22 +22,74 @@ The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI. L
 
 ## Pick your door
 
+> **Lost?** Start at [`docs/OVERVIEW.md`](docs/OVERVIEW.md) — a single page that ties usage, license, agent on-boarding, template downloads, multi-user teams, and multi-team federation into one narrative. The table below is the by-role drill-down.
+
 | You are… | Read this | TL;DR |
 |---|---|---|
+| 🧭 **First time here** | [`docs/OVERVIEW.md`](docs/OVERVIEW.md) | 5-minute map of every concept + a "small-team workflow" walkthrough. |
 | 🧑 **A worker / admin joining a room** | [`docs/HUMAN.md`](docs/HUMAN.md) | Open the URL the operator gave you; pick a nickname; you're in. |
 | 🤖 **Writing an agent to plug in** | [`docs/AGENT.md`](docs/AGENT.md) | `@aipehub/sdk-node` or Python `aipehub`. Subclass `AgentParticipant`. |
+| 🧩 **Bringing in an LLM agent without writing code** | [`docs/TEMPLATES.md`](docs/TEMPLATES.md) + [`templates/`](templates/) | YAML manifest → paste / upload in admin UI → host spawns it for you. Two sets: project-original (`templates/agents/`) and CC0/MIT community-adapted (`templates/community/`). |
 | 🔧 **Running the server** | [`docs/DEPLOY.md`](docs/DEPLOY.md) | `pnpm host` for local, Caddy + systemd for public. |
-| 🪢 **Joining one hub to another** | [`docs/FEDERATION.md`](docs/FEDERATION.md) | `TeamBridgeAgent` — local team appears upstream as one agent. |
+| 🪢 **Federating two hubs (team → org)** | [`docs/FEDERATION.md`](docs/FEDERATION.md) | `TeamBridgeAgent` makes a whole sub-Hub appear upstream as one agent — keeps internal members / keys / sub-tasks private. |
+| 🔌 **Driving a Hub from Claude Desktop / Cursor / Cline** | [`docs/MCP.md`](docs/MCP.md) | `@aipehub/mcp-server` is an MCP bridge — 5 tools (list / dispatch / evaluate / leaderboard / tasks). Add 5 lines to your MCP client config. |
+| ⚖️ **Worried about license / commercial use** | [`docs/LICENSE-FAQ.md`](docs/LICENSE-FAQ.md) | MIT throughout. Embeddable in closed-source / SaaS. Community templates are CC0 + MIT. |
 | 🧠 **Designing on top of it** | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) + [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | Hub is dumb on purpose; wire protocol is v1.0. |
+
+### Adding an agent — two paths
+
+|  | Host-managed (no code) | External SDK (your code) |
+|---|---|---|
+| **You do** | Paste / upload a YAML manifest in admin UI | Write `AgentParticipant.handleTask`, call `connect(url, agents)` |
+| **Where it runs** | Inside the Hub process (LocalAgentPool) | Anywhere on the network |
+| **What it can do** | LLM tasks via Anthropic / OpenAI / Mock providers | Anything — LLMs, scrapers, private data, ML models, scripts |
+| **API key lives** | Encrypted in `.aipehub/secrets.enc.json` (per-agent or workspace default) | Wherever your code reads it |
+| **On restart** | Auto-respawned by `LocalAgentPool` | Your code reconnects (SDK has built-in auto-retry) |
+| **Best for** | End users • standard roles • one-click templates | Developers • private logic • cross-language workers |
+| **Read** | [`docs/TEMPLATES.md`](docs/TEMPLATES.md) | [`docs/AGENT.md`](docs/AGENT.md) |
+
+Both paths plug into the same Hub. Mix freely — a room can have host-managed `writer-zh` next to your private SDK-connected `rag-agent`.
 
 Contributing? See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security issues: [`SECURITY.md`](SECURITY.md). Version history: [`CHANGELOG.md`](CHANGELOG.md).
 
-## Quick start — pick a demo
+## Quick start
+
+### Get running in 30 seconds — pick one
 
 ```bash
+# A. Docker (recommended for first try — no Node setup needed)
+docker compose up
+# → http://127.0.0.1:3000  + admin URL printed in the logs
+# → state persists under ./data
+
+# B. npx (once published to npm — no clone needed)
+npx @aipehub/host
+# → opens ./.aipehub workspace in cwd, prints first-run admin URL
+
+# C. From source (cloned repo, full demo set available)
 pnpm install
 pnpm build
+pnpm host
+```
 
+All three boot the same binary. Open the printed admin URL → save the token → you're in.
+
+> ⚠️ **`npx @aipehub/host` is queued for v2.1 publish.** Until then use Docker (A) or source (C). Track release status in [CHANGELOG.md](CHANGELOG.md).
+
+CLI flags:
+
+```bash
+aipehub-host --help       # full env-var reference
+aipehub-host --version    # package version
+```
+
+After it boots, follow [`docs/OVERVIEW.md`](docs/OVERVIEW.md) for the "what now" walkthrough.
+
+### Demos (cloned repo)
+
+Once you've `pnpm install && pnpm build`-ed, every collaboration pattern in the framework has a runnable demo:
+
+```bash
 # in-process demos (no network)
 pnpm demo                # two mock agents + one mock human
 pnpm demo:broadcast      # three reviewers race, losers cancelled
@@ -56,9 +110,6 @@ pnpm demo:llm:real       # real Claude/GPT (needs ANTHROPIC_API_KEY/OPENAI_API_K
 # v2.0 full stack — web UI + agent admission + tasks panel
 pnpm demo:open-space
 pnpm demo:federated-team # one Hub joins another Hub as a single agent
-
-# production binary (env-driven, no demo data)
-pnpm host                # see docs/DEPLOY.md for the env vars
 ```
 
 ## Embedded — everything in one process
@@ -197,8 +248,15 @@ Full runnable demo in [`examples/open-space`](examples/open-space). `pnpm demo:o
 | `@aipehub/llm` | `LlmAgent` base class + `LlmProvider` interface + `MockLlmProvider` |
 | `@aipehub/llm-anthropic` | Anthropic Claude provider (peer dep: `@anthropic-ai/sdk`) |
 | `@aipehub/llm-openai` | OpenAI provider (peer dep: `openai`) |
+| `@aipehub/mcp-server` | MCP (Model Context Protocol) bridge — let Claude Desktop / Cursor drive a Hub |
 | `aipehub` (PyPI, in `python-sdk/`) | Python SDK — connect Python agents to a Hub over the same wire protocol |
 
 ## License
 
-MIT
+**MIT** for the project itself — see [`LICENSE`](LICENSE).
+
+- ✅ Commercial use, closed-source derivatives, internal SaaS embedding — all allowed.
+- ⚠️ Retain the LICENSE file + copyright notice in your distribution.
+- Third-party prompt templates under [`templates/community/`](templates/community/) carry their own (compatible) licenses — CC0 1.0 and MIT — aggregated verbatim in [`templates/community/LICENSE-NOTICES.md`](templates/community/LICENSE-NOTICES.md).
+
+Common questions ("can I embed in closed-source", "do I have to attribute community templates", "is fork+rename allowed") are answered in [`docs/LICENSE-FAQ.md`](docs/LICENSE-FAQ.md).

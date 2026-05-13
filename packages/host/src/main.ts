@@ -36,9 +36,84 @@
  * draining the SSE clients, stopping the hub, and exiting cleanly.
  */
 
+import { readFileSync } from 'node:fs'
+
 import { Hub, Space, type SpaceConfig, type TranscriptEntry } from '@aipehub/core'
 import { serveWebSocket } from '@aipehub/transport-ws'
 import { serveWeb } from '@aipehub/web'
+
+import { LocalAgentPool } from './local-agent-pool.js'
+
+// CLI flags handled before any work — keep these cheap and side-effect free
+// so `npx @aipehub/host --help` exits in milliseconds without trying to
+// open a workspace dir on disk.
+const ARGV = process.argv.slice(2)
+
+if (ARGV.includes('--help') || ARGV.includes('-h')) {
+  printUsage()
+  process.exit(0)
+}
+if (ARGV.includes('--version') || ARGV.includes('-V')) {
+  process.stdout.write(`${pkgVersion()}\n`)
+  process.exit(0)
+}
+
+function pkgVersion(): string {
+  try {
+    const url = new URL('../package.json', import.meta.url)
+    const pkg = JSON.parse(readFileSync(url, 'utf8')) as { version?: string }
+    return pkg.version ?? 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
+function printUsage(): void {
+  process.stdout.write(`Usage: aipehub-host [--help] [--version]
+
+Production AipeHub host. Reads all configuration from environment
+variables (12-factor style). No CLI flags drive runtime behavior — set
+the env, run the command. The same binary works for local dev, LAN
+deployments, and public VPS behind Caddy / nginx.
+
+ENVIRONMENT
+  AIPE_SPACE              workspace directory (default: .aipehub)
+  AIPE_HOST               bind address (default: 127.0.0.1)
+  AIPE_WEB_PORT           HTTP port (default: 3000)
+  AIPE_WS_PORT            WebSocket port for remote agents (default: 4000)
+  AIPE_GATING             'open' | 'admin-approval' (default: admin-approval)
+  AIPE_COOKIE_SECURE      '1' to set Secure + SameSite=Strict (default: 0)
+  AIPE_ALLOWED_HOSTS      comma list — enforce Host: / Origin: on state-changing requests
+  AIPE_ADMIN_RATE_MAX     admin login attempts per IP per window (default: 10)
+  AIPE_ADMIN_RATE_SEC     rate-limit window in seconds (default: 60)
+  AIPE_DEFAULT_LANG       'zh' | 'en' (default: zh)
+  AIPE_HEARTBEAT_MS       transport heartbeat ms (default: 30000)
+  AIPE_SPACE_NAME         label for space.json on first init (default: AipeHub)
+  AIPE_ADMIN_DISPLAY_NAME first admin's display name (default: Operator)
+
+  AIPE_SECRET_KEY         optional master key for secrets encryption
+                          (64 hex chars; overrides on-disk runtime/secret.key)
+  ANTHROPIC_API_KEY       fallback Anthropic key for managed LLM agents
+  OPENAI_API_KEY          fallback OpenAI key for managed LLM agents
+
+EXAMPLES
+  # Local one-liner (creates ./.aipehub on first run, prints admin URL)
+  npx @aipehub/host
+
+  # Custom workspace and ports
+  AIPE_SPACE=/srv/aipehub AIPE_WEB_PORT=3030 npx @aipehub/host
+
+  # Public deployment behind a TLS-terminating reverse proxy
+  AIPE_HOST=127.0.0.1 \\
+  AIPE_COOKIE_SECURE=1 \\
+  AIPE_ALLOWED_HOSTS=hub.example.com,hub-ws.example.com \\
+  npx @aipehub/host
+
+DOCS
+  https://github.com/AipeHub/AipeHub/blob/main/docs/OVERVIEW.md
+  https://github.com/AipeHub/AipeHub/blob/main/docs/DEPLOY.md
+`)
+}
 
 function env(name: string, fallback?: string): string | undefined {
   const v = process.env[name]
@@ -116,6 +191,13 @@ async function main(): Promise<void> {
     process.stdout.write(`[hub][seq=${String(e.seq).padStart(2, '0')}] ${describe(e)}\n`)
   })
 
+  // The LocalAgentPool materialises every `agents.json` row that carries
+  // a `managed` spec into a live LlmAgent on the Hub. Not a separate
+  // service — just a piece of host startup. Run before the Web server
+  // boots so API responses include managed agents from the first call.
+  const localAgents = new LocalAgentPool({ hub, space })
+  await localAgents.start()
+
   const allowedHosts = envList('AIPE_ALLOWED_HOSTS')
   const adminRateMax = envInt('AIPE_ADMIN_RATE_MAX', 10)
   const adminRateSec = envInt('AIPE_ADMIN_RATE_SEC', 60)
@@ -129,6 +211,7 @@ async function main(): Promise<void> {
     host: config.host,
     port: config.webPort,
     cookieSecure: config.cookieSecure,
+    lifecycle: localAgents,
     ...(allowedHosts ? { allowedHosts } : {}),
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },
   })
@@ -154,6 +237,7 @@ async function main(): Promise<void> {
     console.log(`\n[host] ${sig} received — draining…`)
     try { await ws.close() } catch (err) { console.error('[host] ws close error:', err) }
     try { await web.close() } catch (err) { console.error('[host] web close error:', err) }
+    try { await localAgents.stopAll() } catch (err) { console.error('[host] local agents stop error:', err) }
     try { await hub.stop() } catch (err) { console.error('[host] hub stop error:', err) }
     console.log('[host] stopped cleanly.')
     process.exit(0)

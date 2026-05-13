@@ -1,0 +1,30 @@
+# AipeHub — security contact (RFC 9116)
+#
+# This file follows the security.txt convention so automated scanners
+# (Open Bug Bounty, security crawlers, internal tooling) can find a
+# reliable disclosure channel.
+#
+# The canonical source lives at:
+#   https://github.com/AipeHub/AipeHub/blob/main/.well-known/security.txt
+#
+# When AipeHub is deployed behind a custom domain you should ALSO host a
+# copy at https://<your-hub>/.well-known/security.txt so reporters can
+# find it from your hub URL.
+
+Contact: https://github.com/AipeHub/AipeHub/security/advisories/new
+Contact: mailto:security@aipehub.dev
+Expires: 2027-05-12T00:00:00.000Z
+Preferred-Languages: en, zh
+Policy: https://github.com/AipeHub/AipeHub/blob/main/SECURITY.md
+Acknowledgments: https://github.com/AipeHub/AipeHub/security/advisories
+Canonical: https://github.com/AipeHub/AipeHub/.well-known/security.txt
+
+# Notes for operators:
+# 1. The mailto: line points at an alias that is NOT yet activated as of
+#    2026-05-12 — see SECURITY.md "Status note". GitHub Private
+#    Vulnerability Reporting is the active channel until then.
+# 2. `Expires` must be < 1 year out per RFC 9116; renew this file each
+#    spring (or earlier if the contact info changes).
+# 3. We deliberately do not publish a PGP key — GitHub's private
+#    advisory channel is already TLS-encrypted end-to-end. If your
+#    policy requires PGP, contact us first and we'll arrange.

@@ -1,0 +1,39 @@
+# 中文编辑团队 — 写作 + 审稿 双 agent
+#
+# 工作流（由 admin 在控制台手动派发，AipeHub 不内置 workflow 引擎）：
+#   1. 派发到 capability=draft → writer-zh 出一稿
+#   2. 派发到 capability=review → reviewer-zh 给修改建议
+#   3. admin 评分（贡献榜计入）
+#
+# 想跑这套：用 admin → 智能体 → 导入 → 粘贴本文件，一次注册两个 agent。
+schema: aipehub.team/v1
+
+team:
+  name: 中文编辑团队
+  description: 写作 → 审稿 的最小流水线，按 capability 派发即可。
+  agents:
+    - id: writer-zh
+      displayName: 中文写作助手
+      capabilities: [draft]
+      kind: llm
+      provider: anthropic
+      model: claude-opus-4-7
+      weightDefault: 2.0
+      system: |
+        你是一个简洁的中文写作助手。
+        - 输入主题或素材，输出 200-400 字的连贯中文。
+        - 不写客套话，不写 "以下是..." 之类的导语。
+        - 保留专有名词原文。
+
+    - id: reviewer-zh
+      displayName: 中文审稿
+      capabilities: [review]
+      kind: llm
+      provider: anthropic
+      model: claude-opus-4-7
+      weightDefault: 1.5
+      system: |
+        你是一个中文文本审稿员。
+        - 找出最影响阅读的一处问题（事实/逻辑/用词/重复 任选一项）。
+        - 用 JSON 回复：{"issue": "...", "suggestion": "..."}。
+        - 没问题就返回 {"issue": null, "suggestion": null}。

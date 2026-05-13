@@ -45,6 +45,37 @@ export interface Task {
    * `PriorityQueueScheduler` (v0.7).
    */
   priority?: number
+  /**
+   * Contribution-system **weight** for the task — "how much does getting
+   * this done count for". A floating-point number in [0.1, 10.0] rounded
+   * to one decimal place; defaults to 1.0 when omitted so legacy callers
+   * keep behaving as if every task were unit-weight.
+   *
+   * Combined with a reviewer's `Evaluation.rating` (0–5) it yields the
+   * task's **contribution score**: `contribution = weight × rating`. The
+   * score surfaces on `TaskView` and aggregates inside `Hub.leaderboard()`.
+   *
+   * The Hub clamps and rounds the incoming value in `dispatch()` so the
+   * persisted task is always well-formed; the field on `Task` is therefore
+   * already-sanitised.
+   */
+  weight?: number
+  /**
+   * **Contribution opt-out for this specific task.** When `false`, the
+   * leaderboard pretends the task doesn't exist — neither its rated
+   * contribution nor its unrated-bookkeeping enters the totals. `true`
+   * and `undefined` both mean "count it normally" so legacy and default
+   * callers see the unchanged v2.1 behaviour.
+   *
+   * The rule baked into the system: the **publisher's** preference
+   * (stored on `AdminRecord.contributionOptOut` / `WorkerRecord.
+   * contributionOptOut`) controls **their own** dispatches. The Web
+   * layer reads the logged-in publisher's preference and stamps this
+   * field on outgoing tasks accordingly. The handler's preference is
+   * *not* consulted — opting out of "I publish into the score" must not
+   * be a way to also opt out of "I appear when I do work."
+   */
+  countContribution?: boolean
   createdAt: number
 }
 
@@ -93,14 +124,70 @@ export type AdmissionDecision =
 
 /**
  * A reviewer's verdict on a completed task. Append-only — once written,
- * lives in the transcript forever. `rating` is optional (any agreed scale,
- * e.g. 1–5 stars); `comment` is free text.
+ * lives in the transcript forever. `rating` is optional. Since v2.1 the
+ * contribution system treats `rating` as a 0–5 score with one decimal of
+ * precision; the Hub clamps and rounds incoming values in `evaluate(...)`
+ * so the persisted entry is well-formed. Earlier integer-only ratings
+ * (1–5 stars) still round-trip unchanged. `comment` is free text.
+ *
+ * Multiple evaluations against the same task are allowed and all live in
+ * the transcript; the **latest rated one wins** for purposes of the
+ * derived `TaskView.effectiveRating` / `.contribution` and the leaderboard.
  */
 export interface Evaluation {
   taskId: TaskId
   by: ParticipantId
   rating?: number
   comment?: string
+}
+
+// --- Contribution / leaderboard (v2.1) ------------------------------------
+
+/**
+ * Per-participant aggregate of "how much they got done" within a time
+ * window. Derived purely from the transcript by `Hub.leaderboard(...)`;
+ * no extra state is stored.
+ *
+ * Counted: tasks with `status === 'done'` whose `completedAt` falls in
+ * the window AND that have at least one rated evaluation. Unrated and
+ * failed/cancelled tasks are ignored for `totalContribution`; unrated
+ * ones still bump `unratedTaskCount` on the parent `Leaderboard` so the
+ * UI can surface "you owe N reviews".
+ *
+ * `byCapability` slices the contribution by the capability(ies) that
+ * routed each task — handy for spotting "alice is great at review but
+ * not at draft". `explicit` dispatches contribute under no capability.
+ */
+export interface ContributionRow {
+  participantId: ParticipantId
+  taskCount: number
+  /** Sum of weights of all rated, completed tasks credited to this id. */
+  totalWeight: number
+  /** Sum of (weight × rating) across all rated, completed tasks. */
+  totalContribution: number
+  /** Mean rating across `taskCount` rated tasks; 0 when taskCount===0. */
+  averageRating: number
+  /** Most recent `completedAt` we've credited (ms). */
+  lastActivityTs: number
+  byCapability: Record<string, { count: number; contribution: number }>
+}
+
+/**
+ * Time-bounded view of {@link ContributionRow}[], sorted by
+ * `totalContribution` descending. Returned by `Hub.leaderboard({ from, to })`
+ * and surfaced verbatim at `/api/leaderboard` (admins **and** workers see
+ * it — visibility is the point: "all contributions are seen by all").
+ */
+export interface Leaderboard {
+  /** Window start, inclusive (ms since epoch). */
+  from: number
+  /** Window end, exclusive (ms since epoch). */
+  to: number
+  rows: ContributionRow[]
+  /** Completed tasks in the window whose latest evaluation has no rating. */
+  unratedTaskCount: number
+  /** Total completed tasks counted in the window (rated + unrated). */
+  totalTaskCount: number
 }
 
 // --- Transcript ------------------------------------------------------------

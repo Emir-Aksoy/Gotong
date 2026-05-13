@@ -24,9 +24,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*"
+    "@aipehub/core": "workspace:*",
+    "yaml": "^2.6.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0"
   }
 }
