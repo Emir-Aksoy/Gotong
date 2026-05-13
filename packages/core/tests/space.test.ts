@@ -20,7 +20,7 @@ describe('Space (v2.0 — file-first persistence)', () => {
     await rm(root, { recursive: true, force: true })
   })
 
-  it('init writes space.json + config.json + empty admins/agents/workers + runtime/', async () => {
+  it('init writes space.json + config.json + empty admins/agents/workers + runtime/ + services/', async () => {
     const { space, adminToken } = await Space.init(root, { name: 'test', description: 'hi' })
     expect(adminToken).toBeNull()
     expect(existsSync(space.paths.space)).toBe(true)
@@ -29,6 +29,9 @@ describe('Space (v2.0 — file-first persistence)', () => {
     expect(existsSync(space.paths.agents)).toBe(true)
     expect(existsSync(space.paths.workers)).toBe(true)
     expect(existsSync(space.paths.runtime.pendingApps)).toBe(true)
+    // services/ is created empty up-front so the host's bootstrapServices
+    // doesn't need to mkdir on every boot.
+    expect(existsSync(space.paths.services)).toBe(true)
     const meta = JSON.parse(readFileSync(space.paths.space, 'utf8'))
     expect(meta.name).toBe('test')
     expect(meta.description).toBe('hi')

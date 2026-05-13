@@ -55,6 +55,15 @@ export class Space {
     workers: '',
     transcript: '',
     secrets: '',
+    /**
+     * Hub Services root (v2.2). The host's `bootstrapServices` reads
+     * `<services>/plugins.json` and gives each loaded plugin a subdir
+     * `<services>/<type>/<impl>/` to put its data in. Core itself does
+     * not import the services-sdk — this path is just a string the host
+     * uses. Created (empty) by `Space.init`; safe to be absent at
+     * `Space.open` time (host will create on demand).
+     */
+    services: '',
     runtime: {
       pendingApps: '',
       adminSessions: '',
@@ -74,6 +83,7 @@ export class Space {
     this.paths.workers = join(root, 'workers.json')
     this.paths.transcript = join(root, 'transcript.jsonl')
     this.paths.secrets = join(root, 'secrets.enc.json')
+    this.paths.services = join(root, 'services')
     this.paths.runtime.pendingApps = join(root, 'runtime', 'pending-apps.json')
     this.paths.runtime.adminSessions = join(root, 'runtime', 'admin-sessions.json')
     this.paths.runtime.workerSessions = join(root, 'runtime', 'worker-sessions.json')
@@ -111,6 +121,10 @@ export class Space {
   ): Promise<{ space: Space; adminToken: string | null; adminId: string | null }> {
     mkdirSync(root, { recursive: true })
     mkdirSync(join(root, 'runtime'), { recursive: true })
+    // services/ is created up-front so `bootstrapServices` (host-side)
+    // can drop `plugins.json` and per-plugin subdirs without re-checking
+    // the parent at every boot. It stays empty until plugins register.
+    mkdirSync(join(root, 'services'), { recursive: true })
     const s = new Space(root)
 
     if (existsSync(s.paths.space)) {

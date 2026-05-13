@@ -161,6 +161,9 @@ importers:
       '@aipehub/llm-openai':
         specifier: workspace:*
         version: link:../llm-openai
+      '@aipehub/services-sdk':
+        specifier: workspace:*
+        version: link:../services-sdk
       '@aipehub/transport-ws':
         specifier: workspace:*
         version: link:../transport-ws
@@ -171,6 +174,9 @@ importers:
         specifier: workspace:*
         version: link:../workflow
     devDependencies:
+      '@aipehub/service-memory-file':
+        specifier: workspace:*
+        version: link:../service-memory-file
       vitest:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.41)

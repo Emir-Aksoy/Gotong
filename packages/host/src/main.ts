@@ -62,6 +62,7 @@ import { serveWebSocket } from '@aipehub/transport-ws'
 import { serveWeb } from '@aipehub/web'
 
 import { LocalAgentPool } from './local-agent-pool.js'
+import { bootstrapServices, type HubServices } from './services/index.js'
 import { createWorkflowController } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 
@@ -215,6 +216,34 @@ async function main(): Promise<void> {
     process.stdout.write(`[hub][seq=${String(e.seq).padStart(2, '0')}] ${describe(e)}\n`)
   })
 
+  // Hub Services (memory / artifact / datastore plugins). Plugin load
+  // failures are non-fatal: a bad plugin shows up in the boot log but
+  // the host continues to start. Agents whose yaml `uses:` references
+  // a missing plugin will fail at spawn time. The instance is held so
+  // we can `shutdownAll` on graceful exit.
+  let services: HubServices | undefined
+  try {
+    const boot = await bootstrapServices({ space, hub })
+    services = boot.services
+    if (boot.seeded) {
+      log.info('services: bootstrapped (seeded)', {
+        path: `${SPACE_DIR}/services/plugins.json`,
+        ready: boot.ready.map((p) => `${p.type}:${p.impl}`),
+      })
+    } else {
+      log.info('services: bootstrapped', {
+        ready: boot.ready.map((p) => `${p.type}:${p.impl}`),
+        errors: boot.errors.map((e) => e.packageName),
+      })
+    }
+  } catch (err) {
+    // `bootstrapServices` itself should never throw — its internals
+    // are all best-effort. But if it does (e.g. permission denied
+    // writing the seed manifest), we log and continue: a host without
+    // services is degraded but still useful for non-service agents.
+    log.error('services: bootstrap failed (continuing without services)', { err })
+  }
+
   // The LocalAgentPool materialises every `agents.json` row that carries
   // a `managed` spec into a live LlmAgent on the Hub. Not a separate
   // service — just a piece of host startup. Run before the Web server
@@ -301,6 +330,9 @@ async function main(): Promise<void> {
     try { await ws.close() } catch (err) { log.error('ws close error', { err }) }
     try { await web.close() } catch (err) { log.error('web close error', { err }) }
     try { await localAgents.stopAll() } catch (err) { log.error('local agents stop error', { err }) }
+    if (services) {
+      try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }
+    }
     try { await hub.stop() } catch (err) { log.error('hub stop error', { err }) }
     log.info('stopped cleanly')
     process.exit(0)
