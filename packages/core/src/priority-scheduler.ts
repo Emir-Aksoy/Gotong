@@ -46,10 +46,12 @@ interface QueueEntry {
  * Usage:
  *
  * ```ts
- * import { Hub, DefaultScheduler, PriorityQueueScheduler } from '@aipehub/core'
+ * import { Hub, Space, DefaultScheduler, PriorityQueueScheduler } from '@aipehub/core'
  *
+ * const { space } = await Space.openOrInit('./.aipehub', { name: 'demo' })
  * const hub = new Hub({
- *   scheduler: (registry, invoke, notifyCancel) =>
+ *   space,
+ *   schedulerFactory: (registry, invoke, notifyCancel) =>
  *     new PriorityQueueScheduler(
  *       new DefaultScheduler(registry, invoke, notifyCancel),
  *       { maxConcurrent: 4 },

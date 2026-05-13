@@ -4,6 +4,7 @@ import { MessageBus } from './bus.js'
 import { Registry } from './registry.js'
 import { DefaultScheduler, type CancelNotifier, type Scheduler, type TaskInvoker } from './scheduler.js'
 import { InMemoryStorage, type Storage } from './storage/index.js'
+import { Space } from './space.js'
 import { Transcript } from './transcript.js'
 import type {
   AdmissionDecision,
@@ -26,7 +27,21 @@ interface PendingEntry {
 }
 
 export interface HubConfig {
-  /** Persistence backend. Defaults to in-memory (lost on exit). */
+  /**
+   * Bind the hub to an on-disk space (v2.0+). Required unless `storage` is
+   * supplied explicitly. When `space` is provided the transcript is
+   * persisted to `<space>/transcript.jsonl` and pending agent applications
+   * are mirrored to `<space>/runtime/pending-apps.json` so they survive
+   * a Hub crash within a single host run. (Pending apps are cleared on
+   * `hub.start()` because the underlying WebSocket sessions die with the
+   * host process — they're persisted for live observability, not revival.)
+   */
+  space?: Space
+  /**
+   * Persistence backend. If both `space` and `storage` are given, `storage`
+   * wins (advanced use). v2.0 removes the implicit in-memory default — you
+   * must pick a strategy explicitly (or pass `space` and let it pick).
+   */
   storage?: Storage
   /** Replace the default scheduler. Most users don't need this. */
   schedulerFactory?: (
@@ -57,6 +72,7 @@ export class Hub {
   readonly registry: Registry
   readonly bus: MessageBus
   readonly transcript: Transcript
+  readonly space?: Space
   private readonly scheduler: Scheduler
   private readonly storage: Storage
   private readonly idGen: () => string
@@ -66,7 +82,16 @@ export class Hub {
   private readonly pending = new Map<string, PendingEntry>()
 
   constructor(config: HubConfig = {}) {
-    this.storage = config.storage ?? new InMemoryStorage()
+    this.space = config.space
+    if (config.storage) {
+      this.storage = config.storage
+    } else if (config.space) {
+      this.storage = config.space.storage()
+    } else {
+      throw new Error(
+        `Hub: pass either { space: Space } or { storage: Storage }. v2.0 removed the implicit in-memory default — call \`Space.openOrInit(path, ...)\` to bind the hub to a directory, or use \`new InMemoryStorage()\` explicitly for tests.`,
+      )
+    }
     this.idGen = config.idGenerator ?? (() => randomUUID())
     this.now = config.now ?? (() => Date.now())
     this.transcript = new Transcript(this.storage)
@@ -109,11 +134,28 @@ export class Hub {
     this.scheduler = factory(this.registry, invoke, notifyCancel)
   }
 
+  /**
+   * Spin up a Hub backed purely by `InMemoryStorage` — for tests and
+   * short-lived in-process examples. Production code should use
+   * `new Hub({ space: ... })` so that state survives a restart.
+   */
+  static inMemory(config: Omit<HubConfig, 'space' | 'storage'> = {}): Hub {
+    return new Hub({ ...config, storage: new InMemoryStorage() })
+  }
+
   // --- lifecycle ------------------------------------------------------------
 
   async start(): Promise<void> {
     if (this.started) return
     await this.transcript.load()
+    // Pending applications from a previous host run are ghosts — their
+    // WebSocket sessions died with the process. Clear the file so the
+    // admin UI doesn't see un-actionable entries.
+    if (this.space) {
+      await this.space.writePendingApps([]).catch((err) =>
+        console.error('[hub] could not clear pending-apps:', err),
+      )
+    }
     this.started = true
   }
 
@@ -197,6 +239,7 @@ export class Hub {
       kind: 'agent_pending',
       data: application,
     })
+    this.syncPendingFile()
     return { applicationId: application.id, decision }
   }
 
@@ -221,6 +264,7 @@ export class Hub {
         by,
       },
     })
+    this.syncPendingFile()
     entry.resolve({ approved: true, by })
     return true
   }
@@ -244,8 +288,92 @@ export class Hub {
         reason,
       },
     })
+    this.syncPendingFile()
     entry.resolve({ approved: false, by, reason })
     return true
+  }
+
+  /**
+   * Best-effort write of the current pending-applications set to
+   * `<space>/runtime/pending-apps.json`. Fire-and-forget; on failure we
+   * just log — the in-memory map is the live truth, the file is a mirror
+   * for the admin UI and post-mortem inspection.
+   */
+  private syncPendingFile(): void {
+    if (!this.space) return
+    const apps = [...this.pending.values()].map((e) => e.application)
+    this.space.writePendingApps(apps).catch((err) =>
+      console.error('[hub] sync pending-apps failed:', err),
+    )
+  }
+
+  // --- task views (v2.0) ----------------------------------------------------
+
+  /**
+   * Derive the current state of every task ever dispatched by replaying
+   * the transcript. Pure read — no extra state stored.
+   *
+   *   - `pending`     — `task` seen, no `task_result` yet (in flight, queued,
+   *                     or waiting on a human inbox)
+   *   - `done`        — `task_result` with `kind: 'ok'`
+   *   - `failed`      — `task_result` with `kind: 'failed' | 'no_participant'`
+   *   - `cancelled`   — `task_result` with `kind: 'cancelled'`
+   */
+  tasks(): TaskView[] {
+    const byId = new Map<TaskId, TaskView>()
+    for (const e of this.transcript.all()) {
+      if (e.kind === 'task') {
+        byId.set(e.data.id, {
+          id: e.data.id,
+          task: e.data,
+          status: 'pending',
+          createdAt: e.data.createdAt,
+        })
+      } else if (e.kind === 'task_result') {
+        const view = byId.get(e.data.taskId)
+        if (!view) continue
+        if (e.data.kind === 'ok') view.status = 'done'
+        else if (e.data.kind === 'cancelled') view.status = 'cancelled'
+        else view.status = 'failed'
+        view.result = e.data
+        view.completedAt = e.data.ts
+      } else if (e.kind === 'evaluation') {
+        const view = byId.get(e.data.taskId)
+        if (!view) continue
+        if (!view.evaluations) view.evaluations = []
+        view.evaluations.push(e.data)
+      }
+    }
+    return [...byId.values()].sort((a, b) => a.createdAt - b.createdAt)
+  }
+
+  /**
+   * Re-dispatch a previously-finished task. Creates a brand-new task
+   * (new id, new `createdAt`) with the same `strategy` and `payload`, plus
+   * a `retryOf: <original-id>` field added to the payload object so the
+   * UI / consumers can trace lineage. Throws if the original task is
+   * still pending — retry on a live task is a programming error.
+   */
+  async retry(taskId: TaskId, by: ParticipantId = 'system'): Promise<TaskResult> {
+    const view = this.tasks().find((t) => t.id === taskId)
+    if (!view) {
+      throw new Error(`retry: unknown task ${taskId}`)
+    }
+    if (view.status === 'pending') {
+      throw new Error(`retry: task ${taskId} is still pending — wait for it to finish`)
+    }
+    const orig = view.task
+    const payload =
+      orig.payload && typeof orig.payload === 'object' && !Array.isArray(orig.payload)
+        ? { ...(orig.payload as Record<string, unknown>), retryOf: taskId }
+        : { retryOf: taskId, payload: orig.payload }
+    return this.dispatch({
+      from: by,
+      strategy: orig.strategy,
+      payload,
+      title: orig.title ? `retry: ${orig.title}` : undefined,
+      priority: orig.priority,
+    })
   }
 
   // --- evaluation (v1.1) ----------------------------------------------------
@@ -341,3 +469,18 @@ export function newId(): string {
   return randomUUID()
 }
 export type { TaskId }
+
+/**
+ * Aggregated view of a task derived from the transcript. See `Hub.tasks()`.
+ */
+export type TaskStatus = 'pending' | 'done' | 'failed' | 'cancelled'
+
+export interface TaskView {
+  id: TaskId
+  task: Task
+  status: TaskStatus
+  result?: TaskResult
+  evaluations?: Evaluation[]
+  createdAt: number
+  completedAt?: number
+}

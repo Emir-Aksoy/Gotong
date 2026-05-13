@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/llm-openai",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "description": "AipeHub LLM provider for OpenAI — wraps openai and implements LlmProvider.",
   "license": "MIT",

@@ -1,38 +1,21 @@
-/* AipeHub — worker view.
+/* AipeHub — worker view (v2.0, file-first).
  *
- * Workflow:
- *   1. User submits join form -> POST /api/workers
- *   2. Server creates a HumanParticipant; client remembers `myId`.
- *   3. On disconnect/refresh: my participant lingers on the hub. Worker can
- *      reclaim by re-entering the same nickname (gets 409 then DELETE+retry).
- *      For v1.1 we just store myId in sessionStorage so reloads continue to
- *      "be" that worker, and the Leave button calls DELETE /api/workers/:id.
+ * No sessionStorage / localStorage. The browser's only state is the
+ * HttpOnly `aipehub_worker` cookie set by POST /api/workers; identity is
+ * recovered on each load via GET /api/whoami.
  */
 (() => {
   const { $, t, applyStaticI18n, onLangChange, escapeHtml, summarize, isBadResult,
-          fetchJson, connectStream } = window.AipeHub
+          fetchJson, connectStream, syncLangFromConfig } = window.AipeHub
 
   const state = {
     participants: [],
     transcript: [],
-    pending: [],          // all human-bound pending tasks (we filter to me when rendering)
+    pending: [],
     myId: null,
+    myCaps: [],
   }
 
-  const ME_KEY = 'aipehub.worker.id'
-
-  function getMyId() {
-    try { return sessionStorage.getItem(ME_KEY) || null } catch { return null }
-  }
-  function setMyId(id) {
-    try {
-      if (id) sessionStorage.setItem(ME_KEY, id)
-      else sessionStorage.removeItem(ME_KEY)
-    } catch { /* ignore */ }
-    state.myId = id
-  }
-
-  // --- DOM refs (resolved on DOMContentLoaded) ---------------------------
   let dom = null
 
   function resolveDom() {
@@ -59,7 +42,19 @@
     state.participants = snap.participants
     state.transcript = snap.transcript
     state.pending = snap.pending
+    if (snap.config?.defaultLang) syncLangFromConfig(snap.config.defaultLang)
     renderAll()
+  }
+
+  async function recoverIdentity() {
+    const me = await fetchJson('/api/whoami')
+    if (me.role === 'worker') {
+      state.myId = me.id
+      state.myCaps = me.capabilities || []
+    } else {
+      state.myId = null
+      state.myCaps = []
+    }
   }
 
   function applyEvent(ev) {
@@ -79,9 +74,8 @@
         state.participants = state.participants.filter((p) => p.id !== ev.data.id)
         state.pending = state.pending.filter((task) => task.assignedTo !== ev.data.id)
         if (state.myId === ev.data.id) {
-          // somebody (or some other tab) leaved us
-          setMyId(null)
-          showJoinForm()
+          state.myId = null
+          state.myCaps = []
         }
         break
       case 'task':
@@ -93,8 +87,6 @@
     }
     renderAll()
   }
-
-  // --- view switching -----------------------------------------------------
 
   function showJoinForm() {
     dom.overlay.hidden = false
@@ -108,14 +100,9 @@
     dom.leaveBtn.hidden = false
     dom.meLabel.hidden = false
     dom.roleBadge.hidden = false
-    const me = state.participants.find((p) => p.id === state.myId)
-    const caps = me ? (me.capabilities || []).join(',') : ''
-    dom.meLabel.textContent = caps
-      ? `${state.myId} · ${caps}`
-      : state.myId || ''
+    const capsStr = (state.myCaps || []).join(',')
+    dom.meLabel.textContent = capsStr ? `${state.myId} · ${capsStr}` : state.myId || ''
   }
-
-  // --- rendering ----------------------------------------------------------
 
   function renderAll() {
     if (!dom) return
@@ -195,8 +182,6 @@
     }
   }
 
-  // --- actions -----------------------------------------------------------
-
   async function join(id, capsRaw) {
     dom.joinError.textContent = ''
     const capabilities = capsRaw.split(',').map((s) => s.trim()).filter(Boolean)
@@ -206,7 +191,8 @@
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ id, capabilities }),
       })
-      setMyId(r.id)
+      state.myId = r.id
+      state.myCaps = r.capabilities || []
       await refresh()
     } catch (err) {
       dom.joinError.textContent = t.failedAlert(err.message || String(err))
@@ -216,7 +202,8 @@
   async function leave() {
     if (!state.myId) return
     const id = state.myId
-    setMyId(null)
+    state.myId = null
+    state.myCaps = []
     try {
       await fetchJson(`/api/workers/${encodeURIComponent(id)}`, { method: 'DELETE' })
     } catch (err) {
@@ -242,11 +229,8 @@
     })
   }
 
-  // --- wire it up --------------------------------------------------------
-
   document.addEventListener('DOMContentLoaded', async () => {
     resolveDom()
-    state.myId = getMyId()
 
     dom.form.addEventListener('submit', (e) => {
       e.preventDefault()
@@ -280,14 +264,10 @@
     })
 
     try {
+      await recoverIdentity()
       await refresh()
-      // If my id is set but server doesn't know me, clear it.
-      if (state.myId && !state.participants.find((p) => p.id === state.myId)) {
-        setMyId(null)
-        renderAll()
-      }
     } catch (err) {
-      console.error('initial refresh failed:', err)
+      console.error('initial load failed:', err)
     }
     connectStream(applyEvent)
   })

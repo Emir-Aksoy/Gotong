@@ -4,6 +4,57 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.0`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## 2.0.0 — 2026-05-12 — File-first
+
+The hub is now a *directory* on disk. Drop the directory, drop the space. Copy it, copy the space. No process- or browser-resident state to lose.
+
+### Breaking
+
+- `new Hub()` with no arguments **throws**. Pass either `space: Space` (production) or `storage: Storage` (advanced). For tests, use the new `Hub.inMemory()` static helper.
+- `serveWeb(hub, opts)` now requires `hub.space` to be set. The previous `adminToken` option is gone — admin identity is read from `<space>/admins.json` instead. Mint admins via `Space.init(...)` or `space.createAdmin(displayName)`.
+- The browser SPA no longer reads or writes `localStorage` / `sessionStorage`. Worker identity is recovered every load from `GET /api/whoami` (which checks the HttpOnly cookie against `<space>/workers.json`). Language preference is non-persistent per-tab; the default comes from `<space>/config.json#defaultLang`.
+
+### Added — Space
+
+- New `Space` class in `@aipehub/core` — the on-disk truth of a workspace:
+  - `space.json` — name, description, createdAt, version
+  - `config.json` — host, ports, heartbeat, gating, defaultLang
+  - `admins.json` — multi-admin list with `tokenHash` (SHA-256), `displayName`, `createdAt`
+  - `agents.json` — known agent allowlist with optional `apiKeyHash` + `lastSeen`
+  - `workers.json` — known worker accounts with `tokenHash` + `lastSeen`
+  - `transcript.jsonl` — the Hub's append-only log (existing `FileStorage`)
+  - `runtime/pending-apps.json` — current pending agent admissions, cleared on hub start
+  - `runtime/admin-sessions.json`, `runtime/worker-sessions.json` — HttpOnly-cookie session table, survives hub restarts → no one gets logged out
+- `Space.init(dir, opts)`, `Space.open(dir)`, `Space.openOrInit(dir, opts)`.
+- `space.createAdmin / createWorker` mint a fresh token, hash it with SHA-256, return the plaintext once.
+- `space.verifyAdminToken / verifyWorkerToken` perform constant-time hash comparison.
+- Atomic writes (`tmp` file + rename) so a power-cut never leaves a torn config.
+
+### Added — task model
+
+- `hub.tasks()` returns a `TaskView[]` aggregated from the transcript — every task ever dispatched, with derived `status: 'pending' | 'done' | 'failed' | 'cancelled'`, attached `result`, and attached `evaluations`.
+- `hub.retry(taskId, by?)` re-dispatches a finished task as a fresh one with `payload.retryOf` lineage. Throws if the task is still pending.
+
+### Added — web
+
+- `/admin` console grew a **task panel** with filters (all / in flight / done / failed) and a **Retry** button on failed / cancelled rows; click any short task id to populate the evaluation form.
+- Multi-admin support throughout: `<space>/admins.json` can hold many entries; `transcript.task.from` / `agent_approved.by` etc. record the actual admin id.
+- New **on-disk roster** card on the admin page that surfaces persisted admins + workers even when they aren't currently online.
+- New API: `POST /api/admin/tasks/:id/retry`.
+
+### Internal
+
+- `Hub.inMemory(config?)` static helper for tests and in-process examples.
+- `serveWeb` Web server cleanly mounts atop `hub.space` — admin / worker auth, sessions, dispatch, retry, evaluate all read & write through Space.
+
+### Changed
+
+- All existing examples now declare their persistence strategy. `web-demo` and `open-space` use `Space.openOrInit('.aipehub-…')`; in-process demos (hello-collab, broadcast-claim, llm-mock, llm-real, cli-human, remote-{agent,python}/host) use `Hub.inMemory()`.
+
+### Stats
+
+- **139 passed + 2 skipped** (was 130 + 2). Core grew from 57 → 76 via the new Space (13) and tasks (6) suites.
+
 ## 1.1.0 — 2026-05-12 — Open Space
 
 Turns the embeddable hub into an actual collaborative space with three role-distinct entry points (admin / worker / agent), admin-gated agent admission, and a split web UI.

@@ -75,7 +75,7 @@ describe('transport-ws — gating: admin-approval (v1.1)', () => {
   const clients: FakeClient[] = []
 
   beforeEach(async () => {
-    hub = new Hub()
+    hub = Hub.inMemory()
     await hub.start()
     wsHandle = await serveWebSocket(hub, { port: 0, gating: 'admin-approval' })
   })

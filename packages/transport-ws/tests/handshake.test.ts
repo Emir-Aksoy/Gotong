@@ -93,7 +93,7 @@ describe('transport-ws — handshake', () => {
   const clients: FakeClient[] = []
 
   beforeEach(async () => {
-    hub = new Hub()
+    hub = Hub.inMemory()
     await hub.start()
     wsHandle = await serveWebSocket(hub, { port: 0 })
   })
@@ -202,7 +202,7 @@ describe('transport-ws — handshake', () => {
 
   it('authenticate returning false -> REJECT auth_failed', async () => {
     // start an alt server that requires auth
-    const altHub = new Hub()
+    const altHub = Hub.inMemory()
     await altHub.start()
     const alt = await serveWebSocket(altHub, {
       port: 0,
@@ -231,7 +231,7 @@ describe('transport-ws — handshake', () => {
   })
 
   it('authenticate returning true -> WELCOME', async () => {
-    const altHub = new Hub()
+    const altHub = Hub.inMemory()
     await altHub.start()
     const alt = await serveWebSocket(altHub, {
       port: 0,

@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/sdk-node",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "description": "AipeHub Node SDK — connect agents to a remote Hub over WebSocket.",
   "license": "MIT",

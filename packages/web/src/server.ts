@@ -6,33 +6,41 @@ import { fileURLToPath } from 'node:url'
 
 import {
   HumanParticipant,
+  type AdminRecord,
   type DispatchStrategy,
   type Hub,
   type ParticipantId,
+  type Space,
   type TaskId,
+  type WorkerRecord,
 } from '@aipehub/core'
 
 /**
- * Reference web UI for AipeHub.
+ * Reference web UI for AipeHub (v2.0 — file-first).
+ *
+ * The whole admin / worker story is anchored to the Hub's Space:
+ *
+ *   - admins, agent allowlist, and workers live in space.admins() /
+ *     space.agents() / space.workers()
+ *   - admin sessions and worker sessions are persisted under
+ *     space/runtime/{admin,worker}-sessions.json so a server restart
+ *     does not log anyone out
+ *   - pending agent admissions are written by `hub.requestAdmission(...)`
+ *     to space/runtime/pending-apps.json
  *
  * Two co-existing surfaces:
  *
- *   - `/`        — worker view (any browser, no auth). Lets a person join
- *                  the hub as a HumanParticipant, see pending tasks assigned
- *                  to them, approve/reject those tasks.
- *   - `/admin`   — admin view. Gated by an admin token (env
- *                  `AIPE_ADMIN_TOKEN` or `serveWeb(hub, { adminToken })`).
- *                  First visit with `?token=…` writes an HttpOnly cookie;
- *                  subsequent visits use the cookie.
+ *   - `/`        — worker view (open). A person joins as a HumanParticipant
+ *                  by POSTing { id, capabilities } to /api/workers; the
+ *                  server mints an HttpOnly cookie tied to a row in
+ *                  workers.json. No browser storage is used.
+ *   - `/admin`   — admin console. Gated by an admin token verified against
+ *                  space.admins() (multi-admin supported). First visit with
+ *                  `?token=…` writes an HttpOnly cookie tied to a row in
+ *                  runtime/admin-sessions.json.
  *
- * Embeds a tiny Node http server that:
- *   - serves a vanilla-JS SPA per route from packages/web/static
- *   - streams HubEvents to clients over SSE at /api/stream
- *   - exposes admin-only endpoints to approve agent admission, dispatch
- *     tasks, and write evaluations
- *
- * No express, no bundler, no framework — just an addressable surface for
- * the humans in the room.
+ * The server also exposes a task panel (`/api/tasks`) and retry endpoint
+ * (`/api/admin/tasks/:id/retry`) wired to `hub.tasks()` / `hub.retry()`.
  */
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -47,28 +55,18 @@ const MIME: Record<string, string> = {
 }
 
 const ADMIN_COOKIE = 'aipehub_admin'
-const ADMIN_COOKIE_MAX_AGE_S = 7 * 24 * 3600
+const WORKER_COOKIE = 'aipehub_worker'
+const COOKIE_MAX_AGE_S = 7 * 24 * 3600
 
 export interface WebServerOptions {
   port?: number
   host?: string
-  /**
-   * Admin authentication token. If unset, falls back to env
-   * `AIPE_ADMIN_TOKEN`. If both are unset, the admin surface is unreachable
-   * (no `/admin` route, no admin APIs) — only the worker view is exposed.
-   *
-   * First visit with `?token=<value>` writes an HttpOnly cookie; later
-   * requests authenticate via the cookie or via `Authorization: Bearer
-   * <value>`.
-   */
-  adminToken?: string
 }
 
 export interface WebServerHandle {
   readonly host: string
   readonly port: number
   readonly url: string
-  readonly adminEnabled: boolean
   close(): Promise<void>
 }
 
@@ -76,13 +74,23 @@ interface SseClient {
   res: ServerResponse
 }
 
+/**
+ * Boot the web server. The Hub **must** be bound to a Space (`new Hub({
+ * space })`) — admin and worker auth read identity from disk. If you only
+ * need an in-memory transcript and no admin / worker auth, use the v1.x
+ * surface and pass `adminToken` directly; that path is gone in v2.0.
+ */
 export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServerHandle> {
+  if (!hub.space) {
+    return Promise.reject(
+      new Error(
+        '@aipehub/web v2.0 requires hub.space — construct the Hub with `new Hub({ space })`. The in-memory path was removed; use Space.openOrInit(dir, ...) first.',
+      ),
+    )
+  }
+  const space = hub.space
   const host = opts.host ?? '127.0.0.1'
   const port = opts.port ?? 3000
-  const adminToken = opts.adminToken ?? process.env.AIPE_ADMIN_TOKEN ?? ''
-  const adminEnabled = adminToken.length > 0
-  /** Cookie session ids that have been validated against `adminToken`. */
-  const adminSessions = new Set<string>()
   const sseClients = new Set<SseClient>()
 
   const unsubscribe = hub.onEvent((event) => {
@@ -96,7 +104,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     }
   })
 
-  const ctx: HandlerCtx = { hub, adminToken, adminEnabled, adminSessions, sseClients }
+  const ctx: HandlerCtx = { hub, space, sseClients }
 
   const server = createServer((req, res) => {
     handle(ctx, req, res).catch((err) => {
@@ -112,22 +120,22 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
 
   return new Promise<WebServerHandle>((resolve, reject) => {
     server.once('error', reject)
-    server.listen(port, host, () => {
+    server.listen(port, host, async () => {
       const addr = server.address()
       const actualPort = typeof addr === 'object' && addr ? addr.port : port
       const url = `http://${host}:${actualPort}`
       console.log(`[aipehub-web] listening at ${url}`)
-      if (adminEnabled) {
-        console.log(`[aipehub-web] admin: ${url}/admin?token=${adminToken}`)
-        console.log(`[aipehub-web] workers: ${url}/`)
+      const admins = await space.admins()
+      if (admins.length > 0) {
+        console.log(`[aipehub-web] ${admins.length} admin(s) configured. /admin requires their token; first-time URL: ${url}/admin?token=<TOKEN>`)
       } else {
-        console.log(`[aipehub-web] admin disabled (set AIPE_ADMIN_TOKEN to enable)`)
+        console.log(`[aipehub-web] no admins yet. Run \`Space.createAdmin(name)\` (or the helper in your launcher) to mint one.`)
       }
+      console.log(`[aipehub-web] workers: ${url}/`)
       resolve({
         host,
         port: actualPort,
         url,
-        adminEnabled,
         close: () =>
           new Promise<void>((resolveClose, rejectClose) => {
             unsubscribe()
@@ -146,9 +154,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
 
 interface HandlerCtx {
   hub: Hub
-  adminToken: string
-  adminEnabled: boolean
-  adminSessions: Set<string>
+  space: Space
   sseClients: Set<SseClient>
 }
 
@@ -178,47 +184,64 @@ async function handle(
 
   // --- state snapshot -----------------------------------------------------
   if (method === 'GET' && path === '/api/state') {
-    sendJson(res, snapshotState(ctx.hub))
+    const config = await ctx.space.config()
+    sendJson(res, {
+      ...(await snapshotState(ctx.hub, ctx.space)),
+      space: await ctx.space.meta(),
+      config: { defaultLang: config.defaultLang, gating: config.gating },
+    })
     return
   }
 
   // --- who am I -----------------------------------------------------------
   if (method === 'GET' && path === '/api/whoami') {
-    sendJson(res, {
-      role: isAdminReq(ctx, req) ? 'admin' : 'guest',
-      adminEnabled: ctx.adminEnabled,
-    })
+    const admin = await ctx.space.findAdminSession(readCookie(req, ADMIN_COOKIE))
+    if (admin) {
+      sendJson(res, { role: 'admin', id: admin.principalId })
+      return
+    }
+    const workerSession = await ctx.space.findWorkerSession(readCookie(req, WORKER_COOKIE))
+    if (workerSession) {
+      const worker = (await ctx.space.workers()).find((w) => w.id === workerSession.principalId)
+      if (worker) {
+        // Auto-rehydrate: if the worker has a valid session but isn't live
+        // in the registry (typical right after a host restart), register
+        // them on the spot. This makes the file the truth — "I am known
+        // in workers.json + my cookie is valid" === "I am present".
+        if (!ctx.hub.participant(worker.id)) {
+          ctx.hub.register(new HumanParticipant({ id: worker.id, capabilities: worker.capabilities }))
+        }
+        sendJson(res, { role: 'worker', id: worker.id, capabilities: worker.capabilities })
+        return
+      }
+    }
+    sendJson(res, { role: 'guest' })
     return
   }
 
   // --- admin login --------------------------------------------------------
-  // GET /admin?token=xxx: validate, mint cookie, redirect to /admin/
-  // GET /admin (no token): serve admin.html if cookie valid, else 401 page
   if (method === 'GET' && (path === '/admin' || path === '/admin/')) {
-    if (!ctx.adminEnabled) {
-      res.writeHead(404, { 'content-type': 'text/plain; charset=utf-8' })
-      res.end('admin disabled — set AIPE_ADMIN_TOKEN to enable')
-      return
-    }
     const supplied = url.searchParams.get('token') ?? ''
     if (supplied) {
-      if (supplied !== ctx.adminToken) {
+      const admin = await ctx.space.verifyAdminToken(supplied)
+      if (!admin) {
         res.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' })
         res.end('invalid token')
         return
       }
       const sid = randomBytes(24).toString('hex')
-      ctx.adminSessions.add(sid)
+      await ctx.space.addAdminSession(sid, admin.id)
       res.writeHead(302, {
-        'set-cookie': `${ADMIN_COOKIE}=${sid}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${ADMIN_COOKIE_MAX_AGE_S}`,
+        'set-cookie': cookieValue(ADMIN_COOKIE, sid),
         location: '/admin/',
       })
       res.end()
       return
     }
-    if (!isAdminReq(ctx, req)) {
+    const sess = await ctx.space.findAdminSession(readCookie(req, ADMIN_COOKIE))
+    if (!sess) {
       res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' })
-      res.end('<!doctype html><meta charset=utf-8><title>AipeHub admin</title><body style="font-family:sans-serif;max-width:30rem;margin:6rem auto;color:#333"><h1>401 — admin token required</h1><p>Open this page with <code>?token=YOUR_TOKEN</code> appended to the URL.</p></body>')
+      res.end('<!doctype html><meta charset=utf-8><title>AipeHub admin</title><body style="font-family:sans-serif;max-width:30rem;margin:6rem auto;color:#333"><h1>401 — admin token required</h1><p>Open this page with <code>?token=YOUR_TOKEN</code> appended.</p></body>')
       return
     }
     await serveStatic(res, 'admin.html')
@@ -228,9 +251,9 @@ async function handle(
   // --- admin logout -------------------------------------------------------
   if (method === 'POST' && path === '/api/admin/logout') {
     const sid = readCookie(req, ADMIN_COOKIE)
-    if (sid) ctx.adminSessions.delete(sid)
+    if (sid) await ctx.space.removeAdminSession(sid)
     res.writeHead(200, {
-      'set-cookie': `${ADMIN_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`,
+      'set-cookie': expireCookie(ADMIN_COOKIE),
       'content-type': 'application/json; charset=utf-8',
     })
     res.end(JSON.stringify({ ok: true }))
@@ -239,54 +262,48 @@ async function handle(
 
   // --- admin: applications -----------------------------------------------
   if (method === 'GET' && path === '/api/admin/applications') {
-    if (!requireAdmin(ctx, req, res)) return
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
     sendJson(res, { applications: ctx.hub.pendingApplications() })
     return
   }
 
   const approveMatch = path.match(/^\/api\/admin\/applications\/([^/]+)\/approve$/)
   if (method === 'POST' && approveMatch) {
-    if (!requireAdmin(ctx, req, res)) return
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
     const appId = decodeURIComponent(approveMatch[1]!)
-    const ok = ctx.hub.approveApplication(appId, 'admin')
-    if (!ok) {
-      sendJson(res, { error: `unknown application ${appId}` }, 404)
-      return
-    }
+    const ok = ctx.hub.approveApplication(appId, admin.id)
+    if (!ok) { sendJson(res, { error: `unknown application ${appId}` }, 404); return }
     sendJson(res, { ok: true })
     return
   }
 
   const rejectAppMatch = path.match(/^\/api\/admin\/applications\/([^/]+)\/reject$/)
   if (method === 'POST' && rejectAppMatch) {
-    if (!requireAdmin(ctx, req, res)) return
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
     const appId = decodeURIComponent(rejectAppMatch[1]!)
     const body = (await readJsonBody(req).catch(() => ({}))) as { reason?: string }
-    const ok = ctx.hub.rejectApplication(appId, body?.reason || 'rejected by admin', 'admin')
-    if (!ok) {
-      sendJson(res, { error: `unknown application ${appId}` }, 404)
-      return
-    }
+    const ok = ctx.hub.rejectApplication(appId, body?.reason || 'rejected by admin', admin.id)
+    if (!ok) { sendJson(res, { error: `unknown application ${appId}` }, 404); return }
     sendJson(res, { ok: true })
     return
   }
 
   // --- admin: dispatch ----------------------------------------------------
   if (method === 'POST' && path === '/api/admin/dispatch') {
-    if (!requireAdmin(ctx, req, res)) return
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
     const body = (await readJsonBody(req).catch(() => ({}))) as {
       strategy?: DispatchStrategy
       payload?: unknown
       title?: string
       priority?: number
     }
-    if (!body?.strategy) {
-      sendJson(res, { error: 'missing strategy' }, 400)
-      return
-    }
-    // fire and forget the eventual result — the transcript will carry it
+    if (!body?.strategy) { sendJson(res, { error: 'missing strategy' }, 400); return }
     ctx.hub.dispatch({
-      from: 'admin',
+      from: admin.id,
       strategy: body.strategy,
       payload: body.payload ?? {},
       title: body.title,
@@ -296,21 +313,37 @@ async function handle(
     return
   }
 
+  // --- admin: retry -------------------------------------------------------
+  const retryMatch = path.match(/^\/api\/admin\/tasks\/([^/]+)\/retry$/)
+  if (method === 'POST' && retryMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const taskId = decodeURIComponent(retryMatch[1]!)
+    try {
+      ctx.hub.retry(taskId, admin.id).catch((err) =>
+        console.error('[aipehub-web] retry failed:', err),
+      )
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
+      return
+    }
+    sendJson(res, { ok: true })
+    return
+  }
+
   // --- admin: evaluation --------------------------------------------------
   if (method === 'POST' && path === '/api/admin/evaluate') {
-    if (!requireAdmin(ctx, req, res)) return
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
     const body = (await readJsonBody(req).catch(() => ({}))) as {
       taskId?: TaskId
       rating?: number
       comment?: string
     }
-    if (!body?.taskId) {
-      sendJson(res, { error: 'missing taskId' }, 400)
-      return
-    }
+    if (!body?.taskId) { sendJson(res, { error: 'missing taskId' }, 400); return }
     const ev = ctx.hub.evaluate({
       taskId: body.taskId,
-      by: 'admin',
+      by: admin.id,
       rating: body.rating,
       comment: body.comment,
     })
@@ -329,29 +362,58 @@ async function handle(
       return
     }
     if (ctx.hub.participant(body.id)) {
-      sendJson(res, { error: `id '${body.id}' already taken` }, 409)
+      sendJson(res, { error: `id '${body.id}' is already live in this space` }, 409)
       return
     }
-    const human = new HumanParticipant({
-      id: body.id,
-      capabilities: Array.isArray(body.capabilities) ? body.capabilities : [],
-    })
+    const caps = Array.isArray(body.capabilities) ? body.capabilities : []
+    // If the worker exists in workers.json already (returning after a leave),
+    // we'd need their old token to re-claim. v2.0: simplest UX — disallow
+    // re-creating an existing worker id; ask them to pick another or hand
+    // them an admin recovery flow later.
+    const known = await ctx.space.workers()
+    if (known.some((w) => w.id === body.id)) {
+      sendJson(res, { error: `id '${body.id}' is reserved by another session — pick another nickname` }, 409)
+      return
+    }
+    const { worker, token } = await ctx.space.createWorker(body.id, caps)
+    const human = new HumanParticipant({ id: worker.id, capabilities: worker.capabilities })
     ctx.hub.register(human)
-    sendJson(res, { ok: true, id: human.id, capabilities: human.capabilities })
+    const sid = randomBytes(24).toString('hex')
+    await ctx.space.addWorkerSession(sid, worker.id)
+    res.writeHead(200, {
+      'set-cookie': cookieValue(WORKER_COOKIE, sid),
+      'content-type': 'application/json; charset=utf-8',
+    })
+    res.end(JSON.stringify({
+      ok: true,
+      id: worker.id,
+      capabilities: worker.capabilities,
+      // The plaintext token is never used by the browser, but we surface it
+      // so a CLI worker (or curl test) can authenticate without cookies.
+      token,
+    }))
     return
   }
 
   // --- worker: leave ------------------------------------------------------
   const workerLeave = path.match(/^\/api\/workers\/([^/]+)$/)
   if (method === 'DELETE' && workerLeave) {
+    const sid = readCookie(req, WORKER_COOKIE)
+    const sess = await ctx.space.findWorkerSession(sid)
     const id = decodeURIComponent(workerLeave[1]!)
-    const p = ctx.hub.participant(id)
-    if (!p || p.kind !== 'human') {
-      sendJson(res, { error: `no human worker ${id}` }, 404)
+    if (!sess || sess.principalId !== id) {
+      sendJson(res, { error: 'not your worker session' }, 403)
       return
     }
-    ctx.hub.unregister(id)
-    sendJson(res, { ok: true })
+    const p = ctx.hub.participant(id)
+    if (p && p.kind === 'human') ctx.hub.unregister(id)
+    await ctx.space.removeWorker(id)
+    if (sid) await ctx.space.removeWorkerSession(sid)
+    res.writeHead(200, {
+      'set-cookie': expireCookie(WORKER_COOKIE),
+      'content-type': 'application/json; charset=utf-8',
+    })
+    res.end(JSON.stringify({ ok: true }))
     return
   }
 
@@ -386,7 +448,6 @@ async function handle(
 
   // --- static files -------------------------------------------------------
   if (method === 'GET') {
-    // Root → worker.html (admin lives at /admin)
     const requested = path === '/' ? 'worker.html' : path.replace(/^\//, '')
     await serveStatic(res, requested)
     return
@@ -417,27 +478,39 @@ function readBearer(req: IncomingMessage): string | undefined {
   return m ? m[1]!.trim() : undefined
 }
 
-function isAdminReq(ctx: HandlerCtx, req: IncomingMessage): boolean {
-  if (!ctx.adminEnabled) return false
-  const bearer = readBearer(req)
-  if (bearer && bearer === ctx.adminToken) return true
-  const sid = readCookie(req, ADMIN_COOKIE)
-  return !!sid && ctx.adminSessions.has(sid)
-}
-
-function requireAdmin(
+async function requireAdmin(
   ctx: HandlerCtx,
   req: IncomingMessage,
   res: ServerResponse,
-): boolean {
-  if (isAdminReq(ctx, req)) return true
+): Promise<AdminRecord | null> {
+  // Bearer token: verify against admins.json directly (for CLI callers)
+  const bearer = readBearer(req)
+  if (bearer) {
+    const admin = await ctx.space.verifyAdminToken(bearer)
+    if (admin) return admin
+  }
+  // Cookie-based session
+  const sid = readCookie(req, ADMIN_COOKIE)
+  const sess = await ctx.space.findAdminSession(sid)
+  if (sess) {
+    const admins = await ctx.space.admins()
+    const a = admins.find((x) => x.id === sess.principalId)
+    if (a) return a
+  }
   sendJson(res, { error: 'admin auth required' }, 401)
-  return false
+  return null
+}
+
+function cookieValue(name: string, value: string): string {
+  return `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${COOKIE_MAX_AGE_S}`
+}
+function expireCookie(name: string): string {
+  return `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`
 }
 
 // --- snapshot / lookup -----------------------------------------------------
 
-function snapshotState(hub: Hub) {
+async function snapshotState(hub: Hub, space: Space) {
   const participants = hub.registry.all().map((p) => ({
     id: p.id,
     kind: p.kind,
@@ -464,11 +537,30 @@ function snapshotState(hub: Hub) {
       }
     }
   }
+  // Surface the known persona registry too (worker.json + agents.json) so
+  // the admin UI can show "people we've seen" not just "people currently
+  // online".
+  const knownAdmins = (await space.admins()).map((a) => publicAdmin(a))
+  const knownWorkers = (await space.workers()).map((w) => publicWorker(w))
   return {
     participants,
     transcript: hub.transcript.all(),
     pending,
     pendingApplications: hub.pendingApplications(),
+    tasks: hub.tasks(),
+    known: { admins: knownAdmins, workers: knownWorkers },
+  }
+}
+
+function publicAdmin(a: AdminRecord) {
+  return { id: a.id, displayName: a.displayName, createdAt: a.createdAt }
+}
+function publicWorker(w: WorkerRecord) {
+  return {
+    id: w.id,
+    capabilities: w.capabilities,
+    createdAt: w.createdAt,
+    lastSeen: w.lastSeen,
   }
 }
 
@@ -522,11 +614,8 @@ function readJsonBody(req: IncomingMessage): Promise<unknown> {
     })
     req.on('end', () => {
       if (!buf) return resolve(undefined)
-      try {
-        resolve(JSON.parse(buf))
-      } catch (err) {
-        reject(err)
-      }
+      try { resolve(JSON.parse(buf)) }
+      catch (err) { reject(err) }
     })
     req.on('error', reject)
   })

@@ -1,21 +1,17 @@
-/* AipeHub web UI — shared core.
+/* AipeHub web UI — shared core (v2.0).
  *
- * Loaded by both admin.html and worker.html. Owns:
- *   - i18n dictionary (zh default, en alt)
- *   - SSE connection to /api/stream
- *   - state snapshot fetch
- *   - common DOM utilities
+ * "File-first" mindset extends to the browser: NO localStorage, NO
+ * sessionStorage. The only state the browser keeps is HttpOnly cookies
+ * set by the server (admin / worker session pointers, opaque to JS).
+ * Everything else round-trips to the server and back.
  *
- * Page-specific scripts (admin.js / worker.js) consume `window.AipeHub.*`.
- *
- * No bundler, no framework — IIFE attached to window.
+ * Language preference defaults to the value the server returns in
+ * /api/state.config.defaultLang; switching it is a per-tab, non-persistent
+ * toggle. This is intentional.
  */
 (() => {
-  // --- i18n --------------------------------------------------------------
-
   const I18N = {
     zh: {
-      // header
       subtitle: '通信空间',
       connecting: '连接中…',
       connected: '已连接',
@@ -23,25 +19,21 @@
       unreachable: '无法连接服务器',
       langButton: 'EN',
       langTitle: 'Switch to English',
-      // roles
       adminBadge: '管理员',
       workerBadge: '工人',
       logout: '退出',
-      // participants
-      participants: '参与者',
-      noParticipants: '暂无参与者',
+      participants: '当前在场',
+      noParticipants: '当前没人',
       noCaps: '无能力',
       load: '负载',
       pKind: { agent: '代理', human: '人类' },
-      // transcript
       transcript: '消息流',
-      // tasks
       pending: '待人类处理',
       noPending: '暂无待办任务',
       untitled: '（未命名）',
       approve: '批准',
       reject: '拒绝',
-      // worker view
+      retry: '重派',
       joinSpace: '加入通信空间',
       nickname: '昵称（ID）',
       capabilitiesLabel: '擅长能力（逗号分隔，可选）',
@@ -51,7 +43,6 @@
       myTasksLabel: '派给我的任务',
       noMyTasks: '暂无派给你的任务',
       youAre: '你的身份',
-      // admin view
       adminTitle: '管理员控制台',
       pendingAgents: '待批准的接入申请',
       noPendingAgents: '当前没有待批准的接入申请',
@@ -71,6 +62,16 @@
       dispatchPriority: '优先级（整数，可选）',
       dispatchButton: '派发',
       dispatchSuccess: '已派发，关注消息流获取结果',
+      tasksPanel: '任务面板',
+      tasksFilterAll: '全部',
+      tasksFilterPending: '进行中',
+      tasksFilterDone: '已完成',
+      tasksFilterFailed: '失败',
+      noTasks: '暂无任务',
+      taskStatusPending: '进行中',
+      taskStatusDone: '完成',
+      taskStatusFailed: '失败',
+      taskStatusCancelled: '取消',
       evaluatePanel: '任务评价',
       evaluateTaskId: 'task ID',
       evaluateRating: '评分（1-5，可选）',
@@ -78,10 +79,11 @@
       evaluateButton: '提交评价',
       evaluateSuccess: '评价已记录',
       pickTaskHint: '点击下方消息流里 task_result 行可自动填入 task ID',
-      // alerts
+      knownRoster: '空间档案',
+      knownAdmins: '管理员',
+      knownWorkers: '工人',
       failedAlert: (msg) => `失败：${msg}`,
       errorAlert: (msg) => `错误：${msg}`,
-      // summary
       sumJoined: (id, kind, caps) =>
         `${id}（${(I18N.zh.pKind[kind] || kind)}）能力=[${caps}]`,
       sumLeft: (id) => id,
@@ -113,8 +115,8 @@
       adminBadge: 'admin',
       workerBadge: 'worker',
       logout: 'log out',
-      participants: 'Participants',
-      noParticipants: 'no participants',
+      participants: 'Online',
+      noParticipants: 'no one online',
       noCaps: 'no caps',
       load: 'load',
       pKind: { agent: 'agent', human: 'human' },
@@ -124,6 +126,7 @@
       untitled: '(untitled)',
       approve: 'Approve',
       reject: 'Reject',
+      retry: 'Retry',
       joinSpace: 'Join the space',
       nickname: 'Nickname (ID)',
       capabilitiesLabel: 'Capabilities (comma-separated, optional)',
@@ -152,6 +155,16 @@
       dispatchPriority: 'Priority (integer, optional)',
       dispatchButton: 'Dispatch',
       dispatchSuccess: 'Dispatched — watch the transcript for the result',
+      tasksPanel: 'Tasks',
+      tasksFilterAll: 'All',
+      tasksFilterPending: 'In flight',
+      tasksFilterDone: 'Done',
+      tasksFilterFailed: 'Failed',
+      noTasks: 'no tasks yet',
+      taskStatusPending: 'pending',
+      taskStatusDone: 'done',
+      taskStatusFailed: 'failed',
+      taskStatusCancelled: 'cancelled',
       evaluatePanel: 'Evaluate a task',
       evaluateTaskId: 'task ID',
       evaluateRating: 'Rating (1-5, optional)',
@@ -159,6 +172,9 @@
       evaluateButton: 'Submit',
       evaluateSuccess: 'Evaluation recorded',
       pickTaskHint: 'Click a task_result row in the transcript to autofill task ID',
+      knownRoster: 'Roster on disk',
+      knownAdmins: 'Admins',
+      knownWorkers: 'Workers',
       failedAlert: (msg) => `failed: ${msg}`,
       errorAlert: (msg) => `error: ${msg}`,
       sumJoined: (id, kind, caps) =>
@@ -183,27 +199,17 @@
     },
   }
 
-  const LANG_KEY = 'aipehub.lang'
-
-  function getLang() {
-    try {
-      const stored = localStorage.getItem(LANG_KEY)
-      if (stored === 'zh' || stored === 'en') return stored
-    } catch (_) { /* ignore */ }
-    return 'zh'
-  }
-
-  let lang = getLang()
+  // The default lang comes from the server (space config.defaultLang); the
+  // toggle is per-tab and non-persistent.
+  let lang = 'zh'
   let t = I18N[lang]
 
   function setLang(next) {
     if (next !== 'zh' && next !== 'en') return
     lang = next
     t = I18N[lang]
-    try { localStorage.setItem(LANG_KEY, lang) } catch (_) { /* ignore */ }
     document.documentElement.setAttribute('lang', lang)
     applyStaticI18n()
-    // notify subscribers (page-specific re-renders)
     for (const fn of langSubscribers) {
       try { fn(lang) } catch (e) { console.error(e) }
     }
@@ -234,7 +240,6 @@
   function escapeHtml(s) {
     return String(s).replace(/[&<>"']/g, (c) => ESC[c])
   }
-
   const $ = (id) => document.getElementById(id)
 
   function setConn(status, label) {
@@ -307,8 +312,6 @@
     return r.json()
   }
 
-  // --- SSE plumbing -------------------------------------------------------
-
   function connectStream(onEvent) {
     setConn('pending', t.connecting)
     const es = new EventSource('/api/stream')
@@ -337,9 +340,16 @@
     fetchJson,
     connectStream,
     $,
+    /**
+     * Synchronise language with what the server says is the space default.
+     * Pages call this once on boot after fetching /api/state.
+     */
+    syncLangFromConfig(defaultLang) {
+      if (defaultLang === 'zh' || defaultLang === 'en') {
+        if (defaultLang !== lang) setLang(defaultLang)
+      }
+    },
   }
-
-  // --- init ---------------------------------------------------------------
 
   document.documentElement.setAttribute('lang', lang)
   document.addEventListener('DOMContentLoaded', () => {

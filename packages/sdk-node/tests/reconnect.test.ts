@@ -34,7 +34,7 @@ describe('sdk-node — reconnect', () => {
   let session: Session | undefined
 
   beforeEach(async () => {
-    hub = new Hub()
+    hub = Hub.inMemory()
     await hub.start()
     wsHandle = await serveWebSocket(hub, { port: 0 })
   })
@@ -99,7 +99,7 @@ describe('sdk-node — reconnect', () => {
     await wsHandle.close()
     await hub.stop()
 
-    hub = new Hub()
+    hub = Hub.inMemory()
     await hub.start()
     // re-bind the same port; race vs SDK retries — we expect to win because
     // the OS releases the port immediately on close()

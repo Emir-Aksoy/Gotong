@@ -19,7 +19,7 @@ describe('LlmAgent — payload handling', () => {
         return 'ok'
       },
     })
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     hub.register(new LlmAgent({ id: 'a', capabilities: ['draft'], provider }))
 
@@ -39,7 +39,7 @@ describe('LlmAgent — payload handling', () => {
         return 'done'
       },
     })
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     hub.register(new LlmAgent({ id: 'a', capabilities: ['draft'], provider }))
 
@@ -57,7 +57,7 @@ describe('LlmAgent — payload handling', () => {
         return 'done'
       },
     })
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     hub.register(new LlmAgent({ id: 'a', capabilities: ['draft'], provider }))
 
@@ -75,7 +75,7 @@ describe('LlmAgent — payload handling', () => {
         return 'done'
       },
     })
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     hub.register(new LlmAgent({ id: 'a', capabilities: ['draft'], provider }))
 
@@ -107,7 +107,7 @@ describe('LlmAgent — system and parameter resolution', () => {
         return 'done'
       },
     })
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     hub.register(
       new LlmAgent({
@@ -138,7 +138,7 @@ describe('LlmAgent — system and parameter resolution', () => {
         return 'done'
       },
     })
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     hub.register(
       new LlmAgent({
@@ -175,7 +175,7 @@ describe('LlmAgent — output and error mapping', () => {
       name: 'mock-A',
       reply: 'hello world',
     })
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     hub.register(new LlmAgent({ id: 'a', capabilities: ['draft'], provider }))
 
@@ -202,7 +202,7 @@ describe('LlmAgent — output and error mapping', () => {
       reply: 'unused',
       throwError: 'auth_denied',
     })
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     hub.register(new LlmAgent({ id: 'a', capabilities: ['draft'], provider }))
 
@@ -233,7 +233,7 @@ describe('LlmAgent — subclass hooks', () => {
       }
     }
 
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     hub.register(new MyAgent({ id: 'a', capabilities: ['draft'], provider }))
 
@@ -254,7 +254,7 @@ describe('LlmAgent — subclass hooks', () => {
       }
     }
 
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     hub.register(new TrimmingAgent({ id: 'a', capabilities: ['draft'], provider }))
 

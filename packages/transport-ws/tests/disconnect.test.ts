@@ -83,7 +83,7 @@ describe('transport-ws — disconnect', () => {
   let wsHandle: WebSocketTransportHandle
 
   beforeEach(async () => {
-    hub = new Hub()
+    hub = Hub.inMemory()
     await hub.start()
     wsHandle = await serveWebSocket(hub, { port: 0 })
   })

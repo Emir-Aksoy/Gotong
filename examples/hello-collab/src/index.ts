@@ -76,7 +76,7 @@ class ReviewerAgent extends AgentParticipant {
 // --- main -------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  const hub = new Hub()
+  const hub = Hub.inMemory()
   await hub.start()
 
   hub.onEvent((e) => {

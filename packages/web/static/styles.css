@@ -407,3 +407,98 @@ body.admin main.admin-grid {
 /* clickable transcript rows in admin (for evaluate task-id picker) */
 .entry-clickable .body { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
 .entry-clickable:hover { background: #f5f5f0; }
+
+/* --- v2.0: task panel ----------------------------------------------- */
+.tasks-filters { display: flex; gap: 0.3rem; margin-bottom: 0.6rem; flex-wrap: wrap; }
+.tasks-filters button {
+  padding: 0.25rem 0.7rem;
+  border: 1px solid #ddd;
+  background: #fff;
+  border-radius: 999px;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.72rem;
+  color: #666;
+}
+.tasks-filters button:hover { background: #f5f5f0; }
+.tasks-filters button.active {
+  background: #1a1a1a;
+  color: #fff;
+  border-color: #1a1a1a;
+}
+.task-card {
+  background: #fff;
+  border: 1px solid #e2e2dd;
+  border-left-width: 4px;
+  border-radius: 5px;
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.82rem;
+}
+.task-pending { border-left-color: #5b9bd5; }
+.task-done    { border-left-color: #1a8a4a; }
+.task-failed  { border-left-color: #c84242; }
+.task-cancelled { border-left-color: #999; }
+.task-head { display: flex; gap: 0.5rem; align-items: center; }
+.task-status {
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #eee;
+}
+.task-status-pending { background: #dceaf6; color: #2a5a85; }
+.task-status-done    { background: #d6ecdb; color: #1a6a3a; }
+.task-status-failed  { background: #fadcdc; color: #8a2828; }
+.task-status-cancelled { background: #eee; color: #666; }
+.task-title { font-weight: 600; flex: 1; }
+.task-strategy { font-size: 0.7rem; color: #888; }
+.task-meta {
+  margin-top: 0.3rem;
+  font-size: 0.72rem;
+  color: #666;
+  word-break: break-word;
+}
+.task-id {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  color: #5b9bd5;
+  cursor: pointer;
+  text-decoration: underline dotted;
+}
+.task-actions { display: flex; gap: 0.4rem; margin-top: 0.5rem; }
+.task-actions button {
+  padding: 0.3rem 0.85rem;
+  border: 1px solid #c89a30;
+  background: #fffbeb;
+  color: #8a6a18;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+.task-actions button:hover:not(:disabled) { background: #ffe9a0; }
+
+/* --- v2.0: roster (admins + workers on disk) ------------------------ */
+.roster h3 {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #888;
+  margin: 0.5rem 0 0.3rem;
+}
+.roster-list {
+  list-style: none;
+  margin: 0 0 0.55rem;
+  padding: 0;
+  font-size: 0.78rem;
+}
+.roster-list li {
+  padding: 0.25rem 0.4rem;
+  background: #f5f5f0;
+  border-radius: 4px;
+  margin-bottom: 2px;
+  color: #444;
+}
+.roster-list li.empty { background: transparent; color: #bbb; font-style: italic; }

@@ -95,7 +95,7 @@ describe('transport-ws — per-agent identity (v0.4)', () => {
   const clients: FakeClient[] = []
 
   async function startWith(authenticate: (k: string | undefined) => AuthenticateResult): Promise<void> {
-    hub = new Hub()
+    hub = Hub.inMemory()
     await hub.start()
     wsHandle = await serveWebSocket(hub, { port: 0, authenticate })
   }

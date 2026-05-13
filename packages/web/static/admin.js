@@ -1,25 +1,24 @@
-/* AipeHub — admin console.
- *
- * Drives the gate (approve / reject pending agents), the dispatcher
- * (kick off tasks from any of the 3 strategies), and the evaluator
- * (write append-only feedback on task results).
+/* AipeHub — admin console (v2.0, file-first).
  *
  * All admin endpoints require the cookie minted by /admin?token=…
- * — if the page got served, auth is already trusted.
+ * (or `Authorization: Bearer …`). No browser caches.
  */
 (() => {
   const { $, t, applyStaticI18n, onLangChange, escapeHtml, summarize, isBadResult,
-          fetchJson, connectStream } = window.AipeHub
+          fetchJson, connectStream, syncLangFromConfig } = window.AipeHub
 
   const state = {
     participants: [],
     transcript: [],
     pendingApplications: [],
+    tasks: [],
+    known: { admins: [], workers: [] },
   }
 
-  // --- DOM refs ----------------------------------------------------------
-  let dom = null
+  // Per-tab filter on the task panel; cleared on reload (no browser storage)
+  let taskFilter = 'all'
 
+  let dom = null
   function resolveDom() {
     dom = {
       participantsList: $('participants-list'),
@@ -42,17 +41,22 @@
       eTask: $('e-task'),
       eRating: $('e-rating'),
       eComment: $('e-comment'),
+      tasksFilters: $('tasks-filters'),
+      tasksList: $('tasks-list'),
+      knownAdminsList: $('known-admins-list'),
+      knownWorkersList: $('known-workers-list'),
       logoutBtn: $('logout-btn'),
     }
   }
-
-  // --- bootstrap ---------------------------------------------------------
 
   async function refresh() {
     const snap = await fetchJson('/api/state')
     state.participants = snap.participants
     state.transcript = snap.transcript
     state.pendingApplications = snap.pendingApplications || []
+    state.tasks = snap.tasks || []
+    state.known = snap.known || { admins: [], workers: [] }
+    if (snap.config?.defaultLang) syncLangFromConfig(snap.config.defaultLang)
     renderAll()
   }
 
@@ -81,17 +85,24 @@
           (a) => a.id !== ev.data.applicationId,
         )
         break
+      case 'task':
+      case 'task_result':
+      case 'evaluation':
+        // Tasks are derived from the transcript; rather than reimplement
+        // the merge here, just re-pull state. Small, fine for v2.
+        refresh().catch((err) => console.error('task refresh failed:', err))
+        return
     }
     renderAll()
   }
-
-  // --- rendering ----------------------------------------------------------
 
   function renderAll() {
     if (!dom) return
     renderPendingApps()
     renderParticipants()
     renderTranscript()
+    renderTasks()
+    renderKnownRoster()
   }
 
   function renderPendingApps() {
@@ -115,9 +126,7 @@
       if (meta.remoteAddress) metaBits.push(`${escapeHtml(t.remoteAddress)}: ${escapeHtml(meta.remoteAddress)}`)
       metaBits.push(`${escapeHtml(t.pendingSince)}: ${new Date(app.pendingSince).toLocaleString()}`)
       card.innerHTML =
-        `<div class="t-head">` +
-          `<span class="t-title">${agents}</span>` +
-        `</div>` +
+        `<div class="t-head"><span class="t-title">${agents}</span></div>` +
         `<div class="pending-meta">${metaBits.join(' · ')}</div>` +
         `<div class="pending-actions">` +
           `<input class="reject-reason" placeholder="${escapeHtml(t.rejectReason)}" data-id="${escapeHtml(app.id)}" />` +
@@ -173,6 +182,72 @@
     }
   }
 
+  function renderTasks() {
+    const root = dom.tasksList
+    if (!root) return
+    // refresh filter UI active state
+    if (dom.tasksFilters) {
+      for (const btn of dom.tasksFilters.querySelectorAll('button[data-filter]')) {
+        btn.classList.toggle('active', btn.dataset.filter === taskFilter)
+      }
+    }
+    const filtered = state.tasks
+      .filter((task) => taskFilter === 'all' ? true : task.status === taskFilter)
+      .slice().reverse() // newest first
+    root.innerHTML = ''
+    if (filtered.length === 0) {
+      root.innerHTML = `<p class="empty">${escapeHtml(t.noTasks)}</p>`
+      return
+    }
+    for (const v of filtered) {
+      const div = document.createElement('div')
+      div.className = `task-card task-${v.status}`
+      const statusLabel =
+        v.status === 'pending'   ? t.taskStatusPending
+      : v.status === 'done'      ? t.taskStatusDone
+      : v.status === 'failed'    ? t.taskStatusFailed
+      :                            t.taskStatusCancelled
+      const title = v.task.title || t.untitled
+      const s = v.task.strategy
+      const target =
+        s.kind === 'explicit'   ? `to=${s.to}`
+      : s.kind === 'capability' ? `caps=[${s.capabilities.join(',')}]`
+      :                            'broadcast'
+      const canRetry = v.status === 'failed' || v.status === 'cancelled'
+      div.innerHTML =
+        `<div class="task-head">` +
+          `<span class="task-status task-status-${v.status}">${escapeHtml(statusLabel)}</span>` +
+          `<span class="task-title">${escapeHtml(title)}</span>` +
+          `<span class="task-strategy">${escapeHtml(s.kind)} · ${escapeHtml(target)}</span>` +
+        `</div>` +
+        `<div class="task-meta">` +
+          `<code class="task-id" data-act="copy-task-id" data-id="${escapeHtml(v.id)}" title="click to fill the evaluation form">${escapeHtml(v.id.slice(0, 8))}…</code>` +
+          (v.result ? ` · ${escapeHtml(resultSummary(v.result))}` : '') +
+        `</div>` +
+        (canRetry
+          ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml(v.id)}">${escapeHtml(t.retry)}</button></div>`
+          : '')
+      root.appendChild(div)
+    }
+  }
+
+  function resultSummary(r) {
+    if (r.kind === 'ok') return t.sumOk(r.by)
+    if (r.kind === 'failed') return t.sumFailed(r.by, r.error)
+    if (r.kind === 'cancelled') return t.sumCancelled(r.reason)
+    return t.sumNoParticipant(r.reason)
+  }
+
+  function renderKnownRoster() {
+    if (!dom.knownAdminsList || !dom.knownWorkersList) return
+    dom.knownAdminsList.innerHTML = state.known.admins.map((a) =>
+      `<li><strong>${escapeHtml(a.id)}</strong> · ${escapeHtml(a.displayName)}</li>`,
+    ).join('') || `<li class="empty">${escapeHtml(t.noParticipants)}</li>`
+    dom.knownWorkersList.innerHTML = state.known.workers.map((w) =>
+      `<li><strong>${escapeHtml(w.id)}</strong>${w.capabilities.length ? ' · ' + w.capabilities.map(escapeHtml).join(', ') : ''}${w.lastSeen ? ` · ${new Date(w.lastSeen).toLocaleString()}` : ''}</li>`,
+    ).join('') || `<li class="empty">${escapeHtml(t.noParticipants)}</li>`
+  }
+
   // --- dispatch form -----------------------------------------------------
 
   function updateDispatchVisibility() {
@@ -189,18 +264,10 @@
     let strategy = null
     if (kind === 'explicit') {
       strategy = { kind, to: dom.dTo.value.trim() }
-      if (!strategy.to) {
-        dom.dispatchMsg.textContent = t.failedAlert('id required')
-        dom.dispatchMsg.classList.add('err')
-        return
-      }
+      if (!strategy.to) { dom.dispatchMsg.textContent = t.failedAlert('id required'); dom.dispatchMsg.classList.add('err'); return }
     } else if (kind === 'capability') {
       const caps = dom.dCaps.value.split(',').map((s) => s.trim()).filter(Boolean)
-      if (caps.length === 0) {
-        dom.dispatchMsg.textContent = t.failedAlert('capabilities required')
-        dom.dispatchMsg.classList.add('err')
-        return
-      }
+      if (caps.length === 0) { dom.dispatchMsg.textContent = t.failedAlert('capabilities required'); dom.dispatchMsg.classList.add('err'); return }
       strategy = { kind, capabilities: caps }
     } else if (kind === 'broadcast') {
       const caps = dom.dCaps.value.split(',').map((s) => s.trim()).filter(Boolean)
@@ -255,11 +322,8 @@
   }
 
   async function approveApp(appId) {
-    await fetchJson(`/api/admin/applications/${encodeURIComponent(appId)}/approve`, {
-      method: 'POST',
-    })
+    await fetchJson(`/api/admin/applications/${encodeURIComponent(appId)}/approve`, { method: 'POST' })
   }
-
   async function rejectApp(appId, reason) {
     await fetchJson(`/api/admin/applications/${encodeURIComponent(appId)}/reject`, {
       method: 'POST',
@@ -267,15 +331,13 @@
       body: JSON.stringify({ reason: reason || 'rejected by admin' }),
     })
   }
-
+  async function retryTask(taskId) {
+    await fetchJson(`/api/admin/tasks/${encodeURIComponent(taskId)}/retry`, { method: 'POST' })
+  }
   async function logout() {
-    try {
-      await fetchJson('/api/admin/logout', { method: 'POST' })
-    } catch { /* ignore */ }
+    try { await fetchJson('/api/admin/logout', { method: 'POST' }) } catch { /* ignore */ }
     window.location.href = '/admin'
   }
-
-  // --- wire it up --------------------------------------------------------
 
   document.addEventListener('DOMContentLoaded', async () => {
     resolveDom()
@@ -286,32 +348,48 @@
     dom.evaluateForm.addEventListener('submit', submitEvaluate)
     dom.logoutBtn.addEventListener('click', logout)
 
-    // Pending-app approve/reject + task_result click-to-fill
+    if (dom.tasksFilters) {
+      dom.tasksFilters.addEventListener('click', (e) => {
+        const btn = e.target
+        if (!(btn instanceof HTMLButtonElement)) return
+        const f = btn.dataset.filter
+        if (!f) return
+        taskFilter = f
+        renderTasks()
+      })
+    }
+
     document.addEventListener('click', async (e) => {
       const target = e.target
-      // pick up task id from a task_result row
+      // Click a task_result row → autofill evaluation form
       if (target instanceof HTMLElement && target.dataset.taskid) {
         dom.eTask.value = target.dataset.taskid
         return
       }
-      if (!(target instanceof HTMLButtonElement)) return
+      if (!(target instanceof HTMLElement)) return
       const act = target.dataset.act
       const id = target.dataset.id
       if (!act || !id) return
-      target.disabled = true
+      // copy task id to the evaluation form on click
+      if (act === 'copy-task-id') {
+        dom.eTask.value = id
+        return
+      }
+      if (target instanceof HTMLButtonElement) target.disabled = true
       try {
         if (act === 'approve-app') {
           await approveApp(id)
         } else if (act === 'reject-app') {
-          // find the sibling input for the reason
           const card = target.closest('.pending-app-card')
           const reasonInput = card?.querySelector('.reject-reason')
           const reason = reasonInput?.value?.trim() || ''
           await rejectApp(id, reason)
+        } else if (act === 'retry') {
+          await retryTask(id)
         }
       } catch (err) {
         alert(t.failedAlert(err.message || String(err)))
-        target.disabled = false
+        if (target instanceof HTMLButtonElement) target.disabled = false
       }
     })
 

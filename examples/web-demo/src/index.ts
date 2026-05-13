@@ -1,20 +1,23 @@
 /**
- * web-demo — opens the AipeHub reference web UI and runs a tiny perpetual
- * loop. Now that the UI is split into admin + worker views, this demo
- * focuses on the worker side:
+ * web-demo — opens the AipeHub reference web UI on `.aipehub-web-demo/`
+ * (auto-init) and runs a tiny perpetual loop:
  *
- *   1. WriterAgent drafts a one-liner (auto)
+ *   1. WriterAgent drafts a one-liner (auto, in-process)
  *   2. Hub dispatches it via `capability: ['approve']`
- *   3. Once a person joins the space at http://localhost:3000 with
- *      capability `approve`, the task lands in their inbox
- *   4. The person clicks Approve / Reject in the browser
+ *   3. Once a worker joins at http://localhost:3000 with capability
+ *      `approve`, the task lands in their inbox
+ *   4. They click Approve / Reject in the browser
  *   5. repeat forever; Ctrl-C to exit
  *
- * To also enable the admin console, set AIPE_ADMIN_TOKEN before running.
+ * The admin token is minted on first launch and printed once.
+ *
+ * No env vars required. Set AIPE_SPACE=/tmp/foo to use a different space dir.
  */
 
-import { AgentParticipant, Hub, type Task } from '@aipehub/core'
+import { AgentParticipant, Hub, Space, type Task } from '@aipehub/core'
 import { serveWeb } from '@aipehub/web'
+
+const SPACE_DIR = process.env.AIPE_SPACE ?? '.aipehub-web-demo'
 
 class WriterAgent extends AgentParticipant {
   private n = 0
@@ -37,20 +40,28 @@ const TOPICS = [
 ]
 
 async function main(): Promise<void> {
-  const hub = new Hub()
-  await hub.start()
+  const { space, adminToken } = await Space.openOrInit(SPACE_DIR, {
+    name: 'web-demo',
+    description: 'simple worker-driven loop (v2.0 file-first)',
+    adminDisplayName: 'Operator',
+    // gating: 'open' so the writer agent in-process registers without approval
+    config: { webPort: 3000, gating: 'open' },
+  })
 
+  const hub = new Hub({ space })
+  await hub.start()
   hub.register(new WriterAgent())
 
-  const web = await serveWeb(hub, { port: 3000 })
-  console.log(`\nOpen ${web.url} to join as a worker.`)
-  console.log(`  pick any nickname (e.g. "alice") and capability "approve" to receive drafts.`)
-  if (web.adminEnabled) {
-    console.log(`Admin login URL was printed above.`)
+  const web = await serveWeb(hub, { port: (await space.config()).webPort })
+
+  console.log(`\n[web-demo] space: ${SPACE_DIR}/`)
+  if (adminToken) {
+    console.log(`[web-demo] admin: ${web.url}/admin?token=${adminToken} (one-time URL — store this token)`)
   } else {
-    console.log(`Admin disabled; set AIPE_ADMIN_TOKEN to enable the /admin console.`)
+    console.log(`[web-demo] admin already configured — re-use your saved token`)
   }
-  console.log(`Ctrl-C to exit.\n`)
+  console.log(`[web-demo] workers: ${web.url}/  — pick capability "approve" to receive drafts`)
+  console.log(`[web-demo] Ctrl-C to exit.\n`)
 
   let running = true
   const shutdown = async () => {
@@ -66,14 +77,12 @@ async function main(): Promise<void> {
 
   let i = 0
   while (running) {
-    // wait until at least one human with "approve" capability has joined
     await waitForCapability(hub, 'approve', () => running)
     if (!running) break
 
     const topic = TOPICS[i % TOPICS.length]!
     i += 1
 
-    // 1. draft
     const draftRes = await hub.dispatch({
       from: 'system',
       strategy: { kind: 'capability', capabilities: ['draft'] },
@@ -86,7 +95,6 @@ async function main(): Promise<void> {
     }
     const text = (draftRes.output as { text: string }).text
 
-    // 2. ask for human approval — by now we know someone has cap "approve"
     const approveRes = await hub.dispatch({
       from: 'system',
       strategy: { kind: 'capability', capabilities: ['approve'] },
@@ -101,7 +109,6 @@ async function main(): Promise<void> {
   }
 }
 
-/** Resolve once at least one human in the hub advertises the given capability. */
 async function waitForCapability(
   hub: Hub,
   cap: string,

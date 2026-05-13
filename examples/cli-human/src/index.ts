@@ -121,7 +121,7 @@ async function runCliLoop(you: HumanParticipant, signal: AbortSignal): Promise<v
 }
 
 async function main(): Promise<void> {
-  const hub = new Hub()
+  const hub = Hub.inMemory()
   await hub.start()
   hub.onEvent((e) => {
     console.log(`  [seq=${String(e.seq).padStart(2, '0')}] ${describe(e)}`)

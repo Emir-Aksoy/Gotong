@@ -6,7 +6,7 @@ const flush = () => new Promise<void>((r) => setImmediate(r))
 
 describe('Hub admission gating (v1.1)', () => {
   it('requestAdmission appends agent_pending and lists the application', async () => {
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     const { applicationId, decision } = hub.requestAdmission({
       agents: [{ id: 'writer', capabilities: ['draft'] }],
@@ -29,7 +29,7 @@ describe('Hub admission gating (v1.1)', () => {
   })
 
   it('approveApplication appends agent_approved, removes from pending, resolves promise', async () => {
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     const { applicationId, decision } = hub.requestAdmission({
       agents: [{ id: 'reviewer', capabilities: ['review'] }],
@@ -52,7 +52,7 @@ describe('Hub admission gating (v1.1)', () => {
   })
 
   it('rejectApplication appends agent_rejected with reason', async () => {
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     const { applicationId, decision } = hub.requestAdmission({
       agents: [{ id: 'spammer', capabilities: [] }],
@@ -79,7 +79,7 @@ describe('Hub admission gating (v1.1)', () => {
   })
 
   it('approve/reject for an unknown id returns false (no transcript noise)', async () => {
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     const before = hub.transcript.size()
     expect(hub.approveApplication('does-not-exist')).toBe(false)
@@ -89,7 +89,7 @@ describe('Hub admission gating (v1.1)', () => {
   })
 
   it('multi-agent application — single decision covers all listed agents', async () => {
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     const { applicationId, decision } = hub.requestAdmission({
       agents: [
@@ -110,7 +110,7 @@ describe('Hub admission gating (v1.1)', () => {
   })
 
   it('hub.stop() resolves outstanding applications with hub_stopped', async () => {
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     const { decision } = hub.requestAdmission({
       agents: [{ id: 'orphan', capabilities: [] }],
@@ -124,7 +124,7 @@ describe('Hub admission gating (v1.1)', () => {
 
   it('pendingApplications ordering: oldest first', async () => {
     let t = 1_000
-    const hub = new Hub({ now: () => t })
+    const hub = Hub.inMemory({ now: () => t })
     await hub.start()
 
     const a = hub.requestAdmission({ agents: [{ id: 'a', capabilities: [] }] })
@@ -147,7 +147,7 @@ describe('Hub admission gating (v1.1)', () => {
   })
 
   it('evaluate appends an evaluation entry with rating + comment', async () => {
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     const ev = hub.evaluate({
       taskId: 't-123',
@@ -167,7 +167,7 @@ describe('Hub admission gating (v1.1)', () => {
   })
 
   it('onEvent observers see agent_pending → agent_approved in order', async () => {
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     const kinds: string[] = []
     hub.onEvent((e) => kinds.push(e.kind))

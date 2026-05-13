@@ -77,7 +77,7 @@ async function main(): Promise<void> {
     console.warn('[llm-real] OPENAI_API_KEY not set — substituting Anthropic for the reviewer.')
   }
 
-  const hub = new Hub()
+  const hub = Hub.inMemory()
   await hub.start()
   hub.onEvent((e) => {
     console.log(`  [seq=${String(e.seq).padStart(2, '0')}] ${describe(e)}`)

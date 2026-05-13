@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/protocol",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "description": "AipeHub wire protocol — frame types, constants, and codec. Zero runtime.",
   "license": "MIT",

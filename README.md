@@ -14,7 +14,9 @@ AipeHub is not an agent. It is a **communication space**: a registry, a message 
 
 ## Status
 
-**v1.1 — Open Space.** Three role-distinct entry points: admin (one or more) approves agent admissions and dispatches tasks; workers join the space through the browser and pick up tasks for humans; agents connect over the wire protocol and land in a pending queue until an admin approves them. See [CHANGELOG.md](CHANGELOG.md) for the v0.0 → v1.1 path and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design. Wire protocol is `1.0`, documented in [docs/PROTOCOL.md](docs/PROTOCOL.md).
+**v2.0 — File-first.** A workspace is a directory on disk (`.aipehub/`). Drop the directory, drop the space. Copy it, hand the room to a teammate. Three role-distinct entry points (admin / worker / agent) keep working across hub restarts because admins, workers, sessions, transcript, and pending admissions are all files. No process-memory or browser-storage state — only HttpOnly cookies that point at rows on disk.
+
+See [CHANGELOG.md](CHANGELOG.md) for the v0.0 → v2.0 path and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design. Wire protocol stays at `1.0`, documented in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI.
 
@@ -38,18 +40,28 @@ pnpm demo:open-space    # v1.1: Hub + WS admission gating + admin/worker web UI
 ## Embedded — everything in one process
 
 ```ts
-import { Hub } from '@aipehub/core'
+import { Hub, Space } from '@aipehub/core'
 
-const hub = new Hub()
+// v2.0: bind to a directory; admins, workers, transcript all live here
+const { space, adminToken } = await Space.openOrInit('.aipehub', {
+  name: 'my-space',
+  adminDisplayName: 'Operator',
+})
+console.log(`Admin URL once: http://localhost:3000/admin?token=${adminToken}`)
+
+const hub = new Hub({ space })
 await hub.start()
 hub.register(new MyAgent())
 hub.register(new MyHumanAdapter())
 
 const result = await hub.dispatch({
-  from: 'system',
+  from: 'admin',
   strategy: { kind: 'capability', capabilities: ['draft'] },
   payload: { topic: 'why TypeScript' },
 })
+
+// for tests / in-process demos with no persistence:
+const tmp = Hub.inMemory()
 ```
 
 ## Distributed — agents connect from another process / machine
@@ -118,30 +130,35 @@ const draft = await hub.dispatch({
 
 Override `buildRequest(task)` to customize prompt assembly (retrieved context, few-shot examples) or `parseResponse(response, task)` to post-process (JSON extraction, validation re-prompt). Override `handleTask(task)` for full control — multi-step reasoning, retries, structured outputs. See [`packages/llm`](packages/llm/src/agent.ts) and the two demos in [`examples/llm-mock`](examples/llm-mock) and [`examples/llm-real`](examples/llm-real).
 
-## Open Space — admins, workers, and agents in one room (v1.1)
+## Open Space — admins, workers, and agents in one room (v2.0)
 
-Set an admin token and turn on admission gating; the web UI splits into two views and remote agents wait for approval before they're announced to the hub.
+Anchor the hub to a `.aipehub/` directory; admin identity, worker accounts, and gated agent admissions all live there. Web UI splits into two views (`/` worker, `/admin` admin). Hub restarts are transparent — cookies still work, admins are still admins, transcripts grow rather than restart.
 
 ```ts
-import { Hub } from '@aipehub/core'
+import { Hub, Space } from '@aipehub/core'
 import { serveWebSocket } from '@aipehub/transport-ws'
 import { serveWeb } from '@aipehub/web'
 
-const hub = new Hub()
+const { space, adminToken } = await Space.openOrInit('.aipehub', {
+  name: 'my-space',
+  adminDisplayName: 'Operator',
+  config: { gating: 'admin-approval' },
+})
+console.log(`Admin URL once: http://localhost:3000/admin?token=${adminToken}`)
+
+const hub = new Hub({ space })
 await hub.start()
 
-// Agents must be approved by an admin before they join
-await serveWebSocket(hub, { port: 4000, gating: 'admin-approval' })
-
-// /admin requires the token; / is the worker view (any browser)
-await serveWeb(hub, { port: 3000, adminToken: process.env.AIPE_ADMIN_TOKEN })
+await serveWebSocket(hub, { port: 4000, gating: (await space.config()).gating })
+await serveWeb(hub, { port: 3000 })
+// admin = /admin?token=<TOKEN>   |   worker = /
 ```
 
-- **Admin** opens `http://localhost:3000/admin?token=…` once (cookie persists). Sees a pending-admissions banner with **Approve / Reject** for every connecting agent, a dispatch panel for all three strategies, and an evaluate panel that writes append-only feedback into the transcript.
-- **Worker** opens `http://localhost:3000/`, picks a nickname + capabilities, and starts receiving tasks dispatched to those capabilities. Same `HumanParticipant` primitive as before, just join-from-browser.
-- **Agent** connects exactly like v1.0 — `connect({ url, agents })` from `@aipehub/sdk-node` or the Python SDK — but the connection holds in `AWAIT_APPROVAL` until an admin acts. Drop the connection and the application rolls back as `agent_rejected · client_disconnected` in the transcript.
+- **Admin** signs in once with the token, then drives the room: approve / reject pending agent admissions, dispatch tasks via any of the three strategies, see all tasks in a filterable panel with a **Retry** button on failed rows, write evaluations attached to specific tasks.
+- **Worker** picks a nickname + capabilities at `/`, becomes a `HumanParticipant`. A `workers.json` row + an HttpOnly cookie remember them across reloads and restarts.
+- **Agent** connects to the WebSocket port; with `gating: 'admin-approval'` they hang in pending until an admin acts.
 
-Default `gating` is still `'open'`, so existing deployments are unchanged. Full runnable demo in [`examples/open-space`](examples/open-space).
+Full runnable demo in [`examples/open-space`](examples/open-space). `pnpm demo:open-space` spins host + agent in one terminal, then point a browser at the two URLs it prints.
 
 ## Packages
 

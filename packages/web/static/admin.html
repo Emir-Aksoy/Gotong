@@ -19,15 +19,21 @@
     </header>
 
     <main id="main-grid" class="admin-grid">
-      <!-- Pending agent admissions, full-width banner when populated -->
       <section id="pending-apps" class="pending-apps">
         <h2 data-i18n="pendingAgents">待批准的接入申请</h2>
         <div id="pending-apps-list"></div>
       </section>
 
       <section id="participants">
-        <h2 data-i18n="participants">参与者</h2>
+        <h2 data-i18n="participants">当前在场</h2>
         <div id="participants-list"></div>
+        <h2 style="margin-top:1.2rem" data-i18n="knownRoster">空间档案</h2>
+        <div class="roster">
+          <h3 data-i18n="knownAdmins">管理员</h3>
+          <ul id="known-admins-list" class="roster-list"></ul>
+          <h3 data-i18n="knownWorkers">工人</h3>
+          <ul id="known-workers-list" class="roster-list"></ul>
+        </div>
       </section>
 
       <section id="transcript">
@@ -36,8 +42,18 @@
       </section>
 
       <section id="controls">
-        <!-- Dispatch panel -->
         <details open class="panel">
+          <summary data-i18n="tasksPanel">任务面板</summary>
+          <div id="tasks-filters" class="tasks-filters">
+            <button type="button" class="active" data-filter="all" data-i18n="tasksFilterAll">全部</button>
+            <button type="button" data-filter="pending" data-i18n="tasksFilterPending">进行中</button>
+            <button type="button" data-filter="done" data-i18n="tasksFilterDone">已完成</button>
+            <button type="button" data-filter="failed" data-i18n="tasksFilterFailed">失败</button>
+          </div>
+          <div id="tasks-list"></div>
+        </details>
+
+        <details class="panel">
           <summary data-i18n="dispatchPanel">派发任务</summary>
           <form id="dispatch-form" class="dispatch-form">
             <label>
@@ -73,7 +89,6 @@
           </form>
         </details>
 
-        <!-- Evaluation panel -->
         <details class="panel">
           <summary data-i18n="evaluatePanel">任务评价</summary>
           <form id="evaluate-form" class="dispatch-form">

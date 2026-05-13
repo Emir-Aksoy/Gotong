@@ -14,6 +14,13 @@ coverage/
 data/
 aipe-data/
 **/aipe-data/
+
+# AipeHub v2.0 spaces — per-workspace directories with state files. Each
+# example creates its own; they should not be committed.
+.aipehub/
+.aipehub-*/
+**/.aipehub/
+**/.aipehub-*/
 *.sqlite
 *.sqlite-journal
 *.db

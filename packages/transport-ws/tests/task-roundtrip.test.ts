@@ -84,7 +84,7 @@ describe('transport-ws — task roundtrip', () => {
   let client: FakeClient | undefined
 
   beforeEach(async () => {
-    hub = new Hub()
+    hub = Hub.inMemory()
     await hub.start()
     wsHandle = await serveWebSocket(hub, { port: 0 })
   })

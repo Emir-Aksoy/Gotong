@@ -18,7 +18,7 @@ class EchoAgent extends AgentParticipant {
 
 describe('Hub (end-to-end)', () => {
   it('capability dispatch reaches the right agent; transcript has task then task_result', async () => {
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     hub.register(new EchoAgent('writer', ['draft']))
     hub.register(new EchoAgent('reviewer', ['review']))
@@ -42,7 +42,7 @@ describe('Hub (end-to-end)', () => {
   })
 
   it('explicit dispatch to a nonexistent id returns no_participant', async () => {
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     const result = await hub.dispatch({
       from: 'system',
@@ -54,7 +54,7 @@ describe('Hub (end-to-end)', () => {
   })
 
   it('register / unregister produce participant_joined / participant_left entries', async () => {
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     const a = new EchoAgent('a', [])
     hub.register(a)
@@ -71,7 +71,7 @@ describe('Hub (end-to-end)', () => {
   })
 
   it('publish reaches subscribers but not the sender', async () => {
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     const onAlice = vi.fn()
     const onBob = vi.fn()
@@ -99,7 +99,7 @@ describe('Hub (end-to-end)', () => {
   })
 
   it('onEvent fires for every transcript entry', async () => {
-    const hub = new Hub()
+    const hub = Hub.inMemory()
     await hub.start()
     const events: TranscriptEntry[] = []
     const off = hub.onEvent((e) => events.push(e))

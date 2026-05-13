@@ -1,40 +1,54 @@
 /**
- * Open Space host (v1.1):
+ * Open Space host (v2.0 — file-first):
  *
- *   - Hub
- *   - WebSocket transport on :4100 with `gating: 'admin-approval'`
- *     (every connecting agent waits in pending state until an admin
- *     approves it through the web UI)
- *   - Web UI on :3100 with admin enabled via AIPE_ADMIN_TOKEN
+ *   - Space at `.aipehub/` (auto-init if missing). One admin minted on
+ *     first run; their plaintext token is printed once and never again.
+ *   - Hub bound to the space (transcript + pending apps + sessions all
+ *     persisted)
+ *   - WebSocket transport on space.config.wsPort with admin-approval gating
+ *   - Web UI on space.config.webPort
  *
- * Sits and waits — does NOT dispatch tasks itself. Tasks are dispatched
- * from the admin console at /admin (or from CLI calls to the admin API
- * with Bearer auth).
+ * Sits and waits — does NOT dispatch tasks itself. Tasks come from the
+ * admin console at /admin (or from CLI calls to the admin API with the
+ * bearer token).
  */
 
-import { Hub, type TranscriptEntry } from '@aipehub/core'
+import { Hub, Space, type TranscriptEntry } from '@aipehub/core'
 import { serveWebSocket } from '@aipehub/transport-ws'
 import { serveWeb } from '@aipehub/web'
 
-const WS_PORT = Number(process.env.AIPE_WS_PORT ?? 4100)
-const WEB_PORT = Number(process.env.AIPE_WEB_PORT ?? 3100)
-const ADMIN_TOKEN = process.env.AIPE_ADMIN_TOKEN ?? 'letmein'
+const SPACE_DIR = process.env.AIPE_SPACE ?? '.aipehub-open-space'
 
 async function main(): Promise<void> {
-  const hub = new Hub()
+  const initResult = await Space.openOrInit(SPACE_DIR, {
+    name: 'Open Space demo',
+    description: 'Three-role file-first collaborative space',
+    adminDisplayName: 'Operator',
+    config: { webPort: 3100, wsPort: 4100, gating: 'admin-approval' },
+  })
+  const { space, adminToken } = initResult
+
+  const hub = new Hub({ space })
   await hub.start()
 
   hub.onEvent((e) => {
     console.log(`[host][seq=${String(e.seq).padStart(2, '0')}] ${describe(e)}`)
   })
 
-  const ws = await serveWebSocket(hub, { port: WS_PORT, gating: 'admin-approval' })
-  const web = await serveWeb(hub, { port: WEB_PORT, adminToken: ADMIN_TOKEN })
+  const config = await space.config()
+  const ws = await serveWebSocket(hub, { port: config.wsPort, gating: config.gating })
+  const web = await serveWeb(hub, { port: config.webPort })
 
-  console.log(`\n=== AipeHub Open Space ready ===`)
-  console.log(`Admin   : ${web.url}/admin?token=${ADMIN_TOKEN}`)
-  console.log(`Workers : ${web.url}/`)
-  console.log(`Agents  : connect a remote agent to ${ws.url} — it will land in pending until an admin approves it.`)
+  console.log(`\n=== AipeHub Open Space ready (v2.0) ===`)
+  console.log(`Space dir : ${SPACE_DIR}/   (delete to start fresh)`)
+  if (adminToken) {
+    console.log(`Admin     : ${web.url}/admin?token=${adminToken}`)
+    console.log(`            ↑ this token is shown ONCE. Save it now.`)
+  } else {
+    console.log(`Admin     : ${web.url}/admin (use the token you already have)`)
+  }
+  console.log(`Workers   : ${web.url}/`)
+  console.log(`Agents    : connect to ${ws.url} — they will queue for approval`)
   console.log(`\nPress Ctrl-C to stop.\n`)
 
   const shutdown = async () => {
@@ -47,7 +61,6 @@ async function main(): Promise<void> {
   process.on('SIGINT', shutdown)
   process.on('SIGTERM', shutdown)
 
-  // Sleep forever; signals do the cleanup.
   await new Promise<never>(() => { /* never */ })
 }
 

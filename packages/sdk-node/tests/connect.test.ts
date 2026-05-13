@@ -34,7 +34,7 @@ describe('sdk-node — connect', () => {
   let session: Session | undefined
 
   beforeEach(async () => {
-    hub = new Hub()
+    hub = Hub.inMemory()
     await hub.start()
     wsHandle = await serveWebSocket(hub, { port: 0 })
   })

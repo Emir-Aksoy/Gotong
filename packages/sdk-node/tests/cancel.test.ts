@@ -55,7 +55,7 @@ describe('sdk-node — cancel notification', () => {
   let session: Session | undefined
 
   beforeEach(async () => {
-    hub = new Hub()
+    hub = Hub.inMemory()
     await hub.start()
     wsHandle = await serveWebSocket(hub, { port: 0 })
   })

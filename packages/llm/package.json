@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/llm",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "description": "AipeHub LLM agent base — provider interface and LlmAgent for building LLM-backed participants.",
   "license": "MIT",
