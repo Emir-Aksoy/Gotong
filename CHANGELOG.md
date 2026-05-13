@@ -4,6 +4,55 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.0`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — public-deployment hardening
+
+Targets the "open-source it + run a public体验版" milestone.
+
+### Added — security
+- **CSRF defence.** `serveWeb` now accepts `allowedHosts: string[]`. When set, every POST/DELETE is rejected unless the `Host:` header and (if present) the `Origin:` header match the allow-list. Returns 403 on mismatch. Production deployments **must** set this.
+- **SameSite=Strict + Secure cookies** when `cookieSecure: true`. Previously was `SameSite=Lax` even in HTTPS mode.
+- **Rate limiting** on admin token verification — both `/admin?token=…` and Bearer-authenticated admin API calls. Per-IP sliding window, in-memory, configurable via `adminLoginRateLimit: { max, windowSec }` (defaults 10 per 60s; `max: 0` disables).
+- **Security headers** on every response: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, plus a `Content-Security-Policy` that blocks third-party loads.
+
+### Added — operability
+- `GET /healthz` returns `200 ok` for load-balancer / uptime checks.
+- Web server honours `X-Forwarded-For` for client-IP detection (first hop) so the rate limiter is meaningful behind a reverse proxy.
+- Cookie helper uses `Strict` SameSite when secure, `Lax` otherwise.
+
+### Added — admin lifecycle
+- `POST /api/admin/admins { displayName }` mints a fresh admin and returns the plaintext token exactly once. Used for inviting more admins without redeploying.
+- `DELETE /api/admin/admins/:id` revokes another admin. Refuses to remove the last admin or to remove yourself (use `logout` for the latter).
+
+### Added — new package `@aipehub/host`
+- Production binary that runs Hub + WebSocket + Web from environment variables. No demo agents, no test traffic.
+- `aipehub-host` bin entry; runnable via `pnpm host`.
+- Env vars: `AIPE_SPACE`, `AIPE_HOST`, `AIPE_WEB_PORT`, `AIPE_WS_PORT`, `AIPE_GATING`, `AIPE_COOKIE_SECURE`, `AIPE_ALLOWED_HOSTS`, `AIPE_ADMIN_RATE_MAX`, `AIPE_ADMIN_RATE_SEC`, `AIPE_DEFAULT_LANG`, `AIPE_HEARTBEAT_MS`, `AIPE_SPACE_NAME`, `AIPE_ADMIN_DISPLAY_NAME`.
+- Graceful shutdown on SIGINT / SIGTERM: drains SSE clients, closes WS, calls `hub.stop()` before exit.
+
+### Added — federation
+- `TeamBridgeAgent` in `@aipehub/sdk-node`: wraps a local Hub as one agent on an upstream Hub. Forwards tasks downward, reframes results upward with provenance (`localBy`, `localTaskId` in `output`). Optional `mapTask` callback to rewrite dispatch strategy.
+- New example `examples/federated-team` with `upstream-host`, `team-host`, `driver`, and a launcher. Demo target: `pnpm demo:federated-team`.
+- New 4-test suite `packages/sdk-node/tests/bridge.test.ts` covers ok / failed / no_participant / mapTask paths in-process (no WS).
+
+### Added — documentation
+- `docs/DEPLOY.md` — three deployment shapes (Local / LAN / Public), full Caddyfile and systemd unit templates, env-var reference, production checklist.
+- `docs/FEDERATION.md` — Hub-of-Hubs design, result wrapping semantics, recursive bridges.
+- `docs/AGENT.md` — how to write & connect an agent in Node / Python, approval flow, capability conventions, troubleshooting.
+- `docs/HUMAN.md` — admin + worker walkthroughs, multi-admin invite flow, server-side first-token recovery story.
+- `CONTRIBUTING.md` and `SECURITY.md` added at repo root.
+- Top-level `README.md` reorganised around "pick your door" (worker / agent / operator / federation / architecture).
+
+### Added — launch scripts (macOS)
+- `启动-OpenSpace.command` and `重置-OpenSpace.command` (already shipped).
+- `启动-联邦协作.command` for the federation demo.
+
+### Changed
+- `examples/open-space/src/host.ts` now plumbs `config.host` and `config.cookieSecure` into the transport servers. Previously only `port` was wired, so `host` in `config.json` had no effect.
+- `SpaceConfig` gains `cookieSecure: boolean` (default `false`). Backwards-compatible — existing `config.json` files are merged with defaults on read.
+
+### Test stats
+- **143 passed + 2 skipped** (was 139 + 2). sdk-node: 7 → 11 via bridge.test.ts.
+
 ## 2.0.0 — 2026-05-12 — File-first
 
 The hub is now a *directory* on disk. Drop the directory, drop the space. Copy it, copy the space. No process- or browser-resident state to lose.

@@ -36,8 +36,12 @@ async function main(): Promise<void> {
   })
 
   const config = await space.config()
-  const ws = await serveWebSocket(hub, { port: config.wsPort, gating: config.gating })
-  const web = await serveWeb(hub, { port: config.webPort })
+  const ws = await serveWebSocket(hub, { host: config.host, port: config.wsPort, gating: config.gating })
+  const web = await serveWeb(hub, {
+    host: config.host,
+    port: config.webPort,
+    cookieSecure: config.cookieSecure,
+  })
 
   console.log(`\n=== AipeHub Open Space ready (v2.0) ===`)
   console.log(`Space dir : ${SPACE_DIR}/   (delete to start fresh)`)

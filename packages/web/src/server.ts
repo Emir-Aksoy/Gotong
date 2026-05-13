@@ -61,6 +61,30 @@ const COOKIE_MAX_AGE_S = 7 * 24 * 3600
 export interface WebServerOptions {
   port?: number
   host?: string
+  /**
+   * Add `Secure` flag to admin / worker cookies and upgrade SameSite from
+   * `Lax` to `Strict`. Required for production HTTPS deployment (browsers
+   * refuse to send `Secure` cookies over HTTP, so leave this **off** for
+   * local / LAN HTTP development). Default false. Cookies are always
+   * `HttpOnly`.
+   */
+  cookieSecure?: boolean
+  /**
+   * Hostnames the server will accept on the `Host:` and `Origin:` headers
+   * of state-changing requests (POST / DELETE). Reject anything else with
+   * 403. Defaults to "no check" (only safe on localhost-bound dev). For
+   * production, pass `['hub.example.com']` so a third-party page can't
+   * CSRF-trigger admin actions through a logged-in browser. The "host:port"
+   * combination must match exactly; protocol is checked against
+   * `cookieSecure` (https vs http).
+   */
+  allowedHosts?: readonly string[]
+  /**
+   * Per-IP rate limit on admin-token verification (`/admin?token=…`).
+   * Anti-bruteforce. Default `{ max: 10, windowSec: 60 }`. Set `max: 0`
+   * to disable.
+   */
+  adminLoginRateLimit?: { max: number; windowSec: number }
 }
 
 export interface WebServerHandle {
@@ -91,6 +115,10 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
   const space = hub.space
   const host = opts.host ?? '127.0.0.1'
   const port = opts.port ?? 3000
+  const cookieSecure = opts.cookieSecure ?? false
+  const allowedHosts = opts.allowedHosts ? new Set(opts.allowedHosts) : undefined
+  const rateLimitOpts = opts.adminLoginRateLimit ?? { max: 10, windowSec: 60 }
+  const adminLoginLimiter = new RateLimiter(rateLimitOpts.max, rateLimitOpts.windowSec * 1000)
   const sseClients = new Set<SseClient>()
 
   const unsubscribe = hub.onEvent((event) => {
@@ -104,7 +132,14 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     }
   })
 
-  const ctx: HandlerCtx = { hub, space, sseClients }
+  const ctx: HandlerCtx = {
+    hub,
+    space,
+    sseClients,
+    cookieSecure,
+    allowedHosts,
+    adminLoginLimiter,
+  }
 
   const server = createServer((req, res) => {
     handle(ctx, req, res).catch((err) => {
@@ -156,6 +191,99 @@ interface HandlerCtx {
   hub: Hub
   space: Space
   sseClients: Set<SseClient>
+  cookieSecure: boolean
+  allowedHosts: Set<string> | undefined
+  adminLoginLimiter: RateLimiter
+}
+
+/**
+ * Tiny in-memory sliding-window rate limiter — sufficient for the
+ * "small体验版" scale this codebase targets. Behind Caddy the client IP
+ * comes from `X-Forwarded-For` (first hop); on bare localhost it falls
+ * back to `req.socket.remoteAddress`. Replace with Redis when you have
+ * a real fleet.
+ */
+class RateLimiter {
+  private hits = new Map<string, number[]>()
+  constructor(
+    private readonly max: number,
+    private readonly windowMs: number,
+  ) {}
+  /** true if allowed, false if over budget. Records the hit when allowed. */
+  check(key: string): boolean {
+    if (this.max <= 0) return true
+    const now = Date.now()
+    const list = this.hits.get(key) ?? []
+    const fresh = list.filter((t) => now - t < this.windowMs)
+    if (fresh.length >= this.max) {
+      this.hits.set(key, fresh)
+      return false
+    }
+    fresh.push(now)
+    this.hits.set(key, fresh)
+    return true
+  }
+}
+
+const SECURITY_HEADERS: Record<string, string> = {
+  'x-content-type-options': 'nosniff',
+  'x-frame-options': 'DENY',
+  'referrer-policy': 'no-referrer',
+  // Allow inline styles + scripts for the SPA. The static admin/worker
+  // pages are first-party; no third-party loads. CSP could be tightened
+  // further if the SPA is rewritten to drop inline event handlers.
+  'content-security-policy':
+    "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'",
+}
+
+function clientIp(req: IncomingMessage): string {
+  const fwd = req.headers['x-forwarded-for']
+  if (typeof fwd === 'string' && fwd.length > 0) {
+    const first = fwd.split(',')[0]?.trim()
+    if (first) return first
+  }
+  return req.socket.remoteAddress ?? 'unknown'
+}
+
+/**
+ * Reject cross-origin state-changing requests. Defence in depth on top of
+ * SameSite cookies: a misconfigured browser or a same-site subdomain
+ * attacker can sometimes get around SameSite=Lax for top-level POST. The
+ * Origin (or Referer) and Host headers must agree.
+ *
+ * Returns true if request should be allowed, false if rejected (and 403
+ * already written to res).
+ */
+function checkOrigin(
+  ctx: HandlerCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+): boolean {
+  if (!ctx.allowedHosts) return true                   // strict-check disabled
+  const host = req.headers.host
+  if (!host || !ctx.allowedHosts.has(host)) {
+    res.writeHead(403, { 'content-type': 'text/plain' })
+    res.end('forbidden: untrusted host')
+    return false
+  }
+  const origin = req.headers.origin
+  if (origin) {
+    let parsed: URL
+    try { parsed = new URL(origin) } catch {
+      res.writeHead(403, { 'content-type': 'text/plain' }); res.end('forbidden: bad origin'); return false
+    }
+    // protocol must match HTTPS posture, host must be on the allow-list
+    const wantProto = ctx.cookieSecure ? 'https:' : null
+    if (wantProto && parsed.protocol !== wantProto) {
+      res.writeHead(403, { 'content-type': 'text/plain' }); res.end('forbidden: insecure origin'); return false
+    }
+    if (!ctx.allowedHosts.has(parsed.host)) {
+      res.writeHead(403, { 'content-type': 'text/plain' }); res.end('forbidden: cross-origin'); return false
+    }
+  }
+  // No Origin header on same-origin GET-form POSTs is fine; SameSite=Strict
+  // already protects those once we're cookieSecure.
+  return true
 }
 
 async function handle(
@@ -166,6 +294,25 @@ async function handle(
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`)
   const path = url.pathname
   const method = req.method ?? 'GET'
+
+  // Security headers on every response (SSE excluded — no-cache already
+  // disables intermediaries; CSP on SSE breaks nothing but adds nothing)
+  for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v)
+
+  // --- healthz (load balancer / systemd / uptime monitors) ----------------
+  if (path === '/healthz') {
+    res.writeHead(200, { 'content-type': 'text/plain' })
+    res.end('ok')
+    return
+  }
+
+  // --- CSRF defence: writes must originate from an allowed host ---------
+  // GET/HEAD/OPTIONS are exempt (no side effects, browsers won't preflight
+  // simple GETs anyway). For everything else, require Host + Origin match
+  // when allowedHosts is configured.
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS') {
+    if (!checkOrigin(ctx, req, res)) return
+  }
 
   // --- SSE stream ---------------------------------------------------------
   if (method === 'GET' && path === '/api/stream') {
@@ -223,6 +370,12 @@ async function handle(
   if (method === 'GET' && (path === '/admin' || path === '/admin/')) {
     const supplied = url.searchParams.get('token') ?? ''
     if (supplied) {
+      const ip = clientIp(req)
+      if (!ctx.adminLoginLimiter.check(ip)) {
+        res.writeHead(429, { 'content-type': 'text/plain; charset=utf-8', 'retry-after': '60' })
+        res.end('too many login attempts; try again in a minute')
+        return
+      }
       const admin = await ctx.space.verifyAdminToken(supplied)
       if (!admin) {
         res.writeHead(401, { 'content-type': 'text/plain; charset=utf-8' })
@@ -232,7 +385,7 @@ async function handle(
       const sid = randomBytes(24).toString('hex')
       await ctx.space.addAdminSession(sid, admin.id)
       res.writeHead(302, {
-        'set-cookie': cookieValue(ADMIN_COOKIE, sid),
+        'set-cookie': cookieValue(ADMIN_COOKIE, sid, ctx.cookieSecure),
         location: '/admin/',
       })
       res.end()
@@ -253,10 +406,54 @@ async function handle(
     const sid = readCookie(req, ADMIN_COOKIE)
     if (sid) await ctx.space.removeAdminSession(sid)
     res.writeHead(200, {
-      'set-cookie': expireCookie(ADMIN_COOKIE),
+      'set-cookie': expireCookie(ADMIN_COOKIE, ctx.cookieSecure),
       'content-type': 'application/json; charset=utf-8',
     })
     res.end(JSON.stringify({ ok: true }))
+    return
+  }
+
+  // --- admin: invite (mint a new admin) -----------------------------------
+  // Sister-admin onboarding. The current admin POSTs { displayName }; the
+  // server mints a fresh admin row + plaintext token and returns it ONCE.
+  // The current admin shares the token with the invitee out-of-band (Signal /
+  // 1Password / etc) — there is no email step on purpose.
+  if (method === 'POST' && path === '/api/admin/admins') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const body = (await readJsonBody(req).catch(() => ({}))) as { displayName?: string }
+    const displayName = (body.displayName ?? '').trim()
+    if (!displayName) { sendJson(res, { error: 'displayName required' }, 400); return }
+    if (displayName.length > 80) { sendJson(res, { error: 'displayName too long' }, 400); return }
+    const { admin: created, token } = await ctx.space.createAdmin(displayName)
+    sendJson(res, {
+      ok: true,
+      admin: { id: created.id, displayName: created.displayName, createdAt: created.createdAt },
+      token,                // plaintext, shown ONCE
+    })
+    return
+  }
+
+  // --- admin: revoke another admin ---------------------------------------
+  const revokeAdminMatch = path.match(/^\/api\/admin\/admins\/([^/]+)$/)
+  if (method === 'DELETE' && revokeAdminMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const targetId = decodeURIComponent(revokeAdminMatch[1]!)
+    // Don't let an admin lock themselves out by deleting their own row
+    // while sessions still point at it — they can `logout` for that.
+    if (targetId === admin.id) {
+      sendJson(res, { error: 'cannot revoke yourself; use logout' }, 400)
+      return
+    }
+    const remaining = (await ctx.space.admins()).filter((a) => a.id !== targetId)
+    if (remaining.length === 0) {
+      sendJson(res, { error: 'refusing to revoke last admin' }, 400)
+      return
+    }
+    const ok = await ctx.space.removeAdmin(targetId)
+    if (!ok) { sendJson(res, { error: `unknown admin ${targetId}` }, 404); return }
+    sendJson(res, { ok: true })
     return
   }
 
@@ -381,7 +578,7 @@ async function handle(
     const sid = randomBytes(24).toString('hex')
     await ctx.space.addWorkerSession(sid, worker.id)
     res.writeHead(200, {
-      'set-cookie': cookieValue(WORKER_COOKIE, sid),
+      'set-cookie': cookieValue(WORKER_COOKIE, sid, ctx.cookieSecure),
       'content-type': 'application/json; charset=utf-8',
     })
     res.end(JSON.stringify({
@@ -410,7 +607,7 @@ async function handle(
     await ctx.space.removeWorker(id)
     if (sid) await ctx.space.removeWorkerSession(sid)
     res.writeHead(200, {
-      'set-cookie': expireCookie(WORKER_COOKIE),
+      'set-cookie': expireCookie(WORKER_COOKIE, ctx.cookieSecure),
       'content-type': 'application/json; charset=utf-8',
     })
     res.end(JSON.stringify({ ok: true }))
@@ -483,13 +680,19 @@ async function requireAdmin(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<AdminRecord | null> {
-  // Bearer token: verify against admins.json directly (for CLI callers)
+  // Bearer token: verify against admins.json directly (for CLI callers).
+  // Rate-limited like the browser login path — same anti-bruteforce budget.
   const bearer = readBearer(req)
   if (bearer) {
+    if (!ctx.adminLoginLimiter.check(clientIp(req))) {
+      res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+      res.end('too many auth attempts; try again in a minute')
+      return null
+    }
     const admin = await ctx.space.verifyAdminToken(bearer)
     if (admin) return admin
   }
-  // Cookie-based session
+  // Cookie-based session (no rate limit — cookie is already a signed-in proof)
   const sid = readCookie(req, ADMIN_COOKIE)
   const sess = await ctx.space.findAdminSession(sid)
   if (sess) {
@@ -501,11 +704,20 @@ async function requireAdmin(
   return null
 }
 
-function cookieValue(name: string, value: string): string {
-  return `${name}=${value}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${COOKIE_MAX_AGE_S}`
+function cookieValue(name: string, value: string, secure: boolean): string {
+  // Production (HTTPS): Secure + Strict — refuses to send the cookie on any
+  // cross-site navigation, which closes the main remaining CSRF gap that
+  // SameSite=Lax leaves open (top-level GET-form POST).
+  // Dev (HTTP / LAN): no Secure, Lax — allows opening admin URL from email /
+  // chat links during onboarding.
+  const sameSite = secure ? 'Strict' : 'Lax'
+  const sec = secure ? '; Secure' : ''
+  return `${name}=${value}; HttpOnly; SameSite=${sameSite}${sec}; Path=/; Max-Age=${COOKIE_MAX_AGE_S}`
 }
-function expireCookie(name: string): string {
-  return `${name}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`
+function expireCookie(name: string, secure: boolean): string {
+  const sameSite = secure ? 'Strict' : 'Lax'
+  const sec = secure ? '; Secure' : ''
+  return `${name}=; HttpOnly; SameSite=${sameSite}${sec}; Path=/; Max-Age=0`
 }
 
 // --- snapshot / lookup -----------------------------------------------------

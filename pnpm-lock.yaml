@@ -33,6 +33,21 @@ importers:
         specifier: workspace:*
         version: link:../../packages/llm
 
+  examples/federated-team:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/sdk-node':
+        specifier: workspace:*
+        version: link:../../packages/sdk-node
+      '@aipehub/transport-ws':
+        specifier: workspace:*
+        version: link:../../packages/transport-ws
+      '@aipehub/web':
+        specifier: workspace:*
+        version: link:../../packages/web
+
   examples/hello-collab:
     dependencies:
       '@aipehub/core':
@@ -131,6 +146,18 @@ importers:
       vitest:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.41)
+
+  packages/host:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../core
+      '@aipehub/transport-ws':
+        specifier: workspace:*
+        version: link:../transport-ws
+      '@aipehub/web':
+        specifier: workspace:*
+        version: link:../web
 
   packages/llm:
     dependencies:

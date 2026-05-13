@@ -1,0 +1,20 @@
+{
+  "name": "@aipehub/example-federated-team",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Federation demo — a local team Hub (single human leader + a few sub-agents) joins an upstream Hub as one agent, via TeamBridgeAgent.",
+  "scripts": {
+    "start": "tsx src/launcher.ts",
+    "upstream": "tsx src/upstream-host.ts",
+    "team": "tsx src/team-host.ts",
+    "driver": "tsx src/driver.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/transport-ws": "workspace:*",
+    "@aipehub/sdk-node": "workspace:*",
+    "@aipehub/web": "workspace:*"
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "@aipehub/host",
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Production host binary for AipeHub — runs Hub + WebSocket + Web from environment variables. No demo state, no built-in agents.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AipeHub/AipeHub.git",
+    "directory": "packages/host"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "aipehub-host": "./bin/aipehub-host.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "bin", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "tsx src/main.ts",
+    "prepack": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/transport-ws": "workspace:*",
+    "@aipehub/web": "workspace:*"
+  }
+}

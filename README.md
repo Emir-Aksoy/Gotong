@@ -14,27 +14,51 @@ AipeHub is not an agent. It is a **communication space**: a registry, a message 
 
 ## Status
 
-**v2.0 — File-first.** A workspace is a directory on disk (`.aipehub/`). Drop the directory, drop the space. Copy it, hand the room to a teammate. Three role-distinct entry points (admin / worker / agent) keep working across hub restarts because admins, workers, sessions, transcript, and pending admissions are all files. No process-memory or browser-storage state — only HttpOnly cookies that point at rows on disk.
+**v2.0 — File-first.** A workspace is a directory on disk (`.aipehub/`). Drop the directory, drop the space. Copy it, hand the room to a teammate. Admins, workers, sessions, transcript, and pending admissions are all files; HttpOnly cookies are the only browser-side state. Restarts are transparent.
 
-See [CHANGELOG.md](CHANGELOG.md) for the v0.0 → v2.0 path and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design. Wire protocol stays at `1.0`, documented in [docs/PROTOCOL.md](docs/PROTOCOL.md).
+The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI. License: [MIT](LICENSE).
 
-The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI.
+## Pick your door
 
-## Quick start
+| You are… | Read this | TL;DR |
+|---|---|---|
+| 🧑 **A worker / admin joining a room** | [`docs/HUMAN.md`](docs/HUMAN.md) | Open the URL the operator gave you; pick a nickname; you're in. |
+| 🤖 **Writing an agent to plug in** | [`docs/AGENT.md`](docs/AGENT.md) | `@aipehub/sdk-node` or Python `aipehub`. Subclass `AgentParticipant`. |
+| 🔧 **Running the server** | [`docs/DEPLOY.md`](docs/DEPLOY.md) | `pnpm host` for local, Caddy + systemd for public. |
+| 🪢 **Joining one hub to another** | [`docs/FEDERATION.md`](docs/FEDERATION.md) | `TeamBridgeAgent` — local team appears upstream as one agent. |
+| 🧠 **Designing on top of it** | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) + [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | Hub is dumb on purpose; wire protocol is v1.0. |
+
+Contributing? See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security issues: [`SECURITY.md`](SECURITY.md). Version history: [`CHANGELOG.md`](CHANGELOG.md).
+
+## Quick start — pick a demo
 
 ```bash
 pnpm install
-pnpm demo               # two mock agents and a mock human collaborate
-pnpm demo:broadcast     # three reviewers race, losers get cancelled
-pnpm demo:persist:fresh && pnpm demo:persist:resume               # JSONL transcript across restarts
-pnpm demo:persist:sqlite:fresh && pnpm demo:persist:sqlite:resume # SQLite transcript across restarts
-pnpm demo:web           # web UI + writer agent + alice (browse to localhost:3000)
-pnpm demo:remote        # host + worker in separate processes over WebSocket
-pnpm demo:remote:python # Node host + Python worker (cross-language demo)
-pnpm demo:cli-human     # terminal-as-human approval loop (AIPE_AUTO=1 for non-TTY)
-pnpm demo:llm           # LlmAgent + mock provider (no API key needed)
-pnpm demo:llm:real      # LlmAgent + real Claude/GPT (needs ANTHROPIC_API_KEY/OPENAI_API_KEY)
-pnpm demo:open-space    # v1.1: Hub + WS admission gating + admin/worker web UI
+pnpm build
+
+# in-process demos (no network)
+pnpm demo                # two mock agents + one mock human
+pnpm demo:broadcast      # three reviewers race, losers cancelled
+
+# persistence demos
+pnpm demo:persist:fresh && pnpm demo:persist:resume
+pnpm demo:persist:sqlite:fresh && pnpm demo:persist:sqlite:resume
+
+# remote agents
+pnpm demo:remote         # host + worker in separate processes
+pnpm demo:remote:python  # Node host + Python worker (cross-language)
+pnpm demo:cli-human      # terminal-as-human approval loop
+
+# LLM-backed agents
+pnpm demo:llm            # LlmAgent + mock provider (no API key needed)
+pnpm demo:llm:real       # real Claude/GPT (needs ANTHROPIC_API_KEY/OPENAI_API_KEY)
+
+# v2.0 full stack — web UI + agent admission + tasks panel
+pnpm demo:open-space
+pnpm demo:federated-team # one Hub joins another Hub as a single agent
+
+# production binary (env-driven, no demo data)
+pnpm host                # see docs/DEPLOY.md for the env vars
 ```
 
 ## Embedded — everything in one process
@@ -166,9 +190,10 @@ Full runnable demo in [`examples/open-space`](examples/open-space). `pnpm demo:o
 |---|---|
 | `@aipehub/core` | Hub, registry, scheduler, transcript, storage, Participant base classes |
 | `@aipehub/web` | Embeddable reference UI (HTTP + SSE + vanilla SPA) |
+| `@aipehub/host` | Production binary — env-driven, no demo state, ships `aipehub-host` |
 | `@aipehub/protocol` | Wire-protocol types + codec (zero runtime) |
 | `@aipehub/transport-ws` | Hub-side WebSocket transport |
-| `@aipehub/sdk-node` | Node SDK for remote agents |
+| `@aipehub/sdk-node` | Node SDK for remote agents (also exports `TeamBridgeAgent`) |
 | `@aipehub/llm` | `LlmAgent` base class + `LlmProvider` interface + `MockLlmProvider` |
 | `@aipehub/llm-anthropic` | Anthropic Claude provider (peer dep: `@anthropic-ai/sdk`) |
 | `@aipehub/llm-openai` | OpenAI provider (peer dep: `openai`) |

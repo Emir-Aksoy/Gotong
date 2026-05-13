@@ -365,6 +365,14 @@ export interface SpaceConfig {
   heartbeatIntervalMs: number
   gating: 'open' | 'admin-approval'
   defaultLang: 'zh' | 'en'
+  /**
+   * When true, admin / worker cookies carry the `Secure` flag so browsers
+   * only send them over HTTPS. Turn this on for any production deployment
+   * fronted by TLS (Caddy / nginx / Cloudflare). Leave false for local /
+   * LAN HTTP — `Secure` over HTTP makes browsers silently drop the cookie
+   * and login appears to "succeed but never stick".
+   */
+  cookieSecure: boolean
 }
 
 export const DEFAULT_CONFIG: SpaceConfig = {
@@ -374,6 +382,7 @@ export const DEFAULT_CONFIG: SpaceConfig = {
   heartbeatIntervalMs: 30_000,
   gating: 'admin-approval',
   defaultLang: 'zh',
+  cookieSecure: false,
 }
 
 export interface AdminRecord {
