@@ -43,6 +43,10 @@
     pendingApplications: [],
     tasks: [],
     known: { admins: [], workers: [] },
+    // Task cards remember their expanded/collapsed state across re-renders.
+    // Plain `Set<TaskId>` — wiped on reload (no localStorage), restored by
+    // clicking transcript rows or the card head again. Memory-only.
+    expandedTasks: new Set(),
   }
 
   // Per-tab filter on the task panel; cleared on reload (no browser storage)
@@ -385,8 +389,10 @@
       return
     }
     for (const v of filtered) {
+      const isOpen = state.expandedTasks.has(v.id)
       const div = document.createElement('div')
-      div.className = `task-card task-${v.status}`
+      div.className = `task-card task-${v.status}` + (isOpen ? ' expanded' : '')
+      div.dataset.taskId = v.id
       const statusLabel =
         v.status === 'pending'   ? t.taskStatusPending
       : v.status === 'done'      ? t.taskStatusDone
@@ -399,20 +405,25 @@
       : s.kind === 'capability' ? `caps=[${s.capabilities.join(',')}]`
       :                            'broadcast'
       const canRetry = v.status === 'failed' || v.status === 'cancelled'
-      div.innerHTML =
-        `<div class="task-head">` +
+      const caret = isOpen ? '▾' : '▸'
+      const headHtml =
+        `<div class="task-head" data-act="toggle-task" data-id="${escapeHtml(v.id)}" role="button" tabindex="0" aria-expanded="${isOpen ? 'true' : 'false'}">` +
+          `<span class="task-caret">${caret}</span>` +
           `<span class="task-status task-status-${v.status}">${escapeHtml(statusLabel)}</span>` +
           `<span class="task-title">${escapeHtml(title)}</span>` +
           `<span class="task-strategy">${escapeHtml(s.kind)} · ${escapeHtml(target)}</span>` +
-        `</div>` +
+        `</div>`
+      const metaHtml =
         `<div class="task-metrics">${taskMetricsHtml(v)}</div>` +
         `<div class="task-meta">` +
-          `<code class="task-id" data-act="copy-task-id" data-id="${escapeHtml(v.id)}" title="click to fill the evaluation form">${escapeHtml(v.id.slice(0, 8))}…</code>` +
+          `<code class="task-id" data-act="copy-task-id" data-id="${escapeHtml(v.id)}" title="${escapeHtml(t.taskIdHint)}">${escapeHtml(v.id.slice(0, 8))}…</code>` +
           (v.result ? ` · ${escapeHtml(resultSummary(v.result))}` : '') +
-        `</div>` +
-        (canRetry
-          ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml(v.id)}">${escapeHtml(t.retry)}</button></div>`
-          : '')
+        `</div>`
+      const retryHtml = canRetry
+        ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml(v.id)}">${escapeHtml(t.retry)}</button></div>`
+        : ''
+      const detailHtml = isOpen ? renderTaskDetail(v) : ''
+      div.innerHTML = headHtml + metaHtml + retryHtml + detailHtml
       root.appendChild(div)
     }
   }
@@ -422,6 +433,214 @@
     if (r.kind === 'failed') return t.sumFailed(r.by, r.error)
     if (r.kind === 'cancelled') return t.sumCancelled(r.reason)
     return t.sumNoParticipant(r.reason)
+  }
+
+  // ── Task detail panel ─────────────────────────────────────────────────
+  //
+  // Rendered inline inside an expanded `.task-card`. Shows:
+  //   • timing summary (created → completed, duration)
+  //   • payload (JSON pretty-printed, collapsed-by-default <details>)
+  //   • output (LLM-shape gets the prose unwrapped; everything else falls
+  //     back to JSON. Token usage / stop reason show as a meta line.)
+  //   • existing evaluations (rating + comment + timestamp)
+  //   • inline evaluation form (re-uses POST /api/admin/evaluate)
+  //
+  // All data comes from the snapshot's `state.tasks` view — no extra HTTP
+  // round-trip is needed to open a card.
+
+  function renderTaskDetail(v) {
+    const sections = []
+
+    // timing
+    const created = new Date(v.createdAt).toLocaleString()
+    const completed = v.completedAt ? new Date(v.completedAt).toLocaleString() : '—'
+    const dur = v.completedAt ? formatDuration(v.completedAt - v.createdAt) : '—'
+    sections.push(
+      `<div class="task-detail-section task-detail-timing">` +
+        `<span><strong>${escapeHtml(t.detailCreated)}</strong> ${escapeHtml(created)}</span>` +
+        `<span><strong>${escapeHtml(t.detailCompleted)}</strong> ${escapeHtml(completed)}</span>` +
+        `<span><strong>${escapeHtml(t.detailDuration)}</strong> ${escapeHtml(dur)}</span>` +
+      `</div>`
+    )
+
+    // payload
+    sections.push(
+      `<details class="task-detail-section" open>` +
+        `<summary>${escapeHtml(t.detailPayload)}</summary>` +
+        `<pre class="task-detail-pre">${escapeHtml(formatJsonPretty(v.task.payload))}</pre>` +
+      `</details>`
+    )
+
+    // output (only when there's a result)
+    if (v.result) {
+      sections.push(renderResultBlock(v.result))
+    }
+
+    // existing evaluations
+    if (Array.isArray(v.evaluations) && v.evaluations.length > 0) {
+      const rows = v.evaluations.map((ev) => {
+        const when = ev.ts ? new Date(ev.ts).toLocaleString() : ''
+        const rating = typeof ev.rating === 'number' ? `★ ${formatScore(ev.rating)}/5` : t.detailCommentOnly
+        const comment = ev.comment ? escapeHtml(ev.comment) : ''
+        const author = ev.from ? `<code>${escapeHtml(ev.from)}</code>` : ''
+        return `<li>` +
+          `<span class="ev-rating">${escapeHtml(rating)}</span>` +
+          (author ? ` <span class="ev-from">${author}</span>` : '') +
+          (when ? ` <span class="ev-ts">${escapeHtml(when)}</span>` : '') +
+          (comment ? `<div class="ev-comment">${comment}</div>` : '') +
+          `</li>`
+      }).join('')
+      sections.push(
+        `<details class="task-detail-section" open>` +
+          `<summary>${escapeHtml(t.detailEvaluations)} (${v.evaluations.length})</summary>` +
+          `<ul class="task-detail-evals">${rows}</ul>` +
+        `</details>`
+      )
+    }
+
+    // inline eval form (only meaningful once the task has a result)
+    if (v.status === 'done' || v.status === 'failed') {
+      sections.push(renderInlineEvalForm(v.id))
+    }
+
+    return `<div class="task-detail">${sections.join('')}</div>`
+  }
+
+  function renderResultBlock(r) {
+    // LLM-shape: { text, stopReason, usage, by }. Unwrap the prose so it's
+    // readable; show meta on a second line. Everything else falls back to
+    // pretty-printed JSON.
+    if (r.kind === 'ok') {
+      const out = r.output
+      if (out && typeof out === 'object' && typeof out.text === 'string') {
+        const meta = []
+        if (out.by) meta.push(`${escapeHtml(t.detailBy)} <code>${escapeHtml(out.by)}</code>`)
+        if (out.stopReason) meta.push(`${escapeHtml(t.detailStopReason)} ${escapeHtml(out.stopReason)}`)
+        if (out.usage) {
+          const u = out.usage
+          const tokens = []
+          if (typeof u.inputTokens === 'number') tokens.push(`in ${u.inputTokens}`)
+          if (typeof u.outputTokens === 'number') tokens.push(`out ${u.outputTokens}`)
+          if (tokens.length) meta.push(`${escapeHtml(t.detailUsage)} ${escapeHtml(tokens.join(' / '))}`)
+        }
+        return (
+          `<details class="task-detail-section" open>` +
+            `<summary>${escapeHtml(t.detailOutput)}</summary>` +
+            (meta.length ? `<div class="task-detail-meta">${meta.join(' · ')}</div>` : '') +
+            `<pre class="task-detail-pre task-detail-text">${escapeHtml(out.text)}</pre>` +
+          `</details>`
+        )
+      }
+      return (
+        `<details class="task-detail-section" open>` +
+          `<summary>${escapeHtml(t.detailOutput)}</summary>` +
+          `<div class="task-detail-meta">${escapeHtml(t.detailBy)} <code>${escapeHtml(r.by)}</code></div>` +
+          `<pre class="task-detail-pre">${escapeHtml(formatJsonPretty(out))}</pre>` +
+        `</details>`
+      )
+    }
+    // failed / cancelled / no-participant → show the reason / error
+    const summary = resultSummary(r)
+    return (
+      `<div class="task-detail-section task-detail-error">` +
+        `<strong>${escapeHtml(t.detailOutput)}</strong> ${escapeHtml(summary)}` +
+      `</div>`
+    )
+  }
+
+  function renderInlineEvalForm(taskId) {
+    // No <form> element — submit is a button click handler (data-act). Keeps
+    // us out of nested-form trouble and lets the same global click delegator
+    // pick it up.
+    return (
+      `<div class="task-detail-section task-detail-eval">` +
+        `<strong>${escapeHtml(t.detailEvaluate)}</strong>` +
+        `<div class="inline-eval-row">` +
+          `<label>${escapeHtml(t.evaluateRating)}` +
+            `<input type="number" min="0" max="5" step="0.1" data-inline-eval-rating="${escapeHtml(taskId)}" />` +
+          `</label>` +
+          `<label class="inline-eval-comment-label">${escapeHtml(t.evaluateComment)}` +
+            `<textarea rows="2" data-inline-eval-comment="${escapeHtml(taskId)}"></textarea>` +
+          `</label>` +
+        `</div>` +
+        `<div class="inline-eval-actions">` +
+          `<button data-act="inline-eval-submit" data-id="${escapeHtml(taskId)}">${escapeHtml(t.evaluateButton)}</button>` +
+          `<span class="inline-eval-msg" data-inline-eval-msg="${escapeHtml(taskId)}"></span>` +
+        `</div>` +
+      `</div>`
+    )
+  }
+
+  function formatJsonPretty(value) {
+    try {
+      return JSON.stringify(value, null, 2)
+    } catch (err) {
+      return String(value)
+    }
+  }
+
+  function formatDuration(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return '—'
+    if (ms < 1000) return `${ms} ms`
+    const s = Math.round(ms / 100) / 10
+    if (s < 60) return `${s.toFixed(1)} s`
+    const m = Math.floor(s / 60)
+    const rem = Math.round(s - m * 60)
+    return `${m}m ${rem}s`
+  }
+
+  async function submitInlineEval(taskId, btn) {
+    const card = btn.closest('.task-card')
+    if (!card) return
+    const ratingEl = card.querySelector(`[data-inline-eval-rating="${CSS.escape(taskId)}"]`)
+    const commentEl = card.querySelector(`[data-inline-eval-comment="${CSS.escape(taskId)}"]`)
+    const msgEl = card.querySelector(`[data-inline-eval-msg="${CSS.escape(taskId)}"]`)
+    if (msgEl) {
+      msgEl.textContent = ''
+      msgEl.classList.remove('ok', 'err')
+    }
+    const ratingStr = (ratingEl?.value ?? '').trim()
+    const rating = ratingStr ? Number(ratingStr) : undefined
+    const comment = (commentEl?.value ?? '').trim() || undefined
+    if (rating == null && !comment) {
+      if (msgEl) {
+        msgEl.textContent = t.evaluateEmpty
+        msgEl.classList.add('err')
+      }
+      return
+    }
+    btn.disabled = true
+    try {
+      await fetchJson('/api/admin/evaluate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ taskId, rating, comment }),
+      })
+      if (msgEl) {
+        msgEl.textContent = t.evaluateSuccess
+        msgEl.classList.add('ok')
+      }
+      if (commentEl) commentEl.value = ''
+      // Re-render happens automatically when the `evaluation` SSE event
+      // hits — the new row appears in the list above.
+    } catch (err) {
+      if (msgEl) {
+        msgEl.textContent = t.failedAlert(err.message || String(err))
+        msgEl.classList.add('err')
+      }
+    } finally {
+      btn.disabled = false
+    }
+  }
+
+  function expandTaskAndScroll(taskId) {
+    state.expandedTasks.add(taskId)
+    renderTasks()
+    requestAnimationFrame(() => {
+      const sel = `.task-card[data-task-id="${CSS.escape(taskId)}"]`
+      const card = document.querySelector(sel)
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
   }
 
   // --- managed agents (v2.1) ---------------------------------------------
@@ -1486,32 +1705,52 @@
 
     document.addEventListener('click', async (e) => {
       const target = e.target
-      // Click a task_result row → autofill evaluation form + jump to
-      // the Tasks tab (the eval form lives there now after the tab
-      // split, otherwise the autofill would be invisible).
-      if (target instanceof HTMLElement && target.dataset.taskid) {
-        dom.eTask.value = target.dataset.taskid
-        gotoTab('tasks')
-        return
-      }
       if (!(target instanceof HTMLElement)) return
-      const act = target.dataset.act
-      const id = target.dataset.id
-      if (!act || !id) return
-      // copy task id to the evaluation form on click — same cross-tab
-      // jump as the transcript-row case above so the autofill is
-      // actually visible in the Tasks tab.
+      // Walk up from the click target to find an actionable ancestor —
+      // lets clicks on inner spans (e.g. .task-caret, .task-title) hit
+      // the .task-head handler instead of falling through.
+      const actEl = target.closest('[data-act]')
+      const act = actEl instanceof HTMLElement ? actEl.dataset.act : undefined
+      const id = actEl instanceof HTMLElement ? actEl.dataset.id : undefined
+      // Click a task_result row in the transcript → jump to the Tasks
+      // tab, expand that task's card, and scroll it into view. Also
+      // autofill the global eval form (kept as a fallback for power
+      // users who prefer typing IDs).
+      const taskRowEl = target.closest('[data-taskid]')
+      if (taskRowEl instanceof HTMLElement && taskRowEl.dataset.taskid) {
+        const tid = taskRowEl.dataset.taskid
+        if (dom.eTask) dom.eTask.value = tid
+        gotoTab('tasks')
+        expandTaskAndScroll(tid)
+        return
+      }
+      if (!act) return
+      // Toggle a task card's expanded state. Targets a row with
+      // data-act="toggle-task" data-id="<taskId>".
+      if (act === 'toggle-task' && id) {
+        if (state.expandedTasks.has(id)) state.expandedTasks.delete(id)
+        else state.expandedTasks.add(id)
+        renderTasks()
+        return
+      }
+      if (act === 'inline-eval-submit' && id && actEl instanceof HTMLButtonElement) {
+        await submitInlineEval(id, actEl)
+        return
+      }
+      if (!id) return
+      // copy task id to the (global) evaluation form on click — same
+      // cross-tab jump as the transcript-row case above.
       if (act === 'copy-task-id') {
-        dom.eTask.value = id
+        if (dom.eTask) dom.eTask.value = id
         gotoTab('tasks')
         return
       }
-      if (target instanceof HTMLButtonElement) target.disabled = true
+      if (actEl instanceof HTMLButtonElement) actEl.disabled = true
       try {
         if (act === 'approve-app') {
           await approveApp(id)
         } else if (act === 'reject-app') {
-          const card = target.closest('.pending-app-card')
+          const card = actEl.closest('.pending-app-card')
           const reasonInput = card?.querySelector('.reject-reason')
           const reason = reasonInput?.value?.trim() || ''
           await rejectApp(id, reason)
@@ -1520,7 +1759,7 @@
         }
       } catch (err) {
         alert(t.failedAlert(err.message || String(err)))
-        if (target instanceof HTMLButtonElement) target.disabled = false
+        if (actEl instanceof HTMLButtonElement) actEl.disabled = false
       }
     })
 
