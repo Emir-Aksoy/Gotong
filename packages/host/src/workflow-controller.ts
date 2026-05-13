@@ -129,6 +129,48 @@ export class WorkflowController {
     return out
   }
 
+  /**
+   * Unregister a workflow runner and delete its backing YAML file.
+   *
+   * Three-step removal, each step best-effort but ordered so a partial
+   * failure leaves the most sensible state:
+   *
+   *   1. unregister the participant from the Hub (so no new task lands)
+   *   2. delete the on-disk file (so a restart doesn't re-load it)
+   *   3. drop from the in-memory index
+   *
+   * If step 1 fails (workflow doesn't exist), we throw and don't touch
+   * disk. If step 2 fails (file already gone, permissions), we still
+   * complete step 3 — the user clearly wants this workflow gone, and
+   * the participant is already off the Hub.
+   *
+   * In-flight tasks already dispatched to this runner are NOT cancelled;
+   * the Hub's normal flow lets them finish. Future invocations of the
+   * trigger capability will get `no_participant`.
+   */
+  async remove(id: string): Promise<void> {
+    const w = this.known.get(id)
+    if (!w) {
+      throw new Error(`workflow '${id}' is not loaded`)
+    }
+    const removed = this.hub.unregister(w.participantId)
+    if (!removed) {
+      // Out-of-sync: known map says it's there but Hub doesn't agree.
+      // Drop the bookkeeping anyway and try to clean the file too.
+      this.known.delete(id)
+      if (w.file) {
+        try { unlinkSync(w.file) } catch { /* ignore */ }
+      }
+      throw new Error(
+        `workflow '${id}' was not on the Hub — in-memory index has been resynced. Try again.`,
+      )
+    }
+    if (w.file) {
+      try { unlinkSync(w.file) } catch { /* the user can rm it manually if needed */ }
+    }
+    this.known.delete(id)
+  }
+
   async importFromText(text: string): Promise<WorkflowSummary> {
     const def = parseWorkflow(text)
     if (this.known.has(def.id)) {

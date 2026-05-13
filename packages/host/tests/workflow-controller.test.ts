@@ -116,4 +116,34 @@ describe('WorkflowController', () => {
     expect(summary.file).toMatch(/team__editorial\.yaml$/)
     expect(existsSync(summary.file!)).toBe(true)
   })
+
+  describe('remove()', () => {
+    it('unregisters the runner and deletes the YAML file', async () => {
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      const summary = await c.importFromText(SAMPLE)
+      expect(hub.registry.get('workflow:editorial')).toBeDefined()
+      expect(existsSync(summary.file!)).toBe(true)
+
+      await c.remove('editorial')
+
+      expect(hub.registry.get('workflow:editorial')).toBeUndefined()
+      expect(existsSync(summary.file!)).toBe(false)
+      expect(await c.list()).toEqual([])
+    })
+
+    it('throws on unknown id', async () => {
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      await expect(c.remove('nope')).rejects.toThrow(/not loaded/)
+    })
+
+    it('allows re-importing after removal', async () => {
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      await c.importFromText(SAMPLE)
+      await c.remove('editorial')
+      // No longer in the way — reimport should succeed.
+      const summary = await c.importFromText(SAMPLE)
+      expect(summary.id).toBe('editorial')
+      expect(hub.registry.get('workflow:editorial')).toBeDefined()
+    })
+  })
 })

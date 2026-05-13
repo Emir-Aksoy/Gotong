@@ -73,6 +73,24 @@ export interface SimpleStep {
   dispatch: DispatchSpec
   /** Per-step retry / continue policy. Defaults to the workflow-level one. */
   onFailure?: StepFailurePolicy
+  /**
+   * Optional predicate string. If present and evaluates to **false** at
+   * the moment this step is about to run, the step is recorded as
+   * `skipped` and `dispatch` is NOT called. Skipped steps have
+   * `output: undefined`, which propagates through `$ref`s the same way
+   * a `continue`-style failure does.
+   *
+   * Grammar (kept deliberately small — see `predicate.ts`):
+   *
+   *   when: $trigger.payload.priority == "high"
+   *   when: $step1.output.ok == true && $trigger.payload.urgent != false
+   *   when: !($step1.output.skip == true)
+   *
+   * Operands: `$ref` paths (resolved via the same resolver as `payload`)
+   * OR literals (`"string"`, numbers, `true`, `false`, `null`). Operators:
+   * `==`, `!=`, `&&`, `||`, `!`, and parens. No arithmetic, no functions.
+   */
+  when?: string
 }
 
 export interface ParallelStep {
@@ -82,6 +100,8 @@ export interface ParallelStep {
   parallel: true
   branches: Branch[]
   onFailure?: StepFailurePolicy
+  /** See `SimpleStep.when` — applies to the whole parallel fan-out. */
+  when?: string
 }
 
 export interface Branch {

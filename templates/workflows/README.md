@@ -68,6 +68,12 @@ workflow:
         - id: b
           dispatch: { ... }
 
+    - id: notify-boss                  # 条件执行（v0.2）
+      when: $trigger.payload.priority == "high"
+      dispatch:
+        strategy: { kind: capability, capabilities: [notify] }
+        payload: ...
+
   output:                              # 最终返回给 admin 的内容
     result: $step2.output
     side: $fanout.a.output
@@ -95,6 +101,33 @@ workflow:
 | `retry` + `max: N` | 该步重试最多 N 次再判定 |
 
 `onFailure` 可写在 step 级，也可写在 workflow 顶层。step 级优先。
+
+### 条件执行 `when:`（v0.2）
+
+每个 step（包括 parallel 步）都可以加一个 `when:` 表达式。
+**为 `false` 时该步被跳过，downstream 用 `$step.output` 引用会得到 `undefined`**。
+
+```yaml
+- id: notify-boss
+  when: $trigger.payload.priority == "high" && $analyze.output.score != 0
+  dispatch: ...
+```
+
+支持的语法（故意小而精）：
+
+| 类型 | 语法 |
+|---|---|
+| 引用 | `$trigger.payload.foo` / `$stepId.output.bar` |
+| 字面量 | `"string"` / `123` / `true` / `false` / `null` |
+| 比较 | `==`、`!=`（**严格类型**，`1 == "1"` 为 false）|
+| 布尔 | `&&`、`\|\|`、`!`（短路）|
+| 分组 | `( ... )` |
+
+**故意不支持**：算术（`+`、`-`、`*`）、大小比较（`<`、`>`）、函数调用、数组/对象字面量。
+`when` 是闸门不是计算 —— 如果想做计算，写一个步。
+
+错误的 `when` 表达式在导入时（`parseWorkflow`）就会被拒，不会等到运行时才崩。
+缺失的 ref（`$nope.output`）当 `undefined` 处理，不抛错 —— 这样易用，跟"没跑过"的 step 行为一致。
 
 ## 文件落盘
 

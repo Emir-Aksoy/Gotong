@@ -7,6 +7,13 @@ export {
   WorkflowSchemaError,
   WorkflowRefError,
 } from './types.js'
+
+export {
+  WorkflowPredicateError,
+  parsePredicate,
+  evaluatePredicate,
+  CompiledPredicate,
+} from './predicate.js'
 export type {
   WorkflowDefinition,
   TriggerSpec,

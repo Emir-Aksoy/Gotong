@@ -131,6 +131,10 @@
       workflowStepsLabel: (n) => `${n} 步`,
       workflowTriggerLabel: '触发能力',
       workflowImportDone: (id) => `已导入 workflow:${id}，立刻可用。文件已写入 definitions/。`,
+      workflowRemoveBtn: '移除',
+      confirmRemoveWorkflow: (id) =>
+        `确定要移除 workflow "${id}" 吗？runner 立刻下线，YAML 文件会被删除（不可恢复）。已派出未完成的任务会照常跑完。`,
+      workflowRemoveDone: (id) => `已移除 workflow:${id}`,
       doImport: '导入',
       editAgent: '编辑智能体',
       save: '保存',
@@ -321,6 +325,10 @@
       workflowStepsLabel: (n) => `${n} step${n === 1 ? '' : 's'}`,
       workflowTriggerLabel: 'Trigger capability',
       workflowImportDone: (id) => `Imported workflow:${id}. Ready to dispatch. File saved to definitions/.`,
+      workflowRemoveBtn: 'Remove',
+      confirmRemoveWorkflow: (id) =>
+        `Remove workflow "${id}"? The runner goes offline immediately and the YAML file will be deleted (no recovery). In-flight tasks already dispatched finish normally.`,
+      workflowRemoveDone: (id) => `Removed workflow:${id}`,
       doImport: 'Import',
       editAgent: 'Edit agent',
       save: 'Save',

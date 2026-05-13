@@ -437,3 +437,161 @@ describe('WorkflowRunner — file-first persistence', () => {
     expect(ids).toEqual(['run-1', 'run-2'])
   })
 })
+
+describe('WorkflowRunner — conditional branches (when)', () => {
+  it('skips a step whose `when` evaluates to false; downstream refs see undefined', async () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: cond
+  trigger: { capability: go }
+  steps:
+    - id: prep
+      dispatch:
+        strategy: { kind: capability, capabilities: [prep] }
+        payload: $trigger.payload
+    - id: maybe-notify
+      when: $trigger.payload.urgent == true
+      dispatch:
+        strategy: { kind: capability, capabilities: [notify] }
+        payload: $prep.output
+    - id: finalize
+      dispatch:
+        strategy: { kind: capability, capabilities: [finalize] }
+        payload:
+          prep_out: $prep.output
+          notify_out: $maybe-notify.output
+  output: $finalize.output
+`
+    const def = parseWorkflow(yaml)
+    const { hub, calls } = makeStubHub((call) => {
+      if (call.strategy.kind === 'capability' && call.strategy.capabilities[0] === 'prep') {
+        return ok(nextTaskId(), 'PREPPED', 'prep-bot')
+      }
+      if (call.strategy.kind === 'capability' && call.strategy.capabilities[0] === 'notify') {
+        return ok(nextTaskId(), 'NOTIFIED', 'notify-bot')
+      }
+      return ok(nextTaskId(), { final: true, notify_out: call.payload }, 'final-bot')
+    })
+
+    // urgent: false → maybe-notify should be skipped
+    const runner = new WorkflowRunner({ definition: def, hub })
+    const out = await runner.onTask(makeTask({ urgent: false }))
+    if (out.kind !== 'ok') throw new Error('expected ok')
+
+    // 2 calls only — prep + finalize. notify is skipped.
+    expect(calls).toHaveLength(2)
+    expect(calls[0]!.strategy).toEqual({ kind: 'capability', capabilities: ['prep'] })
+    expect(calls[1]!.strategy).toEqual({ kind: 'capability', capabilities: ['finalize'] })
+    // The finalize payload threaded $maybe-notify.output → undefined
+    expect(calls[1]!.payload).toEqual({
+      prep_out: 'PREPPED',
+      notify_out: undefined,
+    })
+  })
+
+  it('runs the step when `when` is true', async () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: cond2
+  trigger: { capability: go }
+  steps:
+    - id: notify
+      when: $trigger.payload.urgent == true
+      dispatch:
+        strategy: { kind: capability, capabilities: [notify] }
+        payload: hi
+  output: $notify.output
+`
+    const def = parseWorkflow(yaml)
+    const { hub, calls } = makeStubHub(() => ok(nextTaskId(), 'NOTIFIED', 'mock'))
+    const runner = new WorkflowRunner({ definition: def, hub })
+    const out = await runner.onTask(makeTask({ urgent: true }))
+    if (out.kind !== 'ok') throw new Error('expected ok')
+    expect(out.output).toBe('NOTIFIED')
+    expect(calls).toHaveLength(1)
+  })
+
+  it('skips a parallel step when its `when` is false', async () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: cond-parallel
+  trigger: { capability: go }
+  steps:
+    - id: fanout
+      when: $trigger.payload.do_fanout == true
+      parallel: true
+      branches:
+        - id: a
+          dispatch:
+            strategy: { kind: capability, capabilities: [x] }
+            payload: 1
+        - id: b
+          dispatch:
+            strategy: { kind: capability, capabilities: [y] }
+            payload: 2
+    - id: tail
+      dispatch:
+        strategy: { kind: capability, capabilities: [tail] }
+        payload: { upstream: $fanout.output }
+  output: $tail.output
+`
+    const def = parseWorkflow(yaml)
+    const { hub, calls } = makeStubHub(() => ok(nextTaskId(), 'TAIL', 'tail-bot'))
+    const runner = new WorkflowRunner({ definition: def, hub })
+    const out = await runner.onTask(makeTask({ do_fanout: false }))
+    if (out.kind !== 'ok') throw new Error('expected ok')
+    expect(calls).toHaveLength(1) // only tail
+    expect(calls[0]!.payload).toEqual({ upstream: undefined })
+  })
+
+  it('schema rejects an invalid `when` predicate at parse time', () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: bad-when
+  trigger: { capability: go }
+  steps:
+    - id: s1
+      when: $trigger.payload.x ==
+      dispatch:
+        strategy: { kind: capability, capabilities: [x] }
+        payload: hi
+`
+    expect(() => parseWorkflow(yaml)).toThrow(/not a valid predicate/)
+  })
+
+  it('records a runtime when-failure as `failed` (e.g. bad ref shape)', async () => {
+    // `$step.field` referring to a parallel step's branches table — that's
+    // a runtime error from `lookupRef`, not a missing key.
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: badref
+  trigger: { capability: go }
+  steps:
+    - id: fan
+      parallel: true
+      branches:
+        - id: a
+          dispatch:
+            strategy: { kind: capability, capabilities: [x] }
+            payload: 1
+    - id: gated
+      when: $fan.zzz.output == "x"
+      dispatch:
+        strategy: { kind: capability, capabilities: [y] }
+        payload: hi
+`
+    const def = parseWorkflow(yaml)
+    const { hub } = makeStubHub(() => ok(nextTaskId(), 'a-done', 'a-bot'))
+    const runner = new WorkflowRunner({ definition: def, hub })
+    const out = await runner.onTask(makeTask({}))
+    expect(out.kind).toBe('failed')
+    if (out.kind !== 'failed') throw new Error('expected failed')
+    expect(out.error).toMatch(/step 'gated' failed/)
+    expect(out.error).toMatch(/when '\$fan\.zzz\.output == "x"' threw/)
+  })
+})

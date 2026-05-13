@@ -16,6 +16,7 @@ import { parse as parseYaml } from 'yaml'
 
 import type { DispatchStrategy } from '@aipehub/core'
 
+import { parsePredicate, WorkflowPredicateError } from './predicate.js'
 import {
   WORKFLOW_SCHEMA_V1,
   WorkflowSchemaError,
@@ -147,6 +148,8 @@ function validateStep(raw: unknown, path: string, seenIds: Set<string>): Step {
   }
   seenIds.add(s.id)
 
+  const when = validateWhen(s.when, `${path}.when`)
+
   const isParallel = s.parallel === true
   if (isParallel) {
     const branchesRaw = s.branches
@@ -170,6 +173,7 @@ function validateStep(raw: unknown, path: string, seenIds: Set<string>): Step {
     if (typeof s.description === 'string') out.description = s.description
     const fp = parseStepFailurePolicy(s.onFailure, `${path}.onFailure`)
     if (fp) out.onFailure = fp
+    if (when !== undefined) out.when = when
     return out
   }
 
@@ -184,7 +188,27 @@ function validateStep(raw: unknown, path: string, seenIds: Set<string>): Step {
   if (typeof s.description === 'string') out.description = s.description
   const fp = parseStepFailurePolicy(s.onFailure, `${path}.onFailure`)
   if (fp) out.onFailure = fp
+  if (when !== undefined) out.when = when
   return out
+}
+
+/**
+ * Light validator for the optional `when` predicate. We parse it
+ * eagerly at schema-validation time so bad predicates surface during
+ * import, not at first dispatch.
+ */
+function validateWhen(raw: unknown, path: string): string | undefined {
+  if (raw === undefined) return undefined
+  if (typeof raw !== 'string' || raw.trim().length === 0) {
+    throw new WorkflowSchemaError(`${path} must be a non-empty string`)
+  }
+  try {
+    parsePredicate(raw)
+  } catch (err) {
+    const msg = err instanceof WorkflowPredicateError ? err.message : String(err)
+    throw new WorkflowSchemaError(`${path} is not a valid predicate: ${msg}`)
+  }
+  return raw
 }
 
 function validateBranch(raw: unknown, path: string, seenIds: Set<string>): Branch {

@@ -134,6 +134,12 @@ export interface WorkflowSurface {
    * implementation guarantees atomic writes (tmp + rename).
    */
   importFromText(text: string): Promise<WorkflowSummary>
+  /**
+   * Unregister a loaded workflow and delete its YAML file from disk.
+   * Throws if the id is unknown. In-flight tasks already dispatched to
+   * the runner are not cancelled; the Hub finishes them normally.
+   */
+  remove(id: string): Promise<void>
 }
 
 export interface WorkflowSummary {
@@ -821,6 +827,27 @@ async function handle(
       sendJson(res, { ok: true, workflow: summary })
     } catch (err) {
       sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+    return
+  }
+
+  const deleteWorkflowMatch = path.match(/^\/api\/admin\/workflows\/([^/]+)$/)
+  if (method === 'DELETE' && deleteWorkflowMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.workflows) {
+      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
+      return
+    }
+    const id = decodeURIComponent(deleteWorkflowMatch[1]!)
+    try {
+      await ctx.workflows.remove(id)
+      sendJson(res, { ok: true })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      // "not loaded" → 404, everything else → 400
+      const status = /not loaded|unknown/i.test(msg) ? 404 : 400
+      sendJson(res, { error: msg }, status)
     }
     return
   }

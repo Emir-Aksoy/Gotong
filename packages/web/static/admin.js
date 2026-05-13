@@ -744,6 +744,9 @@
         <header>
           <strong>${name}</strong>
           <code>${escapeHtml(w.participantId)}</code>
+          <button type="button" class="ma-btn ma-btn-secondary"
+                  data-act="remove-workflow"
+                  data-id="${escapeHtml(w.id)}">${escapeHtml(t.workflowRemoveBtn)}</button>
         </header>
         ${desc}
         <ul class="ma-meta">
@@ -753,6 +756,23 @@
         ${file}
       </article>`
     }).join('')
+  }
+
+  async function removeWorkflow(id) {
+    if (!confirm(t.confirmRemoveWorkflow(id))) return
+    try {
+      const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      })
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        alert(t.failedAlert(body.error || `${r.status}`))
+        return
+      }
+      await refreshWorkflows()
+    } catch (err) {
+      alert(t.failedAlert(err.message || String(err)))
+    }
   }
 
   function openWorkflowImportModal() {
@@ -1017,6 +1037,8 @@
         exportAgent(id)
       } else if (act === 'remove-agent') {
         removeAgent(id)
+      } else if (act === 'remove-workflow') {
+        removeWorkflow(id)
       }
     })
     // ESC closes any open modal

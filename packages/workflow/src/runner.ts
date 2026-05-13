@@ -26,6 +26,7 @@ import {
   type TaskResult,
 } from '@aipehub/core'
 
+import { parsePredicate, type CompiledPredicate } from './predicate.js'
 import { resolveRefs, type ResolutionContext } from './resolver.js'
 import type { RunStore } from './run-store.js'
 import {
@@ -84,6 +85,13 @@ export class WorkflowRunner extends AgentParticipant {
   private readonly runStore: RunStore | null
   private readonly idGen: () => string
   private readonly now: () => number
+  /**
+   * Pre-compiled `when` predicates per step id. Empty entries mean the
+   * step has no `when`. Compiled once at construction so dispatch-time
+   * is just a tree walk; bad predicates would have already been caught
+   * by the schema validator at parseWorkflow time.
+   */
+  private readonly whenPredicates = new Map<string, CompiledPredicate>()
 
   constructor(opts: WorkflowRunnerOptions) {
     super({
@@ -95,6 +103,11 @@ export class WorkflowRunner extends AgentParticipant {
     this.runStore = opts.runStore ?? null
     this.idGen = opts.idGenerator ?? (() => randomUUID())
     this.now = opts.now ?? (() => Date.now())
+    for (const step of opts.definition.steps) {
+      if (step.when) {
+        this.whenPredicates.set(step.id, parsePredicate(step.when))
+      }
+    }
   }
 
   protected async handleTask(task: Task): Promise<unknown> {
@@ -168,6 +181,27 @@ export class WorkflowRunner extends AgentParticipant {
       status: 'running',
       attempts: 0,
       subTaskIds: [],
+    }
+
+    // `when` gate — applies before any dispatch. A false predicate marks
+    // the step as `skipped`, the runner doesn't call hub.dispatch, and
+    // downstream refs to `$step.output` resolve to `undefined`.
+    const pred = this.whenPredicates.get(step.id)
+    if (pred) {
+      let passed: boolean
+      try {
+        passed = pred.eval(ctx)
+      } catch (err) {
+        record.endedAt = this.now()
+        record.status = 'failed'
+        record.error = `when '${pred.source}' threw: ${err instanceof Error ? err.message : String(err)}`
+        return record
+      }
+      if (!passed) {
+        record.endedAt = this.now()
+        record.status = 'skipped'
+        return record
+      }
     }
 
     if ('parallel' in step && step.parallel === true) {
