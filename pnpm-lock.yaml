@@ -69,6 +69,21 @@ importers:
         specifier: ^4.70.0
         version: 4.104.0(ws@8.20.0)
 
+  examples/open-space:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/sdk-node':
+        specifier: workspace:*
+        version: link:../../packages/sdk-node
+      '@aipehub/transport-ws':
+        specifier: workspace:*
+        version: link:../../packages/transport-ws
+      '@aipehub/web':
+        specifier: workspace:*
+        version: link:../../packages/web
+
   examples/persist-and-resume:
     dependencies:
       '@aipehub/core':

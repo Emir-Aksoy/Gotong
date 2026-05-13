@@ -14,7 +14,7 @@ AipeHub is not an agent. It is a **communication space**: a registry, a message 
 
 ## Status
 
-**v1.0** — stable. See [CHANGELOG.md](CHANGELOG.md) for the v0.0 → v1.0 path and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design. Wire protocol is `1.0`, documented in [docs/PROTOCOL.md](docs/PROTOCOL.md).
+**v1.1 — Open Space.** Three role-distinct entry points: admin (one or more) approves agent admissions and dispatches tasks; workers join the space through the browser and pick up tasks for humans; agents connect over the wire protocol and land in a pending queue until an admin approves them. See [CHANGELOG.md](CHANGELOG.md) for the v0.0 → v1.1 path and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design. Wire protocol is `1.0`, documented in [docs/PROTOCOL.md](docs/PROTOCOL.md).
 
 The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI.
 
@@ -32,6 +32,7 @@ pnpm demo:remote:python # Node host + Python worker (cross-language demo)
 pnpm demo:cli-human     # terminal-as-human approval loop (AIPE_AUTO=1 for non-TTY)
 pnpm demo:llm           # LlmAgent + mock provider (no API key needed)
 pnpm demo:llm:real      # LlmAgent + real Claude/GPT (needs ANTHROPIC_API_KEY/OPENAI_API_KEY)
+pnpm demo:open-space    # v1.1: Hub + WS admission gating + admin/worker web UI
 ```
 
 ## Embedded — everything in one process
@@ -116,6 +117,31 @@ const draft = await hub.dispatch({
 ```
 
 Override `buildRequest(task)` to customize prompt assembly (retrieved context, few-shot examples) or `parseResponse(response, task)` to post-process (JSON extraction, validation re-prompt). Override `handleTask(task)` for full control — multi-step reasoning, retries, structured outputs. See [`packages/llm`](packages/llm/src/agent.ts) and the two demos in [`examples/llm-mock`](examples/llm-mock) and [`examples/llm-real`](examples/llm-real).
+
+## Open Space — admins, workers, and agents in one room (v1.1)
+
+Set an admin token and turn on admission gating; the web UI splits into two views and remote agents wait for approval before they're announced to the hub.
+
+```ts
+import { Hub } from '@aipehub/core'
+import { serveWebSocket } from '@aipehub/transport-ws'
+import { serveWeb } from '@aipehub/web'
+
+const hub = new Hub()
+await hub.start()
+
+// Agents must be approved by an admin before they join
+await serveWebSocket(hub, { port: 4000, gating: 'admin-approval' })
+
+// /admin requires the token; / is the worker view (any browser)
+await serveWeb(hub, { port: 3000, adminToken: process.env.AIPE_ADMIN_TOKEN })
+```
+
+- **Admin** opens `http://localhost:3000/admin?token=…` once (cookie persists). Sees a pending-admissions banner with **Approve / Reject** for every connecting agent, a dispatch panel for all three strategies, and an evaluate panel that writes append-only feedback into the transcript.
+- **Worker** opens `http://localhost:3000/`, picks a nickname + capabilities, and starts receiving tasks dispatched to those capabilities. Same `HumanParticipant` primitive as before, just join-from-browser.
+- **Agent** connects exactly like v1.0 — `connect({ url, agents })` from `@aipehub/sdk-node` or the Python SDK — but the connection holds in `AWAIT_APPROVAL` until an admin acts. Drop the connection and the application rolls back as `agent_rejected · client_disconnected` in the transcript.
+
+Default `gating` is still `'open'`, so existing deployments are unchanged. Full runnable demo in [`examples/open-space`](examples/open-space).
 
 ## Packages
 

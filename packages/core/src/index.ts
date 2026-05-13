@@ -43,4 +43,9 @@ export type {
   // transcript / events
   TranscriptEntry,
   HubEvent,
+  // admission gating (v1.1)
+  PendingApplication,
+  AdmissionDecision,
+  // evaluation (v1.1)
+  Evaluation,
 } from './types.js'

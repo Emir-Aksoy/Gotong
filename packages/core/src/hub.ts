@@ -6,16 +6,24 @@ import { DefaultScheduler, type CancelNotifier, type Scheduler, type TaskInvoker
 import { InMemoryStorage, type Storage } from './storage/index.js'
 import { Transcript } from './transcript.js'
 import type {
+  AdmissionDecision,
   ChannelId,
   DispatchStrategy,
+  Evaluation,
   HubEvent,
   Message,
   Participant,
   ParticipantId,
+  PendingApplication,
   Task,
   TaskId,
   TaskResult,
 } from './types.js'
+
+interface PendingEntry {
+  application: PendingApplication
+  resolve: (decision: AdmissionDecision) => void
+}
 
 export interface HubConfig {
   /** Persistence backend. Defaults to in-memory (lost on exit). */
@@ -55,6 +63,7 @@ export class Hub {
   private readonly now: () => number
   private started = false
   private stopped = false
+  private readonly pending = new Map<string, PendingEntry>()
 
   constructor(config: HubConfig = {}) {
     this.storage = config.storage ?? new InMemoryStorage()
@@ -111,6 +120,12 @@ export class Hub {
   async stop(): Promise<void> {
     if (this.stopped) return
     this.stopped = true
+    // Resolve every pending admission as a rejection so callers don't hang
+    // forever when the hub shuts down with applications in flight.
+    for (const [id, entry] of this.pending) {
+      entry.resolve({ approved: false, reason: 'hub_stopped' })
+      this.pending.delete(id)
+    }
     for (const p of this.registry.all()) {
       try {
         await p.onShutdown?.()
@@ -150,6 +165,111 @@ export class Hub {
 
   participants(): Participant[] {
     return this.registry.all()
+  }
+
+  // --- admission gating (v1.1) ---------------------------------------------
+
+  /**
+   * Submit an admission application. The returned promise resolves when an
+   * admin (or any caller of `approveApplication` / `rejectApplication`) acts
+   * on it — or rejects with `'hub_stopped'` if the hub stops first.
+   *
+   * Transport layers (e.g. `@aipehub/transport-ws` with
+   * `gating: 'admin-approval'`) call this on every HELLO and gate WELCOME on
+   * the decision. The application id is also appended to the transcript as
+   * an `agent_pending` event so observers see it in real time.
+   */
+  requestAdmission(req: {
+    agents: ReadonlyArray<{ id: ParticipantId; capabilities: readonly string[] }>
+    meta?: Readonly<Record<string, unknown>>
+  }): { applicationId: string; decision: Promise<AdmissionDecision> } {
+    const application: PendingApplication = {
+      id: this.idGen(),
+      agents: req.agents.map((a) => ({ id: a.id, capabilities: [...a.capabilities] })),
+      meta: req.meta,
+      pendingSince: this.now(),
+    }
+    const decision = new Promise<AdmissionDecision>((resolve) => {
+      this.pending.set(application.id, { application, resolve })
+    })
+    this.transcript.append({
+      ts: application.pendingSince,
+      kind: 'agent_pending',
+      data: application,
+    })
+    return { applicationId: application.id, decision }
+  }
+
+  /** Currently-pending applications, oldest first. */
+  pendingApplications(): PendingApplication[] {
+    return [...this.pending.values()]
+      .map((e) => e.application)
+      .sort((a, b) => a.pendingSince - b.pendingSince)
+  }
+
+  /** Approve a pending application. Returns false if the id is unknown. */
+  approveApplication(applicationId: string, by?: ParticipantId): boolean {
+    const entry = this.pending.get(applicationId)
+    if (!entry) return false
+    this.pending.delete(applicationId)
+    this.transcript.append({
+      ts: this.now(),
+      kind: 'agent_approved',
+      data: {
+        applicationId,
+        agentIds: entry.application.agents.map((a) => a.id),
+        by,
+      },
+    })
+    entry.resolve({ approved: true, by })
+    return true
+  }
+
+  /** Reject a pending application. Returns false if the id is unknown. */
+  rejectApplication(
+    applicationId: string,
+    reason: string,
+    by?: ParticipantId,
+  ): boolean {
+    const entry = this.pending.get(applicationId)
+    if (!entry) return false
+    this.pending.delete(applicationId)
+    this.transcript.append({
+      ts: this.now(),
+      kind: 'agent_rejected',
+      data: {
+        applicationId,
+        agentIds: entry.application.agents.map((a) => a.id),
+        by,
+        reason,
+      },
+    })
+    entry.resolve({ approved: false, by, reason })
+    return true
+  }
+
+  // --- evaluation (v1.1) ----------------------------------------------------
+
+  /**
+   * Record a reviewer's verdict on a completed task. Appended to the
+   * transcript as an `evaluation` entry; no state is mutated. The caller
+   * is responsible for cross-referencing `taskId` with an earlier
+   * `task_result` entry — the hub does not validate the link.
+   */
+  evaluate(opts: {
+    taskId: TaskId
+    by: ParticipantId
+    rating?: number
+    comment?: string
+  }): Evaluation {
+    const ev: Evaluation = {
+      taskId: opts.taskId,
+      by: opts.by,
+      rating: opts.rating,
+      comment: opts.comment,
+    }
+    this.transcript.append({ ts: this.now(), kind: 'evaluation', data: ev })
+    return ev
   }
 
   // --- messaging ------------------------------------------------------------

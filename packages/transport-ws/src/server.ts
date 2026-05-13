@@ -43,6 +43,20 @@ export interface WebSocketTransportOptions {
   authenticate?: (
     apiKey: string | undefined,
   ) => AuthenticateResult | Promise<AuthenticateResult>
+  /**
+   * Agent admission policy (v1.1).
+   *
+   *   - `'open'` (default) — every successful HELLO becomes an active session
+   *     immediately. This is the pre-v1.1 behaviour.
+   *   - `'admin-approval'` — after authenticate succeeds, the connection is
+   *     held in an awaiting-approval state and the HELLO is published as a
+   *     pending application via `hub.requestAdmission(...)`. WELCOME is sent
+   *     only after `hub.approveApplication(...)` is called; if it is
+   *     rejected (or the client disconnects), no agent is registered and the
+   *     socket is closed cleanly. Pair with `@aipehub/web` admin UI to drive
+   *     the approval decisions.
+   */
+  gating?: 'open' | 'admin-approval'
 }
 
 export interface WebSocketTransportHandle {
@@ -91,6 +105,7 @@ export function serveWebSocket(
           remoteAddress: req.socket.remoteAddress,
           heartbeatIntervalMs,
           authenticate: opts.authenticate,
+          gating: opts.gating ?? 'open',
         })
         sessions.add(session)
         session.onClosed(() => sessions.delete(session))

@@ -34,6 +34,22 @@ header h1::before { content: "◉ "; color: #6cc; }
 }
 .conn[data-status="open"] { color: #8f8; opacity: 1; }
 .conn[data-status="error"] { color: #f88; opacity: 1; }
+.lang-toggle {
+  margin-left: 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+.lang-toggle:hover { background: rgba(255, 255, 255, 0.16); }
+.lang-toggle:active { transform: translateY(1px); }
 
 /* --- layout ---------------------------------------------------------- */
 main {
@@ -172,3 +188,222 @@ section h2 {
 .t-actions button[data-act="reject"]   { background: #c84242; color: #fff; border-color: #c84242; }
 .t-actions button:hover:not(:disabled) { filter: brightness(1.08); }
 .t-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* --- role badges + leave button (v1.1) ------------------------------- */
+.role-badge {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  line-height: 1;
+}
+.role-admin { background: #d57c5b; color: #fff; }
+.role-worker { background: #5b9bd5; color: #fff; }
+.me-label {
+  font-size: 0.72rem;
+  opacity: 0.7;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+.leave-btn {
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(255, 80, 80, 0.18);
+  color: #fff;
+  border: 1px solid rgba(255, 120, 120, 0.32);
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1;
+}
+.leave-btn:hover { background: rgba(255, 80, 80, 0.32); }
+
+/* --- worker: join overlay (v1.1) ------------------------------------- */
+.join-overlay {
+  position: fixed;
+  inset: 3rem 0 0 0;
+  background: rgba(247, 247, 245, 0.96);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 20;
+}
+.join-overlay[hidden] { display: none; }
+.join-form {
+  background: #fff;
+  padding: 1.6rem 1.8rem;
+  border-radius: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.08);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  width: min(28rem, 100% - 2rem);
+}
+.join-form h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  letter-spacing: 0;
+  text-transform: none;
+  color: #1a1a1a;
+}
+.join-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  color: #555;
+}
+.join-form input {
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #ccc;
+  border-radius: 5px;
+  font: inherit;
+  font-size: 0.92rem;
+}
+.join-form input:focus { outline: 2px solid #5b9bd5; outline-offset: -1px; border-color: #5b9bd5; }
+.join-form button {
+  padding: 0.6rem;
+  background: #1a8a4a;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  font-weight: 700;
+  font-size: 0.92rem;
+  cursor: pointer;
+  margin-top: 0.4rem;
+}
+.join-form button:hover { filter: brightness(1.08); }
+.join-error { color: #c84242; margin: 0; font-size: 0.82rem; min-height: 1em; }
+
+.participant-me {
+  outline: 2px solid #5b9bd5;
+  outline-offset: -2px;
+  background: #eef5fb;
+}
+
+/* --- admin layout (v1.1) --------------------------------------------- */
+body.admin main.admin-grid {
+  grid-template-columns: 240px 1fr 360px;
+  grid-template-rows: auto 1fr;
+}
+.pending-apps {
+  grid-column: 1 / -1;
+  background: #fff;
+  border-bottom: 1px solid #e2e2dd;
+}
+.pending-apps:not(.has-pending) {
+  padding-top: 0.6rem;
+  padding-bottom: 0.6rem;
+}
+.pending-apps:not(.has-pending) h2 { margin-bottom: 0.25rem; }
+.pending-apps.has-pending {
+  background: #fff8e0;
+  border-bottom: 2px solid #f0c850;
+}
+.pending-app-card {
+  background: #fff;
+  border: 1px solid #f0d878;
+  border-radius: 6px;
+  padding: 0.7rem 0.85rem;
+  margin-bottom: 0.55rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.pending-meta { font-size: 0.72rem; color: #888; }
+.pending-actions { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+.pending-actions .reject-reason {
+  flex: 1;
+  min-width: 12rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.78rem;
+}
+.pending-actions button {
+  padding: 0.35rem 0.85rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+.pending-actions .btn-approve { background: #1a8a4a; color: #fff; border-color: #1a8a4a; }
+.pending-actions .btn-reject  { background: #c84242; color: #fff; border-color: #c84242; }
+.pending-actions button:hover:not(:disabled) { filter: brightness(1.08); }
+.pending-actions button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* --- admin controls panel -------------------------------------------- */
+.panel {
+  background: #f5f5f0;
+  border: 1px solid #e2e2dd;
+  border-radius: 6px;
+  padding: 0.5rem 0.8rem;
+  margin-bottom: 0.7rem;
+}
+.panel > summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #555;
+  padding: 0.25rem 0;
+}
+.panel[open] > summary { color: #1a1a1a; margin-bottom: 0.55rem; }
+.dispatch-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+.dispatch-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.72rem;
+  color: #666;
+}
+.dispatch-form input,
+.dispatch-form select,
+.dispatch-form textarea {
+  padding: 0.4rem 0.55rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font: inherit;
+  font-size: 0.82rem;
+  background: #fff;
+}
+.dispatch-form textarea {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  resize: vertical;
+}
+.dispatch-form button {
+  padding: 0.5rem;
+  background: #5b9bd5;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 0.85rem;
+  margin-top: 0.2rem;
+}
+.dispatch-form button:hover { filter: brightness(1.08); }
+.form-msg {
+  margin: 0;
+  font-size: 0.78rem;
+  min-height: 1em;
+}
+.form-msg.ok { color: #1a8a4a; }
+.form-msg.err { color: #c84242; }
+.hint { font-size: 0.72rem; color: #888; margin: 0 0 0.2rem; }
+
+/* clickable transcript rows in admin (for evaluate task-id picker) */
+.entry-clickable .body { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
+.entry-clickable:hover { background: #f5f5f0; }

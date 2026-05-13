@@ -1,16 +1,19 @@
 /**
- * web-demo — opens the AipeHub reference web UI in your browser and runs a
- * tiny perpetual loop:
+ * web-demo — opens the AipeHub reference web UI and runs a tiny perpetual
+ * loop. Now that the UI is split into admin + worker views, this demo
+ * focuses on the worker side:
  *
  *   1. WriterAgent drafts a one-liner (auto)
- *   2. Alice (HumanParticipant) is asked to approve it
- *   3. dispatch hangs until you click Approve or Reject in the browser
- *   4. repeat forever; Ctrl-C to exit
+ *   2. Hub dispatches it via `capability: ['approve']`
+ *   3. Once a person joins the space at http://localhost:3000 with
+ *      capability `approve`, the task lands in their inbox
+ *   4. The person clicks Approve / Reject in the browser
+ *   5. repeat forever; Ctrl-C to exit
  *
- * Open http://127.0.0.1:3000 after launch.
+ * To also enable the admin console, set AIPE_ADMIN_TOKEN before running.
  */
 
-import { AgentParticipant, Hub, HumanParticipant, type Task } from '@aipehub/core'
+import { AgentParticipant, Hub, type Task } from '@aipehub/core'
 import { serveWeb } from '@aipehub/web'
 
 class WriterAgent extends AgentParticipant {
@@ -37,13 +40,16 @@ async function main(): Promise<void> {
   const hub = new Hub()
   await hub.start()
 
-  const writer = new WriterAgent()
-  const alice = new HumanParticipant({ id: 'alice', capabilities: ['approve'] })
-  hub.register(writer)
-  hub.register(alice)
+  hub.register(new WriterAgent())
 
   const web = await serveWeb(hub, { port: 3000 })
-  console.log(`\nOpen ${web.url} in your browser to interact with Alice.`)
+  console.log(`\nOpen ${web.url} to join as a worker.`)
+  console.log(`  pick any nickname (e.g. "alice") and capability "approve" to receive drafts.`)
+  if (web.adminEnabled) {
+    console.log(`Admin login URL was printed above.`)
+  } else {
+    console.log(`Admin disabled; set AIPE_ADMIN_TOKEN to enable the /admin console.`)
+  }
   console.log(`Ctrl-C to exit.\n`)
 
   let running = true
@@ -60,9 +66,14 @@ async function main(): Promise<void> {
 
   let i = 0
   while (running) {
+    // wait until at least one human with "approve" capability has joined
+    await waitForCapability(hub, 'approve', () => running)
+    if (!running) break
+
     const topic = TOPICS[i % TOPICS.length]!
     i += 1
 
+    // 1. draft
     const draftRes = await hub.dispatch({
       from: 'system',
       strategy: { kind: 'capability', capabilities: ['draft'] },
@@ -75,16 +86,32 @@ async function main(): Promise<void> {
     }
     const text = (draftRes.output as { text: string }).text
 
+    // 2. ask for human approval — by now we know someone has cap "approve"
     const approveRes = await hub.dispatch({
       from: 'system',
-      strategy: { kind: 'explicit', to: alice.id },
+      strategy: { kind: 'capability', capabilities: ['approve'] },
       payload: { draft: text, topic },
       title: `approve draft about "${topic}"`,
     })
     console.log(
-      `[${i}] alice -> ${approveRes.kind === 'ok' ? 'approved' : approveRes.kind}`,
+      `[${i}] human verdict: ${approveRes.kind === 'ok' ? 'approved' : approveRes.kind}`,
     )
 
+    await sleep(500)
+  }
+}
+
+/** Resolve once at least one human in the hub advertises the given capability. */
+async function waitForCapability(
+  hub: Hub,
+  cap: string,
+  stillRunning: () => boolean,
+): Promise<void> {
+  while (stillRunning()) {
+    const hit = hub.participants().some(
+      (p) => p.kind === 'human' && p.capabilities.includes(cap),
+    )
+    if (hit) return
     await sleep(500)
   }
 }

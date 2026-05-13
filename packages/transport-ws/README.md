@@ -40,6 +40,22 @@ await serveWebSocket(hub, {
 })
 ```
 
+### Admin-approval gating (v1.1+)
+
+Hold every connecting agent in a pending queue until an admin approves it. Combine with `@aipehub/web`'s admin console for an interactive approval surface.
+
+```ts
+await serveWebSocket(hub, { port: 4000, gating: 'admin-approval' })
+// elsewhere — driven from the admin UI or a script:
+//   hub.pendingApplications() -> [{ id, agents, meta, pendingSince }, ...]
+//   hub.approveApplication(applicationId, 'admin')
+//   hub.rejectApplication(applicationId, 'no thanks', 'admin')
+```
+
+Session state machine grows one extra state: `AWAIT_HELLO → AWAIT_APPROVAL → READY → CLOSING → DEAD`. The wire protocol stays at `1.0` — gating is server-side; `REJECT auth_failed` carries the rejection reason from the admin verbatim. If the client disconnects mid-wait, the application is rolled back as `agent_rejected · client_disconnected` and the decision promise resolves with `{ approved: false }`.
+
+Default is `gating: 'open'`, the pre-v1.1 behaviour.
+
 ## Wire protocol
 
 Full spec: [docs/PROTOCOL.md](https://github.com/AipeHub/AipeHub/blob/main/docs/PROTOCOL.md).

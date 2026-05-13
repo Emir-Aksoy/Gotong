@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/transport-ws",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "description": "AipeHub Hub-side WebSocket transport. Lets remote agents connect via the wire protocol.",
   "license": "MIT",

@@ -1,0 +1,19 @@
+{
+  "name": "@aipehub/example-open-space",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Open Space demo (v1.1) — Hub with admin-approval gating, web admin/worker UIs, and a remote writer agent that needs admin approval to join.",
+  "scripts": {
+    "start": "tsx src/launcher.ts",
+    "host": "tsx src/host.ts",
+    "agent": "tsx src/agent.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/transport-ws": "workspace:*",
+    "@aipehub/sdk-node": "workspace:*",
+    "@aipehub/web": "workspace:*"
+  }
+}

@@ -17,7 +17,7 @@ import type { WebSocket } from 'ws'
 
 import { RemoteAgentParticipant } from './remote-participant.js'
 
-type SessionState = 'AWAIT_HELLO' | 'READY' | 'CLOSING' | 'DEAD'
+type SessionState = 'AWAIT_HELLO' | 'AWAIT_APPROVAL' | 'READY' | 'CLOSING' | 'DEAD'
 
 import type { AuthenticateResult } from './server.js'
 
@@ -27,6 +27,8 @@ export interface SessionOptions {
   authenticate?: (
     apiKey: string | undefined,
   ) => AuthenticateResult | Promise<AuthenticateResult>
+  /** Admission policy. `'open'` is the default and the pre-v1.1 behaviour. */
+  gating?: 'open' | 'admin-approval'
 }
 
 export interface SessionInfo {
@@ -54,6 +56,12 @@ export class Session {
   private helloTimer?: NodeJS.Timeout
   private missedPings = 0
   private closedHandlers: Array<() => void> = []
+  /**
+   * Pending admission application id, populated only while
+   * `state === 'AWAIT_APPROVAL'`. Used by `cleanup()` to roll back
+   * the application if the client disconnects before the admin decides.
+   */
+  private pendingApplicationId?: string
 
   constructor(
     private readonly ws: WebSocket,
@@ -118,6 +126,15 @@ export class Session {
         return
       }
       await this.handleHello(frame)
+      return
+    }
+    if (this.state === 'AWAIT_APPROVAL') {
+      // While we wait for admin approval, the only meaningful client frame
+      // is GOODBYE (client gave up). PING is harmless; everything else is
+      // silently ignored — agents have not been registered yet, so any
+      // RESULT/PUBLISH/SUBSCRIBE would refer to nothing.
+      if (frame.type === 'GOODBYE') this.handleGoodbye()
+      else if (frame.type === 'PING') this.send({ type: 'PONG', ts: frame.ts })
       return
     }
     if (this.state !== 'READY') return
@@ -215,16 +232,14 @@ export class Session {
       return
     }
 
-    const created: RemoteAgentParticipant[] = []
+    // --- per-agent shape + allowlist validation (pre-admission) ----------
     for (const decl of frame.agents) {
       if (!decl || typeof decl.id !== 'string') {
-        for (const p of created) this.hub.unregister(p.id)
         this.sendReject('bad_hello', 'each agent must have a string id')
         this.terminate()
         return
       }
       if (allowedAgents !== '*' && !allowedAgents.includes(decl.id)) {
-        for (const p of created) this.hub.unregister(p.id)
         this.sendReject(
           'forbidden_agent',
           `agent '${decl.id}' is not allowed for this API key`,
@@ -232,6 +247,44 @@ export class Session {
         this.terminate()
         return
       }
+    }
+
+    // --- admission gate (v1.1) -------------------------------------------
+    if (this.opts.gating === 'admin-approval') {
+      this.state = 'AWAIT_APPROVAL'
+      const admission = this.hub.requestAdmission({
+        agents: frame.agents.map((a) => ({
+          id: a.id,
+          capabilities: Array.isArray(a.capabilities) ? a.capabilities : [],
+        })),
+        meta: {
+          remoteAddress: this.opts.remoteAddress,
+          clientName: frame.client?.name,
+          clientVersion: frame.client?.version,
+        },
+      })
+      this.pendingApplicationId = admission.applicationId
+      const decision = await admission.decision
+
+      // Client may have disconnected while we waited; cleanup() already
+      // rolled the application back in that case. We narrow via a runtime
+      // cast because TS's flow analysis pins the state to 'AWAIT_APPROVAL'
+      // across the `await` even though `cleanup()` can fire from a different
+      // event-loop task.
+      if ((this.state as SessionState) === 'DEAD') return
+
+      this.pendingApplicationId = undefined
+      if (!decision.approved) {
+        this.sendReject('auth_failed', decision.reason || 'admission rejected')
+        this.terminate()
+        return
+      }
+      // approved — fall through to registration
+    }
+
+    // --- register agents into the hub ------------------------------------
+    const created: RemoteAgentParticipant[] = []
+    for (const decl of frame.agents) {
       if (this.hub.registry.has(decl.id)) {
         for (const p of created) this.hub.unregister(p.id)
         this.sendReject('duplicate_id', `agent '${decl.id}' already registered`)
@@ -339,6 +392,18 @@ export class Session {
     if (this.helloTimer) {
       clearTimeout(this.helloTimer)
       this.helloTimer = undefined
+    }
+    // Roll back a still-pending admission application if the client
+    // disconnects before the admin decides. This both resolves the dangling
+    // decision promise and appends an `agent_rejected` event so observers
+    // see the dropout.
+    if (this.pendingApplicationId) {
+      try {
+        this.hub.rejectApplication(this.pendingApplicationId, 'client_disconnected')
+      } catch {
+        /* ignore */
+      }
+      this.pendingApplicationId = undefined
     }
     for (const p of this.participants.values()) {
       p.failAllPending('remote_disconnect')

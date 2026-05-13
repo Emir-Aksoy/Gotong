@@ -67,6 +67,42 @@ export interface Participant {
   onShutdown?(): void | Promise<void>
 }
 
+// --- Admission gating (v1.1) -----------------------------------------------
+
+/**
+ * One client's bid to join the hub. A WebSocket HELLO becomes a
+ * PendingApplication when the transport is configured with
+ * `gating: 'admin-approval'`. Admin tools resolve it via
+ * `hub.approveApplication(id)` / `hub.rejectApplication(id, reason)`.
+ *
+ * A single application can carry multiple agents (HELLO.agents is a list);
+ * admin decisions are all-or-nothing on the application as a unit.
+ */
+export interface PendingApplication {
+  id: string
+  agents: ReadonlyArray<{ id: ParticipantId; capabilities: readonly string[] }>
+  meta?: Readonly<Record<string, unknown>>
+  pendingSince: number
+}
+
+export type AdmissionDecision =
+  | { approved: true; by?: ParticipantId }
+  | { approved: false; by?: ParticipantId; reason: string }
+
+// --- Evaluation (v1.1) -----------------------------------------------------
+
+/**
+ * A reviewer's verdict on a completed task. Append-only — once written,
+ * lives in the transcript forever. `rating` is optional (any agreed scale,
+ * e.g. 1–5 stars); `comment` is free text.
+ */
+export interface Evaluation {
+  taskId: TaskId
+  by: ParticipantId
+  rating?: number
+  comment?: string
+}
+
 // --- Transcript ------------------------------------------------------------
 
 export type TranscriptEntry =
@@ -80,6 +116,25 @@ export type TranscriptEntry =
       data: { id: ParticipantId; participantKind: ParticipantKind; capabilities: readonly string[] }
     }
   | { seq: number; ts: number; kind: 'participant_left'; data: { id: ParticipantId } }
+  | {
+      seq: number
+      ts: number
+      kind: 'agent_pending'
+      data: PendingApplication
+    }
+  | {
+      seq: number
+      ts: number
+      kind: 'agent_approved'
+      data: { applicationId: string; agentIds: readonly ParticipantId[]; by?: ParticipantId }
+    }
+  | {
+      seq: number
+      ts: number
+      kind: 'agent_rejected'
+      data: { applicationId: string; agentIds: readonly ParticipantId[]; by?: ParticipantId; reason: string }
+    }
+  | { seq: number; ts: number; kind: 'evaluation'; data: Evaluation }
 
 // --- Event stream (for observers / web UI) ---------------------------------
 

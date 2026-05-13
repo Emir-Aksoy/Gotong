@@ -78,6 +78,14 @@ function describe(e: TranscriptEntry): string {
       if (e.data.kind === 'failed') return `RESULT   failed by ${e.data.by}: ${e.data.error}`
       if (e.data.kind === 'cancelled') return `RESULT   cancelled: ${e.data.reason}`
       return `RESULT   no_participant: ${e.data.reason}`
+    case 'agent_pending':
+      return `PENDING  ${e.data.agents.map((a) => a.id).join(',')}`
+    case 'agent_approved':
+      return `APPROVE  ${e.data.agentIds.join(',')}`
+    case 'agent_rejected':
+      return `REJECT   ${e.data.agentIds.join(',')} — ${e.data.reason}`
+    case 'evaluation':
+      return `EVAL     ${e.data.taskId.slice(0, 8)}… by ${e.data.by}`
   }
 }
 

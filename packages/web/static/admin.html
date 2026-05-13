@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AipeHub — Admin</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app-core.js" defer></script>
+    <script src="/admin.js" defer></script>
+  </head>
+  <body class="admin">
+    <header>
+      <h1>AipeHub</h1>
+      <span class="subtitle" data-i18n="adminTitle">管理员控制台</span>
+      <span id="conn" class="conn" data-status="pending" data-i18n="connecting">连接中…</span>
+      <span class="role-badge role-admin" data-i18n="adminBadge">管理员</span>
+      <button id="logout-btn" class="leave-btn" type="button" data-i18n="logout">退出</button>
+      <button id="lang-toggle" class="lang-toggle" type="button" title="切换语言 / Switch language">EN</button>
+    </header>
+
+    <main id="main-grid" class="admin-grid">
+      <!-- Pending agent admissions, full-width banner when populated -->
+      <section id="pending-apps" class="pending-apps">
+        <h2 data-i18n="pendingAgents">待批准的接入申请</h2>
+        <div id="pending-apps-list"></div>
+      </section>
+
+      <section id="participants">
+        <h2 data-i18n="participants">参与者</h2>
+        <div id="participants-list"></div>
+      </section>
+
+      <section id="transcript">
+        <h2><span data-i18n="transcript">消息流</span> <span id="transcript-count" class="count"></span></h2>
+        <ol id="transcript-list"></ol>
+      </section>
+
+      <section id="controls">
+        <!-- Dispatch panel -->
+        <details open class="panel">
+          <summary data-i18n="dispatchPanel">派发任务</summary>
+          <form id="dispatch-form" class="dispatch-form">
+            <label>
+              <span data-i18n="strategyKind">派发策略</span>
+              <select id="d-strategy">
+                <option value="capability" data-i18n="strategyCapability">按能力匹配</option>
+                <option value="explicit" data-i18n="strategyExplicit">指定参与者</option>
+                <option value="broadcast" data-i18n="strategyBroadcast">广播</option>
+              </select>
+            </label>
+            <label id="d-to-label">
+              <span data-i18n="dispatchTo">目标 ID</span>
+              <input id="d-to" autocomplete="off" />
+            </label>
+            <label id="d-caps-label">
+              <span data-i18n="dispatchCaps">能力（逗号分隔）</span>
+              <input id="d-caps" autocomplete="off" placeholder="draft, review" />
+            </label>
+            <label>
+              <span data-i18n="dispatchTitle">标题（可选）</span>
+              <input id="d-title" autocomplete="off" />
+            </label>
+            <label>
+              <span data-i18n="dispatchPayload">Payload (JSON)</span>
+              <textarea id="d-payload" rows="4">{ "topic": "distributed agents" }</textarea>
+            </label>
+            <label>
+              <span data-i18n="dispatchPriority">优先级（整数，可选）</span>
+              <input id="d-priority" autocomplete="off" type="number" />
+            </label>
+            <button type="submit" data-i18n="dispatchButton">派发</button>
+            <p id="dispatch-msg" class="form-msg"></p>
+          </form>
+        </details>
+
+        <!-- Evaluation panel -->
+        <details class="panel">
+          <summary data-i18n="evaluatePanel">任务评价</summary>
+          <form id="evaluate-form" class="dispatch-form">
+            <p class="hint" data-i18n="pickTaskHint">点击下方消息流里 task_result 行可自动填入 task ID</p>
+            <label>
+              <span data-i18n="evaluateTaskId">task ID</span>
+              <input id="e-task" autocomplete="off" required />
+            </label>
+            <label>
+              <span data-i18n="evaluateRating">评分（1-5，可选）</span>
+              <input id="e-rating" type="number" min="1" max="5" autocomplete="off" />
+            </label>
+            <label>
+              <span data-i18n="evaluateComment">评语（可选）</span>
+              <textarea id="e-comment" rows="3"></textarea>
+            </label>
+            <button type="submit" data-i18n="evaluateButton">提交评价</button>
+            <p id="evaluate-msg" class="form-msg"></p>
+          </form>
+        </details>
+      </section>
+    </main>
+  </body>
+</html>

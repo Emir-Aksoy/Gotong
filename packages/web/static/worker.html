@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AipeHub — Worker</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/app-core.js" defer></script>
+    <script src="/worker.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <h1>AipeHub</h1>
+      <span class="subtitle" data-i18n="subtitle">通信空间</span>
+      <span id="conn" class="conn" data-status="pending" data-i18n="connecting">连接中…</span>
+      <span id="role-badge" class="role-badge role-worker" hidden data-i18n="workerBadge">工人</span>
+      <span id="me-label" class="me-label" hidden></span>
+      <button id="leave-btn" class="leave-btn" type="button" hidden data-i18n="leaveButton">离开</button>
+      <button id="lang-toggle" class="lang-toggle" type="button" title="切换语言 / Switch language">EN</button>
+    </header>
+
+    <!-- Join form (shown until POST /api/workers succeeds) -->
+    <div id="join-overlay" class="join-overlay">
+      <form id="join-form" class="join-form">
+        <h2 data-i18n="joinSpace">加入通信空间</h2>
+        <label>
+          <span data-i18n="nickname">昵称（ID）</span>
+          <input id="join-id" name="id" required autocomplete="off" autofocus />
+        </label>
+        <label>
+          <span data-i18n="capabilitiesLabel">擅长能力（逗号分隔，可选）</span>
+          <input id="join-caps" name="capabilities" autocomplete="off"
+                 data-i18n-placeholder="capabilitiesPlaceholder" />
+        </label>
+        <button type="submit" data-i18n="joinButton">进入</button>
+        <p id="join-error" class="join-error"></p>
+      </form>
+    </div>
+
+    <main id="main-grid">
+      <section id="participants">
+        <h2 data-i18n="participants">参与者</h2>
+        <div id="participants-list"></div>
+      </section>
+      <section id="my-tasks">
+        <h2 data-i18n="myTasksLabel">派给我的任务</h2>
+        <div id="my-tasks-list"></div>
+      </section>
+      <section id="transcript">
+        <h2><span data-i18n="transcript">消息流</span> <span id="transcript-count" class="count"></span></h2>
+        <ol id="transcript-list"></ol>
+      </section>
+    </main>
+  </body>
+</html>
