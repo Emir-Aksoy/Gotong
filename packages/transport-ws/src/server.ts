@@ -4,12 +4,45 @@ import { WebSocketServer } from 'ws'
 
 import { Session, type SessionInfo } from './session.js'
 
+/**
+ * Result of an `authenticate` hook.
+ *
+ * Three shapes, in order of richness:
+ *
+ *   - `boolean` — accept (true) or reject (false). All agents in the HELLO
+ *     are accepted on `true`. This is the v0.1 shape; kept for back-compat.
+ *
+ *   - `{ ok: true, allowedAgents?: readonly string[] | '*' }` — accept the
+ *     connection, optionally restricting which agent ids the client may
+ *     declare. Use this to bind an API key to one or a few agent
+ *     identities so a leaked key can't impersonate every agent in the
+ *     deployment. Omit (or use `'*'`) to allow any id.
+ *
+ *   - `{ ok: false, reason?: string }` — reject. The optional reason is
+ *     forwarded to the client as the REJECT message.
+ */
+export type AuthenticateResult =
+  | boolean
+  | { ok: true; allowedAgents?: readonly string[] | '*' }
+  | { ok: false; reason?: string }
+
 export interface WebSocketTransportOptions {
   port?: number
   host?: string
   heartbeatIntervalMs?: number
-  /** Return true to accept the apiKey. Async allowed. Default: no auth required. */
-  authenticate?: (apiKey: string | undefined) => boolean | Promise<boolean>
+  /**
+   * Authentication / authorization hook. Called once per HELLO with the
+   * apiKey the client sent. Async allowed. Default: no auth required, all
+   * agent ids allowed.
+   *
+   * Returning `true` (or `{ ok: true }` with no `allowedAgents`) is the
+   * "open" mode. Returning `{ ok: true, allowedAgents: [...] }` enforces
+   * per-key identity: any HELLO.agents.id not in the allow-list gets
+   * rejected with `forbidden_agent`. See {@link AuthenticateResult}.
+   */
+  authenticate?: (
+    apiKey: string | undefined,
+  ) => AuthenticateResult | Promise<AuthenticateResult>
 }
 
 export interface WebSocketTransportHandle {

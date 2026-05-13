@@ -19,10 +19,14 @@ import { RemoteAgentParticipant } from './remote-participant.js'
 
 type SessionState = 'AWAIT_HELLO' | 'READY' | 'CLOSING' | 'DEAD'
 
+import type { AuthenticateResult } from './server.js'
+
 export interface SessionOptions {
   remoteAddress?: string
   heartbeatIntervalMs: number
-  authenticate?: (apiKey: string | undefined) => boolean | Promise<boolean>
+  authenticate?: (
+    apiKey: string | undefined,
+  ) => AuthenticateResult | Promise<AuthenticateResult>
 }
 
 export interface SessionInfo {
@@ -170,14 +174,13 @@ export class Session {
       return
     }
 
+    // Default: open auth, every agent id allowed.
+    let allowedAgents: readonly string[] | '*' = '*'
+
     if (this.opts.authenticate) {
+      let raw: AuthenticateResult
       try {
-        const ok = await this.opts.authenticate(frame.apiKey)
-        if (!ok) {
-          this.sendReject('auth_failed', 'apiKey verification failed')
-          this.terminate()
-          return
-        }
+        raw = await this.opts.authenticate(frame.apiKey)
       } catch (err) {
         this.sendReject(
           'internal_error',
@@ -185,6 +188,24 @@ export class Session {
         )
         this.terminate()
         return
+      }
+      // Normalize the three shapes.
+      if (raw === false) {
+        this.sendReject('auth_failed', 'apiKey verification failed')
+        this.terminate()
+        return
+      }
+      if (raw === true) {
+        // accept, no per-agent restriction
+      } else if (raw.ok === false) {
+        this.sendReject('auth_failed', raw.reason ?? 'apiKey verification failed')
+        this.terminate()
+        return
+      } else {
+        // raw.ok === true
+        if (raw.allowedAgents !== undefined && raw.allowedAgents !== '*') {
+          allowedAgents = raw.allowedAgents
+        }
       }
     }
 
@@ -199,6 +220,15 @@ export class Session {
       if (!decl || typeof decl.id !== 'string') {
         for (const p of created) this.hub.unregister(p.id)
         this.sendReject('bad_hello', 'each agent must have a string id')
+        this.terminate()
+        return
+      }
+      if (allowedAgents !== '*' && !allowedAgents.includes(decl.id)) {
+        for (const p of created) this.hub.unregister(p.id)
+        this.sendReject(
+          'forbidden_agent',
+          `agent '${decl.id}' is not allowed for this API key`,
+        )
         this.terminate()
         return
       }

@@ -71,10 +71,17 @@ Sent if HELLO is accepted. Transitions both sides to `READY`.
 ```ts
 {
   type: "REJECT",
-  code: "auth_failed" | "duplicate_id" | "protocol_mismatch" | "bad_hello" | "internal_error",
+  code: "auth_failed"        // apiKey rejected or returned { ok: false }
+      | "forbidden_agent"    // apiKey valid but cannot register a declared id (v0.4+)
+      | "duplicate_id"       // some declared id is already in the hub registry
+      | "protocol_mismatch"  // major version of HELLO.protocolVersion differs
+      | "bad_hello"          // HELLO malformed (e.g. empty agents array)
+      | "internal_error",
   message: string
 }
 ```
+
+**`forbidden_agent`** (added in protocol 1.0 minor revision, v0.4 of AipeHub): the server's `authenticate` hook returned `{ ok: true, allowedAgents: [...] }` and at least one id in `HELLO.agents` was not in that allow-list. Use this to bind an API key to a fixed set of agent identities — a leaked key cannot then impersonate any other agent in the deployment. Clients should treat unknown codes as a generic auth/setup failure and surface `message` to the operator.
 
 ### `TASK` — server → client
 

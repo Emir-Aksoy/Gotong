@@ -20,6 +20,7 @@ export interface AgentDecl {
 
 export type RejectCode =
   | 'auth_failed'
+  | 'forbidden_agent'
   | 'duplicate_id'
   | 'protocol_mismatch'
   | 'bad_hello'

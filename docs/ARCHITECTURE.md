@@ -7,7 +7,8 @@ This document records the design decisions for the framework. It is the source o
 | v0.0 | Embeddable library: Hub, three dispatch strategies, transcript, FileStorage, web UI |
 | v0.1 | Wire protocol + WebSocket transport + Node SDK — remote agents can connect from another process/machine |
 | v0.2 | `LlmAgent` base class + neutral `LlmProvider` interface + Anthropic / OpenAI providers — drop in an LLM-backed agent without coupling the Hub to any vendor SDK |
-| v0.3 | **`SqliteStorage`** — durable transcript persistence backed by SQLite (`better-sqlite3` optional peer dep). FileStorage stays the no-dependency default. |
+| v0.3 | `SqliteStorage` — durable transcript persistence backed by SQLite (`better-sqlite3` optional peer dep). FileStorage stays the no-dependency default. |
+| v0.4 | **Per-agent identity at HELLO** — `authenticate` can return `{ ok: true, allowedAgents: ['a1', 'a2'] }` to bind an API key to a specific set of agent ids. A leaked key cannot impersonate any other agent. New `forbidden_agent` REJECT code. Back-compat: boolean return still works. |
 
 ## 1. Philosophy
 
