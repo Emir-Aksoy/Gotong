@@ -197,3 +197,72 @@ describe('OpenAIProvider — error propagation', () => {
     ).rejects.toThrow('auth_denied')
   })
 })
+
+// Tests for the OpenAI-compatible vendor extension (DeepSeek, Qwen,
+// Zhipu, Moonshot, Ollama, vLLM, …). These all share the OpenAIProvider
+// class but get `baseURL`, `name`, and `maxTokensField: 'max_tokens'`
+// wired in by the host's `buildProvider`. The provider class doesn't
+// care about the baseURL itself (the OpenAI SDK does); we test the
+// fields that *we* control: the `name`, the `maxTokensField` switch,
+// and that `baseURL` is forwarded to the SDK constructor when no
+// `client` is injected.
+describe('OpenAIProvider — openai-compatible extensions', () => {
+  it('uses custom name when provided (defaults to "openai" otherwise)', () => {
+    const a = new OpenAIProvider({ client: {} as any })
+    expect(a.name).toBe('openai')
+    const b = new OpenAIProvider({ client: {} as any, name: 'deepseek' })
+    expect(b.name).toBe('deepseek')
+  })
+
+  it('sends max_tokens instead of max_completion_tokens when maxTokensField is overridden', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      maxTokensField: 'max_tokens',
+    })
+
+    await provider.complete({
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 512,
+    })
+
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.max_tokens).toBe(512)
+    // The newer field must not be on the wire — that's what would
+    // trigger a 400 from non-OpenAI compatible endpoints.
+    expect(body.max_completion_tokens).toBeUndefined()
+  })
+
+  it('keeps default max_completion_tokens field when maxTokensField is omitted', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+
+    await provider.complete({
+      messages: [{ role: 'user', content: 'hi' }],
+      maxTokens: 100,
+    })
+
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.max_completion_tokens).toBe(100)
+    expect(body.max_tokens).toBeUndefined()
+  })
+
+  it('passes baseURL to the OpenAI SDK when constructing its own client', () => {
+    // No `client` injected → provider builds its own. The OpenAI SDK
+    // exposes `baseURL` on the constructed client (and lower-cases the
+    // path to whatever it normalized internally), so we can read it
+    // back to verify the option survived the constructor.
+    const provider = new OpenAIProvider({
+      apiKey: 'sk-test-not-real',
+      baseURL: 'https://api.deepseek.com/v1',
+    })
+    // Reach into the private field — the alternative (mocking the
+    // openai module) is more brittle than this typed escape hatch.
+    const inner = (provider as unknown as { client: { baseURL: string } }).client
+    expect(inner.baseURL).toBe('https://api.deepseek.com/v1')
+  })
+})

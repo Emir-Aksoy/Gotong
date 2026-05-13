@@ -609,12 +609,18 @@ export interface ManagedAgentSpec {
   /**
    * Provider name. Mapped to a concrete `LlmProvider` by the host. API
    * keys come from the host's environment — never from this file. The
-   * three built-in providers are:
-   *   - `'anthropic'` — needs `ANTHROPIC_API_KEY`
-   *   - `'openai'`    — needs `OPENAI_API_KEY`
-   *   - `'mock'`      — no key needed; canned responses for testing
+   * four built-in providers are:
+   *   - `'anthropic'`          — needs `ANTHROPIC_API_KEY`
+   *   - `'openai'`             — needs `OPENAI_API_KEY`
+   *   - `'openai-compatible'`  — any OpenAI-compatible HTTP endpoint
+   *                              (DeepSeek, Qwen / DashScope, Zhipu,
+   *                              Moonshot, Ollama, vLLM, …). Requires a
+   *                              per-agent `apiKey` (workspace defaults
+   *                              don't apply because every baseURL is a
+   *                              different vendor) and a `baseURL`.
+   *   - `'mock'`               — no key needed; canned responses for testing
    */
-  provider: 'anthropic' | 'openai' | 'mock'
+  provider: 'anthropic' | 'openai' | 'openai-compatible' | 'mock'
   /** Model id understood by the provider (e.g. `claude-opus-4-7`). */
   model?: string
   /** System prompt. Free-form. Length is not limited by the Hub. */
@@ -625,6 +631,25 @@ export interface ManagedAgentSpec {
    * agent receives. Same range as `Task.weight`: [0.1, 10.0], 1 decimal.
    */
   weightDefault?: number
+  /**
+   * API base URL — **required** when `provider === 'openai-compatible'`,
+   * ignored otherwise. Must point at an OpenAI-compatible
+   * `/v1/chat/completions` endpoint. Examples:
+   *   - DeepSeek:  `https://api.deepseek.com/v1`
+   *   - Qwen:      `https://dashscope.aliyuncs.com/compatible-mode/v1`
+   *   - Zhipu:     `https://open.bigmodel.cn/api/paas/v4`
+   *   - Moonshot:  `https://api.moonshot.cn/v1`
+   *   - Ollama:    `http://localhost:11434/v1`
+   *   - vLLM:      `http://your-host:8000/v1`
+   */
+  baseURL?: string
+  /**
+   * Optional human-readable label for an `'openai-compatible'` provider,
+   * surfaced in logs and the admin UI (e.g. `"DeepSeek"`, `"通义千问"`,
+   * `"Ollama local"`). Falls back to the host portion of `baseURL` when
+   * omitted. Ignored for other provider strings.
+   */
+  providerLabel?: string
 }
 
 export interface WorkerRecord {

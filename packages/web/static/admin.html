@@ -117,6 +117,21 @@
               <span data-i18n="agentProvider">Provider</span>
               <select id="ma-provider"></select>
             </label>
+            <!-- openai-compatible-only fields. JS toggles their visibility
+                 in response to provider changes; they stay collapsed so
+                 the form doesn't grow for the common (OpenAI / Anthropic
+                 / Mock) cases. -->
+            <label id="ma-baseurl-row" class="ma-compat-only" hidden>
+              <span data-i18n="agentBaseUrl">Base URL</span>
+              <input id="ma-base-url" type="url" autocomplete="off"
+                     placeholder="https://api.deepseek.com/v1" />
+              <small class="hint" data-i18n="agentBaseUrlHint">指向任意 OpenAI 兼容的 /v1/chat/completions 端点：DeepSeek、通义、智谱、Moonshot、Ollama、vLLM 等</small>
+            </label>
+            <label id="ma-provider-label-row" class="ma-compat-only" hidden>
+              <span data-i18n="agentProviderLabel">Provider 显示名（可选）</span>
+              <input id="ma-provider-label" autocomplete="off" maxlength="40"
+                     placeholder="DeepSeek" />
+            </label>
             <label>
               <span data-i18n="agentModel">Model（可选）</span>
               <input id="ma-model" autocomplete="off" placeholder="claude-opus-4-7" />

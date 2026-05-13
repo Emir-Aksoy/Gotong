@@ -218,6 +218,12 @@
       agentApiKey: '私有 API Key（可选，加密保存）',
       agentApiKeyHint: '留空 → 使用工作区默认；点「清空」可移除本 agent 的私有 key',
       agentApiKeyHintEdit: '已配私有 key。留空保持不变；输入新值会更新；点「清空」按钮可移除。',
+      agentApiKeyHintCompat: '**必填**：openai-compatible 没有工作区默认 key（每个 baseURL 是不同厂商）。',
+      // --- openai-compatible provider ---
+      openaiCompatHint: 'DeepSeek / 通义 / 智谱 / Ollama / vLLM 等',
+      agentBaseUrl: 'Base URL',
+      agentBaseUrlHint: '指向任意 OpenAI 兼容的 /v1/chat/completions 端点：DeepSeek、通义、智谱、Moonshot、Ollama、vLLM 等',
+      agentProviderLabel: 'Provider 显示名（可选）',
       failedAlert: (msg) => `失败：${msg}`,
       errorAlert: (msg) => `错误：${msg}`,
       sumJoined: (id, kind, caps) =>
@@ -447,6 +453,12 @@
       agentApiKey: 'Private API key (optional, encrypted)',
       agentApiKeyHint: 'Empty → workspace default; "Clear" removes this agent\'s own key',
       agentApiKeyHintEdit: 'A private key is set. Empty = unchanged; new value = update; "Clear" removes it.',
+      agentApiKeyHintCompat: '**Required**: openai-compatible has no workspace fallback (every baseURL is a different vendor).',
+      // --- openai-compatible provider ---
+      openaiCompatHint: 'DeepSeek / Qwen / Zhipu / Ollama / vLLM / …',
+      agentBaseUrl: 'Base URL',
+      agentBaseUrlHint: 'Any OpenAI-compatible /v1/chat/completions endpoint: DeepSeek, Qwen, Zhipu, Moonshot, Ollama, vLLM, etc.',
+      agentProviderLabel: 'Provider label (optional)',
       failedAlert: (msg) => `failed: ${msg}`,
       errorAlert: (msg) => `error: ${msg}`,
       sumJoined: (id, kind, caps) =>

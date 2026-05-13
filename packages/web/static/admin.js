@@ -105,6 +105,8 @@
       maDisplayName: $('ma-display-name'),
       maCaps: $('ma-caps'),
       maProvider: $('ma-provider'),
+      maBaseUrl: $('ma-base-url'),
+      maProviderLabel: $('ma-provider-label'),
       maModel: $('ma-model'),
       maSystem: $('ma-system'),
       maWeight: $('ma-weight'),
@@ -466,8 +468,19 @@
       const kindBadge = managed
         ? `<span class="agent-kind-badge agent-kind-local">${escapeHtml(t.localAgentBadge)}</span>`
         : `<span class="agent-kind-badge agent-kind-cloud">${escapeHtml(t.cloudAgentBadge)}</span>`
+      // For openai-compatible agents, show the friendly label (or
+      // baseURL host) instead of the literal "openai-compatible" string
+      // so the card communicates the actual vendor at a glance.
+      let providerText = managed?.provider || ''
+      if (managed?.provider === 'openai-compatible') {
+        let host = managed.providerLabel
+        if (!host && managed.baseURL) {
+          try { host = new URL(managed.baseURL).host } catch { /* ignore */ }
+        }
+        providerText = host ? `openai-compat · ${host}` : 'openai-compat'
+      }
       const meta = managed
-        ? `${kindBadge}<span class="ma-provider">${escapeHtml(managed.provider)}${managed.model ? ' · ' + escapeHtml(managed.model) : ''}</span>`
+        ? `${kindBadge}<span class="ma-provider">${escapeHtml(providerText)}${managed.model ? ' · ' + escapeHtml(managed.model) : ''}</span>`
         : `${kindBadge}<span class="ma-external">${escapeHtml(t.externalAgent)}</span>`
       const actions = managed ? `
         <button class="ma-action" data-act="edit-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.edit)}</button>
@@ -492,17 +505,51 @@
 
   function syncProviderSelect() {
     if (!dom?.maProvider) return
-    // All three are valid in agents.json; greyed out if env doesn't support.
-    const all = ['mock', 'anthropic', 'openai']
+    // All four are valid in agents.json; greyed out if env doesn't supply a key.
+    // openai-compatible is always available — its key MUST be per-agent.
+    const all = ['mock', 'anthropic', 'openai', 'openai-compatible']
     const avail = new Set(ma.providers)
     dom.maProvider.innerHTML = all.map((p) => {
       const disabled = !avail.has(p)
       const suffix = disabled ? ` — ${t.providerDisabled}` : ''
-      return `<option value="${p}"${disabled ? ' disabled' : ''}>${p}${suffix}</option>`
+      // Friendlier label for openai-compatible — the raw string would
+      // be opaque to non-developers picking from the dropdown.
+      const display = p === 'openai-compatible'
+        ? `openai-compatible · ${t.openaiCompatHint}`
+        : p
+      return `<option value="${p}"${disabled ? ' disabled' : ''}>${display}${suffix}</option>`
     }).join('')
     // Default to the first available
     const first = all.find((p) => avail.has(p))
     if (first) dom.maProvider.value = first
+    syncProviderDependentFields()
+  }
+
+  /**
+   * Show / hide the `openai-compatible`-only fields (baseURL,
+   * providerLabel) based on the current provider selection, and update
+   * the API-key hint to flag that the key is REQUIRED for that path.
+   */
+  function syncProviderDependentFields() {
+    if (!dom?.maProvider) return
+    const isCompat = dom.maProvider.value === 'openai-compatible'
+    document.querySelectorAll('.ma-compat-only').forEach((el) => {
+      el.hidden = !isCompat
+    })
+    // Make baseURL native-required when shown so the browser blocks
+    // an empty submit before our server-side check fires.
+    if (dom.maBaseUrl) dom.maBaseUrl.required = isCompat
+    // Hint copy + visual emphasis depending on provider.
+    if (dom.maApiKeyHint && !ma._clearKeyOnSubmit) {
+      // Only swap the hint when we're not mid-clear (which sets its own message).
+      if (ma.formMode === 'edit') {
+        // Edit mode is handled by openAgentForm; don't override it here.
+      } else {
+        dom.maApiKeyHint.textContent = isCompat
+          ? t.agentApiKeyHintCompat
+          : t.agentApiKeyHint
+      }
+    }
   }
 
   function openAgentForm(mode, agent) {
@@ -523,6 +570,10 @@
         dom.maModel.value = agent.managed.model || ''
         dom.maSystem.value = agent.managed.system || ''
         dom.maWeight.value = agent.managed.weightDefault != null ? String(agent.managed.weightDefault) : ''
+        // openai-compatible-specific fields. Echo them back into the
+        // form so the user can edit them without retyping.
+        if (dom.maBaseUrl) dom.maBaseUrl.value = agent.managed.baseURL || ''
+        if (dom.maProviderLabel) dom.maProviderLabel.value = agent.managed.providerLabel || ''
       }
       // Show "this agent has its own key" hint + a Clear button when applicable
       const hasOverride = !!ma.secrets.agents[agent.id]
@@ -530,6 +581,8 @@
       dom.maApiKey.placeholder = hasOverride ? '••••••••' : ''
       dom.maApiKeyHint.textContent = hasOverride ? t.agentApiKeyHintEdit : t.agentApiKeyHint
       dom.maApiKeyClear.hidden = !hasOverride
+      // Toggle baseURL row visibility based on the loaded provider.
+      syncProviderDependentFields()
     } else {
       dom.maForm.reset()
       dom.maId.disabled = false
@@ -558,10 +611,20 @@
     const weightStr = dom.maWeight.value.trim()
     const weightDefault = weightStr ? Number(weightStr) : undefined
     const apiKey = dom.maApiKey.value
+    // openai-compatible-only payload pieces. Only attached when the
+    // provider actually uses them so we don't pollute agents.json for
+    // OpenAI / Anthropic agents that happen to have the inputs in the
+    // DOM. Server-side validation rejects empty baseURL on this path.
+    const baseURL = provider === 'openai-compatible'
+      ? (dom.maBaseUrl?.value.trim() || undefined)
+      : undefined
+    const providerLabel = provider === 'openai-compatible'
+      ? (dom.maProviderLabel?.value.trim() || undefined)
+      : undefined
     // Carry apiKey only when the user typed something OR (in edit mode)
     // they used the Clear button — clearing is represented as an explicit
     // empty string; "no apiKey field at all" means "leave it alone".
-    const body = { id, displayName, capabilities, provider, model, system, weightDefault }
+    const body = { id, displayName, capabilities, provider, model, system, weightDefault, baseURL, providerLabel }
     if (apiKey.length > 0) body.apiKey = apiKey
     if (ma._clearKeyOnSubmit) { body.apiKey = ''; ma._clearKeyOnSubmit = false }
     try {
@@ -1257,6 +1320,8 @@
 
     // Managed-agent panel events
     dom.maNewBtn?.addEventListener('click', () => openAgentForm('create'))
+    // Provider switch — show/hide the openai-compatible-only fields live.
+    dom.maProvider?.addEventListener('change', syncProviderDependentFields)
     dom.maImportBtn?.addEventListener('click', () => {
       // Close the dropdown after the user picks an import method.
       if (dom.maImportDropdown) dom.maImportDropdown.open = false

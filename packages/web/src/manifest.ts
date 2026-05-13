@@ -162,14 +162,29 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
     throw new ManifestError(`${path}.kind: only 'llm' is supported today, got '${String(kind)}'`)
   }
   const provider = a.provider
-  if (provider !== 'anthropic' && provider !== 'openai' && provider !== 'mock') {
+  if (
+    provider !== 'anthropic' &&
+    provider !== 'openai' &&
+    provider !== 'openai-compatible' &&
+    provider !== 'mock'
+  ) {
     throw new ManifestError(
-      `${path}.provider must be 'anthropic', 'openai', or 'mock' — got '${String(provider)}'`,
+      `${path}.provider must be 'anthropic', 'openai', 'openai-compatible', or 'mock' — got '${String(provider)}'`,
     )
   }
   const system = a.system
   if (typeof system !== 'string' || system.length === 0) {
     throw new ManifestError(`${path}.system is required (non-empty string)`)
+  }
+  // openai-compatible needs a baseURL or it can't be spawned at all.
+  // Fail at parse time rather than letting it slip through to a runtime
+  // throw on the next host restart.
+  if (provider === 'openai-compatible') {
+    if (typeof a.baseURL !== 'string' || a.baseURL.length === 0) {
+      throw new ManifestError(
+        `${path}.baseURL is required when provider is 'openai-compatible' (e.g. 'https://api.deepseek.com/v1')`,
+      )
+    }
   }
   const managed: ManagedAgentSpec = {
     kind: 'llm',
@@ -179,6 +194,15 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
   if (typeof a.model === 'string' && a.model.length > 0) managed.model = a.model
   if (typeof a.weightDefault === 'number' && Number.isFinite(a.weightDefault)) {
     managed.weightDefault = a.weightDefault
+  }
+  // openai-compatible-only optional fields. Carrying baseURL when the
+  // provider is something else would be confusing in agents.json — so
+  // we gate strictly on the provider string.
+  if (provider === 'openai-compatible') {
+    managed.baseURL = a.baseURL as string
+    if (typeof a.providerLabel === 'string' && a.providerLabel.length > 0) {
+      managed.providerLabel = a.providerLabel
+    }
   }
   const out: ParsedAgent = { id: a.id, capabilities, managed }
   if (typeof a.displayName === 'string') out.displayName = a.displayName
@@ -208,6 +232,10 @@ export function renderAgentManifest(rec: {
   }
   if (rec.managed.model) agent.model = rec.managed.model
   if (rec.managed.weightDefault != null) agent.weightDefault = rec.managed.weightDefault
+  // Echo openai-compatible-specific fields so a round-trip export →
+  // edit → re-import doesn't drop the connection details.
+  if (rec.managed.baseURL) agent.baseURL = rec.managed.baseURL
+  if (rec.managed.providerLabel) agent.providerLabel = rec.managed.providerLabel
   if (rec.displayName) agent.displayName = rec.displayName
   return {
     schema: AGENT_SCHEMA_V1,

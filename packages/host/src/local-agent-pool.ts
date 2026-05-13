@@ -92,6 +92,10 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    *   - per-provider workspace key (encrypted at rest in the Space)
    *   - the host's environment variable (legacy fallback)
    *   - `mock` — no key needed
+   *   - `openai-compatible` — always listed; the per-agent `apiKey`
+   *     field on the create form is the only key source (every
+   *     `baseURL` is a different vendor, so a single workspace key
+   *     wouldn't model the world correctly)
    *
    * Per-agent overrides are NOT consulted here; this list is what shows
    * up in the create form, and an agent with its own key can still be
@@ -102,6 +106,9 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     const ws: Record<string, string> = await this.space.listProviderApiKeys().catch(() => ({}))
     if (ws.anthropic || process.env.ANTHROPIC_API_KEY) list.push('anthropic')
     if (ws.openai    || process.env.OPENAI_API_KEY)    list.push('openai')
+    // openai-compatible is always available — the per-agent apiKey field
+    // is the only source of credentials and is enforced at spawn time.
+    list.push('openai-compatible')
     return list
   }
 
@@ -143,6 +150,11 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * Walk the three sources of API keys in order and return the first
    * hit. `mock` never needs a key — return undefined and the provider
    * builder will skip the check.
+   *
+   * `openai-compatible` short-circuits to per-agent only: every baseURL
+   * is a different vendor (DeepSeek vs. Qwen vs. Zhipu), so a single
+   * workspace-level `openai-compatible` key wouldn't make sense. The
+   * spawn step throws a clear error if the per-agent key is missing.
    */
   private async resolveApiKey(
     agentId: ParticipantId,
@@ -151,6 +163,8 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     if (provider === 'mock') return undefined
     const perAgent = await this.space.getAgentApiKey(agentId).catch(() => null)
     if (perAgent) return perAgent
+    // openai-compatible has no workspace / env fallback — see comment above.
+    if (provider === 'openai-compatible') return undefined
     const workspace = await this.space.getProviderApiKey(provider).catch(() => null)
     if (workspace) return workspace
     if (provider === 'anthropic') return process.env.ANTHROPIC_API_KEY
@@ -189,6 +203,38 @@ function buildProvider(spec: ManagedAgentSpec, apiKey: string | undefined): LlmP
         )
       }
       return new OpenAIProvider({ apiKey })
+    }
+    case 'openai-compatible': {
+      // Two hard requirements at spawn time. We fail loudly with a
+      // message that names the offending agent field so the admin UI
+      // can surface it verbatim.
+      if (!spec.baseURL) {
+        throw new Error(
+          `provider 'openai-compatible' needs a baseURL — point it at an OpenAI-compatible /v1/chat/completions endpoint (e.g. https://api.deepseek.com/v1)`,
+        )
+      }
+      if (!apiKey) {
+        throw new Error(
+          `provider 'openai-compatible' needs a private API key set on this agent (workspace-level keys don't apply — each baseURL is a different vendor)`,
+        )
+      }
+      // Derive a readable provider name: explicit label wins, then
+      // baseURL host, then a generic fallback. Never blows up on a
+      // malformed URL — the SDK call will fail with a clearer message.
+      let name = spec.providerLabel?.trim()
+      if (!name) {
+        try { name = new URL(spec.baseURL).host } catch { name = 'openai-compatible' }
+      }
+      return new OpenAIProvider({
+        apiKey,
+        baseURL: spec.baseURL,
+        name,
+        // Almost every OpenAI-compatible vendor (DeepSeek, Qwen, Zhipu,
+        // Moonshot, Ollama, vLLM, …) speaks the legacy `max_tokens`
+        // shape, not the newer `max_completion_tokens` OpenAI reasoning
+        // models require. Default to legacy here.
+        maxTokensField: 'max_tokens',
+      })
     }
     default: {
       const exhaustive: never = spec.provider

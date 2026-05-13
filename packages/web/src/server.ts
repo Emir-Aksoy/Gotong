@@ -724,6 +724,18 @@ async function handle(
         )
         return
       }
+      // openai-compatible has no workspace/env fallback by design (each
+      // baseURL is a different vendor). Reject upfront if the caller
+      // forgot the per-agent key instead of persisting a stub the host
+      // will refuse to spawn on the next boot.
+      if (parsed.managed.provider === 'openai-compatible' && !hasApiKey) {
+        sendJson(
+          res,
+          { error: `provider 'openai-compatible' requires a per-agent apiKey (workspace keys don't apply)` },
+          400,
+        )
+        return
+      }
     }
     const record = await ctx.space.upsertAgent({
       id: parsed.id,
@@ -958,6 +970,25 @@ async function handle(
           400,
         )
         return
+      }
+      // openai-compatible-specific: edit can't strip the per-agent key.
+      // The `apiKey` field has tri-state semantics: undefined = keep
+      // current, "" = clear, "<non-empty>" = replace. We compute the
+      // post-edit state and reject if it leaves an openai-compatible
+      // agent without any key (since workspace/env can't cover for it).
+      if (parsed.managed.provider === 'openai-compatible') {
+        const editKey = (body as { apiKey?: unknown }).apiKey
+        const willClear = editKey === ''
+        const willSet = typeof editKey === 'string' && editKey.length > 0
+        const willHaveKey = willSet || (!willClear && hasStoredKey)
+        if (!willHaveKey) {
+          sendJson(
+            res,
+            { error: `provider 'openai-compatible' requires a per-agent apiKey (workspace keys don't apply)` },
+            400,
+          )
+          return
+        }
       }
     }
     const record = await ctx.space.upsertAgent({
@@ -1492,15 +1523,33 @@ function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
     capabilities.push(c)
   }
   const provider = body.provider
-  if (provider !== 'anthropic' && provider !== 'openai' && provider !== 'mock') {
-    throw new ManifestError(`provider must be 'anthropic', 'openai' or 'mock'`)
+  if (
+    provider !== 'anthropic' &&
+    provider !== 'openai' &&
+    provider !== 'openai-compatible' &&
+    provider !== 'mock'
+  ) {
+    throw new ManifestError(`provider must be 'anthropic', 'openai', 'openai-compatible' or 'mock'`)
   }
   const system = body.system
   if (typeof system !== 'string' || system.length === 0) throw new ManifestError(`system is required`)
+  // openai-compatible additionally requires a baseURL. We validate it
+  // here so the API rejects bad inputs before they hit the supervisor.
+  if (provider === 'openai-compatible') {
+    if (typeof body.baseURL !== 'string' || body.baseURL.length === 0) {
+      throw new ManifestError(`baseURL is required when provider is 'openai-compatible'`)
+    }
+  }
   const managed: ManagedAgentSpec = { kind: 'llm', provider, system }
   if (typeof body.model === 'string' && body.model.length > 0) managed.model = body.model
   if (typeof body.weightDefault === 'number' && Number.isFinite(body.weightDefault)) {
     managed.weightDefault = body.weightDefault
+  }
+  if (provider === 'openai-compatible') {
+    managed.baseURL = body.baseURL as string
+    if (typeof body.providerLabel === 'string' && body.providerLabel.length > 0) {
+      managed.providerLabel = body.providerLabel
+    }
   }
   const out: ParsedAgent = { id: body.id, capabilities, managed }
   if (typeof body.displayName === 'string') out.displayName = body.displayName
