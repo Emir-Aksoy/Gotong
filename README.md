@@ -22,7 +22,8 @@ AipeHub is not an agent. It is a **communication space**: a registry, a message 
 pnpm install
 pnpm demo               # two mock agents and a mock human collaborate
 pnpm demo:broadcast     # three reviewers race, losers get cancelled
-pnpm demo:persist:fresh && pnpm demo:persist:resume   # transcript across restarts
+pnpm demo:persist:fresh && pnpm demo:persist:resume               # JSONL transcript across restarts
+pnpm demo:persist:sqlite:fresh && pnpm demo:persist:sqlite:resume # SQLite transcript across restarts
 pnpm demo:web           # web UI + writer agent + alice (browse to localhost:3000)
 pnpm demo:remote        # host + worker in separate processes over WebSocket
 pnpm demo:llm           # LlmAgent + mock provider (no API key needed)

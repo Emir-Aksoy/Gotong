@@ -6,7 +6,8 @@ This document records the design decisions for the framework. It is the source o
 |---|---|
 | v0.0 | Embeddable library: Hub, three dispatch strategies, transcript, FileStorage, web UI |
 | v0.1 | Wire protocol + WebSocket transport + Node SDK — remote agents can connect from another process/machine |
-| v0.2 | **`LlmAgent` base class + neutral `LlmProvider` interface + Anthropic / OpenAI providers** — drop in an LLM-backed agent without coupling the Hub to any vendor SDK |
+| v0.2 | `LlmAgent` base class + neutral `LlmProvider` interface + Anthropic / OpenAI providers — drop in an LLM-backed agent without coupling the Hub to any vendor SDK |
+| v0.3 | **`SqliteStorage`** — durable transcript persistence backed by SQLite (`better-sqlite3` optional peer dep). FileStorage stays the no-dependency default. |
 
 ## 1. Philosophy
 
@@ -87,10 +88,15 @@ The transcript is what `serveWeb()` reads to render history. It is also what mak
 
 - **`InMemoryStorage`** — for tests, demos, and ephemeral runs. Default.
 - **`FileStorage`** — durable JSONL append-only log. One transcript entry per line, single file, no external dependencies. Crash-tolerant: a partial trailing line is skipped on load with a warning.
+- **`SqliteStorage`** (v0.3) — `better-sqlite3`-backed table `transcript(seq PK, ts, kind, data)` with WAL mode. Indexed reads on `seq`, single-transaction inserts, and full crash recovery via SQLite's journaling. Optional peer dependency: install `better-sqlite3` if you want it; `FileStorage` stays the zero-dep default.
 
-v0 persists **transcript entries only**. Pending tasks and participant registrations are runtime-only and lost on Hub restart — adapters must re-register and re-dispatch any in-flight work themselves. See §11 for the implications when you resume.
+Which one to pick:
+- **`FileStorage`** — small / medium transcripts, no native deps, easiest to inspect (it's just JSONL). Tail it with `tail -f`.
+- **`SqliteStorage`** — long-running Hubs, large transcripts, or workloads where you want SELECT-by-seq instead of scanning the whole file. Comes with a one-time native-module install.
 
-A future `SqliteStorage` will subsume both with structured queries and pending-task journaling. The interface stays the same.
+v0 persists **transcript entries only**. Pending tasks and participant registrations are runtime-only and lost on Hub restart — adapters must re-register and re-dispatch any in-flight work themselves. See §12 for the implications when you resume.
+
+Pending-task journaling on top of `SqliteStorage` is a follow-up — the schema has room for it (just add a `pending_tasks` table); the Hub-side wiring is what's not yet built.
 
 ## 7. Web UI (reference)
 
@@ -250,6 +256,7 @@ packages/core/src/
     index.ts            Storage interface + re-exports
     memory.ts           InMemoryStorage (default; ephemeral)
     file.ts             FileStorage (JSONL append-only, durable)
+    sqlite.ts           SqliteStorage (better-sqlite3, WAL, indexed by seq)
   participants/
     agent.ts            AgentParticipant base class
     human.ts            HumanParticipant — async task inbox driven by an adapter

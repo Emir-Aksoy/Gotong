@@ -1,12 +1,13 @@
 /**
- * persist-and-resume — proves FileStorage durability across processes.
+ * persist-and-resume — proves transcript durability across processes.
  *
- *   `start fresh`  -> wipe the file, write a few entries, exit
- *   `start resume` -> load the file, print prior entries, append one more,
- *                     show seq picked up where the previous run left off
+ *   `start fresh`           -> FileStorage: wipe, write entries, exit
+ *   `start resume`          -> FileStorage: load and append one more
+ *   `start fresh --sqlite`  -> SqliteStorage: same flow on a SQLite DB
+ *   `start resume --sqlite` -> SqliteStorage: load and append one more
  *
- * The transcript path is anchored to *this example's directory*, not the cwd,
- * so the demo behaves the same wherever pnpm dispatches it from.
+ * `--sqlite` swaps FileStorage for SqliteStorage. The Hub doesn't care which
+ * one is used — the Storage interface is the same.
  */
 
 import { existsSync } from 'node:fs'
@@ -18,13 +19,33 @@ import {
   AgentParticipant,
   FileStorage,
   Hub,
+  SqliteStorage,
+  type Storage,
   type Task,
   type TranscriptEntry,
 } from '@aipehub/core'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = join(HERE, '..', 'aipe-data')
-const TRANSCRIPT_PATH = join(DATA_DIR, 'transcript.jsonl')
+const FILE_PATH = join(DATA_DIR, 'transcript.jsonl')
+const SQLITE_PATH = join(DATA_DIR, 'transcript.db')
+
+function pickStorage(useSqlite: boolean): { storage: Storage; path: string; kind: string } {
+  if (useSqlite) {
+    return { storage: new SqliteStorage({ path: SQLITE_PATH }), path: SQLITE_PATH, kind: 'sqlite' }
+  }
+  return { storage: new FileStorage(FILE_PATH), path: FILE_PATH, kind: 'file' }
+}
+
+async function clearBacking(useSqlite: boolean): Promise<void> {
+  if (useSqlite) {
+    for (const p of [SQLITE_PATH, `${SQLITE_PATH}-wal`, `${SQLITE_PATH}-shm`]) {
+      if (existsSync(p)) await unlink(p)
+    }
+  } else if (existsSync(FILE_PATH)) {
+    await unlink(FILE_PATH)
+  }
+}
 
 type EchoPayload = { text: string }
 
@@ -38,13 +59,12 @@ class EchoAgent extends AgentParticipant {
   }
 }
 
-async function runFresh(): Promise<void> {
-  if (existsSync(TRANSCRIPT_PATH)) {
-    await unlink(TRANSCRIPT_PATH)
-    console.log(`  wiped ${TRANSCRIPT_PATH}`)
-  }
+async function runFresh(useSqlite: boolean): Promise<void> {
+  await clearBacking(useSqlite)
+  const { storage, path, kind } = pickStorage(useSqlite)
+  console.log(`  storage: ${kind} at ${path}`)
 
-  const hub = new Hub({ storage: new FileStorage(TRANSCRIPT_PATH) })
+  const hub = new Hub({ storage })
   await hub.start()
   hub.register(new EchoAgent())
 
@@ -61,16 +81,18 @@ async function runFresh(): Promise<void> {
 
   console.log(`\ntranscript size: ${hub.transcript.size()}`)
   await hub.stop()
-  console.log(`done; transcript persisted at ${TRANSCRIPT_PATH}`)
+  console.log(`done; transcript persisted at ${path}`)
 }
 
-async function runResume(): Promise<void> {
-  if (!existsSync(TRANSCRIPT_PATH)) {
-    console.error(`no transcript at ${TRANSCRIPT_PATH} — run 'start fresh' first.`)
+async function runResume(useSqlite: boolean): Promise<void> {
+  const { storage, path, kind } = pickStorage(useSqlite)
+  if (!existsSync(path)) {
+    console.error(`no transcript at ${path} — run 'start fresh${useSqlite ? ' --sqlite' : ''}' first.`)
     process.exit(1)
   }
+  console.log(`  storage: ${kind} at ${path}`)
 
-  const hub = new Hub({ storage: new FileStorage(TRANSCRIPT_PATH) })
+  const hub = new Hub({ storage })
   await hub.start() // hub.start() awaits transcript.load()
 
   console.log('\n=== resume run: prior transcript loaded ===\n')
@@ -107,13 +129,15 @@ async function runResume(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  const mode = process.argv[2]
+  const args = process.argv.slice(2)
+  const mode = args[0]
+  const useSqlite = args.includes('--sqlite')
   if (mode === 'fresh') {
-    await runFresh()
+    await runFresh(useSqlite)
   } else if (mode === 'resume') {
-    await runResume()
+    await runResume(useSqlite)
   } else {
-    console.error(`usage: start <fresh|resume>`)
+    console.error(`usage: start <fresh|resume> [--sqlite]`)
     process.exit(1)
   }
 }

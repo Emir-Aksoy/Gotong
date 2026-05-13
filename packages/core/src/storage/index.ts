@@ -20,3 +20,4 @@ export interface Storage {
 
 export { InMemoryStorage } from './memory.js'
 export { FileStorage } from './file.js'
+export { SqliteStorage, type SqliteStorageOptions } from './sqlite.js'

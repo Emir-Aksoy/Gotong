@@ -11,8 +11,8 @@ export type { Scheduler, TaskInvoker, CancelNotifier } from './scheduler.js'
 
 export { Transcript } from './transcript.js'
 
-export { InMemoryStorage, FileStorage } from './storage/index.js'
-export type { Storage } from './storage/index.js'
+export { InMemoryStorage, FileStorage, SqliteStorage } from './storage/index.js'
+export type { Storage, SqliteStorageOptions } from './storage/index.js'
 
 export { AgentParticipant } from './participants/agent.js'
 export type { AgentOptions } from './participants/agent.js'
