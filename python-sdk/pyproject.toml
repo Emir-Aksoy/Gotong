@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aipehub"
-version = "0.5.0"
+version = "1.0.0"
 description = "AipeHub Python SDK — connect Python agents to an AipeHub Hub over WebSocket."
 readme = "README.md"
 license = { text = "MIT" }

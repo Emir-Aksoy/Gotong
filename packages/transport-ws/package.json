@@ -1,9 +1,17 @@
 {
   "name": "@aipehub/transport-ws",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "AipeHub Hub-side WebSocket transport. Lets remote agents connect via the wire protocol.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AipeHub/AipeHub.git",
+    "directory": "packages/transport-ws"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -17,7 +25,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@aipehub/core": "workspace:*",

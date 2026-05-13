@@ -14,7 +14,9 @@ AipeHub is not an agent. It is a **communication space**: a registry, a message 
 
 ## Status
 
-🚧 v0.2 — embeddable lib + reference web UI + WebSocket wire protocol + Node SDK + LLM agent base & Anthropic/OpenAI providers. APIs may still shift before v1.0. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/PROTOCOL.md](docs/PROTOCOL.md).
+**v1.0** — stable. See [CHANGELOG.md](CHANGELOG.md) for the v0.0 → v1.0 path and [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the design. Wire protocol is `1.0`, documented in [docs/PROTOCOL.md](docs/PROTOCOL.md).
+
+The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI.
 
 ## Quick start
 
