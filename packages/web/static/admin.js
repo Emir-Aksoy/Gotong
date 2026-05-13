@@ -20,6 +20,15 @@
     editingId: null,
   }
 
+  // Workflow state. `available` is `null` until we've probed the API:
+  //   null    → unknown (initial)
+  //   false   → host has no WorkflowSurface (API returned 404) — keep section hidden
+  //   true    → host supports workflows; render the panel
+  const wf = {
+    available: null,
+    workflows: [],
+  }
+
   const state = {
     participants: [],
     transcript: [],
@@ -96,6 +105,16 @@
       maImportText: $('ma-import-text'),
       maImportSubmit: $('ma-import-submit'),
       maImportMsg: $('ma-import-msg'),
+      // Workflows (v2.1)
+      wfSection: $('workflows'),
+      wfList: $('workflows-list'),
+      wfSummary: $('wf-summary'),
+      wfImportBtn: $('wf-import-btn'),
+      wfImportModal: $('wf-import-modal'),
+      wfImportFile: $('wf-import-file'),
+      wfImportText: $('wf-import-text'),
+      wfImportSubmit: $('wf-import-submit'),
+      wfImportMsg: $('wf-import-msg'),
       // Room health banner (v2.1+)
       hToday: $('health-today-tasks'),
       hOnline: $('health-online'),
@@ -131,10 +150,17 @@
         // A managed agent just registered (or re-registered after edit);
         // its online flag flips. Cheap to re-pull.
         refreshManagedAgents().catch(() => {})
+        // Workflow runners use id prefix `workflow:`; pull when one appears.
+        if (typeof ev.data.id === 'string' && ev.data.id.startsWith('workflow:')) {
+          refreshWorkflows().catch(() => {})
+        }
         break
       case 'participant_left':
         state.participants = state.participants.filter((p) => p.id !== ev.data.id)
         refreshManagedAgents().catch(() => {})
+        if (typeof ev.data.id === 'string' && ev.data.id.startsWith('workflow:')) {
+          refreshWorkflows().catch(() => {})
+        }
         break
       case 'agent_pending':
         state.pendingApplications.push(ev.data)
@@ -164,6 +190,7 @@
     renderTasks()
     renderKnownRoster()
     renderManagedAgents()
+    if (wf.available) renderWorkflows()
     // The leaderboard is its own async pull — re-fetch on every full
     // render so a fresh task_result / evaluation immediately re-ranks.
     // Cheap (one /api/leaderboard call), but we swallow failures so a
@@ -672,6 +699,110 @@
     }
   }
 
+  // --- workflows (v2.1) --------------------------------------------------
+
+  async function refreshWorkflows() {
+    if (!dom?.wfSection) return
+    try {
+      const r = await fetch('/api/admin/workflows')
+      if (r.status === 404) {
+        // Host has no workflow surface (embedded mode / older host).
+        wf.available = false
+        dom.wfSection.hidden = true
+        return
+      }
+      if (!r.ok) {
+        // Unexpected — log and leave the section as it was.
+        console.warn('refreshWorkflows: HTTP', r.status)
+        return
+      }
+      const body = await r.json()
+      wf.available = true
+      wf.workflows = body.workflows || []
+      dom.wfSection.hidden = false
+      renderWorkflows()
+    } catch (err) {
+      console.warn('refreshWorkflows:', err)
+    }
+  }
+
+  function renderWorkflows() {
+    if (!dom.wfList) return
+    if (dom.wfSummary) {
+      dom.wfSummary.textContent =
+        wf.workflows.length === 0 ? '' : t.workflowsSummary(wf.workflows.length)
+    }
+    if (wf.workflows.length === 0) {
+      dom.wfList.innerHTML = `<p class="empty">${escapeHtml(t.workflowsEmpty)}</p>`
+      return
+    }
+    dom.wfList.innerHTML = wf.workflows.map((w) => {
+      const name = w.name ? escapeHtml(w.name) : escapeHtml(w.id)
+      const desc = w.description ? `<p class="hint">${escapeHtml(w.description)}</p>` : ''
+      const file = w.file ? `<small class="hint">${escapeHtml(w.file)}</small>` : ''
+      return `<article class="ma-card">
+        <header>
+          <strong>${name}</strong>
+          <code>${escapeHtml(w.participantId)}</code>
+        </header>
+        ${desc}
+        <ul class="ma-meta">
+          <li><span class="ma-label">${escapeHtml(t.workflowTriggerLabel)}:</span> <code>${escapeHtml(w.triggerCapability)}</code></li>
+          <li>${escapeHtml(t.workflowStepsLabel(w.stepCount))}</li>
+        </ul>
+        ${file}
+      </article>`
+    }).join('')
+  }
+
+  function openWorkflowImportModal() {
+    dom.wfImportText.value = ''
+    dom.wfImportFile.value = ''
+    dom.wfImportMsg.textContent = ''
+    dom.wfImportMsg.classList.remove('ok', 'err')
+    dom.wfImportModal.hidden = false
+  }
+
+  function closeWorkflowImportModal() {
+    dom.wfImportModal.hidden = true
+  }
+
+  async function submitWorkflowImport() {
+    dom.wfImportMsg.textContent = ''
+    dom.wfImportMsg.classList.remove('ok', 'err')
+    let text = dom.wfImportText.value
+    const file = dom.wfImportFile.files?.[0]
+    if (file && !text) {
+      text = await file.text()
+    }
+    if (!text || !text.trim()) {
+      dom.wfImportMsg.textContent = t.importEmpty
+      dom.wfImportMsg.classList.add('err')
+      return
+    }
+    try {
+      const r = await fetch('/api/admin/workflows/import', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: text,
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        dom.wfImportMsg.textContent = t.failedAlert(body.error || `${r.status}`)
+        dom.wfImportMsg.classList.add('err')
+        return
+      }
+      const id = body.workflow?.id || '?'
+      dom.wfImportMsg.textContent = t.workflowImportDone(id)
+      dom.wfImportMsg.classList.add('ok')
+      await refreshWorkflows()
+      setTimeout(closeWorkflowImportModal, 700)
+    } catch (err) {
+      dom.wfImportMsg.textContent = t.failedAlert(err.message || String(err))
+      dom.wfImportMsg.classList.add('err')
+    }
+  }
+
   async function exportAgent(id) {
     // GET with browser-driven download (content-disposition on server side)
     window.location.href = `/api/admin/agents/${encodeURIComponent(id)}/export`
@@ -840,6 +971,10 @@
     dom.maKeysBtn?.addEventListener('click', openKeysModal)
     dom.maForm?.addEventListener('submit', submitAgentForm)
     dom.maImportSubmit?.addEventListener('click', submitImport)
+
+    // Workflow panel events
+    dom.wfImportBtn?.addEventListener('click', openWorkflowImportModal)
+    dom.wfImportSubmit?.addEventListener('click', submitWorkflowImport)
     dom.maApiKeyClear?.addEventListener('click', () => {
       // Trigger an explicit-empty apiKey on the next submit. We don't
       // wipe the persisted key here — that happens on Save so the user
@@ -856,6 +991,7 @@
         if (!dom.maFormModal.hidden) closeAgentForm()
         if (!dom.maImportModal.hidden) closeImportModal()
         if (!dom.maKeysModal.hidden) closeKeysModal()
+        if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal()
       }
       const act = target.dataset.act
       // Provider key actions live in the keys modal — they take a
@@ -889,8 +1025,10 @@
       if (!dom.maFormModal.hidden) closeAgentForm()
       if (!dom.maImportModal.hidden) closeImportModal()
       if (!dom.maKeysModal.hidden) closeKeysModal()
+      if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal()
     })
     refreshManagedAgents().catch((err) => console.warn('initial agents refresh:', err))
+    refreshWorkflows().catch((err) => console.warn('initial workflows refresh:', err))
 
     document.addEventListener('click', async (e) => {
       const target = e.target

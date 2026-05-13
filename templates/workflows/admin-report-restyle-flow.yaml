@@ -1,0 +1,38 @@
+# =============================================================================
+# Workflow: 行政任务 · 报告改写（快速复用既有材料出新口径报告）
+# Companion team: templates/teams/admin-task-orchestration.yaml
+# Schema: aipehub.workflow/v1
+#
+# 这个 workflow 解决一个具体痛点：
+#   "上周写过给上级的工作报告了，这周要给媒体外宣，下周还要给党组会 ——
+#    每次都要重写吗？"
+# 不用。把上一版报告 + 新口径要求 + 可选的补充材料丢进来，
+# report-restyler 自动按新口径出新报告（不编造事实、不改数据）。
+#
+# 触发：admin 派一个 capability=restyle-report 的任务即可。
+# =============================================================================
+
+schema: aipehub.workflow/v1
+
+workflow:
+  id: admin-report-restyle-flow
+  name: 行政任务 · 报告改写
+  description: 已有报告 + 新口径 → 同事实、新表达的新报告
+
+  trigger:
+    capability: restyle-report
+
+  steps:
+    - id: restyle
+      description: report-restyler 按新口径重写
+      dispatch:
+        strategy: { kind: capability, capabilities: [restyle] }
+        title: "报告改写"
+        payload:
+          original_report: $trigger.payload.original_report
+          new_brief: $trigger.payload.new_brief
+          extra_materials: $trigger.payload.extra_materials
+          target_audience: $trigger.payload.target_audience
+          length_hint: $trigger.payload.length_hint
+
+  output: $restyle.output

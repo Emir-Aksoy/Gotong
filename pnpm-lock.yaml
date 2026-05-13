@@ -167,6 +167,13 @@ importers:
       '@aipehub/web':
         specifier: workspace:*
         version: link:../web
+      '@aipehub/workflow':
+        specifier: workspace:*
+        version: link:../workflow
+    devDependencies:
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@20.19.41)
 
   packages/llm:
     dependencies:
@@ -267,6 +274,19 @@ importers:
         version: link:../core
       yaml:
         specifier: ^2.6.0
+        version: 2.9.0
+    devDependencies:
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@20.19.41)
+
+  packages/workflow:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../core
+      yaml:
+        specifier: ^2.5.0
         version: 2.9.0
     devDependencies:
       vitest:

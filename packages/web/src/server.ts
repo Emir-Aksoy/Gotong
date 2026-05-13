@@ -107,6 +107,47 @@ export interface WebServerOptions {
    * tests).
    */
   lifecycle?: ManagedAgentLifecycle
+  /**
+   * Optional workflow controller. The host wires this to
+   * `@aipehub/workflow` so the admin UI can list / import workflows
+   * without the Web package taking a runtime dep on the workflow
+   * runner. When absent, the workflow API endpoints return 404.
+   */
+  workflows?: WorkflowSurface
+}
+
+/**
+ * Public surface the Web layer talks to when answering workflow API
+ * calls. Implemented by the host (`packages/host/src/workflow-controller.ts`)
+ * — kept as a duck-typed interface here so `@aipehub/web` does not pull
+ * `@aipehub/workflow` into its dependency closure.
+ */
+export interface WorkflowSurface {
+  list(): Promise<WorkflowSummary[]>
+  /**
+   * Parse the supplied YAML / JSON, write it to the on-disk definitions
+   * directory, and register a live `WorkflowRunner` on the Hub. Returns
+   * the summary of the newly-loaded workflow.
+   *
+   * Throws on schema errors (the Web layer surfaces `err.message`
+   * verbatim) or when the workflow id already exists. The host
+   * implementation guarantees atomic writes (tmp + rename).
+   */
+  importFromText(text: string): Promise<WorkflowSummary>
+}
+
+export interface WorkflowSummary {
+  id: string
+  participantId: string
+  name?: string
+  description?: string
+  triggerCapability: string
+  stepCount: number
+  /**
+   * Absolute path of the YAML file backing this workflow on disk, or
+   * `null` if the runner was registered programmatically (no file).
+   */
+  file: string | null
 }
 
 export interface WebServerHandle {
@@ -162,6 +203,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     allowedHosts,
     adminLoginLimiter,
     lifecycle: opts.lifecycle,
+    workflows: opts.workflows,
   }
 
   const server = createServer((req, res) => {
@@ -218,6 +260,7 @@ interface HandlerCtx {
   allowedHosts: Set<string> | undefined
   adminLoginLimiter: RateLimiter
   lifecycle: ManagedAgentLifecycle | undefined
+  workflows: WorkflowSurface | undefined
 }
 
 /**
@@ -738,6 +781,47 @@ async function handle(
         ? { name: manifest.teamName, description: manifest.teamDescription }
         : undefined,
     })
+    return
+  }
+
+  // --- workflows (v2.1) ------------------------------------------------
+  // The Web layer does not depend on `@aipehub/workflow` directly — it
+  // talks to `ctx.workflows` (a duck-typed `WorkflowSurface`) which the
+  // host wires up. When the surface is absent (embedded use, tests
+  // without the workflow runner), these endpoints respond 404 so the
+  // admin UI can hide the panel.
+
+  if (method === 'GET' && path === '/api/admin/workflows') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.workflows) {
+      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
+      return
+    }
+    try {
+      const list = await ctx.workflows.list()
+      sendJson(res, { workflows: list })
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
+    }
+    return
+  }
+
+  if (method === 'POST' && path === '/api/admin/workflows/import') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.workflows) {
+      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
+      return
+    }
+    const raw = await readTextBody(req).catch(() => '')
+    if (!raw) { sendJson(res, { error: 'empty body' }, 400); return }
+    try {
+      const summary = await ctx.workflows.importFromText(raw)
+      sendJson(res, { ok: true, workflow: summary })
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
+    }
     return
   }
 

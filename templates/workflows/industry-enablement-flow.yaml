@@ -1,0 +1,84 @@
+# =============================================================================
+# Workflow: 传统行业 AI 赋能梳理（全流程）
+# Companion team: templates/teams/traditional-industry-ai-enablement.yaml
+# Schema: aipehub.workflow/v1
+#
+# 用户把自己的行业 / 岗位 / 痛点丢进来 →
+#   diagnose         先反问 4-7 个具体问题，把工作场景摸清楚
+#                    （注：v0.1 还没做交互式问答；这一步现在会一次性产出
+#                     "建议你回答以下问题" 的清单，admin 收到后人工补全
+#                     再触发后续 workflow。完整双向问答留到 v0.2 加。）
+#   ai-opportunity   出"机会清单"，分 🟢 速赢 / 🟡 中期 / 🔴 战略 / ⚠️ 不建议
+#   tool-recommend   挑 1-2 个机会 → 出工具对比表（SaaS/通用LLM/垂直产品/自建）
+#   rollout-plan     挑 1 个机会 → 出 30 天 Gantt + KPI + 3 个风险
+#   risk-explain     预测 3 个老板 / 员工典型疑虑，给顺向 + 反向回应
+#
+# 触发：admin 派一个 capability=enable-industry-with-ai 的任务。
+# =============================================================================
+
+schema: aipehub.workflow/v1
+
+workflow:
+  id: industry-enablement-flow
+  name: 传统行业 AI 赋能梳理
+  description: 诊断 → 机会 → 工具 → 落地 → 顾虑回应，一键全跑
+
+  trigger:
+    capability: enable-industry-with-ai
+
+  steps:
+    - id: diagnose
+      description: 摸清行业 / 岗位 / 工作流细节
+      dispatch:
+        strategy: { kind: capability, capabilities: [diagnose] }
+        title: "业务诊断"
+        payload:
+          industry: $trigger.payload.industry
+          role: $trigger.payload.role
+          pain_points: $trigger.payload.pain_points
+          context_notes: $trigger.payload.context_notes
+
+    - id: scan
+      description: 出"机会清单"
+      dispatch:
+        strategy: { kind: capability, capabilities: [ai-opportunity] }
+        title: "AI 机会扫描"
+        payload:
+          diagnosis: $diagnose.output
+          budget_hint: $trigger.payload.budget_hint
+          timeline_hint: $trigger.payload.timeline_hint
+
+    - id: tools
+      description: 工具对比
+      dispatch:
+        strategy: { kind: capability, capabilities: [tool-recommend] }
+        title: "工具对比表"
+        payload:
+          opportunities: $scan.output
+          must_self_host: $trigger.payload.must_self_host
+
+    - id: plan
+      description: 30 天试点方案
+      dispatch:
+        strategy: { kind: capability, capabilities: [rollout-plan] }
+        title: "30 天试点"
+        payload:
+          opportunities: $scan.output
+          tools: $tools.output
+          team_size: $trigger.payload.team_size
+
+    - id: concerns
+      description: 顾虑 / 反对意见预演
+      dispatch:
+        strategy: { kind: capability, capabilities: [risk-explain] }
+        title: "顾虑回应"
+        payload:
+          plan: $plan.output
+          known_objections: $trigger.payload.known_objections
+
+  output:
+    diagnosis: $diagnose.output
+    opportunities: $scan.output
+    tools: $tools.output
+    rollout_plan: $plan.output
+    objection_handling: $concerns.output

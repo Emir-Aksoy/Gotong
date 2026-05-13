@@ -134,6 +134,44 @@
         </div>
       </div>
 
+      <!-- Workflows (v2.1) — hidden when the host has no workflow surface -->
+      <section id="workflows" class="managed-agents" hidden>
+        <h2>
+          <span data-i18n="workflowsTitle">工作流</span>
+          <span id="wf-summary" class="lb-summary"></span>
+          <button type="button" id="wf-import-btn" class="ma-btn" data-i18n="importWorkflow">导入工作流</button>
+        </h2>
+        <div id="workflows-list" class="managed-agents-list"></div>
+        <p class="hint">
+          <span data-i18n="workflowsHint">工作流把多个 agent 按顺序串起来。admin 派一个任务到 workflow 的触发能力，整个流程自动跑完。模板：</span>
+          <a href="https://github.com/AipeHub/AipeHub/tree/main/templates/workflows" target="_blank" rel="noopener">templates/workflows/</a>
+        </p>
+      </section>
+
+      <!-- Modal: import a workflow -->
+      <div id="wf-import-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card" role="dialog" aria-modal="true">
+          <header class="modal-head">
+            <h3 data-i18n="importWorkflow">导入工作流</h3>
+            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+          </header>
+          <div class="dispatch-form">
+            <p class="hint" data-i18n="workflowImportHint">aipehub.workflow/v1 格式。导入后立刻注册到 Hub，并写入 .aipehub/workflows/definitions/ 目录。</p>
+            <label>
+              <span data-i18n="uploadFile">上传文件</span>
+              <input id="wf-import-file" type="file" accept=".yaml,.yml,.json" />
+            </label>
+            <label>
+              <span data-i18n="orPaste">或粘贴内容</span>
+              <textarea id="wf-import-text" rows="12" placeholder="schema: aipehub.workflow/v1&#10;workflow:&#10;  id: ..."></textarea>
+            </label>
+            <button type="button" id="wf-import-submit" data-i18n="doImport">导入</button>
+            <p id="wf-import-msg" class="form-msg"></p>
+          </div>
+        </div>
+      </div>
+
       <!-- Modal: import a manifest (file or paste) -->
       <div id="ma-import-modal" class="modal" hidden>
         <div class="modal-backdrop" data-act="close-modal"></div>

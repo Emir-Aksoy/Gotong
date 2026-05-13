@@ -27,6 +27,12 @@
  *   AIPE_HEARTBEAT_MS       transport heartbeat interval (default 30000)
  *   AIPE_SPACE_NAME         label written into space.json on first init
  *   AIPE_ADMIN_DISPLAY_NAME first admin's display name (default 'Operator')
+ *   AIPE_WORKFLOWS_DIR      directory of workflow YAML/JSON files to
+ *                           auto-load on boot. Default
+ *                           `<AIPE_SPACE>/workflows/definitions`. Each
+ *                           parseable file becomes a registered
+ *                           `WorkflowRunner` participant; failed files
+ *                           are logged and skipped.
  *
  * On first launch the space dir is created and a one-time admin URL is
  * printed to stdout. On subsequent launches the printout shows just the
@@ -37,12 +43,15 @@
  */
 
 import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import { Hub, Space, type SpaceConfig, type TranscriptEntry } from '@aipehub/core'
 import { serveWebSocket } from '@aipehub/transport-ws'
 import { serveWeb } from '@aipehub/web'
 
 import { LocalAgentPool } from './local-agent-pool.js'
+import { createWorkflowController } from './workflow-controller.js'
+import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 
 // CLI flags handled before any work — keep these cheap and side-effect free
 // so `npx @aipehub/host --help` exits in milliseconds without trying to
@@ -90,6 +99,9 @@ ENVIRONMENT
   AIPE_HEARTBEAT_MS       transport heartbeat ms (default: 30000)
   AIPE_SPACE_NAME         label for space.json on first init (default: AipeHub)
   AIPE_ADMIN_DISPLAY_NAME first admin's display name (default: Operator)
+  AIPE_WORKFLOWS_DIR      directory of *.yaml/*.json workflow files to
+                          auto-load on boot
+                          (default: <AIPE_SPACE>/workflows/definitions)
 
   AIPE_SECRET_KEY         optional master key for secrets encryption
                           (64 hex chars; overrides on-disk runtime/secret.key)
@@ -198,6 +210,23 @@ async function main(): Promise<void> {
   const localAgents = new LocalAgentPool({ hub, space })
   await localAgents.start()
 
+  // Workflow runners. Optional — the loader silently no-ops when the
+  // directory doesn't exist, so users who aren't using workflows see no
+  // extra log output. Errors are reported per-file; one bad workflow
+  // never blocks host boot.
+  const workflowsDir = env('AIPE_WORKFLOWS_DIR', join(SPACE_DIR, 'workflows', 'definitions'))!
+  const workflowReport = await loadWorkflows({
+    hub,
+    dir: workflowsDir,
+    spaceRoot: SPACE_DIR,
+  })
+  const wfMsg = formatLoadReport(workflowReport)
+  if (wfMsg) console.log(wfMsg)
+  const workflowController = createWorkflowController(
+    { hub, definitionsDir: workflowsDir, spaceRoot: SPACE_DIR },
+    workflowReport,
+  )
+
   const allowedHosts = envList('AIPE_ALLOWED_HOSTS')
   const adminRateMax = envInt('AIPE_ADMIN_RATE_MAX', 10)
   const adminRateSec = envInt('AIPE_ADMIN_RATE_SEC', 60)
@@ -212,6 +241,7 @@ async function main(): Promise<void> {
     port: config.webPort,
     cookieSecure: config.cookieSecure,
     lifecycle: localAgents,
+    workflows: workflowController,
     ...(allowedHosts ? { allowedHosts } : {}),
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },
   })

@@ -1,0 +1,51 @@
+# =============================================================================
+# Workflow: 中文编辑流水线
+# Companion team: templates/teams/editorial-zh.yaml
+# Schema: aipehub.workflow/v1
+#
+# How it works (host 启动加载 + admin 派一个 task 后):
+#   admin 派任务到 capability=run-editorial → 这个 workflow runner 接到
+#   → 内部按 steps 顺序调 hub.dispatch():
+#       1) 派给 capability=draft 的 agent（writer-zh）出一稿
+#       2) 派给 capability=review 的 agent（reviewer-zh）出评审意见
+#   → 把评审意见作为最终结果返回给 admin
+#
+# 你不需要在 admin 控制台一步一步派 —— 只要派"一个" run-editorial 任务就行。
+# 整个工作流的每一步、每个子任务、最终结果，全部在 transcript 里留痕。
+# =============================================================================
+
+schema: aipehub.workflow/v1
+
+workflow:
+  id: editorial-flow
+  name: 中文编辑流水线
+  description: writer-zh 起草 → reviewer-zh 评审，一键跑完
+
+  trigger:
+    capability: run-editorial   # admin 派任务到这个 cap 就触发整个 flow
+
+  steps:
+    - id: draft
+      description: 由 writer-zh 出第一稿
+      dispatch:
+        strategy: { kind: capability, capabilities: [draft] }
+        title: "起草: $trigger.payload.topic"
+        payload:
+          topic: $trigger.payload.topic
+          notes: $trigger.payload.notes
+
+    - id: review
+      description: 由 reviewer-zh 评审上一步的产出
+      dispatch:
+        strategy: { kind: capability, capabilities: [review] }
+        title: "评审"
+        payload:
+          original_topic: $trigger.payload.topic
+          draft_to_review: $draft.output
+          review_focus: $trigger.payload.review_focus
+
+  # 最终回给 admin 的就是评审意见 + 原稿（方便对比）
+  output:
+    topic: $trigger.payload.topic
+    draft: $draft.output
+    review: $review.output

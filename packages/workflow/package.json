@@ -1,45 +1,36 @@
 {
-  "name": "@aipehub/host",
-  "version": "2.0.0",
+  "name": "@aipehub/workflow",
+  "version": "0.1.0",
   "type": "module",
-  "description": "Production host binary for AipeHub — runs Hub + WebSocket + Web from environment variables. No demo state, no built-in agents.",
+  "description": "AipeHub workflow runner — pluggable, file-first multi-step orchestration that lives outside the Hub core.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/AipeHub/AipeHub.git",
-    "directory": "packages/host"
+    "directory": "packages/workflow"
   },
   "publishConfig": {
     "access": "public"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "bin": {
-    "aipehub-host": "./bin/aipehub-host.js"
-  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src", "bin", "README.md"],
+  "files": ["dist", "src", "README.md"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "start": "tsx src/main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@aipehub/core": "workspace:*",
-    "@aipehub/llm": "workspace:*",
-    "@aipehub/llm-anthropic": "workspace:*",
-    "@aipehub/llm-openai": "workspace:*",
-    "@aipehub/transport-ws": "workspace:*",
-    "@aipehub/web": "workspace:*",
-    "@aipehub/workflow": "workspace:*"
+    "yaml": "^2.5.0"
   },
   "devDependencies": {
     "vitest": "^2.0.0"
