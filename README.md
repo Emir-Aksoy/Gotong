@@ -27,6 +27,7 @@ pnpm demo:persist:sqlite:fresh && pnpm demo:persist:sqlite:resume # SQLite trans
 pnpm demo:web           # web UI + writer agent + alice (browse to localhost:3000)
 pnpm demo:remote        # host + worker in separate processes over WebSocket
 pnpm demo:remote:python # Node host + Python worker (cross-language demo)
+pnpm demo:cli-human     # terminal-as-human approval loop (AIPE_AUTO=1 for non-TTY)
 pnpm demo:llm           # LlmAgent + mock provider (no API key needed)
 pnpm demo:llm:real      # LlmAgent + real Claude/GPT (needs ANTHROPIC_API_KEY/OPENAI_API_KEY)
 ```

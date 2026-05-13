@@ -23,6 +23,7 @@
     "demo:remote:python": "pnpm --filter @aipehub/example-remote-python start",
     "demo:llm": "pnpm --filter @aipehub/example-llm-mock start",
     "demo:llm:real": "pnpm --filter @aipehub/example-llm-real start",
+    "demo:cli-human": "pnpm --filter @aipehub/example-cli-human start",
     "test": "pnpm -r test"
   },
   "devDependencies": {

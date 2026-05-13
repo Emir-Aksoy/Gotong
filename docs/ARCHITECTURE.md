@@ -9,7 +9,8 @@ This document records the design decisions for the framework. It is the source o
 | v0.2 | `LlmAgent` base class + neutral `LlmProvider` interface + Anthropic / OpenAI providers — drop in an LLM-backed agent without coupling the Hub to any vendor SDK |
 | v0.3 | `SqliteStorage` — durable transcript persistence backed by SQLite (`better-sqlite3` optional peer dep). FileStorage stays the no-dependency default. |
 | v0.4 | Per-agent identity at HELLO — `authenticate` can return `{ ok: true, allowedAgents: ['a1', 'a2'] }` to bind an API key to a specific set of agent ids. A leaked key cannot impersonate any other agent. New `forbidden_agent` REJECT code. Back-compat: boolean return still works. |
-| v0.5 | **Python SDK** (`python-sdk/`, package name `aipehub`) — second language client. `AgentParticipant` + `connect()` mirror the Node SDK; tests pass against a fake Hub server; `examples/remote-python` runs a Node host + Python worker end-to-end over the same wire protocol. |
+| v0.5 | Python SDK (`python-sdk/`, package name `aipehub`) — second language client. `AgentParticipant` + `connect()` mirror the Node SDK; tests pass against a fake Hub server; `examples/remote-python` runs a Node host + Python worker end-to-end over the same wire protocol. |
+| v0.6 | **CLI human adapter** — `examples/cli-human` shows the terminal driving a `HumanParticipant`: tasks render to stdout, responses come back through readline (`AIPE_AUTO=1` skips the prompt for CI / non-TTY). Reference pattern for any UI / chat / IM adapter built on `human.next()` / `human.complete()` / `human.reject()`. |
 
 ## 1. Philosophy
 
@@ -305,6 +306,7 @@ examples/
   llm-mock/             LlmAgent + MockLlmProvider — no API key needed
   llm-real/             LlmAgent + Anthropic & OpenAI — Claude writes, GPT reviews
   remote-python/        Node Hub + Python worker (cross-language) — v0.5
+  cli-human/            terminal-as-human adapter; readline-driven approval loop — v0.6
 
 python-sdk/             Python SDK (PyPI name: aipehub) — v0.5
   src/aipehub/

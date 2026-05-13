@@ -24,6 +24,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
+  examples/cli-human:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+
   examples/hello-collab:
     dependencies:
       '@aipehub/core':
