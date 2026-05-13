@@ -34,7 +34,9 @@ import { existsSync, mkdirSync, unlinkSync } from 'node:fs'
 import { rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { Hub } from '@aipehub/core'
+import { createLogger, type Hub } from '@aipehub/core'
+
+const log = createLogger('workflow-ctl')
 import {
   RunStore,
   WorkflowRunner,
@@ -198,16 +200,14 @@ export class WorkflowController {
       // Errors are logged because there's no caller to bubble them to.
       const participant = this.hub.registry.get(known.participantId)
       if (!participant || !(participant instanceof WorkflowRunner)) {
-        console.warn(
-          `[aipehub-workflow] resume: workflow '${summary.workflowId}' is indexed but not registered on the Hub; skipping run ${summary.runId}`,
-        )
+        log.warn('resume: workflow indexed but not registered; skipping run', {
+          workflowId: summary.workflowId,
+          runId: summary.runId,
+        })
         continue
       }
       participant.resumeRun(state).catch((err) => {
-        console.error(
-          `[aipehub-workflow] resume of run '${summary.runId}' threw:`,
-          err,
-        )
+        log.error('resume of run threw', { runId: summary.runId, err })
       })
       resumed++
     }

@@ -86,6 +86,22 @@ pnpm exec aipehub-host --version    # current host version
 
 After it boots, follow [`docs/OVERVIEW.md`](docs/OVERVIEW.md) for the "what now" walkthrough.
 
+### Logging
+
+Structured logging is **on by default** — JSON line per event when stdout is piped (for `jq` / Loki / ELK / Datadog), pretty-printed when stdout is a terminal. Three env vars control it:
+
+```bash
+AIPE_LOG_LEVEL=info       # silent | trace | debug | info (default) | warn | error | fatal
+AIPE_LOG_FORMAT=json      # json | pretty (default: auto by TTY)
+AIPE_LOG_DISABLED=1       # hard-off escape hatch
+```
+
+Filter by component with `jq` once you've got JSON output:
+
+```bash
+pnpm host 2>&1 | jq 'select(.comp == "local-agents")'
+```
+
 ### Demos (cloned repo)
 
 Once you've `pnpm install && pnpm build`-ed, every collaboration pattern in the framework has a runnable demo:

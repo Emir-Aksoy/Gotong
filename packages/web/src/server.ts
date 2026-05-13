@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 import {
   HumanParticipant,
+  createLogger,
   type AdminRecord,
   type AgentRecord,
   type DispatchStrategy,
@@ -17,6 +18,8 @@ import {
   type TaskId,
   type WorkerRecord,
 } from '@aipehub/core'
+
+const log = createLogger('web')
 
 import {
   AGENT_SCHEMA_V1,
@@ -241,7 +244,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
 
   const server = createServer((req, res) => {
     handle(ctx, req, res).catch((err) => {
-      console.error('[aipehub-web] handler threw:', err)
+      log.error('handler threw', { url: req.url, method: req.method, err })
       if (!res.headersSent) {
         res.writeHead(500, { 'content-type': 'text/plain' })
         res.end(`server error: ${err instanceof Error ? err.message : String(err)}`)
@@ -257,14 +260,17 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
       const addr = server.address()
       const actualPort = typeof addr === 'object' && addr ? addr.port : port
       const url = `http://${host}:${actualPort}`
-      console.log(`[aipehub-web] listening at ${url}`)
+      log.info('listening', { url })
       const admins = await space.admins()
       if (admins.length > 0) {
-        console.log(`[aipehub-web] ${admins.length} admin(s) configured. /admin requires their token; first-time URL: ${url}/admin?token=<TOKEN>`)
+        log.info('admins configured', {
+          count: admins.length,
+          adminUrl: `${url}/admin?token=<TOKEN>`,
+        })
       } else {
-        console.log(`[aipehub-web] no admins yet. Run \`Space.createAdmin(name)\` (or the helper in your launcher) to mint one.`)
+        log.info('no admins yet — run Space.createAdmin(name) to mint one')
       }
-      console.log(`[aipehub-web] workers: ${url}/`)
+      log.info('worker URL', { url: `${url}/` })
       resolve({
         host,
         port: actualPort,
@@ -1028,7 +1034,7 @@ async function handle(
     if (!admin) return
     const id = decodeURIComponent(editAgentMatch[1]!)
     if (ctx.lifecycle) {
-      await ctx.lifecycle.stop(id).catch((err) => console.error(`[aipehub-web] stop ${id}:`, err))
+      await ctx.lifecycle.stop(id).catch((err) => log.error('lifecycle stop failed', { id, err }))
     }
     const ok = await ctx.space.removeAgent(id)
     if (!ok) { sendJson(res, { error: `unknown agent '${id}'` }, 404); return }
@@ -1143,7 +1149,7 @@ async function handle(
       }
       return
     }
-    ctx.hub.dispatch(dispatchOpts).catch((err) => console.error('[aipehub-web] dispatch failed:', err))
+    ctx.hub.dispatch(dispatchOpts).catch((err) => log.error('dispatch failed', { err }))
     sendJson(res, { ok: true })
     return
   }
@@ -1166,7 +1172,7 @@ async function handle(
     const taskId = decodeURIComponent(retryMatch[1]!)
     try {
       ctx.hub.retry(taskId, admin.id).catch((err) =>
-        console.error('[aipehub-web] retry failed:', err),
+        log.error('retry failed', { taskId, err }),
       )
     } catch (err) {
       sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)

@@ -38,6 +38,9 @@ export {
 
 export { Transcript } from './transcript.js'
 
+export { createLogger } from './logger.js'
+export type { Logger, LogLevel, LoggerOptions } from './logger.js'
+
 export { InMemoryStorage, FileStorage, SqliteStorage } from './storage/index.js'
 export type { Storage, SqliteStorageOptions } from './storage/index.js'
 

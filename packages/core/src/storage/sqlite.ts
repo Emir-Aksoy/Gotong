@@ -2,8 +2,11 @@ import { dirname } from 'node:path'
 import { existsSync, mkdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 
+import { createLogger } from '../logger.js'
 import type { TranscriptEntry } from '../types.js'
 import type { Storage } from './index.js'
+
+const log = createLogger('storage/sqlite')
 
 // In an ESM build, `require` is not in scope. `createRequire` gives us a CJS
 // require resolver rooted at this module's URL so we can synchronously load
@@ -134,8 +137,7 @@ export class SqliteStorage implements Storage {
         } as TranscriptEntry)
       } catch {
         // Corrupt row — log and skip. Should not happen via normal writes.
-        // eslint-disable-next-line no-console
-        console.warn(`[SqliteStorage] skipping malformed row seq=${row.seq}`)
+        log.warn('skipping malformed row', { seq: row.seq })
       }
     }
     return out

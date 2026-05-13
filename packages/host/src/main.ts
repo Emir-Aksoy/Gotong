@@ -34,6 +34,16 @@
  *                           `WorkflowRunner` participant; failed files
  *                           are logged and skipped.
  *
+ *   --- structured logging (default ON, see @aipehub/core/logger) ---
+ *
+ *   AIPE_LOG_LEVEL          'silent' | 'trace' | 'debug' | 'info' | 'warn'
+ *                           | 'error' | 'fatal'  (default 'info')
+ *   AIPE_LOG_FORMAT         'json' | 'pretty'  (default: 'pretty' when
+ *                           stdout is a TTY, else 'json' for machine
+ *                           consumption / log shippers)
+ *   AIPE_LOG_DISABLED       '1' to suppress all log output. Takes
+ *                           precedence over LEVEL and FORMAT.
+ *
  * On first launch the space dir is created and a one-time admin URL is
  * printed to stdout. On subsequent launches the printout shows just the
  * /admin entry — admins keep their existing cookies / tokens.
@@ -45,7 +55,9 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { Hub, Space, type SpaceConfig, type TranscriptEntry } from '@aipehub/core'
+import { Hub, Space, createLogger, type SpaceConfig, type TranscriptEntry } from '@aipehub/core'
+
+const log = createLogger('host')
 import { serveWebSocket } from '@aipehub/transport-ws'
 import { serveWeb } from '@aipehub/web'
 
@@ -221,7 +233,7 @@ async function main(): Promise<void> {
     spaceRoot: SPACE_DIR,
   })
   const wfMsg = formatLoadReport(workflowReport)
-  if (wfMsg) console.log(wfMsg)
+  if (wfMsg) log.info('workflow loader', { report: wfMsg })
   const workflowController = createWorkflowController(
     { hub, definitionsDir: workflowsDir, spaceRoot: SPACE_DIR },
     workflowReport,
@@ -235,12 +247,13 @@ async function main(): Promise<void> {
   // and runs in the background.
   workflowController.resumeRunningRuns().then((r) => {
     if (r.resumed > 0 || r.abandoned > 0) {
-      console.log(
-        `[workflows] resume: ${r.resumed} continued from last completed step, ${r.abandoned} marked failed (workflow no longer loaded)`,
-      )
+      log.info('workflow resume', {
+        resumed: r.resumed,
+        abandoned: r.abandoned,
+      })
     }
   }).catch((err) => {
-    console.error('[workflows] resume scan failed:', err)
+    log.error('workflow resume scan failed', { err })
   })
 
   const allowedHosts = envList('AIPE_ALLOWED_HOSTS')
@@ -262,6 +275,10 @@ async function main(): Promise<void> {
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },
   })
 
+  // Boot banner — intentionally plain stdout, NOT a log line. The
+  // "First-run admin URL" appears once in a host's lifetime and must
+  // stand out visually; folding it into the structured log stream
+  // would bury it. Operational events below go through the logger.
   console.log(`\n=== AipeHub host ready ===`)
   console.log(`Space     : ${SPACE_DIR}`)
   console.log(`Web       : ${web.url}`)
@@ -280,12 +297,12 @@ async function main(): Promise<void> {
   const shutdown = async (sig: string) => {
     if (shuttingDown) return
     shuttingDown = true
-    console.log(`\n[host] ${sig} received — draining…`)
-    try { await ws.close() } catch (err) { console.error('[host] ws close error:', err) }
-    try { await web.close() } catch (err) { console.error('[host] web close error:', err) }
-    try { await localAgents.stopAll() } catch (err) { console.error('[host] local agents stop error:', err) }
-    try { await hub.stop() } catch (err) { console.error('[host] hub stop error:', err) }
-    console.log('[host] stopped cleanly.')
+    log.info('shutdown signal received — draining', { signal: sig })
+    try { await ws.close() } catch (err) { log.error('ws close error', { err }) }
+    try { await web.close() } catch (err) { log.error('web close error', { err }) }
+    try { await localAgents.stopAll() } catch (err) { log.error('local agents stop error', { err }) }
+    try { await hub.stop() } catch (err) { log.error('hub stop error', { err }) }
+    log.info('stopped cleanly')
     process.exit(0)
   }
   process.on('SIGINT', () => { void shutdown('SIGINT') })
@@ -322,6 +339,6 @@ function describe(e: TranscriptEntry): string {
 }
 
 main().catch((err) => {
-  console.error('[host] fatal:', err instanceof Error ? err.stack ?? err.message : err)
+  log.fatal('boot failed', { err })
   process.exit(1)
 })

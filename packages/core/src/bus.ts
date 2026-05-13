@@ -1,4 +1,7 @@
+import { createLogger } from './logger.js'
 import type { ChannelId, Message, ParticipantId } from './types.js'
+
+const log = createLogger('bus')
 
 /**
  * MessageBus owns the pub/sub graph (who subscribed to which channel) and
@@ -61,7 +64,7 @@ export class MessageBus {
       try {
         obs(msg)
       } catch (err) {
-        console.error('[bus] publish observer threw:', err)
+        log.error('publish observer threw', { err })
       }
     }
 
@@ -75,11 +78,11 @@ export class MessageBus {
           const r = this.deliver(sid, msg)
           if (r && typeof (r as Promise<unknown>).catch === 'function') {
             ;(r as Promise<unknown>).catch((err) => {
-              console.error(`[bus] delivery to ${sid} failed:`, err)
+              log.error('delivery failed', { to: sid, err })
             })
           }
         } catch (err) {
-          console.error(`[bus] delivery to ${sid} threw:`, err)
+          log.error('delivery threw', { to: sid, err })
         }
       })
     }

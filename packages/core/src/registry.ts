@@ -1,4 +1,7 @@
+import { createLogger } from './logger.js'
 import type { Participant, ParticipantId, ParticipantKind } from './types.js'
+
+const log = createLogger('registry')
 
 /**
  * Registry tracks who is online, what they can do, and how loaded they are.
@@ -27,7 +30,7 @@ export class Registry implements RegistryEvents {
       try {
         h(p)
       } catch (err) {
-        console.error('[registry] join handler threw:', err)
+        log.error('join handler threw', { err })
       }
     }
   }
@@ -41,7 +44,7 @@ export class Registry implements RegistryEvents {
       try {
         h(id)
       } catch (err) {
-        console.error('[registry] leave handler threw:', err)
+        log.error('leave handler threw', { err })
       }
     }
     return p

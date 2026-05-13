@@ -2,8 +2,11 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { appendFile, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
+import { createLogger } from '../logger.js'
 import type { TranscriptEntry } from '../types.js'
 import type { Storage } from './index.js'
+
+const log = createLogger('storage/file')
 
 /**
  * Append-only JSONL transcript file. One entry per line. Crash-safe enough
@@ -34,7 +37,7 @@ export class FileStorage implements Storage {
       } catch {
         // tolerate a trailing partial line from a crash
         if (i !== lines.length - 1) {
-          console.warn(`[FileStorage] skipping malformed line ${i + 1} in ${this.path}`)
+          log.warn('skipping malformed line', { line: i + 1, path: this.path })
         }
       }
     }

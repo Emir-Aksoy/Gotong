@@ -1,14 +1,17 @@
-import type {
-  AgentRecord,
-  Hub,
-  ManagedAgentLifecycle,
-  ManagedAgentSpec,
-  ParticipantId,
-  Space,
+import {
+  createLogger,
+  type AgentRecord,
+  type Hub,
+  type ManagedAgentLifecycle,
+  type ManagedAgentSpec,
+  type ParticipantId,
+  type Space,
 } from '@aipehub/core'
 import { LlmAgent, MockLlmProvider, type LlmProvider } from '@aipehub/llm'
 import { AnthropicProvider } from '@aipehub/llm-anthropic'
 import { OpenAIProvider } from '@aipehub/llm-openai'
+
+const log = createLogger('local-agents')
 
 /**
  * `LocalAgentPool` is **not** a separate component — it is a small piece
@@ -60,10 +63,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
         try {
           await this.spawn(a)
         } catch (err) {
-          console.error(
-            `[local-agents] failed to spawn '${a.id}':`,
-            err instanceof Error ? err.message : err,
-          )
+          log.error('spawn failed', { id: a.id, err })
         }
       }
       return
@@ -116,7 +116,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   async stopAll(): Promise<void> {
     for (const id of [...this.running.keys()]) {
       await this.stop(id).catch((err) =>
-        console.error(`[local-agents] stop ${id} failed:`, err),
+        log.error('stop failed', { id, err }),
       )
     }
   }
@@ -143,7 +143,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     })
     this.hub.register(agent)
     this.running.set(record.id, agent)
-    console.log(`[local-agents] spawned ${record.id} (provider=${record.managed.provider})`)
+    log.info('spawned', { id: record.id, provider: record.managed.provider })
   }
 
   /**

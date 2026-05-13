@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto'
 
 import { MessageBus } from './bus.js'
+import { createLogger } from './logger.js'
 import { Registry } from './registry.js'
 import { DefaultScheduler, type CancelNotifier, type Scheduler, type TaskInvoker } from './scheduler.js'
 import { InMemoryStorage, type Storage } from './storage/index.js'
 import { Space } from './space.js'
 import { Transcript } from './transcript.js'
+
+const log = createLogger('hub')
 import type {
   AdmissionDecision,
   ChannelId,
@@ -124,11 +127,11 @@ export class Hub {
         const r = p.onTaskCancelled(taskId, reason)
         if (r && typeof (r as Promise<unknown>).catch === 'function') {
           ;(r as Promise<unknown>).catch((err) =>
-            console.error('[hub] onTaskCancelled rejected:', err),
+            log.error('onTaskCancelled rejected', { taskId, err }),
           )
         }
       } catch (err) {
-        console.error('[hub] onTaskCancelled threw:', err)
+        log.error('onTaskCancelled threw', { taskId, err })
       }
     }
 
@@ -155,7 +158,7 @@ export class Hub {
     // admin UI doesn't see un-actionable entries.
     if (this.space) {
       await this.space.writePendingApps([]).catch((err) =>
-        console.error('[hub] could not clear pending-apps:', err),
+        log.error('could not clear pending-apps', { err }),
       )
     }
     this.started = true
@@ -174,7 +177,7 @@ export class Hub {
       try {
         await p.onShutdown?.()
       } catch (err) {
-        console.error(`[hub] onShutdown for ${p.id} threw:`, err)
+        log.error('onShutdown threw', { participantId: p.id, err })
       }
     }
     if (this.storage.close) await this.storage.close()
@@ -305,7 +308,7 @@ export class Hub {
     if (!this.space) return
     const apps = [...this.pending.values()].map((e) => e.application)
     this.space.writePendingApps(apps).catch((err) =>
-      console.error('[hub] sync pending-apps failed:', err),
+      log.error('sync pending-apps failed', { err }),
     )
   }
 

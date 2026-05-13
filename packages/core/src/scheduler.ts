@@ -1,5 +1,8 @@
+import { createLogger } from './logger.js'
 import type { Registry } from './registry.js'
 import type { Participant, ParticipantId, Task, TaskId, TaskResult } from './types.js'
+
+const log = createLogger('scheduler')
 
 /**
  * Scheduler routes a Task to one or more Participants according to the task's
@@ -105,7 +108,7 @@ export class DefaultScheduler implements Scheduler {
             try {
               this.notifyCancel(other.id, task.id, 'lost broadcast race')
             } catch (err) {
-              console.error('[scheduler] cancel notify threw:', err)
+              log.error('cancel notify threw', { taskId: task.id, err })
             }
           }
         }

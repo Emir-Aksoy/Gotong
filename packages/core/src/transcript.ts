@@ -1,5 +1,8 @@
+import { createLogger } from './logger.js'
 import type { Storage } from './storage/index.js'
 import type { TranscriptEntry } from './types.js'
+
+const log = createLogger('transcript')
 
 /**
  * Append-only event log. Every meaningful thing the Hub does becomes a
@@ -32,13 +35,13 @@ export class Transcript {
     const full = { ...entry, seq: this.seq } as TranscriptEntry
     this.entries.push(full)
     this.storage.appendTranscriptEntry(full).catch((err) => {
-      console.error('[transcript] persist failed:', err)
+      log.error('persist failed', { err })
     })
     for (const obs of this.observers) {
       try {
         obs(full)
       } catch (err) {
-        console.error('[transcript] observer threw:', err)
+        log.error('observer threw', { err })
       }
     }
     return full
