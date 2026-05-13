@@ -156,6 +156,65 @@ export class WorkflowController {
   }
 
   /**
+   * Scan the on-disk run history and resume any run whose recorded
+   * status is still `'running'`. Typical use: called once during host
+   * boot, right after `loadWorkflows` registers the runners. A normal
+   * shutdown leaves no `'running'` files behind; one that's still there
+   * is the trace of a crash / kill-9 / power loss.
+   *
+   * For each crashed run:
+   *   - if the matching workflow runner is still loaded, kick off
+   *     `runner.resumeRun(state)` (fire-and-forget so a long resume
+   *     doesn't block boot)
+   *   - if the workflow has since been removed, mark the run as
+   *     `'failed'` with a clear reason and persist it back so the admin
+   *     history view stops showing a stale "running" forever
+   *
+   * Returns the count of runs resumed, plus the count abandoned.
+   */
+  async resumeRunningRuns(): Promise<{ resumed: number; abandoned: number }> {
+    const all = await this.runStore.listRuns()
+    let resumed = 0
+    let abandoned = 0
+    for (const summary of all) {
+      if (summary.status !== 'running') continue
+      const known = this.known.get(summary.workflowId)
+      const state = await this.runStore.read(summary.runId)
+      if (!state) continue
+      if (!known) {
+        // Workflow no longer loaded — close out the run so it doesn't
+        // sit in history forever pretending to still be running.
+        state.status = 'failed'
+        state.endedAt = Date.now()
+        state.error =
+          state.error ??
+          `host restarted while running and workflow '${summary.workflowId}' is no longer loaded`
+        await this.runStore.write(state)
+        abandoned++
+        continue
+      }
+      // Found the live runner — kick off resume. We do NOT await: a
+      // long-tail resume shouldn't block the host's boot sequence.
+      // Errors are logged because there's no caller to bubble them to.
+      const participant = this.hub.registry.get(known.participantId)
+      if (!participant || !(participant instanceof WorkflowRunner)) {
+        console.warn(
+          `[aipehub-workflow] resume: workflow '${summary.workflowId}' is indexed but not registered on the Hub; skipping run ${summary.runId}`,
+        )
+        continue
+      }
+      participant.resumeRun(state).catch((err) => {
+        console.error(
+          `[aipehub-workflow] resume of run '${summary.runId}' threw:`,
+          err,
+        )
+      })
+      resumed++
+    }
+    return { resumed, abandoned }
+  }
+
+  /**
    * Unregister a workflow runner and delete its backing YAML file.
    *
    * Three-step removal, each step best-effort but ordered so a partial

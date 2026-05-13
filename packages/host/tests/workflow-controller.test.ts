@@ -184,6 +184,72 @@ describe('WorkflowController', () => {
       expect(onlyEditorial.map((r) => r.runId)).toEqual(['r_1'])
     })
 
+    it('resumeRunningRuns() abandons runs whose workflow is no longer loaded', async () => {
+      // Drop a "running" run on disk for a workflow id that we never
+      // import — controller should close it out as failed.
+      const store = new RunStore(tmp)
+      store.ensureDirs()
+      await store.write({
+        runId: 'r_orphan',
+        workflowId: 'long-gone',
+        triggeredByTaskId: 't_orphan',
+        triggerPayload: {},
+        steps: [],
+        startedAt: 1,
+        status: 'running',
+      })
+
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      const r = await c.resumeRunningRuns()
+      expect(r).toEqual({ resumed: 0, abandoned: 1 })
+
+      const recovered = await c.readRun('r_orphan')
+      expect(recovered).not.toBeNull()
+      expect(recovered!.status).toBe('failed')
+      expect(recovered!.error).toMatch(/no longer loaded/)
+      expect(recovered!.endedAt).toBeDefined()
+    })
+
+    it('resumeRunningRuns() skips runs that already reached a terminal status', async () => {
+      const store = new RunStore(tmp)
+      store.ensureDirs()
+      // One done, one failed — neither should be touched.
+      await store.write({
+        runId: 'r_done',
+        workflowId: 'editorial',
+        triggeredByTaskId: 't_d',
+        triggerPayload: {},
+        steps: [],
+        startedAt: 1,
+        endedAt: 2,
+        status: 'done',
+        finalOutput: 'kept',
+      })
+      await store.write({
+        runId: 'r_failed',
+        workflowId: 'editorial',
+        triggeredByTaskId: 't_f',
+        triggerPayload: {},
+        steps: [],
+        startedAt: 1,
+        endedAt: 2,
+        status: 'failed',
+        error: 'original error',
+      })
+
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      const r = await c.resumeRunningRuns()
+      expect(r).toEqual({ resumed: 0, abandoned: 0 })
+
+      const done = await c.readRun('r_done')
+      expect(done!.status).toBe('done')
+      expect(done!.finalOutput).toBe('kept')
+
+      const failed = await c.readRun('r_failed')
+      expect(failed!.status).toBe('failed')
+      expect(failed!.error).toBe('original error')
+    })
+
     it('readRun() returns the full state, or null when missing', async () => {
       const store = new RunStore(tmp)
       store.ensureDirs()

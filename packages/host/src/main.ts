@@ -227,6 +227,22 @@ async function main(): Promise<void> {
     workflowReport,
   )
 
+  // Recover from crashes: any run still marked 'running' on disk is the
+  // trace of a previous host that died mid-flight. Continue it from the
+  // first incomplete step. Runs whose workflow is no longer loaded get
+  // closed out as 'failed' so the admin history stops claiming they're
+  // still running. We log a one-line summary; resume itself is async
+  // and runs in the background.
+  workflowController.resumeRunningRuns().then((r) => {
+    if (r.resumed > 0 || r.abandoned > 0) {
+      console.log(
+        `[workflows] resume: ${r.resumed} continued from last completed step, ${r.abandoned} marked failed (workflow no longer loaded)`,
+      )
+    }
+  }).catch((err) => {
+    console.error('[workflows] resume scan failed:', err)
+  })
+
   const allowedHosts = envList('AIPE_ALLOWED_HOSTS')
   const adminRateMax = envInt('AIPE_ADMIN_RATE_MAX', 10)
   const adminRateSec = envInt('AIPE_ADMIN_RATE_SEC', 60)

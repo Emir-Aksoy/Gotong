@@ -127,10 +127,121 @@ export class WorkflowRunner extends AgentParticipant {
       triggerPayload: task.payload,
       stepOutputs: new Map<string, unknown>(),
     }
+    return this.executeStartingAt(state, ctx, 0, undefined, { throwOnHaltFailure: true })
+  }
+
+  /**
+   * Resume a previously-persisted run that was interrupted (typically by
+   * a host restart). The state on disk must have `status === 'running'`;
+   * any run that had already reached a terminal status is left alone.
+   *
+   * The resume model is "re-execute incomplete steps":
+   *   - Steps recorded with `status: 'done'` keep their persisted output;
+   *     we replay them into the resolution context but skip the dispatch.
+   *   - Steps with `status: 'skipped'` keep their record as-is and feed
+   *     `undefined` into the context (same as a fresh skipped step).
+   *   - Steps with `status: 'failed'` AND workflow-level `onFailure:
+   *     continue` are treated like skipped (their record is preserved).
+   *   - Any other step record (`running`, or `failed` under halt) is
+   *     dropped from `state.steps` and re-executed.
+   *
+   * Returns the final output (same as `handleTask`), but never throws —
+   * there's no caller to reject; a halt-failure on resume just persists
+   * the new failure record.
+   */
+  async resumeRun(initial: RunState): Promise<unknown> {
+    if (initial.status !== 'running') {
+      throw new Error(
+        `cannot resume run '${initial.runId}' — status is '${initial.status}', not 'running'`,
+      )
+    }
+    if (initial.workflowId !== this.definition.id) {
+      throw new Error(
+        `cannot resume run '${initial.runId}' — its workflowId '${initial.workflowId}' does not match this runner ('${this.definition.id}')`,
+      )
+    }
+
+    // We operate on the caller's state object directly — the contract of
+    // `resumeRun(state)` is "continue this run", so the caller expects
+    // their object to reflect the final outcome once we resolve. Tests
+    // and host code can read the updated state without an extra disk
+    // round-trip.
+    const state = initial
+    const ctx: ResolutionContext = {
+      triggerPayload: state.triggerPayload,
+      stepOutputs: new Map<string, unknown>(),
+    }
     const workflowFailureMode: 'halt' | 'continue' = this.definition.onFailure ?? 'halt'
 
-    let lastStepOutput: unknown = undefined
-    for (const step of this.definition.steps) {
+    // Index existing records by stepId. We keep the records that were in
+    // a terminal-for-resume state; everything else gets dropped so the
+    // step can run fresh.
+    const keep: StepRecord[] = []
+    const completedOutputs = new Map<string, unknown>()
+    const replayLastOutput = { value: undefined as unknown }
+    for (const sr of state.steps) {
+      if (sr.status === 'done') {
+        keep.push(sr)
+        completedOutputs.set(sr.stepId, sr.output)
+        replayLastOutput.value = sr.output
+      } else if (sr.status === 'skipped') {
+        keep.push(sr)
+        completedOutputs.set(sr.stepId, undefined)
+      } else if (sr.status === 'failed' && workflowFailureMode === 'continue') {
+        keep.push(sr)
+        completedOutputs.set(sr.stepId, undefined)
+      }
+      // running / failed-under-halt → drop, will be re-run below
+    }
+    state.steps = keep
+    await this.persist(state)
+
+    // Find the first step in the definition that isn't already in
+    // `completedOutputs`. That's where execution resumes from.
+    let startIndex = 0
+    for (let i = 0; i < this.definition.steps.length; i++) {
+      const stepId = this.definition.steps[i]!.id
+      if (completedOutputs.has(stepId)) {
+        ctx.stepOutputs.set(stepId, completedOutputs.get(stepId))
+        startIndex = i + 1
+      } else {
+        break
+      }
+    }
+
+    return this.executeStartingAt(
+      state,
+      ctx,
+      startIndex,
+      replayLastOutput.value,
+      { throwOnHaltFailure: false },
+    )
+  }
+
+  /**
+   * Iterate `this.definition.steps` from `startIndex`, executing each
+   * one in turn against `ctx`. Handles `done` / `failed` / `skipped`
+   * branching the same way as the original `handleTask`. Returns the
+   * final output once all steps have been processed.
+   *
+   * Shared between fresh `handleTask` runs (startIndex = 0) and
+   * `resumeRun` (startIndex = first incomplete step). The
+   * `throwOnHaltFailure` flag is the one behavioural difference: a
+   * fresh task should reject so the Hub sees the failure; a resume run
+   * has no caller and simply persists the failure state instead.
+   */
+  private async executeStartingAt(
+    state: RunState,
+    ctx: ResolutionContext,
+    startIndex: number,
+    initialLastStepOutput: unknown,
+    opts: { throwOnHaltFailure: boolean },
+  ): Promise<unknown> {
+    const workflowFailureMode: 'halt' | 'continue' = this.definition.onFailure ?? 'halt'
+    let lastStepOutput = initialLastStepOutput
+
+    for (let i = startIndex; i < this.definition.steps.length; i++) {
+      const step = this.definition.steps[i]!
       const record = await this.runStep(step, ctx, state)
       state.steps.push(record)
       await this.persist(state)
@@ -144,7 +255,8 @@ export class WorkflowRunner extends AgentParticipant {
           state.endedAt = this.now()
           state.error = `step '${step.id}' failed: ${record.error ?? 'unknown'}`
           await this.persist(state)
-          throw new Error(state.error)
+          if (opts.throwOnHaltFailure) throw new Error(state.error)
+          return undefined
         }
         // continue mode — record it, leave output undefined, move on
         ctx.stepOutputs.set(step.id, undefined)

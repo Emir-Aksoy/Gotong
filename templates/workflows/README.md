@@ -141,6 +141,20 @@ workflow:
 
 崩了重启也能用 `jq` 翻看历史。和 AipeHub v2.0 "file-first" 路线完全一致。
 
+### 中断恢复（v0.3）
+
+host 启动时会扫一遍 `runs/`，把所有 `status: "running"` 的旧 run **从上次未完成的那一步**接着跑：
+
+- 已完成的 step（`status: "done"`）**不再重新派发**，输出从磁盘恢复供下游 `$ref` 使用。
+- 跑到一半挂掉的 step（`status: "running"`）会被**整步重跑**（旧的子任务 id 丢弃）。
+- 工作流定义被删除（YAML 文件不在了）的旧 run，会被关掉，标为 `failed`，附 `error: "host restarted while running and workflow '<id>' is no longer loaded"` —— 不会一直挂在 admin UI 的"运行历史"里假装还在跑。
+
+恢复异步进行，不会阻塞 host boot。控制台会打印一行 summary：
+
+```
+[workflows] resume: 1 continued from last completed step, 0 marked failed (workflow no longer loaded)
+```
+
 ## 贡献新 workflow
 
 欢迎 PR。规范：

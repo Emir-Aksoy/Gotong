@@ -595,3 +595,160 @@ workflow:
     expect(out.error).toMatch(/when '\$fan\.zzz\.output == "x"' threw/)
   })
 })
+
+describe('WorkflowRunner — resume from disk (v0.3)', () => {
+  // Same three-step workflow used by all resume tests. `mid` is the
+  // step that's marked still-running on disk when the host crashed.
+  const RESUMABLE_YAML = `
+schema: aipehub.workflow/v1
+workflow:
+  id: three-step
+  trigger: { capability: go }
+  steps:
+    - id: head
+      dispatch:
+        strategy: { kind: capability, capabilities: [head] }
+        payload: $trigger.payload
+    - id: mid
+      dispatch:
+        strategy: { kind: capability, capabilities: [mid] }
+        payload: { from_head: $head.output }
+    - id: tail
+      dispatch:
+        strategy: { kind: capability, capabilities: [tail] }
+        payload: { from_mid: $mid.output }
+  output: $tail.output
+`
+
+  function partialState(overrides?: Partial<RunState>): RunState {
+    return {
+      runId: 'r_resume_1',
+      workflowId: 'three-step',
+      triggeredByTaskId: 'task_origin',
+      triggerPayload: { kicked: true },
+      steps: [
+        {
+          stepId: 'head',
+          startedAt: 100,
+          endedAt: 110,
+          status: 'done',
+          attempts: 1,
+          subTaskIds: ['sub_head'],
+          output: 'HEAD_OUTPUT',
+        },
+      ],
+      startedAt: 100,
+      status: 'running',
+      ...overrides,
+    }
+  }
+
+  it('skips already-done steps and runs only the remainder', async () => {
+    const def = parseWorkflow(RESUMABLE_YAML)
+    const { hub, calls } = makeStubHub((c) => {
+      if (c.payload && typeof c.payload === 'object' && 'from_head' in c.payload) {
+        return ok(nextTaskId(), 'MID_OUTPUT', 'mid-bot')
+      }
+      return ok(nextTaskId(), 'TAIL_OUTPUT', 'tail-bot')
+    })
+    const runner = new WorkflowRunner({ definition: def, hub })
+
+    const out = await runner.resumeRun(partialState())
+    expect(out).toBe('TAIL_OUTPUT')
+    // head was already done → not redispatched. mid + tail → 2 calls.
+    expect(calls).toHaveLength(2)
+    expect(calls[0]!.payload).toEqual({ from_head: 'HEAD_OUTPUT' })
+    expect(calls[1]!.payload).toEqual({ from_mid: 'MID_OUTPUT' })
+  })
+
+  it('re-runs a step that was mid-flight (status running) by dropping its record', async () => {
+    const def = parseWorkflow(RESUMABLE_YAML)
+    let midAttempts = 0
+    const { hub, calls } = makeStubHub((c) => {
+      if (c.payload && typeof c.payload === 'object' && 'from_head' in c.payload) {
+        midAttempts += 1
+        return ok(nextTaskId(), 'MID_FRESH', 'mid-bot')
+      }
+      return ok(nextTaskId(), 'TAIL_OUTPUT', 'tail-bot')
+    })
+    const runner = new WorkflowRunner({ definition: def, hub })
+
+    // mid was mid-flight when the host died — it has a stale 'running' record
+    const state = partialState({
+      steps: [
+        partialState().steps[0]!,
+        {
+          stepId: 'mid',
+          startedAt: 200,
+          status: 'running',
+          attempts: 1,
+          subTaskIds: ['sub_mid_stale'],
+        },
+      ],
+    })
+    await runner.resumeRun(state)
+    // mid got re-run from scratch (head reused)
+    expect(midAttempts).toBe(1)
+    // The stale "running" mid record was dropped in favour of the new one.
+    expect(state.steps.find((s) => s.stepId === 'mid')!.subTaskIds).not.toContain('sub_mid_stale')
+    expect(calls.map((c) => c.strategy.kind === 'capability' && c.strategy.capabilities[0])).toEqual(['mid', 'tail'])
+  })
+
+  it('writes the resumed state back to disk on each step', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'aipehub-resume-'))
+    try {
+      const def = parseWorkflow(RESUMABLE_YAML)
+      const store = new RunStore(tmp)
+      store.ensureDirs()
+      const { hub } = makeStubHub(() => ok(nextTaskId(), 'OUT', 'bot'))
+      const runner = new WorkflowRunner({ definition: def, hub, runStore: store })
+
+      const initial = partialState()
+      await store.write(initial)
+      await runner.resumeRun(initial)
+
+      const onDisk = JSON.parse(readFileSync(store.pathFor(initial.runId), 'utf8')) as RunState
+      expect(onDisk.status).toBe('done')
+      expect(onDisk.endedAt).toBeDefined()
+      expect(onDisk.steps.map((s) => s.stepId)).toEqual(['head', 'mid', 'tail'])
+      expect(onDisk.finalOutput).toBe('OUT')
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('persists a fresh failure (and does not throw) when resume hits halt failure', async () => {
+    const def = parseWorkflow(RESUMABLE_YAML)
+    const { hub } = makeStubHub((c) => {
+      if (c.strategy.kind === 'capability' && c.strategy.capabilities[0] === 'mid') {
+        return fail(nextTaskId(), 'mid blew up on resume', 'mid-bot')
+      }
+      return ok(nextTaskId(), 'unused', 'bot')
+    })
+    const runner = new WorkflowRunner({ definition: def, hub })
+
+    const initial = partialState()
+    const out = await runner.resumeRun(initial)
+    expect(out).toBeUndefined()
+    expect(initial.status).toBe('failed')
+    expect(initial.error).toMatch(/mid blew up on resume/)
+  })
+
+  it('refuses to resume a run that is not in `running` status', async () => {
+    const def = parseWorkflow(RESUMABLE_YAML)
+    const { hub } = makeStubHub(() => ok(nextTaskId(), 'x', 'b'))
+    const runner = new WorkflowRunner({ definition: def, hub })
+
+    await expect(runner.resumeRun(partialState({ status: 'done' }))).rejects.toThrow(/not 'running'/)
+  })
+
+  it('refuses to resume a run that targets a different workflowId', async () => {
+    const def = parseWorkflow(RESUMABLE_YAML)
+    const { hub } = makeStubHub(() => ok(nextTaskId(), 'x', 'b'))
+    const runner = new WorkflowRunner({ definition: def, hub })
+
+    await expect(
+      runner.resumeRun(partialState({ workflowId: 'something-else' })),
+    ).rejects.toThrow(/does not match this runner/)
+  })
+})
