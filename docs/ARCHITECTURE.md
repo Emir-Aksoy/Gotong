@@ -80,35 +80,53 @@ The transcript is what `serveWeb()` reads to render history. It is also what mak
 `Storage` is an interface. The first version ships two implementations:
 
 - **`InMemoryStorage`** — for tests, demos, and ephemeral runs. Default.
-- **`SqliteStorage`** — for persistence across restarts. Single-file SQLite, no external server.
+- **`FileStorage`** — durable JSONL append-only log. One transcript entry per line, single file, no external dependencies. Crash-tolerant: a partial trailing line is skipped on load with a warning.
 
-Storage is responsible for persisting:
+v0 persists **transcript entries only**. Pending tasks and participant registrations are runtime-only and lost on Hub restart — adapters must re-register and re-dispatch any in-flight work themselves. See §11 for the implications when you resume.
 
-- Transcript entries
-- Pending tasks (so a Hub restart can resume mid-flight tasks)
-- Participant registrations (so reconnecting participants pick up their inbox)
-
-Storage does **not** persist participant code or behavior. Adapters re-register on Hub boot.
+A future `SqliteStorage` will subsume both with structured queries and pending-task journaling. The interface stays the same.
 
 ## 7. Web UI (reference)
 
-A reference web UI ships in `packages/web` (planned, not in the very first cut). It is purely a *visualization and intervention surface* — it reads the transcript, lists participants, and lets a human take action on tasks routed to them. It does not run any business logic.
+A reference web UI ships in `packages/web`. It is a *visualization and intervention surface* — it reads the transcript, lists participants, and lets humans take action on tasks routed to them. It does not run any business logic.
 
-The web UI is optional: `hub.serveWeb({ port })` starts it; you can also bring your own UI and just consume the Hub's event stream.
+Surface area:
 
-## 8. Deployment shape (v1)
+- **Snapshot** `GET /api/state` — current participants, full transcript, pending human tasks
+- **Live stream** `GET /api/stream` (Server-Sent Events) — every appended `TranscriptEntry`
+- **Action** `POST /api/tasks/:id/(complete|reject)` — resolves a pending task on whichever `HumanParticipant` currently holds it
+
+The frontend is a single vanilla-JS page; no bundler, no framework, no build step beyond `tsc` for the server. Use it as-is, or read it as ~250 lines of reference for building your own UI on top of `hub.onEvent()`.
+
+```ts
+import { Hub } from '@aipehub/core'
+import { serveWeb } from '@aipehub/web'
+
+const hub = new Hub()
+await hub.start()
+const web = await serveWeb(hub, { port: 3000 })
+// later: await web.close()
+```
+
+## 8. Deployment shape (v0)
 
 Single-process embeddable library:
 
 ```ts
-import { Hub } from '@aipehub/core'
-const hub = new Hub({ storage: new SqliteStorage('./aipe.db') })
+import { Hub, FileStorage } from '@aipehub/core'
+
+const hub = new Hub({ storage: new FileStorage('./aipe.jsonl') })
+await hub.start()
 hub.register(new MyAgent())
 hub.register(new MyHumanAdapter())
-await hub.dispatch({ kind: 'capability', capabilities: ['draft'], payload: ... })
+await hub.dispatch({
+  from: 'system',
+  strategy: { kind: 'capability', capabilities: ['draft'] },
+  payload: { topic: 'why TS' },
+})
 ```
 
-A future version may add a `transport/` layer to let participants connect across processes (websocket / gRPC). The Hub interface stays the same.
+A future version may add a `transport/` layer so participants can connect across processes (websocket / gRPC). The Hub interface stays the same.
 
 ## 9. What is explicitly NOT in v0
 
@@ -118,7 +136,7 @@ A future version may add a `transport/` layer to let participants connect across
 - Multi-tenant auth
 - Network transport (single-process only)
 - A scheduler that understands cost, latency, or priority
-- The web UI (designed for, not built yet)
+- Persistent pending tasks across restarts (only transcript persists; see §11)
 
 These are intentional cuts. The v0 surface is the smallest API that proves the abstraction holds.
 
@@ -133,10 +151,46 @@ packages/core/src/
   scheduler.ts          Scheduler interface + DefaultScheduler (three strategies)
   transcript.ts         append-only event log
   storage/
-    index.ts            Storage interface
-    memory.ts           in-memory impl (default)
+    index.ts            Storage interface + re-exports
+    memory.ts           InMemoryStorage (default; ephemeral)
+    file.ts             FileStorage (JSONL append-only, durable)
   participants/
     agent.ts            AgentParticipant base class
-    human.ts            HumanParticipant base class + simple CLI adapter
+    human.ts            HumanParticipant — async task inbox driven by an adapter
   index.ts              public re-exports
+
+packages/web/
+  src/server.ts         Node http server: SSE stream + state snapshot + task action API
+  src/index.ts          serveWeb() export
+  static/index.html     single-page UI shell
+  static/app.js         vanilla-JS client; connects to /api/stream
+  static/styles.css
+
+examples/
+  hello-collab/         capability + explicit dispatch, mock human auto-approves
+  broadcast-claim/      broadcast strategy: three reviewers race, losers get cancelled
+  persist-and-resume/   FileStorage round-trip: seq continues across restarts
+  web-demo/             web UI in front of a perpetual writer + alice loop
 ```
+
+## 11. Asynchrony — what is and is not synchronized
+
+A few semantic edges that matter once you build something real on top of the Hub. Each is a deliberate v0 choice, not an oversight.
+
+### Resume rewrites `participant_joined` on every boot
+
+`Transcript.load()` brings back every prior entry, but `register()` after boot writes a fresh `participant_joined` entry — the Hub treats each process as a new session. If you derive "currently online" from the transcript alone, pair each `participant_joined` with the latest `participant_left` (or session boundary) to know who's actually present. The transcript is the journal of what happened, not a snapshot of right now.
+
+### Broadcast cancel notifications race with `dispatch()` resolution
+
+When a broadcast winner is decided, `dispatch()` resolves immediately with the winner's result. The losers' `onTaskCancelled` callbacks are scheduled but not necessarily run yet. Demos that print "winner!" right after `await dispatch(...)` often see the cancel log lines arrive afterward in non-deterministic order. This is OK by design — cancels are best-effort notifications, not part of the task-result contract. If you need them ordered, sleep a tick before reading.
+
+### Transcript persistence is fire-and-forget per append
+
+`Transcript.append()` returns synchronously after pushing the entry to the in-memory log; the Storage write is dispatched on a separate promise chain. Consequences:
+
+- A crash *between* `await dispatch(...)` and `await hub.stop()` may lose the last few entries.
+- `await hub.stop()` *does* flush — for `FileStorage`, `close()` awaits the serial write queue.
+- If you need write-through for a specific moment, await a follow-up no-op or call `hub.stop()`.
+
+A future version may add `transcript.flush(): Promise<void>` if a real use case appears. For now, the fast in-memory path is more valuable than a per-append durability guarantee.
