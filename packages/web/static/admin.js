@@ -113,6 +113,14 @@
       maImportText: $('ma-import-text'),
       maImportSubmit: $('ma-import-submit'),
       maImportMsg: $('ma-import-msg'),
+      maGhImportBtn: $('ma-gh-import-btn'),
+      maGhImportModal: $('ma-gh-import-modal'),
+      maGhUrl: $('ma-gh-url'),
+      maGhSource: $('ma-gh-source'),
+      maGhResolved: $('ma-gh-resolved'),
+      maGhImportSubmit: $('ma-gh-import-submit'),
+      maGhImportMsg: $('ma-gh-import-msg'),
+      maImportDropdown: document.querySelector('.ma-import-dropdown'),
       // Workflows (v2.1)
       wfSection: $('workflows'),
       wfList: $('workflows-list'),
@@ -455,9 +463,12 @@
       const onlineCls = a.online ? 'agent-online' : 'agent-offline'
       const onlineLabel = a.online ? t.online : t.offline
       const caps = (a.allowedCapabilities || []).map((c) => `<span class="cap">${escapeHtml(c)}</span>`).join('')
+      const kindBadge = managed
+        ? `<span class="agent-kind-badge agent-kind-local">${escapeHtml(t.localAgentBadge)}</span>`
+        : `<span class="agent-kind-badge agent-kind-cloud">${escapeHtml(t.cloudAgentBadge)}</span>`
       const meta = managed
-        ? `<span class="ma-provider">${escapeHtml(managed.provider)}${managed.model ? ' · ' + escapeHtml(managed.model) : ''}</span>`
-        : `<span class="ma-external">${escapeHtml(t.externalAgent)}</span>`
+        ? `${kindBadge}<span class="ma-provider">${escapeHtml(managed.provider)}${managed.model ? ' · ' + escapeHtml(managed.model) : ''}</span>`
+        : `${kindBadge}<span class="ma-external">${escapeHtml(t.externalAgent)}</span>`
       const actions = managed ? `
         <button class="ma-action" data-act="edit-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.edit)}</button>
         <button class="ma-action" data-act="export-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.export_)}</button>
@@ -711,6 +722,119 @@
     } catch (err) {
       dom.maImportMsg.textContent = t.failedAlert(err.message || String(err))
       dom.maImportMsg.classList.add('err')
+    }
+  }
+
+  // --- GitHub import (with optional China-friendly mirror) -------------
+  //
+  // Accept any of:
+  //   https://github.com/<o>/<r>/blob/<ref>/<path...>
+  //   https://github.com/<o>/<r>/raw/<ref>/<path...>
+  //   https://raw.githubusercontent.com/<o>/<r>/<ref>/<path...>
+  //
+  // and rewrite to one of three download sources picked in the UI:
+  //   - github   : raw.githubusercontent.com (default upstream)
+  //   - jsdelivr : cdn.jsdelivr.net/gh/<o>/<r>@<ref>/<path>  (CDN, China-OK)
+  //   - ghproxy  : mirror.ghproxy.com/<raw_url>             (transparent proxy)
+  //
+  // The actual download URL is shown live in the modal so users can sanity-
+  // check before hitting "import". On submit we fetch the text client-side
+  // and feed it to the existing POST /api/admin/agents/import — no new
+  // server endpoint, no CORS dance for the host.
+
+  function parseGithubUrl(rawInput) {
+    const u = (rawInput || '').trim()
+    if (!u) return null
+    // raw.githubusercontent.com/<o>/<r>/<ref>/<path>
+    let m = u.match(/^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/i)
+    if (m) return { owner: m[1], repo: m[2], ref: m[3], path: m[4] }
+    // github.com/<o>/<r>/(blob|raw)/<ref>/<path>
+    m = u.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:blob|raw)\/([^/]+)\/(.+)$/i)
+    if (m) return { owner: m[1], repo: m[2], ref: m[3], path: m[4] }
+    return null
+  }
+
+  function buildDownloadUrl(parts, source) {
+    const { owner, repo, ref, path } = parts
+    if (source === 'jsdelivr') {
+      return `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${ref}/${path}`
+    }
+    if (source === 'ghproxy') {
+      return `https://mirror.ghproxy.com/https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path}`
+    }
+    return `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path}`
+  }
+
+  function updateGhResolved() {
+    if (!dom.maGhResolved) return
+    const parts = parseGithubUrl(dom.maGhUrl.value)
+    if (!parts) {
+      dom.maGhResolved.textContent = '—'
+      return
+    }
+    dom.maGhResolved.textContent = buildDownloadUrl(parts, dom.maGhSource.value)
+  }
+
+  function openGithubImportModal() {
+    dom.maGhUrl.value = ''
+    dom.maGhResolved.textContent = '—'
+    dom.maGhImportMsg.textContent = ''
+    dom.maGhImportMsg.classList.remove('ok', 'err')
+    dom.maGhImportModal.hidden = false
+  }
+
+  function closeGithubImportModal() {
+    dom.maGhImportModal.hidden = true
+  }
+
+  async function submitGithubImport() {
+    dom.maGhImportMsg.textContent = ''
+    dom.maGhImportMsg.classList.remove('ok', 'err')
+    const parts = parseGithubUrl(dom.maGhUrl.value)
+    if (!parts) {
+      dom.maGhImportMsg.textContent = t.ghImportBadUrl
+      dom.maGhImportMsg.classList.add('err')
+      return
+    }
+    const dlUrl = buildDownloadUrl(parts, dom.maGhSource.value)
+    // Step 1 — fetch the YAML/JSON text from the chosen mirror.
+    let text = ''
+    try {
+      const r = await fetch(dlUrl, { mode: 'cors' })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      text = await r.text()
+      if (!text.trim()) throw new Error('empty response')
+    } catch (err) {
+      dom.maGhImportMsg.textContent = t.ghFetchFailed(err.message || String(err))
+      dom.maGhImportMsg.classList.add('err')
+      return
+    }
+    // Step 2 — feed the text to the existing import endpoint. Same path
+    // as the paste/upload flow, so the server treats it identically.
+    try {
+      const r = await fetch('/api/admin/agents/import', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: text,
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        dom.maGhImportMsg.textContent = t.failedAlert(body.error || `${r.status}`)
+        dom.maGhImportMsg.classList.add('err')
+        return
+      }
+      const createdCount = (body.created || []).length
+      const skippedCount = (body.skipped || []).length
+      const spawnErrCount = (body.spawnErrors || []).length
+      dom.maGhImportMsg.textContent = t.importDone(createdCount, skippedCount, spawnErrCount)
+      dom.maGhImportMsg.classList.add(spawnErrCount > 0 ? 'err' : 'ok')
+      await refreshManagedAgents()
+      if (createdCount > 0 && spawnErrCount === 0) {
+        setTimeout(closeGithubImportModal, 700)
+      }
+    } catch (err) {
+      dom.maGhImportMsg.textContent = t.failedAlert(err.message || String(err))
+      dom.maGhImportMsg.classList.add('err')
     }
   }
 
@@ -1133,10 +1257,33 @@
 
     // Managed-agent panel events
     dom.maNewBtn?.addEventListener('click', () => openAgentForm('create'))
-    dom.maImportBtn?.addEventListener('click', openImportModal)
+    dom.maImportBtn?.addEventListener('click', () => {
+      // Close the dropdown after the user picks an import method.
+      if (dom.maImportDropdown) dom.maImportDropdown.open = false
+      openImportModal()
+    })
+    dom.maGhImportBtn?.addEventListener('click', () => {
+      if (dom.maImportDropdown) dom.maImportDropdown.open = false
+      openGithubImportModal()
+    })
     dom.maKeysBtn?.addEventListener('click', openKeysModal)
     dom.maForm?.addEventListener('submit', submitAgentForm)
     dom.maImportSubmit?.addEventListener('click', submitImport)
+    dom.maGhImportSubmit?.addEventListener('click', submitGithubImport)
+    // Live-preview the resolved download URL as the user types or
+    // flips the mirror source — so they can see whether the parser
+    // recognized their URL before clicking "import".
+    dom.maGhUrl?.addEventListener('input', updateGhResolved)
+    dom.maGhSource?.addEventListener('change', updateGhResolved)
+    // Click outside the dropdown closes it (click on the summary
+    // toggles it natively, so we only handle the "click elsewhere" path).
+    document.addEventListener('click', (e) => {
+      if (!dom.maImportDropdown || !dom.maImportDropdown.open) return
+      if (!(e.target instanceof Node)) return
+      if (!dom.maImportDropdown.contains(e.target)) {
+        dom.maImportDropdown.open = false
+      }
+    })
 
     // Workflow panel events
     dom.wfImportBtn?.addEventListener('click', openWorkflowImportModal)
@@ -1156,6 +1303,7 @@
       if (target.dataset.act === 'close-modal') {
         if (!dom.maFormModal.hidden) closeAgentForm()
         if (!dom.maImportModal.hidden) closeImportModal()
+        if (dom.maGhImportModal && !dom.maGhImportModal.hidden) closeGithubImportModal()
         if (!dom.maKeysModal.hidden) closeKeysModal()
         if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal()
         if (dom.wfRunsModal && !dom.wfRunsModal.hidden) closeWorkflowRunsModal()
@@ -1198,6 +1346,7 @@
       if (e.key !== 'Escape') return
       if (!dom.maFormModal.hidden) closeAgentForm()
       if (!dom.maImportModal.hidden) closeImportModal()
+      if (dom.maGhImportModal && !dom.maGhImportModal.hidden) closeGithubImportModal()
       if (!dom.maKeysModal.hidden) closeKeysModal()
       if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal()
       if (dom.wfRunsModal && !dom.wfRunsModal.hidden) closeWorkflowRunsModal()
@@ -1243,6 +1392,18 @@
       applyStaticI18n()
       renderAll()
     })
+
+    // View switcher — jump to the worker (`/`) view. Both views share
+    // identity through HttpOnly cookies (`aipehub_admin` + `aipehub_worker`),
+    // so a person who is both admin and worker keeps both sessions across
+    // the switch. No client-side state is saved here — server is the
+    // source of truth and the new page re-fetches everything.
+    const switchToWorkerBtn = document.getElementById('switch-to-worker-btn')
+    if (switchToWorkerBtn) {
+      switchToWorkerBtn.addEventListener('click', () => {
+        window.location.href = '/'
+      })
+    }
 
     try {
       await refresh()

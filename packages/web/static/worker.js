@@ -298,6 +298,17 @@
       renderAll()
     })
 
+    // View switcher — jump to the admin (`/admin`) view. If the user
+    // already has an `aipehub_admin` cookie they land in the admin
+    // console directly; otherwise the admin page presents the usual
+    // login flow. No client-side state is saved here.
+    const switchToAdminBtn = document.getElementById('switch-to-admin-btn')
+    if (switchToAdminBtn) {
+      switchToAdminBtn.addEventListener('click', () => {
+        window.location.href = '/admin'
+      })
+    }
+
     try {
       await recoverIdentity()
       await refresh()

@@ -51,6 +51,52 @@ header h1::before { content: "◉ "; color: #6cc; }
 .lang-toggle:hover { background: rgba(255, 255, 255, 0.16); }
 .lang-toggle:active { transform: translateY(1px); }
 
+/* View switcher pill — single-person admin+worker scenario, jump between
+   the two consoles. Same shape as .lang-toggle but blue accent so the
+   user can tell them apart at a glance. */
+.view-switch-btn {
+  margin-left: 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: rgba(100, 170, 255, 0.18);
+  color: #fff;
+  border: 1px solid rgba(100, 170, 255, 0.45);
+  cursor: pointer;
+  font-family: inherit;
+  line-height: 1;
+  letter-spacing: 0.04em;
+}
+.view-switch-btn:hover { background: rgba(100, 170, 255, 0.32); }
+.view-switch-btn:active { transform: translateY(1px); }
+
+/* Agent kind badges in the agents list — visually separate the two
+   architectural classes per the project's "local = host-managed,
+   no socket / cloud = external SDK via WebSocket" model. */
+.agent-kind-badge {
+  display: inline-block;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 1px 7px;
+  border-radius: 3px;
+  letter-spacing: 0.05em;
+  margin-right: 0.45rem;
+  vertical-align: middle;
+  text-transform: uppercase;
+  line-height: 1.4;
+}
+.agent-kind-local {
+  background: rgba(100, 200, 120, 0.18);
+  color: #2f8748;
+  border: 1px solid rgba(100, 200, 120, 0.4);
+}
+.agent-kind-cloud {
+  background: rgba(140, 130, 220, 0.18);
+  color: #6c5cc5;
+  border: 1px solid rgba(140, 130, 220, 0.4);
+}
+
 /* --- layout ---------------------------------------------------------- */
 main {
   display: grid;
@@ -798,6 +844,68 @@ body.admin main.admin-grid {
 }
 .ma-btn:hover { filter: brightness(1.08); }
 .managed-agents .lb-summary { margin-left: auto; }
+
+/* Import method dropdown — folds "upload/paste" and "from GitHub" (and
+   any future import method) under a single "导入 ▾" button so the
+   toolbar stays calm. <details>/<summary> is the lightest accessible
+   primitive that gives us click-to-open + ESC + keyboard nav for free. */
+.ma-import-dropdown {
+  display: inline-block;
+  position: relative;
+  margin-left: 0.3rem;
+}
+.ma-import-summary {
+  /* inherits .ma-btn — we just kill the default disclosure triangle */
+  list-style: none;
+  margin-left: 0;       /* .ma-btn already adds it; prevent double */
+  user-select: none;
+}
+.ma-import-summary::-webkit-details-marker { display: none; }
+.ma-import-menu {
+  position: absolute;
+  z-index: 50;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 180px;
+  background: #fff;
+  border: 1px solid #d4d4cf;
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ma-import-menu-item {
+  font: inherit;
+  font-size: 0.74rem;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+  color: #2f2f29;
+  white-space: nowrap;
+}
+.ma-import-menu-item:hover { background: #f0f4fa; }
+
+/* "Resolved URL" preview inside the GitHub-import modal — long URLs
+   shouldn't overflow or wrap weirdly. */
+.ma-gh-resolved-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.35rem;
+}
+.ma-gh-resolved {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  background: #f5f5f0;
+  padding: 1px 6px;
+  border-radius: 3px;
+  word-break: break-all;
+}
 
 .managed-agents-list {
   display: grid;

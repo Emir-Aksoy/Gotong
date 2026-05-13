@@ -18,6 +18,7 @@
         <input type="checkbox" id="contrib-toggle-input" />
         <span class="contrib-toggle-label" data-i18n="contribToggleLabel">我派发的任务计入贡献榜</span>
       </label>
+      <button id="switch-to-worker-btn" class="view-switch-btn" type="button" data-i18n="switchToWorker" title="切换到工作台 / Go to Worker view">→ 工作台</button>
       <button id="logout-btn" class="leave-btn" type="button" data-i18n="logout">退出</button>
       <button id="lang-toggle" class="lang-toggle" type="button" title="切换语言 / Switch language">EN</button>
     </header>
@@ -59,12 +60,18 @@
           <span id="ma-summary" class="lb-summary"></span>
           <button type="button" id="ma-keys-btn" class="ma-btn ma-btn-secondary" data-i18n="apiKeysBtn">API Key 管理</button>
           <button type="button" id="ma-new-btn" class="ma-btn" data-i18n="newAgent">+ 创建</button>
-          <button type="button" id="ma-import-btn" class="ma-btn" data-i18n="importAgent">导入</button>
+          <details class="ma-import-dropdown">
+            <summary class="ma-btn ma-import-summary" data-i18n="importMenuLabel">导入 ▾</summary>
+            <div class="ma-import-menu" role="menu">
+              <button type="button" id="ma-import-btn" class="ma-import-menu-item" role="menuitem" data-i18n="importMenuFile">上传 / 粘贴 YAML</button>
+              <button type="button" id="ma-gh-import-btn" class="ma-import-menu-item" role="menuitem" data-i18n="importMenuGithub">从 GitHub URL</button>
+            </div>
+          </details>
         </h2>
         <div id="managed-agents-list" class="managed-agents-list"></div>
         <p class="hint">
-          <span data-i18n="templatesHint">从公网模板库找标准 agent / team 文件，复制内容到「导入」即可：</span>
-          <a href="https://github.com/AipeHub/aipehub-templates" target="_blank" rel="noopener">github.com/AipeHub/aipehub-templates</a>
+          <span data-i18n="templatesHint">主仓库 <code>templates/</code> 目录下有标准 agent / team / workflow 模板。打开任一 yaml，复制内容到「导入」即可：</span>
+          <a href="https://github.com/Emir-Aksoy/AipeHub/tree/main/templates" target="_blank" rel="noopener">github.com/Emir-Aksoy/AipeHub · templates/</a>
         </p>
       </section>
 
@@ -194,6 +201,41 @@
             </label>
             <button type="button" id="wf-import-submit" data-i18n="doImport">导入</button>
             <p id="wf-import-msg" class="form-msg"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: import a manifest from a GitHub URL (raw / blob), with
+           an optional China-friendly mirror (jsDelivr / ghproxy) so users
+           behind the GFW don't time out on raw.githubusercontent.com. -->
+      <div id="ma-gh-import-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card" role="dialog" aria-modal="true">
+          <header class="modal-head">
+            <h3 data-i18n="ghImportTitle">从 GitHub 导入</h3>
+            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+          </header>
+          <div class="dispatch-form">
+            <p class="hint" data-i18n="ghImportHint">粘贴 GitHub 上 agent / team / workflow 的 yaml 链接（blob 或 raw 都行）。如果访问 GitHub 慢，可一键切换到国内镜像源。</p>
+            <label>
+              <span data-i18n="ghImportUrlLabel">文件 URL</span>
+              <input id="ma-gh-url" type="url" autocomplete="off"
+                     placeholder="https://github.com/.../templates/agent/sample.yaml" />
+            </label>
+            <label>
+              <span data-i18n="ghImportSourceLabel">下载源（可一键切换）</span>
+              <select id="ma-gh-source">
+                <option value="jsdelivr" data-i18n="ghSourceJsdelivr">jsDelivr CDN（国内可达，推荐）</option>
+                <option value="ghproxy" data-i18n="ghSourceGhproxy">ghproxy 镜像（国内备用）</option>
+                <option value="github" data-i18n="ghSourceGithub">GitHub 原版（raw.githubusercontent.com）</option>
+              </select>
+            </label>
+            <p class="hint ma-gh-resolved-row">
+              <span data-i18n="ghResolvedLabel">实际下载地址：</span>
+              <code id="ma-gh-resolved" class="ma-gh-resolved">—</code>
+            </p>
+            <button type="button" id="ma-gh-import-submit" data-i18n="ghImportSubmit">下载并导入</button>
+            <p id="ma-gh-import-msg" class="form-msg"></p>
           </div>
         </div>
       </div>
