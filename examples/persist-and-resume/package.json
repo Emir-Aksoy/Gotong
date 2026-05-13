@@ -1,0 +1,14 @@
+{
+  "name": "@aipehub/example-persist-and-resume",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "FileStorage durability: write a transcript in 'fresh', then continue seq across processes in 'resume'.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*"
+  }
+}

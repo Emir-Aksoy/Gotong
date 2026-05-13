@@ -1,0 +1,18 @@
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.DS_Store
+*.log
+
+# Claude Code local harness settings — not part of the open-source repo
+.claude/
+.env
+.env.local
+coverage/
+.turbo/
+data/
+aipe-data/
+**/aipe-data/
+*.sqlite
+*.sqlite-journal

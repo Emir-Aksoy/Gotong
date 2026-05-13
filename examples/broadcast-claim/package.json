@@ -1,0 +1,14 @@
+{
+  "name": "@aipehub/example-broadcast-claim",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Broadcast dispatch: fastest reviewer wins, the rest get onTaskCancelled.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*"
+  }
+}

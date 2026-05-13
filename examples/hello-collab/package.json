@@ -1,0 +1,14 @@
+{
+  "name": "@aipehub/example-hello-collab",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Two mock agents and one mock human collaborating to draft a writeup.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*"
+  }
+}
