@@ -31,7 +31,7 @@
   "dependencies": {
     "@aipehub/core": "workspace:*",
     "@aipehub/protocol": "workspace:*",
-    "ws": "^8.18.0"
+    "ws": "^8.20.1"
   },
   "devDependencies": {
     "@aipehub/transport-ws": "workspace:*",
