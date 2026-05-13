@@ -11,6 +11,7 @@
 | 🧭 项目整体概览（5 分钟读懂） | [`OVERVIEW.md`](OVERVIEW.md) |
 | 🧑 加入一个 room（admin 或 worker 视角） | [`HUMAN.md`](HUMAN.md) |
 | 🧩 不写代码导入 / 分享 LLM 智能体模板 | [`TEMPLATES.md`](TEMPLATES.md) |
+| 🧪 **真机测试指南**（本机 / 局域网 / 公网 VPS） | [`REAL-WORLD-TESTING.md`](REAL-WORLD-TESTING.md) |
 | 🤖 自己写 agent 接入 | [`../AGENT.md`](../AGENT.md)（英文，待翻译） |
 | 🔧 在自己机器 / 服务器部署 | [`../DEPLOY.md`](../DEPLOY.md)（英文，待翻译） |
 | 🪢 多团队 hub 联合 | [`../FEDERATION.md`](../FEDERATION.md)（英文，待翻译） |
@@ -25,6 +26,7 @@
 | OVERVIEW | ✅ 完整翻译 |
 | HUMAN | ✅ 完整翻译（原本就部分中文） |
 | TEMPLATES | ✅ 完整翻译 |
+| REAL-WORLD-TESTING | ✅ 中文原创（暂无英文版，欢迎 PR 翻译） |
 | AGENT | ⏳ 待翻译 |
 | DEPLOY | ⏳ 待翻译 |
 | FEDERATION | ⏳ 待翻译 |
