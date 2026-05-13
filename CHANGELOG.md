@@ -105,6 +105,36 @@ cancels in-flight PR runs; `main` post-merge runs always finish.
   history / resume orchestration).
 - Workspace total: **316 passed / 2 skipped**.
 
+### Distribution
+
+- **No `npm publish` at this stage.** The earlier "queued for v2.1"
+  plan to push `@aipehub/*` to npmjs.com has been **descoped**. Source
+  (`pnpm install && pnpm build && pnpm host`) and Docker
+  (`docker compose up`) are the two supported install paths — both
+  documented in [README](README.md) Quick start.
+- **Open decision** — which JS registry, if any: stay source-only, JSR
+  (jsr.io — GitHub OAuth, no separate account, native TS), or GitHub
+  Packages (`@aipehub` scope same as the GitHub org but users must
+  configure `.npmrc`). Tracked in
+  [RELEASE-CHECKLIST](.github/RELEASE-CHECKLIST.md).
+- **Pre-built single-file binaries** for macOS (arm64 + x64) and
+  Windows x64 are a planned but **non-blocking** item — Docker already
+  covers the cross-platform "click and run" case. Bun `--compile` is
+  the leading candidate; requires inlining `packages/web/static/*`
+  before the binary is self-contained.
+- **PyPI**: `aipehub` is similarly source-only at this stage
+  (`pip install -e python-sdk/`). PyPI publish decision moves alongside
+  the JS-registry call.
+
+### Author / committer hygiene
+
+- All commits in the repo history now use the GitHub `users.noreply`
+  alias as author and committer — eliminates the `<user>@<hostname>.local`
+  leak the local-default git config introduces when `user.email` is
+  unset. One-time `git rebase --root --exec 'git commit --amend
+  --reset-author --no-edit'` rewrote 23 commits before the repo was
+  pushed anywhere; nobody had to force-push.
+
 ## Unreleased — managed agents + encrypted API keys + template library (v2.1)
 
 The "普通人 60 秒上线一个 agent" milestone. Adds host-managed LLM

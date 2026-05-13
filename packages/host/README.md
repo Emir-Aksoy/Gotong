@@ -5,12 +5,14 @@ Production-ready binary for [AipeHub](https://github.com/AipeHub/AipeHub). Boots
 ## Quick start
 
 ```bash
-# One-liner (no install)
-npx @aipehub/host
+# From source (the only supported path right now — npm publish is descoped,
+# see .github/RELEASE-CHECKLIST.md "Distribution decision")
+git clone https://github.com/AipeHub/AipeHub.git && cd AipeHub
+pnpm install && pnpm build
+pnpm host
 
-# Or install + run
-npm i -g @aipehub/host
-aipehub-host
+# Or cross-platform via Docker (no Node setup)
+docker compose up
 ```
 
 On first launch:

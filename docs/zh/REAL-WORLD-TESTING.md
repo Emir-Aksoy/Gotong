@@ -306,8 +306,11 @@ sudo journalctl -u aipehub -n 200 | grep -iE 'sk-(ant|proj)|token=|api[_-]?key'
 A：`brew install jq` 即可（macOS）。或者跳过 demo 脚本，手动按上面 1.2 走。
 
 **Q：能不能不用 `pnpm host`，直接 `npx @aipehub/host`？**
-A：等正式 npm 发布之后可以。当前主分支还没推 npm（README 里有说明）。
-本地开发先用 `pnpm host`。
+A：现在不行。**`npm publish` 已经从 v1.0 关键路径上下线**——见
+[`.github/RELEASE-CHECKLIST.md`](../../.github/RELEASE-CHECKLIST.md)
+"Distribution decision" 一节。两条支持的安装路径是：
+（1）从源码 `pnpm install && pnpm build && pnpm host`；
+（2）跨平台直接 `docker compose up`。
 
 **Q：Anthropic 在国内连不上怎么办？**
 A：① 用国内可用的模型，把 yaml 里 `provider` 改成 `openai` 并指向

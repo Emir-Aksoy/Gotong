@@ -46,11 +46,28 @@ see the result back in your chat. Useful for:
 
 ### 2a. Prerequisites
 
-- A running AipeHub host. `pnpm host`, `npx @aipehub/host`, or
-  `docker compose up` — any of those is fine.
+- A running AipeHub host — either `pnpm host` (from source) or
+  `docker compose up`. Both work; pick whichever fits your setup.
 - Its admin Bearer token. Printed once at first launch (search the
   host stdout for `First-run admin URL`). Subsequent admins can be
   minted via [`POST /api/admin/admins`](DEPLOY.md#c8-onboard-more-admins).
+
+> ⚠️ **`@aipehub/mcp-server` is currently source-only.** The
+> `"command": "npx", "args": ["-y", "@aipehub/mcp-server"]` style
+> shown in every client example below will start working once a JS
+> registry is picked (see
+> [RELEASE-CHECKLIST](../.github/RELEASE-CHECKLIST.md) "Distribution
+> decision"). **Until then**, in every config block on this page
+> substitute the `npx` line with:
+>
+> ```json
+> "command": "node",
+> "args": ["/absolute/path/to/AipeHub/packages/mcp-server/bin/server.js"]
+> ```
+>
+> The substitution applies in Claude Desktop, Cursor, Cline, and any
+> generic MCP client — only the `command`/`args` change, the `env`
+> block stays identical.
 
 ### 2b. Claude Desktop
 

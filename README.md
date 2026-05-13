@@ -57,30 +57,31 @@ Contributing? See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security issues: [`SECUR
 ### Get running in 30 seconds — pick one
 
 ```bash
-# A. Docker (recommended for first try — no Node setup needed)
+# A. Docker (recommended — no Node setup, works on macOS / Windows / Linux)
 docker compose up
 # → http://127.0.0.1:3000  + admin URL printed in the logs
 # → state persists under ./data
 
-# B. npx (once published to npm — no clone needed)
-npx @aipehub/host
-# → opens ./.aipehub workspace in cwd, prints first-run admin URL
-
-# C. From source (cloned repo, full demo set available)
+# B. From source (cloned repo, full demo set available)
 pnpm install
 pnpm build
 pnpm host
 ```
 
-All three boot the same binary. Open the printed admin URL → save the token → you're in.
+Both boot the same binary. Open the printed admin URL → save the token → you're in.
 
-> ⚠️ **`npx @aipehub/host` is queued for v2.1 publish.** Until then use Docker (A) or source (C). Track release status in [CHANGELOG.md](CHANGELOG.md).
+> 💡 **Distribution.** No `npm publish` at this stage — Docker (A) and source (B)
+> are the two supported install paths. The earlier "queued for v2.1" npm plan has
+> been **descoped**; the registry choice (npm / JSR / source-only) is an open
+> decision tracked in [RELEASE-CHECKLIST](.github/RELEASE-CHECKLIST.md). Pre-built
+> single-file binaries for macOS / Windows are a planned but non-blocking item —
+> Docker already covers the "click and run" cross-platform case.
 
-CLI flags:
+CLI flags (from a built repo):
 
 ```bash
-aipehub-host --help       # full env-var reference
-aipehub-host --version    # package version
+pnpm exec aipehub-host --help       # full env-var reference
+pnpm exec aipehub-host --version    # current host version
 ```
 
 After it boots, follow [`docs/OVERVIEW.md`](docs/OVERVIEW.md) for the "what now" walkthrough.

@@ -4,11 +4,28 @@ MCP (Model Context Protocol) bridge for [AipeHub](https://github.com/AipeHub/Aip
 
 ## Install
 
+> ⚠️ **Source-only at this stage.** `npm publish` is descoped — see
+> [`.github/RELEASE-CHECKLIST.md`](../../.github/RELEASE-CHECKLIST.md)
+> "Distribution decision". The `npx -y @aipehub/mcp-server` invocations
+> shown in the **Configure your MCP client** examples below will start
+> working once a JS registry is picked; until then, substitute
+> `npx -y @aipehub/mcp-server` with the absolute path:
+>
+> ```
+> "command": "node",
+> "args": ["/absolute/path/to/AipeHub/packages/mcp-server/bin/server.js"]
+> ```
+
 ```bash
+# 1. Build from source
+git clone https://github.com/AipeHub/AipeHub.git && cd AipeHub
+pnpm install && pnpm build
+
+# 2. (Future, after npm publish — NOT available yet)
 # As an MCP client config (no global install needed):
 #   "command": "npx", "args": ["-y", "@aipehub/mcp-server"]
 # Or globally:
-npm i -g @aipehub/mcp-server
+# npm i -g @aipehub/mcp-server
 ```
 
 ## Configure your MCP client
@@ -63,7 +80,7 @@ aipehub-mcp --version
 
 ## Where do I get the admin token?
 
-When you first launch the AipeHub host (`pnpm host` / `npx @aipehub/host` / `docker compose up`), stdout prints:
+When you first launch the AipeHub host (`pnpm host` or `docker compose up`), stdout prints:
 
 ```
 First-run admin URL (shown ONCE — save it):

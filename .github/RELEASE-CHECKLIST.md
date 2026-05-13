@@ -32,17 +32,48 @@ list keeps the checklist honest.
 - [ ] **Set up Caddy** or equivalent in front of any public demo —
       the `docs/DEPLOY.md` C-shape pattern is the reference.
 
-## npm / PyPI publish
+## Distribution decision (was: npm / PyPI publish)
 
-- [ ] **Publish `@aipehub/host` to npm public registry** so
-      `npx @aipehub/host` (advertised in `README.md` Quick start) starts
-      working. Until then the Quick-start carries a "queued for v2.1"
-      caveat.
-- [ ] Same for the other `@aipehub/*` packages — currently only
-      buildable from source.
-- [ ] **Publish `aipehub` to PyPI** — referenced in
-      [`python-sdk/README.md`](../python-sdk/README.md) and
-      [`docs/AGENT.md`](../docs/AGENT.md).
+The "publish to npmjs.com + pypi.org" plan was **descoped from the
+v1.0 critical path** in v2.1 (see CHANGELOG → Unreleased v2.1 →
+Distribution). Source-only + Docker now cover both Quick-start paths.
+Three open decisions remain — each is independent and any of them
+can stay "no" indefinitely:
+
+- [ ] **Pick a JS registry**:
+  - **Option 1 — Source-only (status quo).** Users `git clone` +
+    `pnpm install && pnpm build`. Zero registry maintenance. README
+    Quick-start `B` already documents this. Choose this and delete
+    this checklist item.
+  - **Option 2 — JSR (jsr.io).** GitHub OAuth login (no separate
+    npm account), native TypeScript, works with npm / pnpm / Bun /
+    Deno. Suggested if `npm install`-equivalent UX matters. Requires
+    `@aipehub` scope reservation on jsr.io and minor `package.json`
+    `exports` cleanup per package.
+  - **Option 3 — GitHub Packages.** Same `@aipehub/*` scope as the
+    GitHub org. Standard `npm publish` workflow. Lower install UX
+    than JSR — users must put `@aipehub:registry=https://npm.pkg.github.com`
+    in `.npmrc` first. Choose this if you want zero-tooling change.
+  - **Option 4 — npmjs.com.** The original plan. Requires npm
+    account + 2FA + `@aipehub` org reservation. Best install UX (`pnpm
+    add @aipehub/workflow`) but most setup overhead.
+- [ ] **PyPI publish for `aipehub`**: same source-only-vs-published
+      call. Currently `pip install -e python-sdk/` is the only path.
+      Referenced in [`python-sdk/README.md`](../python-sdk/README.md)
+      and [`docs/AGENT.md`](../docs/AGENT.md). If you publish to a JS
+      registry, doing PyPI alongside keeps consistency.
+- [ ] **Pre-built single-file binaries** for macOS (arm64 + x64) and
+      Windows x64. Non-blocking — Docker covers cross-platform
+      "click and run" today. If pursued:
+  - Bun `--compile` is the leading candidate (one cross-compile
+    command per target on a single Mac).
+  - Blocker: `packages/web/src/server.ts` reads static assets via
+    runtime `readFile` from `<package>/static/`. The static files
+    need to be inlined into the bundle (≈100 lines of build-step
+    work) before the binary is self-contained.
+  - Distribution channel: GitHub Releases (no separate hosting
+    needed). Workflow: build on tag push via GitHub Actions matrix
+    (linux/macos/windows runners), upload artifacts to the release.
 
 ## Documentation polish
 
