@@ -36,11 +36,26 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
+  examples/web-demo:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/web':
+        specifier: workspace:*
+        version: link:../../packages/web
+
   packages/core:
     devDependencies:
       vitest:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.41)
+
+  packages/web:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../core
 
 packages:
 

@@ -1,0 +1,15 @@
+{
+  "name": "@aipehub/example-web-demo",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Hub + reference web UI: a writer agent and a human (alice) collaborate via the browser.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/web": "workspace:*"
+  }
+}

@@ -13,6 +13,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "demo": "pnpm --filter @aipehub/example-hello-collab start",
+    "demo:web": "pnpm --filter @aipehub/example-web-demo start",
     "demo:broadcast": "pnpm --filter @aipehub/example-broadcast-claim start",
     "demo:persist:fresh": "pnpm --filter @aipehub/example-persist-and-resume start fresh",
     "demo:persist:resume": "pnpm --filter @aipehub/example-persist-and-resume start resume",

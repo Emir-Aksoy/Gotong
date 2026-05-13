@@ -1,0 +1,23 @@
+{
+  "name": "@aipehub/web",
+  "version": "0.0.0",
+  "type": "module",
+  "description": "AipeHub reference web UI — embeddable HTTP + SSE server with a vanilla-JS frontend.",
+  "license": "MIT",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "static", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*"
+  }
+}
