@@ -248,7 +248,11 @@ async function main(): Promise<void> {
   // a `managed` spec into a live LlmAgent on the Hub. Not a separate
   // service — just a piece of host startup. Run before the Web server
   // boots so API responses include managed agents from the first call.
-  const localAgents = new LocalAgentPool({ hub, space })
+  // `services` is passed through so agents with `uses:` declarations
+  // get their handles attached at spawn time (PR-8). When services
+  // failed to bootstrap, agents without `uses:` still spawn normally;
+  // agents with `uses:` fail loudly with a clear log line.
+  const localAgents = new LocalAgentPool({ hub, space, services })
   await localAgents.start()
 
   // Workflow runners. Optional — the loader silently no-ops when the

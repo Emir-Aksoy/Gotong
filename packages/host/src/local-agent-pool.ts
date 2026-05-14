@@ -5,11 +5,23 @@ import {
   type ManagedAgentLifecycle,
   type ManagedAgentSpec,
   type ParticipantId,
+  type ServiceUseSpec,
   type Space,
 } from '@aipehub/core'
 import { LlmAgent, MockLlmProvider, type LlmProvider } from '@aipehub/llm'
 import { AnthropicProvider } from '@aipehub/llm-anthropic'
 import { OpenAIProvider } from '@aipehub/llm-openai'
+import {
+  resolveOwner,
+  type ArtifactHandle,
+  type DatastoreHandle,
+  type MemoryHandle,
+  type Owner,
+  type Scope,
+  type ServiceCtx,
+} from '@aipehub/services-sdk'
+
+import type { HubServices, ServiceUseSpec as AttachSpec } from './services/index.js'
 
 const log = createLogger('local-agents')
 
@@ -41,11 +53,26 @@ const log = createLogger('local-agents')
 export class LocalAgentPool implements ManagedAgentLifecycle {
   private readonly hub: Hub
   private readonly space: Space
+  /**
+   * Optional Hub Services. Present when the host successfully booted
+   * services (see `bootstrapServices`). Absent on hosts that disabled
+   * services or where the boot failed — the pool still works, but
+   * agents declaring `uses:` will fail to spawn with a clear error.
+   */
+  private readonly services?: HubServices
   private readonly running = new Map<ParticipantId, LlmAgent>()
+  /**
+   * Per-agent record of the Owner used to file service data, so
+   * `stop(id)` can detach the right handles. Owner derivation depends
+   * on scope (`'private'` → agentId; `'workflow'` → runId; etc.); we
+   * keep the owner explicit to avoid re-deriving on tear-down.
+   */
+  private readonly serviceOwnerForAgent = new Map<ParticipantId, Owner>()
 
-  constructor(opts: { hub: Hub; space: Space }) {
+  constructor(opts: { hub: Hub; space: Space; services?: HubServices }) {
     this.hub = opts.hub
     this.space = opts.space
+    this.services = opts.services
   }
 
   /**
@@ -78,11 +105,27 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   /**
    * Remove the live participant for `id` from the Hub registry and
    * forget the internal handle. Safe to call with unknown ids.
+   *
+   * Also calls `services.detachFor(owner)` so the plugin layer
+   * releases any cached per-owner handles. Note: detach does **not**
+   * delete data — only `softDelete` (PR-10) moves it to trash.
    */
   async stop(id: ParticipantId): Promise<void> {
     const live = this.running.get(id)
     if (live) this.running.delete(id)
     if (this.hub.participant(id)) this.hub.unregister(id)
+    // Best-effort service detach. We swallow errors here because
+    // tearing down a participant on shutdown is the wrong moment to
+    // fail loudly — the plugin's own next attach will reinitialise.
+    const owner = this.serviceOwnerForAgent.get(id)
+    if (owner && this.services) {
+      try {
+        await this.services.detachFor(owner)
+      } catch (err) {
+        log.warn('service detach failed during stop', { id, err })
+      }
+    }
+    this.serviceOwnerForAgent.delete(id)
   }
 
   /**
@@ -129,8 +172,26 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     // previous managed instance or an external SDK agent — yank it before
     // overwriting. The persisted record wins; that's the whole point of
     // "agents.json is the source of truth."
-    if (this.hub.participant(record.id)) this.hub.unregister(record.id)
+    if (this.hub.participant(record.id)) {
+      // also detach old service handles, otherwise the plugin keeps
+      // pointing at stale state for this owner
+      const oldOwner = this.serviceOwnerForAgent.get(record.id)
+      if (oldOwner && this.services) {
+        await this.services.detachFor(oldOwner).catch((err) =>
+          log.warn('respawn detach failed', { id: record.id, err }),
+        )
+      }
+      this.hub.unregister(record.id)
+    }
     this.running.delete(record.id)
+    this.serviceOwnerForAgent.delete(record.id)
+
+    // Resolve service handles BEFORE we build the agent — the spawn
+    // must fail atomically if any plugin attach throws (e.g. config
+    // validation rejected the yaml). A half-attached state would
+    // leave the plugin with cached handles for a participant the Hub
+    // doesn't actually have.
+    const { ctx, owner } = await this.attachServicesIfDeclared(record)
 
     const apiKey = await this.resolveApiKey(record.id, record.managed.provider)
     const provider = buildProvider(record.managed, apiKey)
@@ -140,10 +201,64 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       provider,
       system: record.managed.system,
       model: record.managed.model,
+      services: ctx,
     })
     this.hub.register(agent)
     this.running.set(record.id, agent)
-    log.info('spawned', { id: record.id, provider: record.managed.provider })
+    if (owner) this.serviceOwnerForAgent.set(record.id, owner)
+    log.info('spawned', {
+      id: record.id,
+      provider: record.managed.provider,
+      services: record.managed.uses
+        ? record.managed.uses.map((u) => `${u.type}:${u.impl}`)
+        : [],
+    })
+  }
+
+  /**
+   * Resolve `record.managed.uses` to live handles + an Owner.
+   *
+   * Returns `{ ctx: undefined, owner: undefined }` when the agent
+   * declared no uses — the most common case, especially for agents
+   * authored before v2.2. Otherwise:
+   *
+   *   1. Each `uses` entry's `config.scope` decides the Owner (default
+   *      `'private'` → `(agent, record.id)` per RFC §4).
+   *   2. The Hub Services facade attaches per (plugin, owner) and
+   *      returns typed handles.
+   *   3. Handles are sorted into a `ServiceCtx`: singular `memory`
+   *      and `artifact` go on their named field; `datastore` entries
+   *      group into a record keyed by `config.name` (with a fallback
+   *      to `<impl>` when the plugin author forgot to name).
+   *
+   * Throws if `services` is absent but uses is declared, or any
+   * single attach fails — the agent spawn aborts loudly. The caller
+   * (`start(record)` / `start()` loop) catches and logs without
+   * killing the whole pool.
+   */
+  private async attachServicesIfDeclared(
+    record: AgentRecord,
+  ): Promise<{ ctx?: ServiceCtx; owner?: Owner }> {
+    const uses = record.managed?.uses
+    if (!uses || uses.length === 0) return {}
+    if (!this.services) {
+      throw new Error(
+        `agent '${record.id}' declares uses[] but Hub Services failed to bootstrap on this host — check earlier 'services:' log lines`,
+      )
+    }
+    // Owner derivation is per-entry: an agent COULD theoretically
+    // declare a private-scope memory and a workflow-scope datastore.
+    // But the LocalAgentPool only spawns at host boot (no live
+    // workflow run id available), so workflow scope on a managed
+    // agent doesn't make sense yet — we accept the spec but file
+    // everything under `(agent, id)` for now and revisit in MVP-2
+    // (workflow-driven agents).
+    const owner: Owner = { kind: 'agent', id: record.id }
+    const specs: AttachSpec[] = uses.map((u) => buildAttachSpec(u, owner))
+    const live = await this.services.attachAll(specs)
+
+    const ctx = buildCtx(live)
+    return { ctx, owner }
   }
 
   /**
@@ -171,6 +286,94 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     if (provider === 'openai')    return process.env.OPENAI_API_KEY
     return undefined
   }
+}
+
+/**
+ * Translate one `ServiceUseSpec` from yaml into the `AttachSpec` shape
+ * the `HubServices.attachAll` API expects. The differences are
+ * organisational:
+ *
+ *   - the yaml-side spec is a plain JSON record; the attach-side spec
+ *     is the same plus a fully-derived Owner;
+ *   - the yaml-side spec calls the data blob `config`; the attach side
+ *     keeps that name verbatim — the plugin only ever sees its own
+ *     opaque config.
+ *
+ * Per-entry scope override lives inside `config.scope` (RFC §6). The
+ * default `'private'` Owner is already passed in; this function only
+ * overrides when the yaml asks for `'workflow'` or `'shared:<group>'`.
+ */
+function buildAttachSpec(use: ServiceUseSpec, defaultOwner: Owner): AttachSpec {
+  let owner = defaultOwner
+  const scope = (use.config?.scope as Scope | undefined)
+  if (scope && scope !== 'private') {
+    // Workflow scope requires a runId we don't have at managed-agent
+    // boot — leave it to a future MVP-2 workflow integration. We
+    // resolve to the default Owner today rather than throw, so a
+    // yaml that previews a future feature still imports cleanly.
+    if (scope.startsWith('shared:')) {
+      const groupId = scope.slice('shared:'.length)
+      if (groupId) {
+        owner = resolveOwner(scope, { groupId })
+      }
+    }
+    // 'workflow' scope on a managed agent is a no-op today; we log
+    // once at attach time so admin can grep for it.
+    if (scope === 'workflow') {
+      log.warn('uses.config.scope=workflow on managed agent — falling back to private', {
+        agent: defaultOwner.id,
+        type: use.type,
+        impl: use.impl,
+      })
+    }
+  }
+  return {
+    type: use.type,
+    impl: use.impl,
+    owner,
+    config: use.config ?? {},
+  }
+}
+
+/**
+ * Group attached handles into a `ServiceCtx` for the LlmAgent
+ * constructor. The mapping is:
+ *
+ *   - memory   → singular ctx.memory     (last attach wins; in
+ *                practice the yaml parser already rejects duplicate
+ *                memory entries so "last" == "only")
+ *   - artifact → singular ctx.artifact   (same as above)
+ *   - datastore → record keyed by config.name; falls back to
+ *                `<impl>` when name absent
+ *   - other (third-party type strings) → `ctx.extra[type]` so the
+ *                agent can cast on the use site
+ */
+function buildCtx(
+  live: ReadonlyArray<{ type: string; impl: string; handle: unknown; owner: Owner }>,
+): ServiceCtx {
+  const ctx: { memory?: MemoryHandle; artifact?: ArtifactHandle; datastore?: Record<string, DatastoreHandle>; extra?: Record<string, unknown> } = {}
+  for (const h of live) {
+    if (h.type === 'memory') {
+      ctx.memory = h.handle as MemoryHandle
+    } else if (h.type === 'artifact') {
+      ctx.artifact = h.handle as ArtifactHandle
+    } else if (h.type === 'datastore') {
+      ctx.datastore ??= {}
+      // Try to read the `config.name` the plugin used. Without
+      // access to the original spec at this point we settle on a
+      // deterministic fallback so two unnamed datastores don't
+      // overwrite each other.
+      const handle = h.handle as DatastoreHandle & { name?: string }
+      const key = (typeof handle.name === 'string' && handle.name.length > 0)
+        ? handle.name
+        : h.impl
+      ctx.datastore[key] = handle
+    } else {
+      ctx.extra ??= {}
+      ctx.extra[h.type] = h.handle
+    }
+  }
+  return ctx
 }
 
 /**
