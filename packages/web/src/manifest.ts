@@ -1,6 +1,6 @@
 import { parse as parseYaml } from 'yaml'
 
-import type { ManagedAgentSpec } from '@aipehub/core'
+import type { ManagedAgentSpec, ServiceUseSpec } from '@aipehub/core'
 
 /**
  * Agent / team manifests are the file format the public template library
@@ -204,8 +204,83 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
       managed.providerLabel = a.providerLabel
     }
   }
+  // Optional `uses:` — Hub Services declarations. Validate shape only;
+  // plugin-specific `config` blocks are checked at spawn time by the
+  // plugin's `validateConfig`. We deliberately don't probe the
+  // ServiceRegistry here — manifests can be imported on a host that
+  // doesn't have all the plugins installed; the failure happens later
+  // with a useful PluginNotFoundError. RFC §6 calls this out.
+  if (a.uses !== undefined) {
+    managed.uses = validateUsesArray(a.uses, `${path}.uses`)
+  }
   const out: ParsedAgent = { id: a.id, capabilities, managed }
   if (typeof a.displayName === 'string') out.displayName = a.displayName
+  return out
+}
+
+/**
+ * Walk a raw `uses:` array, returning a typed list of `ServiceUseSpec`.
+ *
+ * Rules enforced here (manifest-time, plugin-agnostic):
+ *
+ *   - top-level must be an array
+ *   - each entry must be an object with non-empty `type` + `impl`
+ *   - duplicate `(type, impl)` across the array is rejected for the
+ *     singular types `memory` and `artifact`. `datastore` may repeat
+ *     because each instance is keyed by `config.name`.
+ *   - `config` is optional; when present it must be a plain object.
+ *     The plugin's `validateConfig` runs at spawn time on this blob.
+ *
+ * Exported so the admin POST/PUT path in `server.ts` can run the same
+ * checks against form data without re-implementing them. The `path`
+ * argument is purely cosmetic — it prefixes every error message so
+ * the admin UI can point users at the offending line.
+ */
+export function validateUsesArray(raw: unknown, path: string): ServiceUseSpec[] {
+  if (!Array.isArray(raw)) {
+    throw new ManifestError(`${path} must be an array`)
+  }
+  const out: ServiceUseSpec[] = []
+  // Track `(type, impl)` pairs for the singular types so a duplicate
+  // is caught right away. RFC §6 rule 3.
+  const seenSingular = new Set<string>()
+  for (let i = 0; i < raw.length; i++) {
+    const entry = raw[i]
+    const ep = `${path}[${i}]`
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ManifestError(`${ep} must be an object`)
+    }
+    const e = entry as Record<string, unknown>
+    if (typeof e.type !== 'string' || e.type.length === 0) {
+      throw new ManifestError(`${ep}.type is required (non-empty string)`)
+    }
+    if (typeof e.impl !== 'string' || e.impl.length === 0) {
+      throw new ManifestError(`${ep}.impl is required (non-empty string)`)
+    }
+    if (e.config !== undefined) {
+      if (typeof e.config !== 'object' || e.config === null || Array.isArray(e.config)) {
+        throw new ManifestError(`${ep}.config must be an object when present`)
+      }
+    }
+    const spec: ServiceUseSpec = { type: e.type, impl: e.impl }
+    if (e.config !== undefined) {
+      spec.config = e.config as Record<string, unknown>
+    }
+    // Singular constraint applies only to the well-known singular
+    // types. Third-party `type` strings get the same treatment as
+    // `datastore` (allowed to repeat) — they choose their own
+    // uniqueness rules in their plugin's `validateConfig`.
+    if (e.type === 'memory' || e.type === 'artifact') {
+      const k = `${e.type}:${e.impl}`
+      if (seenSingular.has(k)) {
+        throw new ManifestError(
+          `${ep} declares ${e.type}:${e.impl} more than once — only 'datastore' may repeat`,
+        )
+      }
+      seenSingular.add(k)
+    }
+    out.push(spec)
+  }
   return out
 }
 
@@ -236,6 +311,16 @@ export function renderAgentManifest(rec: {
   // edit → re-import doesn't drop the connection details.
   if (rec.managed.baseURL) agent.baseURL = rec.managed.baseURL
   if (rec.managed.providerLabel) agent.providerLabel = rec.managed.providerLabel
+  if (rec.managed.uses && rec.managed.uses.length > 0) {
+    // Deep-clone each entry so the exported object is independent of
+    // the agents.json copy. Re-importing the result must yield the
+    // same `uses:` list byte-for-byte (covered by the round-trip test).
+    agent.uses = rec.managed.uses.map((u) => {
+      const out: Record<string, unknown> = { type: u.type, impl: u.impl }
+      if (u.config !== undefined) out.config = { ...u.config }
+      return out
+    })
+  }
   if (rec.displayName) agent.displayName = rec.displayName
   return {
     schema: AGENT_SCHEMA_V1,

@@ -221,6 +221,206 @@ describe('renderAgentManifest', () => {
 })
 
 /**
+ * `uses:` (Hub Services declarations) — added in PR-7.
+ *
+ * The parser is plugin-agnostic: it validates only the shape, not the
+ * existence of any specific plugin. Plugin resolution happens at agent
+ * spawn time, where a missing plugin surfaces as PluginNotFoundError.
+ */
+describe('parseManifest — uses: (Hub Services)', () => {
+  it('parses a minimal uses array', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  uses:
+    - type: memory
+      impl: file
+      config: { scope: private, kinds: [episodic] }
+    - type: artifact
+      impl: file
+      config: { name: reports }
+    - type: datastore
+      impl: sqlite
+      config: { name: cases }
+    - type: datastore
+      impl: sqlite
+      config: { name: sessions }
+`
+    const m = parseManifest(yaml)
+    const uses = m.agents[0]!.managed.uses
+    expect(uses).toHaveLength(4)
+    expect(uses![0]).toEqual({
+      type: 'memory',
+      impl: 'file',
+      config: { scope: 'private', kinds: ['episodic'] },
+    })
+    expect(uses![2]!.type).toBe('datastore')
+    expect(uses![3]!.config!.name).toBe('sessions')
+  })
+
+  it('an agent without uses parses cleanly and reports undefined', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent: { id: w, capabilities: [x], provider: mock, system: hi }
+`
+    const m = parseManifest(yaml)
+    expect(m.agents[0]!.managed.uses).toBeUndefined()
+  })
+
+  it('rejects uses that is not an array', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  uses: "memory"
+`
+    expect(() => parseManifest(yaml)).toThrow(/uses must be an array/)
+  })
+
+  it('rejects a uses entry missing type', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  uses:
+    - impl: file
+`
+    expect(() => parseManifest(yaml)).toThrow(/uses\[0\]\.type is required/)
+  })
+
+  it('rejects a uses entry missing impl', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  uses:
+    - type: memory
+`
+    expect(() => parseManifest(yaml)).toThrow(/uses\[0\]\.impl is required/)
+  })
+
+  it('rejects non-object config', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  uses:
+    - type: memory
+      impl: file
+      config: "not-an-object"
+`
+    expect(() => parseManifest(yaml)).toThrow(/config must be an object/)
+  })
+
+  it('rejects duplicate memory entries (singular type)', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  uses:
+    - type: memory
+      impl: file
+    - type: memory
+      impl: file
+`
+    expect(() => parseManifest(yaml)).toThrow(/memory:file more than once/)
+  })
+
+  it('rejects duplicate artifact entries (singular type)', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  uses:
+    - type: artifact
+      impl: file
+    - type: artifact
+      impl: file
+`
+    expect(() => parseManifest(yaml)).toThrow(/artifact:file more than once/)
+  })
+
+  it('allows repeated datastore entries (each keyed by config.name)', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: w
+  capabilities: [x]
+  provider: mock
+  system: hi
+  uses:
+    - type: datastore
+      impl: sqlite
+      config: { name: a }
+    - type: datastore
+      impl: sqlite
+      config: { name: b }
+`
+    const m = parseManifest(yaml)
+    expect(m.agents[0]!.managed.uses).toHaveLength(2)
+  })
+
+  it('renderAgentManifest round-trips uses byte-for-byte', () => {
+    const rec = {
+      id: 'coach',
+      allowedCapabilities: ['intake'],
+      managed: {
+        kind: 'llm' as const,
+        provider: 'mock' as const,
+        system: 'be brief',
+        uses: [
+          {
+            type: 'memory',
+            impl: 'file',
+            config: { scope: 'private', kinds: ['episodic'] },
+          },
+          {
+            type: 'artifact',
+            impl: 'file',
+            config: { name: 'reports' },
+          },
+        ],
+      },
+    }
+    const rendered = renderAgentManifest(rec)
+    const parsed = parseManifest(JSON.stringify(rendered))
+    expect(parsed.agents[0]!.managed.uses).toEqual(rec.managed.uses)
+  })
+
+  it('renderAgentManifest omits uses entirely when not declared', () => {
+    const rendered = renderAgentManifest({
+      id: 'plain',
+      allowedCapabilities: ['x'],
+      managed: { kind: 'llm', provider: 'mock', system: 'hi' },
+    })
+    const a = (rendered.agent as Record<string, unknown>)
+    expect(a.uses).toBeUndefined()
+  })
+})
+
+/**
  * The repo ships standard YAML templates under /templates. Smoke them
  * through the parser so a typo in a template trips CI rather than
  * surprising an end-user at import time.

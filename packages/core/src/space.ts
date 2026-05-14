@@ -664,6 +664,42 @@ export interface ManagedAgentSpec {
    * omitted. Ignored for other provider strings.
    */
   providerLabel?: string
+  /**
+   * Hub Services this agent uses (v2.2 — see docs/services-rfc.md §6).
+   * Empty / absent means the agent has no service handles at runtime;
+   * its ctx is `EMPTY_SERVICE_CTX`. Two rules enforced at yaml parse:
+   *
+   *   1. `type` + `impl` must exist on a loaded plugin at spawn time.
+   *   2. The same `type` may appear at most twice — once as `memory`
+   *      / `artifact` (singular per agent), but `datastore` can appear
+   *      multiple times because each has its own `config.name`.
+   *
+   * The Hub forwards `config` verbatim to `plugin.validateConfig`.
+   */
+  uses?: ServiceUseSpec[]
+}
+
+/**
+ * One entry under `ManagedAgentSpec.uses`. Plain JS interface so
+ * `@aipehub/core` doesn't take a runtime dep on `@aipehub/services-sdk`
+ * (the SDK lives "downstream" of core in the workspace graph — see
+ * docs/services-rfc.md §14 for the cycle-avoidance discussion).
+ *
+ * Field semantics:
+ *
+ *   - `type` + `impl` — plugin selector. The host's `ServiceRegistry`
+ *     looks up `(type, impl)` exactly; misses surface as
+ *     `PluginNotFoundError` at agent spawn time.
+ *   - `config` — opaque to core / web. Always passed through to
+ *     `plugin.validateConfig` which decides shape + defaults.
+ *     `config.scope` (`'private' | 'workflow' | 'shared:<group>'`)
+ *     determines the Owner the plugin files data under; defaults to
+ *     `'private'` per RFC Q1=A.
+ */
+export interface ServiceUseSpec {
+  type: string
+  impl: string
+  config?: Readonly<Record<string, unknown>>
 }
 
 export interface WorkerRecord {

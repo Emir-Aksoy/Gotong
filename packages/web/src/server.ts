@@ -27,6 +27,7 @@ import {
   ManifestError,
   parseManifest,
   renderAgentManifest,
+  validateUsesArray,
   type ParsedAgent,
 } from './manifest.js'
 
@@ -1556,6 +1557,13 @@ function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
     if (typeof body.providerLabel === 'string' && body.providerLabel.length > 0) {
       managed.providerLabel = body.providerLabel
     }
+  }
+  // Hub Services declarations (v2.2). Same plugin-agnostic checks as
+  // the manifest path — both routes must accept identical shapes so
+  // an admin can switch between "paste YAML" and "fill the form"
+  // without losing any field.
+  if (body.uses !== undefined) {
+    managed.uses = validateUsesArray(body.uses, 'uses')
   }
   const out: ParsedAgent = { id: body.id, capabilities, managed }
   if (typeof body.displayName === 'string') out.displayName = body.displayName
