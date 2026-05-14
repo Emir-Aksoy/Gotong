@@ -164,6 +164,29 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     }
   }
 
+  /**
+   * Web-layer hook: soft-delete every Hub Service plugin's data for
+   * the agent that was just removed from `agents.json`. RFC Q3=A:
+   * the agent's data goes to per-plugin `.trash/` for the retention
+   * window so a mistaken delete can be reversed. Failures are logged
+   * but never re-thrown — the agents.json record is gone and we're
+   * past the rollback window.
+   */
+  async onAgentRemoved(id: ParticipantId): Promise<void> {
+    if (!this.services) return
+    const owner: Owner = { kind: 'agent', id }
+    try {
+      const results = await this.services.softDeleteAllForOwner(owner, {
+        reason: 'agent_removed',
+      })
+      const trashed = results.filter((r) => r.ref).length
+      const failed = results.filter((r) => r.error).length
+      log.info('agent removed — services soft-deleted', { id, trashed, failed })
+    } catch (err) {
+      log.error('services soft-delete failed', { id, err })
+    }
+  }
+
   private async spawn(record: AgentRecord): Promise<void> {
     if (!record.managed) {
       throw new Error(`spawn: record '${record.id}' has no managed spec`)

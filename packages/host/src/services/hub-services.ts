@@ -229,6 +229,12 @@ export class HubServices {
    * under an open handle. Detach is best-effort; we still call
    * `softDelete` even if detach throws (most plugins are robust against
    * the case, but logging the error is the right hygiene).
+   *
+   * After the plugin resolves we publish a `service_trashed` event
+   * on the hub surface — the admin SSE stream picks it up and the UI
+   * shows a "moved to trash; auto-deletes in 30 days" toast. Plugins
+   * do NOT need to publish themselves; doing so here means a misbehaved
+   * plugin can't accidentally double-publish.
    */
   async softDelete(spec: {
     type: ServiceType
@@ -254,10 +260,133 @@ export class HubServices {
       }
     }
     const ref = await plugin.softDelete(spec.owner)
-    // Plugins also publish their own `service_trashed` events through
-    // the hub surface; we keep that responsibility there rather than
-    // double-publish from here.
+    // Plugin's softDelete signature doesn't take `reason` (it's a
+    // facade-level concept the admin layer carries). We layer it onto
+    // the published event from the caller's spec, falling back to the
+    // ref's own reason if the plugin chose to set one.
+    const reason = spec.reason ?? ref.reason
+    this.hubSurface.publishEvent('service_trashed', {
+      type: spec.type,
+      impl: spec.impl,
+      ownerKind: spec.owner.kind,
+      ownerId: spec.owner.id,
+      ref: {
+        id: ref.id,
+        deletedAt: ref.deletedAt,
+        expiresAt: ref.expiresAt,
+        ...(reason !== undefined ? { reason } : {}),
+      },
+    })
     return ref
+  }
+
+  /**
+   * Soft-delete EVERY plugin's data for this owner. Used by the
+   * admin "delete agent" flow: removing an agent's record from
+   * `agents.json` doesn't (and shouldn't) wipe the disk — instead
+   * we move the data to per-plugin trash so an admin who deleted by
+   * mistake can `restore` within the retention window.
+   *
+   * Plugin-level failures are reported in the result but don't abort
+   * the rest: a corrupt or missing plugin shouldn't strand the agent's
+   * other data in limbo.
+   */
+  async softDeleteAllForOwner(
+    owner: Owner,
+    opts: { reason?: string } = {},
+  ): Promise<Array<{ type: ServiceType; impl: string; ref?: TrashRef; error?: string }>> {
+    const out: Array<{ type: ServiceType; impl: string; ref?: TrashRef; error?: string }> = []
+    for (const plugin of this.registry.all()) {
+      try {
+        const ref = await this.softDelete({
+          type: plugin.type,
+          impl: plugin.impl,
+          owner,
+          ...(opts.reason !== undefined ? { reason: opts.reason } : {}),
+        })
+        out.push({ type: plugin.type, impl: plugin.impl, ref })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        this.logger.warn('softDeleteAllForOwner: plugin failed', {
+          type: plugin.type, impl: plugin.impl, err: msg,
+        })
+        out.push({ type: plugin.type, impl: plugin.impl, error: msg })
+      }
+    }
+    return out
+  }
+
+  /**
+   * Walk every plugin's `listTrash()` (when implemented) and hard-
+   * delete entries whose `expiresAt` is past `now`. Plugins that
+   * don't expose `listTrash` are skipped silently — the contract
+   * requires the basic lifecycle methods but `listTrash` is an
+   * extension. Each purge publishes a `service_purged` event so the
+   * admin UI can refresh its trash list in real time.
+   */
+  async sweepExpiredTrash(now: number = Date.now()): Promise<{
+    scanned: number
+    purged: number
+  }> {
+    let scanned = 0
+    let purged = 0
+    for (const plugin of this.registry.all()) {
+      const listFn = (plugin as { listTrash?: () => Promise<TrashRef[]> }).listTrash
+      if (typeof listFn !== 'function') continue
+      let entries: TrashRef[]
+      try {
+        entries = await listFn.call(plugin)
+      } catch (err) {
+        this.logger.warn('sweepExpiredTrash: listTrash failed', {
+          type: plugin.type, impl: plugin.impl, err,
+        })
+        continue
+      }
+      for (const ref of entries) {
+        scanned += 1
+        if (ref.expiresAt <= now) {
+          try {
+            await plugin.hardDelete(ref)
+            purged += 1
+            this.hubSurface.publishEvent('service_purged', {
+              type: plugin.type,
+              impl: plugin.impl,
+              trashId: ref.id,
+            })
+          } catch (err) {
+            this.logger.warn('sweepExpiredTrash: hardDelete failed', {
+              type: plugin.type, impl: plugin.impl, trashId: ref.id, err,
+            })
+          }
+        }
+      }
+    }
+    return { scanned, purged }
+  }
+
+  /**
+   * Walk every plugin's `listTrash()` and gather the union, tagged
+   * by `(type, impl)`. The admin UI uses this to render the trash
+   * tab; PR-10 also calls it from `sweepExpiredTrash`. Plugins that
+   * don't expose `listTrash` contribute nothing (silent skip).
+   */
+  async listTrashAll(): Promise<Array<TrashRef & { type: ServiceType; impl: string }>> {
+    const out: Array<TrashRef & { type: ServiceType; impl: string }> = []
+    for (const plugin of this.registry.all()) {
+      const listFn = (plugin as { listTrash?: () => Promise<TrashRef[]> }).listTrash
+      if (typeof listFn !== 'function') continue
+      try {
+        const entries = await listFn.call(plugin)
+        for (const ref of entries) {
+          out.push({ ...ref, type: plugin.type, impl: plugin.impl })
+        }
+      } catch (err) {
+        this.logger.warn('listTrashAll: plugin listTrash failed', {
+          type: plugin.type, impl: plugin.impl, err,
+        })
+      }
+    }
+    return out
   }
 
   /** Restore from trash. Throws TrashRestoreConflictError on conflict. */

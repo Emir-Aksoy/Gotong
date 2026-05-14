@@ -91,6 +91,10 @@ function describe(e: TranscriptEntry): string {
       return `REJECT   ${e.data.agentIds.join(',')} — ${e.data.reason}`
     case 'evaluation':
       return `EVAL     ${e.data.taskId.slice(0, 8)}… by ${e.data.by}${e.data.rating != null ? ` ${e.data.rating}/5` : ''}${e.data.comment ? ` "${e.data.comment}"` : ''}`
+    case 'service_trashed':
+      return `TRASH    ${e.data.type}:${e.data.impl} owner=${e.data.ownerKind}/${e.data.ownerId}`
+    case 'service_purged':
+      return `PURGE    ${e.data.type}:${e.data.impl} trashId=${e.data.trashId}`
   }
 }
 

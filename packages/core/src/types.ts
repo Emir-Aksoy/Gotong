@@ -222,6 +222,47 @@ export type TranscriptEntry =
       data: { applicationId: string; agentIds: readonly ParticipantId[]; by?: ParticipantId; reason: string }
     }
   | { seq: number; ts: number; kind: 'evaluation'; data: Evaluation }
+  /**
+   * Hub Services soft-delete notification (v2.2). Plugins publish
+   * this through `HubSurfaceForPlugins.publishEvent` after `softDelete`
+   * resolves; the admin SSE stream relays it so the UI can show a
+   * "moved to trash; auto-deletes in 30 days" toast in real time. The
+   * `data.ref` is the same TrashRef the plugin returned to the caller;
+   * `data.type` + `data.impl` repeat the plugin identity at the top
+   * level so SSE consumers can filter without parsing TrashRef.
+   */
+  | {
+      seq: number
+      ts: number
+      kind: 'service_trashed'
+      data: {
+        type: string
+        impl: string
+        ownerKind: string
+        ownerId: string
+        ref: {
+          id: string
+          deletedAt: number
+          expiresAt: number
+          reason?: string
+        }
+      }
+    }
+  /**
+   * Hub Services lifecycle sweep notification (v2.2). Emitted when the
+   * background sweeper hard-deletes an expired trash entry. UI consumers
+   * use this to refresh the trash list / show "auto-purged after 30 days".
+   */
+  | {
+      seq: number
+      ts: number
+      kind: 'service_purged'
+      data: {
+        type: string
+        impl: string
+        trashId: string
+      }
+    }
 
 // --- Event stream (for observers / web UI) ---------------------------------
 

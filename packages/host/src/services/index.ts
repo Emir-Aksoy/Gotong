@@ -20,3 +20,5 @@ export {
   type BootstrapServicesOpts,
   type BootstrapServicesResult,
 } from './bootstrap.js'
+
+export { LifecycleSweeper, type LifecycleSweeperOpts } from './sweeper.js'

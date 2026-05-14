@@ -760,6 +760,22 @@ export interface ManagedAgentLifecycle {
    * form (it still allows saving — an agent can carry its own key).
    */
   availableProviders(): Promise<readonly string[]>
+  /**
+   * Hook called by the web layer **after** `space.removeAgent(id)`
+   * persists the deletion. Optional — implementations that don't
+   * care about post-removal cleanup omit it.
+   *
+   * The host's `LocalAgentPool` uses this hook to soft-delete every
+   * Hub Service plugin's data for the now-removed agent (per RFC
+   * Q3=A: 30-day retention + admin notification). Data lands in
+   * each plugin's local `.trash/` directory; the lifecycle sweep
+   * hard-deletes anything past `expiresAt`.
+   *
+   * Failures inside this hook MUST NOT roll back the deletion —
+   * the agents.json entry is already gone. The web layer logs and
+   * moves on.
+   */
+  onAgentRemoved?(id: ParticipantId): Promise<void>
 }
 
 // --- helpers ---------------------------------------------------------------

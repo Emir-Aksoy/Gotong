@@ -1029,7 +1029,10 @@ async function handle(
   // Remove. Lifecycle.stop first so the live agent leaves the registry,
   // then erase from agents.json. A managed agent that fails to stop
   // (e.g. its provider is mid-call) is still removed from disk — the
-  // next boot won't bring it back.
+  // next boot won't bring it back. After the record is gone we ping
+  // `lifecycle.onAgentRemoved` (PR-10) so the host can soft-delete
+  // every Hub Service this agent's data lives in; failures here are
+  // logged but never roll back the deletion.
   if (method === 'DELETE' && editAgentMatch) {
     const admin = await requireAdmin(ctx, req, res)
     if (!admin) return
@@ -1039,6 +1042,11 @@ async function handle(
     }
     const ok = await ctx.space.removeAgent(id)
     if (!ok) { sendJson(res, { error: `unknown agent '${id}'` }, 404); return }
+    if (ctx.lifecycle?.onAgentRemoved) {
+      await ctx.lifecycle.onAgentRemoved(id).catch((err) =>
+        log.error('lifecycle.onAgentRemoved failed', { id, err }),
+      )
+    }
     sendJson(res, { ok: true })
     return
   }

@@ -62,7 +62,7 @@ import { serveWebSocket } from '@aipehub/transport-ws'
 import { serveWeb } from '@aipehub/web'
 
 import { LocalAgentPool } from './local-agent-pool.js'
-import { bootstrapServices, type HubServices } from './services/index.js'
+import { bootstrapServices, LifecycleSweeper, type HubServices } from './services/index.js'
 import { createWorkflowController } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 
@@ -222,6 +222,7 @@ async function main(): Promise<void> {
   // a missing plugin will fail at spawn time. The instance is held so
   // we can `shutdownAll` on graceful exit.
   let services: HubServices | undefined
+  let sweeper: LifecycleSweeper | undefined
   try {
     const boot = await bootstrapServices({ space, hub })
     services = boot.services
@@ -236,6 +237,13 @@ async function main(): Promise<void> {
         errors: boot.errors.map((e) => e.packageName),
       })
     }
+    // Background sweep: hard-delete trash entries past their
+    // expiresAt. Default cadence is 1h — see LifecycleSweeper. The
+    // first tick runs on the next microtask so a host that booted
+    // with already-expired entries from a previous run drains right
+    // away.
+    sweeper = new LifecycleSweeper({ services })
+    sweeper.start()
   } catch (err) {
     // `bootstrapServices` itself should never throw — its internals
     // are all best-effort. But if it does (e.g. permission denied
@@ -334,6 +342,9 @@ async function main(): Promise<void> {
     try { await ws.close() } catch (err) { log.error('ws close error', { err }) }
     try { await web.close() } catch (err) { log.error('web close error', { err }) }
     try { await localAgents.stopAll() } catch (err) { log.error('local agents stop error', { err }) }
+    if (sweeper) {
+      try { await sweeper.stop() } catch (err) { log.error('sweeper stop error', { err }) }
+    }
     if (services) {
       try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }
     }
@@ -371,6 +382,10 @@ function describe(e: TranscriptEntry): string {
       return `REJECT   app=${e.data.applicationId} by ${e.data.by ?? '?'}: ${e.data.reason}`
     case 'evaluation':
       return `EVAL     ${e.data.taskId} rating=${e.data.rating ?? '?'} by ${e.data.by}`
+    case 'service_trashed':
+      return `TRASH    ${e.data.type}:${e.data.impl} owner=${e.data.ownerKind}/${e.data.ownerId} ref=${e.data.ref.id}`
+    case 'service_purged':
+      return `PURGE    ${e.data.type}:${e.data.impl} trashId=${e.data.trashId}`
   }
 }
 
