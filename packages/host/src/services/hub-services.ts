@@ -35,7 +35,14 @@
 import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { Logger } from '@aipehub/core'
+import type {
+  Logger,
+  ServicePluginDescriptor,
+  ServiceSnapshotView,
+  ServiceTarget,
+  ServiceTrashRef,
+  ServicesAdminSurface,
+} from '@aipehub/core'
 import type {
   HubSurfaceForPlugins,
   Owner,
@@ -442,6 +449,108 @@ export class HubServices {
   get _hubSurface(): HubSurfaceForPlugins {
     return this.hubSurface
   }
+
+  /**
+   * Adapter view that satisfies the core-defined `ServicesAdminSurface`.
+   * Web layer takes this — it doesn't need the rest of HubServices's
+   * richer (host-internal) methods. The adapter is cheap to construct;
+   * call repeatedly is fine.
+   */
+  asAdminSurface(): ServicesAdminSurface {
+    return {
+      listPlugins: (): readonly ServicePluginDescriptor[] => {
+        return this.registry.all().map((p) => {
+          const out: ServicePluginDescriptor = {
+            type: p.type,
+            impl: p.impl,
+            version: p.version,
+          }
+          if (p.description) (out as { description?: string }).description = p.description
+          return out
+        })
+      },
+      describe: async (target: ServiceTarget): Promise<ServiceSnapshotView | null> => {
+        const snap = await this.describe({
+          type: target.type,
+          impl: target.impl,
+          owner: { kind: target.owner.kind as Owner['kind'], id: target.owner.id },
+        })
+        // The web layer renders empty-owner rows as "no data";
+        // returning null here lets the UI filter rather than walk
+        // a list of zero-byte snapshots.
+        if (snap.sizeBytes === 0 && (snap.itemCount ?? 0) === 0 && !snap.preview) {
+          return null
+        }
+        return toSnapshotView(snap)
+      },
+      softDelete: async (
+        target: ServiceTarget & { reason?: string },
+      ): Promise<ServiceTrashRef> => {
+        const ref = await this.softDelete({
+          type: target.type,
+          impl: target.impl,
+          owner: { kind: target.owner.kind as Owner['kind'], id: target.owner.id },
+          ...(target.reason ? { reason: target.reason } : {}),
+        })
+        return toTrashView(ref, target.type, target.impl, target.reason)
+      },
+      restore: async (ref: ServiceTrashRef): Promise<void> => {
+        await this.restore(fromTrashView(ref))
+      },
+      hardDelete: async (ref: ServiceTrashRef): Promise<void> => {
+        await this.hardDelete(fromTrashView(ref))
+      },
+      listTrash: async (): Promise<readonly ServiceTrashRef[]> => {
+        const all = await this.listTrashAll()
+        return all.map((r) => toTrashView(r, r.type, r.impl, r.reason))
+      },
+      sweepExpired: async (now?: number): Promise<{ scanned: number; purged: number }> => {
+        return this.sweepExpiredTrash(now ?? Date.now())
+      },
+    }
+  }
+}
+
+function toSnapshotView(snap: ServiceSnapshot): ServiceSnapshotView {
+  const out: ServiceSnapshotView = { sizeBytes: snap.sizeBytes }
+  if (snap.itemCount !== undefined) (out as { itemCount?: number }).itemCount = snap.itemCount
+  if (snap.lastAccess !== undefined) (out as { lastAccess?: number }).lastAccess = snap.lastAccess
+  if (snap.preview) (out as { preview?: ServiceSnapshotView['preview'] }).preview = snap.preview
+  return out
+}
+
+function toTrashView(
+  ref: TrashRef,
+  type: string,
+  impl: string,
+  reasonOverride?: string,
+): ServiceTrashRef {
+  const reason = reasonOverride ?? ref.reason
+  const out: ServiceTrashRef = {
+    id: ref.id,
+    type,
+    impl,
+    ownerKind: ref.ownerKind,
+    ownerId: ref.ownerId,
+    deletedAt: ref.deletedAt,
+    expiresAt: ref.expiresAt,
+  }
+  if (reason !== undefined) (out as { reason?: string }).reason = reason
+  return out
+}
+
+function fromTrashView(ref: ServiceTrashRef): TrashRef {
+  const out: TrashRef = {
+    id: ref.id,
+    type: ref.type,
+    impl: ref.impl,
+    ownerKind: ref.ownerKind as Owner['kind'],
+    ownerId: ref.ownerId,
+    deletedAt: ref.deletedAt,
+    expiresAt: ref.expiresAt,
+  }
+  if (ref.reason !== undefined) (out as { reason?: string }).reason = ref.reason
+  return out
 }
 
 /** Live handle returned from {@link HubServices.attach}. */

@@ -312,6 +312,9 @@ async function main(): Promise<void> {
     cookieSecure: config.cookieSecure,
     lifecycle: localAgents,
     workflows: workflowController,
+    // services may be undefined if bootstrap failed; serveWeb handles
+    // that by responding 503 on the /api/admin/services/* routes.
+    ...(services ? { services: services.asAdminSurface() } : {}),
     ...(allowedHosts ? { allowedHosts } : {}),
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },
   })

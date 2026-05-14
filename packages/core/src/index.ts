@@ -15,6 +15,16 @@ export type {
   PersistedPendingApp,
 } from './space.js'
 
+export type {
+  ServicesAdminSurface,
+  ServicePluginDescriptor,
+  ServiceOwnerRef,
+  ServiceTarget,
+  ServiceSnapshotView,
+  ServicePreviewBlob,
+  ServiceTrashRef,
+} from './services-admin.js'
+
 export {
   encryptSecret,
   decryptSecret,

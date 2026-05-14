@@ -14,6 +14,8 @@ import {
   type ManagedAgentLifecycle,
   type ManagedAgentSpec,
   type ParticipantId,
+  type ServiceTrashRef,
+  type ServicesAdminSurface,
   type Space,
   type TaskId,
   type WorkerRecord,
@@ -118,6 +120,14 @@ export interface WebServerOptions {
    * runner. When absent, the workflow API endpoints return 404.
    */
   workflows?: WorkflowSurface
+  /**
+   * Optional Hub Services admin surface (PR-11). The host wires
+   * `hubServices.asAdminSurface()` here. When absent, all
+   * `/api/admin/services/...` endpoints return 503 so the admin UI
+   * can hide the tab cleanly. Web has no runtime dep on
+   * `@aipehub/services-sdk` — the surface is plain types in `@aipehub/core`.
+   */
+  services?: ServicesAdminSurface
 }
 
 /**
@@ -241,6 +251,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     adminLoginLimiter,
     lifecycle: opts.lifecycle,
     workflows: opts.workflows,
+    services: opts.services,
   }
 
   const server = createServer((req, res) => {
@@ -301,6 +312,7 @@ interface HandlerCtx {
   adminLoginLimiter: RateLimiter
   lifecycle: ManagedAgentLifecycle | undefined
   workflows: WorkflowSurface | undefined
+  services: ServicesAdminSurface | undefined
 }
 
 /**
@@ -943,6 +955,158 @@ async function handle(
       // "not loaded" → 404, everything else → 400
       const status = /not loaded|unknown/i.test(msg) ? 404 : 400
       sendJson(res, { error: msg }, status)
+    }
+    return
+  }
+
+  // --- Hub Services admin (v2.2) ------------------------------------------
+  // All endpoints require admin auth. When the host didn't supply a
+  // services surface (Hub Services failed to bootstrap, or this is an
+  // embedded use without the host wiring), every route returns 503 so
+  // the UI can hide the tab cleanly rather than render a half-broken
+  // page. Errors get translated to status:
+  //   PluginNotFoundError      → 404
+  //   TrashRestoreConflictError → 409
+  //   ServiceConfigError       → 400
+  //   everything else          → 500
+
+  if (method === 'GET' && path === '/api/admin/services/plugins') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    sendJson(res, { plugins: ctx.services.listPlugins() })
+    return
+  }
+
+  // Describe one (plugin, owner) pair. Returns `{ snapshot: null }`
+  // (HTTP 200) when the plugin has no data for the owner — the admin
+  // UI uses that to keep the row in the table greyed out.
+  const describeMatch = path.match(
+    /^\/api\/admin\/services\/owners\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/,
+  )
+  if (method === 'GET' && describeMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    const [, type, impl, ownerKind, ownerId] = describeMatch
+    try {
+      const snap = await ctx.services.describe({
+        type: decodeURIComponent(type!),
+        impl: decodeURIComponent(impl!),
+        owner: { kind: decodeURIComponent(ownerKind!), id: decodeURIComponent(ownerId!) },
+      })
+      sendJson(res, { snapshot: snap })
+    } catch (err) {
+      sendServiceError(res, err)
+    }
+    return
+  }
+
+  // Soft-delete an owner's data for one plugin.
+  if (method === 'DELETE' && describeMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    const [, type, impl, ownerKind, ownerId] = describeMatch
+    // readJsonBody returns undefined on empty body. Treat that as
+    // "no reason supplied" rather than throwing.
+    const raw = await readJsonBody(req).catch(() => undefined)
+    const body = (raw && typeof raw === 'object' ? raw : {}) as { reason?: string }
+    try {
+      const ref = await ctx.services.softDelete({
+        type: decodeURIComponent(type!),
+        impl: decodeURIComponent(impl!),
+        owner: { kind: decodeURIComponent(ownerKind!), id: decodeURIComponent(ownerId!) },
+        by: admin.id,
+        ...(typeof body.reason === 'string' && body.reason.length > 0 ? { reason: body.reason } : {}),
+      })
+      sendJson(res, { ok: true, ref })
+    } catch (err) {
+      sendServiceError(res, err)
+    }
+    return
+  }
+
+  // List all trash entries across plugins. Sorted newest-first so the
+  // admin UI shows recent trash at the top.
+  if (method === 'GET' && path === '/api/admin/services/trash') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    try {
+      const all = await ctx.services.listTrash()
+      const sorted = [...all].sort((a, b) => b.deletedAt - a.deletedAt)
+      sendJson(res, { trash: sorted })
+    } catch (err) {
+      sendServiceError(res, err)
+    }
+    return
+  }
+
+  // Restore via POST so the body can carry the full ServiceTrashRef
+  // (the path alone doesn't have all the fields the plugin needs).
+  // Returns 409 if the original owner slot is occupied.
+  const restoreMatch = path.match(/^\/api\/admin\/services\/trash\/([^/]+)\/([^/]+)\/([^/]+)\/restore$/)
+  if (method === 'POST' && restoreMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    const [, type, impl, id] = restoreMatch
+    const t = decodeURIComponent(type!)
+    const i = decodeURIComponent(impl!)
+    const refId = decodeURIComponent(id!)
+    try {
+      // Find the ref in the union — saves an admin from having to
+      // POST the whole TrashRef body. The set is small (admin trash);
+      // a linear scan is fine.
+      const all = await ctx.services.listTrash()
+      const ref = all.find((r) => r.type === t && r.impl === i && r.id === refId)
+      if (!ref) { sendJson(res, { error: 'trash entry not found' }, 404); return }
+      await ctx.services.restore(ref)
+      sendJson(res, { ok: true })
+    } catch (err) {
+      sendServiceError(res, err)
+    }
+    return
+  }
+
+  // Hard delete one trash entry. Irreversible.
+  const hardDeleteMatch = path.match(/^\/api\/admin\/services\/trash\/([^/]+)\/([^/]+)\/([^/]+)$/)
+  if (method === 'DELETE' && hardDeleteMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    const [, type, impl, id] = hardDeleteMatch
+    const t = decodeURIComponent(type!)
+    const i = decodeURIComponent(impl!)
+    const refId = decodeURIComponent(id!)
+    try {
+      const all = await ctx.services.listTrash()
+      const ref = all.find((r) => r.type === t && r.impl === i && r.id === refId)
+      if (!ref) { sendJson(res, { error: 'trash entry not found' }, 404); return }
+      await ctx.services.hardDelete(ref)
+      sendJson(res, { ok: true })
+    } catch (err) {
+      sendServiceError(res, err)
+    }
+    return
+  }
+
+  // Manual sweep — admin button "purge expired now". Returns the same
+  // `{ scanned, purged }` shape the periodic sweeper logs.
+  if (method === 'POST' && path === '/api/admin/services/sweep') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    try {
+      if (!ctx.services.sweepExpired) {
+        sendJson(res, { error: 'manual sweep not supported by this host' }, 405)
+        return
+      }
+      const out = await ctx.services.sweepExpired()
+      sendJson(res, { ok: true, ...out })
+    } catch (err) {
+      sendServiceError(res, err)
     }
     return
   }
@@ -1594,6 +1758,24 @@ function publicAgent(rec: AgentRecord, hub: Hub) {
 function sendJson(res: ServerResponse, data: unknown, status = 200): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
   res.end(JSON.stringify(data))
+}
+
+/**
+ * Translate a `@aipehub/services-sdk` typed error to an HTTP status.
+ * The web layer doesn't import the sdk's errors (it stays decoupled
+ * from the services package). We pattern-match on the error name —
+ * those names are stable string constants set in the sdk's
+ * `new.target.name` and round-trip across module boundaries.
+ */
+function sendServiceError(res: ServerResponse, err: unknown): void {
+  const e = err as { name?: string; message?: string }
+  const name = e?.name ?? ''
+  const msg = e?.message ?? String(err)
+  let status = 500
+  if (name === 'PluginNotFoundError') status = 404
+  else if (name === 'TrashRestoreConflictError') status = 409
+  else if (name === 'ServiceConfigError') status = 400
+  sendJson(res, { error: msg, code: name || 'unknown' }, status)
 }
 
 /**
