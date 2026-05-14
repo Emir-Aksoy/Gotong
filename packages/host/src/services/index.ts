@@ -22,3 +22,16 @@ export {
 } from './bootstrap.js'
 
 export { LifecycleSweeper, type LifecycleSweeperOpts } from './sweeper.js'
+
+export {
+  recordCaseConversation,
+  recordCaseStepOutput,
+  recallCaseConversation,
+  recallCaseStepOutputs,
+  formatCaseContextBlock,
+  type CaseConversationSource,
+  type CaseConversationEntry,
+  type CaseStepOutputEntry,
+  type CaseContextBinding,
+  type FormatCaseContextOpts,
+} from './case-context.js'

@@ -14,6 +14,24 @@
 #   risk-explain     预测 3 个老板 / 员工典型疑虑，给顺向 + 反向回应
 #
 # 触发：admin 派一个 capability=enable-industry-with-ai 的任务。
+#
+# # v2.3 备注 —— case-conversation 状态
+#
+# 本工作流（v1）的 6 个 agent 都是基础 `LlmAgent`，没有 host glue
+# 层，因此**目前还不接入** v2.3 引入的 case-memory 注入（即"案主
+# 在工作流中途插话被自动写进 case-memory 让下游 agent 看见"这件
+# 事，这条流程暂时享受不到）。
+#
+# 想要"案主可以中途插话"能力的，请用 `industry-consultation-flow.yaml`
+# —— 那条流程的 agent（industry-coach-pro / industry-research-analyst）
+# 在 system prompt 里已显式承诺读 `## 当前 case 的已有上下文`，
+# 配套 host glue 也在 examples/industry-consultation-deepseek 里给
+# 出了最小可工作范例。
+#
+# 给本流程接入 case-conversation 的工作量：把 6 个 agent 都改造为
+# 走 host glue 的 LlmAgent 子类（用 packages/host/src/services/case-context.ts
+# 的 helper），并在 system prompt 上加同样的"读 case 上下文"段。
+# 留给后续 PR。
 # =============================================================================
 
 schema: aipehub.workflow/v1

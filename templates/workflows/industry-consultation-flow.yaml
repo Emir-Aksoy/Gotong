@@ -1,11 +1,26 @@
 # =============================================================================
-# Workflow: 传统行业 AI 转型咨询全流程（含资深顾问人工 review）
+# Workflow: 传统行业 AI 转型咨询全流程（含资深顾问人工 review + 案主插话）
 # Companion team: templates/teams/industry-consultation-team.yaml
 # Schema: aipehub.workflow/v1
 #
-# 这是 industry-enablement-flow.yaml 的 v2 —— 比起 v1 的"五步全自动"，
-# 这一版集成了 v2.2 Hub Services（memory + artifact + datastore）+
-# 真实的"人在回路"（capability=consultant-review 派给一个真人 worker）。
+# v2 增强：相对 v1 的"五步全自动"，本工作流加了：
+#   - v2.2  Hub Services（memory + artifact + datastore）
+#   - v2.2  真实的"人在回路"（capability=consultant-review 派给真人 worker）
+#   - v2.3  case-context: 案主可以在工作流**任意时刻**找 case-manager
+#           插话提问 / 补充事实 / 重写草稿请求，所有对话写进 case-memory，
+#           下一步 agent 自动看见
+#
+# # 案主插话怎么集成
+#
+# - workflow 主路径**不变**（intake → research → draft → human-review →
+#   finalize）。
+# - 案主任何时刻都可以**单独**派一个 `capability=case-conversation`
+#   的任务给 `case-manager` agent，带 `payload.caseId = <runId>`。
+# - host glue 在每一步 step 跑前自动 `recallCaseConversation` +
+#   `recallCaseStepOutputs`，拼到 agent 的 prompt 头部
+#   `## 当前 case 的已有上下文`；跑后 `recordCaseStepOutput` 写回。
+# - case-manager 不进 steps 列表——它是横切关注点。具体接线见
+#   packages/host/src/services/case-context.ts。
 #
 # 派发：admin 派一个 capability=consult-industry-with-human 的任务，
 # 携带 payload：

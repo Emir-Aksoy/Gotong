@@ -4,6 +4,100 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.0`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — case-conversation (v2.3)
+
+A small but consequential layer on top of v2.2 Hub Services: cases get a
+shared timeline so users can interject **anywhere** in the workflow and
+downstream agents automatically see those interjections.
+
+### Added — host helper
+
+- **`packages/host/src/services/case-context.ts`** — append-only case
+  timeline backed by an existing `memory:file` handle, **no new service
+  type**. Helpers:
+  - `recordCaseConversation` / `recallCaseConversation` — user / agent
+    interjections, tagged by source (`user` / `manager` / `coach` /
+    `analyst` / `reviewer` / `system`) and optional `stepId`.
+  - `recordCaseStepOutput` / `recallCaseStepOutputs` — workflow step
+    outputs cached on the case for cross-step recall.
+  - `formatCaseContextBlock` — render the timeline as a Markdown-ish
+    prompt prefix downstream LLM agents can `prepend` to their user
+    message verbatim.
+  - Storage convention: owner `{kind:'workflow-run', id: caseId}`, kind
+    `episodic`, topic / source / stepId encoded in `meta`. Filtering
+    happens helper-side (the file backend doesn't take meta queries).
+- **Exported under `@aipehub/host/services`** alongside the existing
+  `bootstrapServices` / `LifecycleSweeper` surface — examples and
+  third-party hosts can `import { recordCaseConversation, ... }`
+  directly without touching internals.
+
+### Added — agent template
+
+- **`templates/agents/case-manager.yaml`** — `case-manager` agent with
+  `capability=case-conversation` / `case-status`. Acts as the "side
+  channel" outside the workflow steps: receives user interjections,
+  the host glue writes them into the case timeline, the agent answers
+  in three sections (`## 回应` / `## 我的判断` / `## 路由建议`). The
+  routing hint tells the host whether to dispatch to a specialist
+  agent or stop after the manager's reply. Declares only `memory:file`
+  (kind=`episodic`) — shares the case-memory owner with the other
+  agents working on the same case.
+
+### Added — workflow + agent updates
+
+- **`templates/agents/industry-coach-pro.yaml`** — system prompt now
+  explicitly reads `## 当前 case 的已有上下文` when present, draws on
+  the interjected facts in `[模式: draft]` / `[模式: finalize]`.
+- **`templates/agents/industry-research-analyst.yaml`** — same:
+  surfaces case-timeline facts in the "关键洞察" + "3 个提醒" sections.
+- **`templates/workflows/industry-consultation-flow.yaml`** — header
+  documents the v2.3 case-conversation integration: each step's host
+  glue calls `recallCaseConversation` + `recallCaseStepOutputs`
+  pre-run and `recordCaseStepOutput` post-run; the case-manager is
+  **not** a workflow step (it's a side channel).
+- **`templates/workflows/industry-enablement-flow.yaml`** — header
+  notes that the v1 flow's 6 zero-glue `LlmAgent`s do **not** yet
+  read case context; upgrade path documented inline. Use
+  `industry-consultation-flow.yaml` if you need interjection support.
+
+### Added — regression coverage
+
+- **`packages/host/tests/case-context.test.ts`** — 8 tests against a
+  hand-rolled in-memory `MemoryHandle` covering: round-trip record →
+  recall, case isolation (caseA ≠ caseB), conversation vs step-output
+  separation, `formatCaseContextBlock` output shape, empty-input
+  no-op, `includeStepOutputs` filter, long-text truncation, and meta
+  round-trip into the underlying memory entry.
+
+### Added — real-API example coverage
+
+- **`examples/industry-consultation-deepseek/`** upgraded:
+  - Workflow YAML now propagates `caseId` through every step's payload
+    (`caseId: $trigger.payload.caseId`).
+  - `CoachAgent` / `ResearchAgent` now use a shared host glue
+    (`withCaseContext`) that prepends the case timeline + records step
+    output / agent reply afterwards.
+  - New `CaseManagerAgent` capability=`case-conversation` demonstrates
+    a user interjection between RUN 1 (餐饮) and RUN 2 (零售): the
+    manager reads the full case-1 timeline (intake/research/draft/
+    review/finalize step outputs + coach replies) and answers a new
+    follow-up question that wasn't in the workflow trigger.
+  - Post-run inspection dumps both the agent-level memory (cross-case
+    `priorCount` log) **and** every case-memory's timeline grouped by
+    `caseId` so the cross-case isolation is visible.
+
+### Notes
+
+- v2.3 is additive on top of v2.2 — no breaking changes to existing
+  agent yaml, plugin contracts, or REST endpoints.
+- The case-memory mechanism (per-`caseId` owner) and the agent-level
+  memory mechanism (per-agent owner) are **orthogonal**. Authors can
+  use either or both without coupling.
+- Storage cost: each case's memory is a small jsonl file under
+  `<space>/services/memory/file/workflow-run/<caseId>/episodic.jsonl`.
+  No automatic cleanup yet — bound the case count or wire a sweeper
+  on top of `LifecycleSweeper` if your deployment has long lifetimes.
+
 ## Unreleased — Hub Services (v2.2)
 
 A pluggable per-agent state layer. Agents declare what they want
