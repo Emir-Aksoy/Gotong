@@ -186,6 +186,9 @@ importers:
       '@aipehub/core':
         specifier: workspace:*
         version: link:../core
+      '@aipehub/services-sdk':
+        specifier: workspace:*
+        version: link:../services-sdk
     devDependencies:
       vitest:
         specifier: ^2.0.0

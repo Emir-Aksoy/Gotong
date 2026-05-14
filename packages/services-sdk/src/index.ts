@@ -60,6 +60,10 @@ export type {
   SqlHandle,
 } from './types/datastore.js'
 
+// Agent ctx (RFC §7)
+export { EMPTY_SERVICE_CTX } from './types/agent-ctx.js'
+export type { ServiceCtx } from './types/agent-ctx.js'
+
 // Registry + loader
 export { ServiceRegistry } from './registry.js'
 export {
