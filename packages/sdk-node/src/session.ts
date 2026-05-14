@@ -15,6 +15,13 @@ import {
 } from '@aipehub/protocol'
 import WebSocket from 'ws'
 
+import {
+  ServiceClientImpl,
+  toWireDecls,
+  type ServiceClient,
+  type ServiceUseRequest,
+} from './service-client.js'
+
 export type SessionState =
   | 'connecting'
   | 'ready'
@@ -34,11 +41,38 @@ export interface ConnectOptions {
   reconnectMaxBackoffMs?: number
   /** Notified on every state transition. */
   onStateChange?: (state: SessionState, info?: { reason?: string }) => void
+  /**
+   * Hub Services to make available to this connection (protocol v1.1). The
+   * SDK turns these into `HELLO.services` and exposes a `ServiceClient` on
+   * the returned `Session`. The `ServiceClient` surface mirrors the
+   * in-process `ServiceCtx` from `@aipehub/services-sdk` so an agent can
+   * call `this.services.memory.recall(...)` regardless of whether it's
+   * running in-process or as a remote sidecar.
+   *
+   * Omitting this field is the v1.0 behaviour — the agent has no services.
+   * The host may also have been started without a service gateway, in
+   * which case calls return `forbidden_service`.
+   */
+  services?: ServiceUseRequest[]
 }
 
 export interface Session {
   readonly state: SessionState
   readonly sessionId: string | undefined
+  /**
+   * Service client (protocol v1.1). Present iff `connect()` was called
+   * with a non-empty `services` array. Agent authors typically read this
+   * once after `connect()` returns and stash it on their agent instance:
+   *
+   *     const coach = new CoachAgent({ id: 'coach', capabilities: ['draft'] })
+   *     const session = await connect({ url, agents: [coach], services: [...] })
+   *     coach.services = session.services        // <-- hand-off
+   *
+   * The `ServiceClient` surface mirrors `@aipehub/services-sdk`'s
+   * `ServiceCtx` shape (`memory` / `artifact` / `datastore`) so agent
+   * code reads identically to an in-process LlmAgent.
+   */
+  readonly services: ServiceClient | undefined
   publish(from: ParticipantId, channel: ChannelId, body: unknown): void
   subscribe(participantId: ParticipantId, channel: ChannelId): void
   unsubscribe(participantId: ParticipantId, channel: ChannelId): void
@@ -86,6 +120,8 @@ export async function connect(opts: ConnectOptions): Promise<Session> {
 class SessionImpl implements Session {
   state: SessionState = 'connecting'
   sessionId: string | undefined
+  services: ServiceClient | undefined
+  private serviceClient: ServiceClientImpl | undefined
   private ws: WebSocket | undefined
   private readonly agents: Map<ParticipantId, AgentParticipant>
   private closeRequested = false
@@ -98,6 +134,27 @@ class SessionImpl implements Session {
   constructor(private readonly opts: ResolvedOptions) {
     this.agents = new Map(opts.agents.map((a) => [a.id, a]))
     this.backoff = opts.reconnectInitialBackoffMs
+
+    // Build the service client eagerly (before the socket opens) so the
+    // user can grab `session.services` without an extra await after
+    // `connect()` resolves. The client owns RPC bookkeeping; the socket
+    // is wired in via `send` / `attachResultFrame` once it's ready.
+    if (opts.services && opts.services.length > 0) {
+      this.serviceClient = new ServiceClientImpl({
+        declarations: opts.services,
+        sendCall: (frame) => this.send(frame),
+        defaultAgentId: () => {
+          // Pick the first declared agent id as the default `from`. If
+          // multiple agents share a session, an agent author wanting to
+          // call services as agent B (not A) must call `memoryFor(...)`
+          // and we'd need to thread `from` — punted for v1.1 since the
+          // common case is one-agent-per-session.
+          const first = opts.agents[0]
+          return first?.id ?? 'unknown'
+        },
+      })
+      this.services = this.serviceClient
+    }
   }
 
   async openInitial(): Promise<void> {
@@ -121,6 +178,9 @@ class SessionImpl implements Session {
           capabilities: [...a.capabilities],
         })),
         ...(this.opts.apiKey !== undefined ? { apiKey: this.opts.apiKey } : {}),
+        ...(this.opts.services && this.opts.services.length > 0
+          ? { services: toWireDecls(this.opts.services) }
+          : {}),
       })
     })
 
@@ -239,11 +299,24 @@ class SessionImpl implements Session {
       case 'ERROR':
         console.warn(`[sdk-node] server ERROR: ${frame.code} — ${frame.message}`)
         break
+      case 'SERVICE_RESULT':
+        if (this.serviceClient) {
+          this.serviceClient.attachResultFrame(frame)
+        }
+        // If we received a SERVICE_RESULT with no client (server bug or
+        // stale frame post-close), silently drop — better than crashing.
+        break
     }
   }
 
   private handleDisconnect(): void {
     this.ws = undefined
+    // Any in-flight SERVICE_CALLs are stranded — fail them so awaiters
+    // don't hang. (On auto-reconnect the agent must re-issue from its
+    // own state; v1.1 doesn't preserve in-flight RPC across reconnect.)
+    if (this.serviceClient) {
+      this.serviceClient.failAllPending('connection_lost')
+    }
     if (this.state === 'closed') return
     if (this.closeRequested) {
       this.setState('closed')

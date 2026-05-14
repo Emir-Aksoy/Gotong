@@ -1,5 +1,9 @@
 import type { Hub } from '@aipehub/core'
-import { DEFAULT_HEARTBEAT_INTERVAL_MS } from '@aipehub/protocol'
+import {
+  DEFAULT_HEARTBEAT_INTERVAL_MS,
+  type ServiceOwner,
+  type ServiceType,
+} from '@aipehub/protocol'
 import { WebSocketServer } from 'ws'
 
 import { Session, type SessionInfo } from './session.js'
@@ -26,10 +30,44 @@ export type AuthenticateResult =
   | { ok: true; allowedAgents?: readonly string[] | '*' }
   | { ok: false; reason?: string }
 
+/**
+ * Narrow contract the WebSocket transport needs to expose Hub Services to
+ * remote agents (protocol v1.1 SERVICE_CALL). The host's `HubServices` is
+ * the production implementation; tests pass a fake. transport-ws is kept
+ * decoupled from `@aipehub/host` and `@aipehub/services-sdk` — the gateway
+ * is the only seam.
+ *
+ * `attach` is called on first SERVICE_CALL for a given `(type, impl, owner)`;
+ * subsequent calls reuse the cached handle. `detachFor` is called on
+ * session close (and on per-agent leave for `kind:'agent'` owners).
+ */
+export interface ServiceCallGateway {
+  attach(spec: {
+    type: ServiceType
+    impl: string
+    owner: ServiceOwner
+    /** Plugin-defined config blob — forwarded as `HELLO.services[i].config`. */
+    config: unknown
+  }): Promise<{ handle: unknown }>
+
+  detachFor(owner: ServiceOwner): Promise<void>
+}
+
 export interface WebSocketTransportOptions {
   port?: number
   host?: string
   heartbeatIntervalMs?: number
+  /**
+   * Optional services gateway (protocol v1.1). When provided, remote
+   * sessions that declare `HELLO.services` may issue SERVICE_CALL frames
+   * to drive Hub Services. When absent, any SERVICE_CALL is rejected as
+   * `forbidden_service` — the v1.0 behaviour.
+   *
+   * Production code passes the host's `HubServices` (it satisfies this
+   * interface via duck-typing on `attach` + `detachFor`). Tests pass a
+   * narrow fake. See {@link ServiceCallGateway}.
+   */
+  services?: ServiceCallGateway
   /**
    * Authentication / authorization hook. Called once per HELLO with the
    * apiKey the client sent. Async allowed. Default: no auth required, all
@@ -106,6 +144,7 @@ export function serveWebSocket(
           heartbeatIntervalMs,
           authenticate: opts.authenticate,
           gating: opts.gating ?? 'open',
+          ...(opts.services ? { services: opts.services } : {}),
         })
         sessions.add(session)
         session.onClosed(() => sessions.delete(session))

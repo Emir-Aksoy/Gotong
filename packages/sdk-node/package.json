@@ -31,6 +31,7 @@
   "dependencies": {
     "@aipehub/core": "workspace:*",
     "@aipehub/protocol": "workspace:*",
+    "@aipehub/services-sdk": "workspace:*",
     "ws": "^8.18.0"
   },
   "devDependencies": {

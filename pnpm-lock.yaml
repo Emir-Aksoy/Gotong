@@ -273,6 +273,9 @@ importers:
       '@aipehub/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@aipehub/services-sdk':
+        specifier: workspace:*
+        version: link:../services-sdk
       ws:
         specifier: ^8.18.0
         version: 8.20.0
