@@ -69,6 +69,25 @@ downstream agents automatically see those interjections.
   no-op, `includeStepOutputs` filter, long-text truncation, and meta
   round-trip into the underlying memory entry.
 
+### Added — provider retry
+
+- **`OpenAIProvider.maxRetries`** (default `0`, opt-in). On transient
+  transport-layer failures (`Premature close`, `socket hang up`,
+  `ECONNRESET` / `ECONNREFUSED` / `ETIMEDOUT` / `EPIPE` / `EAI_AGAIN`,
+  undici's `UND_ERR_*` codes, HTTP `429` and `5xx`), the provider
+  retries up to `maxRetries` additional times with exponential
+  backoff + jitter (default `500ms × 2^(n-1)`, capped at 5s, +200ms
+  jitter). Permanent errors (4xx other than 429, auth, malformed
+  body) never retry. The motivating case: real DeepSeek runs would
+  occasionally fail with `Premature close` on the largest
+  `finalize` step; with `maxRetries: 3` the example now self-heals.
+- **`isTransientError`** exported from `@aipehub/llm-openai` for
+  callers building their own retry layer on top.
+- **`retryBackoffMs`** opt — injectable backoff function (tests use
+  `() => 1` to keep the suite instant).
+- 11 new tests in `packages/llm-openai/tests/provider.test.ts`
+  (4 retry behavior + 7 classifier). Test count went 15 → 26.
+
 ### Added — real-API example coverage
 
 - **`examples/industry-consultation-deepseek/`** upgraded:

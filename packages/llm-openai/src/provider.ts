@@ -58,6 +58,24 @@ export interface OpenAIProviderOptions {
    * users (the original behavior) keep working unchanged.
    */
   maxTokensField?: 'max_completion_tokens' | 'max_tokens'
+  /**
+   * Number of **additional** attempts to make on transient transport-layer
+   * errors (Premature close / socket hang up / ECONNRESET / 5xx / 429).
+   * The first attempt is always made; this controls retries on top of it.
+   * Total attempts = `maxRetries + 1`. Default `0` (no retries) so existing
+   * callers see no behavior change. Suggested for OpenAI-compatible vendors
+   * with flaky upstreams: `2` or `3`. Auth errors (401/403) and 4xx (other
+   * than 429) never retry — they're not transient. Backoff is 500ms × 2ⁿ
+   * with full jitter, capped at 5s per wait.
+   */
+  maxRetries?: number
+  /**
+   * Override the default backoff schedule. Useful in tests where you want
+   * instant retries. Receives the 1-indexed attempt number (1 = before
+   * first retry, 2 = before second, …) and returns ms to wait. Default
+   * is `500 * 2^(n-1)` with up to 200ms jitter.
+   */
+  retryBackoffMs?: (attempt: number) => number
 }
 
 /**
@@ -84,11 +102,15 @@ export class OpenAIProvider implements LlmProvider {
   private readonly client: OpenAI
   private readonly defaultModel: string
   private readonly maxTokensField: 'max_completion_tokens' | 'max_tokens'
+  private readonly maxRetries: number
+  private readonly retryBackoffMs: (attempt: number) => number
 
   constructor(opts: OpenAIProviderOptions = {}) {
     this.name = opts.name ?? 'openai'
     this.defaultModel = opts.defaultModel ?? 'gpt-4o-mini'
     this.maxTokensField = opts.maxTokensField ?? 'max_completion_tokens'
+    this.maxRetries = Math.max(0, opts.maxRetries ?? 0)
+    this.retryBackoffMs = opts.retryBackoffMs ?? defaultBackoff
     if (opts.client) {
       this.client = opts.client
     } else {
@@ -120,31 +142,113 @@ export class OpenAIProvider implements LlmProvider {
     if (req.maxTokens !== undefined) body[this.maxTokensField] = req.maxTokens
     if (req.temperature !== undefined) body.temperature = req.temperature
 
-    // We use the SDK's loosely-typed call signature so the same code path
-    // works whether `client` is the real SDK or a test fake. SDK errors
-    // (auth, rate-limit, transport) propagate to the caller untouched.
-    const raw = (await (
-      this.client.chat.completions.create as unknown as (
-        b: Record<string, unknown>,
-      ) => Promise<OpenAIChatCompletionLike>
-    )(body)) as OpenAIChatCompletionLike
+    let lastErr: unknown
+    const totalAttempts = this.maxRetries + 1
+    for (let attempt = 1; attempt <= totalAttempts; attempt++) {
+      try {
+        // We use the SDK's loosely-typed call signature so the same code path
+        // works whether `client` is the real SDK or a test fake.
+        const raw = (await (
+          this.client.chat.completions.create as unknown as (
+            b: Record<string, unknown>,
+          ) => Promise<OpenAIChatCompletionLike>
+        )(body)) as OpenAIChatCompletionLike
 
-    const firstChoice = raw.choices?.[0]
-    const text = firstChoice?.message?.content ?? ''
-
-    const out: LlmResponse = {
-      text,
-      stopReason: mapStopReason(firstChoice?.finish_reason),
-      raw,
-    }
-    if (raw.usage) {
-      out.usage = {
-        inputTokens: raw.usage.prompt_tokens,
-        outputTokens: raw.usage.completion_tokens,
+        const firstChoice = raw.choices?.[0]
+        const text = firstChoice?.message?.content ?? ''
+        const out: LlmResponse = {
+          text,
+          stopReason: mapStopReason(firstChoice?.finish_reason),
+          raw,
+        }
+        if (raw.usage) {
+          out.usage = {
+            inputTokens: raw.usage.prompt_tokens,
+            outputTokens: raw.usage.completion_tokens,
+          }
+        }
+        return out
+      } catch (err) {
+        lastErr = err
+        // Don't retry on permanent errors (auth, model-not-found, etc.) or
+        // when we've exhausted the budget. Any 4xx except 429 is permanent;
+        // network-layer + 5xx + 429 are transient.
+        if (attempt >= totalAttempts || !isTransientError(err)) {
+          throw err
+        }
+        const waitMs = this.retryBackoffMs(attempt)
+        await sleep(waitMs)
+        // Loop and retry with the same body.
       }
     }
-    return out
+    // Defensive: the loop either returns or throws on every iteration; this
+    // line keeps TypeScript happy if it can't prove the loop always exits.
+    throw lastErr instanceof Error ? lastErr : new Error('OpenAIProvider: retry loop exited without result')
   }
+}
+
+// --- transient-error detection -----------------------------------------
+
+/**
+ * Classify an SDK / fetch error as transient (worth retrying) vs permanent.
+ *
+ * Transient (retry):
+ *   - `Premature close` — server closed connection mid-response. This is the
+ *     specific failure we saw on DeepSeek and the original motivation for
+ *     this helper.
+ *   - `socket hang up`, `fetch failed`, `aborted`, `read ECONNRESET` — TCP
+ *     /HTTP-client surface terms for "connection died mid-flight".
+ *   - Node socket error codes: `ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`,
+ *     `EPIPE`, `EAI_AGAIN`, undici's `UND_ERR_SOCKET`. Looked up on both
+ *     the error and `error.cause` (undici nests the underlying socket
+ *     error there).
+ *   - HTTP `429` (rate-limited) and any `5xx` (upstream is sick).
+ *
+ * Permanent (do not retry):
+ *   - `401` / `403` — bad key.
+ *   - `404` — wrong model id.
+ *   - Other 4xx — bad request body.
+ *
+ * Exposed for tests; not part of the public API.
+ */
+export function isTransientError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false
+  const e = err as {
+    message?: unknown
+    code?: unknown
+    status?: unknown
+    cause?: { code?: unknown; message?: unknown }
+  }
+  const msg = typeof e.message === 'string' ? e.message : ''
+  if (
+    /premature close|socket hang up|fetch failed|aborted|read econnreset|etimedout/i.test(msg)
+  ) {
+    return true
+  }
+  const causeMsg = typeof e.cause?.message === 'string' ? e.cause.message : ''
+  if (causeMsg && /premature close|socket hang up|fetch failed/i.test(causeMsg)) {
+    return true
+  }
+  const code = (typeof e.code === 'string' ? e.code : '')
+    || (typeof e.cause?.code === 'string' ? e.cause.code : '')
+  const transientCodes = [
+    'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN',
+    'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_HEADERS_TIMEOUT',
+  ]
+  if (transientCodes.includes(code)) return true
+  const status = typeof e.status === 'number' ? e.status : 0
+  if (status === 429 || (status >= 500 && status <= 599)) return true
+  return false
+}
+
+function defaultBackoff(attempt: number): number {
+  // 500ms × 2^(n-1) capped at 5s, plus up to 200ms jitter.
+  const base = Math.min(500 * Math.pow(2, attempt - 1), 5000)
+  return base + Math.floor(Math.random() * 200)
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 /**

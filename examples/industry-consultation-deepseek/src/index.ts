@@ -601,6 +601,10 @@ async function main(): Promise<void> {
     defaultModel: 'deepseek-v4-flash',
     name: 'deepseek',
     maxTokensField: 'max_tokens',
+    // DeepSeek occasionally closes the response stream early
+    // ("Premature close"); retry up to 3 times on transient transport
+    // errors / 5xx / 429. See packages/llm-openai/src/provider.ts.
+    maxRetries: 3,
   })
 
   // ── agent-级 services（跨 case 持久；coach 才用）

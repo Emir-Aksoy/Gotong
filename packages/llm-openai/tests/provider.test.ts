@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { LlmRequest } from '@aipehub/llm'
 
-import { OpenAIProvider } from '../src/index.js'
+import { OpenAIProvider, isTransientError } from '../src/index.js'
 
 /**
  * Build a fake OpenAI SDK client exposing only the methods the provider
@@ -251,6 +251,77 @@ describe('OpenAIProvider — openai-compatible extensions', () => {
     expect(body.max_tokens).toBeUndefined()
   })
 
+  it('retries on Premature close and eventually succeeds', async () => {
+    let calls = 0
+    const { client, create } = makeFakeClient(async () => {
+      calls += 1
+      if (calls < 3) {
+        // Mimic the exact undici / fetch surface DeepSeek produces.
+        const err = new Error(
+          'Invalid response body while trying to fetch https://api.deepseek.com/v1/chat/completions: Premature close',
+        )
+        throw err
+      }
+      return {
+        choices: [{ message: { content: 'done' }, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      }
+    })
+    const provider = new OpenAIProvider({
+      client: client as any,
+      maxRetries: 3,
+      retryBackoffMs: () => 1, // 1ms — keep test fast
+    })
+    const res = await provider.complete({ messages: [{ role: 'user', content: 'hi' }] })
+    expect(res.text).toBe('done')
+    expect(create).toHaveBeenCalledTimes(3)
+  })
+
+  it('does NOT retry on a permanent error (401 auth)', async () => {
+    const { client, create } = makeFakeClient(async () => {
+      const err: Error & { status?: number } = new Error('Unauthorized')
+      err.status = 401
+      throw err
+    })
+    const provider = new OpenAIProvider({
+      client: client as any,
+      maxRetries: 3,
+      retryBackoffMs: () => 1,
+    })
+    await expect(
+      provider.complete({ messages: [{ role: 'user', content: 'hi' }] }),
+    ).rejects.toThrow(/Unauthorized/)
+    expect(create).toHaveBeenCalledTimes(1) // no retries
+  })
+
+  it('gives up after maxRetries+1 attempts and rethrows the last error', async () => {
+    const { client, create } = makeFakeClient(async () => {
+      const err = new Error('Premature close') as Error & { code?: string }
+      err.code = 'ECONNRESET'
+      throw err
+    })
+    const provider = new OpenAIProvider({
+      client: client as any,
+      maxRetries: 2,
+      retryBackoffMs: () => 1,
+    })
+    await expect(
+      provider.complete({ messages: [{ role: 'user', content: 'hi' }] }),
+    ).rejects.toThrow(/Premature close/)
+    expect(create).toHaveBeenCalledTimes(3) // 1 initial + 2 retries
+  })
+
+  it('with maxRetries=0 makes exactly one attempt (default behaviour)', async () => {
+    const { client, create } = makeFakeClient(async () => {
+      throw new Error('Premature close')
+    })
+    const provider = new OpenAIProvider({ client: client as any })
+    await expect(
+      provider.complete({ messages: [{ role: 'user', content: 'hi' }] }),
+    ).rejects.toThrow(/Premature close/)
+    expect(create).toHaveBeenCalledTimes(1)
+  })
+
   it('passes baseURL to the OpenAI SDK when constructing its own client', () => {
     // No `client` injected → provider builds its own. The OpenAI SDK
     // exposes `baseURL` on the constructed client (and lower-cases the
@@ -264,5 +335,59 @@ describe('OpenAIProvider — openai-compatible extensions', () => {
     // openai module) is more brittle than this typed escape hatch.
     const inner = (provider as unknown as { client: { baseURL: string } }).client
     expect(inner.baseURL).toBe('https://api.deepseek.com/v1')
+  })
+})
+
+describe('isTransientError classifier', () => {
+  it('flags Premature close as transient (the original motivation)', () => {
+    expect(
+      isTransientError(
+        new Error(
+          'Invalid response body while trying to fetch https://api.deepseek.com/v1/chat/completions: Premature close',
+        ),
+      ),
+    ).toBe(true)
+  })
+
+  it('flags ECONNRESET / ECONNREFUSED / ETIMEDOUT as transient', () => {
+    for (const code of ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'EPIPE', 'EAI_AGAIN', 'UND_ERR_SOCKET']) {
+      const err: Error & { code?: string } = new Error('socket fail')
+      err.code = code
+      expect(isTransientError(err)).toBe(true)
+    }
+  })
+
+  it('reads error.cause.code for undici-wrapped errors', () => {
+    const err: Error & { cause?: { code?: string } } = new Error('fetch failed')
+    err.cause = { code: 'ECONNRESET' }
+    expect(isTransientError(err)).toBe(true)
+  })
+
+  it('flags 429 and 5xx as transient', () => {
+    for (const status of [429, 500, 502, 503, 504]) {
+      const err: Error & { status?: number } = new Error(`http ${status}`)
+      err.status = status
+      expect(isTransientError(err)).toBe(true)
+    }
+  })
+
+  it('does NOT flag 4xx (other than 429) as transient', () => {
+    for (const status of [400, 401, 403, 404, 422]) {
+      const err: Error & { status?: number } = new Error(`http ${status}`)
+      err.status = status
+      expect(isTransientError(err)).toBe(false)
+    }
+  })
+
+  it('does NOT flag a generic Error with no recognised marker', () => {
+    expect(isTransientError(new Error('your prompt is malformed'))).toBe(false)
+  })
+
+  it('handles non-Error throwables gracefully', () => {
+    expect(isTransientError(undefined)).toBe(false)
+    expect(isTransientError(null)).toBe(false)
+    expect(isTransientError('string')).toBe(false)
+    expect(isTransientError(42)).toBe(false)
+    expect(isTransientError({})).toBe(false)
   })
 })
