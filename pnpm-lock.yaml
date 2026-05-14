@@ -270,6 +270,25 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.41)
 
+  packages/service-datastore-sqlite:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../core
+      '@aipehub/services-sdk':
+        specifier: workspace:*
+        version: link:../services-sdk
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.0
+        version: 7.6.13
+      better-sqlite3:
+        specifier: ^11.5.0
+        version: 11.10.0
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@20.19.41)
+
   packages/service-memory-file:
     dependencies:
       '@aipehub/core':

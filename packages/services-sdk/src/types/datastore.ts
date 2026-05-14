@@ -27,6 +27,14 @@
  */
 
 export interface DatastoreHandle {
+  /**
+   * The `config.name` this datastore was attached with. The host's
+   * `LocalAgentPool.buildCtx` uses this to key the `ctx.datastore`
+   * record so an agent that declared `cases` and `sessions` reads
+   * them by those names. Plugins MUST expose this verbatim — using
+   * the original config name lets agents and the admin UI line up.
+   */
+  readonly name: string
   readonly kv: KvHandle
   readonly sql: SqlHandle
 }

@@ -359,15 +359,12 @@ function buildCtx(
       ctx.artifact = h.handle as ArtifactHandle
     } else if (h.type === 'datastore') {
       ctx.datastore ??= {}
-      // Try to read the `config.name` the plugin used. Without
-      // access to the original spec at this point we settle on a
-      // deterministic fallback so two unnamed datastores don't
-      // overwrite each other.
-      const handle = h.handle as DatastoreHandle & { name?: string }
-      const key = (typeof handle.name === 'string' && handle.name.length > 0)
-        ? handle.name
-        : h.impl
-      ctx.datastore[key] = handle
+      // Datastores key on `handle.name` — the plugin guarantees this
+      // is the same string the yaml put under `config.name`, so two
+      // databases declared as `cases` and `sessions` end up at those
+      // exact keys on the ctx.
+      const handle = h.handle as DatastoreHandle
+      ctx.datastore[handle.name] = handle
     } else {
       ctx.extra ??= {}
       ctx.extra[h.type] = h.handle
