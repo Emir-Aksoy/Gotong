@@ -331,6 +331,13 @@ the plugin is available to every agent's yaml `uses:`. Plugin load
 failures are non-fatal: a bad plugin shows up in the boot log but
 doesn't crash the host.
 
+> **Deployment note**: the host resolves plugin packages from its own
+> `node_modules/`, so third-party plugins need to be installed where
+> the host can see them — `pnpm add my-org/aipehub-redis-memory` in
+> the host workspace, or a `package.json` dependency on the deploy
+> image. Putting the package name in `plugins.json` alone is not enough
+> if the package itself isn't on disk.
+
 ## Packages
 
 | Package | Purpose |

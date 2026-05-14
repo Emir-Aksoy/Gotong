@@ -37,6 +37,48 @@ import { join } from 'node:path'
 
 import { ensurePluginRootDir, HubServices } from './hub-services.js'
 
+/**
+ * Host-anchored ESM importer. Anchors `import()` resolution to **this
+ * file's** location rather than `services-sdk/dist/loader.js`'s — pnpm's
+ * isolated module graph means `services-sdk/node_modules/@aipehub/` only
+ * contains `core`, so a naive `import(pkg)` from inside services-sdk
+ * cannot find first-party plugin packages even when they're declared as
+ * host dependencies.
+ *
+ * `import.meta.resolve(specifier)` is the ESM-aware Node 20+ resolver
+ * (sync since 20.6, returns a `file://` URL string). It honours the
+ * package's `exports.import` condition, so ESM-only plugin packages
+ * (no CJS `main`) work — unlike `createRequire(...).resolve()`, which
+ * fails on `exports`-only packages with `ERR_PACKAGE_PATH_NOT_EXPORTED`.
+ *
+ * Because `bootstrap.ts` lives inside the host package, the resolution
+ * walk reaches the host's own `node_modules/@aipehub/` tree where pnpm
+ * has laid down symlinks for every declared service plugin.
+ *
+ * Plugins that live OUTSIDE the host's dep tree (e.g. third-party
+ * `my-org/aipehub-redis-memory` installed by an operator into the
+ * space directory) won't resolve via this path. RFC §8 covers a future
+ * `manifestPath`-anchored resolution; for now those plugins should be
+ * installed alongside the host.
+ */
+async function hostAnchoredImport(pkg: string): Promise<unknown> {
+  // Prefer `import.meta.resolve` (sync, Node 20.6+) — it returns the
+  // resolved `file://` URL string anchored to *this module's* location,
+  // which is what gives us access to the host's `node_modules/@aipehub/`
+  // tree. Honours `exports.import` so pure-ESM plugin packages work.
+  //
+  // Test runners (vite-node / vitest) don't implement
+  // `import.meta.resolve`. In that environment we fall back to a bare
+  // `import(pkg)` and let the bundler's resolver handle it — vite-node
+  // doesn't enforce the pnpm-isolated `node_modules` walk Node does at
+  // runtime, so plugin packages anywhere in the workspace are visible.
+  const meta = import.meta as { resolve?: (s: string) => string }
+  if (typeof meta.resolve === 'function') {
+    return import(meta.resolve(pkg))
+  }
+  return import(/* @vite-ignore */ pkg)
+}
+
 export interface BootstrapServicesOpts {
   /** The space whose `<root>/services/` directory holds the manifest. */
   space: Space
@@ -85,11 +127,17 @@ export async function bootstrapServices(
 
   // Phase 1: load + register. Failures here are reported but do not
   // abort the host. The `loadPlugins` function is itself non-fatal.
+  //
+  // We always pass an `importPackage` — defaulting to a host-anchored
+  // resolver — because the SDK's own `import(pkg)` resolves relative
+  // to `services-sdk/dist/loader.js`, which (under pnpm) cannot see
+  // plugin packages declared as host dependencies. See the
+  // `hostAnchoredImport` jsdoc above.
   const load = await loadPlugins({
     manifestPath,
     registry,
     ...(opts.seedDefaults !== undefined ? { seedDefaults: opts.seedDefaults } : {}),
-    ...(opts.importPackage ? { importPackage: opts.importPackage } : {}),
+    importPackage: opts.importPackage ?? hostAnchoredImport,
   })
   if (load.seeded) {
     logger.info('services: seeded default plugins.json', {

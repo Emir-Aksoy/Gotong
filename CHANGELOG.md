@@ -39,6 +39,12 @@ host's integration layer.
   initialises every plugin with its own `rootDir`, returns a
   `HubServices` facade. Plugin import + init failures are non-fatal:
   the bad plugin shows up in `errors[]` and a `warn` log line.
+  Resolution is **host-anchored** via `import.meta.resolve` from
+  `bootstrap.ts`, so plugins declared as host dependencies are visible
+  even under pnpm's isolated module graph (where
+  `services-sdk/node_modules/@aipehub/` only contains `core`). Test
+  runners that don't implement `import.meta.resolve` (vite-node) fall
+  back to a plain `import(pkg)`.
 - **`LocalAgentPool`** spawn-time wiring: reads `record.managed.uses`,
   calls `services.attachAll`, sorts the resulting handles into a
   `ServiceCtx`, passes it to `new LlmAgent({ services: ctx })`. On
@@ -69,7 +75,8 @@ host's integration layer.
   data with size + last-access columns; opens a detail modal with the
   plugin's preview (text or base64); trash sub-view with restore +
   hard-delete; "purge expired now" button; soft-delete toast says
-  "moved to trash, auto-deletes in 30 days". 28 new i18n keys × 2 langs.
+  "moved to trash, auto-deletes in 30 days". 27 new i18n keys × 2 langs
+  (`tabServices` + 26 `services*`).
 
 ### Added — agent yaml schema
 
@@ -89,6 +96,14 @@ host's integration layer.
   `paths.services` string on `Space`. The `services-sdk → core` type
   dependency that already existed isn't reversed; HubServices lives in
   `@aipehub/host`.
+- All three first-party plugin packages
+  (`service-memory-file`, `service-artifact-file`,
+  `service-datastore-sqlite`) are declared as **runtime dependencies**
+  of `@aipehub/host`, not devDependencies — without this the
+  pnpm-isolated module graph hides them from the production resolver.
+  Third-party plugins still resolve fine as long as they're installed
+  somewhere reachable from the host package (`pnpm add` in the host
+  workspace, or a deploy-time `npm i`).
 - Existing agents with no `uses:` are unchanged. The optional field
   parses as `undefined`; LlmAgent without a `services` opt reads
   `EMPTY_SERVICE_CTX` (a frozen `{}`).

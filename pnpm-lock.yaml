@@ -161,6 +161,15 @@ importers:
       '@aipehub/llm-openai':
         specifier: workspace:*
         version: link:../llm-openai
+      '@aipehub/service-artifact-file':
+        specifier: workspace:*
+        version: link:../service-artifact-file
+      '@aipehub/service-datastore-sqlite':
+        specifier: workspace:*
+        version: link:../service-datastore-sqlite
+      '@aipehub/service-memory-file':
+        specifier: workspace:*
+        version: link:../service-memory-file
       '@aipehub/services-sdk':
         specifier: workspace:*
         version: link:../services-sdk
@@ -174,9 +183,6 @@ importers:
         specifier: workspace:*
         version: link:../workflow
     devDependencies:
-      '@aipehub/service-memory-file':
-        specifier: workspace:*
-        version: link:../service-memory-file
       vitest:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.41)
