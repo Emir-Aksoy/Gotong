@@ -4,6 +4,96 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.0`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — Hub Services (v2.2)
+
+A pluggable per-agent state layer. Agents declare what they want
+(`memory`, `artifact`, `datastore`) in their yaml; the host attaches
+typed handles at spawn time and keeps the bookkeeping. The Hub itself
+gains nothing — Hub stays a "dumb dispatcher". All wiring sits in
+`@aipehub/services-sdk` + per-implementation plugin packages + the
+host's integration layer.
+
+### Added — services SDK + first-party plugins
+
+- **`@aipehub/services-sdk`** — the plugin contract. `ServicePlugin`
+  with lifecycle (`init` / `validateConfig` / `attach` / `detach` /
+  `softDelete` / `restore` / `hardDelete` / `describe` / `shutdown`),
+  `ServiceRegistry`, `loadPlugins` dynamic-import loader with auto-seed
+  of the default first-party manifest, `runPluginContract` shared
+  vitest factory, typed errors (`PluginNotFoundError`,
+  `TrashRestoreConflictError`, `ServiceConfigError`, …), and the
+  `ServiceCtx` type the LlmAgent constructor accepts.
+- **`@aipehub/service-memory-file`** — JSONL files per
+  `(owner, kind)`. `recall` is case-insensitive substring + kinds /
+  since / k filters. Trash lives under the plugin's local `.trash/`.
+- **`@aipehub/service-artifact-file`** — per-owner directories with
+  path-traversal defense, MIME allow-list, byte caps. List, exists,
+  remove, recursive walk for `list({ prefix })`.
+- **`@aipehub/service-datastore-sqlite`** — one `.sqlite` per declared
+  `config.name` per owner. KV mode (backed by a `_kv` table) + raw SQL
+  with prepared-statement caching. WAL + foreign-keys ON by default.
+
+### Added — host integration
+
+- **`bootstrapServices`** boots the loader, mkdirs `<space>/services/`,
+  initialises every plugin with its own `rootDir`, returns a
+  `HubServices` facade. Plugin import + init failures are non-fatal:
+  the bad plugin shows up in `errors[]` and a `warn` log line.
+- **`LocalAgentPool`** spawn-time wiring: reads `record.managed.uses`,
+  calls `services.attachAll`, sorts the resulting handles into a
+  `ServiceCtx`, passes it to `new LlmAgent({ services: ctx })`. On
+  `stop(id)` (and on respawn) the pool calls `detachFor(owner)`.
+- **`onAgentRemoved(id)`** lifecycle hook the web layer fires after
+  `space.removeAgent`. LocalAgentPool implements it via
+  `services.softDeleteAllForOwner` so deleting an agent moves all its
+  service data to per-plugin trash (RFC Q3=A: 30-day retention +
+  toast notification).
+- **`LifecycleSweeper`** — background janitor (default 1h tick) that
+  hard-deletes trash entries past `expiresAt`. Stop() awaits the
+  in-flight tick so SIGTERM doesn't race the sweep.
+
+### Added — admin surface
+
+- **REST**: `GET /api/admin/services/plugins`, `GET / DELETE
+  /api/admin/services/owners/:t/:i/:k/:id`, `GET
+  /api/admin/services/trash`, `POST
+  /api/admin/services/trash/:t/:i/:id/restore`, `DELETE
+  /api/admin/services/trash/:t/:i/:id`, `POST
+  /api/admin/services/sweep`. Wired through a plain-data
+  `ServicesAdminSurface` interface in `@aipehub/core` so
+  `@aipehub/web` never has to import the SDK.
+- **SSE events**: `service_trashed` (every soft-delete) and
+  `service_purged` (every expired-trash auto-cleanup) flow through
+  the hub transcript and the admin SSE stream.
+- **Admin UI**: a sixth "服务 / Services" tab. Lists per-agent service
+  data with size + last-access columns; opens a detail modal with the
+  plugin's preview (text or base64); trash sub-view with restore +
+  hard-delete; "purge expired now" button; soft-delete toast says
+  "moved to trash, auto-deletes in 30 days". 28 new i18n keys × 2 langs.
+
+### Added — agent yaml schema
+
+- **`ManagedAgentSpec.uses?: ServiceUseSpec[]`** in `@aipehub/core` and
+  `parseManifest` validation in `@aipehub/web`. Yaml authors declare
+  `{ type, impl, config }` per service. The same validator runs on the
+  admin POST/PUT form path. `memory` and `artifact` are singular per
+  agent; `datastore` (and third-party types) may repeat.
+- **`renderAgentManifest`** echoes the `uses:` list (deep-cloned) so
+  export → edit → re-import is lossless.
+- **Template**: `templates/agents/industry-coach-with-memory.yaml` —
+  full example using all three first-party plugins.
+
+### Notes
+
+- core gets a single new file (`services-admin.ts`, type-only) plus a
+  `paths.services` string on `Space`. The `services-sdk → core` type
+  dependency that already existed isn't reversed; HubServices lives in
+  `@aipehub/host`.
+- Existing agents with no `uses:` are unchanged. The optional field
+  parses as `undefined`; LlmAgent without a `services` opt reads
+  `EMPTY_SERVICE_CTX` (a frozen `{}`).
+- Wire protocol (`docs/PROTOCOL.md`) is unchanged.
+
 ## Unreleased — workflow engine + CI (v2.1)
 
 The pluggable workflow layer the Hub deliberately doesn't bundle. The
