@@ -30,11 +30,17 @@ workflows/
                                    (解析→拆解→[并行: 联络稿+派发]→报告→归档)
   admin-report-restyle-flow.yaml   ⭐ 报告改写专用（最常复用的场景）
                                    旧报告 + 新口径 → 同事实、新表达
-  industry-enablement-flow.yaml    ⭐ 传统行业 AI 赋能梳理
+  industry-enablement-flow.yaml    ⭐ 传统行业 AI 赋能梳理（v1，全自动）
                                    (诊断→机会→工具→落地→顾虑回应)
+  industry-consultation-flow.yaml  🆕 传统行业咨询（v2.2，含真人 review）
+                                   intake→research→draft→👤review→finalize
+                                   集成 Hub Services（memory/artifact/datastore）
 ```
 
 ⭐ = 配套 `templates/teams/` 下同名团队使用。
+🆕 = 新增：v2.2 "Hub Services + 人在回路" 版本，体现真人资深顾问对 AI
+草稿的 review 节点 —— `consultant-review` capability 派给任何 worker。
+完整的端到端测试在 `packages/host/tests/industry-consultation-flow.test.ts`。
 
 ## YAML 速查
 

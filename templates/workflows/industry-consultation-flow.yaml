@@ -1,0 +1,166 @@
+# =============================================================================
+# Workflow: 传统行业 AI 转型咨询全流程（含资深顾问人工 review）
+# Companion team: templates/teams/industry-consultation-team.yaml
+# Schema: aipehub.workflow/v1
+#
+# 这是 industry-enablement-flow.yaml 的 v2 —— 比起 v1 的"五步全自动"，
+# 这一版集成了 v2.2 Hub Services（memory + artifact + datastore）+
+# 真实的"人在回路"（capability=consultant-review 派给一个真人 worker）。
+#
+# 派发：admin 派一个 capability=consult-industry-with-human 的任务，
+# 携带 payload：
+#   {
+#     industry:        "餐饮 / 制造 / ...",     // 必填
+#     role:            "老板 / 店长 / ...",     // 选填
+#     user_situation:  "我们是 8 个人的早餐店 ...",  // 必填，客户自述
+#     known_objections:[]                       // 选填
+#   }
+#
+# 流程：
+#   1) intake           coach 出"我想先了解几件事"问题清单
+#   2) research         分析师查行业 cases datastore，出对标案例
+#   3) draft            coach 综合 intake + research 出初稿
+#   4) human-review     真人资深顾问审核草稿，给反馈或通过
+#                       (capability=consultant-review，派给 worker)
+#   5) finalize         coach 吸收顾问反馈，出终稿，写 artifact 落盘
+#
+# Q&A：
+# - "step 4 没人在线怎么办？" —— Hub.dispatch 在没人响应时会一直挂着，
+#   直到 worker 上线 + 完成。生产部署里建议给 worker 配 PagerDuty /
+#   微信通知。本 workflow 不设硬超时（人不一定能秒回）。
+# - "想跳过 step 4？" —— 把它改成 `when: false`，或者直接用 v1 工作流。
+# - "草稿和终稿落盘了吗？" —— coach 自己在 finalize 阶段用
+#   `artifact.write('reports/<runId>.md', ...)` 写盘。本 workflow 不做
+#   artifact，agent 用自己的 services 句柄做。
+# =============================================================================
+
+schema: aipehub.workflow/v1
+
+workflow:
+  id: industry-consultation-flow
+  name: 传统行业咨询（含人工 review）
+  description: |
+    intake → research → draft → 资深顾问人工 review → finalize
+    完整的"AI 顾问 + 真人审核"咨询管线。集成 memory / artifact /
+    datastore 三件套。
+
+  trigger:
+    capability: consult-industry-with-human
+
+  steps:
+    # ─────────────────────────────────────────────────────────
+    # Step 1: 初访 —— coach 反问问题清单
+    # ─────────────────────────────────────────────────────────
+    - id: intake
+      description: 初访摸底，coach 出问题清单
+      dispatch:
+        strategy: { kind: capability, capabilities: [intake-consultation] }
+        title: "初访：摸清客户业务"
+        payload:
+          prompt: |
+            [模式: intake]
+
+            客户行业：$trigger.payload.industry
+            客户角色：$trigger.payload.role
+            客户自述：
+            $trigger.payload.user_situation
+
+    # ─────────────────────────────────────────────────────────
+    # Step 2: 行业研究 —— analyst 查 datastore 出对标案例
+    # ─────────────────────────────────────────────────────────
+    - id: research
+      description: 查行业案例库，出对标 + 洞察
+      dispatch:
+        strategy: { kind: capability, capabilities: [industry-research] }
+        title: "行业研究：对标案例"
+        payload:
+          prompt: |
+            行业：$trigger.payload.industry
+            角色：$trigger.payload.role
+
+            coach 初访的问题清单（供你定位关键议题）：
+            $intake.output
+
+            请按 system 里规定的格式输出。
+
+    # ─────────────────────────────────────────────────────────
+    # Step 3: 草稿 —— coach 综合 intake + research 出初稿
+    # ─────────────────────────────────────────────────────────
+    - id: draft
+      description: 出方案草稿（之后交资深顾问 review）
+      dispatch:
+        strategy: { kind: capability, capabilities: [draft-consultation] }
+        title: "草稿：初步咨询报告"
+        payload:
+          prompt: |
+            [模式: draft]
+
+            客户行业：$trigger.payload.industry
+            客户角色：$trigger.payload.role
+            客户自述：
+            $trigger.payload.user_situation
+
+            初访阶段你的问题清单：
+            $intake.output
+
+            行业研究分析师的对标案例 + 洞察：
+            $research.output
+
+            请按 [模式: draft] 的格式出"行业 AI 转型方案草稿（初稿）"。
+
+    # ─────────────────────────────────────────────────────────
+    # Step 4: 资深顾问 review —— 真人 worker 介入
+    # ─────────────────────────────────────────────────────────
+    # 关键一步：dispatch capability=consultant-review 派给任何
+    # 标了该能力的 HumanParticipant。Hub.dispatch 会挂起直到 worker
+    # 在 admin / worker UI 上点 "Complete" 给回结果。
+    #
+    # worker 的 Complete 表单（payload 是自由 JSON）建议填：
+    #   { approved: true|false, revisions: "改 quick-win 第 2 条…", reviewer: "李顾问" }
+    #
+    # 没人在线 → 任务在 worker 队列里等着，直到有人 join 后看到并处理。
+    # 这是 RFC §人在回路 的核心约定 —— workflow 不替人决策超时。
+    - id: human-review
+      description: 资深顾问审核草稿（HUMAN-IN-THE-LOOP）
+      dispatch:
+        strategy: { kind: capability, capabilities: [consultant-review] }
+        title: "审核草稿：资深顾问决定改哪里"
+        payload:
+          industry: $trigger.payload.industry
+          draft_report: $draft.output
+          guidance: |
+            请审核上面这份咨询草稿。可以的话回复 JSON：
+              { "approved": true/false,
+                "revisions": "<具体怎么改，或为空表示通过>",
+                "reviewer": "<您的署名>" }
+            实在没法给 JSON 也可以纯文字回；后续步骤会把你的回复
+            原样塞给 coach 当 [reviewer 反馈] 段。
+
+    # ─────────────────────────────────────────────────────────
+    # Step 5: 终稿 —— coach 吸收 reviewer 反馈定稿 + 写 artifact
+    # ─────────────────────────────────────────────────────────
+    - id: finalize
+      description: 吸收资深顾问反馈，出终稿，artifact 落盘
+      dispatch:
+        strategy: { kind: capability, capabilities: [finalize-consultation] }
+        title: "终稿：吸收反馈出最终报告"
+        payload:
+          prompt: |
+            [模式: finalize]
+
+            草稿全文（已经过资深顾问 review）：
+            $draft.output
+
+            [reviewer 反馈]
+            $human-review.output
+
+            请按 [模式: finalize] 的格式给出终稿。宿主胶水会自动把
+            你的输出 artifact.write 到 reports/<industry>-<runId>.md
+            并在 datastore.sessions 表里记一行。你只要专心写好终稿。
+
+  output:
+    intake_questions: $intake.output
+    research_brief: $research.output
+    draft_report: $draft.output
+    human_review: $human-review.output
+    final_report: $finalize.output

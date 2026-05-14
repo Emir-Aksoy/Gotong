@@ -87,8 +87,23 @@ host's integration layer.
   agent; `datastore` (and third-party types) may repeat.
 - **`renderAgentManifest`** echoes the `uses:` list (deep-cloned) so
   export → edit → re-import is lossless.
-- **Template**: `templates/agents/industry-coach-with-memory.yaml` —
-  full example using all three first-party plugins.
+- **Templates** for the "传统行业 AI 咨询" product line:
+  - `templates/agents/industry-coach-with-memory.yaml` — minimal
+    single-agent example using all three first-party plugins (v2.2
+    landmark commit).
+  - `templates/agents/industry-coach-pro.yaml` — multi-phase coach
+    (intake / draft / finalize) with full services triad.
+  - `templates/agents/industry-research-analyst.yaml` — companion
+    research agent backed by a `cases` datastore.
+  - `templates/teams/industry-consultation-team.yaml` — one-click
+    import of the two agents above.
+  - `templates/workflows/industry-consultation-flow.yaml` — the
+    5-step consultation pipeline with a **real human-in-the-loop**
+    review step (`capability=consultant-review` dispatches to any
+    Worker who advertised that capability). End-to-end coverage in
+    `packages/host/tests/industry-consultation-flow.test.ts` (5
+    integration tests; runs the full pipeline including a fake
+    auto-reviewer that completes the review task synchronously).
 
 ### Notes
 
