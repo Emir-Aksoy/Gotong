@@ -54,6 +54,30 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
+  examples/industry-consultation-deepseek:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/host':
+        specifier: workspace:*
+        version: link:../../packages/host
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@aipehub/llm-openai':
+        specifier: workspace:*
+        version: link:../../packages/llm-openai
+      '@aipehub/services-sdk':
+        specifier: workspace:*
+        version: link:../../packages/services-sdk
+      '@aipehub/workflow':
+        specifier: workspace:*
+        version: link:../../packages/workflow
+      openai:
+        specifier: ^4.70.0
+        version: 4.104.0(ws@8.20.0)(zod@3.25.76)
+
   examples/llm-mock:
     dependencies:
       '@aipehub/core':
