@@ -34,6 +34,7 @@
       <button class="tabbar-btn" type="button" data-tab="workflows" data-i18n="tabWorkflows">工作流</button>
       <button class="tabbar-btn" type="button" data-tab="tasks"     data-i18n="tabTasks">任务</button>
       <button class="tabbar-btn" type="button" data-tab="activity"  data-i18n="tabActivity">活动</button>
+      <button class="tabbar-btn" type="button" data-tab="services"  data-i18n="tabServices">服务</button>
     </nav>
 
     <main id="main-grid" class="admin-grid">
@@ -395,6 +396,63 @@
             <p id="evaluate-msg" class="form-msg"></p>
           </form>
         </details>
+      </section>
+
+      <!-- Hub Services tab (v2.2). The DOM stays present at all times;
+           the JS only renders / refreshes when the tab becomes active
+           (`activeTab === 'services'`). When the host disabled
+           services, /api/admin/services/plugins returns 503 and we
+           swap in the "disabled" message. -->
+      <section id="services" class="managed-agents" data-tab="services">
+        <h2><span data-i18n="servicesPanel">Hub 服务</span>
+          <button id="services-sweep-btn" type="button" class="secondary-btn" data-i18n="servicesSweepBtn">立即清理过期项</button>
+        </h2>
+        <div id="services-disabled" class="empty-state" hidden data-i18n="servicesDisabled">此主机未启用服务功能</div>
+        <div id="services-plugins-empty" class="empty-state" hidden data-i18n="servicesEmpty">尚未注册任何服务插件</div>
+        <table id="services-table" class="services-table" hidden>
+          <thead>
+            <tr>
+              <th data-i18n="servicesPlugin">插件</th>
+              <th data-i18n="servicesOwner">归属</th>
+              <th data-i18n="servicesSize">大小</th>
+              <th data-i18n="servicesItemCount">条目</th>
+              <th data-i18n="servicesLastAccess">最近访问</th>
+              <th data-i18n="servicesActions">操作</th>
+            </tr>
+          </thead>
+          <tbody id="services-tbody"></tbody>
+        </table>
+
+        <h2 style="margin-top:1.4rem"><span data-i18n="servicesTrashTitle">废纸篓</span></h2>
+        <div id="services-trash-empty" class="empty-state" hidden data-i18n="servicesTrashEmpty">废纸篓为空</div>
+        <table id="services-trash-table" class="services-table" hidden>
+          <thead>
+            <tr>
+              <th data-i18n="servicesPlugin">插件</th>
+              <th data-i18n="servicesOwner">归属</th>
+              <th data-i18n="servicesTrashedAt">删除时间</th>
+              <th data-i18n="servicesExpiresAt">过期时间</th>
+              <th data-i18n="servicesTrashReason">原因</th>
+              <th data-i18n="servicesActions">操作</th>
+            </tr>
+          </thead>
+          <tbody id="services-trash-tbody"></tbody>
+        </table>
+
+        <!-- Detail modal: opened by clicking "详情" on a row. Holds
+             the preview blob (text or base64) returned by the plugin's
+             describe(). Closed by clicking the backdrop or pressing
+             Esc. -->
+        <div id="services-detail-modal" class="modal-backdrop" hidden>
+          <div class="modal-panel">
+            <header>
+              <h3 id="services-detail-title"></h3>
+              <button type="button" id="services-detail-close" aria-label="close">×</button>
+            </header>
+            <pre id="services-detail-body" class="preview-body"></pre>
+            <img id="services-detail-image" class="preview-image" alt="" hidden>
+          </div>
+        </div>
       </section>
     </main>
   </body>
