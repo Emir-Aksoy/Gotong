@@ -120,6 +120,71 @@ class WriterAgent extends AgentParticipant {
 }
 ```
 
+### Hub Services (v1.1+) — memory / artifact / datastore
+
+Remote agents can drive Hub Services with the **same TypeScript surface** as in-process LlmAgent. Declare what you need in `connect()`; read it on the returned `Session` and stash it on your agent.
+
+```ts
+import { AgentParticipant, connect, type Task } from '@aipehub/sdk-node'
+
+class CoachAgent extends AgentParticipant {
+  services?: import('@aipehub/sdk-node').ServiceClient
+
+  constructor() {
+    super({ id: 'coach', capabilities: ['draft'] })
+  }
+
+  protected async handleTask(task: Task): Promise<unknown> {
+    const caseId = (task.payload as { caseId: string }).caseId
+    // Identical shape to in-process LlmAgent — same MemoryHandle interface.
+    const caseMem = this.services!.memoryFor('file', {
+      kind: 'workflow-run',
+      id: caseId,
+    })
+    const prior = await caseMem.recall({ k: 20 })
+    await caseMem.remember({ kind: 'episodic', text: 'draft v1' })
+    return { saw: prior.length }
+  }
+}
+
+const coach = new CoachAgent()
+const session = await connect({
+  url: 'wss://hub.example.com/ws',
+  agents: [coach],
+  services: [
+    // Static per-agent memory (the common case)
+    { type: 'memory', impl: 'file', owner: { kind: 'agent', id: 'self' } },
+    // Case-scoped memory — agent picks the case id at call time
+    { type: 'memory', impl: 'file', owner: { kind: 'workflow-run', id: '*' } },
+  ],
+})
+coach.services = session.services
+```
+
+What this gets you:
+
+- The Hub lazy-attaches each `(type, impl, owner)` on first call; cache reused for subsequent calls.
+- `owner.id: 'self'` resolves to the calling agent's id, server-side.
+- `owner.id: '*'` is a wildcard — needed for case-scoped memory where the id is `task.payload.caseId` (only known at call time).
+- Methods outside the allowlist (`recall` / `remember` / `list` / `forget` / `clear` for memory) return `unknown_method`. The allowlist exists so a misbehaving agent can't walk the prototype chain.
+- On disconnect, the Hub detaches every cached handle. Reconnect attaches fresh.
+
+ACL is **declarative**: bad ACL = bad HELLO. Admins reviewing the application (under `gating: 'admin-approval'`) see the full `services` list before approval. See `docs/services-over-ws-rfc.md` for the design rationale and full ACL semantics.
+
+Error handling on the SDK side surfaces as a `ServiceCallError` with `error.code` from the wire enum:
+
+```ts
+import { ServiceCallError } from '@aipehub/sdk-node'
+
+try {
+  await this.services!.memory!.recall({})
+} catch (err) {
+  if (err instanceof ServiceCallError && err.code === 'forbidden_owner') {
+    // …
+  }
+}
+```
+
 ### Channels (free-form messaging)
 
 For non-task communication between participants:

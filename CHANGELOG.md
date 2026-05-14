@@ -2,7 +2,139 @@
 
 All notable changes to AipeHub are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) at the npm-package level.
 
-The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.0`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
+The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.1`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
+
+## Unreleased — services over WebSocket (wire protocol v1.1)
+
+Remote agents can now drive Hub Services (memory / artifact / datastore)
+over the same WebSocket they use for tasks. Closes the gap
+`docs/AGENT.md` already promised — moving an agent between in-process
+and remote shapes is now genuinely a constructor-arg change, not a
+logic change. **The "external agent standardized onboarding" goal**:
+deploying a new agent type to a running host no longer requires `pnpm
+install` on the host (npm-environment-free); the agent just runs as a
+process and connects over WS.
+
+Design: `docs/services-over-ws-rfc.md` (RFC, signed off on 5 key
+decisions).
+
+### Added — protocol v1.1 (additive on v1.0)
+
+- **`SERVICE_CALL` (client → server)** + **`SERVICE_RESULT` (server →
+  client)** frames. Single-request / single-reply RPC; multiple
+  concurrent calls per session interleave by `callId`.
+- **`HELLO.services?: ServiceUseDecl[]`** — optional declaration of
+  which `(type, impl, ownerPattern)` triples the connection is
+  allowed to invoke. ACL is bound at HELLO time so admin-approval
+  reviewers see the full picture before approving.
+- **Owner patterns** — `id: '<literal>'` (exact match), `id: 'self'`
+  (server-substituted to the calling agent's id; agents only), `id:
+  '*'` (any concrete id of that kind). Per-prefix matching deferred
+  to v1.2.
+- **Method allowlist** hardcoded in `@aipehub/protocol`:
+  - `memory`: recall / remember / list / forget / clear
+  - `artifact`: write / read / list / exists / remove
+  - `datastore`: kv.get / kv.set / kv.del / kv.keys / sql.exec / sql.query
+- **`PROTOCOL_VERSION`** bumped to `'1.1'`. Minor bump — major still
+  `1`, so v1.0 ↔ v1.1 are fully interoperable. v1.0 clients ignore
+  `services` (forward-compat); v1.0 servers receiving SERVICE_CALL
+  reply `bad_frame` ERROR (client SDK surfaces as `server_too_old`).
+- **`DEFAULT_SERVICE_CALL_TIMEOUT_MS`** = 30000. Client-side guard;
+  the server doesn't enforce per-call timeouts.
+- **Error codes** (in SERVICE_RESULT): `forbidden_service` /
+  `forbidden_owner` / `attach_failed` / `service_error` /
+  `unknown_method` / `bad_args` / `unknown_agent` / `session_not_ready`
+  / `unknown_service` / `internal_error`.
+
+### Added — server (`@aipehub/transport-ws`)
+
+- **`ServiceCallRouter`** (new module) — per-session router with a
+  `(type, impl, ownerKey)` handle cache. Lazy attach on first call;
+  `dispose()` detaches all on session close; `onAgentLeft(id)`
+  detaches only that agent's `kind:'agent'` owners (other kinds —
+  `workflow-run`, `shared` — survive per RFC §6).
+- **`ServiceCallGateway`** interface in `server.ts` — narrow shape
+  (`attach` + `detachFor`) so transport-ws stays free of
+  `@aipehub/host` and `@aipehub/services-sdk` dependencies. Production
+  hosts pass `HubServices` directly (structurally satisfies it).
+- **`WebSocketTransportOptions.services?: ServiceCallGateway`** — when
+  present, sessions get a router; when absent, every SERVICE_CALL
+  replies `forbidden_service` (graceful degradation).
+- **Session integration** — HELLO.services validated + router built
+  in `handleHello`; SERVICE_CALL handled in `onMessage`; dispose on
+  `cleanup`. Malformed decls return `REJECT bad_hello` before WELCOME.
+
+### Added — SDK (`@aipehub/sdk-node`)
+
+- **`ServiceClient`** (new type) — exposes `memory`, `artifact`,
+  `datastore: Record<name, …>` static-owner handles + `memoryFor` /
+  `artifactFor` / `datastoreFor` factories for dynamic owners. The
+  handle wrappers faithfully implement
+  `@aipehub/services-sdk`'s `MemoryHandle` / `ArtifactHandle` /
+  `DatastoreHandle` contracts (incl. `DatastoreHandle.name` /
+  `kv` / `sql` sub-namespaces), so agent code reads identically to
+  in-process LlmAgent.
+- **`ServiceCallError`** — surfaces `SERVICE_RESULT.ok: false` as a
+  thrown `Error` subclass with `code` from the wire enum.
+- **`ConnectOptions.services?: ServiceUseRequest[]`** + **`Session.services?: ServiceClient`** — agent author wires `coach.services = session.services` once after `await connect()` resolves.
+- **`@aipehub/services-sdk`** added as runtime dep so SDK users don't have to install services-sdk separately for the handle types. Type-only imports — no runtime size impact.
+- Disconnect fails all pending RPCs with `session_not_ready` —
+  consistent with how in-flight TASK frames are handled.
+
+### Added — host wire-up (`@aipehub/host`)
+
+- `main.ts` passes the bootstrapped `HubServices` into `serveWebSocket`
+  as the gateway. When `bootstrapServices` fails the services field
+  is omitted and remote agents see `forbidden_service` — same
+  degradation path as a stripped-down host.
+
+### Added — example
+
+- **`examples/services-sidecar-demo`** — zero-dep demo using
+  `MockLlmProvider` that:
+  1. Starts hub + bootstrapServices + ws server.
+  2. Connects **two** sidecar agents (writer + reviewer) via `sdk-node`,
+     each declaring `services: [{memory, file, workflow-run/*}]`.
+  3. Drives one case end-to-end (writer remembers → reviewer recalls
+     writer's entry → reviewer remembers → reader reads the jsonl
+     file directly to prove disk persistence).
+  4. Tears down cleanly. ~250 lines of TypeScript, ~10ms runtime.
+- This is the canonical "external agent over WS with services"
+  recipe — the industry-consultation in-process example stays as a
+  baseline for comparison.
+
+### Added — regression coverage
+
+- **`packages/transport-ws/tests/service-call-router.test.ts`** — 19
+  unit tests (ACL matrix, cache reuse, wildcard, dispose,
+  onAgentLeft, post-dispose rejection).
+- **`packages/transport-ws/tests/service-call-roundtrip.test.ts`** — 6
+  end-to-end over a real WS server (roundtrip, gateway-less fallback,
+  wildcard isolation, forbidden_owner, disconnect cleanup).
+- **`packages/sdk-node/tests/services-roundtrip.test.ts`** — 7 SDK
+  integration tests against a fake gateway (presence/absence,
+  remember/recall roundtrip, factory cache, datastore kv+sql,
+  ServiceCallError, pending-on-close).
+- **`packages/host/tests/services-over-ws.test.ts`** — 3 full-stack
+  integration tests with the **real** `service-memory-file` plugin
+  on a tmp dir (two-session shared case-memory, forbidden_owner,
+  disconnect detach).
+
+Total: 35 new tests across 4 layers; 0 regressions in the existing
+153-test suite.
+
+### Notes
+
+- v1.0 ↔ v1.1 compatibility tested both directions: a v1.0 client
+  on a v1.1 server keeps working unchanged; a v1.1 client whose
+  server lacks the `services` gateway sees every SERVICE_CALL
+  rejected as `forbidden_service` (graceful — connection survives).
+- The `services-sidecar-demo` is the migration recipe for the
+  industry-consultation pipeline. The in-process version stays —
+  some deployments may prefer it for lower latency / simpler ops.
+- **Out of scope for v1.1**: streaming results, per-call timeouts
+  server-side, per-prefix owner matching, third-party service-type
+  method allowlist extension. All scheduled for v1.2 / future RFCs.
 
 ## Unreleased — case-conversation (v2.3)
 

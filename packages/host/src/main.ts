@@ -305,6 +305,15 @@ async function main(): Promise<void> {
     host: config.host,
     port: config.wsPort,
     gating: config.gating,
+    // Protocol v1.1 SERVICE_CALL support — only enabled when
+    // bootstrapServices succeeded (i.e. `services` is defined). When
+    // absent, remote agents that declare `services` in HELLO will get
+    // `forbidden_service` on every SERVICE_CALL — graceful degradation.
+    //
+    // HubServices satisfies ServiceCallGateway structurally (attach +
+    // detachFor signatures align; HubServices's richer return types are
+    // tolerated under structural typing).
+    ...(services ? { services } : {}),
   })
   const web = await serveWeb(hub, {
     host: config.host,

@@ -150,6 +150,24 @@ importers:
         specifier: workspace:*
         version: link:../../packages/transport-ws
 
+  examples/services-sidecar-demo:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/host':
+        specifier: workspace:*
+        version: link:../../packages/host
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@aipehub/sdk-node':
+        specifier: workspace:*
+        version: link:../../packages/sdk-node
+      '@aipehub/transport-ws':
+        specifier: workspace:*
+        version: link:../../packages/transport-ws
+
   examples/web-demo:
     dependencies:
       '@aipehub/core':
@@ -207,6 +225,9 @@ importers:
         specifier: workspace:*
         version: link:../workflow
     devDependencies:
+      '@aipehub/sdk-node':
+        specifier: workspace:*
+        version: link:../sdk-node
       vitest:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.41)

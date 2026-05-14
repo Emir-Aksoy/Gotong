@@ -50,6 +50,7 @@
     "@aipehub/workflow": "workspace:*"
   },
   "devDependencies": {
+    "@aipehub/sdk-node": "workspace:*",
     "vitest": "^2.0.0"
   }
 }

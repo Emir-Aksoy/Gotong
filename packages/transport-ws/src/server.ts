@@ -50,7 +50,14 @@ export interface ServiceCallGateway {
     config: unknown
   }): Promise<{ handle: unknown }>
 
-  detachFor(owner: ServiceOwner): Promise<void>
+  /**
+   * Release any state filed against `owner`. Return type intentionally
+   * `Promise<unknown>` (not `Promise<void>`) so production implementations
+   * with richer return types (e.g. `HubServices.detachFor` returns
+   * `DetachedHandle[]`) satisfy the interface structurally without an
+   * adapter. The router awaits but discards the value.
+   */
+  detachFor(owner: ServiceOwner): Promise<unknown>
 }
 
 export interface WebSocketTransportOptions {
