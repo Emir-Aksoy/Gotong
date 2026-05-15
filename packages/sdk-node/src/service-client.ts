@@ -63,6 +63,36 @@ export interface ServiceUseRequest {
   impl: string
   owner: ServiceOwner | { kind: 'agent'; id: 'self' }
   config?: unknown
+  /**
+   * Optional per-method ACL narrowing (v1.2). If set, restricts this
+   * connection to a subset of the type's wire-callable methods. Names
+   * follow the `'method'` or `'namespace.method'` shape — max one dot.
+   *
+   * Use this to declare a strictly-read-only scope ahead of time so
+   * admins can spot if your agent later tries to write:
+   *
+   *   services: [{
+   *     type: 'memory', impl: 'file',
+   *     owner: { kind: 'agent', id: 'self' },
+   *     methods: ['recall', 'list'],   // refuses `remember` / `forget` etc.
+   *   }]
+   */
+  methods?: readonly string[]
+}
+
+/**
+ * A handle to a third-party service type. The SDK has no typed wrappers
+ * for unknown contracts, so callers issue method calls dynamically via
+ * `.call(method, ...args)`. Returned by `customFor()`.
+ *
+ * The method name is sent as-is on the wire and dispatched against the
+ * plugin's `attach()`-returned handle on the host. The plugin's
+ * `wireMethods` (set at host bootstrap) determines which names are
+ * allowed.
+ */
+export interface CustomServiceHandle {
+  /** Wire method name (e.g. `'pages.create'`). Bounded to one dot. */
+  call(method: string, ...args: unknown[]): Promise<unknown>
 }
 
 /**
@@ -75,6 +105,9 @@ export interface ServiceUseRequest {
  *   - `*For(impl, owner)` factories produce a wrapper for any concrete
  *     owner that matches a declared pattern (incl. `id: '*'` wildcards).
  *     Repeat calls return cached wrappers.
+ *   - `customFor(type, impl, owner)` is the dynamic-dispatch escape
+ *     hatch for third-party service types (anything not in
+ *     `BUILTIN_SERVICE_METHODS`).
  */
 export interface ServiceClient {
   readonly memory?: MemoryHandle
@@ -84,6 +117,13 @@ export interface ServiceClient {
   memoryFor(impl: string, owner: ServiceOwner): MemoryHandle
   artifactFor(impl: string, owner: ServiceOwner): ArtifactHandle
   datastoreFor(impl: string, owner: ServiceOwner): DatastoreHandle
+  /**
+   * Generic factory for third-party service types. Use when there is no
+   * typed `*For` for the service category. The plugin must register its
+   * wire methods at host bootstrap (see `ServicePlugin.wireMethods`),
+   * else SERVICE_CALL returns `unknown_method`.
+   */
+  customFor(type: string, impl: string, owner: ServiceOwner): CustomServiceHandle
 }
 
 /**
@@ -184,6 +224,13 @@ export class ServiceClientImpl implements ServiceClient {
     return this.cachedHandle('datastore', impl, owner, () =>
       this.buildDatastoreHandle('datastore', impl, owner),
     )
+  }
+
+  customFor(type: string, impl: string, owner: ServiceOwner): CustomServiceHandle {
+    return this.cachedHandle(type, impl, owner, () => ({
+      call: (method: string, ...args: unknown[]) =>
+        this.call(type, impl, owner, method, args),
+    }))
   }
 
   // --- session integration -------------------------------------------------
@@ -388,6 +435,7 @@ export function toWireDecls(reqs: readonly ServiceUseRequest[]): ServiceUseDecl[
     impl: r.impl,
     owner: { kind: r.owner.kind, id: r.owner.id },
     ...(r.config !== undefined ? { config: r.config } : {}),
+    ...(r.methods !== undefined && r.methods.length > 0 ? { methods: [...r.methods] } : {}),
   }))
 }
 

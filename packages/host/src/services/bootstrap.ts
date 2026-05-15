@@ -25,6 +25,7 @@
  */
 
 import { createLogger, type Hub, type Logger, type Space } from '@aipehub/core'
+import { registerServiceMethods } from '@aipehub/protocol'
 import {
   loadPlugins,
   PluginLoadError,
@@ -169,6 +170,28 @@ export async function bootstrapServices(
       }
       await plugin.init(ctx)
       registry.markInitialized(plugin.type, plugin.impl)
+      // Third-party plugins extend the SERVICE_CALL allowlist with their own
+      // wire-callable methods. Built-in types already have their methods in
+      // `BUILTIN_SERVICE_METHODS`; registration is a set-merge so an explicit
+      // declaration here is harmless. See protocol/constants.ts.
+      if (plugin.wireMethods && plugin.wireMethods.length > 0) {
+        try {
+          registerServiceMethods(plugin.type, plugin.wireMethods)
+          logger.info('services: registered wire methods', {
+            type: plugin.type,
+            impl: plugin.impl,
+            count: plugin.wireMethods.length,
+          })
+        } catch (err) {
+          // Bad wireMethods (e.g. `'a.b.c'` paths) — log loudly but don't
+          // abort: the plugin still works for in-process LlmAgents.
+          logger.warn('services: registerServiceMethods refused', {
+            type: plugin.type,
+            impl: plugin.impl,
+            err: err instanceof Error ? err.message : String(err),
+          })
+        }
+      }
       ready.push(plugin)
       logger.info('services: plugin ready', {
         type: plugin.type,

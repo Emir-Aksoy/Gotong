@@ -78,6 +78,27 @@ export interface ServicePlugin<TConfig = unknown, THandle = unknown> {
   readonly version: string
   /** Optional one-liner for admin UI. */
   readonly description?: string
+  /**
+   * Optional wire-callable method names a remote agent may invoke against
+   * the handle this plugin's `attach` returns. Used **only** for plugins
+   * whose `type` is not in `BUILTIN_SERVICE_METHODS`; the host calls
+   * `registerServiceMethods(type, wireMethods)` once at bootstrap so the
+   * `ServiceCallRouter` can dispatch SERVICE_CALL frames against them.
+   *
+   * Plugins implementing the built-in `'memory'` / `'artifact'` /
+   * `'datastore'` types should leave this `undefined` — the protocol
+   * package already lists the canonical method names. Setting `wireMethods`
+   * on a built-in type is harmless (registration merges sets, never
+   * overrides) but adds no value.
+   *
+   * Names follow the `'method'` or `'namespace.method'` shape (max one
+   * dot). The router refuses to dispatch deeper paths regardless of what
+   * appears here.
+   *
+   * In-process LlmAgents do not consult this field — they call the
+   * handle's methods directly. It only gates the WebSocket SDK path.
+   */
+  readonly wireMethods?: readonly string[]
 
   /**
    * Parse + validate a raw config blob from yaml. Throws

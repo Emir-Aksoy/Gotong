@@ -229,12 +229,35 @@ export class Hub {
   requestAdmission(req: {
     agents: ReadonlyArray<{ id: ParticipantId; capabilities: readonly string[] }>
     meta?: Readonly<Record<string, unknown>>
+    /**
+     * Optional service ACL the client is requesting. Carried into
+     * `PendingApplication.services` so admins can review it before
+     * approving. Validation happened transport-side before this call
+     * (illegal owner patterns rejected with `bad_hello`); the hub
+     * trusts the shape and stores it verbatim.
+     */
+    services?: ReadonlyArray<{
+      type: string
+      impl: string
+      owner: { kind: string; id: string }
+      config?: unknown
+    }>
   }): { applicationId: string; decision: Promise<AdmissionDecision> } {
     const application: PendingApplication = {
       id: this.idGen(),
       agents: req.agents.map((a) => ({ id: a.id, capabilities: [...a.capabilities] })),
       meta: req.meta,
       pendingSince: this.now(),
+      ...(req.services && req.services.length > 0
+        ? {
+            services: req.services.map((s) => ({
+              type: s.type,
+              impl: s.impl,
+              owner: { kind: s.owner.kind, id: s.owner.id },
+              ...(s.config !== undefined ? { config: s.config } : {}),
+            })),
+          }
+        : {}),
     }
     const decision = new Promise<AdmissionDecision>((resolve) => {
       this.pending.set(application.id, { application, resolve })

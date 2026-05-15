@@ -1,26 +1,29 @@
 {
-  "name": "@aipehub/web",
-  "version": "2.0.0",
+  "name": "@aipehub/cli",
+  "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub reference web UI — embeddable HTTP + SSE server with a vanilla-JS frontend.",
+  "description": "AipeHub CLI — bootstrap sidecar agents, ping a hub, inspect services. Zero install needed beyond `npx @aipehub/cli`.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/AipeHub/AipeHub.git",
-    "directory": "packages/web"
+    "directory": "packages/cli"
   },
   "publishConfig": {
     "access": "public"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "bin": {
+    "aipehub": "./bin/aipehub.js"
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src", "static", "README.md"],
+  "files": ["dist", "src", "bin", "templates", "README.md"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -29,11 +32,11 @@
     "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@aipehub/core": "workspace:*",
-    "@aipehub/protocol": "workspace:*",
-    "yaml": "^2.6.0"
+    "@aipehub/protocol": "workspace:*"
   },
   "devDependencies": {
-    "vitest": "^2.0.0"
+    "vitest": "^2.0.0",
+    "ws": "^8.18.0",
+    "@types/ws": "^8.5.13"
   }
 }

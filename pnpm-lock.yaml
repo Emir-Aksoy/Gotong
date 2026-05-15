@@ -177,6 +177,22 @@ importers:
         specifier: workspace:*
         version: link:../../packages/web
 
+  packages/cli:
+    dependencies:
+      '@aipehub/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@20.19.41)
+      ws:
+        specifier: ^8.18.0
+        version: 8.20.0
+
   packages/core:
     devDependencies:
       '@types/better-sqlite3':
@@ -203,6 +219,9 @@ importers:
       '@aipehub/llm-openai':
         specifier: workspace:*
         version: link:../llm-openai
+      '@aipehub/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       '@aipehub/service-artifact-file':
         specifier: workspace:*
         version: link:../service-artifact-file
@@ -390,6 +409,9 @@ importers:
       '@aipehub/core':
         specifier: workspace:*
         version: link:../core
+      '@aipehub/protocol':
+        specifier: workspace:*
+        version: link:../protocol
       yaml:
         specifier: ^2.6.0
         version: 2.9.0

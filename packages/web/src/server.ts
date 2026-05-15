@@ -20,6 +20,7 @@ import {
   type TaskId,
   type WorkerRecord,
 } from '@aipehub/core'
+import { PROTOCOL_VERSION } from '@aipehub/protocol'
 
 const log = createLogger('web')
 
@@ -1267,6 +1268,47 @@ async function handle(
     return
   }
 
+  // --- admin: prometheus-style metrics (v1.2 observability) ---------------
+  // Returns a plain-text response in OpenMetrics / Prometheus format.
+  // Scrape-friendly: no JSON, stable key names, HELP/TYPE annotations.
+  // Auth-required (admin) because the leaderboard exposes participant ids.
+  if (method === 'GET' && path === '/api/admin/metrics') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const text = renderMetrics(ctx.hub)
+    res.writeHead(200, {
+      // OpenMetrics content-type so Prometheus's scraper does the right thing.
+      'content-type': 'text/plain; version=0.0.4; charset=utf-8',
+    })
+    res.end(text)
+    return
+  }
+
+  // --- admin: SERVICE_CALL audit (v1.1 services-over-ws) ----------------
+  // Returns the most recent `service_call` transcript entries (newest-first).
+  // Caps default at 200 to keep the response small; admins who need more
+  // can pass `?limit=N` (max 2000). Used by the admin UI's services audit
+  // panel and by smoke tests verifying SERVICE_CALL frames left a trail.
+  if (method === 'GET' && path === '/api/admin/transcript/service-calls') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const u = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+    const requested = Number.parseInt(u.searchParams.get('limit') || '200', 10)
+    const limit = Number.isFinite(requested) ? Math.max(1, Math.min(2000, requested)) : 200
+    const filter = (u.searchParams.get('type') || '').trim() || null
+    const all = ctx.hub.transcript.all()
+    const calls = []
+    for (let i = all.length - 1; i >= 0 && calls.length < limit; i--) {
+      const e = all[i]!
+      if (e.kind !== 'service_call') continue
+      const data = e.data as { type: string }
+      if (filter && data.type !== filter) continue
+      calls.push({ seq: e.seq, ts: e.ts, ...e.data })
+    }
+    sendJson(res, { calls })
+    return
+  }
+
   // --- admin: dispatch ----------------------------------------------------
   if (method === 'POST' && path === '/api/admin/dispatch') {
     const admin = await requireAdmin(ctx, req, res)
@@ -1759,6 +1801,157 @@ function sendJson(res: ServerResponse, data: unknown, status = 200): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
   res.end(JSON.stringify(data))
 }
+
+/**
+ * Render `hub` state as a Prometheus / OpenMetrics text exposition.
+ *
+ * Format spec: https://prometheus.io/docs/instrumenting/exposition_formats/
+ *
+ * Choice of metrics (deliberately narrow — every counter / gauge below is
+ * derived from data the hub already keeps in memory or the transcript;
+ * no new bookkeeping required):
+ *
+ *   - `aipehub_protocol_version`       1, labelled with the wire version.
+ *   - `aipehub_participants` gauge      total live participants by kind.
+ *   - `aipehub_tasks_total` counter     completed tasks by terminal kind.
+ *   - `aipehub_pending_applications` gauge  unresolved HELLO admissions.
+ *   - `aipehub_service_calls_total` counter  SERVICE_CALL frames by outcome.
+ *   - `aipehub_service_call_duration_ms_sum` counter / `_count` —
+ *     classic sum/count pair giving you a per-(type,impl) mean over time.
+ *
+ * Histogram buckets are NOT exposed — they'd require runtime bookkeeping
+ * the hub doesn't have. Mean + count is enough for first-pass dashboards;
+ * v1.3 streaming RFC tracks adding bucket support.
+ *
+ * **Performance**: walks the transcript once. With a typical 1k-10k entry
+ * transcript and Prometheus's 15-30s scrape interval, this is negligible.
+ * If a deployment hits 100k+ entries the right next step is to maintain a
+ * rolling counter — out of scope for v1.2.
+ */
+export function renderMetrics(hub: Hub): string {
+  const lines: string[] = []
+  const w = (...ls: string[]) => { for (const l of ls) lines.push(l) }
+
+  // --- protocol version (info-style metric) ----------------------------------
+  w(
+    '# HELP aipehub_protocol_version Wire protocol version (info metric).',
+    '# TYPE aipehub_protocol_version gauge',
+    `aipehub_protocol_version{version="${PROTOCOL_VERSION_LITERAL}"} 1`,
+    '',
+  )
+
+  // --- participants by kind ---------------------------------------------------
+  const participants = hub.participants()
+  const byKind: Record<string, number> = {}
+  for (const p of participants) {
+    byKind[p.kind] = (byKind[p.kind] ?? 0) + 1
+  }
+  w(
+    '# HELP aipehub_participants Number of live participants, by kind.',
+    '# TYPE aipehub_participants gauge',
+  )
+  for (const [kind, count] of Object.entries(byKind)) {
+    w(`aipehub_participants{kind="${escapeLabel(kind)}"} ${count}`)
+  }
+  if (Object.keys(byKind).length === 0) {
+    // Emit a zero so the metric exists even before anyone joins.
+    w('aipehub_participants 0')
+  }
+  w('')
+
+  // --- task outcomes (counter from transcript) -------------------------------
+  // Aggregating from transcript means counters reset on host restart — fine
+  // for Prometheus (which expects counter resets), and avoids extra state.
+  const taskCounts: Record<string, number> = { ok: 0, failed: 0, cancelled: 0, no_participant: 0 }
+  let pendingApps = 0
+  // SERVICE_CALL audit metrics.
+  const svcCalls: Record<string, number> = {}     // key: "type|impl|outcome"
+  const svcDurSum: Record<string, number> = {}    // key: "type|impl"
+  const svcDurCnt: Record<string, number> = {}    // key: "type|impl"
+
+  for (const e of hub.transcript.all()) {
+    if (e.kind === 'task_result') {
+      taskCounts[e.data.kind] = (taskCounts[e.data.kind] ?? 0) + 1
+    } else if (e.kind === 'service_call') {
+      const d = e.data as { type: string; impl: string; outcome: string; durationMs: number }
+      const okey = `${d.type}|${d.impl}|${d.outcome}`
+      svcCalls[okey] = (svcCalls[okey] ?? 0) + 1
+      const dkey = `${d.type}|${d.impl}`
+      svcDurSum[dkey] = (svcDurSum[dkey] ?? 0) + (Number.isFinite(d.durationMs) ? d.durationMs : 0)
+      svcDurCnt[dkey] = (svcDurCnt[dkey] ?? 0) + 1
+    }
+  }
+  pendingApps = hub.pendingApplications().length
+
+  w(
+    '# HELP aipehub_tasks_total Tasks that reached a terminal state, by kind.',
+    '# TYPE aipehub_tasks_total counter',
+  )
+  for (const [kind, n] of Object.entries(taskCounts)) {
+    w(`aipehub_tasks_total{kind="${escapeLabel(kind)}"} ${n}`)
+  }
+  w('')
+
+  w(
+    '# HELP aipehub_pending_applications Unresolved admission applications waiting on admin.',
+    '# TYPE aipehub_pending_applications gauge',
+    `aipehub_pending_applications ${pendingApps}`,
+    '',
+  )
+
+  // --- SERVICE_CALL counters --------------------------------------------------
+  w(
+    '# HELP aipehub_service_calls_total SERVICE_CALL frames resolved, by outcome.',
+    '# TYPE aipehub_service_calls_total counter',
+  )
+  if (Object.keys(svcCalls).length === 0) {
+    w('aipehub_service_calls_total 0')
+  } else {
+    for (const [key, n] of Object.entries(svcCalls)) {
+      const [type, impl, outcome] = key.split('|') as [string, string, string]
+      w(
+        `aipehub_service_calls_total{type="${escapeLabel(type)}",impl="${escapeLabel(impl)}",outcome="${escapeLabel(outcome)}"} ${n}`,
+      )
+    }
+  }
+  w('')
+
+  w(
+    '# HELP aipehub_service_call_duration_ms_sum Cumulative latency of all SERVICE_CALL frames.',
+    '# TYPE aipehub_service_call_duration_ms_sum counter',
+  )
+  for (const [key, n] of Object.entries(svcDurSum)) {
+    const [type, impl] = key.split('|') as [string, string]
+    w(
+      `aipehub_service_call_duration_ms_sum{type="${escapeLabel(type)}",impl="${escapeLabel(impl)}"} ${n}`,
+    )
+  }
+  w('')
+
+  w(
+    '# HELP aipehub_service_call_duration_ms_count Count of SERVICE_CALL frames (mate of the _sum series).',
+    '# TYPE aipehub_service_call_duration_ms_count counter',
+  )
+  for (const [key, n] of Object.entries(svcDurCnt)) {
+    const [type, impl] = key.split('|') as [string, string]
+    w(
+      `aipehub_service_call_duration_ms_count{type="${escapeLabel(type)}",impl="${escapeLabel(impl)}"} ${n}`,
+    )
+  }
+  // Trailing newline — Prometheus accepts both with/without, but the
+  // de-facto convention is one.
+  return lines.join('\n') + '\n'
+}
+
+// Prometheus label values: backslash, double-quote, and newline are
+// the only chars that need escaping. Everything else is opaque.
+function escapeLabel(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')
+}
+
+// Stable string alias used inside `renderMetrics`. Hoisted so the
+// label literal doesn't materialise per-scrape.
+const PROTOCOL_VERSION_LITERAL: string = PROTOCOL_VERSION
 
 /**
  * Translate a `@aipehub/services-sdk` typed error to an HTTP status.

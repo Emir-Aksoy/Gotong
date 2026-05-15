@@ -64,6 +64,16 @@ export interface ServiceOwnerPattern {
  * and forwarded verbatim to `ServicePlugin.validateConfig` at first attach.
  *
  * Multiple decls for the same `(type, impl)` are OR'd at ACL check time.
+ *
+ * `methods` (v1.2 optional) narrows the set of wire methods this connection
+ * may call. When omitted, the connection inherits the full method allowlist
+ * for the service type (`BUILTIN_SERVICE_METHODS` + any third-party
+ * registrations). When present, **only** the listed names are dispatched;
+ * everything else returns `forbidden_method`. Use this to declare "I only
+ * intend to read, never write" or "I only need pages.read, not pages.create".
+ *
+ * The admin reviewing the application sees the requested subset and can
+ * decide whether the agent's scope is sane before approving.
  */
 export interface ServiceUseDecl {
   type: ServiceType
@@ -71,6 +81,13 @@ export interface ServiceUseDecl {
   owner: ServiceOwnerPattern
   /** Plugin-defined config blob. Validated by the plugin at first attach. */
   config?: unknown
+  /**
+   * Optional per-method ACL. When set, restricts this connection to a
+   * subset of the type's allowlisted methods. Names follow the
+   * `'method'` or `'namespace.method'` form (max one dot, same as the
+   * type-level allowlist).
+   */
+  methods?: readonly string[]
 }
 
 /**
@@ -91,6 +108,7 @@ export interface ServiceSelector {
  */
 export type ServiceErrorCode =
   | 'forbidden_service'   // (type, impl) not in HELLO.services
+  | 'forbidden_method'    // method not in the decl's per-method allowlist (v1.2)
   | 'forbidden_owner'     // owner doesn't match any declared pattern
   | 'attach_failed'       // plugin.attach threw at lazy-attach time
   | 'service_error'       // method threw (quota, IO, validation)

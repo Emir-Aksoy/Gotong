@@ -398,6 +398,13 @@ function describe(e: TranscriptEntry): string {
       return `TRASH    ${e.data.type}:${e.data.impl} owner=${e.data.ownerKind}/${e.data.ownerId} ref=${e.data.ref.id}`
     case 'service_purged':
       return `PURGE    ${e.data.type}:${e.data.impl} trashId=${e.data.trashId}`
+    case 'service_call':
+      // v1.2: one line per resolved SERVICE_CALL. Audit lines for OK
+      // calls are noisy at the host's stdout level but useful when
+      // debugging; admins prefer the structured `/api/admin/transcript/
+      // service-calls` view. Either way the data lives in the
+      // transcript.
+      return `SVCCALL  ${e.data.from} ${e.data.type}:${e.data.impl}#${e.data.method} → ${e.data.outcome} (${e.data.durationMs}ms)`
   }
 }
 

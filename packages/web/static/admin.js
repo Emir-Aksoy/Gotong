@@ -328,9 +328,23 @@
       if (meta.clientName) metaBits.push(`${escapeHtml(t.clientLabel)}: ${escapeHtml(meta.clientName)}${meta.clientVersion ? ' ' + escapeHtml(meta.clientVersion) : ''}`)
       if (meta.remoteAddress) metaBits.push(`${escapeHtml(t.remoteAddress)}: ${escapeHtml(meta.remoteAddress)}`)
       metaBits.push(`${escapeHtml(t.pendingSince)}: ${new Date(app.pendingSince).toLocaleString()}`)
+      // v1.1: HELLO.services declarations. Surface them inline so admins
+      // explicitly see the ACL the client requested before clicking Approve.
+      // No services declared (or v1.0 client) → block stays absent.
+      let servicesBlock = ''
+      const services = Array.isArray(app.services) ? app.services : []
+      if (services.length > 0) {
+        const items = services.map((s) => {
+          const owner = `${escapeHtml(s.owner.kind)}/${escapeHtml(s.owner.id)}`
+          return `<li><code>${escapeHtml(s.type)}:${escapeHtml(s.impl)}</code> <span class="muted">@</span> <code>${owner}</code></li>`
+        }).join('')
+        const label = (t.appServicesRequested) || 'Services requested'
+        servicesBlock = `<div class="pending-services"><div class="pending-services-label">${escapeHtml(label)}</div><ul class="pending-services-list">${items}</ul></div>`
+      }
       card.innerHTML =
         `<div class="t-head"><span class="t-title">${agents}</span></div>` +
         `<div class="pending-meta">${metaBits.join(' · ')}</div>` +
+        servicesBlock +
         `<div class="pending-actions">` +
           `<input class="reject-reason" placeholder="${escapeHtml(t.rejectReason)}" data-id="${escapeHtml(app.id)}" />` +
           `<button class="btn-approve" data-act="approve-app" data-id="${escapeHtml(app.id)}">${escapeHtml(t.approve)}</button>` +
@@ -1829,6 +1843,23 @@
       })
     }
 
+    // SERVICE_CALL audit refresh — just re-pulls /api/admin/transcript/service-calls.
+    const auditRefreshBtn = document.getElementById('services-audit-refresh')
+    if (auditRefreshBtn) {
+      auditRefreshBtn.addEventListener('click', async () => {
+        auditRefreshBtn.disabled = true
+        try {
+          const r = await fetchJson('/api/admin/transcript/service-calls?limit=200')
+          svc.audit = r.calls || []
+          renderServicesAudit()
+        } catch (err) {
+          console.warn('services audit refresh failed:', err)
+        } finally {
+          auditRefreshBtn.disabled = false
+        }
+      })
+    }
+
     const detailClose = document.getElementById('services-detail-close')
     const detailBackdrop = document.getElementById('services-detail-modal')
     if (detailClose) detailClose.addEventListener('click', () => closeServicesDetail())
@@ -1856,6 +1887,7 @@
     plugins: [],     // [{type, impl, version, description?}]
     rows: [],        // [{type, impl, owner: {kind,id}, snapshot}]
     trash: [],       // ServiceTrashRef[]
+    audit: [],       // [{ts, from, type, impl, ownerKind, ownerId, method, outcome, durationMs}]
     disabled: false, // host didn't supply services
   }
 
@@ -1931,6 +1963,48 @@
       renderServicesTrash()
     } catch (err) {
       console.warn('services: trash fetch failed', err)
+    }
+
+    // SERVICE_CALL audit (v1.1 services-over-ws). Best-effort; if the
+    // endpoint 503s on a v1.0-only host the table just stays hidden.
+    try {
+      const r = await fetchJson('/api/admin/transcript/service-calls?limit=200')
+      svc.audit = r.calls || []
+      renderServicesAudit()
+    } catch (err) {
+      console.warn('services: audit fetch failed', err)
+    }
+  }
+
+  function renderServicesAudit() {
+    const tableEl = document.getElementById('services-audit-table')
+    const tbodyEl = document.getElementById('services-audit-tbody')
+    const emptyEl = document.getElementById('services-audit-empty')
+    if (!tableEl || !tbodyEl) return
+    tbodyEl.innerHTML = ''
+    const calls = svc.audit || []
+    if (calls.length === 0) {
+      tableEl.hidden = true
+      emptyEl.hidden = false
+      return
+    }
+    emptyEl.hidden = true
+    tableEl.hidden = false
+    // calls already arrive newest-first from the API.
+    for (const c of calls) {
+      const tr = document.createElement('tr')
+      const okClass = c.outcome === 'ok' ? '' : ' bad'
+      tr.className = `audit-row${okClass}`
+      tr.innerHTML = `
+        <td>${new Date(c.ts).toLocaleString()}</td>
+        <td><code>${escapeHtml(c.from)}</code></td>
+        <td><code>${escapeHtml(c.type)}:${escapeHtml(c.impl)}</code></td>
+        <td>${escapeHtml(c.ownerKind)}/${escapeHtml(c.ownerId)}</td>
+        <td><code>${escapeHtml(c.method)}</code></td>
+        <td>${escapeHtml(c.outcome)}</td>
+        <td>${c.durationMs}ms</td>
+      `
+      tbodyEl.appendChild(tr)
     }
   }
 

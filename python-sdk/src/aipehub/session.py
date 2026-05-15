@@ -26,6 +26,7 @@ import websockets
 
 from . import protocol
 from .agent import AgentParticipant
+from .services import ServiceClient, ServiceUseRequest, to_wire_decls
 
 log = logging.getLogger("aipehub.session")
 
@@ -63,6 +64,7 @@ class Session:
         reconnect_initial_backoff_ms: int = 500,
         reconnect_max_backoff_ms: int = 30_000,
         on_state_change: Callable[[SessionState, dict[str, Any] | None], None] | None = None,
+        services: list[ServiceUseRequest] | None = None,
     ) -> None:
         if not agents:
             raise ValueError("connect() requires at least one agent")
@@ -76,6 +78,7 @@ class Session:
         self._initial_backoff = reconnect_initial_backoff_ms
         self._max_backoff = reconnect_max_backoff_ms
         self._on_state_change = on_state_change
+        self._services_decls: list[ServiceUseRequest] = list(services) if services else []
 
         self._ws: _WSConnection | None = None
         self._state: SessionState = "connecting"
@@ -84,6 +87,34 @@ class Session:
         self._closed_event = asyncio.Event()
         self._welcome_event = asyncio.Event()
         self._welcome_error: ConnectionRejected | None = None
+
+        # Build the ServiceClient eagerly (before the socket opens) so agents
+        # can read `session.services` immediately after connect() returns —
+        # SERVICE_CALL frames just queue against the session and ship as the
+        # session sends them. None when no services were declared.
+        if self._services_decls:
+            default_agent = next(iter(self._agents))
+            self.services: ServiceClient | None = ServiceClient(
+                declarations=self._services_decls,
+                send_call=self._send_service_call,
+                default_agent_id=lambda: default_agent,
+            )
+        else:
+            self.services = None
+
+    def _send_service_call(self, frame: dict[str, Any]) -> None:
+        """Synchronous send entry point used by ServiceClient. The frame
+        is JSON-encoded and pushed onto the websocket; if the socket is
+        not open we raise — the ServiceClient surfaces this as
+        ``session_not_ready`` to the awaiting handle method.
+        """
+        ws = self._ws
+        if ws is None or not _is_open(ws):
+            raise RuntimeError("websocket not connected")
+        # ws.send is a coroutine; fire-and-forget the task and let
+        # exceptions bubble through the SERVICE_RESULT timeout if delivery
+        # never completes.
+        asyncio.create_task(ws.send(json.dumps(frame)))
 
     # ----- public API -------------------------------------------------------
 
@@ -115,6 +146,10 @@ class Session:
             with contextlib.suppress(asyncio.CancelledError):
                 self._reader_task.cancel()
                 await self._reader_task
+        # Reject every still-pending SERVICE_CALL — awaiters would otherwise
+        # hang on their futures forever.
+        if self.services is not None:
+            self.services.fail_all_pending(reason)
         self._set_state("closed", {"reason": reason})
         self._closed_event.set()
 
@@ -168,6 +203,7 @@ class Session:
             await ws.send(json.dumps(protocol.hello(
                 agents=[{"id": a.id, "capabilities": a.capabilities} for a in self._agents.values()],
                 api_key=self._api_key,
+                services=to_wire_decls(self._services_decls) if self._services_decls else None,
             )))
             # await first server frame: WELCOME or REJECT
             try:
@@ -204,6 +240,12 @@ class Session:
         t = frame.get("type")
         if t == "TASK":
             asyncio.create_task(self._handle_task_frame(frame))
+        elif t == "SERVICE_RESULT":
+            # Hand back to the ServiceClient pending-call table. Tolerated
+            # if the client never instantiated services — late results
+            # from a previous session are dropped silently.
+            if self.services is not None:
+                self.services.attach_result(frame)
         elif t == "CANCEL":
             recipient = frame.get("recipient")
             agent = self._agents.get(recipient) if isinstance(recipient, str) else None
@@ -274,6 +316,7 @@ async def connect(
     reconnect_initial_backoff_ms: int = 500,
     reconnect_max_backoff_ms: int = 30_000,
     on_state_change: Callable[[SessionState, dict[str, Any] | None], None] | None = None,
+    services: list[ServiceUseRequest] | None = None,
 ) -> Session:
     """Open a session, send HELLO, await WELCOME, return the live ``Session``.
 
@@ -281,6 +324,10 @@ async def connect(
     failure before the first WELCOME. After WELCOME, transient WebSocket
     failures are handled by the SDK (auto-reconnect with exponential backoff)
     unless ``auto_reconnect=False``.
+
+    ``services`` (v1.1) is the list of Hub Services this connection wants
+    to call. Each entry is a :class:`aipehub.services.ServiceUseRequest`.
+    See ``docs/AGENT.md`` for the model.
 
     Caller is expected to ``await session.wait_closed()`` if it needs to
     keep the process alive, or build its own join logic.
@@ -293,6 +340,7 @@ async def connect(
         reconnect_initial_backoff_ms=reconnect_initial_backoff_ms,
         reconnect_max_backoff_ms=reconnect_max_backoff_ms,
         on_state_change=on_state_change,
+        services=services,
     )
     await session._start()
     return session

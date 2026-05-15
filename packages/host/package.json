@@ -41,6 +41,7 @@
     "@aipehub/llm": "workspace:*",
     "@aipehub/llm-anthropic": "workspace:*",
     "@aipehub/llm-openai": "workspace:*",
+    "@aipehub/protocol": "workspace:*",
     "@aipehub/service-artifact-file": "workspace:*",
     "@aipehub/service-datastore-sqlite": "workspace:*",
     "@aipehub/service-memory-file": "workspace:*",

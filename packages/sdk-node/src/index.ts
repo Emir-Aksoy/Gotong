@@ -6,6 +6,7 @@ export type { ConnectOptions, Session, SessionState } from './session.js'
 // reads identically across deployment shapes.
 export {
   ServiceCallError,
+  type CustomServiceHandle,
   type ServiceClient,
   type ServiceUseRequest,
 } from './service-client.js'

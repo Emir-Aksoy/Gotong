@@ -53,6 +53,7 @@ import {
   type TaskResult,
   type DispatchStrategy,
 } from '@aipehub/core'
+import type { ServiceClient, ServiceUseRequest } from './service-client.js'
 
 export interface TeamBridgeOptions {
   /** Id this bridge takes on the upstream hub. */
@@ -74,6 +75,20 @@ export interface TeamBridgeOptions {
    * tell forwarded work apart from in-house tasks.
    */
   tagLocalTasks?: boolean
+  /**
+   * Federation services (v1.2). Listing service declarations here is the
+   * SAME as listing them on `connect({services: [...]})` — they go on the
+   * bridge's HELLO to the upstream hub. The bridge stores the resulting
+   * `ServiceClient` on `bridge.upstreamServices` so local agents handling
+   * forwarded tasks can read / write upstream services (e.g. a shared
+   * datastore the parent organisation owns).
+   *
+   * NOT mirrored as a local Hub service — local agents access them via
+   * the bridge instance reference, which is the cleanest way to keep the
+   * federation boundary explicit. If a local agent should NOT see upstream
+   * data, simply don't give it a reference to the bridge.
+   */
+  forwardUpstreamServices?: readonly ServiceUseRequest[]
 }
 
 export interface LocalDispatchPlan {
@@ -91,11 +106,32 @@ export class TeamBridgeAgent extends AgentParticipant {
   private readonly mapTask: (task: Task) => LocalDispatchPlan
   private readonly tagLocalTasks: boolean
 
+  /**
+   * Services declared on the upstream HELLO. Populated by the caller AFTER
+   * `connect()` resolves, by writing `bridge.upstreamServices = session.services`.
+   * Local agents that hold a reference to the bridge can read upstream
+   * services through this field — the federation seam is explicit:
+   * "if you can see the bridge, you can see its upstream services."
+   *
+   * Undefined until the caller assigns it; remains undefined for bridges
+   * that did not declare any `forwardUpstreamServices`.
+   */
+  upstreamServices?: ServiceClient
+
+  /**
+   * The service declarations this bridge wants to call on the upstream hub.
+   * The federation host reads this and includes them in its `connect()`
+   * services list. Empty / undefined when the bridge needs no upstream
+   * services (the common case).
+   */
+  readonly forwardUpstreamServices: readonly ServiceUseRequest[]
+
   constructor(opts: TeamBridgeOptions) {
     super({ id: opts.id, capabilities: opts.capabilities ?? [] })
     this.localHub = opts.localHub
     this.tagLocalTasks = opts.tagLocalTasks ?? true
     this.mapTask = opts.mapTask ?? ((task) => defaultMap(task))
+    this.forwardUpstreamServices = opts.forwardUpstreamServices ?? []
   }
 
   /**

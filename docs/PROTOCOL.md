@@ -1,4 +1,4 @@
-# AipeHub Wire Protocol v1.1
+# AipeHub Wire Protocol v1.2
 
 The protocol that lets remote agents connect to a Hub over the network. JSON frames over WebSocket (`ws://` or `wss://`).
 
@@ -7,9 +7,16 @@ This protocol is **not** what local agents use — local agents share a process 
 ## Overview
 
 - **Topology** — Hub is the server, agents are clients. Each TCP connection can host one or more agents from the same client process.
-- **Versioning** — `protocolVersion` is SemVer-ish. Major must match. v0.1 of AipeHub ships protocol `1.0`; v0.4 bumps to `1.1` (services-over-ws, additive — v1.0 ↔ v1.1 are fully interoperable both directions).
+- **Versioning** — `protocolVersion` is SemVer-ish. Major must match. v0.1 of AipeHub ships protocol `1.0`; v0.4 bumps to `1.1` (services-over-ws, additive); v0.5 bumps to `1.2` (per-method ACL + third-party allowlist extension + audit transcript, all additive — v1.0 / v1.1 / v1.2 are mutually interoperable both directions).
 - **Serialization** — JSON over WebSocket text frames. Each frame is a self-contained JSON object discriminated by a `type` field.
 - **Concurrency** — frames can be interleaved freely on one connection. The order of TASK delivery to a single agent is preserved by the Hub; RESULT can come back in any order.
+
+## What's new in v1.2
+
+- `ServiceUseDecl.methods?: string[]` — optional per-decl method ACL narrowing. Declare "I only want `recall` and `list`" and SERVICE_CALL frames for `remember` come back as **`forbidden_method`** even if the type-level allowlist would let them through.
+- **Third-party service-type allowlist extension** — plugins ship a `wireMethods` array; host bootstrap calls `registerServiceMethods(type, methods)` so the router can dispatch SERVICE_CALL frames for non-built-in service categories.
+- New error code `forbidden_method` joins the SERVICE_RESULT error enum (the rest stays from v1.1).
+- New transcript entry kind `service_call` — every resolved SERVICE_CALL appends an audit entry with `{from, type, impl, ownerKind, ownerId, method, outcome, durationMs}`. Args are deliberately omitted.
 
 ## What's new in v1.1
 
@@ -182,6 +189,7 @@ Reply to one SERVICE_CALL. Discriminated on `ok`.
     code:
       | "forbidden_service"   // (type, impl) not declared in HELLO.services
       | "forbidden_owner"     // owner doesn't match any declared pattern
+      | "forbidden_method"    // method not in decl.methods narrowing (v1.2)
       | "attach_failed"       // plugin.attach threw at lazy-attach time
       | "service_error"       // method threw (validation, quota, IO)
       | "unknown_method"      // method not on the allowlist

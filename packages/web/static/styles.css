@@ -421,6 +421,20 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   gap: 0.45rem;
 }
 .pending-meta { font-size: 0.72rem; color: #888; }
+.pending-services {
+  background: #fffdf2;
+  border: 1px dashed #e8d180;
+  border-radius: 4px;
+  padding: 0.35rem 0.55rem;
+  font-size: 0.78rem;
+}
+.pending-services-label { font-weight: 600; color: #8b6a18; margin-bottom: 0.25rem; }
+.pending-services-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+.pending-services-list code { background: #f4ecd0; padding: 0.05rem 0.3rem; border-radius: 3px; }
+.pending-services-list .muted { color: #aaa; }
+/* SERVICE_CALL audit table — failed calls highlight light red. */
+.audit-row.bad td { background: #fff0f0; }
+.audit-row.bad td:nth-child(6) { color: #b14040; font-weight: 600; }
 .pending-actions { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
 .pending-actions .reject-reason {
   flex: 1;

@@ -101,6 +101,27 @@ export interface Participant {
 // --- Admission gating (v1.1) -----------------------------------------------
 
 /**
+ * Coarse-grained mirror of `@aipehub/protocol`'s `ServiceUseDecl`. Carried
+ * inside `PendingApplication` so admins can see what services a remote
+ * agent is requesting **before** they approve the application.
+ *
+ * Defined here (not imported from `@aipehub/protocol`) because `core` does
+ * not depend on `protocol` — keeping the dependency arrow one-directional
+ * (`protocol → core` for `ParticipantId`, not the reverse). Equivalent
+ * shape verified by the transport-ws → core adapter at the HELLO seam.
+ *
+ * Owner.id `'self'` is the agent shorthand; `'*'` is a wildcard. The
+ * admin UI is free to render either verbatim.
+ */
+export interface ApplicationServiceDecl {
+  type: string
+  impl: string
+  owner: { kind: string; id: string }
+  /** Optional config blob; admins may inspect it but the field is opaque. */
+  config?: unknown
+}
+
+/**
  * One client's bid to join the hub. A WebSocket HELLO becomes a
  * PendingApplication when the transport is configured with
  * `gating: 'admin-approval'`. Admin tools resolve it via
@@ -108,12 +129,18 @@ export interface Participant {
  *
  * A single application can carry multiple agents (HELLO.agents is a list);
  * admin decisions are all-or-nothing on the application as a unit.
+ *
+ * `services` (v1.1) lists the Hub Services this application wants to call
+ * over WebSocket. Empty / omitted means the client either won't use
+ * services at all or is a v1.0 client predating the feature. Admins
+ * SHOULD inspect this list before approving — it's an explicit ACL.
  */
 export interface PendingApplication {
   id: string
   agents: ReadonlyArray<{ id: ParticipantId; capabilities: readonly string[] }>
   meta?: Readonly<Record<string, unknown>>
   pendingSince: number
+  services?: readonly ApplicationServiceDecl[]
 }
 
 export type AdmissionDecision =
@@ -261,6 +288,36 @@ export type TranscriptEntry =
         type: string
         impl: string
         trashId: string
+      }
+    }
+  /**
+   * SERVICE_CALL audit event (v1.1 services-over-ws). Appended by the
+   * transport-ws session AFTER each SERVICE_CALL is resolved (either
+   * `ok:true` or any error code). The admin UI surfaces these as a
+   * timeline so operators can see which agent touched which service +
+   * any forbidden / failed calls.
+   *
+   * `args` is intentionally NOT persisted — they're free-form,
+   * potentially large (e.g. SQL blobs), and may contain user data the
+   * admin shouldn't see. Only the method + service identity + outcome.
+   *
+   * `from` is the calling agent's id (mirrors `SERVICE_CALL.from`).
+   * `outcome` is `'ok'` when the call succeeded; otherwise the
+   * `ServiceErrorCode` from SERVICE_RESULT.error.code.
+   */
+  | {
+      seq: number
+      ts: number
+      kind: 'service_call'
+      data: {
+        from: ParticipantId
+        type: string
+        impl: string
+        ownerKind: string
+        ownerId: string
+        method: string
+        outcome: 'ok' | string
+        durationMs: number
       }
     }
 

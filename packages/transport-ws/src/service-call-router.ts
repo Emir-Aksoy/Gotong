@@ -30,7 +30,8 @@
 
 import type { ParticipantId } from '@aipehub/core'
 import {
-  SERVICE_METHOD_ALLOWLIST,
+  getServiceMethods,
+  isServiceMethodAllowed,
   type ServiceCallFrame,
   type ServiceErrorCode,
   type ServiceOwner,
@@ -120,13 +121,27 @@ export class ServiceCallRouter {
     }
 
     // 3) Method allowlist -----------------------------------------------------
-    const allowed = SERVICE_METHOD_ALLOWLIST[call.service.type]
-    if (!allowed || !allowed.includes(call.method)) {
+    // Built-ins plus any third-party methods registered at host bootstrap
+    // via `registerServiceMethods` (see protocol/constants.ts).
+    if (!isServiceMethodAllowed(call.service.type, call.method)) {
+      const set = getServiceMethods(call.service.type)
       return this.makeError(
         call.callId,
         'unknown_method',
         `method '${call.method}' is not on the allowlist for service type '${call.service.type}'`,
-        { allowed: allowed ?? [] },
+        { allowed: set ? [...set] : [] },
+      )
+    }
+    // 3b) Per-decl method narrowing (v1.2 optional) ----------------------------
+    // If the decl that matched in step (2) restricted its own subset via
+    // `methods: [...]`, only those names are dispatchable on THIS connection
+    // even though the type-level allowlist would let them through.
+    if (matched.methods && matched.methods.length > 0 && !matched.methods.includes(call.method)) {
+      return this.makeError(
+        call.callId,
+        'forbidden_method',
+        `method '${call.method}' is not in the per-decl allowlist for ${call.service.type}:${call.service.impl}`,
+        { allowed: [...matched.methods] },
       )
     }
     // Bounded method path: at most one dot (e.g. 'sql.exec').

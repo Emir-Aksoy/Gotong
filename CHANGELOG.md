@@ -2,7 +2,159 @@
 
 All notable changes to AipeHub are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) at the npm-package level.
 
-The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.1`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
+The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
+
+## Unreleased — observability + DevX + protocol v1.2 (post-v1.1)
+
+Builds on the v1.1 services-over-WebSocket release. v1.2 is the
+"close the loop" cycle: third-party plugins get a way to ship their
+own wire methods, admins get observability over what remote agents
+are doing, the Python SDK reaches feature parity, and a CLI lands
+that lets sidecar authors skip the boilerplate.
+
+### Added — protocol v1.2 (additive on v1.1, fully back-compat)
+
+- **`registerServiceMethods(type, methods)`** in `@aipehub/protocol`
+  — third-party service plugins extend the SERVICE_CALL allowlist at
+  host bootstrap by declaring a `wireMethods` array on their
+  `ServicePlugin`. Built-ins (`memory` / `artifact` / `datastore`)
+  unchanged; merge-only, never destructive. `BUILTIN_SERVICE_METHODS`
+  is the immutable base; `SERVICE_METHOD_ALLOWLIST` becomes a
+  deprecated alias kept exported for back-compat.
+- **`ServiceUseDecl.methods?: string[]`** — optional per-decl method
+  ACL narrowing. A connection can declare "I only want `recall` and
+  `list`" and SERVICE_CALL frames for `remember` come back as
+  **`forbidden_method`** (new error code) even if the type-level
+  allowlist would permit them.
+- **`ServicePlugin.wireMethods?: readonly string[]`** — new optional
+  field on the plugin contract for non-built-in types. Host bootstrap
+  calls `registerServiceMethods` for each registered plugin that
+  declares it.
+- **`PROTOCOL_VERSION`** bumped to `'1.2'`. Minor bump on the same
+  major, so v1.1 ↔ v1.2 round-trip cleanly: v1.1 server receiving a
+  `methods` field treats it as unknown extra (the wire decoder
+  preserves extra fields silently); v1.1 clients calling a v1.2
+  server never see `forbidden_method` because they never narrow.
+
+### Added — observability (host, web admin)
+
+- **`service_call` transcript entries** — every resolved SERVICE_CALL
+  appends an audit entry recording the calling agent id, service
+  identity, method name, outcome (`'ok'` or the wire `ServiceErrorCode`),
+  and round-trip duration in ms. `args` are NOT persisted (potential
+  user data; potentially large).
+- **Admin UI — Services tab** gains a "SERVICE_CALL 审计" panel
+  listing recent calls with failed calls highlighted. Backed by the
+  new `GET /api/admin/transcript/service-calls?limit=N[&type=X]`
+  endpoint.
+- **Admin UI — Pending applications card** now shows the requested
+  `services: [...]` ACL inline, so the operator sees the full ACL
+  before clicking Approve. Powered by adding `services?:
+  ApplicationServiceDecl[]` to `PendingApplication`; the transport-ws
+  session pipes HELLO.services through `hub.requestAdmission`.
+- **`GET /api/admin/metrics`** — Prometheus / OpenMetrics text
+  exposition. Series: `aipehub_protocol_version` (info),
+  `aipehub_participants{kind}` (gauge), `aipehub_tasks_total{kind}`
+  (counter), `aipehub_pending_applications` (gauge),
+  `aipehub_service_calls_total{type,impl,outcome}` (counter),
+  `aipehub_service_call_duration_ms_{sum,count}{type,impl}` (counter
+  pair). Aggregated lazily from the transcript on each scrape — no
+  extra in-memory bookkeeping.
+
+### Added — Python SDK feature parity
+
+- **`aipehub.services` module** mirroring `@aipehub/sdk-node`'s
+  `ServiceClient`:
+  - `ServiceClient.memory_for(impl, owner)` /
+    `.artifact_for(...)` / `.datastore_for(...)` factories.
+  - Async typed handles: `MemoryHandle.recall(...)`,
+    `ArtifactHandle.write(...)`, `DatastoreHandle.kv.set(...)`,
+    `DatastoreHandle.sql.query(...)`.
+  - `CustomServiceHandle` for third-party types.
+  - `ServiceCallError` exception with `.code` matching the wire enum.
+- `connect(url, agents, services=[...])` — same shape as TS.
+- `Session.services` populated when services declared; `None`
+  otherwise. Pending calls reject with `session_not_ready` on close
+  / disconnect.
+- `PROTOCOL_VERSION` in `aipehub.protocol` bumped to `'1.2'`.
+- 5 new pytest tests cover HELLO.services on the wire, memory
+  roundtrip, error code propagation, third-party `custom_for`, and
+  pending-call rejection on close.
+
+### Added — federation services scaffolding
+
+- **`TeamBridgeAgent.forwardUpstreamServices`** — list of
+  `ServiceUseRequest`s the bridge declares to the upstream hub. Local
+  agents that hold a reference to the bridge read upstream services
+  via `bridge.upstreamServices` (assigned by the federation host
+  after `connect()` resolves). One-way federation is shipped; full
+  bidirectional service forwarding is scoped to v1.3 — see
+  `docs/federation-services-rfc.md`.
+
+### Added — sidecar DevX
+
+- **`docs/SIDECAR.md`** — practical "Day 1" tutorial for connecting an
+  existing agent to a running Hub as a sidecar. Covers the 5-line
+  happy path, services declaration, migration from in-process,
+  cancellation / disconnect / reattach, and the mistake gallery.
+- **`@aipehub/cli`** (`npx @aipehub/cli`, bin: `aipehub`) — new
+  package. Subcommands:
+  - `aipehub new agent <name> [--capabilities=…] [--id=…] [--no-services]`
+    — scaffold a TypeScript sidecar project (`package.json`,
+    `tsconfig.json`, `src/index.ts`, `README.md`). Self-contained;
+    `npm install && npm start` and you're online.
+  - `aipehub new python-agent <name> [...]` — same for Python
+    (`pyproject.toml`, module-aware names).
+  - `aipehub ping <ws-url> [--api-key=…] [--timeout=…]` — handshake-
+    only probe of a Hub for diagnostics. Uses `ws` directly to keep
+    the CLI's transitive dep graph small.
+  - `aipehub help [cmd]`, `aipehub --version`.
+- 15 unit tests cover template rendering + CLI dispatch.
+
+### Added — design docs (for v1.3+)
+
+- **`docs/service-call-streaming-rfc.md`** — RFC for streaming
+  SERVICE_CALL responses (`SERVICE_RESULT_CHUNK` frames + terminal
+  `SERVICE_RESULT { __stream_end__: true }`). Maps out the wire
+  shape, SDK ergonomics (`async for`), back-pressure, cancellation,
+  and back-compat with v1.2.
+- **`docs/plugin-sandbox-rfc.md`** — two-phase plan for sandboxing
+  third-party plugins. Phase 1 (v1.3 candidate): `worker_threads`
+  with `fs` patching against honest mistakes. Phase 2 (v1.4
+  candidate): child process + Node permission model for adversarial
+  deployments.
+- **`docs/federation-services-rfc.md`** — what's shipped in v1.2
+  scaffolding, plus the design for full bidirectional federated
+  SERVICE_CALL forwarding in v1.3+.
+- **`docs/enablement-flow-case-conversation-plan.md`** — staged
+  plan for bringing `industry-enablement-flow` onto case-conversation
+  (yaml `caseId` schema → per-agent `uses:` block → opt-in
+  `autoInjectCaseContext` on `LlmAgent`). One-PR scope.
+
+### Changed — admin transcript shape
+
+`TranscriptEntry` gains a new discriminated variant:
+
+```ts
+| { kind: 'service_call'; data: { from, type, impl, ownerKind, ownerId,
+    method, outcome, durationMs } }
+```
+
+Existing consumers that exhaustively switch on `kind` need a case
+(host's `describe` already updated; admin SSE handler ignores
+non-task entries by design).
+
+### Tests
+
+- Transport-ws: +13 tests for `extend-allowlist`, +4 for
+  `per-method-acl`. 64 total (was 47).
+- Host: +3 tests for `services-audit` (HELLO services in
+  PendingApplication, service_call transcript outcomes). 88 total
+  (was 85).
+- Web: +8 tests for `renderMetrics`. 66 total (was 58).
+- Python SDK: +5 tests for `test_services`. 15 total (was 10).
+- CLI: 15 brand-new tests (templates + cli dispatch).
+- All other packages unchanged and green.
 
 ## Unreleased — services over WebSocket (wire protocol v1.1)
 

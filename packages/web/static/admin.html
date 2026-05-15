@@ -453,6 +453,29 @@
             <img id="services-detail-image" class="preview-image" alt="" hidden>
           </div>
         </div>
+
+        <!-- SERVICE_CALL audit timeline (v1.1 services-over-ws). One row
+             per resolved SERVICE_CALL frame, newest-first. Failed calls
+             are highlighted so operators can spot ACL violations and
+             flaky third-party plugins at a glance. -->
+        <h2 style="margin-top:1.4rem"><span data-i18n="servicesAuditTitle">SERVICE_CALL 审计</span>
+          <button id="services-audit-refresh" type="button" class="secondary-btn" data-i18n="refresh">刷新</button>
+        </h2>
+        <div id="services-audit-empty" class="empty-state" hidden data-i18n="servicesAuditEmpty">尚未记录任何远程服务调用</div>
+        <table id="services-audit-table" class="services-table" hidden>
+          <thead>
+            <tr>
+              <th data-i18n="auditTime">时间</th>
+              <th data-i18n="auditAgent">智能体</th>
+              <th data-i18n="auditService">服务</th>
+              <th data-i18n="auditOwner">归属</th>
+              <th data-i18n="auditMethod">方法</th>
+              <th data-i18n="auditOutcome">结果</th>
+              <th data-i18n="auditDuration">耗时</th>
+            </tr>
+          </thead>
+          <tbody id="services-audit-tbody"></tbody>
+        </table>
       </section>
     </main>
   </body>

@@ -26,17 +26,39 @@ Quick start::
 
 from .agent import AgentParticipant, Message, Task
 from .protocol import PROTOCOL_VERSION
+from .services import (
+    ArtifactHandle,
+    CustomServiceHandle,
+    DatastoreHandle,
+    KvHandle,
+    MemoryHandle,
+    ServiceCallError,
+    ServiceClient,
+    ServiceOwner,
+    ServiceUseRequest,
+    SqlHandle,
+)
 from .session import ConnectionRejected, Session, SessionState, connect
 
 __all__ = [
     "AgentParticipant",
+    "ArtifactHandle",
     "ConnectionRejected",
+    "CustomServiceHandle",
+    "DatastoreHandle",
+    "KvHandle",
     "Message",
+    "MemoryHandle",
     "PROTOCOL_VERSION",
+    "ServiceCallError",
+    "ServiceClient",
+    "ServiceOwner",
+    "ServiceUseRequest",
     "Session",
     "SessionState",
+    "SqlHandle",
     "Task",
     "connect",
 ]
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"

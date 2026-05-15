@@ -201,6 +201,7 @@ export class Session {
   }
 
   private handleServiceCall(frame: ServiceCallFrame): void {
+    const t0 = Date.now()
     if (!this.serviceRouter) {
       // Either v1.1 gateway wasn't configured on the transport, or the
       // client didn't declare any services in HELLO. Either way, the call
@@ -216,11 +217,19 @@ export class Session {
             'or the transport was not started with the services option',
         },
       })
+      this.auditServiceCall(frame, 'forbidden_service', Date.now() - t0)
       return
     }
     this.serviceRouter
       .route(frame)
-      .then((result) => this.send(result))
+      .then((result) => {
+        this.send(result)
+        this.auditServiceCall(
+          frame,
+          result.ok ? 'ok' : result.error.code,
+          Date.now() - t0,
+        )
+      })
       .catch((err) => {
         // ServiceCallRouter.route() is contractually catch-all, but defend
         // against contract violations to keep the connection alive.
@@ -234,7 +243,38 @@ export class Session {
             message: err instanceof Error ? err.message : String(err),
           },
         })
+        this.auditServiceCall(frame, 'internal_error', Date.now() - t0)
       })
+  }
+
+  /**
+   * Append a `service_call` audit entry to the hub transcript. Best-effort:
+   * a closed transcript at shutdown must not propagate up into the SERVICE_CALL
+   * reply path. `args` are intentionally NOT included — they're free-form,
+   * potentially user-data-bearing, and large. The admin UI consumes only the
+   * identity + outcome.
+   */
+  private auditServiceCall(frame: ServiceCallFrame, outcome: string, durationMs: number): void {
+    try {
+      ;(this.hub.transcript as unknown as {
+        append: (e: { ts: number; kind: string; data: unknown }) => void
+      }).append({
+        ts: Date.now(),
+        kind: 'service_call',
+        data: {
+          from: frame.from,
+          type: frame.service.type,
+          impl: frame.service.impl,
+          ownerKind: frame.service.owner.kind,
+          ownerId: frame.service.owner.id,
+          method: frame.method,
+          outcome,
+          durationMs,
+        },
+      })
+    } catch {
+      // ignore — transcript may be closed at shutdown
+    }
   }
 
   private async handleHello(frame: HelloFrame): Promise<void> {
@@ -323,6 +363,20 @@ export class Session {
           clientName: frame.client?.name,
           clientVersion: frame.client?.version,
         },
+        // Surface HELLO.services to the admin UI so the operator reviewing
+        // this application can see the ACL the client is requesting BEFORE
+        // approving. Pre-validated above (illegal patterns reject HELLO);
+        // here we just copy the shape across the protocol/core seam.
+        ...(Array.isArray(frame.services) && frame.services.length > 0
+          ? {
+              services: frame.services.map((s) => ({
+                type: s.type,
+                impl: s.impl,
+                owner: { kind: s.owner.kind, id: s.owner.id },
+                ...(s.config !== undefined ? { config: s.config } : {}),
+              })),
+            }
+          : {}),
       })
       this.pendingApplicationId = admission.applicationId
       const decision = await admission.decision
@@ -563,6 +617,33 @@ function validateServiceDecls(
       return {
         ok: false,
         reason: `services[${i}].owner.id='self' only valid when owner.kind='agent'`,
+      }
+    }
+    // v1.2: per-method ACL narrowing. Optional; when set must be an array
+    // of strings with at most one dot per name (same as the type-level
+    // allowlist). Empty array is rejected — that's a footgun that would
+    // silently forbid every method.
+    if (d.methods !== undefined) {
+      if (!Array.isArray(d.methods)) {
+        return { ok: false, reason: `services[${i}].methods must be an array of strings` }
+      }
+      if (d.methods.length === 0) {
+        return {
+          ok: false,
+          reason: `services[${i}].methods is empty — omit the field for "all methods", do not pass []`,
+        }
+      }
+      for (let j = 0; j < d.methods.length; j++) {
+        const m = d.methods[j]
+        if (typeof m !== 'string' || !m) {
+          return { ok: false, reason: `services[${i}].methods[${j}] must be a non-empty string` }
+        }
+        if (m.split('.').length > 2) {
+          return {
+            ok: false,
+            reason: `services[${i}].methods[${j}]='${m}' — at most one dot per wire method`,
+          }
+        }
       }
     }
   }
