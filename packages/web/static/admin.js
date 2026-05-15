@@ -336,7 +336,16 @@
       if (services.length > 0) {
         const items = services.map((s) => {
           const owner = `${escapeHtml(s.owner.kind)}/${escapeHtml(s.owner.id)}`
-          return `<li><code>${escapeHtml(s.type)}:${escapeHtml(s.impl)}</code> <span class="muted">@</span> <code>${owner}</code></li>`
+          // v1.2: surface per-decl method ACL narrowing so admins know
+          // BEFORE approving whether the client is asking for read-only
+          // access (`methods: ['recall']`) vs full access (no narrowing).
+          // No methods narrowing → "(any method)" placeholder.
+          const methodsArr = Array.isArray(s.methods) ? s.methods : []
+          const methodsLabel = (t.appServicesMethodsAny) || '(any method)'
+          const methodsTxt = methodsArr.length > 0
+            ? methodsArr.map((m) => `<code>${escapeHtml(String(m))}</code>`).join(', ')
+            : `<span class="muted">${escapeHtml(methodsLabel)}</span>`
+          return `<li><code>${escapeHtml(s.type)}:${escapeHtml(s.impl)}</code> <span class="muted">@</span> <code>${owner}</code> <span class="muted">·</span> ${methodsTxt}</li>`
         }).join('')
         const label = (t.appServicesRequested) || 'Services requested'
         servicesBlock = `<div class="pending-services"><div class="pending-services-label">${escapeHtml(label)}</div><ul class="pending-services-list">${items}</ul></div>`

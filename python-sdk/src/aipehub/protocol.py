@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-PROTOCOL_VERSION = "1.1"
+PROTOCOL_VERSION = "1.2"
 DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
 HELLO_TIMEOUT_MS = 5_000
 MAX_MISSED_PINGS = 2

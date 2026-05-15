@@ -119,6 +119,17 @@ export interface ApplicationServiceDecl {
   owner: { kind: string; id: string }
   /** Optional config blob; admins may inspect it but the field is opaque. */
   config?: unknown
+  /**
+   * Optional per-decl method ACL narrowing (v1.2). Admins reviewing this
+   * application see exactly which methods on `{type, impl}` the client
+   * intends to call. Empty / omitted means "all methods the type-level
+   * allowlist permits" — the historical v1.1 default.
+   *
+   * The transport already validated the shape (non-empty strings, ≤1
+   * dot per name) before reaching the hub; consumers can treat the array
+   * as a verbatim copy of HELLO.services[i].methods.
+   */
+  methods?: readonly string[]
 }
 
 /**

@@ -82,6 +82,8 @@
       servicesDisabled: '此主机未启用服务功能',
       // --- v1.1 services-over-ws additions ---
       appServicesRequested: '申请使用的服务',
+      // v1.2: per-decl method ACL placeholder shown when client did not narrow
+      appServicesMethodsAny: '（任意方法）',
       servicesAuditTitle: 'SERVICE_CALL 审计',
       servicesAuditEmpty: '尚未记录任何远程服务调用',
       refresh: '刷新',
@@ -377,6 +379,8 @@
       servicesDisabled: 'Hub Services are not enabled on this host',
       // --- v1.1 services-over-ws additions ---
       appServicesRequested: 'Services requested',
+      // v1.2: per-decl method ACL placeholder shown when client did not narrow
+      appServicesMethodsAny: '(any method)',
       servicesAuditTitle: 'SERVICE_CALL audit',
       servicesAuditEmpty: 'No remote service calls recorded yet',
       refresh: 'Refresh',

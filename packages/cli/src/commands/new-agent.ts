@@ -51,13 +51,19 @@ export async function newAgent(opts: NewAgentOpts): Promise<number> {
     console.log(`  next: cd ${parsed.name} && npm install && npm start`)
   } else {
     const out = renderPyTemplate(parsed)
-    await mkdir(join(target, 'src'), { recursive: true })
+    const modName = parsed.name.replace(/-/g, '_')
+    // Hatchling's `packages = ["src/<modName>"]` (see py-agent template)
+    // expects the source under `src/<modName>/`, NOT under `src/`. Writing
+    // `src/agent.py` made `pip install -e .` fail with "package not found".
+    await mkdir(join(target, 'src', modName), { recursive: true })
     await writeFile(join(target, 'pyproject.toml'), out.pyproject, 'utf8')
-    await writeFile(join(target, 'src', 'agent.py'), out.source, 'utf8')
+    await writeFile(join(target, 'src', modName, '__init__.py'), out.initPy, 'utf8')
+    await writeFile(join(target, 'src', modName, '__main__.py'), out.mainPy, 'utf8')
+    await writeFile(join(target, 'src', modName, 'agent.py'), out.source, 'utf8')
     await writeFile(join(target, 'README.md'), out.readme, 'utf8')
     await writeFile(join(target, '.gitignore'), '__pycache__\n.venv\n*.egg-info\n', 'utf8')
     console.log(`✓ created Python sidecar at ${target}`)
-    console.log(`  next: cd ${parsed.name} && python -m venv .venv && .venv/bin/pip install -e . && .venv/bin/python -m ${parsed.name.replace(/-/g, '_')}`)
+    console.log(`  next: cd ${parsed.name} && python -m venv .venv && .venv/bin/pip install -e . && .venv/bin/python -m ${modName}`)
   }
   return 0
 }

@@ -4,6 +4,83 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — v1.2.1 audit patch (rollup)
+
+The post-v1.2 audit found four claims in the v1.2 section below that
+the code did not actually deliver. This rollup makes them real so the
+v1.2 release ships a self-consistent story.
+
+### Fixed — protocol version constant actually reaches `'1.2'`
+
+- `packages/protocol/src/constants.ts` and
+  `python-sdk/src/aipehub/protocol.py` both **stayed on `'1.1'`** even
+  after the v1.2 docs went live, so the server's WELCOME frame and the
+  `aipehub_protocol_version` info-metric both reported the wrong
+  number. Bumped to `'1.2'` in both SDKs. The wire payload changes
+  zero shape; this just makes the self-advertised version match the
+  feature set described in `docs/PROTOCOL.md`.
+
+### Fixed — per-method ACL is visible to admins (closes the management loop)
+
+- `ServiceUseDecl.methods` was already enforced by the transport-ws
+  router and session, but the management-plane half was missing:
+  `ApplicationServiceDecl` had no `methods` field,
+  `Hub.requestAdmission` did not accept one, and the admin "pending
+  applications" card silently dropped the narrowing. v1.2's promise
+  that admins see ACL narrowing **before** approving was therefore
+  unfulfilled.
+- `ApplicationServiceDecl.methods?: readonly string[]` added.
+  `Hub.requestAdmission(req)` accepts and stores it. The transport-ws
+  session pipes `frame.services[i].methods` through. The admin UI
+  renders the methods next to each `{type}:{impl}/{owner}` row, with a
+  "(any method)" placeholder when the client did not narrow.
+- New test in `packages/host/tests/services-audit.test.ts` covers
+  the end-to-end path: HELLO → `Hub.pendingApplications()[].services[].methods`.
+
+### Fixed — `TeamBridgeAgent.forwardUpstreamServices` actually wires up
+
+- The bridge held two new fields (`forwardUpstreamServices`,
+  `upstreamServices`) but no host code read them; users following the
+  RFC saw the option silently swallowed. v1.2.1's `connect()`
+  (`@aipehub/sdk-node`) now:
+  1. Scans `agents` for `TeamBridgeAgent` instances and merges every
+     bridge's `forwardUpstreamServices` into the connection's HELLO
+     services list (de-duplicated by reference, never lossy).
+  2. After the session opens, writes `bridge.upstreamServices =
+     session.services` so local agents that hold the bridge reference
+     can read upstream services without manual hand-off.
+- Two new tests in `packages/sdk-node/tests/services-roundtrip.test.ts`
+  cover the positive path (memory roundtrip via `bridge.upstreamServices`)
+  and the negative path (bridges without `forwardUpstreamServices`
+  leave `upstreamServices` undefined — no phantom client).
+
+### Fixed — `aipehub new python-agent` produces a runnable layout
+
+- The template's `pyproject.toml` had `packages = ["src/<modName>"]`
+  but the scaffolder wrote source to `src/agent.py`, so `pip install
+  -e .` failed every time with "package not found". `python -m
+  <modName>` was also broken for a separate reason (no `__main__.py`).
+- New layout: `src/<modName>/__init__.py` re-exports `main` from
+  `agent.py`; `src/<modName>/__main__.py` is the one-liner Python
+  opens when the user runs `python -m <modName>`;
+  `src/<modName>/agent.py` is the AgentParticipant subclass. Matches
+  hatchling's expected layout end-to-end.
+- CLI tests assert the new file paths and verify `__init__.py` /
+  `__main__.py` contents; template tests grew one case covering both
+  init/main shims.
+
+### Notes
+
+- All four fixes are additive on v1.2 wire/API and back-compat with
+  v1.1 — the existing v1.2 cross-version reasoning at the bottom of
+  the v1.2 section below still holds.
+- 441 tests across `@aipehub/{core,services-sdk,transport-ws,sdk-node,host,cli,web}`
+  green on this patch. The Python SDK's `PROTOCOL_VERSION` bump is
+  picked up automatically by tests that compare against the imported
+  constant; no test-side changes were needed.
+
+---
+
 ## Unreleased — observability + DevX + protocol v1.2 (post-v1.1)
 
 Builds on the v1.1 services-over-WebSocket release. v1.2 is the

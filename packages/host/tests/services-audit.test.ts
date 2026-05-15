@@ -151,6 +151,50 @@ describe('audit: HELLO.services in PendingApplication + service_call transcript'
     await session.close()
   })
 
+  it('PendingApplication.services carries per-decl methods (v1.2)', async () => {
+    // Same scaffold as the previous test, but assert that a v1.2 client
+    // declaring `methods: ['recall']` shows up verbatim in the admin's
+    // view of the pending application. This is the management-plane half
+    // of per-method ACL — the wire/router side is covered separately in
+    // packages/transport-ws/tests/per-method-acl.test.ts.
+    const ws2 = await serveWebSocket(hub, {
+      port: 0,
+      services,
+      gating: 'admin-approval',
+    })
+    try {
+      const agent = new TouchingAgent()
+      const pending = connect({
+        url: ws2.url,
+        agents: [agent],
+        services: [
+          {
+            type: 'memory',
+            impl: 'file',
+            owner: { kind: 'agent', id: 'self' },
+            methods: ['recall'],
+          },
+        ],
+        autoReconnect: false,
+      })
+
+      let app
+      for (let i = 0; i < 30 && !app; i++) {
+        await new Promise((r) => setTimeout(r, 20))
+        app = hub.pendingApplications()[0]
+      }
+      expect(app, 'expected pending application').toBeTruthy()
+      expect(app!.services?.length).toBe(1)
+      expect(app!.services![0]!.methods).toEqual(['recall'])
+
+      hub.approveApplication(app!.id, 'admin')
+      const session = await pending
+      await session.close()
+    } finally {
+      await ws2.close()
+    }
+  })
+
   it('PendingApplication.services mirrors HELLO.services under admin-approval gating', async () => {
     // Stand up a *separate* admin-gated transport on the same hub.
     const ws2 = await serveWebSocket(hub, {

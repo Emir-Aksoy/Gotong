@@ -71,8 +71,23 @@ describe('runCli', () => {
     const pyproject = await readFile(join(cwd!, 'py-classify', 'pyproject.toml'), 'utf8')
     expect(pyproject).toContain('name = "py-classify"')
     expect(pyproject).toContain('py_classify = "py_classify.agent:main"')
-    const src = await readFile(join(cwd!, 'py-classify', 'src', 'agent.py'), 'utf8')
+    // Source MUST live under `src/<modName>/` (matches hatch's
+    // `packages = ["src/<modName>"]`); writing to `src/agent.py`
+    // breaks `pip install -e .`.
+    const src = await readFile(join(cwd!, 'py-classify', 'src', 'py_classify', 'agent.py'), 'utf8')
     expect(src).toContain('class PyClassifyAgent(AgentParticipant)')
+    // __init__.py re-exports main so `import py_classify` works.
+    const initPy = await readFile(
+      join(cwd!, 'py-classify', 'src', 'py_classify', '__init__.py'),
+      'utf8',
+    )
+    expect(initPy).toContain('from .agent import main')
+    // __main__.py makes `python -m py_classify` work end-to-end.
+    const mainPy = await readFile(
+      join(cwd!, 'py-classify', 'src', 'py_classify', '__main__.py'),
+      'utf8',
+    )
+    expect(mainPy).toContain('main()')
     log.mockRestore()
   })
 

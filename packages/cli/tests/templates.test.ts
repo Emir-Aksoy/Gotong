@@ -103,4 +103,20 @@ describe('py-agent template', () => {
     })
     expect(out.pyproject).toMatch(/aipehub>=1\.1/)
   })
+
+  it('emits __init__.py and __main__.py for `python -m <pkg>` to work', () => {
+    const out = renderPyTemplate({
+      name: 'demo',
+      id: 'demo',
+      capabilities: 'noop',
+      includeServices: false,
+    })
+    // __init__ re-exports main from agent.py so callers can also import
+    // the package programmatically.
+    expect(out.initPy).toContain('from .agent import main')
+    expect(out.initPy).toContain('__all__ = ["main"]')
+    // __main__ is the file `python -m demo` actually executes.
+    expect(out.mainPy).toContain('from .agent import main')
+    expect(out.mainPy).toContain('main()')
+  })
 })

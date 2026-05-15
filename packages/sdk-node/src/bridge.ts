@@ -107,22 +107,23 @@ export class TeamBridgeAgent extends AgentParticipant {
   private readonly tagLocalTasks: boolean
 
   /**
-   * Services declared on the upstream HELLO. Populated by the caller AFTER
-   * `connect()` resolves, by writing `bridge.upstreamServices = session.services`.
-   * Local agents that hold a reference to the bridge can read upstream
-   * services through this field — the federation seam is explicit:
-   * "if you can see the bridge, you can see its upstream services."
+   * Services declared on the upstream HELLO. Auto-populated by `connect()`
+   * (v1.2) when the bridge has a non-empty `forwardUpstreamServices`. Local
+   * agents that hold a reference to the bridge can read upstream services
+   * through this field — the federation seam is explicit: "if you can see
+   * the bridge, you can see its upstream services."
    *
-   * Undefined until the caller assigns it; remains undefined for bridges
-   * that did not declare any `forwardUpstreamServices`.
+   * Stays undefined for bridges with no `forwardUpstreamServices`, and for
+   * connections that returned without a `ServiceClient` (which only happens
+   * when the resolved services list is empty).
    */
   upstreamServices?: ServiceClient
 
   /**
    * The service declarations this bridge wants to call on the upstream hub.
-   * The federation host reads this and includes them in its `connect()`
-   * services list. Empty / undefined when the bridge needs no upstream
-   * services (the common case).
+   * `connect()` (sdk-node, v1.2+) auto-merges these into the HELLO services
+   * list and writes the resulting client back to `upstreamServices`. Empty
+   * / undefined when the bridge needs no upstream services (the common case).
    */
   readonly forwardUpstreamServices: readonly ServiceUseRequest[]
 

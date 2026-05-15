@@ -288,4 +288,67 @@ describe('sdk-node — services roundtrip', () => {
       expect(['session_not_ready']).toContain((err as { code?: string }).code)
     }
   })
+
+  it('TeamBridgeAgent.forwardUpstreamServices auto-wires upstreamServices (v1.2 federation)', async () => {
+    // The bridge's forwardUpstreamServices field used to be a documentation-
+    // only placeholder — defining it set a local field but nothing actually
+    // forwarded those decls to HELLO. v1.2 connect() now merges them in and
+    // writes back the ServiceClient, so a local agent holding the bridge
+    // can read upstream services through `bridge.upstreamServices`.
+    const { TeamBridgeAgent } = await import('../src/bridge.js')
+    const localHub = Hub.inMemory()
+    await localHub.start()
+    try {
+      const bridge = new TeamBridgeAgent({
+        id: 'alice-team',
+        capabilities: ['draft'],
+        localHub,
+        forwardUpstreamServices: [
+          { type: 'memory', impl: 'file', owner: { kind: 'agent', id: 'self' } },
+        ],
+      })
+      // Sanity: before connect, no upstreamServices yet.
+      expect(bridge.upstreamServices).toBeUndefined()
+
+      session = await connect({
+        url: wsHandle.url,
+        agents: [bridge],
+        autoReconnect: false,
+      })
+      // After connect, the bridge picks up the session's services so local
+      // agents that have a reference to the bridge see them.
+      expect(bridge.upstreamServices).toBeDefined()
+      // And the service actually works (FakeGateway memory).
+      const mem = bridge.upstreamServices!.memory!
+      await mem.remember({ kind: 'episodic', text: 'federated' })
+      const recalled = await mem.recall({ k: 1 })
+      expect(recalled[0]!.text).toBe('federated')
+    } finally {
+      await localHub.stop()
+    }
+  })
+
+  it('TeamBridgeAgent without forwardUpstreamServices leaves upstreamServices undefined', async () => {
+    // Negative case: bridges that declare no upstream services don't get a
+    // ServiceClient (we don't want to surprise the user with a phantom one).
+    const { TeamBridgeAgent } = await import('../src/bridge.js')
+    const localHub = Hub.inMemory()
+    await localHub.start()
+    try {
+      const bridge = new TeamBridgeAgent({
+        id: 'bob-team',
+        capabilities: ['draft'],
+        localHub,
+        // no forwardUpstreamServices
+      })
+      session = await connect({
+        url: wsHandle.url,
+        agents: [bridge],
+        autoReconnect: false,
+      })
+      expect(bridge.upstreamServices).toBeUndefined()
+    } finally {
+      await localHub.stop()
+    }
+  })
 })

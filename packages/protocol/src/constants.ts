@@ -1,10 +1,13 @@
 /**
- * Wire protocol version. Bumped to `'1.1'` to advertise SERVICE_CALL /
- * SERVICE_RESULT support. v1.0 clients keep working — the new HELLO field
- * is optional and unknown frames degrade through the v1.0 `bad_frame`
- * path. See `docs/services-over-ws-rfc.md` §8.
+ * Wire protocol version. Bumped to `'1.2'` to advertise per-method ACL
+ * narrowing (`ServiceUseDecl.methods`), the new `forbidden_method` error
+ * code, and the third-party `registerServiceMethods` extension point.
+ * v1.0 / v1.1 clients keep working — the new HELLO field is optional,
+ * unknown error codes pass through as strings, and unknown frames degrade
+ * through the v1.0 `bad_frame` path. See `docs/services-over-ws-rfc.md` §8
+ * and `docs/PROTOCOL.md` "What's new in v1.2".
  */
-export const PROTOCOL_VERSION = '1.1' as const
+export const PROTOCOL_VERSION = '1.2' as const
 
 /** Default server PING cadence. Clients are told this value in WELCOME. */
 export const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000

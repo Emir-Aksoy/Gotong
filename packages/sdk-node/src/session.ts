@@ -21,6 +21,7 @@ import {
   type ServiceClient,
   type ServiceUseRequest,
 } from './service-client.js'
+import { TeamBridgeAgent } from './bridge.js'
 
 export type SessionState =
   | 'connecting'
@@ -112,8 +113,40 @@ export async function connect(opts: ConnectOptions): Promise<Session> {
     if (seen.has(a.id)) throw new Error(`duplicate agent id '${a.id}'`)
     seen.add(a.id)
   }
+
+  // Federation glue (v1.2): each TeamBridgeAgent may declare
+  // `forwardUpstreamServices` — service decls to be merged into HELLO.services
+  // so the bridge can call upstream services from within the local team. We
+  // (a) merge those declarations into the connection's services list before
+  // HELLO is sent, and (b) write back the resulting ServiceClient onto each
+  // bridge's `upstreamServices` field once the session is up. Without this
+  // wiring the field was a documentation-only placeholder.
+  const federationBridges: TeamBridgeAgent[] = []
+  for (const a of resolved.agents) {
+    if (a instanceof TeamBridgeAgent && a.forwardUpstreamServices.length > 0) {
+      federationBridges.push(a)
+    }
+  }
+  if (federationBridges.length > 0) {
+    const merged: ServiceUseRequest[] = [
+      ...(resolved.services ?? []),
+      ...federationBridges.flatMap((b) => [...b.forwardUpstreamServices]),
+    ]
+    resolved.services = merged
+  }
+
   const s = new SessionImpl(resolved)
   await s.openInitial()
+
+  // The bridge holds a reference to the ServiceClient so local agents that
+  // can see the bridge can see upstream services through it — the federation
+  // boundary stays explicit ("if you can see the bridge, you can see its
+  // upstream services"). All bridges share the same client; their decls were
+  // pooled into one HELLO.services list above.
+  for (const b of federationBridges) {
+    b.upstreamServices = s.services
+  }
+
   return s
 }
 

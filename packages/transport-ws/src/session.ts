@@ -365,8 +365,9 @@ export class Session {
         },
         // Surface HELLO.services to the admin UI so the operator reviewing
         // this application can see the ACL the client is requesting BEFORE
-        // approving. Pre-validated above (illegal patterns reject HELLO);
-        // here we just copy the shape across the protocol/core seam.
+        // approving — including per-decl method narrowing (v1.2). Pre-
+        // validated above (illegal patterns reject HELLO); here we just
+        // copy the shape across the protocol/core seam.
         ...(Array.isArray(frame.services) && frame.services.length > 0
           ? {
               services: frame.services.map((s) => ({
@@ -374,6 +375,9 @@ export class Session {
                 impl: s.impl,
                 owner: { kind: s.owner.kind, id: s.owner.id },
                 ...(s.config !== undefined ? { config: s.config } : {}),
+                ...(Array.isArray(s.methods) && s.methods.length > 0
+                  ? { methods: [...s.methods] }
+                  : {}),
               })),
             }
           : {}),

@@ -241,6 +241,8 @@ export class Hub {
       impl: string
       owner: { kind: string; id: string }
       config?: unknown
+      /** Per-decl method ACL narrowing (v1.2). See `ApplicationServiceDecl.methods`. */
+      methods?: readonly string[]
     }>
   }): { applicationId: string; decision: Promise<AdmissionDecision> } {
     const application: PendingApplication = {
@@ -255,6 +257,9 @@ export class Hub {
               impl: s.impl,
               owner: { kind: s.owner.kind, id: s.owner.id },
               ...(s.config !== undefined ? { config: s.config } : {}),
+              ...(s.methods && s.methods.length > 0
+                ? { methods: [...s.methods] }
+                : {}),
             })),
           }
         : {}),
