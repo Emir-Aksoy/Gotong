@@ -24,6 +24,7 @@ import {
   isServiceMethodAllowed,
   registerServiceMethods,
   resetServiceMethodsForTests,
+  unregisterServiceMethods,
   type ServiceCallFrame,
   type ServiceOwner,
   type ServiceUseDecl,
@@ -97,6 +98,43 @@ describe('registerServiceMethods (protocol)', () => {
     ])
     const set = getServiceMethods('notion')
     expect([...set!]).toEqual(['pages.read'])
+  })
+
+  it('unregisterServiceMethods removes only the named third-party methods', () => {
+    registerServiceMethods('notion', ['pages.create', 'pages.read'])
+    expect([...(getServiceMethods('notion') ?? [])].sort()).toEqual([
+      'pages.create',
+      'pages.read',
+    ])
+    unregisterServiceMethods('notion', ['pages.create'])
+    expect([...(getServiceMethods('notion') ?? [])]).toEqual(['pages.read'])
+  })
+
+  it('unregisterServiceMethods will NOT remove built-in methods', () => {
+    // memory:recall is a built-in. Even an explicit unregister call must
+    // leave it in place — the built-in set is the floor.
+    unregisterServiceMethods('memory', ['recall'])
+    expect(isServiceMethodAllowed('memory', 'recall')).toBe(true)
+  })
+
+  it('unregisterServiceMethods collapses entry when only built-ins remain', () => {
+    // For a type with no built-ins, unregistering all registered methods
+    // should remove the runtime entry entirely (so `getServiceMethods` matches
+    // the "never registered" shape — `undefined`).
+    registerServiceMethods('notion', ['pages.create'])
+    expect(getServiceMethods('notion')).toBeDefined()
+    unregisterServiceMethods('notion', ['pages.create'])
+    expect(getServiceMethods('notion')).toBeUndefined()
+    expect(isServiceMethodAllowed('notion', 'pages.create')).toBe(false)
+  })
+
+  it('unregisterServiceMethods is a no-op on unknown type / bad input', () => {
+    expect(() => unregisterServiceMethods('ghost', ['x'])).not.toThrow()
+    expect(() =>
+      unregisterServiceMethods('memory', null as unknown as readonly string[]),
+    ).not.toThrow()
+    // Built-ins still intact.
+    expect(isServiceMethodAllowed('memory', 'recall')).toBe(true)
   })
 })
 

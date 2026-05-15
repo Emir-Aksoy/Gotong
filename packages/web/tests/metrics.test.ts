@@ -161,4 +161,47 @@ describe('renderMetrics', () => {
   it('ends with a trailing newline', () => {
     expect(renderMetrics(hub).endsWith('\n')).toBe(true)
   })
+
+  it('clamps negative durationMs to zero (counters must not decrease)', () => {
+    // Prometheus convention: counter `_sum` is monotonic. A negative
+    // duration (e.g. clock skew) would let `_sum` go down across scrapes,
+    // breaking rate() queries. We clamp at zero defensively.
+    const append = (hub.transcript as unknown as {
+      append: (e: { ts: number; kind: string; data: unknown }) => void
+    }).append.bind(hub.transcript)
+    append({
+      ts: Date.now(),
+      kind: 'service_call',
+      data: {
+        from: 'a-1',
+        type: 'memory',
+        impl: 'file',
+        ownerKind: 'agent',
+        ownerId: 'a-1',
+        method: 'recall',
+        outcome: 'ok',
+        // pathological: clock went backwards mid-call
+        durationMs: -50,
+      },
+    })
+    append({
+      ts: Date.now(),
+      kind: 'service_call',
+      data: {
+        from: 'a-1',
+        type: 'memory',
+        impl: 'file',
+        ownerKind: 'agent',
+        ownerId: 'a-1',
+        method: 'recall',
+        outcome: 'ok',
+        durationMs: 7,
+      },
+    })
+    const text = renderMetrics(hub)
+    // The negative is treated as 0, so sum = 0 + 7 = 7 (not -43).
+    expect(text).toMatch(/aipehub_service_call_duration_ms_sum\{type="memory",impl="file"\} 7/)
+    // count is still 2 (both calls happened, both audited).
+    expect(text).toMatch(/aipehub_service_call_duration_ms_count\{type="memory",impl="file"\} 2/)
+  })
 })

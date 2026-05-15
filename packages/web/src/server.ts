@@ -1877,7 +1877,13 @@ export function renderMetrics(hub: Hub): string {
       const okey = `${d.type}|${d.impl}|${d.outcome}`
       svcCalls[okey] = (svcCalls[okey] ?? 0) + 1
       const dkey = `${d.type}|${d.impl}`
-      svcDurSum[dkey] = (svcDurSum[dkey] ?? 0) + (Number.isFinite(d.durationMs) ? d.durationMs : 0)
+      // Prometheus convention: durations are non-negative. Clamp at zero to
+      // defend against clock skew (Date.now() going backwards mid-call) and
+      // bogus client-reported negatives. Without this, sum-counters can
+      // decrease across scrapes — a violation that breaks rate() queries.
+      const dur =
+        Number.isFinite(d.durationMs) && d.durationMs >= 0 ? d.durationMs : 0
+      svcDurSum[dkey] = (svcDurSum[dkey] ?? 0) + dur
       svcDurCnt[dkey] = (svcDurCnt[dkey] ?? 0) + 1
     }
   }

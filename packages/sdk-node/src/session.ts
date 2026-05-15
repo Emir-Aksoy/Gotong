@@ -163,6 +163,12 @@ class SessionImpl implements Session {
     resolve: () => void
     reject: (e: Error) => void
   }
+  /**
+   * Have we already emitted the "server is older than this client and won't
+   * enforce v1.2-only features" warning? Sticky for the session so a reconnect
+   * loop doesn't spam logs.
+   */
+  private versionMismatchWarned = false
 
   constructor(private readonly opts: ResolvedOptions) {
     this.agents = new Map(opts.agents.map((a) => [a.id, a]))
@@ -245,6 +251,17 @@ class SessionImpl implements Session {
     switch (frame.type) {
       case 'WELCOME': {
         this.sessionId = frame.sessionId
+        // v1.2 cross-version safety: if the client declared per-method ACL
+        // narrowing (`services[i].methods`), a v1.1 server will NOT enforce
+        // it (the field is unknown, decoded but ignored). The client thinks
+        // it has read-only access; the server lets everything through. Warn
+        // once on WELCOME so the user can see the safety degradation in
+        // logs. We don't reject the connection — that's too strict for the
+        // SDK to decide unilaterally.
+        if (!this.versionMismatchWarned) {
+          this.checkServerVersionForServiceNarrowing(frame.protocolVersion)
+          this.versionMismatchWarned = true
+        }
         this.setState('ready')
         this.backoff = this.opts.reconnectInitialBackoffMs
         if (this.welcomeWaiter) {
@@ -452,6 +469,54 @@ class SessionImpl implements Session {
       console.error('[sdk-node] send failed:', err)
     }
   }
+
+  /**
+   * Detect "this client uses a v1.2 feature the server can't enforce" and warn.
+   *
+   * v1.0/v1.1 servers silently drop unknown fields on HELLO.services entries,
+   * so a v1.2 client declaring `methods: ['recall']` thinks the connection is
+   * read-only — but the older server has no `forbidden_method` path and will
+   * happily accept `remember` calls. That's a quiet downgrade in the trust
+   * boundary; the user should know.
+   *
+   * We only warn for narrowing right now because that's the only v1.2 feature
+   * where the server is the enforcement point. New error codes
+   * (`forbidden_method`) and the third-party allowlist extension are
+   * client/host-side and don't have a cross-version safety story to lose.
+   */
+  private checkServerVersionForServiceNarrowing(serverVersion: unknown): void {
+    if (typeof serverVersion !== 'string') return
+    // The connection's `services` is on `opts.services`; check whether any
+    // decl narrowed via `methods`. If none did, the server version doesn't
+    // matter for this safety property.
+    const usesNarrowing = (this.opts.services ?? []).some(
+      (s) => Array.isArray(s.methods) && s.methods.length > 0,
+    )
+    if (!usesNarrowing) return
+    const [smajor, sminor] = parseVersion(serverVersion)
+    const [cmajor, cminor] = parseVersion(PROTOCOL_VERSION)
+    // Same major or newer? Trust the server.
+    if (smajor !== cmajor) return // major mismatch: REJECT path handles it
+    if (sminor >= cminor) return
+    // Older minor on same major: per-method ACL silently won't be enforced.
+    console.warn(
+      `[sdk-node] server protocol version ${serverVersion} is older than ` +
+        `client ${PROTOCOL_VERSION} — per-method ACL narrowing (` +
+        `ServiceUseDecl.methods) is NOT enforced server-side on v1.${sminor}. ` +
+        `Treat the connection as if methods narrowing were absent.`,
+    )
+  }
+}
+
+/** Parse `'1.2'` → `[1, 2]`. Best-effort; non-numeric components become 0. */
+function parseVersion(v: string): [number, number] {
+  const parts = v.split('.')
+  const major = Number(parts[0])
+  const minor = Number(parts[1])
+  return [
+    Number.isFinite(major) ? major : 0,
+    Number.isFinite(minor) ? minor : 0,
+  ]
 }
 
 function noParticipant(taskId: string, reason: string): TaskResult {

@@ -133,6 +133,57 @@ export function resetServiceMethodsForTests(): void {
 }
 
 /**
+ * Remove a third-party plugin's wire methods from the runtime allowlist.
+ *
+ * Symmetric with `registerServiceMethods`: pass the same `methods` array you
+ * registered with and the runtime drops them from the allowlist. Built-in
+ * methods on the same `type` (i.e. those declared in `BUILTIN_SERVICE_METHODS`)
+ * are NEVER removed — calling `unregisterServiceMethods('memory', ['recall'])`
+ * is a no-op on the built-in side. If after removal a type has only built-in
+ * methods left, the runtime entry collapses back to a snapshot of the
+ * built-in set.
+ *
+ * Intended for plugin hot-reload / clean shutdown of long-lived host
+ * processes (e.g. a unit-test harness that mounts and unmounts plugins).
+ * No-op on unknown `type`.
+ *
+ * @example
+ *   registerServiceMethods('notion', ['pages.create'])
+ *   // …plugin runs…
+ *   unregisterServiceMethods('notion', ['pages.create'])
+ *   // 'notion' is now back to whatever (if anything) was in BUILTIN_SERVICE_METHODS
+ */
+export function unregisterServiceMethods(
+  type: string,
+  methods: readonly string[],
+): void {
+  if (!type || typeof type !== 'string') return
+  if (!Array.isArray(methods)) return
+  const existing = runtimeAllowlist.get(type)
+  if (!existing) return
+  const builtin = BUILTIN_SERVICE_METHODS[type] ?? []
+  const builtinSet = new Set(builtin)
+  const next = new Set<string>(existing)
+  for (const m of methods) {
+    if (typeof m !== 'string') continue
+    // Never delete a built-in method — the built-in set is the floor.
+    if (builtinSet.has(m)) continue
+    next.delete(m)
+  }
+  // If the remaining set is exactly the built-ins, collapse to a fresh
+  // snapshot so the map identity matches a never-registered type.
+  if (next.size === builtinSet.size && [...next].every((m) => builtinSet.has(m))) {
+    if (builtin.length > 0) {
+      runtimeAllowlist.set(type, new Set(builtin))
+    } else {
+      runtimeAllowlist.delete(type)
+    }
+  } else {
+    runtimeAllowlist.set(type, next)
+  }
+}
+
+/**
  * @deprecated since v1.2 — use `isServiceMethodAllowed` / `getServiceMethods`
  * instead. Kept exported so existing third-party code that imported the
  * symbol keeps compiling; reflects only built-ins, not registered extensions.

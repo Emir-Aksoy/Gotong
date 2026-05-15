@@ -4,6 +4,61 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — v1.2.2 minor-debt cleanup
+
+Second audit pass picked up three smaller issues that did not block
+v1.2 from being self-consistent (v1.2.1 already handled those) but
+would have made v1.3 startup awkward. None of them change wire shape;
+all are additive on the SDK / runtime surface.
+
+### Added — plugin lifecycle: `unregisterServiceMethods`
+
+- `@aipehub/protocol` gains `unregisterServiceMethods(type, methods)`,
+  symmetric with `registerServiceMethods`. Designed for plugin hot-
+  reload and clean host shutdown — a long-lived process that mounts
+  and unmounts service plugins can now drop their wire methods from
+  the runtime allowlist instead of leaking entries for the rest of
+  the process. Built-in methods (`memory:recall`, `artifact:list`, …)
+  are explicitly NOT removable; they are the floor of the allowlist.
+- 4 new tests in `packages/transport-ws/tests/extend-allowlist.test.ts`
+  cover symmetric remove, the built-in floor invariant, the empty-
+  set collapse to `undefined`, and the no-op-on-bad-input contract.
+
+### Added — cross-version safety warning in `@aipehub/sdk-node`
+
+- The SDK now reads `WELCOME.protocolVersion` and, if it's older than
+  the SDK's own `PROTOCOL_VERSION` on the same major, **and** the
+  client declared `services[i].methods`, emits one `console.warn`:
+  the server is too old to enforce per-method ACL narrowing, so the
+  connection is effectively unnarrowed. The warning is sticky for
+  the session (no reconnect-loop spam) and silent when narrowing is
+  not in play. v1.1 servers stay reachable; the user just knows.
+- New test file `packages/sdk-node/tests/version-mismatch.test.ts`
+  spawns a raw `ws` server that replies with a configurable
+  `WELCOME.protocolVersion` and verifies four cases: warning fires
+  on (v1.1, narrowing); silent on (v1.1, no narrowing); silent on
+  (same version, narrowing); and the warning fires exactly once.
+
+### Fixed — `renderMetrics` clamps negative `durationMs`
+
+- `aipehub_service_call_duration_ms_sum` is a Prometheus counter and
+  must be monotonic. The previous code summed `Number.isFinite(d)
+  ? d : 0`, which let a negative duration (mid-call clock skew, or
+  a buggy client) drag the counter down across scrapes — breaking
+  `rate()` queries silently. Now clamped to `>= 0`.
+- New test in `packages/web/tests/metrics.test.ts` injects a `-50ms`
+  service-call entry alongside a `+7ms` one and asserts the rendered
+  sum is `7` (not `-43`) while count is still `2`.
+
+### Notes
+
+- All three changes are pure additions on the SDK / runtime; nothing
+  on the wire moved. v1.2.1 + v1.2.2 together compose a self-
+  consistent v1.2 release.
+- 450 tests across the workspace green on this patch (+9 over v1.2.1).
+
+---
+
 ## Unreleased — v1.2.1 audit patch (rollup)
 
 The post-v1.2 audit found four claims in the v1.2 section below that
