@@ -1,1 +1,1 @@
-export { OpenAIProvider, type OpenAIProviderOptions } from './provider.js'
+export { OpenAIProvider, isTransientError, type OpenAIProviderOptions } from './provider.js'

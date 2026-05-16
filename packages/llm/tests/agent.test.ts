@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { Hub } from '@aipehub/core'
+import { EMPTY_SERVICE_CTX, type ServiceCtx } from '@aipehub/services-sdk'
 import { LlmAgent, MockLlmProvider, type LlmRequest } from '../src/index.js'
 
 function makeTask(payload: unknown, capabilities = ['draft']) {
@@ -265,5 +266,161 @@ describe('LlmAgent — subclass hooks', () => {
     if (result.kind === 'ok') {
       expect(result.output).toEqual({ trimmed: 'trimmed' })
     }
+  })
+})
+
+/**
+ * Tiny subclass that exposes the protected `services` field for
+ * black-box testing without sacrificing the encapsulation on the real
+ * `LlmAgent`. Every assertion below goes through this view.
+ */
+class ServicesPeekAgent extends LlmAgent {
+  get _services(): ServiceCtx {
+    return this.services
+  }
+}
+
+describe('LlmAgent — services ctx injection (PR-6)', () => {
+  const provider = new MockLlmProvider({ reply: 'ok' })
+
+  it('no services opt → field is EMPTY_SERVICE_CTX (identity match)', () => {
+    const agent = new ServicesPeekAgent({
+      id: 'a',
+      capabilities: ['draft'],
+      provider,
+    })
+    expect(agent._services).toBe(EMPTY_SERVICE_CTX)
+    // Frozen — accidental mutation would throw / be silently dropped.
+    expect(Object.isFrozen(agent._services)).toBe(true)
+  })
+
+  it('services: undefined → field is EMPTY_SERVICE_CTX', () => {
+    const agent = new ServicesPeekAgent({
+      id: 'a',
+      capabilities: ['draft'],
+      provider,
+      services: undefined,
+    })
+    expect(agent._services).toBe(EMPTY_SERVICE_CTX)
+  })
+
+  it('services: {} → field is the supplied object (caller controls identity)', () => {
+    const ctx: ServiceCtx = {}
+    const agent = new ServicesPeekAgent({
+      id: 'a',
+      capabilities: ['draft'],
+      provider,
+      services: ctx,
+    })
+    // Caller-supplied object wins (not coerced to EMPTY_SERVICE_CTX)
+    expect(agent._services).toBe(ctx)
+  })
+
+  it('services with memory + artifact handles are exposed verbatim', () => {
+    // Tiny stand-in handles — we only check the agent doesn't mangle them.
+    const memory = { recall: async () => [], remember: async () => ({ id: 'x', kind: 'episodic' as const, text: '', ts: 0 }), list: async () => [], clear: async () => 0 }
+    const artifact = { write: async () => ({ ref: 'x', mime: 'text/plain' as const, sizeBytes: 0, ts: 0 }), read: async () => ({ content: '', mime: 'text/plain' as const, sizeBytes: 0, ts: 0 }), list: async () => [], exists: async () => false, remove: async () => undefined }
+    const ctx: ServiceCtx = {
+      memory: memory as unknown as ServiceCtx['memory'],
+      artifact: artifact as unknown as ServiceCtx['artifact'],
+    }
+    const agent = new ServicesPeekAgent({
+      id: 'a',
+      capabilities: ['draft'],
+      provider,
+      services: ctx,
+    })
+    expect(agent._services.memory).toBe(memory)
+    expect(agent._services.artifact).toBe(artifact)
+    expect(agent._services.datastore).toBeUndefined()
+  })
+
+  it('services.datastore is a record keyed by config.name', () => {
+    const cases = { kv: {}, sql: {} } as unknown as NonNullable<ServiceCtx['datastore']>[string]
+    const sessions = { kv: {}, sql: {} } as unknown as NonNullable<ServiceCtx['datastore']>[string]
+    const agent = new ServicesPeekAgent({
+      id: 'a',
+      capabilities: ['draft'],
+      provider,
+      services: { datastore: { cases, sessions } },
+    })
+    expect(agent._services.datastore?.cases).toBe(cases)
+    expect(agent._services.datastore?.sessions).toBe(sessions)
+  })
+
+  it('declaring services does NOT change buildRequest output', async () => {
+    let captured: LlmRequest | undefined
+    const cap = new MockLlmProvider({
+      reply: (req) => {
+        captured = req
+        return 'ok'
+      },
+    })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(
+      new LlmAgent({
+        id: 'a',
+        capabilities: ['draft'],
+        provider: cap,
+        services: {
+          memory: undefined,
+          artifact: undefined,
+        },
+      }),
+    )
+    await hub.dispatch(makeTask('hi'))
+    await hub.stop()
+    // base buildRequest must stay agnostic to services — same shape as
+    // an agent that never declared a ctx. PR-13 demo templates will
+    // decide how to mention services in prompts.
+    expect(captured?.messages).toEqual([{ role: 'user', content: 'hi' }])
+    expect(captured?.system).toBeUndefined()
+  })
+
+  it('subclass can call this.services.memory.recall from buildRequest', async () => {
+    let captured: LlmRequest | undefined
+    const cap = new MockLlmProvider({
+      reply: (req) => {
+        captured = req
+        return 'ok'
+      },
+    })
+
+    // Hand-rolled MemoryHandle stub — only the methods we touch.
+    const recalled = [
+      { id: '1', kind: 'episodic' as const, text: 'last time you helped a baker', ts: 1 },
+    ]
+    const memory = {
+      recall: async () => recalled,
+      remember: async () => ({ id: 'x', kind: 'episodic' as const, text: '', ts: 0 }),
+      list: async () => [],
+      clear: async () => 0,
+    } as unknown as NonNullable<ServiceCtx['memory']>
+
+    class CoachAgent extends LlmAgent {
+      protected override async handleTask(task: import('@aipehub/core').Task) {
+        // Recall before invoking — proves the subclass can read services.
+        const items = (await this.services.memory?.recall({ query: '' })) ?? []
+        const base = this.buildRequest(task)
+        const sys = `prior memories: ${items.map((i) => i.text).join('; ')}`
+        const res = await this.provider.complete({ ...base, system: sys })
+        return this.parseResponse(res, task)
+      }
+    }
+
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(
+      new CoachAgent({
+        id: 'a',
+        capabilities: ['draft'],
+        provider: cap,
+        services: { memory },
+      }),
+    )
+    await hub.dispatch(makeTask('go'))
+    await hub.stop()
+    expect(captured?.system).toBe('prior memories: last time you helped a baker')
   })
 })

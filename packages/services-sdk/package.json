@@ -1,0 +1,41 @@
+{
+  "name": "@aipehub/services-sdk",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AipeHub Services SDK — plugin contract, registry, loader. Same surface for first-party and third-party service plugins (memory / artifact / datastore / …).",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AipeHub/AipeHub.git",
+    "directory": "packages/services-sdk"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0"
+  }
+}

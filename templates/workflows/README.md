@@ -30,11 +30,22 @@ workflows/
                                    (解析→拆解→[并行: 联络稿+派发]→报告→归档)
   admin-report-restyle-flow.yaml   ⭐ 报告改写专用（最常复用的场景）
                                    旧报告 + 新口径 → 同事实、新表达
-  industry-enablement-flow.yaml    ⭐ 传统行业 AI 赋能梳理
+  industry-enablement-flow.yaml    ⭐ 传统行业 AI 赋能梳理（v1，全自动）
                                    (诊断→机会→工具→落地→顾虑回应)
+                                   ⚠️ 暂未接入 v2.3 case-conversation
+  industry-consultation-flow.yaml  🆕 传统行业咨询（v2.3，含真人 review +
+                                   案主插话）
+                                   intake→research→draft→👤review→finalize
+                                   集成 Hub Services（memory/artifact/datastore）
+                                   + case-conversation 横切对话面
 ```
 
 ⭐ = 配套 `templates/teams/` 下同名团队使用。
+🆕 = v2.3：在 v2.2 "Hub Services + 人在回路" 基础上引入 **案主任务管家
+**（`templates/agents/case-manager.yaml`），让案主能在工作流任意时刻
+插话，对话写进 case-memory，下游 step 自动读到。端到端实测见
+`examples/industry-consultation-deepseek/`（真实 DeepSeek API），单元
+测试见 `packages/host/tests/case-context.test.ts` + `industry-consultation-flow.test.ts`。
 
 ## YAML 速查
 

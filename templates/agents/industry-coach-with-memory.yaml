@@ -1,0 +1,73 @@
+# 行业陪练教练 — 带 Hub Services 的示范 agent
+# AipeHub agent v1 manifest (v2.2 — uses Hub Services)
+#
+# 用法：admin 控制台 → 智能体 → 导入 → 粘贴本文件
+#
+# 这是 RFC §6 示例的可运行版本，展示三种 Hub 服务都接上：
+#   - memory:file      —— 跨任务记住此前的咨询要点
+#   - artifact:file    —— 把分析报告落盘成 markdown
+#   - datastore:sqlite —— 行业案例的结构化检索
+#
+# 默认 scope=private —— 数据按 agent.id 隔离，不会泄露给其他 agent；
+# 软删后进入 30 天废纸篓 (RFC Q3=A)，可在管理后台"服务"页查看 / 恢复。
+#
+# 想换 provider 把 `provider` 改成 `openai` / `mock` 即可。
+# 跑端到端 demo 时建议用 `provider: mock` —— 不需要 API key。
+schema: aipehub.agent/v1
+
+agent:
+  id: industry-coach
+  displayName: 行业陪练教练
+  capabilities: [intake, coach]
+  kind: llm
+  provider: anthropic
+  model: claude-opus-4-7
+  weightDefault: 1.5
+  system: |
+    你是一个传统行业的转型陪练教练。
+
+    第一次和某位老板对谈时，先用 memory.recall 检查过往是否聊过；
+    没有的话开放式提三问，把回答用 memory.remember 写入 episodic
+    记忆 (作为下一次咨询的上下文)。
+
+    每次对话结束时，把"今天的结论 + 行动项"落成一份 markdown 报告，
+    通过 artifact.write 存到 reports/<日期>.md。报告写完不要给客户
+    重复一遍，只在 task output 里告诉他文件名。
+
+    遇到客户提供的行业数据 (员工人数、营收、利润等数字)，用
+    cases datastore 的 sql 接口塞进表，做横向对比时用 SQL 查询。
+
+    始终用中文回复。简洁。
+
+  uses:
+    # 私有记忆 —— 默认 scope=private，只有 industry-coach 自己能读
+    - type: memory
+      impl: file
+      config:
+        kinds: [episodic, semantic]
+        maxEpisodicBytes: 1048576
+
+    # 行业报告 —— 落盘成 markdown
+    - type: artifact
+      impl: file
+      config:
+        name: industry-reports
+        maxBytesPerFile: 5242880    # 5 MB per file
+        allowedMimePrefixes: ['text/', 'application/']
+
+    # 行业案例库 —— 结构化检索
+    - type: datastore
+      impl: sqlite
+      config:
+        name: cases
+        schema: |
+          CREATE TABLE IF NOT EXISTS cases (
+            id TEXT PRIMARY KEY,
+            industry TEXT NOT NULL,
+            company_size TEXT,
+            revenue_rmb INTEGER,
+            employees INTEGER,
+            pain_point TEXT,
+            recorded_at INTEGER NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS idx_cases_industry ON cases(industry);

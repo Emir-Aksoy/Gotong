@@ -9,10 +9,21 @@ export type {
   AgentRecord,
   ManagedAgentSpec,
   ManagedAgentLifecycle,
+  ServiceUseSpec,
   WorkerRecord,
   SessionRecord,
   PersistedPendingApp,
 } from './space.js'
+
+export type {
+  ServicesAdminSurface,
+  ServicePluginDescriptor,
+  ServiceOwnerRef,
+  ServiceTarget,
+  ServiceSnapshotView,
+  ServicePreviewBlob,
+  ServiceTrashRef,
+} from './services-admin.js'
 
 export {
   encryptSecret,

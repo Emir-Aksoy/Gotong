@@ -53,6 +53,7 @@ import {
   type TaskResult,
   type DispatchStrategy,
 } from '@aipehub/core'
+import type { ServiceClient, ServiceUseRequest } from './service-client.js'
 
 export interface TeamBridgeOptions {
   /** Id this bridge takes on the upstream hub. */
@@ -74,6 +75,38 @@ export interface TeamBridgeOptions {
    * tell forwarded work apart from in-house tasks.
    */
   tagLocalTasks?: boolean
+  /**
+   * Federation services (v1.2.1+). Listing service declarations here is the
+   * SAME as listing them on `connect({services: [...]})` — they go on the
+   * bridge's HELLO to the upstream hub. The bridge stores the resulting
+   * `ServiceClient` on `bridge.upstreamServices` so local agents handling
+   * forwarded tasks can read / write upstream services (e.g. a shared
+   * datastore the parent organisation owns).
+   *
+   * NOT mirrored as a local Hub service — local agents access them via
+   * the bridge instance reference, which is the cleanest way to keep the
+   * federation boundary explicit. If a local agent should NOT see upstream
+   * data, simply don't give it a reference to the bridge.
+   */
+  forwardUpstreamServices?: readonly ServiceUseRequest[]
+}
+
+/**
+ * Brand-check helper used by `connect()` to spot bridges even when
+ * `instanceof TeamBridgeAgent` would falsely return `false` (multiple copies
+ * of `@aipehub/sdk-node` resolved into the same dep graph — rare but
+ * possible under pnpm peer mismatch or workspace overrides).
+ *
+ * Exported so external integrations can do the same recognition trick;
+ * unstable shape, prefer using `TeamBridgeAgent` directly when you can.
+ */
+export function isTeamBridge(agent: unknown): agent is TeamBridgeAgent {
+  if (agent instanceof TeamBridgeAgent) return true
+  return (
+    typeof agent === 'object' &&
+    agent !== null &&
+    (agent as { __isAipehubBridge?: unknown }).__isAipehubBridge === true
+  )
 }
 
 export interface LocalDispatchPlan {
@@ -91,11 +124,43 @@ export class TeamBridgeAgent extends AgentParticipant {
   private readonly mapTask: (task: Task) => LocalDispatchPlan
   private readonly tagLocalTasks: boolean
 
+  /**
+   * Services declared on the upstream HELLO. Auto-populated by `connect()`
+   * (v1.2.1+) when the bridge has a non-empty `forwardUpstreamServices`.
+   * Local agents that hold a reference to the bridge can read upstream
+   * services through this field — the federation seam is explicit: "if
+   * you can see the bridge, you can see its upstream services."
+   *
+   * Stays undefined for bridges with no `forwardUpstreamServices`, and for
+   * connections that returned without a `ServiceClient` (which only happens
+   * when the resolved services list is empty).
+   */
+  upstreamServices?: ServiceClient
+
+  /**
+   * The service declarations this bridge wants to call on the upstream hub.
+   * `connect()` (sdk-node, v1.2.1+) auto-merges these into the HELLO services
+   * list and writes the resulting client back to `upstreamServices`. Empty
+   * / undefined when the bridge needs no upstream services (the common case).
+   */
+  readonly forwardUpstreamServices: readonly ServiceUseRequest[]
+
+  /**
+   * Brand for cross-package / cross-version detection. `connect()` uses
+   * this in addition to `instanceof` so that bridges built against a
+   * different copy of `@aipehub/sdk-node` (pnpm peer mismatch, monorepo
+   * override edge cases) still get their `forwardUpstreamServices` honored.
+   *
+   * Never read this directly — call `isTeamBridge(agent)` instead.
+   */
+  readonly __isAipehubBridge = true as const
+
   constructor(opts: TeamBridgeOptions) {
     super({ id: opts.id, capabilities: opts.capabilities ?? [] })
     this.localHub = opts.localHub
     this.tagLocalTasks = opts.tagLocalTasks ?? true
     this.mapTask = opts.mapTask ?? ((task) => defaultMap(task))
+    this.forwardUpstreamServices = opts.forwardUpstreamServices ?? []
   }
 
   /**

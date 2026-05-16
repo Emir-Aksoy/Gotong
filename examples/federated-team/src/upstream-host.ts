@@ -97,6 +97,13 @@ function describe(e: TranscriptEntry): string {
       return `REJECT   app=${e.data.applicationId} by ${e.data.by ?? '?'}: ${e.data.reason}`
     case 'evaluation':
       return `EVAL     ${e.data.taskId} rating=${e.data.rating ?? '?'} by ${e.data.by}`
+    case 'service_trashed':
+      return `TRASH    ${e.data.type}:${e.data.impl} owner=${e.data.ownerKind}/${e.data.ownerId}`
+    case 'service_purged':
+      return `PURGE    ${e.data.type}:${e.data.impl} trashId=${e.data.trashId}`
+    case 'service_call':
+      // v1.2 audit entry — one line per resolved SERVICE_CALL.
+      return `SVCCALL  ${e.data.from} ${e.data.type}:${e.data.impl}#${e.data.method} → ${e.data.outcome} (${e.data.durationMs}ms)`
   }
 }
 

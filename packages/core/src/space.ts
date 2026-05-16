@@ -55,6 +55,15 @@ export class Space {
     workers: '',
     transcript: '',
     secrets: '',
+    /**
+     * Hub Services root (v2.2). The host's `bootstrapServices` reads
+     * `<services>/plugins.json` and gives each loaded plugin a subdir
+     * `<services>/<type>/<impl>/` to put its data in. Core itself does
+     * not import the services-sdk — this path is just a string the host
+     * uses. Created (empty) by `Space.init`; safe to be absent at
+     * `Space.open` time (host will create on demand).
+     */
+    services: '',
     runtime: {
       pendingApps: '',
       adminSessions: '',
@@ -74,6 +83,7 @@ export class Space {
     this.paths.workers = join(root, 'workers.json')
     this.paths.transcript = join(root, 'transcript.jsonl')
     this.paths.secrets = join(root, 'secrets.enc.json')
+    this.paths.services = join(root, 'services')
     this.paths.runtime.pendingApps = join(root, 'runtime', 'pending-apps.json')
     this.paths.runtime.adminSessions = join(root, 'runtime', 'admin-sessions.json')
     this.paths.runtime.workerSessions = join(root, 'runtime', 'worker-sessions.json')
@@ -111,6 +121,10 @@ export class Space {
   ): Promise<{ space: Space; adminToken: string | null; adminId: string | null }> {
     mkdirSync(root, { recursive: true })
     mkdirSync(join(root, 'runtime'), { recursive: true })
+    // services/ is created up-front so `bootstrapServices` (host-side)
+    // can drop `plugins.json` and per-plugin subdirs without re-checking
+    // the parent at every boot. It stays empty until plugins register.
+    mkdirSync(join(root, 'services'), { recursive: true })
     const s = new Space(root)
 
     if (existsSync(s.paths.space)) {
@@ -650,6 +664,42 @@ export interface ManagedAgentSpec {
    * omitted. Ignored for other provider strings.
    */
   providerLabel?: string
+  /**
+   * Hub Services this agent uses (v2.2 — see docs/services-rfc.md §6).
+   * Empty / absent means the agent has no service handles at runtime;
+   * its ctx is `EMPTY_SERVICE_CTX`. Two rules enforced at yaml parse:
+   *
+   *   1. `type` + `impl` must exist on a loaded plugin at spawn time.
+   *   2. The same `type` may appear at most twice — once as `memory`
+   *      / `artifact` (singular per agent), but `datastore` can appear
+   *      multiple times because each has its own `config.name`.
+   *
+   * The Hub forwards `config` verbatim to `plugin.validateConfig`.
+   */
+  uses?: ServiceUseSpec[]
+}
+
+/**
+ * One entry under `ManagedAgentSpec.uses`. Plain JS interface so
+ * `@aipehub/core` doesn't take a runtime dep on `@aipehub/services-sdk`
+ * (the SDK lives "downstream" of core in the workspace graph — see
+ * docs/services-rfc.md §14 for the cycle-avoidance discussion).
+ *
+ * Field semantics:
+ *
+ *   - `type` + `impl` — plugin selector. The host's `ServiceRegistry`
+ *     looks up `(type, impl)` exactly; misses surface as
+ *     `PluginNotFoundError` at agent spawn time.
+ *   - `config` — opaque to core / web. Always passed through to
+ *     `plugin.validateConfig` which decides shape + defaults.
+ *     `config.scope` (`'private' | 'workflow' | 'shared:<group>'`)
+ *     determines the Owner the plugin files data under; defaults to
+ *     `'private'` per RFC Q1=A.
+ */
+export interface ServiceUseSpec {
+  type: string
+  impl: string
+  config?: Readonly<Record<string, unknown>>
 }
 
 export interface WorkerRecord {
@@ -710,6 +760,22 @@ export interface ManagedAgentLifecycle {
    * form (it still allows saving — an agent can carry its own key).
    */
   availableProviders(): Promise<readonly string[]>
+  /**
+   * Hook called by the web layer **after** `space.removeAgent(id)`
+   * persists the deletion. Optional — implementations that don't
+   * care about post-removal cleanup omit it.
+   *
+   * The host's `LocalAgentPool` uses this hook to soft-delete every
+   * Hub Service plugin's data for the now-removed agent (per RFC
+   * Q3=A: 30-day retention + admin notification). Data lands in
+   * each plugin's local `.trash/` directory; the lifecycle sweep
+   * hard-deletes anything past `expiresAt`.
+   *
+   * Failures inside this hook MUST NOT roll back the deletion —
+   * the agents.json entry is already gone. The web layer logs and
+   * moves on.
+   */
+  onAgentRemoved?(id: ParticipantId): Promise<void>
 }
 
 // --- helpers ---------------------------------------------------------------

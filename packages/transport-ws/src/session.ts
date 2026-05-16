@@ -12,14 +12,17 @@ import {
   type HelloFrame,
   type RejectCode,
   type ServerFrame,
+  type ServiceCallFrame,
+  type ServiceUseDecl,
 } from '@aipehub/protocol'
 import type { WebSocket } from 'ws'
 
 import { RemoteAgentParticipant } from './remote-participant.js'
+import { ServiceCallRouter } from './service-call-router.js'
 
 type SessionState = 'AWAIT_HELLO' | 'AWAIT_APPROVAL' | 'READY' | 'CLOSING' | 'DEAD'
 
-import type { AuthenticateResult } from './server.js'
+import type { AuthenticateResult, ServiceCallGateway } from './server.js'
 
 export interface SessionOptions {
   remoteAddress?: string
@@ -29,6 +32,12 @@ export interface SessionOptions {
   ) => AuthenticateResult | Promise<AuthenticateResult>
   /** Admission policy. `'open'` is the default and the pre-v1.1 behaviour. */
   gating?: 'open' | 'admin-approval'
+  /**
+   * When present, enables protocol v1.1 SERVICE_CALL handling. The session
+   * creates a `ServiceCallRouter` per HELLO that has a non-empty `services`
+   * field; otherwise SERVICE_CALL is rejected as `forbidden_service`.
+   */
+  services?: ServiceCallGateway
 }
 
 export interface SessionInfo {
@@ -62,6 +71,14 @@ export class Session {
    * the application if the client disconnects before the admin decides.
    */
   private pendingApplicationId?: string
+
+  /**
+   * Per-session SERVICE_CALL router. Created in {@link handleHello} when
+   * the client declared a non-empty `services` field AND the transport
+   * was configured with a `ServiceCallGateway`. Disposed in
+   * {@link cleanup}.
+   */
+  private serviceRouter?: ServiceCallRouter
 
   constructor(
     private readonly ws: WebSocket,
@@ -143,6 +160,13 @@ export class Session {
       case 'RESULT':
         this.handleResult(frame.result)
         break
+      case 'SERVICE_CALL':
+        // Fire-and-forget: routing is async, but the protocol says results
+        // can come back in any order, so we don't need to await before
+        // accepting the next frame. The router never throws — every failure
+        // is encoded into a SERVICE_RESULT.
+        this.handleServiceCall(frame)
+        break
       case 'PUBLISH':
         if (!this.participants.has(frame.from)) {
           this.sendError('forbidden_publish', `'${frame.from}' not owned by this connection`)
@@ -173,6 +197,83 @@ export class Session {
       case 'HELLO':
         this.sendError('unexpected_frame', 'HELLO already received')
         break
+    }
+  }
+
+  private handleServiceCall(frame: ServiceCallFrame): void {
+    const t0 = Date.now()
+    if (!this.serviceRouter) {
+      // Either v1.1 gateway wasn't configured on the transport, or the
+      // client didn't declare any services in HELLO. Either way, the call
+      // is forbidden.
+      this.send({
+        type: 'SERVICE_RESULT',
+        callId: frame.callId,
+        ok: false,
+        error: {
+          code: 'forbidden_service',
+          message:
+            'no service-call gateway available — either HELLO.services was empty ' +
+            'or the transport was not started with the services option',
+        },
+      })
+      this.auditServiceCall(frame, 'forbidden_service', Date.now() - t0)
+      return
+    }
+    this.serviceRouter
+      .route(frame)
+      .then((result) => {
+        this.send(result)
+        this.auditServiceCall(
+          frame,
+          result.ok ? 'ok' : result.error.code,
+          Date.now() - t0,
+        )
+      })
+      .catch((err) => {
+        // ServiceCallRouter.route() is contractually catch-all, but defend
+        // against contract violations to keep the connection alive.
+        console.error(`[ws][${this.sessionId}] router.route() threw:`, err)
+        this.send({
+          type: 'SERVICE_RESULT',
+          callId: frame.callId,
+          ok: false,
+          error: {
+            code: 'internal_error',
+            message: err instanceof Error ? err.message : String(err),
+          },
+        })
+        this.auditServiceCall(frame, 'internal_error', Date.now() - t0)
+      })
+  }
+
+  /**
+   * Append a `service_call` audit entry to the hub transcript. Best-effort:
+   * a closed transcript at shutdown must not propagate up into the SERVICE_CALL
+   * reply path. `args` are intentionally NOT included — they're free-form,
+   * potentially user-data-bearing, and large. The admin UI consumes only the
+   * identity + outcome.
+   */
+  private auditServiceCall(frame: ServiceCallFrame, outcome: string, durationMs: number): void {
+    try {
+      ;(this.hub.transcript as unknown as {
+        append: (e: { ts: number; kind: string; data: unknown }) => void
+      }).append({
+        ts: Date.now(),
+        kind: 'service_call',
+        data: {
+          from: frame.from,
+          type: frame.service.type,
+          impl: frame.service.impl,
+          ownerKind: frame.service.owner.kind,
+          ownerId: frame.service.owner.id,
+          method: frame.method,
+          outcome,
+          durationMs,
+        },
+      })
+    } catch {
+      // ignore — transcript may be closed at shutdown
     }
   }
 
@@ -262,6 +363,24 @@ export class Session {
           clientName: frame.client?.name,
           clientVersion: frame.client?.version,
         },
+        // Surface HELLO.services to the admin UI so the operator reviewing
+        // this application can see the ACL the client is requesting BEFORE
+        // approving — including per-decl method narrowing (v1.2). Pre-
+        // validated above (illegal patterns reject HELLO); here we just
+        // copy the shape across the protocol/core seam.
+        ...(Array.isArray(frame.services) && frame.services.length > 0
+          ? {
+              services: frame.services.map((s) => ({
+                type: s.type,
+                impl: s.impl,
+                owner: { kind: s.owner.kind, id: s.owner.id },
+                ...(s.config !== undefined ? { config: s.config } : {}),
+                ...(Array.isArray(s.methods) && s.methods.length > 0
+                  ? { methods: [...s.methods] }
+                  : {}),
+              })),
+            }
+          : {}),
       })
       this.pendingApplicationId = admission.applicationId
       const decision = await admission.decision
@@ -309,6 +428,34 @@ export class Session {
       }
       this.participants.set(decl.id, participant)
       created.push(participant)
+    }
+
+    // --- service router setup (protocol v1.1) ----------------------------
+    // Only spin up a router if BOTH the transport supplies a gateway AND
+    // the client declared services. Either missing → no service support
+    // on this session; SERVICE_CALL gets forbidden_service.
+    if (this.opts.services && Array.isArray(frame.services) && frame.services.length > 0) {
+      const validation = validateServiceDecls(frame.services)
+      if (!validation.ok) {
+        // We already registered agents above; tear them down before bailing.
+        for (const p of created) {
+          try {
+            this.hub.unregister(p.id)
+          } catch {
+            /* ignore */
+          }
+        }
+        this.sendReject('bad_hello', validation.reason)
+        this.terminate()
+        return
+      }
+      this.serviceRouter = new ServiceCallRouter({
+        gateway: this.opts.services,
+        declarations: frame.services,
+        sessionAgentIds: frame.agents.map((a) => a.id),
+        warn: (msg, ctx) =>
+          console.warn(`[ws][${this.sessionId}] ${msg}`, ctx ?? {}),
+      })
     }
 
     this.send({
@@ -414,6 +561,15 @@ export class Session {
       }
     }
     this.participants.clear()
+    // Best-effort detach of any service handles this session lazy-attached.
+    // dispose() never throws; warn-logs internally.
+    if (this.serviceRouter) {
+      const router = this.serviceRouter
+      this.serviceRouter = undefined
+      router.dispose().catch((err) => {
+        console.error(`[ws][${this.sessionId}] router.dispose() failed:`, err)
+      })
+    }
     for (const h of this.closedHandlers) {
       try {
         h()
@@ -423,4 +579,77 @@ export class Session {
     }
     this.closedHandlers = []
   }
+}
+
+/**
+ * Shape-check the `services` array a client sent in HELLO. Validating
+ * here (not inside the router) means malformed declarations are caught
+ * before we promise the client a service-enabled session.
+ *
+ * Returns `{ ok: true }` on success or `{ ok: false, reason }` for the
+ * REJECT message. We intentionally do NOT validate `config` here — that's
+ * the plugin's job at first-attach time.
+ */
+function validateServiceDecls(
+  decls: readonly ServiceUseDecl[],
+): { ok: true } | { ok: false; reason: string } {
+  for (let i = 0; i < decls.length; i++) {
+    const d = decls[i]!
+    if (!d || typeof d !== 'object') {
+      return { ok: false, reason: `services[${i}] must be an object` }
+    }
+    if (typeof d.type !== 'string' || !d.type) {
+      return { ok: false, reason: `services[${i}].type must be a non-empty string` }
+    }
+    if (typeof d.impl !== 'string' || !d.impl) {
+      return { ok: false, reason: `services[${i}].impl must be a non-empty string` }
+    }
+    const owner = d.owner as { kind?: unknown; id?: unknown } | undefined
+    if (!owner || typeof owner !== 'object') {
+      return { ok: false, reason: `services[${i}].owner must be an object` }
+    }
+    if (owner.kind !== 'agent' && owner.kind !== 'workflow-run' && owner.kind !== 'shared') {
+      return {
+        ok: false,
+        reason: `services[${i}].owner.kind must be 'agent' | 'workflow-run' | 'shared'`,
+      }
+    }
+    if (typeof owner.id !== 'string' || !owner.id) {
+      return { ok: false, reason: `services[${i}].owner.id must be a non-empty string` }
+    }
+    if (owner.id === 'self' && owner.kind !== 'agent') {
+      return {
+        ok: false,
+        reason: `services[${i}].owner.id='self' only valid when owner.kind='agent'`,
+      }
+    }
+    // v1.2: per-method ACL narrowing. Optional; when set must be an array
+    // of strings with at most one dot per name (same as the type-level
+    // allowlist). Empty array is rejected — that's a footgun that would
+    // silently forbid every method.
+    if (d.methods !== undefined) {
+      if (!Array.isArray(d.methods)) {
+        return { ok: false, reason: `services[${i}].methods must be an array of strings` }
+      }
+      if (d.methods.length === 0) {
+        return {
+          ok: false,
+          reason: `services[${i}].methods is empty — omit the field for "all methods", do not pass []`,
+        }
+      }
+      for (let j = 0; j < d.methods.length; j++) {
+        const m = d.methods[j]
+        if (typeof m !== 'string' || !m) {
+          return { ok: false, reason: `services[${i}].methods[${j}] must be a non-empty string` }
+        }
+        if (m.split('.').length > 2) {
+          return {
+            ok: false,
+            reason: `services[${i}].methods[${j}]='${m}' — at most one dot per wire method`,
+          }
+        }
+      }
+    }
+  }
+  return { ok: true }
 }

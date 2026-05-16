@@ -14,10 +14,13 @@ import {
   type ManagedAgentLifecycle,
   type ManagedAgentSpec,
   type ParticipantId,
+  type ServiceTrashRef,
+  type ServicesAdminSurface,
   type Space,
   type TaskId,
   type WorkerRecord,
 } from '@aipehub/core'
+import { PROTOCOL_VERSION } from '@aipehub/protocol'
 
 const log = createLogger('web')
 
@@ -27,6 +30,7 @@ import {
   ManifestError,
   parseManifest,
   renderAgentManifest,
+  validateUsesArray,
   type ParsedAgent,
 } from './manifest.js'
 
@@ -117,6 +121,14 @@ export interface WebServerOptions {
    * runner. When absent, the workflow API endpoints return 404.
    */
   workflows?: WorkflowSurface
+  /**
+   * Optional Hub Services admin surface (PR-11). The host wires
+   * `hubServices.asAdminSurface()` here. When absent, all
+   * `/api/admin/services/...` endpoints return 503 so the admin UI
+   * can hide the tab cleanly. Web has no runtime dep on
+   * `@aipehub/services-sdk` — the surface is plain types in `@aipehub/core`.
+   */
+  services?: ServicesAdminSurface
 }
 
 /**
@@ -240,6 +252,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     adminLoginLimiter,
     lifecycle: opts.lifecycle,
     workflows: opts.workflows,
+    services: opts.services,
   }
 
   const server = createServer((req, res) => {
@@ -300,6 +313,7 @@ interface HandlerCtx {
   adminLoginLimiter: RateLimiter
   lifecycle: ManagedAgentLifecycle | undefined
   workflows: WorkflowSurface | undefined
+  services: ServicesAdminSurface | undefined
 }
 
 /**
@@ -946,6 +960,158 @@ async function handle(
     return
   }
 
+  // --- Hub Services admin (v2.2) ------------------------------------------
+  // All endpoints require admin auth. When the host didn't supply a
+  // services surface (Hub Services failed to bootstrap, or this is an
+  // embedded use without the host wiring), every route returns 503 so
+  // the UI can hide the tab cleanly rather than render a half-broken
+  // page. Errors get translated to status:
+  //   PluginNotFoundError      → 404
+  //   TrashRestoreConflictError → 409
+  //   ServiceConfigError       → 400
+  //   everything else          → 500
+
+  if (method === 'GET' && path === '/api/admin/services/plugins') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    sendJson(res, { plugins: ctx.services.listPlugins() })
+    return
+  }
+
+  // Describe one (plugin, owner) pair. Returns `{ snapshot: null }`
+  // (HTTP 200) when the plugin has no data for the owner — the admin
+  // UI uses that to keep the row in the table greyed out.
+  const describeMatch = path.match(
+    /^\/api\/admin\/services\/owners\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/,
+  )
+  if (method === 'GET' && describeMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    const [, type, impl, ownerKind, ownerId] = describeMatch
+    try {
+      const snap = await ctx.services.describe({
+        type: decodeURIComponent(type!),
+        impl: decodeURIComponent(impl!),
+        owner: { kind: decodeURIComponent(ownerKind!), id: decodeURIComponent(ownerId!) },
+      })
+      sendJson(res, { snapshot: snap })
+    } catch (err) {
+      sendServiceError(res, err)
+    }
+    return
+  }
+
+  // Soft-delete an owner's data for one plugin.
+  if (method === 'DELETE' && describeMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    const [, type, impl, ownerKind, ownerId] = describeMatch
+    // readJsonBody returns undefined on empty body. Treat that as
+    // "no reason supplied" rather than throwing.
+    const raw = await readJsonBody(req).catch(() => undefined)
+    const body = (raw && typeof raw === 'object' ? raw : {}) as { reason?: string }
+    try {
+      const ref = await ctx.services.softDelete({
+        type: decodeURIComponent(type!),
+        impl: decodeURIComponent(impl!),
+        owner: { kind: decodeURIComponent(ownerKind!), id: decodeURIComponent(ownerId!) },
+        by: admin.id,
+        ...(typeof body.reason === 'string' && body.reason.length > 0 ? { reason: body.reason } : {}),
+      })
+      sendJson(res, { ok: true, ref })
+    } catch (err) {
+      sendServiceError(res, err)
+    }
+    return
+  }
+
+  // List all trash entries across plugins. Sorted newest-first so the
+  // admin UI shows recent trash at the top.
+  if (method === 'GET' && path === '/api/admin/services/trash') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    try {
+      const all = await ctx.services.listTrash()
+      const sorted = [...all].sort((a, b) => b.deletedAt - a.deletedAt)
+      sendJson(res, { trash: sorted })
+    } catch (err) {
+      sendServiceError(res, err)
+    }
+    return
+  }
+
+  // Restore via POST so the body can carry the full ServiceTrashRef
+  // (the path alone doesn't have all the fields the plugin needs).
+  // Returns 409 if the original owner slot is occupied.
+  const restoreMatch = path.match(/^\/api\/admin\/services\/trash\/([^/]+)\/([^/]+)\/([^/]+)\/restore$/)
+  if (method === 'POST' && restoreMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    const [, type, impl, id] = restoreMatch
+    const t = decodeURIComponent(type!)
+    const i = decodeURIComponent(impl!)
+    const refId = decodeURIComponent(id!)
+    try {
+      // Find the ref in the union — saves an admin from having to
+      // POST the whole TrashRef body. The set is small (admin trash);
+      // a linear scan is fine.
+      const all = await ctx.services.listTrash()
+      const ref = all.find((r) => r.type === t && r.impl === i && r.id === refId)
+      if (!ref) { sendJson(res, { error: 'trash entry not found' }, 404); return }
+      await ctx.services.restore(ref)
+      sendJson(res, { ok: true })
+    } catch (err) {
+      sendServiceError(res, err)
+    }
+    return
+  }
+
+  // Hard delete one trash entry. Irreversible.
+  const hardDeleteMatch = path.match(/^\/api\/admin\/services\/trash\/([^/]+)\/([^/]+)\/([^/]+)$/)
+  if (method === 'DELETE' && hardDeleteMatch) {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    const [, type, impl, id] = hardDeleteMatch
+    const t = decodeURIComponent(type!)
+    const i = decodeURIComponent(impl!)
+    const refId = decodeURIComponent(id!)
+    try {
+      const all = await ctx.services.listTrash()
+      const ref = all.find((r) => r.type === t && r.impl === i && r.id === refId)
+      if (!ref) { sendJson(res, { error: 'trash entry not found' }, 404); return }
+      await ctx.services.hardDelete(ref)
+      sendJson(res, { ok: true })
+    } catch (err) {
+      sendServiceError(res, err)
+    }
+    return
+  }
+
+  // Manual sweep — admin button "purge expired now". Returns the same
+  // `{ scanned, purged }` shape the periodic sweeper logs.
+  if (method === 'POST' && path === '/api/admin/services/sweep') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
+    try {
+      if (!ctx.services.sweepExpired) {
+        sendJson(res, { error: 'manual sweep not supported by this host' }, 405)
+        return
+      }
+      const out = await ctx.services.sweepExpired()
+      sendJson(res, { ok: true, ...out })
+    } catch (err) {
+      sendServiceError(res, err)
+    }
+    return
+  }
+
   // Edit one. Same body shape as POST. Lifecycle.start on the new
   // record reloads the live agent (stop+start).
   const editAgentMatch = path.match(/^\/api\/admin\/agents\/([^/]+)$/)
@@ -1028,7 +1194,10 @@ async function handle(
   // Remove. Lifecycle.stop first so the live agent leaves the registry,
   // then erase from agents.json. A managed agent that fails to stop
   // (e.g. its provider is mid-call) is still removed from disk — the
-  // next boot won't bring it back.
+  // next boot won't bring it back. After the record is gone we ping
+  // `lifecycle.onAgentRemoved` (PR-10) so the host can soft-delete
+  // every Hub Service this agent's data lives in; failures here are
+  // logged but never roll back the deletion.
   if (method === 'DELETE' && editAgentMatch) {
     const admin = await requireAdmin(ctx, req, res)
     if (!admin) return
@@ -1038,6 +1207,11 @@ async function handle(
     }
     const ok = await ctx.space.removeAgent(id)
     if (!ok) { sendJson(res, { error: `unknown agent '${id}'` }, 404); return }
+    if (ctx.lifecycle?.onAgentRemoved) {
+      await ctx.lifecycle.onAgentRemoved(id).catch((err) =>
+        log.error('lifecycle.onAgentRemoved failed', { id, err }),
+      )
+    }
     sendJson(res, { ok: true })
     return
   }
@@ -1091,6 +1265,47 @@ async function handle(
     const ok = ctx.hub.rejectApplication(appId, body?.reason || 'rejected by admin', admin.id)
     if (!ok) { sendJson(res, { error: `unknown application ${appId}` }, 404); return }
     sendJson(res, { ok: true })
+    return
+  }
+
+  // --- admin: prometheus-style metrics (v1.2 observability) ---------------
+  // Returns a plain-text response in OpenMetrics / Prometheus format.
+  // Scrape-friendly: no JSON, stable key names, HELP/TYPE annotations.
+  // Auth-required (admin) because the leaderboard exposes participant ids.
+  if (method === 'GET' && path === '/api/admin/metrics') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const text = renderMetrics(ctx.hub)
+    res.writeHead(200, {
+      // OpenMetrics content-type so Prometheus's scraper does the right thing.
+      'content-type': 'text/plain; version=0.0.4; charset=utf-8',
+    })
+    res.end(text)
+    return
+  }
+
+  // --- admin: SERVICE_CALL audit (v1.1 services-over-ws) ----------------
+  // Returns the most recent `service_call` transcript entries (newest-first).
+  // Caps default at 200 to keep the response small; admins who need more
+  // can pass `?limit=N` (max 2000). Used by the admin UI's services audit
+  // panel and by smoke tests verifying SERVICE_CALL frames left a trail.
+  if (method === 'GET' && path === '/api/admin/transcript/service-calls') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const u = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+    const requested = Number.parseInt(u.searchParams.get('limit') || '200', 10)
+    const limit = Number.isFinite(requested) ? Math.max(1, Math.min(2000, requested)) : 200
+    const filter = (u.searchParams.get('type') || '').trim() || null
+    const all = ctx.hub.transcript.all()
+    const calls = []
+    for (let i = all.length - 1; i >= 0 && calls.length < limit; i--) {
+      const e = all[i]!
+      if (e.kind !== 'service_call') continue
+      const data = e.data as { type: string }
+      if (filter && data.type !== filter) continue
+      calls.push({ seq: e.seq, ts: e.ts, ...e.data })
+    }
+    sendJson(res, { calls })
     return
   }
 
@@ -1557,6 +1772,13 @@ function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
       managed.providerLabel = body.providerLabel
     }
   }
+  // Hub Services declarations (v2.2). Same plugin-agnostic checks as
+  // the manifest path — both routes must accept identical shapes so
+  // an admin can switch between "paste YAML" and "fill the form"
+  // without losing any field.
+  if (body.uses !== undefined) {
+    managed.uses = validateUsesArray(body.uses, 'uses')
+  }
   const out: ParsedAgent = { id: body.id, capabilities, managed }
   if (typeof body.displayName === 'string') out.displayName = body.displayName
   return out
@@ -1578,6 +1800,181 @@ function publicAgent(rec: AgentRecord, hub: Hub) {
 function sendJson(res: ServerResponse, data: unknown, status = 200): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
   res.end(JSON.stringify(data))
+}
+
+/**
+ * Render `hub` state as a Prometheus / OpenMetrics text exposition.
+ *
+ * Format spec: https://prometheus.io/docs/instrumenting/exposition_formats/
+ *
+ * Choice of metrics (deliberately narrow — every counter / gauge below is
+ * derived from data the hub already keeps in memory or the transcript;
+ * no new bookkeeping required):
+ *
+ *   - `aipehub_protocol_version`       1, labelled with the wire version.
+ *   - `aipehub_participants` gauge      total live participants by kind.
+ *   - `aipehub_tasks_total` counter     completed tasks by terminal kind.
+ *   - `aipehub_pending_applications` gauge  unresolved HELLO admissions.
+ *   - `aipehub_service_calls_total` counter  SERVICE_CALL frames by outcome.
+ *   - `aipehub_service_call_duration_ms_sum` counter / `_count` —
+ *     classic sum/count pair giving you a per-(type,impl) mean over time.
+ *
+ * Histogram buckets are NOT exposed — they'd require runtime bookkeeping
+ * the hub doesn't have. Mean + count is enough for first-pass dashboards;
+ * v1.3 streaming RFC tracks adding bucket support.
+ *
+ * **Performance**: walks the transcript once. With a typical 1k-10k entry
+ * transcript and Prometheus's 15-30s scrape interval, this is negligible.
+ * If a deployment hits 100k+ entries the right next step is to maintain a
+ * rolling counter — out of scope for v1.2.
+ */
+export function renderMetrics(hub: Hub): string {
+  const lines: string[] = []
+  const w = (...ls: string[]) => { for (const l of ls) lines.push(l) }
+
+  // --- protocol version (info-style metric) ----------------------------------
+  w(
+    '# HELP aipehub_protocol_version Wire protocol version (info metric).',
+    '# TYPE aipehub_protocol_version gauge',
+    `aipehub_protocol_version{version="${PROTOCOL_VERSION_LITERAL}"} 1`,
+    '',
+  )
+
+  // --- participants by kind ---------------------------------------------------
+  const participants = hub.participants()
+  const byKind: Record<string, number> = {}
+  for (const p of participants) {
+    byKind[p.kind] = (byKind[p.kind] ?? 0) + 1
+  }
+  w(
+    '# HELP aipehub_participants Number of live participants, by kind.',
+    '# TYPE aipehub_participants gauge',
+  )
+  for (const [kind, count] of Object.entries(byKind)) {
+    w(`aipehub_participants{kind="${escapeLabel(kind)}"} ${count}`)
+  }
+  if (Object.keys(byKind).length === 0) {
+    // Emit a zero so the metric exists even before anyone joins.
+    w('aipehub_participants 0')
+  }
+  w('')
+
+  // --- task outcomes (counter from transcript) -------------------------------
+  // Aggregating from transcript means counters reset on host restart — fine
+  // for Prometheus (which expects counter resets), and avoids extra state.
+  const taskCounts: Record<string, number> = { ok: 0, failed: 0, cancelled: 0, no_participant: 0 }
+  let pendingApps = 0
+  // SERVICE_CALL audit metrics.
+  const svcCalls: Record<string, number> = {}     // key: "type|impl|outcome"
+  const svcDurSum: Record<string, number> = {}    // key: "type|impl"
+  const svcDurCnt: Record<string, number> = {}    // key: "type|impl"
+
+  for (const e of hub.transcript.all()) {
+    if (e.kind === 'task_result') {
+      taskCounts[e.data.kind] = (taskCounts[e.data.kind] ?? 0) + 1
+    } else if (e.kind === 'service_call') {
+      const d = e.data as { type: string; impl: string; outcome: string; durationMs: number }
+      const okey = `${d.type}|${d.impl}|${d.outcome}`
+      svcCalls[okey] = (svcCalls[okey] ?? 0) + 1
+      const dkey = `${d.type}|${d.impl}`
+      // Prometheus convention: durations are non-negative. Clamp at zero to
+      // defend against clock skew (Date.now() going backwards mid-call) and
+      // bogus client-reported negatives. Without this, sum-counters can
+      // decrease across scrapes — a violation that breaks rate() queries.
+      const dur =
+        Number.isFinite(d.durationMs) && d.durationMs >= 0 ? d.durationMs : 0
+      svcDurSum[dkey] = (svcDurSum[dkey] ?? 0) + dur
+      svcDurCnt[dkey] = (svcDurCnt[dkey] ?? 0) + 1
+    }
+  }
+  pendingApps = hub.pendingApplications().length
+
+  w(
+    '# HELP aipehub_tasks_total Tasks that reached a terminal state, by kind.',
+    '# TYPE aipehub_tasks_total counter',
+  )
+  for (const [kind, n] of Object.entries(taskCounts)) {
+    w(`aipehub_tasks_total{kind="${escapeLabel(kind)}"} ${n}`)
+  }
+  w('')
+
+  w(
+    '# HELP aipehub_pending_applications Unresolved admission applications waiting on admin.',
+    '# TYPE aipehub_pending_applications gauge',
+    `aipehub_pending_applications ${pendingApps}`,
+    '',
+  )
+
+  // --- SERVICE_CALL counters --------------------------------------------------
+  w(
+    '# HELP aipehub_service_calls_total SERVICE_CALL frames resolved, by outcome.',
+    '# TYPE aipehub_service_calls_total counter',
+  )
+  if (Object.keys(svcCalls).length === 0) {
+    w('aipehub_service_calls_total 0')
+  } else {
+    for (const [key, n] of Object.entries(svcCalls)) {
+      const [type, impl, outcome] = key.split('|') as [string, string, string]
+      w(
+        `aipehub_service_calls_total{type="${escapeLabel(type)}",impl="${escapeLabel(impl)}",outcome="${escapeLabel(outcome)}"} ${n}`,
+      )
+    }
+  }
+  w('')
+
+  w(
+    '# HELP aipehub_service_call_duration_ms_sum Cumulative latency of all SERVICE_CALL frames.',
+    '# TYPE aipehub_service_call_duration_ms_sum counter',
+  )
+  for (const [key, n] of Object.entries(svcDurSum)) {
+    const [type, impl] = key.split('|') as [string, string]
+    w(
+      `aipehub_service_call_duration_ms_sum{type="${escapeLabel(type)}",impl="${escapeLabel(impl)}"} ${n}`,
+    )
+  }
+  w('')
+
+  w(
+    '# HELP aipehub_service_call_duration_ms_count Count of SERVICE_CALL frames (mate of the _sum series).',
+    '# TYPE aipehub_service_call_duration_ms_count counter',
+  )
+  for (const [key, n] of Object.entries(svcDurCnt)) {
+    const [type, impl] = key.split('|') as [string, string]
+    w(
+      `aipehub_service_call_duration_ms_count{type="${escapeLabel(type)}",impl="${escapeLabel(impl)}"} ${n}`,
+    )
+  }
+  // Trailing newline — Prometheus accepts both with/without, but the
+  // de-facto convention is one.
+  return lines.join('\n') + '\n'
+}
+
+// Prometheus label values: backslash, double-quote, and newline are
+// the only chars that need escaping. Everything else is opaque.
+function escapeLabel(s: string): string {
+  return s.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n')
+}
+
+// Stable string alias used inside `renderMetrics`. Hoisted so the
+// label literal doesn't materialise per-scrape.
+const PROTOCOL_VERSION_LITERAL: string = PROTOCOL_VERSION
+
+/**
+ * Translate a `@aipehub/services-sdk` typed error to an HTTP status.
+ * The web layer doesn't import the sdk's errors (it stays decoupled
+ * from the services package). We pattern-match on the error name —
+ * those names are stable string constants set in the sdk's
+ * `new.target.name` and round-trip across module boundaries.
+ */
+function sendServiceError(res: ServerResponse, err: unknown): void {
+  const e = err as { name?: string; message?: string }
+  const name = e?.name ?? ''
+  const msg = e?.message ?? String(err)
+  let status = 500
+  if (name === 'PluginNotFoundError') status = 404
+  else if (name === 'TrashRestoreConflictError') status = 409
+  else if (name === 'ServiceConfigError') status = 400
+  sendJson(res, { error: msg, code: name || 'unknown' }, status)
 }
 
 /**

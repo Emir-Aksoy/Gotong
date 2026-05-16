@@ -1,0 +1,42 @@
+{
+  "name": "@aipehub/cli",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AipeHub CLI — bootstrap sidecar agents, ping a hub, inspect services. Zero install needed beyond `npx @aipehub/cli`.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AipeHub/AipeHub.git",
+    "directory": "packages/cli"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "aipehub": "./bin/aipehub.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "bin", "templates", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aipehub/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0",
+    "ws": "^8.18.0",
+    "@types/ws": "^8.5.13"
+  }
+}

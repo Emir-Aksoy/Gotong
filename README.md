@@ -252,6 +252,92 @@ await serveWeb(hub, { port: 3000 })
 
 Full runnable demo in [`examples/open-space`](examples/open-space). `pnpm demo:open-space` spins host + agent in one terminal, then point a browser at the two URLs it prints.
 
+## Hub Services — agent memory, artifacts, datastores (v2.2)
+
+An agent can declare what state it wants the host to keep on its
+behalf. Three first-party "services" ship today; the plumbing is
+plugin-from-day-1 so adding a fourth is a separate npm package.
+
+```yaml
+# templates/agents/industry-coach-with-memory.yaml
+schema: aipehub.agent/v1
+agent:
+  id: industry-coach
+  capabilities: [intake]
+  provider: anthropic
+  model: claude-opus-4-7
+  system: |
+    Use memory.recall before answering; artifact.write the report
+    afterwards; cases.sql for structured industry comparisons.
+  uses:
+    - { type: memory,    impl: file,   config: { kinds: [episodic, semantic] } }
+    - { type: artifact,  impl: file,   config: { name: industry-reports } }
+    - { type: datastore, impl: sqlite, config: { name: cases, schema: "..." } }
+```
+
+At spawn time the host resolves each `uses:` entry to a typed handle
+the agent reads from `ctx.memory`, `ctx.artifact`, `ctx.datastore.<name>`.
+Owner-based isolation is the default — two agents asking for `memory:file`
+get two different stores. Data layout lives under `<space>/services/`:
+
+```
+<space>/services/
+├─ plugins.json                    # which plugins to load (auto-seeded)
+├─ memory/file/agent/<agentId>/    # one dir per (plugin, owner)
+├─ artifact/file/agent/<agentId>/
+└─ datastore/sqlite/agent/<agentId>/<name>.sqlite
+```
+
+Soft delete is a click in the admin "服务 / Services" tab; data moves
+to per-plugin `.trash/`, lives 30 days, then a background sweeper
+hard-deletes it. Restore is one POST until then. Full design is in
+[`docs/services-rfc.md`](docs/services-rfc.md).
+
+| Package | What it provides |
+|---|---|
+| `@aipehub/services-sdk` | `ServicePlugin` contract, registry, loader. The seam plugin authors implement. |
+| `@aipehub/service-memory-file` | First-party `memory:file` — episodic / semantic / working as JSONL. |
+| `@aipehub/service-artifact-file` | First-party `artifact:file` — per-owner directories of files with MIME + size guards. |
+| `@aipehub/service-datastore-sqlite` | First-party `datastore:sqlite` — KV + raw SQL on one `.sqlite` per declared name. |
+
+### Writing your own plugin
+
+```ts
+// my-plugin/src/index.ts
+import type { ServicePlugin } from '@aipehub/services-sdk'
+
+class MyPlugin implements ServicePlugin {
+  readonly type = 'memory'
+  readonly impl = 'redis'
+  readonly version = '0.1.0'
+
+  async init(ctx) { /* open the redis pool */ }
+  async validateConfig(raw) { /* parse + reject bad shapes */ }
+  async attach(owner, config) { /* return a MemoryHandle */ }
+  async detach(owner) { /* close the per-owner cache */ }
+  async softDelete(owner) { /* return a TrashRef; the host stores it */ }
+  async restore(ref) { /* throws TrashRestoreConflictError on collision */ }
+  async hardDelete(ref) { /* irreversible */ }
+  async describe(owner) { /* admin UI snapshot — sizeBytes, preview */ }
+  async shutdown() { /* drain + close */ }
+}
+
+export default () => new MyPlugin()
+```
+
+Drop the package name into `<space>/services/plugins.json` and restart
+the host — `loadPlugins` dynamic-imports the entry, calls `init`, and
+the plugin is available to every agent's yaml `uses:`. Plugin load
+failures are non-fatal: a bad plugin shows up in the boot log but
+doesn't crash the host.
+
+> **Deployment note**: the host resolves plugin packages from its own
+> `node_modules/`, so third-party plugins need to be installed where
+> the host can see them — `pnpm add my-org/aipehub-redis-memory` in
+> the host workspace, or a `package.json` dependency on the deploy
+> image. Putting the package name in `plugins.json` alone is not enough
+> if the package itself isn't on disk.
+
 ## Packages
 
 | Package | Purpose |
@@ -265,6 +351,10 @@ Full runnable demo in [`examples/open-space`](examples/open-space). `pnpm demo:o
 | `@aipehub/llm` | `LlmAgent` base class + `LlmProvider` interface + `MockLlmProvider` |
 | `@aipehub/llm-anthropic` | Anthropic Claude provider (peer dep: `@anthropic-ai/sdk`) |
 | `@aipehub/llm-openai` | OpenAI provider (peer dep: `openai`) |
+| `@aipehub/services-sdk` | Hub Services plugin contract (v2.2) — see the section above |
+| `@aipehub/service-memory-file` | First-party `memory:file` plugin (JSONL on disk) |
+| `@aipehub/service-artifact-file` | First-party `artifact:file` plugin (per-owner dirs, MIME-gated) |
+| `@aipehub/service-datastore-sqlite` | First-party `datastore:sqlite` plugin (KV + SQL) |
 | `@aipehub/mcp-server` | MCP (Model Context Protocol) bridge — let Claude Desktop / Cursor drive a Hub |
 | `aipehub` (PyPI, in `python-sdk/`) | Python SDK — connect Python agents to a Hub over the same wire protocol |
 

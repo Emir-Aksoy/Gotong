@@ -1,0 +1,20 @@
+{
+  "name": "@aipehub/example-industry-consultation-deepseek",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "End-to-end industry consultation pipeline driven by the real DeepSeek-v4-flash API. Reads DEEPSEEK_API_KEY from .env.local at the repo root.",
+  "scripts": {
+    "start": "tsx --env-file=../../.env.local src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/host": "workspace:*",
+    "@aipehub/llm": "workspace:*",
+    "@aipehub/llm-openai": "workspace:*",
+    "@aipehub/services-sdk": "workspace:*",
+    "@aipehub/workflow": "workspace:*",
+    "openai": "^4.70.0"
+  }
+}

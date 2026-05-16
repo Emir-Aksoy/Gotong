@@ -1,0 +1,48 @@
+{
+  "name": "@aipehub/service-datastore-sqlite",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AipeHub datastore service — SQLite-backed implementation. First-party plugin: per-owner KV (single _kv table) + raw SQL on one .sqlite per declared datastore.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AipeHub/AipeHub.git",
+    "directory": "packages/service-datastore-sqlite"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aipehub/services-sdk": "workspace:*",
+    "@aipehub/core": "workspace:*"
+  },
+  "peerDependencies": {
+    "better-sqlite3": ">=11.0.0"
+  },
+  "peerDependenciesMeta": {
+    "better-sqlite3": {
+      "optional": false
+    }
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "better-sqlite3": "^11.5.0",
+    "vitest": "^2.0.0"
+  }
+}

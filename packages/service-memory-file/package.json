@@ -1,0 +1,38 @@
+{
+  "name": "@aipehub/service-memory-file",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AipeHub memory service — file-backed (jsonl) implementation. First-party plugin: episodic / semantic / working memory persisted as append-only JSONL files. Agent's data is private by default per RFC §4.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AipeHub/AipeHub.git",
+    "directory": "packages/service-memory-file"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist", "src", "README.md"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepack": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@aipehub/services-sdk": "workspace:*",
+    "@aipehub/core": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0"
+  }
+}

@@ -62,6 +62,7 @@ import { serveWebSocket } from '@aipehub/transport-ws'
 import { serveWeb } from '@aipehub/web'
 
 import { LocalAgentPool } from './local-agent-pool.js'
+import { bootstrapServices, LifecycleSweeper, type HubServices } from './services/index.js'
 import { createWorkflowController } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 
@@ -215,11 +216,51 @@ async function main(): Promise<void> {
     process.stdout.write(`[hub][seq=${String(e.seq).padStart(2, '0')}] ${describe(e)}\n`)
   })
 
+  // Hub Services (memory / artifact / datastore plugins). Plugin load
+  // failures are non-fatal: a bad plugin shows up in the boot log but
+  // the host continues to start. Agents whose yaml `uses:` references
+  // a missing plugin will fail at spawn time. The instance is held so
+  // we can `shutdownAll` on graceful exit.
+  let services: HubServices | undefined
+  let sweeper: LifecycleSweeper | undefined
+  try {
+    const boot = await bootstrapServices({ space, hub })
+    services = boot.services
+    if (boot.seeded) {
+      log.info('services: bootstrapped (seeded)', {
+        path: `${SPACE_DIR}/services/plugins.json`,
+        ready: boot.ready.map((p) => `${p.type}:${p.impl}`),
+      })
+    } else {
+      log.info('services: bootstrapped', {
+        ready: boot.ready.map((p) => `${p.type}:${p.impl}`),
+        errors: boot.errors.map((e) => e.packageName),
+      })
+    }
+    // Background sweep: hard-delete trash entries past their
+    // expiresAt. Default cadence is 1h — see LifecycleSweeper. The
+    // first tick runs on the next microtask so a host that booted
+    // with already-expired entries from a previous run drains right
+    // away.
+    sweeper = new LifecycleSweeper({ services })
+    sweeper.start()
+  } catch (err) {
+    // `bootstrapServices` itself should never throw — its internals
+    // are all best-effort. But if it does (e.g. permission denied
+    // writing the seed manifest), we log and continue: a host without
+    // services is degraded but still useful for non-service agents.
+    log.error('services: bootstrap failed (continuing without services)', { err })
+  }
+
   // The LocalAgentPool materialises every `agents.json` row that carries
   // a `managed` spec into a live LlmAgent on the Hub. Not a separate
   // service — just a piece of host startup. Run before the Web server
   // boots so API responses include managed agents from the first call.
-  const localAgents = new LocalAgentPool({ hub, space })
+  // `services` is passed through so agents with `uses:` declarations
+  // get their handles attached at spawn time (PR-8). When services
+  // failed to bootstrap, agents without `uses:` still spawn normally;
+  // agents with `uses:` fail loudly with a clear log line.
+  const localAgents = new LocalAgentPool({ hub, space, services })
   await localAgents.start()
 
   // Workflow runners. Optional — the loader silently no-ops when the
@@ -264,6 +305,15 @@ async function main(): Promise<void> {
     host: config.host,
     port: config.wsPort,
     gating: config.gating,
+    // Protocol v1.1 SERVICE_CALL support — only enabled when
+    // bootstrapServices succeeded (i.e. `services` is defined). When
+    // absent, remote agents that declare `services` in HELLO will get
+    // `forbidden_service` on every SERVICE_CALL — graceful degradation.
+    //
+    // HubServices satisfies ServiceCallGateway structurally (attach +
+    // detachFor signatures align; HubServices's richer return types are
+    // tolerated under structural typing).
+    ...(services ? { services } : {}),
   })
   const web = await serveWeb(hub, {
     host: config.host,
@@ -271,6 +321,9 @@ async function main(): Promise<void> {
     cookieSecure: config.cookieSecure,
     lifecycle: localAgents,
     workflows: workflowController,
+    // services may be undefined if bootstrap failed; serveWeb handles
+    // that by responding 503 on the /api/admin/services/* routes.
+    ...(services ? { services: services.asAdminSurface() } : {}),
     ...(allowedHosts ? { allowedHosts } : {}),
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },
   })
@@ -301,6 +354,12 @@ async function main(): Promise<void> {
     try { await ws.close() } catch (err) { log.error('ws close error', { err }) }
     try { await web.close() } catch (err) { log.error('web close error', { err }) }
     try { await localAgents.stopAll() } catch (err) { log.error('local agents stop error', { err }) }
+    if (sweeper) {
+      try { await sweeper.stop() } catch (err) { log.error('sweeper stop error', { err }) }
+    }
+    if (services) {
+      try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }
+    }
     try { await hub.stop() } catch (err) { log.error('hub stop error', { err }) }
     log.info('stopped cleanly')
     process.exit(0)
@@ -335,6 +394,17 @@ function describe(e: TranscriptEntry): string {
       return `REJECT   app=${e.data.applicationId} by ${e.data.by ?? '?'}: ${e.data.reason}`
     case 'evaluation':
       return `EVAL     ${e.data.taskId} rating=${e.data.rating ?? '?'} by ${e.data.by}`
+    case 'service_trashed':
+      return `TRASH    ${e.data.type}:${e.data.impl} owner=${e.data.ownerKind}/${e.data.ownerId} ref=${e.data.ref.id}`
+    case 'service_purged':
+      return `PURGE    ${e.data.type}:${e.data.impl} trashId=${e.data.trashId}`
+    case 'service_call':
+      // v1.2: one line per resolved SERVICE_CALL. Audit lines for OK
+      // calls are noisy at the host's stdout level but useful when
+      // debugging; admins prefer the structured `/api/admin/transcript/
+      // service-calls` view. Either way the data lives in the
+      // transcript.
+      return `SVCCALL  ${e.data.from} ${e.data.type}:${e.data.impl}#${e.data.method} → ${e.data.outcome} (${e.data.durationMs}ms)`
   }
 }
 

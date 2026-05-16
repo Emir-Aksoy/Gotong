@@ -43,6 +43,10 @@
     pendingApplications: [],
     tasks: [],
     known: { admins: [], workers: [] },
+    // Task cards remember their expanded/collapsed state across re-renders.
+    // Plain `Set<TaskId>` — wiped on reload (no localStorage), restored by
+    // clicking transcript rows or the card head again. Memory-only.
+    expandedTasks: new Set(),
   }
 
   // Per-tab filter on the task panel; cleared on reload (no browser storage)
@@ -203,6 +207,20 @@
         // the merge here, just re-pull state. Small, fine for v2.
         refresh().catch((err) => console.error('task refresh failed:', err))
         return
+      case 'service_trashed':
+        // Toast notification + refresh the services tab if it's
+        // currently visible. RFC Q3=A wants the user to know data
+        // moved to trash with a 30-day window.
+        showServicesToast(t.servicesToastTrashed)
+        if (document.body.dataset.activeTab === 'services') {
+          refreshServices().catch((err) => console.warn('services refresh failed:', err))
+        }
+        break
+      case 'service_purged':
+        if (document.body.dataset.activeTab === 'services') {
+          refreshServices().catch(() => {})
+        }
+        break
     }
     renderAll()
   }
@@ -310,9 +328,32 @@
       if (meta.clientName) metaBits.push(`${escapeHtml(t.clientLabel)}: ${escapeHtml(meta.clientName)}${meta.clientVersion ? ' ' + escapeHtml(meta.clientVersion) : ''}`)
       if (meta.remoteAddress) metaBits.push(`${escapeHtml(t.remoteAddress)}: ${escapeHtml(meta.remoteAddress)}`)
       metaBits.push(`${escapeHtml(t.pendingSince)}: ${new Date(app.pendingSince).toLocaleString()}`)
+      // v1.1: HELLO.services declarations. Surface them inline so admins
+      // explicitly see the ACL the client requested before clicking Approve.
+      // No services declared (or v1.0 client) → block stays absent.
+      let servicesBlock = ''
+      const services = Array.isArray(app.services) ? app.services : []
+      if (services.length > 0) {
+        const items = services.map((s) => {
+          const owner = `${escapeHtml(s.owner.kind)}/${escapeHtml(s.owner.id)}`
+          // v1.2: surface per-decl method ACL narrowing so admins know
+          // BEFORE approving whether the client is asking for read-only
+          // access (`methods: ['recall']`) vs full access (no narrowing).
+          // No methods narrowing → "(any method)" placeholder.
+          const methodsArr = Array.isArray(s.methods) ? s.methods : []
+          const methodsLabel = (t.appServicesMethodsAny) || '(any method)'
+          const methodsTxt = methodsArr.length > 0
+            ? methodsArr.map((m) => `<code>${escapeHtml(String(m))}</code>`).join(', ')
+            : `<span class="muted">${escapeHtml(methodsLabel)}</span>`
+          return `<li><code>${escapeHtml(s.type)}:${escapeHtml(s.impl)}</code> <span class="muted">@</span> <code>${owner}</code> <span class="muted">·</span> ${methodsTxt}</li>`
+        }).join('')
+        const label = (t.appServicesRequested) || 'Services requested'
+        servicesBlock = `<div class="pending-services"><div class="pending-services-label">${escapeHtml(label)}</div><ul class="pending-services-list">${items}</ul></div>`
+      }
       card.innerHTML =
         `<div class="t-head"><span class="t-title">${agents}</span></div>` +
         `<div class="pending-meta">${metaBits.join(' · ')}</div>` +
+        servicesBlock +
         `<div class="pending-actions">` +
           `<input class="reject-reason" placeholder="${escapeHtml(t.rejectReason)}" data-id="${escapeHtml(app.id)}" />` +
           `<button class="btn-approve" data-act="approve-app" data-id="${escapeHtml(app.id)}">${escapeHtml(t.approve)}</button>` +
@@ -385,8 +426,10 @@
       return
     }
     for (const v of filtered) {
+      const isOpen = state.expandedTasks.has(v.id)
       const div = document.createElement('div')
-      div.className = `task-card task-${v.status}`
+      div.className = `task-card task-${v.status}` + (isOpen ? ' expanded' : '')
+      div.dataset.taskId = v.id
       const statusLabel =
         v.status === 'pending'   ? t.taskStatusPending
       : v.status === 'done'      ? t.taskStatusDone
@@ -399,20 +442,25 @@
       : s.kind === 'capability' ? `caps=[${s.capabilities.join(',')}]`
       :                            'broadcast'
       const canRetry = v.status === 'failed' || v.status === 'cancelled'
-      div.innerHTML =
-        `<div class="task-head">` +
+      const caret = isOpen ? '▾' : '▸'
+      const headHtml =
+        `<div class="task-head" data-act="toggle-task" data-id="${escapeHtml(v.id)}" role="button" tabindex="0" aria-expanded="${isOpen ? 'true' : 'false'}">` +
+          `<span class="task-caret">${caret}</span>` +
           `<span class="task-status task-status-${v.status}">${escapeHtml(statusLabel)}</span>` +
           `<span class="task-title">${escapeHtml(title)}</span>` +
           `<span class="task-strategy">${escapeHtml(s.kind)} · ${escapeHtml(target)}</span>` +
-        `</div>` +
+        `</div>`
+      const metaHtml =
         `<div class="task-metrics">${taskMetricsHtml(v)}</div>` +
         `<div class="task-meta">` +
-          `<code class="task-id" data-act="copy-task-id" data-id="${escapeHtml(v.id)}" title="click to fill the evaluation form">${escapeHtml(v.id.slice(0, 8))}…</code>` +
+          `<code class="task-id" data-act="copy-task-id" data-id="${escapeHtml(v.id)}" title="${escapeHtml(t.taskIdHint)}">${escapeHtml(v.id.slice(0, 8))}…</code>` +
           (v.result ? ` · ${escapeHtml(resultSummary(v.result))}` : '') +
-        `</div>` +
-        (canRetry
-          ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml(v.id)}">${escapeHtml(t.retry)}</button></div>`
-          : '')
+        `</div>`
+      const retryHtml = canRetry
+        ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml(v.id)}">${escapeHtml(t.retry)}</button></div>`
+        : ''
+      const detailHtml = isOpen ? renderTaskDetail(v) : ''
+      div.innerHTML = headHtml + metaHtml + retryHtml + detailHtml
       root.appendChild(div)
     }
   }
@@ -422,6 +470,214 @@
     if (r.kind === 'failed') return t.sumFailed(r.by, r.error)
     if (r.kind === 'cancelled') return t.sumCancelled(r.reason)
     return t.sumNoParticipant(r.reason)
+  }
+
+  // ── Task detail panel ─────────────────────────────────────────────────
+  //
+  // Rendered inline inside an expanded `.task-card`. Shows:
+  //   • timing summary (created → completed, duration)
+  //   • payload (JSON pretty-printed, collapsed-by-default <details>)
+  //   • output (LLM-shape gets the prose unwrapped; everything else falls
+  //     back to JSON. Token usage / stop reason show as a meta line.)
+  //   • existing evaluations (rating + comment + timestamp)
+  //   • inline evaluation form (re-uses POST /api/admin/evaluate)
+  //
+  // All data comes from the snapshot's `state.tasks` view — no extra HTTP
+  // round-trip is needed to open a card.
+
+  function renderTaskDetail(v) {
+    const sections = []
+
+    // timing
+    const created = new Date(v.createdAt).toLocaleString()
+    const completed = v.completedAt ? new Date(v.completedAt).toLocaleString() : '—'
+    const dur = v.completedAt ? formatDuration(v.completedAt - v.createdAt) : '—'
+    sections.push(
+      `<div class="task-detail-section task-detail-timing">` +
+        `<span><strong>${escapeHtml(t.detailCreated)}</strong> ${escapeHtml(created)}</span>` +
+        `<span><strong>${escapeHtml(t.detailCompleted)}</strong> ${escapeHtml(completed)}</span>` +
+        `<span><strong>${escapeHtml(t.detailDuration)}</strong> ${escapeHtml(dur)}</span>` +
+      `</div>`
+    )
+
+    // payload
+    sections.push(
+      `<details class="task-detail-section" open>` +
+        `<summary>${escapeHtml(t.detailPayload)}</summary>` +
+        `<pre class="task-detail-pre">${escapeHtml(formatJsonPretty(v.task.payload))}</pre>` +
+      `</details>`
+    )
+
+    // output (only when there's a result)
+    if (v.result) {
+      sections.push(renderResultBlock(v.result))
+    }
+
+    // existing evaluations
+    if (Array.isArray(v.evaluations) && v.evaluations.length > 0) {
+      const rows = v.evaluations.map((ev) => {
+        const when = ev.ts ? new Date(ev.ts).toLocaleString() : ''
+        const rating = typeof ev.rating === 'number' ? `★ ${formatScore(ev.rating)}/5` : t.detailCommentOnly
+        const comment = ev.comment ? escapeHtml(ev.comment) : ''
+        const author = ev.from ? `<code>${escapeHtml(ev.from)}</code>` : ''
+        return `<li>` +
+          `<span class="ev-rating">${escapeHtml(rating)}</span>` +
+          (author ? ` <span class="ev-from">${author}</span>` : '') +
+          (when ? ` <span class="ev-ts">${escapeHtml(when)}</span>` : '') +
+          (comment ? `<div class="ev-comment">${comment}</div>` : '') +
+          `</li>`
+      }).join('')
+      sections.push(
+        `<details class="task-detail-section" open>` +
+          `<summary>${escapeHtml(t.detailEvaluations)} (${v.evaluations.length})</summary>` +
+          `<ul class="task-detail-evals">${rows}</ul>` +
+        `</details>`
+      )
+    }
+
+    // inline eval form (only meaningful once the task has a result)
+    if (v.status === 'done' || v.status === 'failed') {
+      sections.push(renderInlineEvalForm(v.id))
+    }
+
+    return `<div class="task-detail">${sections.join('')}</div>`
+  }
+
+  function renderResultBlock(r) {
+    // LLM-shape: { text, stopReason, usage, by }. Unwrap the prose so it's
+    // readable; show meta on a second line. Everything else falls back to
+    // pretty-printed JSON.
+    if (r.kind === 'ok') {
+      const out = r.output
+      if (out && typeof out === 'object' && typeof out.text === 'string') {
+        const meta = []
+        if (out.by) meta.push(`${escapeHtml(t.detailBy)} <code>${escapeHtml(out.by)}</code>`)
+        if (out.stopReason) meta.push(`${escapeHtml(t.detailStopReason)} ${escapeHtml(out.stopReason)}`)
+        if (out.usage) {
+          const u = out.usage
+          const tokens = []
+          if (typeof u.inputTokens === 'number') tokens.push(`in ${u.inputTokens}`)
+          if (typeof u.outputTokens === 'number') tokens.push(`out ${u.outputTokens}`)
+          if (tokens.length) meta.push(`${escapeHtml(t.detailUsage)} ${escapeHtml(tokens.join(' / '))}`)
+        }
+        return (
+          `<details class="task-detail-section" open>` +
+            `<summary>${escapeHtml(t.detailOutput)}</summary>` +
+            (meta.length ? `<div class="task-detail-meta">${meta.join(' · ')}</div>` : '') +
+            `<pre class="task-detail-pre task-detail-text">${escapeHtml(out.text)}</pre>` +
+          `</details>`
+        )
+      }
+      return (
+        `<details class="task-detail-section" open>` +
+          `<summary>${escapeHtml(t.detailOutput)}</summary>` +
+          `<div class="task-detail-meta">${escapeHtml(t.detailBy)} <code>${escapeHtml(r.by)}</code></div>` +
+          `<pre class="task-detail-pre">${escapeHtml(formatJsonPretty(out))}</pre>` +
+        `</details>`
+      )
+    }
+    // failed / cancelled / no-participant → show the reason / error
+    const summary = resultSummary(r)
+    return (
+      `<div class="task-detail-section task-detail-error">` +
+        `<strong>${escapeHtml(t.detailOutput)}</strong> ${escapeHtml(summary)}` +
+      `</div>`
+    )
+  }
+
+  function renderInlineEvalForm(taskId) {
+    // No <form> element — submit is a button click handler (data-act). Keeps
+    // us out of nested-form trouble and lets the same global click delegator
+    // pick it up.
+    return (
+      `<div class="task-detail-section task-detail-eval">` +
+        `<strong>${escapeHtml(t.detailEvaluate)}</strong>` +
+        `<div class="inline-eval-row">` +
+          `<label>${escapeHtml(t.evaluateRating)}` +
+            `<input type="number" min="0" max="5" step="0.1" data-inline-eval-rating="${escapeHtml(taskId)}" />` +
+          `</label>` +
+          `<label class="inline-eval-comment-label">${escapeHtml(t.evaluateComment)}` +
+            `<textarea rows="2" data-inline-eval-comment="${escapeHtml(taskId)}"></textarea>` +
+          `</label>` +
+        `</div>` +
+        `<div class="inline-eval-actions">` +
+          `<button data-act="inline-eval-submit" data-id="${escapeHtml(taskId)}">${escapeHtml(t.evaluateButton)}</button>` +
+          `<span class="inline-eval-msg" data-inline-eval-msg="${escapeHtml(taskId)}"></span>` +
+        `</div>` +
+      `</div>`
+    )
+  }
+
+  function formatJsonPretty(value) {
+    try {
+      return JSON.stringify(value, null, 2)
+    } catch (err) {
+      return String(value)
+    }
+  }
+
+  function formatDuration(ms) {
+    if (!Number.isFinite(ms) || ms < 0) return '—'
+    if (ms < 1000) return `${ms} ms`
+    const s = Math.round(ms / 100) / 10
+    if (s < 60) return `${s.toFixed(1)} s`
+    const m = Math.floor(s / 60)
+    const rem = Math.round(s - m * 60)
+    return `${m}m ${rem}s`
+  }
+
+  async function submitInlineEval(taskId, btn) {
+    const card = btn.closest('.task-card')
+    if (!card) return
+    const ratingEl = card.querySelector(`[data-inline-eval-rating="${CSS.escape(taskId)}"]`)
+    const commentEl = card.querySelector(`[data-inline-eval-comment="${CSS.escape(taskId)}"]`)
+    const msgEl = card.querySelector(`[data-inline-eval-msg="${CSS.escape(taskId)}"]`)
+    if (msgEl) {
+      msgEl.textContent = ''
+      msgEl.classList.remove('ok', 'err')
+    }
+    const ratingStr = (ratingEl?.value ?? '').trim()
+    const rating = ratingStr ? Number(ratingStr) : undefined
+    const comment = (commentEl?.value ?? '').trim() || undefined
+    if (rating == null && !comment) {
+      if (msgEl) {
+        msgEl.textContent = t.evaluateEmpty
+        msgEl.classList.add('err')
+      }
+      return
+    }
+    btn.disabled = true
+    try {
+      await fetchJson('/api/admin/evaluate', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ taskId, rating, comment }),
+      })
+      if (msgEl) {
+        msgEl.textContent = t.evaluateSuccess
+        msgEl.classList.add('ok')
+      }
+      if (commentEl) commentEl.value = ''
+      // Re-render happens automatically when the `evaluation` SSE event
+      // hits — the new row appears in the list above.
+    } catch (err) {
+      if (msgEl) {
+        msgEl.textContent = t.failedAlert(err.message || String(err))
+        msgEl.classList.add('err')
+      }
+    } finally {
+      btn.disabled = false
+    }
+  }
+
+  function expandTaskAndScroll(taskId) {
+    state.expandedTasks.add(taskId)
+    renderTasks()
+    requestAnimationFrame(() => {
+      const sel = `.task-card[data-task-id="${CSS.escape(taskId)}"]`
+      const card = document.querySelector(sel)
+      if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    })
   }
 
   // --- managed agents (v2.1) ---------------------------------------------
@@ -1293,7 +1549,7 @@
   // a `tab-hidden` class. Keeping them in the DOM means cross-tab
   // interactions (e.g. clicking a task_result row in Activity auto-
   // fills the eval form in Tasks) keep working without rewiring.
-  const TABS = ['overview', 'agents', 'workflows', 'tasks', 'activity']
+  const TABS = ['overview', 'agents', 'workflows', 'tasks', 'activity', 'services']
 
   function activeTabFromHash() {
     const h = (location.hash || '').replace(/^#/, '')
@@ -1486,32 +1742,52 @@
 
     document.addEventListener('click', async (e) => {
       const target = e.target
-      // Click a task_result row → autofill evaluation form + jump to
-      // the Tasks tab (the eval form lives there now after the tab
-      // split, otherwise the autofill would be invisible).
-      if (target instanceof HTMLElement && target.dataset.taskid) {
-        dom.eTask.value = target.dataset.taskid
-        gotoTab('tasks')
-        return
-      }
       if (!(target instanceof HTMLElement)) return
-      const act = target.dataset.act
-      const id = target.dataset.id
-      if (!act || !id) return
-      // copy task id to the evaluation form on click — same cross-tab
-      // jump as the transcript-row case above so the autofill is
-      // actually visible in the Tasks tab.
+      // Walk up from the click target to find an actionable ancestor —
+      // lets clicks on inner spans (e.g. .task-caret, .task-title) hit
+      // the .task-head handler instead of falling through.
+      const actEl = target.closest('[data-act]')
+      const act = actEl instanceof HTMLElement ? actEl.dataset.act : undefined
+      const id = actEl instanceof HTMLElement ? actEl.dataset.id : undefined
+      // Click a task_result row in the transcript → jump to the Tasks
+      // tab, expand that task's card, and scroll it into view. Also
+      // autofill the global eval form (kept as a fallback for power
+      // users who prefer typing IDs).
+      const taskRowEl = target.closest('[data-taskid]')
+      if (taskRowEl instanceof HTMLElement && taskRowEl.dataset.taskid) {
+        const tid = taskRowEl.dataset.taskid
+        if (dom.eTask) dom.eTask.value = tid
+        gotoTab('tasks')
+        expandTaskAndScroll(tid)
+        return
+      }
+      if (!act) return
+      // Toggle a task card's expanded state. Targets a row with
+      // data-act="toggle-task" data-id="<taskId>".
+      if (act === 'toggle-task' && id) {
+        if (state.expandedTasks.has(id)) state.expandedTasks.delete(id)
+        else state.expandedTasks.add(id)
+        renderTasks()
+        return
+      }
+      if (act === 'inline-eval-submit' && id && actEl instanceof HTMLButtonElement) {
+        await submitInlineEval(id, actEl)
+        return
+      }
+      if (!id) return
+      // copy task id to the (global) evaluation form on click — same
+      // cross-tab jump as the transcript-row case above.
       if (act === 'copy-task-id') {
-        dom.eTask.value = id
+        if (dom.eTask) dom.eTask.value = id
         gotoTab('tasks')
         return
       }
-      if (target instanceof HTMLButtonElement) target.disabled = true
+      if (actEl instanceof HTMLButtonElement) actEl.disabled = true
       try {
         if (act === 'approve-app') {
           await approveApp(id)
         } else if (act === 'reject-app') {
-          const card = target.closest('.pending-app-card')
+          const card = actEl.closest('.pending-app-card')
           const reasonInput = card?.querySelector('.reject-reason')
           const reason = reasonInput?.value?.trim() || ''
           await rejectApp(id, reason)
@@ -1520,7 +1796,7 @@
         }
       } catch (err) {
         alert(t.failedAlert(err.message || String(err)))
-        if (target instanceof HTMLButtonElement) target.disabled = false
+        if (actEl instanceof HTMLButtonElement) actEl.disabled = false
       }
     })
 
@@ -1546,6 +1822,345 @@
     } catch (err) {
       console.error('initial refresh failed:', err)
     }
+
+    // Services tab: lazy-load on first activation; refresh on every
+    // tab focus thereafter so trash/sweep operations from another
+    // window get picked up. We deliberately don't poll — the SSE
+    // stream pushes `service_trashed` / `service_purged`.
+    document.querySelectorAll('.tabbar-btn[data-tab="services"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        refreshServices().catch((err) => console.warn('services tab load failed:', err))
+      })
+    })
+    if (document.body.dataset.activeTab === 'services') {
+      refreshServices().catch((err) => console.warn('services initial load failed:', err))
+    }
+
+    const sweepBtn = document.getElementById('services-sweep-btn')
+    if (sweepBtn) {
+      sweepBtn.addEventListener('click', async () => {
+        sweepBtn.disabled = true
+        try {
+          const r = await fetchJson('/api/admin/services/sweep', { method: 'POST' })
+          showServicesToast(t.servicesSweepResult(r.scanned, r.purged))
+          await refreshServices()
+        } catch (err) {
+          alert(t.failedAlert(err?.message || String(err)))
+        } finally {
+          sweepBtn.disabled = false
+        }
+      })
+    }
+
+    // SERVICE_CALL audit refresh — just re-pulls /api/admin/transcript/service-calls.
+    const auditRefreshBtn = document.getElementById('services-audit-refresh')
+    if (auditRefreshBtn) {
+      auditRefreshBtn.addEventListener('click', async () => {
+        auditRefreshBtn.disabled = true
+        try {
+          const r = await fetchJson('/api/admin/transcript/service-calls?limit=200')
+          svc.audit = r.calls || []
+          renderServicesAudit()
+        } catch (err) {
+          console.warn('services audit refresh failed:', err)
+        } finally {
+          auditRefreshBtn.disabled = false
+        }
+      })
+    }
+
+    const detailClose = document.getElementById('services-detail-close')
+    const detailBackdrop = document.getElementById('services-detail-modal')
+    if (detailClose) detailClose.addEventListener('click', () => closeServicesDetail())
+    if (detailBackdrop) {
+      detailBackdrop.addEventListener('click', (e) => {
+        if (e.target === detailBackdrop) closeServicesDetail()
+      })
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && detailBackdrop && !detailBackdrop.hidden) closeServicesDetail()
+    })
+
     connectStream(applyEvent)
   })
+
+  // ─── Services tab (v2.2) ──────────────────────────────────────────────
+  //
+  // The tab walks every registered plugin and, for every managed
+  // agent, asks for a per-(plugin, owner) snapshot. Agents that don't
+  // use a given service contribute null snapshots and are filtered
+  // out. The trash sub-view is a flat list across plugins so admins
+  // can see "what's recently been deleted" in one place.
+
+  const svc = {
+    plugins: [],     // [{type, impl, version, description?}]
+    rows: [],        // [{type, impl, owner: {kind,id}, snapshot}]
+    trash: [],       // ServiceTrashRef[]
+    audit: [],       // [{ts, from, type, impl, ownerKind, ownerId, method, outcome, durationMs}]
+    disabled: false, // host didn't supply services
+  }
+
+  async function refreshServices() {
+    const tableEl = document.getElementById('services-table')
+    const tbodyEl = document.getElementById('services-tbody')
+    const emptyEl = document.getElementById('services-plugins-empty')
+    const disabledEl = document.getElementById('services-disabled')
+    const trashTableEl = document.getElementById('services-trash-table')
+    const trashTbodyEl = document.getElementById('services-trash-tbody')
+    const trashEmptyEl = document.getElementById('services-trash-empty')
+    if (!tableEl || !tbodyEl) return
+
+    // Plugin list (or 503 → disabled).
+    let plugins
+    try {
+      const r = await fetch('/api/admin/services/plugins')
+      if (r.status === 503) {
+        svc.disabled = true
+        disabledEl.hidden = false
+        tableEl.hidden = true
+        emptyEl.hidden = true
+        trashTableEl.hidden = true
+        trashEmptyEl.hidden = true
+        return
+      }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      const j = await r.json()
+      plugins = j.plugins || []
+    } catch (err) {
+      console.warn('services: plugins fetch failed', err)
+      return
+    }
+    svc.disabled = false
+    disabledEl.hidden = true
+    svc.plugins = plugins
+    if (plugins.length === 0) {
+      tableEl.hidden = true
+      emptyEl.hidden = false
+    } else {
+      emptyEl.hidden = true
+      tableEl.hidden = false
+    }
+
+    // Per-agent snapshots. We use the cached `ma.agents` list to know
+    // which owners to ask about — same agents the "Agents" tab uses.
+    const rows = []
+    for (const plugin of plugins) {
+      for (const agent of ma.agents || []) {
+        try {
+          const url = `/api/admin/services/owners/${encodeURIComponent(plugin.type)}/${encodeURIComponent(plugin.impl)}/agent/${encodeURIComponent(agent.id)}`
+          const r = await fetchJson(url)
+          if (r.snapshot) {
+            rows.push({
+              type: plugin.type, impl: plugin.impl,
+              owner: { kind: 'agent', id: agent.id },
+              snapshot: r.snapshot,
+            })
+          }
+        } catch (err) {
+          // 404 / 500 — skip and keep going. The user sees the
+          // rows that DID resolve; partial-success beats nothing.
+        }
+      }
+    }
+    svc.rows = rows
+    renderServicesTable()
+
+    // Trash list.
+    try {
+      const r = await fetchJson('/api/admin/services/trash')
+      svc.trash = r.trash || []
+      renderServicesTrash()
+    } catch (err) {
+      console.warn('services: trash fetch failed', err)
+    }
+
+    // SERVICE_CALL audit (v1.1 services-over-ws). Best-effort; if the
+    // endpoint 503s on a v1.0-only host the table just stays hidden.
+    try {
+      const r = await fetchJson('/api/admin/transcript/service-calls?limit=200')
+      svc.audit = r.calls || []
+      renderServicesAudit()
+    } catch (err) {
+      console.warn('services: audit fetch failed', err)
+    }
+  }
+
+  function renderServicesAudit() {
+    const tableEl = document.getElementById('services-audit-table')
+    const tbodyEl = document.getElementById('services-audit-tbody')
+    const emptyEl = document.getElementById('services-audit-empty')
+    if (!tableEl || !tbodyEl) return
+    tbodyEl.innerHTML = ''
+    const calls = svc.audit || []
+    if (calls.length === 0) {
+      tableEl.hidden = true
+      emptyEl.hidden = false
+      return
+    }
+    emptyEl.hidden = true
+    tableEl.hidden = false
+    // calls already arrive newest-first from the API.
+    for (const c of calls) {
+      const tr = document.createElement('tr')
+      const okClass = c.outcome === 'ok' ? '' : ' bad'
+      tr.className = `audit-row${okClass}`
+      tr.innerHTML = `
+        <td>${new Date(c.ts).toLocaleString()}</td>
+        <td><code>${escapeHtml(c.from)}</code></td>
+        <td><code>${escapeHtml(c.type)}:${escapeHtml(c.impl)}</code></td>
+        <td>${escapeHtml(c.ownerKind)}/${escapeHtml(c.ownerId)}</td>
+        <td><code>${escapeHtml(c.method)}</code></td>
+        <td>${escapeHtml(c.outcome)}</td>
+        <td>${c.durationMs}ms</td>
+      `
+      tbodyEl.appendChild(tr)
+    }
+  }
+
+  function renderServicesTable() {
+    const tbodyEl = document.getElementById('services-tbody')
+    if (!tbodyEl) return
+    tbodyEl.innerHTML = ''
+    for (const row of svc.rows) {
+      const tr = document.createElement('tr')
+      tr.innerHTML = `
+        <td><code>${escapeHtml(row.type)}:${escapeHtml(row.impl)}</code></td>
+        <td>${escapeHtml(row.owner.kind)}/${escapeHtml(row.owner.id)}</td>
+        <td>${formatBytes(row.snapshot.sizeBytes)}</td>
+        <td>${row.snapshot.itemCount ?? ''}</td>
+        <td>${row.snapshot.lastAccess ? new Date(row.snapshot.lastAccess).toLocaleString() : ''}</td>
+        <td>
+          <button type="button" class="secondary-btn" data-action="detail">${escapeHtml(t.servicesDetail)}</button>
+          <button type="button" class="danger-btn" data-action="delete">${escapeHtml(t.servicesDelete)}</button>
+        </td>
+      `
+      tr.querySelector('[data-action="detail"]').addEventListener('click', () => openServicesDetail(row))
+      tr.querySelector('[data-action="delete"]').addEventListener('click', () => softDeleteRow(row))
+      tbodyEl.appendChild(tr)
+    }
+  }
+
+  function renderServicesTrash() {
+    const tableEl = document.getElementById('services-trash-table')
+    const tbodyEl = document.getElementById('services-trash-tbody')
+    const emptyEl = document.getElementById('services-trash-empty')
+    if (!tableEl || !tbodyEl) return
+    tbodyEl.innerHTML = ''
+    if (svc.trash.length === 0) {
+      tableEl.hidden = true
+      emptyEl.hidden = false
+      return
+    }
+    emptyEl.hidden = true
+    tableEl.hidden = false
+    for (const ref of svc.trash) {
+      const tr = document.createElement('tr')
+      tr.innerHTML = `
+        <td><code>${escapeHtml(ref.type)}:${escapeHtml(ref.impl)}</code></td>
+        <td>${escapeHtml(ref.ownerKind)}/${escapeHtml(ref.ownerId)}</td>
+        <td>${new Date(ref.deletedAt).toLocaleString()}</td>
+        <td>${new Date(ref.expiresAt).toLocaleString()}</td>
+        <td>${escapeHtml(ref.reason || '')}</td>
+        <td>
+          <button type="button" class="secondary-btn" data-action="restore">${escapeHtml(t.servicesTrashRestore)}</button>
+          <button type="button" class="danger-btn" data-action="hard">${escapeHtml(t.servicesTrashHardDelete)}</button>
+        </td>
+      `
+      tr.querySelector('[data-action="restore"]').addEventListener('click', () => restoreTrash(ref))
+      tr.querySelector('[data-action="hard"]').addEventListener('click', () => hardDeleteTrash(ref))
+      tbodyEl.appendChild(tr)
+    }
+  }
+
+  async function softDeleteRow(row) {
+    try {
+      await fetchJson(`/api/admin/services/owners/${encodeURIComponent(row.type)}/${encodeURIComponent(row.impl)}/agent/${encodeURIComponent(row.owner.id)}`, {
+        method: 'DELETE',
+      })
+      // Toast comes from the SSE event handler so we don't double-fire.
+      await refreshServices()
+    } catch (err) {
+      alert(t.failedAlert(err?.message || String(err)))
+    }
+  }
+
+  async function restoreTrash(ref) {
+    try {
+      await fetchJson(`/api/admin/services/trash/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.impl)}/${encodeURIComponent(ref.id)}/restore`, {
+        method: 'POST',
+      })
+      showServicesToast(t.servicesToastRestored)
+      await refreshServices()
+    } catch (err) {
+      alert(t.failedAlert(err?.message || String(err)))
+    }
+  }
+
+  async function hardDeleteTrash(ref) {
+    if (!confirm(t.servicesConfirmHardDelete)) return
+    try {
+      await fetchJson(`/api/admin/services/trash/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.impl)}/${encodeURIComponent(ref.id)}`, {
+        method: 'DELETE',
+      })
+      showServicesToast(t.servicesToastHardDeleted)
+      await refreshServices()
+    } catch (err) {
+      alert(t.failedAlert(err?.message || String(err)))
+    }
+  }
+
+  function openServicesDetail(row) {
+    const modal = document.getElementById('services-detail-modal')
+    const title = document.getElementById('services-detail-title')
+    const body = document.getElementById('services-detail-body')
+    const img = document.getElementById('services-detail-image')
+    if (!modal || !title || !body) return
+    title.textContent = `${row.type}:${row.impl} — ${row.owner.kind}/${row.owner.id}`
+    const p = row.snapshot.preview
+    if (p && p.base64) {
+      img.src = `data:${p.mime};base64,${p.base64}`
+      img.alt = title.textContent
+      img.hidden = false
+      body.textContent = ''
+    } else if (p && p.text) {
+      img.hidden = true
+      body.textContent = p.text + (p.truncated ? '\n… (truncated)' : '')
+    } else {
+      img.hidden = true
+      body.textContent = `${formatBytes(row.snapshot.sizeBytes)} • ${row.snapshot.itemCount ?? 0} items`
+    }
+    modal.hidden = false
+  }
+
+  function closeServicesDetail() {
+    const modal = document.getElementById('services-detail-modal')
+    if (modal) modal.hidden = true
+  }
+
+  function formatBytes(n) {
+    if (n < 1024) return `${n} B`
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+    return `${(n / 1024 / 1024).toFixed(2)} MB`
+  }
+
+  /**
+   * Tiny ephemeral toast. Lives 4 seconds, then fades. The container
+   * is lazy-created on first use so a page that never touches the
+   * Services tab pays no DOM cost.
+   */
+  function showServicesToast(msg) {
+    let container = document.getElementById('services-toast-container')
+    if (!container) {
+      container = document.createElement('div')
+      container.id = 'services-toast-container'
+      container.className = 'toast-container'
+      document.body.appendChild(container)
+    }
+    const el = document.createElement('div')
+    el.className = 'toast'
+    el.textContent = msg
+    container.appendChild(el)
+    setTimeout(() => el.classList.add('fade'), 3000)
+    setTimeout(() => el.remove(), 4000)
+  }
 })()

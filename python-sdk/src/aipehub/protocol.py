@@ -15,10 +15,11 @@ from __future__ import annotations
 
 from typing import Any
 
-PROTOCOL_VERSION = "1.0"
+PROTOCOL_VERSION = "1.2"
 DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
 HELLO_TIMEOUT_MS = 5_000
 MAX_MISSED_PINGS = 2
+DEFAULT_SERVICE_CALL_TIMEOUT_MS = 30_000
 
 
 def major_version_of(v: str) -> str:
@@ -31,9 +32,18 @@ def hello(
     *,
     agents: list[dict[str, Any]],
     client_name: str = "aipehub-python",
-    client_version: str = "0.5.0",
+    client_version: str = "1.1.0",
     api_key: str | None = None,
+    services: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """Build a HELLO frame.
+
+    ``services`` (v1.1) declares which Hub Services this connection wants
+    to call. Shape mirrors `@aipehub/protocol`'s ``ServiceUseDecl``: each
+    entry is ``{type, impl, owner: {kind, id}, config?}``. Omit (or pass
+    None / empty list) for v1.0-compatible behaviour — no service ACL,
+    SERVICE_CALL frames will get ``forbidden_service``.
+    """
     frame: dict[str, Any] = {
         "type": "HELLO",
         "protocolVersion": PROTOCOL_VERSION,
@@ -42,7 +52,30 @@ def hello(
     }
     if api_key is not None:
         frame["apiKey"] = api_key
+    if services:
+        frame["services"] = services
     return frame
+
+
+def service_call(
+    *,
+    call_id: str,
+    from_agent: str,
+    service_type: str,
+    impl: str,
+    owner: dict[str, str],
+    method: str,
+    args: list[Any],
+) -> dict[str, Any]:
+    """Build a SERVICE_CALL frame (v1.1)."""
+    return {
+        "type": "SERVICE_CALL",
+        "callId": call_id,
+        "from": from_agent,
+        "service": {"type": service_type, "impl": impl, "owner": owner},
+        "method": method,
+        "args": args,
+    }
 
 
 def result(*, kind: str, task_id: str, by: str | None = None, **extras: Any) -> dict[str, Any]:

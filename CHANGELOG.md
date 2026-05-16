@@ -2,7 +2,888 @@
 
 All notable changes to AipeHub are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) at the npm-package level.
 
-The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.0`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
+The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
+
+## Unreleased — v1.2.7 flaky CI: artifact-file describe preview tie-break
+
+CI monitor flagged `Node 20 · TS workspace` on PR #7 (and intermittently
+on PR #8) — the `service-artifact-file` plugin test
+`reports size, itemCount, preview after writes` failed with
+`expected '# one' to match /two/`. Root cause is a `mtimeMs` tie:
+two `h.write(...)` calls happen inside the same millisecond on Linux
+CI filesystems (ext4 / tmpfs ms-granularity), so both files report
+the same mtime, the `>`-tie-break in `ArtifactFilePlugin.describe`
+never overrides `previewSource`, and walk order (alphabetical) keeps
+`one.md` ahead of `two.md`. Node 22 happened to not tie on the same
+input — the test wasn't deterministic.
+
+### Fixed — test inserts a one-tick delay between writes
+
+- `packages/service-artifact-file/tests/plugin.test.ts` —
+  `describe › reports size, itemCount, preview after writes` now
+  sleeps 20 ms between `one.md` and `two.md` writes so mtimes are
+  distinguishable on the slowest CI filesystem. The plugin itself
+  (`src/plugin.ts`) is unchanged — picking the largest-mtime file is
+  still the right behaviour; the fix is in the test's realism, not
+  the implementation. A long-form comment in the test documents the
+  failure mode for future maintainers so the delay isn't optimised
+  away.
+
+### Notes
+
+- 793 tests workspace-wide green (no change in count — this fix is
+  test-only flake remediation).
+- No production code path touched. No wire shape changes. No new
+  public API.
+- This unblocks PR #7 / PR #8 CI determinism on `Node 20` runners.
+
+---
+
+## Unreleased — v1.2.6 plugin shutdown wireMethods rollback
+
+Closes the last "defer-to-v1.2.x" item from the v1.2.4 audit:
+`bootstrapServices` registered third-party wire methods, but
+`shutdownAll` did not roll them back, so a long-lived process
+mounting / unmounting plugins (test harness, future hot-reload)
+leaked entries in the process-wide runtime allowlist.
+
+### Added — `shutdownAll` rolls back `wireMethods`
+
+- `packages/host/src/services/hub-services.ts`'s `shutdownAll` now
+  calls `unregisterServiceMethods(plugin.type, plugin.wireMethods)`
+  after `plugin.shutdown()` for every plugin that registered wire
+  methods at bootstrap. Built-in types are protected by the
+  allowlist's floor invariant; this only removes the third-party
+  additions. Failures are logged with `warn` but never abort the
+  shutdown sweep — symmetric with the existing `plugin.shutdown()`
+  best-effort behaviour.
+- `packages/host/tests/services-bootstrap.test.ts` gains a new
+  describe block (`wireMethods runtime allowlist lifecycle`) with
+  an end-to-end test: bootstrap a fake `notion` plugin with
+  `wireMethods: ['pages.create', 'pages.read']`, assert
+  `getServiceMethods('notion')` shows both methods, then call
+  `shutdownAll()` and assert the entry collapses back to
+  `undefined` (since `notion` has no built-ins).
+
+### Notes
+
+- 459 tests workspace-wide green (+1 over v1.2.5). No new public
+  API. No wire shape changes.
+- The only remaining v1.2.4-deferred item is the `__isAipehubBridge`
+  brand-vs-Symbol choice — left for v1.3 federation work where
+  more brand fields will land at once.
+
+---
+
+## Unreleased — v1.2.5 boundary fuzz + Python SDK docstring
+
+Two leftover items from the v1.2.4 audit's "can defer" list landed
+together: parseVersion boundary fuzz tests and a one-paragraph
+docstring clarifying that `register_service_methods` /
+`unregister_service_methods` are TS-host-only (no Python equivalent).
+
+### Added — `parseVersion` boundary fuzz tests
+
+- `packages/sdk-node/tests/version-mismatch.test.ts` adds four
+  boundary cases for protocolVersion: empty string, negative-prefixed
+  (`'-1.2'`), whitespace-padded (`'  1.2  '`), and multi-component
+  (`'1.2.3.4.5'`). All previously "accidentally safe" — the parser
+  silently fell back to `[0, 0]` and the major-mismatch path returned
+  without warning. Tests pin the behaviour: the SDK neither crashes
+  nor emits a spurious warning on any of these shapes.
+
+### Fixed — Python SDK docstring clarifies host-side scope
+
+- `python-sdk/src/aipehub/services.py` module docstring now says
+  explicitly that the Python SDK is **client-side only**, and that
+  the TypeScript host SDK's `registerServiceMethods` /
+  `unregisterServiceMethods` have no Python counterpart by design
+  (Python sidecars call into Hubs, they don't host one). Avoids
+  future audits asking "where's the Python register/unregister?".
+- Also bumped the docstring header from "(protocol v1.1)" to
+  "(protocol v1.2)" — matches the actual constant in `protocol.py`.
+
+### Notes
+
+- 458 tests workspace-wide green (+4 over v1.2.4). No source-code
+  changes beyond the docstring and four new tests.
+
+---
+
+## Unreleased — v1.2.4 pre-merge docs + regression guard
+
+Third audit pass before merging to main caught two narrow misses:
+the v1.2 `forbidden_method` code never made it into the Error codes
+summary tables, and the v1.2.3 "silent-return doesn't flip the
+sticky flag" fix was not covered by a regression test. Both
+addressed; no source-code changes beyond a test file.
+
+### Fixed — `forbidden_method` listed in Error code tables
+
+- `docs/PROTOCOL.md` "Error codes summary" table gained the row for
+  `forbidden_method` (was listed only in the v1.2 What's-new paragraph
+  at the top, missing from the canonical index at the bottom).
+- `docs/SIDECAR.md` "Symptom / What happened" table gained a row
+  with the same code and a one-sentence diagnosis distinguishing it
+  from `unknown_method`.
+
+### Added — regression guard for v1.2.3 sticky-flag fix
+
+- `packages/sdk-node/tests/version-mismatch.test.ts` adds a white-box
+  test that pins the invariant the v1.2.3 fix established: when
+  `checkServerVersionForServiceNarrowing` returns silently (no
+  narrowing → no warning), `versionMismatchWarned` remains `false`.
+  No realistic scenario lets a single session's silent return turn
+  into a future warn — `opts.services`, `url`, and `PROTOCOL_VERSION`
+  are all immutable per `SessionImpl`. The guard exists to catch
+  future refactors that might quietly re-introduce the bug. Test
+  uses a private-field cast (`session as unknown as { … }`) with a
+  comment explaining why.
+
+### Notes
+
+- 454 tests workspace-wide green (+1 over v1.2.3). No new public
+  API. No wire shape changes.
+
+---
+
+## Unreleased — v1.2.3 code-review polish + examples typecheck fix
+
+Code-review pass over v1.2 / v1.2.1 / v1.2.2 surfaced nine small
+issues. All are now resolved, plus a typecheck regression in examples
+that v1.2 had quietly introduced.
+
+### Fixed — `parseVersion` recognises pre-release tags
+
+- `@aipehub/sdk-node` was parsing protocol version strings via
+  `Number('2-beta')` which is `NaN` → fallback `0`, so a server
+  reporting `'1.2-beta'` looked like v1.0 to a v1.2 client and
+  produced a spurious cross-version warning. New `parseDigits` helper
+  strips the first non-digit suffix off each component, so
+  `'1.2-beta'`, `'1.2-rc.1'`, and `'1.2.3'` all parse correctly.
+- Two new tests in `packages/sdk-node/tests/version-mismatch.test.ts`
+  cover the pre-release and dotted-patch shapes — both must NOT warn
+  when the client is v1.2.
+
+### Fixed — `unregisterServiceMethods` is symmetric with `register`
+
+- The new (v1.2.2) `unregisterServiceMethods` silently returned on
+  invalid `type` / non-array `methods`, while `registerServiceMethods`
+  threw — asymmetric, hides plugin-lifecycle bugs at the worst time
+  (shutdown path). Now throws on the same conditions; "unknown type"
+  is still a silent no-op because deleting nothing is not an error.
+- Test in `packages/transport-ws/tests/extend-allowlist.test.ts`
+  split into two cases: silent no-op on unknown type vs throw on
+  bad input.
+
+### Fixed — federation glue uses brand check, not `instanceof`
+
+- `connect()` recognised `TeamBridgeAgent` via `instanceof`, which
+  fails across pnpm peer-mismatch or workspace-override edge cases
+  where two copies of `@aipehub/sdk-node` resolve into the same
+  graph. Added a `__isAipehubBridge = true as const` brand and an
+  `isTeamBridge(a)` helper that checks `instanceof` first (fast path)
+  then falls back to the brand. Existing federation tests pass
+  unchanged — the new check is strictly more permissive.
+
+### Fixed — `versionMismatchWarned` flag bookkeeping
+
+- The flag was flipped to `true` even when `checkServerVersion…`
+  returned silently (no narrowing → no warning needed). Effect: if
+  the first WELCOME had no narrowing on a v1.1 server and the
+  reconnect later added narrowing, the warning never fired. Moved the
+  `flag = true` write to the path that actually warns; silent-return
+  paths leave the flag at its existing value.
+
+### Fixed — small code-quality items from the review
+
+- `unregisterServiceMethods` set-equality reduced to a cardinality
+  check; built-ins are never deletable so "same size" implies "same
+  set" (comment added explaining the invariant).
+- `version-mismatch.test.ts` mock server now tracks every connection
+  in an array, not a single `let` — concurrent connections no longer
+  leak sockets between tests.
+- CHANGELOG v1.2 section's `PROTOCOL_VERSION bumped to '1.2'` line
+  carries a footnote pointing at v1.2.1 where the constant actually
+  changed; Python SDK entry got the same caveat.
+- `packages/sdk-node/src/bridge.ts` comments now say `(v1.2.1+)`
+  where they previously said `(v1.2)` for fields that didn't exist
+  on the original v1.2 commit.
+
+### Fixed — examples typecheck regressions
+
+- v1.2's new `'service_call'` variant on `TranscriptEntry` was added
+  to `packages/host/src/main.ts`'s `describe()` switch but missed in
+  all eleven `examples/*` describe() switches. Eight of those had
+  declared return type `string`, so adding the variant broke their
+  builds. Each now handles `case 'service_call'` consistently with
+  `host/main.ts` (`SVCCALL` line with from, type:impl#method,
+  outcome, durationMs).
+
+### Notes
+
+- 453 tests across the workspace green on this patch (+3 over v1.2.2:
+  pre-release parse, dotted parse, unregister throw-symmetric).
+- No wire shape changes. No new API on the SDK surface beyond
+  exporting `isTeamBridge` from `@aipehub/sdk-node`.
+
+---
+
+## Unreleased — v1.2.2 minor-debt cleanup
+
+Second audit pass picked up three smaller issues that did not block
+v1.2 from being self-consistent (v1.2.1 already handled those) but
+would have made v1.3 startup awkward. None of them change wire shape;
+all are additive on the SDK / runtime surface.
+
+### Added — plugin lifecycle: `unregisterServiceMethods`
+
+- `@aipehub/protocol` gains `unregisterServiceMethods(type, methods)`,
+  symmetric with `registerServiceMethods`. Designed for plugin hot-
+  reload and clean host shutdown — a long-lived process that mounts
+  and unmounts service plugins can now drop their wire methods from
+  the runtime allowlist instead of leaking entries for the rest of
+  the process. Built-in methods (`memory:recall`, `artifact:list`, …)
+  are explicitly NOT removable; they are the floor of the allowlist.
+- 4 new tests in `packages/transport-ws/tests/extend-allowlist.test.ts`
+  cover symmetric remove, the built-in floor invariant, the empty-
+  set collapse to `undefined`, and the no-op-on-bad-input contract.
+
+### Added — cross-version safety warning in `@aipehub/sdk-node`
+
+- The SDK now reads `WELCOME.protocolVersion` and, if it's older than
+  the SDK's own `PROTOCOL_VERSION` on the same major, **and** the
+  client declared `services[i].methods`, emits one `console.warn`:
+  the server is too old to enforce per-method ACL narrowing, so the
+  connection is effectively unnarrowed. The warning is sticky for
+  the session (no reconnect-loop spam) and silent when narrowing is
+  not in play. v1.1 servers stay reachable; the user just knows.
+- New test file `packages/sdk-node/tests/version-mismatch.test.ts`
+  spawns a raw `ws` server that replies with a configurable
+  `WELCOME.protocolVersion` and verifies four cases: warning fires
+  on (v1.1, narrowing); silent on (v1.1, no narrowing); silent on
+  (same version, narrowing); and the warning fires exactly once.
+
+### Fixed — `renderMetrics` clamps negative `durationMs`
+
+- `aipehub_service_call_duration_ms_sum` is a Prometheus counter and
+  must be monotonic. The previous code summed `Number.isFinite(d)
+  ? d : 0`, which let a negative duration (mid-call clock skew, or
+  a buggy client) drag the counter down across scrapes — breaking
+  `rate()` queries silently. Now clamped to `>= 0`.
+- New test in `packages/web/tests/metrics.test.ts` injects a `-50ms`
+  service-call entry alongside a `+7ms` one and asserts the rendered
+  sum is `7` (not `-43`) while count is still `2`.
+
+### Notes
+
+- All three changes are pure additions on the SDK / runtime; nothing
+  on the wire moved. v1.2.1 + v1.2.2 together compose a self-
+  consistent v1.2 release.
+- 450 tests across the workspace green on this patch (+9 over v1.2.1).
+
+---
+
+## Unreleased — v1.2.1 audit patch (rollup)
+
+The post-v1.2 audit found four claims in the v1.2 section below that
+the code did not actually deliver. This rollup makes them real so the
+v1.2 release ships a self-consistent story.
+
+### Fixed — protocol version constant actually reaches `'1.2'`
+
+- `packages/protocol/src/constants.ts` and
+  `python-sdk/src/aipehub/protocol.py` both **stayed on `'1.1'`** even
+  after the v1.2 docs went live, so the server's WELCOME frame and the
+  `aipehub_protocol_version` info-metric both reported the wrong
+  number. Bumped to `'1.2'` in both SDKs. The wire payload changes
+  zero shape; this just makes the self-advertised version match the
+  feature set described in `docs/PROTOCOL.md`.
+
+### Fixed — per-method ACL is visible to admins (closes the management loop)
+
+- `ServiceUseDecl.methods` was already enforced by the transport-ws
+  router and session, but the management-plane half was missing:
+  `ApplicationServiceDecl` had no `methods` field,
+  `Hub.requestAdmission` did not accept one, and the admin "pending
+  applications" card silently dropped the narrowing. v1.2's promise
+  that admins see ACL narrowing **before** approving was therefore
+  unfulfilled.
+- `ApplicationServiceDecl.methods?: readonly string[]` added.
+  `Hub.requestAdmission(req)` accepts and stores it. The transport-ws
+  session pipes `frame.services[i].methods` through. The admin UI
+  renders the methods next to each `{type}:{impl}/{owner}` row, with a
+  "(any method)" placeholder when the client did not narrow.
+- New test in `packages/host/tests/services-audit.test.ts` covers
+  the end-to-end path: HELLO → `Hub.pendingApplications()[].services[].methods`.
+
+### Fixed — `TeamBridgeAgent.forwardUpstreamServices` actually wires up
+
+- The bridge held two new fields (`forwardUpstreamServices`,
+  `upstreamServices`) but no host code read them; users following the
+  RFC saw the option silently swallowed. v1.2.1's `connect()`
+  (`@aipehub/sdk-node`) now:
+  1. Scans `agents` for `TeamBridgeAgent` instances and merges every
+     bridge's `forwardUpstreamServices` into the connection's HELLO
+     services list (de-duplicated by reference, never lossy).
+  2. After the session opens, writes `bridge.upstreamServices =
+     session.services` so local agents that hold the bridge reference
+     can read upstream services without manual hand-off.
+- Two new tests in `packages/sdk-node/tests/services-roundtrip.test.ts`
+  cover the positive path (memory roundtrip via `bridge.upstreamServices`)
+  and the negative path (bridges without `forwardUpstreamServices`
+  leave `upstreamServices` undefined — no phantom client).
+
+### Fixed — `aipehub new python-agent` produces a runnable layout
+
+- The template's `pyproject.toml` had `packages = ["src/<modName>"]`
+  but the scaffolder wrote source to `src/agent.py`, so `pip install
+  -e .` failed every time with "package not found". `python -m
+  <modName>` was also broken for a separate reason (no `__main__.py`).
+- New layout: `src/<modName>/__init__.py` re-exports `main` from
+  `agent.py`; `src/<modName>/__main__.py` is the one-liner Python
+  opens when the user runs `python -m <modName>`;
+  `src/<modName>/agent.py` is the AgentParticipant subclass. Matches
+  hatchling's expected layout end-to-end.
+- CLI tests assert the new file paths and verify `__init__.py` /
+  `__main__.py` contents; template tests grew one case covering both
+  init/main shims.
+
+### Notes
+
+- All four fixes are additive on v1.2 wire/API and back-compat with
+  v1.1 — the existing v1.2 cross-version reasoning at the bottom of
+  the v1.2 section below still holds.
+- 441 tests across `@aipehub/{core,services-sdk,transport-ws,sdk-node,host,cli,web}`
+  green on this patch. The Python SDK's `PROTOCOL_VERSION` bump is
+  picked up automatically by tests that compare against the imported
+  constant; no test-side changes were needed.
+
+---
+
+## Unreleased — observability + DevX + protocol v1.2 (post-v1.1)
+
+Builds on the v1.1 services-over-WebSocket release. v1.2 is the
+"close the loop" cycle: third-party plugins get a way to ship their
+own wire methods, admins get observability over what remote agents
+are doing, the Python SDK reaches feature parity, and a CLI lands
+that lets sidecar authors skip the boilerplate.
+
+### Added — protocol v1.2 (additive on v1.1, fully back-compat)
+
+- **`registerServiceMethods(type, methods)`** in `@aipehub/protocol`
+  — third-party service plugins extend the SERVICE_CALL allowlist at
+  host bootstrap by declaring a `wireMethods` array on their
+  `ServicePlugin`. Built-ins (`memory` / `artifact` / `datastore`)
+  unchanged; merge-only, never destructive. `BUILTIN_SERVICE_METHODS`
+  is the immutable base; `SERVICE_METHOD_ALLOWLIST` becomes a
+  deprecated alias kept exported for back-compat.
+- **`ServiceUseDecl.methods?: string[]`** — optional per-decl method
+  ACL narrowing. A connection can declare "I only want `recall` and
+  `list`" and SERVICE_CALL frames for `remember` come back as
+  **`forbidden_method`** (new error code) even if the type-level
+  allowlist would permit them.
+- **`ServicePlugin.wireMethods?: readonly string[]`** — new optional
+  field on the plugin contract for non-built-in types. Host bootstrap
+  calls `registerServiceMethods` for each registered plugin that
+  declares it.
+- **`PROTOCOL_VERSION`** bumped to `'1.2'`. Minor bump on the same
+  major, so v1.1 ↔ v1.2 round-trip cleanly: v1.1 server receiving a
+  `methods` field treats it as unknown extra (the wire decoder
+  preserves extra fields silently); v1.1 clients calling a v1.2
+  server never see `forbidden_method` because they never narrow.
+  > **NOTE — the constant bump only landed in the v1.2.1 audit patch.**
+  > The features above all shipped in this v1.2 entry; the version
+  > string itself was the last debt audit caught (see v1.2.1 section
+  > above). If you're spelunking commit history: `b3c740e` is where the
+  > `'1.2'` constant actually replaces `'1.1'`.
+
+### Added — observability (host, web admin)
+
+- **`service_call` transcript entries** — every resolved SERVICE_CALL
+  appends an audit entry recording the calling agent id, service
+  identity, method name, outcome (`'ok'` or the wire `ServiceErrorCode`),
+  and round-trip duration in ms. `args` are NOT persisted (potential
+  user data; potentially large).
+- **Admin UI — Services tab** gains a "SERVICE_CALL 审计" panel
+  listing recent calls with failed calls highlighted. Backed by the
+  new `GET /api/admin/transcript/service-calls?limit=N[&type=X]`
+  endpoint.
+- **Admin UI — Pending applications card** now shows the requested
+  `services: [...]` ACL inline, so the operator sees the full ACL
+  before clicking Approve. Powered by adding `services?:
+  ApplicationServiceDecl[]` to `PendingApplication`; the transport-ws
+  session pipes HELLO.services through `hub.requestAdmission`.
+- **`GET /api/admin/metrics`** — Prometheus / OpenMetrics text
+  exposition. Series: `aipehub_protocol_version` (info),
+  `aipehub_participants{kind}` (gauge), `aipehub_tasks_total{kind}`
+  (counter), `aipehub_pending_applications` (gauge),
+  `aipehub_service_calls_total{type,impl,outcome}` (counter),
+  `aipehub_service_call_duration_ms_{sum,count}{type,impl}` (counter
+  pair). Aggregated lazily from the transcript on each scrape — no
+  extra in-memory bookkeeping.
+
+### Added — Python SDK feature parity
+
+- **`aipehub.services` module** mirroring `@aipehub/sdk-node`'s
+  `ServiceClient`:
+  - `ServiceClient.memory_for(impl, owner)` /
+    `.artifact_for(...)` / `.datastore_for(...)` factories.
+  - Async typed handles: `MemoryHandle.recall(...)`,
+    `ArtifactHandle.write(...)`, `DatastoreHandle.kv.set(...)`,
+    `DatastoreHandle.sql.query(...)`.
+  - `CustomServiceHandle` for third-party types.
+  - `ServiceCallError` exception with `.code` matching the wire enum.
+- `connect(url, agents, services=[...])` — same shape as TS.
+- `Session.services` populated when services declared; `None`
+  otherwise. Pending calls reject with `session_not_ready` on close
+  / disconnect.
+- `PROTOCOL_VERSION` in `aipehub.protocol` bumped to `'1.2'`. (Same
+  caveat as the TypeScript constant above — the bump itself landed in
+  v1.2.1.)
+- 5 new pytest tests cover HELLO.services on the wire, memory
+  roundtrip, error code propagation, third-party `custom_for`, and
+  pending-call rejection on close.
+
+### Added — federation services scaffolding
+
+- **`TeamBridgeAgent.forwardUpstreamServices`** — list of
+  `ServiceUseRequest`s the bridge declares to the upstream hub. Local
+  agents that hold a reference to the bridge read upstream services
+  via `bridge.upstreamServices` (assigned by the federation host
+  after `connect()` resolves). One-way federation is shipped; full
+  bidirectional service forwarding is scoped to v1.3 — see
+  `docs/federation-services-rfc.md`.
+
+### Added — sidecar DevX
+
+- **`docs/SIDECAR.md`** — practical "Day 1" tutorial for connecting an
+  existing agent to a running Hub as a sidecar. Covers the 5-line
+  happy path, services declaration, migration from in-process,
+  cancellation / disconnect / reattach, and the mistake gallery.
+- **`@aipehub/cli`** (`npx @aipehub/cli`, bin: `aipehub`) — new
+  package. Subcommands:
+  - `aipehub new agent <name> [--capabilities=…] [--id=…] [--no-services]`
+    — scaffold a TypeScript sidecar project (`package.json`,
+    `tsconfig.json`, `src/index.ts`, `README.md`). Self-contained;
+    `npm install && npm start` and you're online.
+  - `aipehub new python-agent <name> [...]` — same for Python
+    (`pyproject.toml`, module-aware names).
+  - `aipehub ping <ws-url> [--api-key=…] [--timeout=…]` — handshake-
+    only probe of a Hub for diagnostics. Uses `ws` directly to keep
+    the CLI's transitive dep graph small.
+  - `aipehub help [cmd]`, `aipehub --version`.
+- 15 unit tests cover template rendering + CLI dispatch.
+
+### Added — design docs (for v1.3+)
+
+- **`docs/service-call-streaming-rfc.md`** — RFC for streaming
+  SERVICE_CALL responses (`SERVICE_RESULT_CHUNK` frames + terminal
+  `SERVICE_RESULT { __stream_end__: true }`). Maps out the wire
+  shape, SDK ergonomics (`async for`), back-pressure, cancellation,
+  and back-compat with v1.2.
+- **`docs/plugin-sandbox-rfc.md`** — two-phase plan for sandboxing
+  third-party plugins. Phase 1 (v1.3 candidate): `worker_threads`
+  with `fs` patching against honest mistakes. Phase 2 (v1.4
+  candidate): child process + Node permission model for adversarial
+  deployments.
+- **`docs/federation-services-rfc.md`** — what's shipped in v1.2
+  scaffolding, plus the design for full bidirectional federated
+  SERVICE_CALL forwarding in v1.3+.
+- **`docs/enablement-flow-case-conversation-plan.md`** — staged
+  plan for bringing `industry-enablement-flow` onto case-conversation
+  (yaml `caseId` schema → per-agent `uses:` block → opt-in
+  `autoInjectCaseContext` on `LlmAgent`). One-PR scope.
+
+### Changed — admin transcript shape
+
+`TranscriptEntry` gains a new discriminated variant:
+
+```ts
+| { kind: 'service_call'; data: { from, type, impl, ownerKind, ownerId,
+    method, outcome, durationMs } }
+```
+
+Existing consumers that exhaustively switch on `kind` need a case
+(host's `describe` already updated; admin SSE handler ignores
+non-task entries by design).
+
+### Tests
+
+- Transport-ws: +13 tests for `extend-allowlist`, +4 for
+  `per-method-acl`. 64 total (was 47).
+- Host: +3 tests for `services-audit` (HELLO services in
+  PendingApplication, service_call transcript outcomes). 88 total
+  (was 85).
+- Web: +8 tests for `renderMetrics`. 66 total (was 58).
+- Python SDK: +5 tests for `test_services`. 15 total (was 10).
+- CLI: 15 brand-new tests (templates + cli dispatch).
+- All other packages unchanged and green.
+
+## Unreleased — services over WebSocket (wire protocol v1.1)
+
+Remote agents can now drive Hub Services (memory / artifact / datastore)
+over the same WebSocket they use for tasks. Closes the gap
+`docs/AGENT.md` already promised — moving an agent between in-process
+and remote shapes is now genuinely a constructor-arg change, not a
+logic change. **The "external agent standardized onboarding" goal**:
+deploying a new agent type to a running host no longer requires `pnpm
+install` on the host (npm-environment-free); the agent just runs as a
+process and connects over WS.
+
+Design: `docs/services-over-ws-rfc.md` (RFC, signed off on 5 key
+decisions).
+
+### Added — protocol v1.1 (additive on v1.0)
+
+- **`SERVICE_CALL` (client → server)** + **`SERVICE_RESULT` (server →
+  client)** frames. Single-request / single-reply RPC; multiple
+  concurrent calls per session interleave by `callId`.
+- **`HELLO.services?: ServiceUseDecl[]`** — optional declaration of
+  which `(type, impl, ownerPattern)` triples the connection is
+  allowed to invoke. ACL is bound at HELLO time so admin-approval
+  reviewers see the full picture before approving.
+- **Owner patterns** — `id: '<literal>'` (exact match), `id: 'self'`
+  (server-substituted to the calling agent's id; agents only), `id:
+  '*'` (any concrete id of that kind). Per-prefix matching deferred
+  to v1.2.
+- **Method allowlist** hardcoded in `@aipehub/protocol`:
+  - `memory`: recall / remember / list / forget / clear
+  - `artifact`: write / read / list / exists / remove
+  - `datastore`: kv.get / kv.set / kv.del / kv.keys / sql.exec / sql.query
+- **`PROTOCOL_VERSION`** bumped to `'1.1'`. Minor bump — major still
+  `1`, so v1.0 ↔ v1.1 are fully interoperable. v1.0 clients ignore
+  `services` (forward-compat); v1.0 servers receiving SERVICE_CALL
+  reply `bad_frame` ERROR (client SDK surfaces as `server_too_old`).
+- **`DEFAULT_SERVICE_CALL_TIMEOUT_MS`** = 30000. Client-side guard;
+  the server doesn't enforce per-call timeouts.
+- **Error codes** (in SERVICE_RESULT): `forbidden_service` /
+  `forbidden_owner` / `attach_failed` / `service_error` /
+  `unknown_method` / `bad_args` / `unknown_agent` / `session_not_ready`
+  / `unknown_service` / `internal_error`.
+
+### Added — server (`@aipehub/transport-ws`)
+
+- **`ServiceCallRouter`** (new module) — per-session router with a
+  `(type, impl, ownerKey)` handle cache. Lazy attach on first call;
+  `dispose()` detaches all on session close; `onAgentLeft(id)`
+  detaches only that agent's `kind:'agent'` owners (other kinds —
+  `workflow-run`, `shared` — survive per RFC §6).
+- **`ServiceCallGateway`** interface in `server.ts` — narrow shape
+  (`attach` + `detachFor`) so transport-ws stays free of
+  `@aipehub/host` and `@aipehub/services-sdk` dependencies. Production
+  hosts pass `HubServices` directly (structurally satisfies it).
+- **`WebSocketTransportOptions.services?: ServiceCallGateway`** — when
+  present, sessions get a router; when absent, every SERVICE_CALL
+  replies `forbidden_service` (graceful degradation).
+- **Session integration** — HELLO.services validated + router built
+  in `handleHello`; SERVICE_CALL handled in `onMessage`; dispose on
+  `cleanup`. Malformed decls return `REJECT bad_hello` before WELCOME.
+
+### Added — SDK (`@aipehub/sdk-node`)
+
+- **`ServiceClient`** (new type) — exposes `memory`, `artifact`,
+  `datastore: Record<name, …>` static-owner handles + `memoryFor` /
+  `artifactFor` / `datastoreFor` factories for dynamic owners. The
+  handle wrappers faithfully implement
+  `@aipehub/services-sdk`'s `MemoryHandle` / `ArtifactHandle` /
+  `DatastoreHandle` contracts (incl. `DatastoreHandle.name` /
+  `kv` / `sql` sub-namespaces), so agent code reads identically to
+  in-process LlmAgent.
+- **`ServiceCallError`** — surfaces `SERVICE_RESULT.ok: false` as a
+  thrown `Error` subclass with `code` from the wire enum.
+- **`ConnectOptions.services?: ServiceUseRequest[]`** + **`Session.services?: ServiceClient`** — agent author wires `coach.services = session.services` once after `await connect()` resolves.
+- **`@aipehub/services-sdk`** added as runtime dep so SDK users don't have to install services-sdk separately for the handle types. Type-only imports — no runtime size impact.
+- Disconnect fails all pending RPCs with `session_not_ready` —
+  consistent with how in-flight TASK frames are handled.
+
+### Added — host wire-up (`@aipehub/host`)
+
+- `main.ts` passes the bootstrapped `HubServices` into `serveWebSocket`
+  as the gateway. When `bootstrapServices` fails the services field
+  is omitted and remote agents see `forbidden_service` — same
+  degradation path as a stripped-down host.
+
+### Added — example
+
+- **`examples/services-sidecar-demo`** — zero-dep demo using
+  `MockLlmProvider` that:
+  1. Starts hub + bootstrapServices + ws server.
+  2. Connects **two** sidecar agents (writer + reviewer) via `sdk-node`,
+     each declaring `services: [{memory, file, workflow-run/*}]`.
+  3. Drives one case end-to-end (writer remembers → reviewer recalls
+     writer's entry → reviewer remembers → reader reads the jsonl
+     file directly to prove disk persistence).
+  4. Tears down cleanly. ~250 lines of TypeScript, ~10ms runtime.
+- This is the canonical "external agent over WS with services"
+  recipe — the industry-consultation in-process example stays as a
+  baseline for comparison.
+
+### Added — regression coverage
+
+- **`packages/transport-ws/tests/service-call-router.test.ts`** — 19
+  unit tests (ACL matrix, cache reuse, wildcard, dispose,
+  onAgentLeft, post-dispose rejection).
+- **`packages/transport-ws/tests/service-call-roundtrip.test.ts`** — 6
+  end-to-end over a real WS server (roundtrip, gateway-less fallback,
+  wildcard isolation, forbidden_owner, disconnect cleanup).
+- **`packages/sdk-node/tests/services-roundtrip.test.ts`** — 7 SDK
+  integration tests against a fake gateway (presence/absence,
+  remember/recall roundtrip, factory cache, datastore kv+sql,
+  ServiceCallError, pending-on-close).
+- **`packages/host/tests/services-over-ws.test.ts`** — 3 full-stack
+  integration tests with the **real** `service-memory-file` plugin
+  on a tmp dir (two-session shared case-memory, forbidden_owner,
+  disconnect detach).
+
+Total: 35 new tests across 4 layers; 0 regressions in the existing
+153-test suite.
+
+### Notes
+
+- v1.0 ↔ v1.1 compatibility tested both directions: a v1.0 client
+  on a v1.1 server keeps working unchanged; a v1.1 client whose
+  server lacks the `services` gateway sees every SERVICE_CALL
+  rejected as `forbidden_service` (graceful — connection survives).
+- The `services-sidecar-demo` is the migration recipe for the
+  industry-consultation pipeline. The in-process version stays —
+  some deployments may prefer it for lower latency / simpler ops.
+- **Out of scope for v1.1**: streaming results, per-call timeouts
+  server-side, per-prefix owner matching, third-party service-type
+  method allowlist extension. All scheduled for v1.2 / future RFCs.
+
+## Unreleased — case-conversation (v2.3)
+
+A small but consequential layer on top of v2.2 Hub Services: cases get a
+shared timeline so users can interject **anywhere** in the workflow and
+downstream agents automatically see those interjections.
+
+### Added — host helper
+
+- **`packages/host/src/services/case-context.ts`** — append-only case
+  timeline backed by an existing `memory:file` handle, **no new service
+  type**. Helpers:
+  - `recordCaseConversation` / `recallCaseConversation` — user / agent
+    interjections, tagged by source (`user` / `manager` / `coach` /
+    `analyst` / `reviewer` / `system`) and optional `stepId`.
+  - `recordCaseStepOutput` / `recallCaseStepOutputs` — workflow step
+    outputs cached on the case for cross-step recall.
+  - `formatCaseContextBlock` — render the timeline as a Markdown-ish
+    prompt prefix downstream LLM agents can `prepend` to their user
+    message verbatim.
+  - Storage convention: owner `{kind:'workflow-run', id: caseId}`, kind
+    `episodic`, topic / source / stepId encoded in `meta`. Filtering
+    happens helper-side (the file backend doesn't take meta queries).
+- **Exported under `@aipehub/host/services`** alongside the existing
+  `bootstrapServices` / `LifecycleSweeper` surface — examples and
+  third-party hosts can `import { recordCaseConversation, ... }`
+  directly without touching internals.
+
+### Added — agent template
+
+- **`templates/agents/case-manager.yaml`** — `case-manager` agent with
+  `capability=case-conversation` / `case-status`. Acts as the "side
+  channel" outside the workflow steps: receives user interjections,
+  the host glue writes them into the case timeline, the agent answers
+  in three sections (`## 回应` / `## 我的判断` / `## 路由建议`). The
+  routing hint tells the host whether to dispatch to a specialist
+  agent or stop after the manager's reply. Declares only `memory:file`
+  (kind=`episodic`) — shares the case-memory owner with the other
+  agents working on the same case.
+
+### Added — workflow + agent updates
+
+- **`templates/agents/industry-coach-pro.yaml`** — system prompt now
+  explicitly reads `## 当前 case 的已有上下文` when present, draws on
+  the interjected facts in `[模式: draft]` / `[模式: finalize]`.
+- **`templates/agents/industry-research-analyst.yaml`** — same:
+  surfaces case-timeline facts in the "关键洞察" + "3 个提醒" sections.
+- **`templates/workflows/industry-consultation-flow.yaml`** — header
+  documents the v2.3 case-conversation integration: each step's host
+  glue calls `recallCaseConversation` + `recallCaseStepOutputs`
+  pre-run and `recordCaseStepOutput` post-run; the case-manager is
+  **not** a workflow step (it's a side channel).
+- **`templates/workflows/industry-enablement-flow.yaml`** — header
+  notes that the v1 flow's 6 zero-glue `LlmAgent`s do **not** yet
+  read case context; upgrade path documented inline. Use
+  `industry-consultation-flow.yaml` if you need interjection support.
+
+### Added — regression coverage
+
+- **`packages/host/tests/case-context.test.ts`** — 8 tests against a
+  hand-rolled in-memory `MemoryHandle` covering: round-trip record →
+  recall, case isolation (caseA ≠ caseB), conversation vs step-output
+  separation, `formatCaseContextBlock` output shape, empty-input
+  no-op, `includeStepOutputs` filter, long-text truncation, and meta
+  round-trip into the underlying memory entry.
+
+### Added — provider retry
+
+- **`OpenAIProvider.maxRetries`** (default `0`, opt-in). On transient
+  transport-layer failures (`Premature close`, `socket hang up`,
+  `ECONNRESET` / `ECONNREFUSED` / `ETIMEDOUT` / `EPIPE` / `EAI_AGAIN`,
+  undici's `UND_ERR_*` codes, HTTP `429` and `5xx`), the provider
+  retries up to `maxRetries` additional times with exponential
+  backoff + jitter (default `500ms × 2^(n-1)`, capped at 5s, +200ms
+  jitter). Permanent errors (4xx other than 429, auth, malformed
+  body) never retry. The motivating case: real DeepSeek runs would
+  occasionally fail with `Premature close` on the largest
+  `finalize` step; with `maxRetries: 3` the example now self-heals.
+- **`isTransientError`** exported from `@aipehub/llm-openai` for
+  callers building their own retry layer on top.
+- **`retryBackoffMs`** opt — injectable backoff function (tests use
+  `() => 1` to keep the suite instant).
+- 11 new tests in `packages/llm-openai/tests/provider.test.ts`
+  (4 retry behavior + 7 classifier). Test count went 15 → 26.
+
+### Added — real-API example coverage
+
+- **`examples/industry-consultation-deepseek/`** upgraded:
+  - Workflow YAML now propagates `caseId` through every step's payload
+    (`caseId: $trigger.payload.caseId`).
+  - `CoachAgent` / `ResearchAgent` now use a shared host glue
+    (`withCaseContext`) that prepends the case timeline + records step
+    output / agent reply afterwards.
+  - New `CaseManagerAgent` capability=`case-conversation` demonstrates
+    a user interjection between RUN 1 (餐饮) and RUN 2 (零售): the
+    manager reads the full case-1 timeline (intake/research/draft/
+    review/finalize step outputs + coach replies) and answers a new
+    follow-up question that wasn't in the workflow trigger.
+  - Post-run inspection dumps both the agent-level memory (cross-case
+    `priorCount` log) **and** every case-memory's timeline grouped by
+    `caseId` so the cross-case isolation is visible.
+
+### Notes
+
+- v2.3 is additive on top of v2.2 — no breaking changes to existing
+  agent yaml, plugin contracts, or REST endpoints.
+- The case-memory mechanism (per-`caseId` owner) and the agent-level
+  memory mechanism (per-agent owner) are **orthogonal**. Authors can
+  use either or both without coupling.
+- Storage cost: each case's memory is a small jsonl file under
+  `<space>/services/memory/file/workflow-run/<caseId>/episodic.jsonl`.
+  No automatic cleanup yet — bound the case count or wire a sweeper
+  on top of `LifecycleSweeper` if your deployment has long lifetimes.
+
+## Unreleased — Hub Services (v2.2)
+
+A pluggable per-agent state layer. Agents declare what they want
+(`memory`, `artifact`, `datastore`) in their yaml; the host attaches
+typed handles at spawn time and keeps the bookkeeping. The Hub itself
+gains nothing — Hub stays a "dumb dispatcher". All wiring sits in
+`@aipehub/services-sdk` + per-implementation plugin packages + the
+host's integration layer.
+
+### Added — services SDK + first-party plugins
+
+- **`@aipehub/services-sdk`** — the plugin contract. `ServicePlugin`
+  with lifecycle (`init` / `validateConfig` / `attach` / `detach` /
+  `softDelete` / `restore` / `hardDelete` / `describe` / `shutdown`),
+  `ServiceRegistry`, `loadPlugins` dynamic-import loader with auto-seed
+  of the default first-party manifest, `runPluginContract` shared
+  vitest factory, typed errors (`PluginNotFoundError`,
+  `TrashRestoreConflictError`, `ServiceConfigError`, …), and the
+  `ServiceCtx` type the LlmAgent constructor accepts.
+- **`@aipehub/service-memory-file`** — JSONL files per
+  `(owner, kind)`. `recall` is case-insensitive substring + kinds /
+  since / k filters. Trash lives under the plugin's local `.trash/`.
+- **`@aipehub/service-artifact-file`** — per-owner directories with
+  path-traversal defense, MIME allow-list, byte caps. List, exists,
+  remove, recursive walk for `list({ prefix })`.
+- **`@aipehub/service-datastore-sqlite`** — one `.sqlite` per declared
+  `config.name` per owner. KV mode (backed by a `_kv` table) + raw SQL
+  with prepared-statement caching. WAL + foreign-keys ON by default.
+
+### Added — host integration
+
+- **`bootstrapServices`** boots the loader, mkdirs `<space>/services/`,
+  initialises every plugin with its own `rootDir`, returns a
+  `HubServices` facade. Plugin import + init failures are non-fatal:
+  the bad plugin shows up in `errors[]` and a `warn` log line.
+  Resolution is **host-anchored** via `import.meta.resolve` from
+  `bootstrap.ts`, so plugins declared as host dependencies are visible
+  even under pnpm's isolated module graph (where
+  `services-sdk/node_modules/@aipehub/` only contains `core`). Test
+  runners that don't implement `import.meta.resolve` (vite-node) fall
+  back to a plain `import(pkg)`.
+- **`LocalAgentPool`** spawn-time wiring: reads `record.managed.uses`,
+  calls `services.attachAll`, sorts the resulting handles into a
+  `ServiceCtx`, passes it to `new LlmAgent({ services: ctx })`. On
+  `stop(id)` (and on respawn) the pool calls `detachFor(owner)`.
+- **`onAgentRemoved(id)`** lifecycle hook the web layer fires after
+  `space.removeAgent`. LocalAgentPool implements it via
+  `services.softDeleteAllForOwner` so deleting an agent moves all its
+  service data to per-plugin trash (RFC Q3=A: 30-day retention +
+  toast notification).
+- **`LifecycleSweeper`** — background janitor (default 1h tick) that
+  hard-deletes trash entries past `expiresAt`. Stop() awaits the
+  in-flight tick so SIGTERM doesn't race the sweep.
+
+### Added — admin surface
+
+- **REST**: `GET /api/admin/services/plugins`, `GET / DELETE
+  /api/admin/services/owners/:t/:i/:k/:id`, `GET
+  /api/admin/services/trash`, `POST
+  /api/admin/services/trash/:t/:i/:id/restore`, `DELETE
+  /api/admin/services/trash/:t/:i/:id`, `POST
+  /api/admin/services/sweep`. Wired through a plain-data
+  `ServicesAdminSurface` interface in `@aipehub/core` so
+  `@aipehub/web` never has to import the SDK.
+- **SSE events**: `service_trashed` (every soft-delete) and
+  `service_purged` (every expired-trash auto-cleanup) flow through
+  the hub transcript and the admin SSE stream.
+- **Admin UI**: a sixth "服务 / Services" tab. Lists per-agent service
+  data with size + last-access columns; opens a detail modal with the
+  plugin's preview (text or base64); trash sub-view with restore +
+  hard-delete; "purge expired now" button; soft-delete toast says
+  "moved to trash, auto-deletes in 30 days". 27 new i18n keys × 2 langs
+  (`tabServices` + 26 `services*`).
+
+### Added — agent yaml schema
+
+- **`ManagedAgentSpec.uses?: ServiceUseSpec[]`** in `@aipehub/core` and
+  `parseManifest` validation in `@aipehub/web`. Yaml authors declare
+  `{ type, impl, config }` per service. The same validator runs on the
+  admin POST/PUT form path. `memory` and `artifact` are singular per
+  agent; `datastore` (and third-party types) may repeat.
+- **`renderAgentManifest`** echoes the `uses:` list (deep-cloned) so
+  export → edit → re-import is lossless.
+- **Templates** for the "传统行业 AI 咨询" product line:
+  - `templates/agents/industry-coach-with-memory.yaml` — minimal
+    single-agent example using all three first-party plugins (v2.2
+    landmark commit).
+  - `templates/agents/industry-coach-pro.yaml` — multi-phase coach
+    (intake / draft / finalize) with full services triad.
+  - `templates/agents/industry-research-analyst.yaml` — companion
+    research agent backed by a `cases` datastore.
+  - `templates/teams/industry-consultation-team.yaml` — one-click
+    import of the two agents above.
+  - `templates/workflows/industry-consultation-flow.yaml` — the
+    5-step consultation pipeline with a **real human-in-the-loop**
+    review step (`capability=consultant-review` dispatches to any
+    Worker who advertised that capability). End-to-end coverage in
+    `packages/host/tests/industry-consultation-flow.test.ts` (5
+    integration tests; runs the full pipeline including a fake
+    auto-reviewer that completes the review task synchronously).
+
+### Notes
+
+- core gets a single new file (`services-admin.ts`, type-only) plus a
+  `paths.services` string on `Space`. The `services-sdk → core` type
+  dependency that already existed isn't reversed; HubServices lives in
+  `@aipehub/host`.
+- All three first-party plugin packages
+  (`service-memory-file`, `service-artifact-file`,
+  `service-datastore-sqlite`) are declared as **runtime dependencies**
+  of `@aipehub/host`, not devDependencies — without this the
+  pnpm-isolated module graph hides them from the production resolver.
+  Third-party plugins still resolve fine as long as they're installed
+  somewhere reachable from the host package (`pnpm add` in the host
+  workspace, or a deploy-time `npm i`).
+- Existing agents with no `uses:` are unchanged. The optional field
+  parses as `undefined`; LlmAgent without a `services` opt reads
+  `EMPTY_SERVICE_CTX` (a frozen `{}`).
+- Wire protocol (`docs/PROTOCOL.md`) is unchanged.
 
 ## Unreleased — workflow engine + CI (v2.1)
 

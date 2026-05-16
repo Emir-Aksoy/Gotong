@@ -3,6 +3,7 @@ import {
   type AgentOptions,
   type Task,
 } from '@aipehub/core'
+import { EMPTY_SERVICE_CTX, type ServiceCtx } from '@aipehub/services-sdk'
 import type { LlmProvider, LlmRequest, LlmResponse } from './types.js'
 
 /**
@@ -38,6 +39,22 @@ export interface LlmAgentOptions extends AgentOptions {
   temperature?: number
   /** Default model id passed through to the provider. */
   model?: string
+  /**
+   * Pre-attached Hub Services handles (memory / artifact / datastore).
+   * Per RFC §7, the host's LocalAgentPool resolves the agent yaml's
+   * `uses:` block at spawn time and injects the resulting handles
+   * here. The agent itself doesn't drive lifecycle — it just reads.
+   *
+   * Subclasses access via the protected `services` field. The base
+   * `buildRequest` does **not** auto-inject service descriptions into
+   * the system prompt; that's a per-agent design decision (see PR-13
+   * templates for examples that do).
+   *
+   * Omit (or pass `undefined`) for the common case of an agent with
+   * no `uses:` block — the field is then `EMPTY_SERVICE_CTX`, a
+   * frozen `{}` so identity comparisons stay cheap.
+   */
+  services?: ServiceCtx
 }
 
 /**
@@ -72,6 +89,14 @@ export class LlmAgent extends AgentParticipant {
     temperature?: number
     model?: string
   }
+  /**
+   * Hub Services handles attached to this agent for its whole life.
+   * `EMPTY_SERVICE_CTX` (a frozen `{}`) when the spawner didn't supply
+   * a ctx — common for SDK-connected agents and tests. Subclasses
+   * read e.g. `this.services.memory?.recall(...)` without worrying
+   * about an undefined ctx.
+   */
+  protected readonly services: ServiceCtx
 
   constructor(opts: LlmAgentOptions) {
     super({ id: opts.id, capabilities: opts.capabilities })
@@ -82,6 +107,7 @@ export class LlmAgent extends AgentParticipant {
       temperature: opts.temperature,
       model: opts.model,
     }
+    this.services = opts.services ?? EMPTY_SERVICE_CTX
   }
 
   /**

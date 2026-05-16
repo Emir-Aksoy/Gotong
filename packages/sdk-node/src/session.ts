@@ -15,6 +15,14 @@ import {
 } from '@aipehub/protocol'
 import WebSocket from 'ws'
 
+import {
+  ServiceClientImpl,
+  toWireDecls,
+  type ServiceClient,
+  type ServiceUseRequest,
+} from './service-client.js'
+import { TeamBridgeAgent, isTeamBridge } from './bridge.js'
+
 export type SessionState =
   | 'connecting'
   | 'ready'
@@ -34,11 +42,38 @@ export interface ConnectOptions {
   reconnectMaxBackoffMs?: number
   /** Notified on every state transition. */
   onStateChange?: (state: SessionState, info?: { reason?: string }) => void
+  /**
+   * Hub Services to make available to this connection (protocol v1.1). The
+   * SDK turns these into `HELLO.services` and exposes a `ServiceClient` on
+   * the returned `Session`. The `ServiceClient` surface mirrors the
+   * in-process `ServiceCtx` from `@aipehub/services-sdk` so an agent can
+   * call `this.services.memory.recall(...)` regardless of whether it's
+   * running in-process or as a remote sidecar.
+   *
+   * Omitting this field is the v1.0 behaviour — the agent has no services.
+   * The host may also have been started without a service gateway, in
+   * which case calls return `forbidden_service`.
+   */
+  services?: ServiceUseRequest[]
 }
 
 export interface Session {
   readonly state: SessionState
   readonly sessionId: string | undefined
+  /**
+   * Service client (protocol v1.1). Present iff `connect()` was called
+   * with a non-empty `services` array. Agent authors typically read this
+   * once after `connect()` returns and stash it on their agent instance:
+   *
+   *     const coach = new CoachAgent({ id: 'coach', capabilities: ['draft'] })
+   *     const session = await connect({ url, agents: [coach], services: [...] })
+   *     coach.services = session.services        // <-- hand-off
+   *
+   * The `ServiceClient` surface mirrors `@aipehub/services-sdk`'s
+   * `ServiceCtx` shape (`memory` / `artifact` / `datastore`) so agent
+   * code reads identically to an in-process LlmAgent.
+   */
+  readonly services: ServiceClient | undefined
   publish(from: ParticipantId, channel: ChannelId, body: unknown): void
   subscribe(participantId: ParticipantId, channel: ChannelId): void
   unsubscribe(participantId: ParticipantId, channel: ChannelId): void
@@ -78,14 +113,53 @@ export async function connect(opts: ConnectOptions): Promise<Session> {
     if (seen.has(a.id)) throw new Error(`duplicate agent id '${a.id}'`)
     seen.add(a.id)
   }
+
+  // Federation glue (v1.2.1+): each TeamBridgeAgent may declare
+  // `forwardUpstreamServices` — service decls to be merged into HELLO.services
+  // so the bridge can call upstream services from within the local team. We
+  // (a) merge those declarations into the connection's services list before
+  // HELLO is sent, and (b) write back the resulting ServiceClient onto each
+  // bridge's `upstreamServices` field once the session is up. Without this
+  // wiring the field was a documentation-only placeholder.
+  //
+  // We use `isTeamBridge` rather than a raw `instanceof` so that bridges
+  // built against a second copy of `@aipehub/sdk-node` (pnpm peer mismatch /
+  // monorepo override edge cases) are still recognised — `instanceof` checks
+  // class identity, which differs between dep-graph realms.
+  const federationBridges: TeamBridgeAgent[] = []
+  for (const a of resolved.agents) {
+    if (isTeamBridge(a) && a.forwardUpstreamServices.length > 0) {
+      federationBridges.push(a)
+    }
+  }
+  if (federationBridges.length > 0) {
+    const merged: ServiceUseRequest[] = [
+      ...(resolved.services ?? []),
+      ...federationBridges.flatMap((b) => [...b.forwardUpstreamServices]),
+    ]
+    resolved.services = merged
+  }
+
   const s = new SessionImpl(resolved)
   await s.openInitial()
+
+  // The bridge holds a reference to the ServiceClient so local agents that
+  // can see the bridge can see upstream services through it — the federation
+  // boundary stays explicit ("if you can see the bridge, you can see its
+  // upstream services"). All bridges share the same client; their decls were
+  // pooled into one HELLO.services list above.
+  for (const b of federationBridges) {
+    b.upstreamServices = s.services
+  }
+
   return s
 }
 
 class SessionImpl implements Session {
   state: SessionState = 'connecting'
   sessionId: string | undefined
+  services: ServiceClient | undefined
+  private serviceClient: ServiceClientImpl | undefined
   private ws: WebSocket | undefined
   private readonly agents: Map<ParticipantId, AgentParticipant>
   private closeRequested = false
@@ -94,10 +168,37 @@ class SessionImpl implements Session {
     resolve: () => void
     reject: (e: Error) => void
   }
+  /**
+   * Have we already emitted the "server is older than this client and won't
+   * enforce v1.2-only features" warning? Sticky for the session so a reconnect
+   * loop doesn't spam logs.
+   */
+  private versionMismatchWarned = false
 
   constructor(private readonly opts: ResolvedOptions) {
     this.agents = new Map(opts.agents.map((a) => [a.id, a]))
     this.backoff = opts.reconnectInitialBackoffMs
+
+    // Build the service client eagerly (before the socket opens) so the
+    // user can grab `session.services` without an extra await after
+    // `connect()` resolves. The client owns RPC bookkeeping; the socket
+    // is wired in via `send` / `attachResultFrame` once it's ready.
+    if (opts.services && opts.services.length > 0) {
+      this.serviceClient = new ServiceClientImpl({
+        declarations: opts.services,
+        sendCall: (frame) => this.send(frame),
+        defaultAgentId: () => {
+          // Pick the first declared agent id as the default `from`. If
+          // multiple agents share a session, an agent author wanting to
+          // call services as agent B (not A) must call `memoryFor(...)`
+          // and we'd need to thread `from` — punted for v1.1 since the
+          // common case is one-agent-per-session.
+          const first = opts.agents[0]
+          return first?.id ?? 'unknown'
+        },
+      })
+      this.services = this.serviceClient
+    }
   }
 
   async openInitial(): Promise<void> {
@@ -121,6 +222,9 @@ class SessionImpl implements Session {
           capabilities: [...a.capabilities],
         })),
         ...(this.opts.apiKey !== undefined ? { apiKey: this.opts.apiKey } : {}),
+        ...(this.opts.services && this.opts.services.length > 0
+          ? { services: toWireDecls(this.opts.services) }
+          : {}),
       })
     })
 
@@ -152,6 +256,13 @@ class SessionImpl implements Session {
     switch (frame.type) {
       case 'WELCOME': {
         this.sessionId = frame.sessionId
+        // v1.2 cross-version safety: warn once per session if the server
+        // is too old to enforce a v1.2-only feature the client is using
+        // (currently just `ServiceUseDecl.methods` narrowing). The flag
+        // is flipped INSIDE the method, only on the path that actually
+        // logs — silent-return paths leave it unset so a later reconnect
+        // (which may carry different narrowing) can still warn.
+        this.checkServerVersionForServiceNarrowing(frame.protocolVersion)
         this.setState('ready')
         this.backoff = this.opts.reconnectInitialBackoffMs
         if (this.welcomeWaiter) {
@@ -239,11 +350,24 @@ class SessionImpl implements Session {
       case 'ERROR':
         console.warn(`[sdk-node] server ERROR: ${frame.code} — ${frame.message}`)
         break
+      case 'SERVICE_RESULT':
+        if (this.serviceClient) {
+          this.serviceClient.attachResultFrame(frame)
+        }
+        // If we received a SERVICE_RESULT with no client (server bug or
+        // stale frame post-close), silently drop — better than crashing.
+        break
     }
   }
 
   private handleDisconnect(): void {
     this.ws = undefined
+    // Any in-flight SERVICE_CALLs are stranded — fail them so awaiters
+    // don't hang. (On auto-reconnect the agent must re-issue from its
+    // own state; v1.1 doesn't preserve in-flight RPC across reconnect.)
+    if (this.serviceClient) {
+      this.serviceClient.failAllPending('connection_lost')
+    }
     if (this.state === 'closed') return
     if (this.closeRequested) {
       this.setState('closed')
@@ -346,6 +470,71 @@ class SessionImpl implements Session {
       console.error('[sdk-node] send failed:', err)
     }
   }
+
+  /**
+   * Detect "this client uses a v1.2 feature the server can't enforce" and warn.
+   *
+   * v1.0/v1.1 servers silently drop unknown fields on HELLO.services entries,
+   * so a v1.2 client declaring `methods: ['recall']` thinks the connection is
+   * read-only — but the older server has no `forbidden_method` path and will
+   * happily accept `remember` calls. That's a quiet downgrade in the trust
+   * boundary; the user should know.
+   *
+   * We only warn for narrowing right now because that's the only v1.2 feature
+   * where the server is the enforcement point. New error codes
+   * (`forbidden_method`) and the third-party allowlist extension are
+   * client/host-side and don't have a cross-version safety story to lose.
+   */
+  private checkServerVersionForServiceNarrowing(serverVersion: unknown): void {
+    // Sticky once warned per session — silent-return below leaves the flag
+    // alone so a later reconnect that DOES warrant a warning can still
+    // produce one.
+    if (this.versionMismatchWarned) return
+    if (typeof serverVersion !== 'string') return
+    // The connection's `services` is on `opts.services`; check whether any
+    // decl narrowed via `methods`. If none did, the server version doesn't
+    // matter for this safety property.
+    const usesNarrowing = (this.opts.services ?? []).some(
+      (s) => Array.isArray(s.methods) && s.methods.length > 0,
+    )
+    if (!usesNarrowing) return
+    const [smajor, sminor] = parseVersion(serverVersion)
+    const [cmajor, cminor] = parseVersion(PROTOCOL_VERSION)
+    // Same major or newer? Trust the server.
+    if (smajor !== cmajor) return // major mismatch: REJECT path handles it
+    if (sminor >= cminor) return
+    // Older minor on same major: per-method ACL silently won't be enforced.
+    this.versionMismatchWarned = true
+    console.warn(
+      `[sdk-node] server protocol version ${serverVersion} is older than ` +
+        `client ${PROTOCOL_VERSION} — per-method ACL narrowing (` +
+        `ServiceUseDecl.methods) is NOT enforced server-side on v1.${sminor}. ` +
+        `Treat the connection as if methods narrowing were absent.`,
+    )
+  }
+}
+
+/**
+ * Parse a protocol version string into `[major, minor]`. Tolerates the
+ * common pre-release shapes — `'1.2-beta'`, `'1.2-rc.1'`, `'1.2.3'` — by
+ * stripping the first non-digit suffix off each component. Non-numeric
+ * components fall back to `0` (mirrors the v1.0 wire decoder's "unknown
+ * extra is silent" stance).
+ */
+function parseVersion(v: string): [number, number] {
+  const parts = v.split('.')
+  const major = parseDigits(parts[0])
+  const minor = parseDigits(parts[1])
+  return [major, minor]
+}
+
+function parseDigits(s: string | undefined): number {
+  if (!s) return 0
+  // Take the leading digits only — '2-beta' → '2', '1' → '1', '' → ''.
+  const m = /^\d+/.exec(s)
+  if (!m) return 0
+  const n = Number(m[0])
+  return Number.isFinite(n) ? n : 0
 }
 
 function noParticipant(taskId: string, reason: string): TaskResult {
