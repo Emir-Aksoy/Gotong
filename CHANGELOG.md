@@ -4,6 +4,41 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — v1.2.5 boundary fuzz + Python SDK docstring
+
+Two leftover items from the v1.2.4 audit's "can defer" list landed
+together: parseVersion boundary fuzz tests and a one-paragraph
+docstring clarifying that `register_service_methods` /
+`unregister_service_methods` are TS-host-only (no Python equivalent).
+
+### Added — `parseVersion` boundary fuzz tests
+
+- `packages/sdk-node/tests/version-mismatch.test.ts` adds four
+  boundary cases for protocolVersion: empty string, negative-prefixed
+  (`'-1.2'`), whitespace-padded (`'  1.2  '`), and multi-component
+  (`'1.2.3.4.5'`). All previously "accidentally safe" — the parser
+  silently fell back to `[0, 0]` and the major-mismatch path returned
+  without warning. Tests pin the behaviour: the SDK neither crashes
+  nor emits a spurious warning on any of these shapes.
+
+### Fixed — Python SDK docstring clarifies host-side scope
+
+- `python-sdk/src/aipehub/services.py` module docstring now says
+  explicitly that the Python SDK is **client-side only**, and that
+  the TypeScript host SDK's `registerServiceMethods` /
+  `unregisterServiceMethods` have no Python counterpart by design
+  (Python sidecars call into Hubs, they don't host one). Avoids
+  future audits asking "where's the Python register/unregister?".
+- Also bumped the docstring header from "(protocol v1.1)" to
+  "(protocol v1.2)" — matches the actual constant in `protocol.py`.
+
+### Notes
+
+- 458 tests workspace-wide green (+4 over v1.2.4). No source-code
+  changes beyond the docstring and four new tests.
+
+---
+
 ## Unreleased — v1.2.4 pre-merge docs + regression guard
 
 Third audit pass before merging to main caught two narrow misses:

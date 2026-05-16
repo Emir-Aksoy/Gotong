@@ -1,9 +1,15 @@
-"""Client-side Hub Services support over WebSocket (protocol v1.1).
+"""Client-side Hub Services support over WebSocket (protocol v1.2).
 
 Mirrors the TypeScript ``@aipehub/sdk-node``'s ``ServiceClient`` surface so
 a Python agent can issue ``self.services.memory_for(...)`` calls and get
 the same handle semantics an in-process agent would have. Handle methods
 serialise into SERVICE_CALL frames and await the matching SERVICE_RESULT.
+
+This module is **client-side only**. The TypeScript host SDK exposes
+``register_service_methods`` / ``unregister_service_methods`` (runtime
+wire-method allowlist for third-party plugins) — there is no Python
+equivalent because AipeHub hosts run on Node. A Python sidecar's job is
+to call into a Hub, not to host one.
 
 # Why this exists
 

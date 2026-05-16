@@ -273,4 +273,97 @@ describe('sdk-node — protocol version mismatch warning', () => {
     // 1.2.3 ≥ 1.2 — should be silent.
     expect(warnedAboutVersion).toBe(false)
   })
+
+  // ---------------------------------------------------------------------
+  // parseVersion boundary fuzz — Audit agent flagged the parser as
+  // "accidentally safe" for several malformed protocolVersion strings.
+  // Pin the behaviour: the SDK must neither crash nor emit a spurious
+  // warning. We do not assert WHETHER a warning fires for malformed
+  // inputs (that's an implementation detail) — only that connect()
+  // returns ready and the process stays up.
+  // ---------------------------------------------------------------------
+
+  it('does not crash on malformed protocolVersion: empty string', async () => {
+    server = await spawnMockServer({ protocolVersion: '' })
+    session = await connect({
+      url: server.url,
+      agents: [new NoopAgent('a')],
+      services: [
+        {
+          type: 'memory',
+          impl: 'file',
+          owner: { kind: 'agent', id: 'self' },
+          methods: ['recall'],
+        },
+      ],
+      autoReconnect: false,
+    })
+    expect(session.state).toBe('ready')
+    // '' parses to [0, 0] — major mismatch vs client v1 → silent.
+  })
+
+  it('does not crash on malformed protocolVersion: negative-prefixed', async () => {
+    // '-1.2' → regex /^\d+/ misses the leading '-', returns null → 0.
+    // Falls into major-mismatch silent return.
+    server = await spawnMockServer({ protocolVersion: '-1.2' })
+    session = await connect({
+      url: server.url,
+      agents: [new NoopAgent('a')],
+      services: [
+        {
+          type: 'memory',
+          impl: 'file',
+          owner: { kind: 'agent', id: 'self' },
+          methods: ['recall'],
+        },
+      ],
+      autoReconnect: false,
+    })
+    expect(session.state).toBe('ready')
+  })
+
+  it('does not crash on malformed protocolVersion: whitespace-padded', async () => {
+    // '  1.2  ' → split('.') → ['  1', '2  '] → '/^\\d+/.exec("  1")'
+    // returns null (leading space) → 0. Same silent-return path.
+    server = await spawnMockServer({ protocolVersion: '  1.2  ' })
+    session = await connect({
+      url: server.url,
+      agents: [new NoopAgent('a')],
+      services: [
+        {
+          type: 'memory',
+          impl: 'file',
+          owner: { kind: 'agent', id: 'self' },
+          methods: ['recall'],
+        },
+      ],
+      autoReconnect: false,
+    })
+    expect(session.state).toBe('ready')
+  })
+
+  it('does not crash on multi-component protocolVersion: "1.2.3.4.5"', async () => {
+    // parseVersion only reads parts[0] / parts[1]; later components are
+    // discarded harmlessly.
+    server = await spawnMockServer({ protocolVersion: '1.2.3.4.5' })
+    session = await connect({
+      url: server.url,
+      agents: [new NoopAgent('a')],
+      services: [
+        {
+          type: 'memory',
+          impl: 'file',
+          owner: { kind: 'agent', id: 'self' },
+          methods: ['recall'],
+        },
+      ],
+      autoReconnect: false,
+    })
+    expect(session.state).toBe('ready')
+    // 1.2.3.4.5 ≥ 1.2 → silent.
+    const warnedAboutVersion = warnSpy.mock.calls.some((args) =>
+      args.some((a) => String(a).includes('protocol version')),
+    )
+    expect(warnedAboutVersion).toBe(false)
+  })
 })
