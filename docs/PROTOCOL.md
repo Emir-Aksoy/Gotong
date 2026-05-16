@@ -319,6 +319,7 @@ A future protocol revision may add a `RESUME` frame with the prior `sessionId` t
 | `unknown_task` | ERROR | RESULT for a task the Hub doesn't have outstanding |
 | `forbidden_service` | SERVICE_RESULT (v1.1) | SERVICE_CALL `(type, impl)` not in HELLO.services |
 | `forbidden_owner` | SERVICE_RESULT (v1.1) | SERVICE_CALL owner doesn't match any declared pattern |
+| `forbidden_method` | SERVICE_RESULT (v1.2) | Method outside the matched decl's `methods` narrowing (per-decl ACL) |
 | `unknown_method` | SERVICE_RESULT (v1.1) | Method outside the per-type allowlist |
 | `attach_failed` | SERVICE_RESULT (v1.1) | Plugin's `attach` threw at lazy-attach time |
 | `service_error` | SERVICE_RESULT (v1.1) | Handle method threw (validation / quota / IO) |

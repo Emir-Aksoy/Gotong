@@ -268,6 +268,7 @@ The errors people actually hit, with what each one means.
 | `forbidden_service` | The `(type, impl)` pair isn't in your HELLO `services` array. Add it. |
 | `forbidden_owner` | The owner you passed to `memoryFor(...)` doesn't match any declared pattern. Wildcards in declarations cover `id: '*'`; literals must match exactly. |
 | `unknown_method` | The method name isn't on the wire allowlist for that service type. For built-ins, see `BUILTIN_SERVICE_METHODS`; for third-party types, the host plugin must call `registerServiceMethods` at bootstrap. |
+| `forbidden_method` (v1.2) | Your `services[...]` decl had `methods: [...]` narrowing, and the method you called isn't on that list. Either widen the narrowing or stop calling the method. Different from `unknown_method`: the method *would* be allowed if you hadn't narrowed. |
 | `attach_failed` | The host plugin's `attach()` threw — invalid config, broken disk path, etc. The host logs are the source of truth. |
 | `session_not_ready` | The SDK's pending-call table got fail-all'd. Either the connection dropped, or `session.close()` was called while a call was in flight. |
 | `bad_args` | The wire `args` field wasn't a JSON array. Don't pass non-serialisable objects (functions, class instances with private fields, etc). |

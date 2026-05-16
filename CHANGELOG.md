@@ -4,6 +4,43 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — v1.2.4 pre-merge docs + regression guard
+
+Third audit pass before merging to main caught two narrow misses:
+the v1.2 `forbidden_method` code never made it into the Error codes
+summary tables, and the v1.2.3 "silent-return doesn't flip the
+sticky flag" fix was not covered by a regression test. Both
+addressed; no source-code changes beyond a test file.
+
+### Fixed — `forbidden_method` listed in Error code tables
+
+- `docs/PROTOCOL.md` "Error codes summary" table gained the row for
+  `forbidden_method` (was listed only in the v1.2 What's-new paragraph
+  at the top, missing from the canonical index at the bottom).
+- `docs/SIDECAR.md` "Symptom / What happened" table gained a row
+  with the same code and a one-sentence diagnosis distinguishing it
+  from `unknown_method`.
+
+### Added — regression guard for v1.2.3 sticky-flag fix
+
+- `packages/sdk-node/tests/version-mismatch.test.ts` adds a white-box
+  test that pins the invariant the v1.2.3 fix established: when
+  `checkServerVersionForServiceNarrowing` returns silently (no
+  narrowing → no warning), `versionMismatchWarned` remains `false`.
+  No realistic scenario lets a single session's silent return turn
+  into a future warn — `opts.services`, `url`, and `PROTOCOL_VERSION`
+  are all immutable per `SessionImpl`. The guard exists to catch
+  future refactors that might quietly re-introduce the bug. Test
+  uses a private-field cast (`session as unknown as { … }`) with a
+  comment explaining why.
+
+### Notes
+
+- 454 tests workspace-wide green (+1 over v1.2.3). No new public
+  API. No wire shape changes.
+
+---
+
 ## Unreleased — v1.2.3 code-review polish + examples typecheck fix
 
 Code-review pass over v1.2 / v1.2.1 / v1.2.2 surfaced nine small

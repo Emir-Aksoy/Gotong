@@ -216,6 +216,42 @@ describe('sdk-node — protocol version mismatch warning', () => {
     expect(warnedAboutVersion).toBe(false)
   })
 
+  it('silent-return path does NOT flip the sticky flag (v1.2.3 regression guard)', async () => {
+    // The v1.2.2 implementation set `versionMismatchWarned = true` right
+    // after calling check(), regardless of whether check() actually warned.
+    // The v1.2.3 fix moved the flag flip inside check() onto the path that
+    // truly warns — so silent-return paths leave the flag at `false`.
+    //
+    // No realistic scenario lets a single session's silent-return turn into
+    // a future warn (services/url/PROTOCOL_VERSION are all immutable per
+    // SessionImpl), but the invariant is still worth pinning so future
+    // refactors don't quietly regress it. White-box: peek at the private
+    // field via cast.
+    server = await spawnMockServer({ protocolVersion: '1.1' })
+    session = await connect({
+      url: server.url,
+      agents: [new NoopAgent('a')],
+      // No `methods` → check() takes the `usesNarrowing === false` early
+      // return; warning is not emitted.
+      services: [
+        { type: 'memory', impl: 'file', owner: { kind: 'agent', id: 'self' } },
+      ],
+      autoReconnect: false,
+    })
+    expect(session.state).toBe('ready')
+    // No warning fired …
+    const versionWarnings = warnSpy.mock.calls.filter((args) =>
+      args.some((a) => String(a).includes('protocol version')),
+    )
+    expect(versionWarnings.length).toBe(0)
+    // …and the sticky flag stayed at the initial `false`. This is the
+    // bit that v1.2.3 fixed.
+    expect(
+      (session as unknown as { versionMismatchWarned: boolean })
+        .versionMismatchWarned,
+    ).toBe(false)
+  })
+
   it('handles dotted patch versions like `"1.2.3"`', async () => {
     server = await spawnMockServer({ protocolVersion: '1.2.3' })
     session = await connect({
