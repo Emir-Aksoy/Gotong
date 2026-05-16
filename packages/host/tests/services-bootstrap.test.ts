@@ -392,3 +392,104 @@ describe('HubServices — attach/detach/softDelete/restore round-trip', () => {
     expect(boot.services.liveHandlesFor({ kind: 'agent', id: 'b' })).toHaveLength(0)
   })
 })
+
+// ---------------------------------------------------------------------------
+// v1.2.6: wireMethods lifecycle — bootstrap registers, shutdownAll unregisters.
+// Without this, a long-lived process (e.g. test harness mounting/unmounting
+// plugins) leaks third-party wire methods in the process-wide allowlist.
+// ---------------------------------------------------------------------------
+
+describe('bootstrapServices — wireMethods runtime allowlist lifecycle', () => {
+  let tmpRoot: string
+  let hub: Hub
+
+  beforeEach(async () => {
+    tmpRoot = await mkdtemp(join(tmpdir(), 'aipehub-wireMethods-'))
+    const init = await Space.init(tmpRoot, { name: 'test' })
+    hub = new Hub({ space: init.space })
+    await hub.start()
+  })
+
+  afterEach(async () => {
+    await hub.stop()
+    await rm(tmpRoot, { recursive: true, force: true })
+  })
+
+  it('registers wireMethods at bootstrap and unregisters them on shutdown', async () => {
+    const { getServiceMethods, resetServiceMethodsForTests } = await import(
+      '@aipehub/protocol'
+    )
+    // Start from a known floor — any prior test that registered wire methods
+    // would leak through the process-wide singleton. The fact that we MUST
+    // call this in a non-test context is itself the bug v1.2.6 fixes.
+    resetServiceMethodsForTests()
+
+    const fake: ServicePlugin = {
+      type: 'notion',          // not a built-in type
+      impl: 'cloud',
+      version: '0.0.1',
+      wireMethods: ['pages.create', 'pages.read'],
+      async init() {
+        /* no-op */
+      },
+      async validateConfig(raw) {
+        return raw as Record<string, unknown>
+      },
+      async attach() {
+        return { handle: {} as never, owner: { kind: 'agent', id: 'a' } }
+      },
+      async detach() {
+        /* no-op */
+      },
+      async softDelete() {
+        return {
+          id: 't',
+          type: 'notion',
+          impl: 'cloud',
+          ownerKind: 'agent',
+          ownerId: 'a',
+          deletedAt: 0,
+          expiresAt: 0,
+        } as TrashRef
+      },
+      async restore() {},
+      async hardDelete() {},
+      async describe() {
+        return { sizeBytes: 0 }
+      },
+      async shutdown() {},
+    }
+
+    // bootstrapServices reads plugins.json from disk — write one that
+    // points at our fake (importPackage will short-circuit the actual
+    // npm resolve and hand back `fake`).
+    const { writeFile } = await import('node:fs/promises')
+    await writeFile(
+      join(hub.space.paths.services, 'plugins.json'),
+      JSON.stringify({ plugins: ['@third-party/notion-cloud'] }),
+      'utf8',
+    )
+    const boot = await bootstrapServices({
+      space: hub.space,
+      hub,
+      logger,
+      seedDefaults: false,
+      importPackage: async () => fake,
+    })
+
+    // After bootstrap, the wire methods are in the runtime allowlist.
+    const afterBoot = getServiceMethods('notion')
+    expect(afterBoot).toBeDefined()
+    expect([...(afterBoot ?? [])].sort()).toEqual([
+      'pages.create',
+      'pages.read',
+    ])
+
+    // Shut down — every wireMethod should be rolled back.
+    await boot.services.shutdownAll()
+
+    // 'notion' is not a built-in type, so unregistering all its methods
+    // collapses the runtime entry — it should be back to `undefined`.
+    expect(getServiceMethods('notion')).toBeUndefined()
+  })
+})

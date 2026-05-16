@@ -53,6 +53,7 @@ import type {
   TrashRef,
 } from '@aipehub/services-sdk'
 import { PluginNotFoundError } from '@aipehub/services-sdk'
+import { unregisterServiceMethods } from '@aipehub/protocol'
 
 /**
  * Shape of a `uses:` entry on an agent yaml. PR-7 will validate this
@@ -430,6 +431,25 @@ export class HubServices {
           impl: plugin.impl,
           err,
         })
+      }
+      // v1.2.6: roll back any wire-method registration this plugin did
+      // at bootstrap so a long-lived process (e.g. hot-reload, test
+      // harness mounting/unmounting plugins) doesn't leak entries in
+      // the process-wide runtime allowlist. Built-in methods are
+      // protected by the allowlist itself; this only removes the
+      // plugin's third-party additions.
+      if (plugin.wireMethods && plugin.wireMethods.length > 0) {
+        try {
+          unregisterServiceMethods(plugin.type, plugin.wireMethods)
+        } catch (err) {
+          // Symmetric throw policy with register — log loudly but
+          // never let it break the rest of the shutdown sweep.
+          this.logger.warn('unregisterServiceMethods refused on shutdown', {
+            type: plugin.type,
+            impl: plugin.impl,
+            err: err instanceof Error ? err.message : String(err),
+          })
+        }
       }
     }
   }

@@ -4,6 +4,42 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — v1.2.6 plugin shutdown wireMethods rollback
+
+Closes the last "defer-to-v1.2.x" item from the v1.2.4 audit:
+`bootstrapServices` registered third-party wire methods, but
+`shutdownAll` did not roll them back, so a long-lived process
+mounting / unmounting plugins (test harness, future hot-reload)
+leaked entries in the process-wide runtime allowlist.
+
+### Added — `shutdownAll` rolls back `wireMethods`
+
+- `packages/host/src/services/hub-services.ts`'s `shutdownAll` now
+  calls `unregisterServiceMethods(plugin.type, plugin.wireMethods)`
+  after `plugin.shutdown()` for every plugin that registered wire
+  methods at bootstrap. Built-in types are protected by the
+  allowlist's floor invariant; this only removes the third-party
+  additions. Failures are logged with `warn` but never abort the
+  shutdown sweep — symmetric with the existing `plugin.shutdown()`
+  best-effort behaviour.
+- `packages/host/tests/services-bootstrap.test.ts` gains a new
+  describe block (`wireMethods runtime allowlist lifecycle`) with
+  an end-to-end test: bootstrap a fake `notion` plugin with
+  `wireMethods: ['pages.create', 'pages.read']`, assert
+  `getServiceMethods('notion')` shows both methods, then call
+  `shutdownAll()` and assert the entry collapses back to
+  `undefined` (since `notion` has no built-ins).
+
+### Notes
+
+- 459 tests workspace-wide green (+1 over v1.2.5). No new public
+  API. No wire shape changes.
+- The only remaining v1.2.4-deferred item is the `__isAipehubBridge`
+  brand-vs-Symbol choice — left for v1.3 federation work where
+  more brand fields will land at once.
+
+---
+
 ## Unreleased — v1.2.5 boundary fuzz + Python SDK docstring
 
 Two leftover items from the v1.2.4 audit's "can defer" list landed
