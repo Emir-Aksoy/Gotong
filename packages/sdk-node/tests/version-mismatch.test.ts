@@ -39,9 +39,11 @@ async function spawnMockServer(welcome: {
   heartbeatIntervalMs?: number
 }): Promise<{ url: string; close: () => Promise<void> }> {
   const wss = new WebSocketServer({ port: 0 })
-  let sock: WsType | undefined
+  // Track every connection — a single-slot `let sock` lost references on
+  // concurrent connections and leaked sockets between tests.
+  const socks: WsType[] = []
   wss.on('connection', (ws) => {
-    sock = ws
+    socks.push(ws)
     ws.on('message', (data) => {
       try {
         const frame = JSON.parse(String(data)) as { type: string }
@@ -68,10 +70,12 @@ async function spawnMockServer(welcome: {
   return {
     url: `ws://127.0.0.1:${port}`,
     close: async () => {
-      try {
-        sock?.close()
-      } catch {
-        /* ignore */
+      for (const s of socks) {
+        try {
+          s.close()
+        } catch {
+          /* ignore — already closed */
+        }
       }
       await new Promise<void>((resolve) => wss.close(() => resolve()))
     },
@@ -185,5 +189,52 @@ describe('sdk-node — protocol version mismatch warning', () => {
       args.some((a) => String(a).includes('protocol version')),
     )
     expect(versionWarnings.length).toBe(1)
+  })
+
+  it('recognises pre-release version tags like `"1.2-beta"`', async () => {
+    // Older v1.2.2 bug: `Number('2-beta')` = NaN → fell back to 0, so a
+    // `'1.2-beta'` server was treated as v1.0 and produced a spurious warning
+    // for v1.2 clients. The parseVersion fix strips the suffix so 1.2-beta
+    // counts as v1.2 — no warning even with narrowing in play.
+    server = await spawnMockServer({ protocolVersion: '1.2-beta' })
+    session = await connect({
+      url: server.url,
+      agents: [new NoopAgent('a')],
+      services: [
+        {
+          type: 'memory',
+          impl: 'file',
+          owner: { kind: 'agent', id: 'self' },
+          methods: ['recall'],
+        },
+      ],
+      autoReconnect: false,
+    })
+    const warnedAboutVersion = warnSpy.mock.calls.some((args) =>
+      args.some((a) => String(a).includes('protocol version')),
+    )
+    expect(warnedAboutVersion).toBe(false)
+  })
+
+  it('handles dotted patch versions like `"1.2.3"`', async () => {
+    server = await spawnMockServer({ protocolVersion: '1.2.3' })
+    session = await connect({
+      url: server.url,
+      agents: [new NoopAgent('a')],
+      services: [
+        {
+          type: 'memory',
+          impl: 'file',
+          owner: { kind: 'agent', id: 'self' },
+          methods: ['recall'],
+        },
+      ],
+      autoReconnect: false,
+    })
+    const warnedAboutVersion = warnSpy.mock.calls.some((args) =>
+      args.some((a) => String(a).includes('protocol version')),
+    )
+    // 1.2.3 ≥ 1.2 — should be silent.
+    expect(warnedAboutVersion).toBe(false)
   })
 })

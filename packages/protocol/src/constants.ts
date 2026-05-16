@@ -157,8 +157,15 @@ export function unregisterServiceMethods(
   type: string,
   methods: readonly string[],
 ): void {
-  if (!type || typeof type !== 'string') return
-  if (!Array.isArray(methods)) return
+  // Symmetric with `registerServiceMethods`: same throw policy on bad input
+  // so plugin lifecycle bugs surface loudly. The one asymmetry is "unknown
+  // type" — deleting nothing is not an error, so we silently return.
+  if (!type || typeof type !== 'string') {
+    throw new Error('unregisterServiceMethods: type must be a non-empty string')
+  }
+  if (!Array.isArray(methods)) {
+    throw new Error('unregisterServiceMethods: methods must be an array')
+  }
   const existing = runtimeAllowlist.get(type)
   if (!existing) return
   const builtin = BUILTIN_SERVICE_METHODS[type] ?? []
@@ -170,9 +177,10 @@ export function unregisterServiceMethods(
     if (builtinSet.has(m)) continue
     next.delete(m)
   }
-  // If the remaining set is exactly the built-ins, collapse to a fresh
-  // snapshot so the map identity matches a never-registered type.
-  if (next.size === builtinSet.size && [...next].every((m) => builtinSet.has(m))) {
+  // If only built-ins remain, collapse the runtime entry. Since the loop
+  // above never deletes a built-in, the remaining set ⊇ built-ins always
+  // holds — equality therefore reduces to a cardinality check.
+  if (next.size === builtinSet.size) {
     if (builtin.length > 0) {
       runtimeAllowlist.set(type, new Set(builtin))
     } else {

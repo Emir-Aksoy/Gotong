@@ -4,6 +4,88 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — v1.2.3 code-review polish + examples typecheck fix
+
+Code-review pass over v1.2 / v1.2.1 / v1.2.2 surfaced nine small
+issues. All are now resolved, plus a typecheck regression in examples
+that v1.2 had quietly introduced.
+
+### Fixed — `parseVersion` recognises pre-release tags
+
+- `@aipehub/sdk-node` was parsing protocol version strings via
+  `Number('2-beta')` which is `NaN` → fallback `0`, so a server
+  reporting `'1.2-beta'` looked like v1.0 to a v1.2 client and
+  produced a spurious cross-version warning. New `parseDigits` helper
+  strips the first non-digit suffix off each component, so
+  `'1.2-beta'`, `'1.2-rc.1'`, and `'1.2.3'` all parse correctly.
+- Two new tests in `packages/sdk-node/tests/version-mismatch.test.ts`
+  cover the pre-release and dotted-patch shapes — both must NOT warn
+  when the client is v1.2.
+
+### Fixed — `unregisterServiceMethods` is symmetric with `register`
+
+- The new (v1.2.2) `unregisterServiceMethods` silently returned on
+  invalid `type` / non-array `methods`, while `registerServiceMethods`
+  threw — asymmetric, hides plugin-lifecycle bugs at the worst time
+  (shutdown path). Now throws on the same conditions; "unknown type"
+  is still a silent no-op because deleting nothing is not an error.
+- Test in `packages/transport-ws/tests/extend-allowlist.test.ts`
+  split into two cases: silent no-op on unknown type vs throw on
+  bad input.
+
+### Fixed — federation glue uses brand check, not `instanceof`
+
+- `connect()` recognised `TeamBridgeAgent` via `instanceof`, which
+  fails across pnpm peer-mismatch or workspace-override edge cases
+  where two copies of `@aipehub/sdk-node` resolve into the same
+  graph. Added a `__isAipehubBridge = true as const` brand and an
+  `isTeamBridge(a)` helper that checks `instanceof` first (fast path)
+  then falls back to the brand. Existing federation tests pass
+  unchanged — the new check is strictly more permissive.
+
+### Fixed — `versionMismatchWarned` flag bookkeeping
+
+- The flag was flipped to `true` even when `checkServerVersion…`
+  returned silently (no narrowing → no warning needed). Effect: if
+  the first WELCOME had no narrowing on a v1.1 server and the
+  reconnect later added narrowing, the warning never fired. Moved the
+  `flag = true` write to the path that actually warns; silent-return
+  paths leave the flag at its existing value.
+
+### Fixed — small code-quality items from the review
+
+- `unregisterServiceMethods` set-equality reduced to a cardinality
+  check; built-ins are never deletable so "same size" implies "same
+  set" (comment added explaining the invariant).
+- `version-mismatch.test.ts` mock server now tracks every connection
+  in an array, not a single `let` — concurrent connections no longer
+  leak sockets between tests.
+- CHANGELOG v1.2 section's `PROTOCOL_VERSION bumped to '1.2'` line
+  carries a footnote pointing at v1.2.1 where the constant actually
+  changed; Python SDK entry got the same caveat.
+- `packages/sdk-node/src/bridge.ts` comments now say `(v1.2.1+)`
+  where they previously said `(v1.2)` for fields that didn't exist
+  on the original v1.2 commit.
+
+### Fixed — examples typecheck regressions
+
+- v1.2's new `'service_call'` variant on `TranscriptEntry` was added
+  to `packages/host/src/main.ts`'s `describe()` switch but missed in
+  all eleven `examples/*` describe() switches. Eight of those had
+  declared return type `string`, so adding the variant broke their
+  builds. Each now handles `case 'service_call'` consistently with
+  `host/main.ts` (`SVCCALL` line with from, type:impl#method,
+  outcome, durationMs).
+
+### Notes
+
+- 453 tests across the workspace green on this patch (+3 over v1.2.2:
+  pre-release parse, dotted parse, unregister throw-symmetric).
+- No wire shape changes. No new API on the SDK surface beyond
+  exporting `isTeamBridge` from `@aipehub/sdk-node`.
+
+---
+
 ## Unreleased — v1.2.2 minor-debt cleanup
 
 Second audit pass picked up three smaller issues that did not block
@@ -167,6 +249,11 @@ that lets sidecar authors skip the boilerplate.
   `methods` field treats it as unknown extra (the wire decoder
   preserves extra fields silently); v1.1 clients calling a v1.2
   server never see `forbidden_method` because they never narrow.
+  > **NOTE — the constant bump only landed in the v1.2.1 audit patch.**
+  > The features above all shipped in this v1.2 entry; the version
+  > string itself was the last debt audit caught (see v1.2.1 section
+  > above). If you're spelunking commit history: `b3c740e` is where the
+  > `'1.2'` constant actually replaces `'1.1'`.
 
 ### Added — observability (host, web admin)
 
@@ -208,7 +295,9 @@ that lets sidecar authors skip the boilerplate.
 - `Session.services` populated when services declared; `None`
   otherwise. Pending calls reject with `session_not_ready` on close
   / disconnect.
-- `PROTOCOL_VERSION` in `aipehub.protocol` bumped to `'1.2'`.
+- `PROTOCOL_VERSION` in `aipehub.protocol` bumped to `'1.2'`. (Same
+  caveat as the TypeScript constant above — the bump itself landed in
+  v1.2.1.)
 - 5 new pytest tests cover HELLO.services on the wire, memory
   roundtrip, error code propagation, third-party `custom_for`, and
   pending-call rejection on close.

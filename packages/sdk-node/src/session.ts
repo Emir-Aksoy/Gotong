@@ -21,7 +21,7 @@ import {
   type ServiceClient,
   type ServiceUseRequest,
 } from './service-client.js'
-import { TeamBridgeAgent } from './bridge.js'
+import { TeamBridgeAgent, isTeamBridge } from './bridge.js'
 
 export type SessionState =
   | 'connecting'
@@ -114,16 +114,21 @@ export async function connect(opts: ConnectOptions): Promise<Session> {
     seen.add(a.id)
   }
 
-  // Federation glue (v1.2): each TeamBridgeAgent may declare
+  // Federation glue (v1.2.1+): each TeamBridgeAgent may declare
   // `forwardUpstreamServices` — service decls to be merged into HELLO.services
   // so the bridge can call upstream services from within the local team. We
   // (a) merge those declarations into the connection's services list before
   // HELLO is sent, and (b) write back the resulting ServiceClient onto each
   // bridge's `upstreamServices` field once the session is up. Without this
   // wiring the field was a documentation-only placeholder.
+  //
+  // We use `isTeamBridge` rather than a raw `instanceof` so that bridges
+  // built against a second copy of `@aipehub/sdk-node` (pnpm peer mismatch /
+  // monorepo override edge cases) are still recognised — `instanceof` checks
+  // class identity, which differs between dep-graph realms.
   const federationBridges: TeamBridgeAgent[] = []
   for (const a of resolved.agents) {
-    if (a instanceof TeamBridgeAgent && a.forwardUpstreamServices.length > 0) {
+    if (isTeamBridge(a) && a.forwardUpstreamServices.length > 0) {
       federationBridges.push(a)
     }
   }
@@ -251,17 +256,13 @@ class SessionImpl implements Session {
     switch (frame.type) {
       case 'WELCOME': {
         this.sessionId = frame.sessionId
-        // v1.2 cross-version safety: if the client declared per-method ACL
-        // narrowing (`services[i].methods`), a v1.1 server will NOT enforce
-        // it (the field is unknown, decoded but ignored). The client thinks
-        // it has read-only access; the server lets everything through. Warn
-        // once on WELCOME so the user can see the safety degradation in
-        // logs. We don't reject the connection — that's too strict for the
-        // SDK to decide unilaterally.
-        if (!this.versionMismatchWarned) {
-          this.checkServerVersionForServiceNarrowing(frame.protocolVersion)
-          this.versionMismatchWarned = true
-        }
+        // v1.2 cross-version safety: warn once per session if the server
+        // is too old to enforce a v1.2-only feature the client is using
+        // (currently just `ServiceUseDecl.methods` narrowing). The flag
+        // is flipped INSIDE the method, only on the path that actually
+        // logs — silent-return paths leave it unset so a later reconnect
+        // (which may carry different narrowing) can still warn.
+        this.checkServerVersionForServiceNarrowing(frame.protocolVersion)
         this.setState('ready')
         this.backoff = this.opts.reconnectInitialBackoffMs
         if (this.welcomeWaiter) {
@@ -485,6 +486,10 @@ class SessionImpl implements Session {
    * client/host-side and don't have a cross-version safety story to lose.
    */
   private checkServerVersionForServiceNarrowing(serverVersion: unknown): void {
+    // Sticky once warned per session — silent-return below leaves the flag
+    // alone so a later reconnect that DOES warrant a warning can still
+    // produce one.
+    if (this.versionMismatchWarned) return
     if (typeof serverVersion !== 'string') return
     // The connection's `services` is on `opts.services`; check whether any
     // decl narrowed via `methods`. If none did, the server version doesn't
@@ -499,6 +504,7 @@ class SessionImpl implements Session {
     if (smajor !== cmajor) return // major mismatch: REJECT path handles it
     if (sminor >= cminor) return
     // Older minor on same major: per-method ACL silently won't be enforced.
+    this.versionMismatchWarned = true
     console.warn(
       `[sdk-node] server protocol version ${serverVersion} is older than ` +
         `client ${PROTOCOL_VERSION} — per-method ACL narrowing (` +
@@ -508,15 +514,27 @@ class SessionImpl implements Session {
   }
 }
 
-/** Parse `'1.2'` → `[1, 2]`. Best-effort; non-numeric components become 0. */
+/**
+ * Parse a protocol version string into `[major, minor]`. Tolerates the
+ * common pre-release shapes — `'1.2-beta'`, `'1.2-rc.1'`, `'1.2.3'` — by
+ * stripping the first non-digit suffix off each component. Non-numeric
+ * components fall back to `0` (mirrors the v1.0 wire decoder's "unknown
+ * extra is silent" stance).
+ */
 function parseVersion(v: string): [number, number] {
   const parts = v.split('.')
-  const major = Number(parts[0])
-  const minor = Number(parts[1])
-  return [
-    Number.isFinite(major) ? major : 0,
-    Number.isFinite(minor) ? minor : 0,
-  ]
+  const major = parseDigits(parts[0])
+  const minor = parseDigits(parts[1])
+  return [major, minor]
+}
+
+function parseDigits(s: string | undefined): number {
+  if (!s) return 0
+  // Take the leading digits only — '2-beta' → '2', '1' → '1', '' → ''.
+  const m = /^\d+/.exec(s)
+  if (!m) return 0
+  const n = Number(m[0])
+  return Number.isFinite(n) ? n : 0
 }
 
 function noParticipant(taskId: string, reason: string): TaskResult {

@@ -128,13 +128,23 @@ describe('registerServiceMethods (protocol)', () => {
     expect(isServiceMethodAllowed('notion', 'pages.create')).toBe(false)
   })
 
-  it('unregisterServiceMethods is a no-op on unknown type / bad input', () => {
+  it('unregisterServiceMethods is a no-op on unknown type', () => {
+    // Deleting nothing is fine — we don't want plugin shutdown to throw
+    // because a type was already gone.
     expect(() => unregisterServiceMethods('ghost', ['x'])).not.toThrow()
-    expect(() =>
-      unregisterServiceMethods('memory', null as unknown as readonly string[]),
-    ).not.toThrow()
-    // Built-ins still intact.
     expect(isServiceMethodAllowed('memory', 'recall')).toBe(true)
+  })
+
+  it('unregisterServiceMethods throws on bad input (symmetric with register)', () => {
+    // Same throw policy as `registerServiceMethods` for type / methods —
+    // catches plugin lifecycle bugs loudly rather than corrupting state.
+    expect(() => unregisterServiceMethods('', ['x'])).toThrow(/non-empty/)
+    expect(() =>
+      unregisterServiceMethods(
+        'memory',
+        null as unknown as readonly string[],
+      ),
+    ).toThrow(/array/)
   })
 })
 
