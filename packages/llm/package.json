@@ -33,6 +33,6 @@
     "@aipehub/services-sdk": "workspace:*"
   },
   "devDependencies": {
-    "vitest": "^2.0.0"
+    "vitest": "^4.1.6"
   }
 }
