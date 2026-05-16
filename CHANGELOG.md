@@ -4,6 +4,41 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — v1.2.7 flaky CI: artifact-file describe preview tie-break
+
+CI monitor flagged `Node 20 · TS workspace` on PR #7 (and intermittently
+on PR #8) — the `service-artifact-file` plugin test
+`reports size, itemCount, preview after writes` failed with
+`expected '# one' to match /two/`. Root cause is a `mtimeMs` tie:
+two `h.write(...)` calls happen inside the same millisecond on Linux
+CI filesystems (ext4 / tmpfs ms-granularity), so both files report
+the same mtime, the `>`-tie-break in `ArtifactFilePlugin.describe`
+never overrides `previewSource`, and walk order (alphabetical) keeps
+`one.md` ahead of `two.md`. Node 22 happened to not tie on the same
+input — the test wasn't deterministic.
+
+### Fixed — test inserts a one-tick delay between writes
+
+- `packages/service-artifact-file/tests/plugin.test.ts` —
+  `describe › reports size, itemCount, preview after writes` now
+  sleeps 20 ms between `one.md` and `two.md` writes so mtimes are
+  distinguishable on the slowest CI filesystem. The plugin itself
+  (`src/plugin.ts`) is unchanged — picking the largest-mtime file is
+  still the right behaviour; the fix is in the test's realism, not
+  the implementation. A long-form comment in the test documents the
+  failure mode for future maintainers so the delay isn't optimised
+  away.
+
+### Notes
+
+- 793 tests workspace-wide green (no change in count — this fix is
+  test-only flake remediation).
+- No production code path touched. No wire shape changes. No new
+  public API.
+- This unblocks PR #7 / PR #8 CI determinism on `Node 20` runners.
+
+---
+
 ## Unreleased — v1.2.6 plugin shutdown wireMethods rollback
 
 Closes the last "defer-to-v1.2.x" item from the v1.2.4 audit:

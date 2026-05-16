@@ -69,6 +69,13 @@ describe('describe', () => {
     const cfg = await plugin.validateConfig({})
     const h = await plugin.attach(owner, cfg)
     await h.write('one.md', '# one')
+    // Linux ext4 / tmpfs report `mtimeMs` at ms granularity. Two writes inside
+    // the same ms produce identical mtimes, the `>` tie-break in describe()
+    // keeps `previewSource` on the first-walked file (alphabetical: `one.md`),
+    // and the assertion below flips. Sleep one tick so mtimes are
+    // distinguishable on the slowest CI filesystem. (Reproduced on Node 20
+    // GHA runner 2026-05-14 — Node 22 happened to not tie on the same input.)
+    await new Promise((resolve) => setTimeout(resolve, 20))
     await h.write('two.md', '# two')
     const snap = await plugin.describe(owner)
     expect(snap.sizeBytes).toBeGreaterThan(0)
