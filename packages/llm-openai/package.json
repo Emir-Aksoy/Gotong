@@ -32,10 +32,10 @@
     "@aipehub/llm": "workspace:*"
   },
   "peerDependencies": {
-    "openai": "^4.70.0"
+    "openai": "^6.38.0"
   },
   "devDependencies": {
-    "openai": "^4.70.0",
+    "openai": "^6.38.0",
     "vitest": "^2.0.0"
   }
 }
