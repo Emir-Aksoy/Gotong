@@ -23,6 +23,13 @@ COPY packages/host/package.json            packages/host/package.json
 COPY packages/llm/package.json             packages/llm/package.json
 COPY packages/llm-anthropic/package.json   packages/llm-anthropic/package.json
 COPY packages/llm-openai/package.json      packages/llm-openai/package.json
+COPY packages/services-sdk/package.json    packages/services-sdk/package.json
+COPY packages/service-memory-file/package.json     packages/service-memory-file/package.json
+COPY packages/service-artifact-file/package.json   packages/service-artifact-file/package.json
+COPY packages/service-datastore-sqlite/package.json packages/service-datastore-sqlite/package.json
+COPY packages/workflow/package.json        packages/workflow/package.json
+COPY packages/cli/package.json             packages/cli/package.json
+COPY packages/mcp-server/package.json      packages/mcp-server/package.json
 
 # Use the lockfile verbatim. We don't add --frozen-lockfile because the
 # image is built from the repo, not from a fresh clone — but pnpm will
