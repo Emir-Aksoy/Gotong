@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/services-sdk",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "AipeHub Services SDK — plugin contract, registry, loader. Same surface for first-party and third-party service plugins (memory / artifact / datastore / …).",
   "license": "MIT",
@@ -24,7 +24,11 @@
       "import": "./dist/testing.js"
     }
   },
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

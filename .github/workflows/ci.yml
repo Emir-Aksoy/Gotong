@@ -30,18 +30,37 @@ jobs:
   # ---------------------------------------------------------------------------
   # Node — typecheck + test the entire pnpm workspace.
   #
-  # Matrix on Node 20 (engines floor) and 22 (next LTS). 22 is allowed
-  # to fail without sinking the whole run via `continue-on-error`, but
-  # we still publish the result so regressions are visible.
+  # Matrix design (kept lean to bound CI cost):
+  #   - ubuntu-latest × node 20 / 22 — Linux is the deploy target, both
+  #     LTS lines we promise to support.
+  #   - macos-latest × node 22 — most contributors develop on macOS;
+  #     this catches Mach-O / fs-event / native-binding deltas that
+  #     wouldn't show on Linux (better-sqlite3 is the usual suspect).
+  #   - windows-latest × node 22 — catches Windows-only path / atomic
+  #     write / native module bugs without doubling our CI minutes.
+  #
+  # Everything is `fail-fast: false` so one platform's flake doesn't
+  # mask the rest. macOS + Windows aren't allowed to fail silently —
+  # they sink the run the same way Linux does.
   # ---------------------------------------------------------------------------
   node:
-    name: Node ${{ matrix.node }} · TS workspace
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    name: Node ${{ matrix.node }} · ${{ matrix.os }} · TS workspace
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
+        # The default matrix is Linux × {20, 22}. `include` adds the
+        # cross-platform smoke runs without expanding into the full
+        # 3-OS × 2-node Cartesian product (which would be 6 jobs for
+        # not much extra coverage).
+        os: [ubuntu-latest]
         node: ["20", "22"]
+        include:
+          - os: macos-latest
+            node: "22"
+          - os: windows-latest
+            node: "22"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

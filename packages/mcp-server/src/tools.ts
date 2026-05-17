@@ -215,8 +215,11 @@ export function registerTools(server: McpServer, client: HubClient): void {
 }
 
 // --- helpers ----------------------------------------------------------
+// `buildStrategy` and `windowToRange` are exported for tests. They're
+// pure functions with no MCP / Hub deps so they're easy to pin down
+// independently of the SDK plumbing.
 
-function buildStrategy(
+export function buildStrategy(
   kind: 'direct' | 'capability' | 'broadcast',
   recipient: string | undefined,
   capabilities: string[] | undefined,
@@ -242,7 +245,7 @@ function buildStrategy(
     : { kind: 'broadcast' }
 }
 
-function windowToRange(w: 'today' | '7d' | '30d' | 'all'): { from?: number; to?: number } {
+export function windowToRange(w: 'today' | '7d' | '30d' | 'all'): { from?: number; to?: number } {
   const now = Date.now()
   if (w === 'all') return {}
   if (w === 'today') {
