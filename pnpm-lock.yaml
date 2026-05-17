@@ -243,6 +243,15 @@ importers:
       '@aipehub/workflow':
         specifier: workspace:*
         version: link:../workflow
+      '@anthropic-ai/sdk':
+        specifier: ^0.96.0
+        version: 0.96.0(zod@4.4.3)
+      better-sqlite3:
+        specifier: ^12.10.0
+        version: 12.10.0
+      openai:
+        specifier: ^6.38.0
+        version: 6.38.0(ws@8.20.1)(zod@4.4.3)
     devDependencies:
       '@aipehub/sdk-node':
         specifier: workspace:*
