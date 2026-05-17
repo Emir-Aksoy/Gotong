@@ -109,3 +109,68 @@ jobs:
 
       - name: Test
         run: pytest -q
+
+  # ---------------------------------------------------------------------------
+  # Docker — smoke-build the production image so Dockerfile drift is caught.
+  #
+  # The README's recommended quick-start path is `docker compose up`. If
+  # the Dockerfile's `COPY packages/<name>/package.json` block drifts out
+  # of sync with `pnpm-workspace.yaml` (a real bug we hit in v3 prep), the
+  # build fails at `pnpm install --frozen-lockfile` with
+  # `ERR_PNPM_OUTDATED_LOCKFILE`. This job catches that within minutes of
+  # the bad commit, not after a user tries to run the image. We don't
+  # push the image anywhere — `--load` keeps the artefact in the local
+  # daemon for the duration of the job, then GitHub discards it.
+  # ---------------------------------------------------------------------------
+  docker:
+    name: Docker · production image smoke build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build production image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: aipehub/host:ci
+          # Use the inline cache so back-to-back PRs reuse the npm install
+          # layer when the lockfile hasn't moved.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Healthcheck the image starts and serves /healthz
+        run: |
+          set -euo pipefail
+          # Bind to host ports 13000/14000 to avoid any collision with the
+          # runner's own services. Mount an ephemeral tmpfs for /data so
+          # the container can write the first-run admin token + space
+          # bootstrap without persisting state past this job.
+          docker run -d --rm \
+            --name aipehub-ci \
+            -p 13000:3000 \
+            -p 14000:4000 \
+            --tmpfs /data:rw,size=64m \
+            aipehub/host:ci
+          # The image declares a HEALTHCHECK with 15s start-period; give
+          # it 30s to settle, then poll /healthz directly.
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:13000/healthz >/dev/null 2>&1; then
+              echo "✓ /healthz responded after $((i * 2))s"
+              docker logs aipehub-ci 2>&1 | head -40
+              docker stop aipehub-ci
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "✗ /healthz never responded — container logs:"
+          docker logs aipehub-ci
+          docker stop aipehub-ci || true
+          exit 1
