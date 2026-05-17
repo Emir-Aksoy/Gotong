@@ -276,6 +276,16 @@ First-run admin URL (shown ONCE — save it):
 
 把 `http://127.0.0.1:3000` 替换成 `https://hub.example.com`，在浏览器里打开。`AIPE_COOKIE_SECURE=1` 加 TLS，cookie 黏住。后续重启 systemd service 不会重新打印 token —— admin 已经持久化在 `admins.json` 里。
 
+> **URL 丢了？** 如果错过 bootstrap 那行日志（终端关掉、log shipper 过滤掉、scrollback 翻过去），用下面这条**不启动 listener** 的恢复命令：
+>
+> ```bash
+> sudo -u aipehub -H AIPE_SPACE=/srv/aipehub-data \
+>   AIPE_HOST=hub.example.com AIPE_COOKIE_SECURE=1 \
+>   /opt/aipehub/packages/host/bin/aipehub-host.js mint-admin-token
+> ```
+>
+> 它不启动 Hub / WebSocket / Web listener，只 open `AIPE_SPACE`，往 `admins.json` 加一个新 admin，按 `AIPE_HOST` / `AIPE_WEB_PORT` / `AIPE_COOKIE_SECURE` 打印一次性 URL（公网 hostname 直接对得上），然后退出。已存在的 admin、cookie、session 都不动。可选传 display name 给新 admin 加标签：`mint-admin-token "Carol"`。
+
 ### C.8 邀请更多 admin
 
 进入 admin UI 后，邀请其他 admin 是服务器端流程：

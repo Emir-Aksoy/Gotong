@@ -311,6 +311,23 @@ it in your browser. The cookie sticks because `AIPE_COOKIE_SECURE=1`
 and the page is served over TLS. Subsequent restarts of the service do
 not re-print the token — admins persist in `admins.json`.
 
+> **Lost the URL?** If you missed the bootstrap line (terminal closed,
+> log shipper filtered it, scrollback gone), use the no-listener
+> recovery subcommand:
+>
+> ```bash
+> sudo -u aipehub -H AIPE_SPACE=/srv/aipehub-data \
+>   AIPE_HOST=hub.example.com AIPE_COOKIE_SECURE=1 \
+>   /opt/aipehub/packages/host/bin/aipehub-host.js mint-admin-token
+> ```
+>
+> Opens `AIPE_SPACE` without starting the Hub or WebSocket / Web
+> listeners, appends a new admin to `admins.json`, prints the one-time
+> URL (respecting `AIPE_HOST` / `AIPE_WEB_PORT` / `AIPE_COOKIE_SECURE`
+> so the printed URL points at your public hostname), and exits.
+> Existing admins, cookies, and sessions are untouched. Pass an
+> optional display name to label the row: `mint-admin-token "Carol"`.
+
 ### C.8 Onboard more admins
 
 Once you're in the admin UI, the **invite-admin** flow is server-side:
