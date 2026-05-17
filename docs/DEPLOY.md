@@ -180,10 +180,10 @@ User=aipehub
 Group=aipehub
 WorkingDirectory=/opt/aipehub
 EnvironmentFile=/etc/aipehub.env
-# Use the published bin once installed:
-#   ExecStart=/usr/bin/env aipehub-host
-# Or run from source via tsx:
-ExecStart=/usr/bin/env node --experimental-strip-types /opt/aipehub/packages/host/src/main.ts
+# Run the built host. `pnpm build` (step C.2) produced dist/. This is
+# the recommended path: zero runtime transpile, fewer moving parts, no
+# Node-version sensitivity.
+ExecStart=/usr/bin/env node /opt/aipehub/packages/host/dist/main.js
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
@@ -200,17 +200,23 @@ StandardError=journal
 WantedBy=multi-user.target
 ```
 
-> Node 20 doesn't ship `--experimental-strip-types` (Node 22 does). Two
-> simpler routes: (a) `pnpm build` and point `ExecStart` at
-> `dist/main.js` directly, or (b) install `tsx` globally and use
-> `/usr/bin/env tsx /opt/aipehub/packages/host/src/main.ts`. Build is
-> the safer production choice — fewer moving parts.
-
-Build-then-run flavour:
-
-```ini
-ExecStart=/usr/bin/env node /opt/aipehub/packages/host/dist/main.js
-```
+> Three alternative `ExecStart` lines you might use **instead** of the
+> default above — pick one of these only if you have a specific reason:
+>
+> ```ini
+> # If you `pnpm install -g @aipehub/host` (or once it's on a registry):
+> ExecStart=/usr/bin/env aipehub-host
+>
+> # Skip the build step entirely — requires Node 22+:
+> ExecStart=/usr/bin/env node --experimental-strip-types /opt/aipehub/packages/host/src/main.ts
+>
+> # Run from source via tsx (Node 20 friendly, extra global dep):
+> ExecStart=/usr/bin/env tsx /opt/aipehub/packages/host/src/main.ts
+> ```
+>
+> `--experimental-strip-types` requires **Node 22+** — on Node 20 the
+> process exits immediately with `bad option: --experimental-strip-types`,
+> so don't pick it unless you've actually deployed Node 22.
 
 ### C.5 Caddyfile
 
