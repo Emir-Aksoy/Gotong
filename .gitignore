@@ -5,6 +5,11 @@ build/
 .DS_Store
 *.log
 
+# `bun build --compile` writes hidden cache files next to the working
+# directory (filenames like `.18b05b9e3dff7a7d-00000000.bun-build`).
+# Safe to delete between runs.
+.*.bun-build
+
 # Claude Code local harness settings — not part of the open-source repo
 .claude/
 .env

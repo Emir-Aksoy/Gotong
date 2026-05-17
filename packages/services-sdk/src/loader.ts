@@ -40,6 +40,16 @@ export interface LoadPluginsOpts {
    */
   seedDefaults?: boolean
   /**
+   * Override the package list written when seeding. Defaults to
+   * `DEFAULT_FIRST_PARTY_PLUGINS`. Hosts use this to exclude packages
+   * that won't load in their environment — e.g. the single-file binary
+   * build cannot load `@aipehub/service-datastore-sqlite` because
+   * `better-sqlite3`'s native binding can't be embedded, so the host
+   * passes a list without it, sparing operators a spurious warning on
+   * every first run.
+   */
+  seedPlugins?: readonly string[]
+  /**
    * Resolver used by `dynamic import`. Defaults to the platform
    * import. Tests inject a fake that returns canned modules.
    */
@@ -73,7 +83,8 @@ export async function loadPlugins(opts: LoadPluginsOpts): Promise<LoadPluginsRes
     validateManifest(manifest)
   } catch (err) {
     if (isMissingFile(err) && seedDefaults) {
-      manifest = { plugins: [...DEFAULT_FIRST_PARTY_PLUGINS] }
+      const seedList = opts.seedPlugins ?? DEFAULT_FIRST_PARTY_PLUGINS
+      manifest = { plugins: [...seedList] }
       await mkdir(dirname(opts.manifestPath), { recursive: true })
       await writeFile(opts.manifestPath, JSON.stringify(manifest, null, 2) + '\n', 'utf8')
       seeded = true

@@ -1,0 +1,148 @@
+# Release — build cross-platform single-file binaries via `bun build --compile`
+# and attach them to the GitHub Release that triggered this run.
+#
+# Trigger:
+#   - `release: types: [published]` — the canonical path. Cut a release in
+#     the GitHub UI (or via `gh release create`), this workflow fires,
+#     and the resulting binaries land on the same release's Assets list.
+#   - `workflow_dispatch` — manual trigger for testing the build matrix
+#     without publishing. Artefacts are uploaded for download but NOT
+#     attached to any release.
+#
+# Why bun --compile:
+#   Operators who don't want to install Node.js / pnpm just to run a
+#   chat server can `curl -L .../aipehub-host-linux-x64 -o aipehub-host
+#   && chmod +x aipehub-host && ./aipehub-host`. The Web UI's static
+#   assets are embedded at build time (see packages/web/scripts/
+#   build-static-assets.mjs) so there's no companion `static/` directory
+#   to ship alongside.
+#
+# What's NOT in the binary:
+#   `@aipehub/service-datastore-sqlite` depends on `better-sqlite3`,
+#   whose native `.node` binding can't be embedded by bun's bundler.
+#   The host detects binary mode via `isCompiledBinary()` and writes a
+#   default plugins.json without sqlite so first-run is warning-free.
+#   Operators who need SQLite-backed datastore should use the npm or
+#   docker install paths.
+
+name: Release Binaries
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+# Release uploads require write access to repository contents.
+permissions:
+  contents: write
+
+# Never cancel a release build in flight — partial uploads would leave
+# the release Assets list looking broken.
+concurrency:
+  group: release-binaries-${{ github.event.release.tag_name || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.target.label }}
+    runs-on: ${{ matrix.target.runner }}
+    timeout-minutes: 20
+    strategy:
+      # One platform failing shouldn't sink the rest — partial binary
+      # set is better than none, and the failure surfaces per-job in the
+      # Actions UI.
+      fail-fast: false
+      matrix:
+        target:
+          - label: darwin-arm64
+            runner: macos-latest
+            bunTarget: bun-darwin-arm64
+            artifact: aipehub-host-darwin-arm64
+            canRun: true
+          - label: darwin-x64
+            runner: macos-13
+            bunTarget: bun-darwin-x64
+            artifact: aipehub-host-darwin-x64
+            canRun: true
+          - label: linux-x64
+            runner: ubuntu-latest
+            bunTarget: bun-linux-x64
+            artifact: aipehub-host-linux-x64
+            canRun: true
+          - label: linux-arm64
+            # Cross-compiled from x64. GitHub Actions has arm64 runners
+            # but they cost extra and a cross-compile is reliable enough
+            # for a smoke build. End users on real arm64 hardware
+            # exercise the binary.
+            runner: ubuntu-latest
+            bunTarget: bun-linux-arm64
+            artifact: aipehub-host-linux-arm64
+            canRun: false
+          - label: windows-x64
+            runner: windows-latest
+            bunTarget: bun-windows-x64
+            artifact: aipehub-host-windows-x64.exe
+            canRun: true
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install pnpm
+        # Version sourced from root package.json `packageManager`.
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: pnpm
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TypeScript workspace
+        # Runs packages/web's static-asset generator first (it's part of
+        # the package's `build` script), so the embedded asset map is
+        # current with anything in static/.
+        run: pnpm -r build
+
+      - name: Compile ${{ matrix.target.label }} binary
+        shell: bash
+        run: |
+          bun build packages/host/bin/aipehub-host.js \
+            --compile \
+            --target=${{ matrix.target.bunTarget }} \
+            --outfile=${{ matrix.target.artifact }}
+          ls -lh ${{ matrix.target.artifact }}
+
+      - name: Smoke-test binary (--version)
+        if: matrix.target.canRun == true
+        shell: bash
+        # The cross-compiled linux-arm64 binary can't be executed on the
+        # x64 runner — skip --version there. Real arm64 hosts will catch
+        # any regression at install time. Every other target runs natively.
+        run: |
+          ./${{ matrix.target.artifact }} --version
+
+      - name: Upload artefact (always)
+        # Always upload — workflow_dispatch runs use this for manual
+        # download, release runs use this as a backup if the gh-release
+        # upload below fails for any reason.
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.target.artifact }}
+          path: ${{ matrix.target.artifact }}
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Attach to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.target.artifact }}
+          fail_on_unmatched_files: true

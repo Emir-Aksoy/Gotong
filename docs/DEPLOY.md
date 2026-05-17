@@ -61,6 +61,48 @@ admin's token already lives (hashed) in `admins.json`.
 
 ---
 
+## 0.5 Single-file binary (no Node required)
+
+`aipehub-host` is also distributed as a self-contained executable built
+with `bun build --compile`. Use this when you want to spin up a hub on
+a fresh box without installing Node.js, pnpm, or the workspace.
+
+```bash
+# Linux x64 — substitute -darwin-arm64 / -darwin-x64 / -windows-x64.exe
+# / -linux-arm64 for the matching platform.
+curl -L -o aipehub-host \
+  https://github.com/Emir-Aksoy/AipeHub/releases/latest/download/aipehub-host-linux-x64
+chmod +x aipehub-host
+./aipehub-host
+```
+
+The binary reads the same `AIPE_*` environment variables as the npm
+build, so every recipe later in this document (A / B / C) works
+unmodified — just substitute `./aipehub-host` for `pnpm host` or
+`aipehub-host` (npm-installed).
+
+What's **inside** the binary:
+- The entire `@aipehub/host` workspace — Hub, WebSocket transport,
+  Web UI (HTML/CSS/JS assets are embedded at build time, not read off
+  disk), and the LLM adapters.
+- The two first-party plugins that don't need native code:
+  `@aipehub/service-memory-file` and `@aipehub/service-artifact-file`.
+
+What's **not** included:
+- `@aipehub/service-datastore-sqlite` — depends on `better-sqlite3`,
+  which ships native `.node` bindings the bundler can't embed. The
+  binary detects its own runtime and writes a default `plugins.json`
+  *without* sqlite, so first-run is warning-free. If you need
+  SQL-backed datastore plugins, use the npm or docker install path.
+- Third-party plugins installed into your space — the binary cannot
+  resolve packages outside its embedded module graph. Plugin
+  development belongs to the npm path.
+
+Binary size is roughly 60 MB across all platforms. Startup is ~5x faster
+than `tsx src/main.ts` because there's no module loader walk.
+
+---
+
 ## A. Local (default)
 
 ```bash

@@ -36,6 +36,7 @@ import {
 } from '@aipehub/services-sdk'
 import { join } from 'node:path'
 
+import { BUILTIN_PLUGINS } from './builtin-plugins.js'
 import { ensurePluginRootDir, HubServices } from './hub-services.js'
 
 /**
@@ -63,6 +64,16 @@ import { ensurePluginRootDir, HubServices } from './hub-services.js'
  * installed alongside the host.
  */
 async function hostAnchoredImport(pkg: string): Promise<unknown> {
+  // First-party plugin? Return the statically-imported namespace from
+  // `builtin-plugins.ts`. Node / tsx would have resolved this to the
+  // exact same module via `import.meta.resolve` below, so this is a
+  // pure short-circuit — its real purpose is to make `bun build
+  // --compile` link the plugin code into the single-file binary, where
+  // dynamic-import resolution against `/$bunfs/root/` fails.
+  if (pkg in BUILTIN_PLUGINS) {
+    return BUILTIN_PLUGINS[pkg]
+  }
+
   // Prefer `import.meta.resolve` (sync, Node 20.6+) — it returns the
   // resolved `file://` URL string anchored to *this module's* location,
   // which is what gives us access to the host's `node_modules/@aipehub/`
@@ -106,6 +117,14 @@ export interface BootstrapServicesOpts {
    * loader if this opt is unset.
    */
   seedDefaults?: boolean
+  /**
+   * Override the package list written into a freshly-seeded
+   * `plugins.json`. When omitted, `loadPlugins` uses
+   * `DEFAULT_FIRST_PARTY_PLUGINS`. The binary-build host uses this to
+   * exclude `@aipehub/service-datastore-sqlite` (its `better-sqlite3`
+   * native binding cannot be embedded by `bun --compile`).
+   */
+  seedPlugins?: readonly string[]
 }
 
 export interface BootstrapServicesResult {
@@ -138,6 +157,7 @@ export async function bootstrapServices(
     manifestPath,
     registry,
     ...(opts.seedDefaults !== undefined ? { seedDefaults: opts.seedDefaults } : {}),
+    ...(opts.seedPlugins !== undefined ? { seedPlugins: opts.seedPlugins } : {}),
     importPackage: opts.importPackage ?? hostAnchoredImport,
   })
   if (load.seeded) {
