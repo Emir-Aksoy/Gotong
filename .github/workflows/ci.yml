@@ -148,34 +148,41 @@ jobs:
 
       - name: Healthcheck the image starts and serves /healthz
         run: |
-          set -euo pipefail
+          set -uo pipefail
           # Bind to host ports 13000/14000 to avoid colliding with anything
-          # else the runner might bring up. The container writes its
-          # workspace bootstrap (first-run admin token + space files)
-          # into the image-layer /data, which the Dockerfile created
-          # with the right node:node ownership; --rm cleans up on stop.
-          # We deliberately do NOT mount a tmpfs over /data: the default
-          # kernel tmpfs is root-owned, and `USER node` then can't write
-          # the workspace — Space.openOrInit crashes the moment it
-          # tries to mkdir, the container exits, and the only thing
-          # the job sees is "container disappeared".
-          docker run -d --rm \
+          # else the runner might bring up. Skipping --rm: when the
+          # container exits early (e.g. workspace bootstrap crash),
+          # --rm reaps it and `docker logs` then dies with
+          # "no such container" — opaque. Without --rm the exited
+          # container sticks around long enough to grab logs and an
+          # inspect snapshot before we explicitly `docker rm -f` at the
+          # end.
+          docker run -d \
             --name aipehub-ci \
             -p 13000:3000 \
             -p 14000:4000 \
             aipehub/host:ci
           # The image declares a HEALTHCHECK with 15s start-period; give
           # it 30s to settle, then poll /healthz directly.
+          rc=1
           for i in $(seq 1 20); do
             if curl -fsS http://127.0.0.1:13000/healthz >/dev/null 2>&1; then
               echo "✓ /healthz responded after $((i * 2))s"
               docker logs aipehub-ci 2>&1 | head -40
-              docker stop aipehub-ci
-              exit 0
+              rc=0
+              break
             fi
             sleep 2
           done
-          echo "✗ /healthz never responded — container logs:"
-          docker logs aipehub-ci
-          docker stop aipehub-ci || true
-          exit 1
+          if [ "$rc" -ne 0 ]; then
+            echo "✗ /healthz never responded — diagnostics follow"
+            echo "--- docker ps -a (state + exit code) ---"
+            docker ps -a --filter name=aipehub-ci \
+              --format 'table {{.Status}}\t{{.RunningFor}}\t{{.Names}}'
+            echo "--- docker inspect (state.error / oom / exit) ---"
+            docker inspect aipehub-ci --format '{{json .State}}' | head -3 || true
+            echo "--- docker logs (full) ---"
+            docker logs aipehub-ci 2>&1 || true
+          fi
+          docker rm -f aipehub-ci >/dev/null 2>&1 || true
+          exit "$rc"
