@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: 🔐 Security vulnerability
-    url: https://github.com/AipeHub/AipeHub/security/advisories/new
+    url: https://github.com/Emir-Aksoy/AipeHub/security/advisories/new
     about: Found a security issue? Please report it privately — see SECURITY.md.
   - name: 💬 Question or discussion
-    url: https://github.com/AipeHub/AipeHub/discussions
+    url: https://github.com/Emir-Aksoy/AipeHub/discussions
     about: Have a question, an idea, or want to show what you built? Discussions is the place.
   - name: 📖 Read the docs
-    url: https://github.com/AipeHub/AipeHub/blob/main/docs/OVERVIEW.md
+    url: https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/OVERVIEW.md
     about: 5-minute single-page map of every concept (中文版 in docs/zh/).

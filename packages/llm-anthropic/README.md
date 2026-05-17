@@ -1,6 +1,6 @@
 # @aipehub/llm-anthropic
 
-Anthropic Claude `LlmProvider` for [AipeHub](https://github.com/AipeHub/AipeHub). Plug into [`@aipehub/llm`](https://www.npmjs.com/package/@aipehub/llm)'s `LlmAgent`.
+Anthropic Claude `LlmProvider` for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Plug into [`@aipehub/llm`](https://www.npmjs.com/package/@aipehub/llm)'s `LlmAgent`.
 
 ## Install
 

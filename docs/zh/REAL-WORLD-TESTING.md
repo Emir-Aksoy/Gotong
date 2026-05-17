@@ -35,7 +35,7 @@
 ### 1.1 启动 host
 
 ```bash
-git clone https://github.com/AipeHub/AipeHub.git
+git clone https://github.com/Emir-Aksoy/AipeHub.git
 cd AipeHub
 pnpm install
 pnpm build
@@ -340,7 +340,7 @@ A：① 如果浏览器 cookie 还在，直接访问 `/admin` 即可；
 
 如果你跑通了 / 跑挂了，欢迎用这两种方式回来：
 
-- **跑通**：发个截图到 [Discussions](https://github.com/AipeHub/AipeHub/discussions)
+- **跑通**：发个截图到 [Discussions](https://github.com/Emir-Aksoy/AipeHub/discussions)
   「show what you built」板块，让别人也少踩坑。
 - **跑挂**：开 issue，模板里照实填硬件 / Node 版本 / 出错日志，
   我们会优先处理"按指南走但跑不起来"的报告 —— 这种 bug 价值最高。

@@ -1,6 +1,6 @@
 # @aipehub/transport-ws
 
-Hub-side WebSocket transport for [AipeHub](https://github.com/AipeHub/AipeHub). Lets remote agents — running in another Node process, on another machine, or written in another language (Python via `aipehub`, more SDKs coming) — register into the same Hub as local in-process agents.
+Hub-side WebSocket transport for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Lets remote agents — running in another Node process, on another machine, or written in another language (Python via `aipehub`, more SDKs coming) — register into the same Hub as local in-process agents.
 
 ## Install
 
@@ -58,7 +58,7 @@ Default is `gating: 'open'`, the pre-v1.1 behaviour.
 
 ## Wire protocol
 
-Full spec: [docs/PROTOCOL.md](https://github.com/AipeHub/AipeHub/blob/main/docs/PROTOCOL.md).
+Full spec: [docs/PROTOCOL.md](https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/PROTOCOL.md).
 
 ## License
 

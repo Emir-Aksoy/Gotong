@@ -9,7 +9,7 @@ issues.** Use a private channel:
 
 Open a private advisory at:
 
-> **<https://github.com/AipeHub/AipeHub/security/advisories/new>**
+> **<https://github.com/Emir-Aksoy/AipeHub/security/advisories/new>**
 
 GitHub's built-in form gives you:
 

@@ -1,6 +1,6 @@
 # @aipehub/web
 
-Embeddable reference web UI for [AipeHub](https://github.com/AipeHub/AipeHub). A zero-dependency vanilla-JS SPA served by a small Node HTTP + SSE server, talking to your `Hub` via its event stream.
+Embeddable reference web UI for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). A zero-dependency vanilla-JS SPA served by a small Node HTTP + SSE server, talking to your `Hub` via its event stream.
 
 Since v1.1 the UI is split into two views — a **worker** view at `/` (open to anyone) and an **admin** console at `/admin` (token-gated). The whole thing is i18n-ready out of the box: default Chinese, optional English, toggle persisted in `localStorage`.
 

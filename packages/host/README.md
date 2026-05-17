@@ -1,13 +1,13 @@
 # @aipehub/host
 
-Production-ready binary for [AipeHub](https://github.com/AipeHub/AipeHub). Boots a Hub + WebSocket transport + Web UI in one process, configured entirely from environment variables. No demo agents, no test traffic, no scaffolding state.
+Production-ready binary for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Boots a Hub + WebSocket transport + Web UI in one process, configured entirely from environment variables. No demo agents, no test traffic, no scaffolding state.
 
 ## Quick start
 
 ```bash
 # From source (the only supported path right now — npm publish is descoped,
 # see .github/RELEASE-CHECKLIST.md "Distribution decision")
-git clone https://github.com/AipeHub/AipeHub.git && cd AipeHub
+git clone https://github.com/Emir-Aksoy/AipeHub.git && cd AipeHub
 pnpm install && pnpm build
 pnpm host
 
@@ -72,7 +72,7 @@ The repo root ships a `Dockerfile` and a `docker-compose.yml`:
 docker compose up
 ```
 
-See [the Docker section of DEPLOY.md](https://github.com/AipeHub/AipeHub/blob/main/docs/DEPLOY.md) for production patterns (TLS via Caddy, systemd, backups).
+See [the Docker section of DEPLOY.md](https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/DEPLOY.md) for production patterns (TLS via Caddy, systemd, backups).
 
 ## What's inside
 

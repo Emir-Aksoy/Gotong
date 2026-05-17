@@ -14,7 +14,7 @@ list keeps the checklist honest.
   - [`SECURITY.md`](../SECURITY.md) → "Backup — email"
   - [`.well-known/security.txt`](../.well-known/security.txt) → `Contact: mailto:` line
 - [ ] **Enable Private Vulnerability Reporting** on
-      `github.com/AipeHub/AipeHub` (Settings → Security & analysis).
+      `github.com/Emir-Aksoy/AipeHub` (Settings → Security & analysis).
       Without this the `/security/advisories/new` URL returns 404 for
       external reporters.
 - [ ] **Refresh `Expires:` in `security.txt`** to a date < 1 year out

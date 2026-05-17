@@ -109,7 +109,7 @@ The admin panel has four sections:
 - 一次可以导入一个 agent 或一整个 team（多个 agent）
 - 服务器解析 → 校验 schema → 创建 + 启动
 
-**公网模板库**：[github.com/AipeHub/AipeHub/tree/main/templates](https://github.com/AipeHub/AipeHub/tree/main/templates) 收集了官方维护的"标准 agent"和"标准 team"模板。流程：
+**公网模板库**：[github.com/Emir-Aksoy/AipeHub/tree/main/templates](https://github.com/Emir-Aksoy/AipeHub/tree/main/templates) 收集了官方维护的"标准 agent"和"标准 team"模板。流程：
 
 1. 浏览 `templates/agents/` 找一个你要的（如 `writer-zh.yaml`）
 2. 点 GitHub 上的 **Raw** → 全选 + 复制

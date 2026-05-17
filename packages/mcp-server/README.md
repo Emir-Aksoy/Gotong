@@ -1,6 +1,6 @@
 # @aipehub/mcp-server
 
-MCP (Model Context Protocol) bridge for [AipeHub](https://github.com/AipeHub/AipeHub). Lets any MCP client — Claude Desktop, Cursor, Cline, Zed, the official `@modelcontextprotocol/inspector` — operate on a running Hub: list participants, dispatch tasks, read the contribution leaderboard, evaluate completed work.
+MCP (Model Context Protocol) bridge for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Lets any MCP client — Claude Desktop, Cursor, Cline, Zed, the official `@modelcontextprotocol/inspector` — operate on a running Hub: list participants, dispatch tasks, read the contribution leaderboard, evaluate completed work.
 
 ## Install
 
@@ -18,7 +18,7 @@ MCP (Model Context Protocol) bridge for [AipeHub](https://github.com/AipeHub/Aip
 
 ```bash
 # 1. Build from source
-git clone https://github.com/AipeHub/AipeHub.git && cd AipeHub
+git clone https://github.com/Emir-Aksoy/AipeHub.git && cd AipeHub
 pnpm install && pnpm build
 
 # 2. (Future, after npm publish — NOT available yet)
@@ -87,7 +87,7 @@ First-run admin URL (shown ONCE — save it):
   http://127.0.0.1:3000/admin?token=<HEX>
 ```
 
-That `<HEX>` is the token. Subsequent admin invites can be minted via [the API](https://github.com/AipeHub/AipeHub/blob/main/docs/DEPLOY.md#c8-onboard-more-admins).
+That `<HEX>` is the token. Subsequent admin invites can be minted via [the API](https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/DEPLOY.md#c8-onboard-more-admins).
 
 The token must belong to an **admin** account — worker tokens cannot dispatch tasks.
 

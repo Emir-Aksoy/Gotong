@@ -1,6 +1,6 @@
 # @aipehub/core
 
-The Hub, message bus, registry, scheduler, transcript, and storage primitives for [AipeHub](https://github.com/AipeHub/AipeHub) — a TypeScript framework for orchestrating agent clusters and humans as collaborative participants.
+The Hub, message bus, registry, scheduler, transcript, and storage primitives for [AipeHub](https://github.com/Emir-Aksoy/AipeHub) — a TypeScript framework for orchestrating agent clusters and humans as collaborative participants.
 
 This package is the only one most users need. Everything else (web UI, WebSocket transport, LLM agents, Python SDK) plugs in.
 
@@ -45,8 +45,8 @@ const result = await hub.dispatch({
 
 ## See also
 
-- [docs/ARCHITECTURE.md](https://github.com/AipeHub/AipeHub/blob/main/docs/ARCHITECTURE.md) — the design.
-- [docs/PROTOCOL.md](https://github.com/AipeHub/AipeHub/blob/main/docs/PROTOCOL.md) — the wire protocol for `@aipehub/transport-ws` and `@aipehub/sdk-node`.
+- [docs/ARCHITECTURE.md](https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/ARCHITECTURE.md) — the design.
+- [docs/PROTOCOL.md](https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/PROTOCOL.md) — the wire protocol for `@aipehub/transport-ws` and `@aipehub/sdk-node`.
 
 ## License
 

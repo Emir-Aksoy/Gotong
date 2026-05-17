@@ -6,7 +6,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AipeHub/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
     "directory": "packages/host"
   },
   "publishConfig": {

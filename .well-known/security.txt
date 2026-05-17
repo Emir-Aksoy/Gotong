@@ -5,19 +5,19 @@
 # reliable disclosure channel.
 #
 # The canonical source lives at:
-#   https://github.com/AipeHub/AipeHub/blob/main/.well-known/security.txt
+#   https://github.com/Emir-Aksoy/AipeHub/blob/main/.well-known/security.txt
 #
 # When AipeHub is deployed behind a custom domain you should ALSO host a
 # copy at https://<your-hub>/.well-known/security.txt so reporters can
 # find it from your hub URL.
 
-Contact: https://github.com/AipeHub/AipeHub/security/advisories/new
+Contact: https://github.com/Emir-Aksoy/AipeHub/security/advisories/new
 Contact: mailto:security@aipehub.dev
 Expires: 2027-05-12T00:00:00.000Z
 Preferred-Languages: en, zh
-Policy: https://github.com/AipeHub/AipeHub/blob/main/SECURITY.md
-Acknowledgments: https://github.com/AipeHub/AipeHub/security/advisories
-Canonical: https://github.com/AipeHub/AipeHub/.well-known/security.txt
+Policy: https://github.com/Emir-Aksoy/AipeHub/blob/main/SECURITY.md
+Acknowledgments: https://github.com/Emir-Aksoy/AipeHub/security/advisories
+Canonical: https://github.com/Emir-Aksoy/AipeHub/.well-known/security.txt
 
 # Notes for operators:
 # 1. The mailto: line points at an alias that is NOT yet activated as of

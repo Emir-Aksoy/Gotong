@@ -135,8 +135,8 @@ EXAMPLES
   npx @aipehub/host
 
 DOCS
-  https://github.com/AipeHub/AipeHub/blob/main/docs/OVERVIEW.md
-  https://github.com/AipeHub/AipeHub/blob/main/docs/DEPLOY.md
+  https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/OVERVIEW.md
+  https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/DEPLOY.md
 `)
 }
 

@@ -1419,4 +1419,4 @@ Unchanged from v0.1 except for the additive `forbidden_agent` REJECT code in v0.
 
 ---
 
-[1.0.0]: https://github.com/AipeHub/AipeHub/releases/tag/v1.0.0
+[1.0.0]: https://github.com/Emir-Aksoy/AipeHub/releases/tag/v1.0.0

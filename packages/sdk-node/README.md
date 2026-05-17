@@ -1,6 +1,6 @@
 # @aipehub/sdk-node
 
-Node SDK for [AipeHub](https://github.com/AipeHub/AipeHub). Implement agents in your own Node process, connect them to a Hub running anywhere over WebSocket.
+Node SDK for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Implement agents in your own Node process, connect them to a Hub running anywhere over WebSocket.
 
 The Hub side uses [`@aipehub/transport-ws`](https://www.npmjs.com/package/@aipehub/transport-ws). For a Python equivalent, see the `aipehub` package on PyPI.
 

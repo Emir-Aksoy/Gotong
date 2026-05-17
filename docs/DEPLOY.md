@@ -135,7 +135,7 @@ sudo chown aipehub:aipehub /srv/aipehub-data
 sudo mkdir -p /opt/aipehub && sudo chown aipehub:aipehub /opt/aipehub
 
 # as the aipehub user
-sudo -u aipehub -H git clone https://github.com/AipeHub/AipeHub.git /opt/aipehub
+sudo -u aipehub -H git clone https://github.com/Emir-Aksoy/AipeHub.git /opt/aipehub
 sudo -u aipehub -H bash -lc 'cd /opt/aipehub && pnpm install && pnpm build'
 ```
 
