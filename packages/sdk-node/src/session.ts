@@ -40,6 +40,18 @@ export interface ConnectOptions {
   autoReconnect?: boolean
   reconnectInitialBackoffMs?: number
   reconnectMaxBackoffMs?: number
+  /**
+   * Initial-handshake budget: how long the first `connect()` call
+   * will wait for the server's WELCOME (or REJECT) after the TCP
+   * socket opens. Pre-3.1 there was no limit — a stuck or
+   * never-deciding admin-approval gate would hang `connect()`
+   * forever. Default 10s; 0 disables the timeout.
+   *
+   * Distinct from `reconnectInitialBackoffMs` (delay between reconnect
+   * attempts) and from the server-side `AWAIT_APPROVAL_TIMEOUT_MS`
+   * (server-side admission ceiling).
+   */
+  connectTimeoutMs?: number
   /** Notified on every state transition. */
   onStateChange?: (state: SessionState, info?: { reason?: string }) => void
   /**
@@ -86,6 +98,7 @@ interface ResolvedOptions extends ConnectOptions {
   reconnectMaxBackoffMs: number
   clientName: string
   clientVersion: string
+  connectTimeoutMs: number
 }
 
 /**
@@ -103,6 +116,7 @@ export async function connect(opts: ConnectOptions): Promise<Session> {
     reconnectMaxBackoffMs: opts.reconnectMaxBackoffMs ?? 30_000,
     clientName: opts.clientName ?? '@aipehub/sdk-node',
     clientVersion: opts.clientVersion ?? '0.0.0',
+    connectTimeoutMs: opts.connectTimeoutMs ?? 10_000,
     ...opts,
   }
   if (resolved.agents.length === 0) {
@@ -203,7 +217,35 @@ class SessionImpl implements Session {
 
   async openInitial(): Promise<void> {
     return new Promise<void>((resolve, reject) => {
-      this.welcomeWaiter = { resolve, reject }
+      let timer: NodeJS.Timeout | undefined
+      const settle = {
+        resolve: () => {
+          if (timer) { clearTimeout(timer); timer = undefined }
+          resolve()
+        },
+        reject: (err: Error) => {
+          if (timer) { clearTimeout(timer); timer = undefined }
+          reject(err)
+        },
+      }
+      this.welcomeWaiter = settle
+      // C3: cap the HELLO → WELCOME window so a never-responding
+      // server (gating gate AFK, broken proxy, paused process) can't
+      // hang `connect()` forever. After the budget elapses we abort
+      // the socket and reject — caller can `try/catch` and retry.
+      const budget = this.opts.connectTimeoutMs
+      if (budget > 0) {
+        timer = setTimeout(() => {
+          if (this.welcomeWaiter === settle) {
+            this.welcomeWaiter = undefined
+            this.closeRequested = true
+            try { this.ws?.terminate() } catch { /* ignore */ }
+            reject(new Error(
+              `connect: no WELCOME within ${budget}ms (server may be down, gating gate AFK, or HELLO refused silently)`,
+            ))
+          }
+        }, budget)
+      }
       this.openSocket()
     })
   }
@@ -228,8 +270,21 @@ class SessionImpl implements Session {
       })
     })
 
-    ws.on('message', (data) => {
-      this.handleFrame(data.toString()).catch((err) =>
+    ws.on('message', (data, isBinary) => {
+      // Server protocol is text/JSON. A binary frame would either be
+      // a transport bug or a hostile/misconfigured peer; either way
+      // there's nothing useful to decode. Drop with a warning rather
+      // than feed garbled UTF-8 into decodeFrame.
+      if (isBinary) {
+        console.warn('[sdk-node] dropping unexpected binary frame from server')
+        return
+      }
+      const text = typeof data === 'string'
+        ? data
+        : (Array.isArray(data)
+          ? Buffer.concat(data).toString('utf8')
+          : (data as Buffer).toString('utf8'))
+      this.handleFrame(text).catch((err) =>
         console.error('[sdk-node] frame handler threw:', err),
       )
     })

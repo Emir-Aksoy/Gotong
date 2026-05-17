@@ -67,13 +67,21 @@ export class AnthropicProvider implements LlmProvider {
   }
 
   async complete(req: LlmRequest): Promise<LlmResponse> {
+    const model = req.model ?? this.defaultModel
     const body: Record<string, unknown> = {
-      model: req.model ?? this.defaultModel,
+      model,
       max_tokens: req.maxTokens ?? this.defaultMaxTokens,
       messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
     }
     if (req.system !== undefined) body.system = req.system
-    if (req.temperature !== undefined) body.temperature = req.temperature
+    // Opus 4.x ("thinking" models) reject `temperature` outright — the
+    // API returns 400 even on values it would accept for other models.
+    // Drop the param rather than forward and fail; callers that
+    // really need a non-default temperature should pick a non-thinking
+    // model. See README §"Claude Opus 4.7" for the full picture.
+    if (req.temperature !== undefined && !isThinkingModel(model)) {
+      body.temperature = req.temperature
+    }
 
     // We use the SDK's loosely-typed call signature so the same code path
     // works whether `client` is the real SDK or a test fake. SDK errors
@@ -95,10 +103,21 @@ export class AnthropicProvider implements LlmProvider {
       raw,
     }
     if (raw.usage) {
-      out.usage = {
+      const usage: LlmResponse['usage'] = {
         inputTokens: raw.usage.input_tokens,
         outputTokens: raw.usage.output_tokens,
       }
+      // Prompt caching: only emit cache-token fields when non-zero
+      // so accounting code doesn't have to special-case zero. Anthropic
+      // reports `cache_creation_input_tokens` + `cache_read_input_tokens`
+      // alongside `input_tokens`; the latter is *fresh* tokens only.
+      if (raw.usage.cache_creation_input_tokens) {
+        usage.cacheCreationTokens = raw.usage.cache_creation_input_tokens
+      }
+      if (raw.usage.cache_read_input_tokens) {
+        usage.cacheReadTokens = raw.usage.cache_read_input_tokens
+      }
+      out.usage = usage
     }
     return out
   }
@@ -112,7 +131,24 @@ export class AnthropicProvider implements LlmProvider {
 interface AnthropicMessageLike {
   content?: ReadonlyArray<{ type: string; text?: string }>
   stop_reason?: string | null
-  usage?: { input_tokens: number; output_tokens: number }
+  usage?: {
+    input_tokens: number
+    output_tokens: number
+    /** Tokens written to the prompt cache on this call. Premium-priced. */
+    cache_creation_input_tokens?: number
+    /** Tokens served from the prompt cache. Heavily discounted. */
+    cache_read_input_tokens?: number
+  }
+}
+
+/**
+ * Models that reject `temperature` / `top_p` / `top_k` and demand
+ * `temperature == 1`. Today: Opus 4.x. Future Anthropic "thinking"
+ * models will follow the same pattern; we match by prefix so the next
+ * Claude Opus drop works without a code change.
+ */
+function isThinkingModel(model: string): boolean {
+  return model.startsWith('claude-opus-4')
 }
 
 function mapStopReason(reason: string | null | undefined): LlmStopReason {

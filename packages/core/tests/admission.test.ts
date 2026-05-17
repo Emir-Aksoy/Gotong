@@ -122,6 +122,26 @@ describe('Hub admission gating (v1.1)', () => {
     })
   })
 
+  // C5: a HELLO landing in the millisecond window between SIGTERM and
+  // the WS server's close used to create a fresh pending entry that
+  // `stop()` (which already finished its drain loop) would never see.
+  // The session sat in AWAIT_APPROVAL forever, outliving the host.
+  // requestAdmission now short-circuits with hub_stopped post-stop.
+  it('requestAdmission after stop resolves immediately as hub_stopped (C5)', async () => {
+    const hub = Hub.inMemory()
+    await hub.start()
+    await hub.stop()
+    const { decision } = hub.requestAdmission({
+      agents: [{ id: 'late', capabilities: [] }],
+    })
+    await expect(decision).resolves.toMatchObject({
+      approved: false,
+      reason: 'hub_stopped',
+    })
+    // No pending entry left behind either.
+    expect(hub.pendingApplications()).toEqual([])
+  })
+
   it('pendingApplications ordering: oldest first', async () => {
     let t = 1_000
     const hub = Hub.inMemory({ now: () => t })

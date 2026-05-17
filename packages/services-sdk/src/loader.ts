@@ -106,12 +106,33 @@ export async function loadPlugins(opts: LoadPluginsOpts): Promise<LoadPluginsRes
     try {
       const mod = await importPackage(pkgName)
       const plugin = pickPlugin(mod, pkgName)
-      // Don't re-register if a previous load already filed this
-      // (type, impl). Allows safe re-runs.
+      // If (type, impl) is already filed, distinguish two cases:
+      //   - Same npm package re-loaded → idempotent no-op (tests rely
+      //     on this; a host that calls loadPlugins twice during boot
+      //     must not error).
+      //   - Different package claims the same slot → surface as a
+      //     conflict error so the operator sees that one package is
+      //     silently hijacking another's (type, impl). Pre-3.1 this
+      //     was a silent `continue` and a hostile or buggy manifest
+      //     could swap in a shim plugin without any log line.
       if (opts.registry.has(plugin.type, plugin.impl)) {
+        const owner = opts.registry.packageNameFor(plugin.type, plugin.impl)
+        if (owner === pkgName) {
+          continue
+        }
+        errors.push(
+          new PluginLoadError(
+            pkgName,
+            new Error(
+              `(type=${plugin.type}, impl=${plugin.impl}) is already registered by ${
+                owner ?? '<unknown>'
+              }; refusing to swap to ${pkgName}`,
+            ),
+          ),
+        )
         continue
       }
-      opts.registry.register(plugin)
+      opts.registry.register(plugin, pkgName)
       loaded.push(plugin)
     } catch (err) {
       const loadErr = err instanceof PluginLoadError

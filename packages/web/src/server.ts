@@ -126,6 +126,38 @@ export interface WebServerOptions {
    */
   adminLoginRateLimit?: { max: number; windowSec: number }
   /**
+   * Per-IP rate limit on worker self-registration
+   * (`POST /api/workers`). Default `{ max: 30, windowSec: 60 }`. Set
+   * `max: 0` to disable.
+   *
+   * Worker creation is intentionally open so anyone can pick a
+   * nickname and join the room without admin involvement, but without
+   * a rate limit the same anonymous remote could mint thousands of
+   * worker rows (each one persisted to `workers.json` + a live
+   * `HumanParticipant` on the Hub) in seconds. The default budget is
+   * generous enough that a real classroom rejoining doesn't trip
+   * (~30 distinct nicknames per minute per IP) but cheap enough that
+   * a script can't fill the workspace dir.
+   */
+  workerCreateRateLimit?: { max: number; windowSec: number }
+  /**
+   * Trust the `X-Forwarded-For` header when computing the per-request
+   * client IP (used for rate-limit keying). Default `false`.
+   *
+   * Set this to `true` ONLY when the host is behind a reverse proxy
+   * (Caddy, nginx, an LB) that you control and that overwrites or
+   * appends to XFF reliably. With the default `false`, the rate limiter
+   * keys on `socket.remoteAddress`, which is the proxy's IP — fine for
+   * single-tenant deploys, but if you actually need per-real-client
+   * rate limiting behind a proxy, flip this on.
+   *
+   * Important: when `false`, attackers cannot bypass the limiter by
+   * spoofing XFF; when `true`, your proxy MUST overwrite the header
+   * (do not pass through client-supplied XFF) or the limiter becomes
+   * trivially bypassable.
+   */
+  trustProxy?: boolean
+  /**
    * Optional managed-agent lifecycle. The host process passes its
    * `AgentSupervisor` here; the Web layer then calls `lifecycle.start
    * (record)` after persisting a new agent and `lifecycle.stop(id)`
@@ -249,8 +281,14 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
   const port = opts.port ?? 3000
   const cookieSecure = opts.cookieSecure ?? false
   const allowedHosts = opts.allowedHosts ? new Set(opts.allowedHosts) : undefined
+  const trustProxy = opts.trustProxy ?? false
   const rateLimitOpts = opts.adminLoginRateLimit ?? { max: 10, windowSec: 60 }
   const adminLoginLimiter = new RateLimiter(rateLimitOpts.max, rateLimitOpts.windowSec * 1000)
+  const workerLimitOpts = opts.workerCreateRateLimit ?? { max: 30, windowSec: 60 }
+  const workerCreateLimiter = new RateLimiter(
+    workerLimitOpts.max,
+    workerLimitOpts.windowSec * 1000,
+  )
   const sseClients = new Set<SseClient>()
 
   const unsubscribe = hub.onEvent((event) => {
@@ -270,7 +308,9 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     sseClients,
     cookieSecure,
     allowedHosts,
+    trustProxy,
     adminLoginLimiter,
+    workerCreateLimiter,
     lifecycle: opts.lifecycle,
     workflows: opts.workflows,
     services: opts.services,
@@ -331,7 +371,9 @@ interface HandlerCtx {
   sseClients: Set<SseClient>
   cookieSecure: boolean
   allowedHosts: Set<string> | undefined
+  trustProxy: boolean
   adminLoginLimiter: RateLimiter
+  workerCreateLimiter: RateLimiter
   lifecycle: ManagedAgentLifecycle | undefined
   workflows: WorkflowSurface | undefined
   services: ServicesAdminSurface | undefined
@@ -377,11 +419,28 @@ const SECURITY_HEADERS: Record<string, string> = {
     "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; img-src 'self' data:; base-uri 'self'; frame-ancestors 'none'",
 }
 
-function clientIp(req: IncomingMessage): string {
-  const fwd = req.headers['x-forwarded-for']
-  if (typeof fwd === 'string' && fwd.length > 0) {
-    const first = fwd.split(',')[0]?.trim()
-    if (first) return first
+/**
+ * Per-request client IP, used for rate-limit keying.
+ *
+ * Honours `X-Forwarded-For` ONLY when the host was started with
+ * `trustProxy: true` (see `WebServerOptions`). Otherwise XFF is
+ * ignored — a remote attacker can set the header on every request
+ * to defeat a naïve rate limiter, so we don't trust it by default.
+ *
+ * When `trustProxy` is on, callers are expected to be behind a
+ * proxy that overwrites XFF (Caddy `reverse_proxy` and nginx
+ * `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`
+ * both do). If the proxy passes through client-supplied XFF
+ * untouched, the limiter is again trivially bypassable — that's
+ * a proxy-config bug, not a server bug.
+ */
+function clientIp(ctx: HandlerCtx, req: IncomingMessage): string {
+  if (ctx.trustProxy) {
+    const fwd = req.headers['x-forwarded-for']
+    if (typeof fwd === 'string' && fwd.length > 0) {
+      const first = fwd.split(',')[0]?.trim()
+      if (first) return first
+    }
   }
   return req.socket.remoteAddress ?? 'unknown'
 }
@@ -456,7 +515,13 @@ async function handle(
   }
 
   // --- SSE stream ---------------------------------------------------------
+  // Auth-gated: SSE leaks the full Hub event firehose (task payloads,
+  // evaluations, service-trash refs, pending applications). Pre-3.1
+  // this was anonymous, which let any port-reachable peer dump every
+  // dispatched task in real time. Require either an admin session or
+  // a worker session to subscribe.
   if (method === 'GET' && path === '/api/stream') {
+    if (!(await requireAdminOrWorker(ctx, req, res))) return
     res.writeHead(200, {
       'content-type': 'text/event-stream; charset=utf-8',
       'cache-control': 'no-cache',
@@ -471,7 +536,13 @@ async function handle(
   }
 
   // --- state snapshot -----------------------------------------------------
+  // Auth-gated: returns the full transcript + admins/workers/tasks
+  // dump. Pre-3.1 this was anonymous and exposed every operational
+  // detail of the room. Require admin or worker auth; the response
+  // payload is unchanged either way (room state is the same for all
+  // signed-in principals — admins use the same view).
   if (method === 'GET' && path === '/api/state') {
+    if (!(await requireAdminOrWorker(ctx, req, res))) return
     const config = await ctx.space.config()
     sendJson(res, {
       ...(await snapshotState(ctx.hub, ctx.space)),
@@ -549,7 +620,25 @@ async function handle(
   if (method === 'GET' && (path === '/admin' || path === '/admin/')) {
     const supplied = url.searchParams.get('token') ?? ''
     if (supplied) {
-      const ip = clientIp(req)
+      // Session-fixation defence: if the visitor already carries a
+      // valid admin cookie, refuse to overwrite it via a URL token.
+      // Otherwise an attacker who owns ANY valid admin token (e.g. an
+      // ex-admin who saved their old recovery link) can phish a
+      // currently-logged-in admin into visiting `/admin?token=<attacker_token>`;
+      // the response would set a fresh cookie bound to the attacker's
+      // admin row, silently substituting the victim's session. By
+      // making the visitor explicitly POST /api/admin/logout first,
+      // the cookie change becomes intentional.
+      const existing = await ctx.space.findAdminSession(readCookie(req, ADMIN_COOKIE))
+      if (existing) {
+        res.writeHead(409, { 'content-type': 'text/plain; charset=utf-8' })
+        res.end(
+          'already signed in as a different admin session.\n' +
+            'sign out first (POST /api/admin/logout) and reopen the link.',
+        )
+        return
+      }
+      const ip = clientIp(ctx, req)
       if (!ctx.adminLoginLimiter.check(ip)) {
         res.writeHead(429, { 'content-type': 'text/plain; charset=utf-8', 'retry-after': '60' })
         res.end('too many login attempts; try again in a minute')
@@ -1440,6 +1529,15 @@ async function handle(
 
   // --- worker: join (register a HumanParticipant) -------------------------
   if (method === 'POST' && path === '/api/workers') {
+    // Rate-limit worker creation per-IP so an anonymous remote can't
+    // mint thousands of worker rows + live HumanParticipants on the
+    // Hub. Default budget (30/min) is generous enough for a classroom
+    // rejoining over flaky WiFi.
+    if (!ctx.workerCreateLimiter.check(clientIp(ctx, req))) {
+      res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+      res.end('too many worker registrations; try again in a minute')
+      return
+    }
     const body = (await readJsonBody(req).catch(() => ({}))) as {
       id?: string
       capabilities?: string[]
@@ -1504,20 +1602,28 @@ async function handle(
     return
   }
 
-  // --- task action (any human's pending task; v1.1 keeps this open) -------
+  // --- task action --------------------------------------------------------
+  // Auth-gated: the caller must be either an admin (who can act on
+  // any human's behalf, e.g. closing out an abandoned assignment) or
+  // the worker whose HumanParticipant id matches the task's assignee.
+  // Pre-3.1 this endpoint was anonymous, which let anyone who could
+  // observe a taskId on /api/stream (also anonymous pre-3.1) forge
+  // results for any human's pending task.
   const taskAction = path.match(/^\/api\/tasks\/([^/]+)\/(complete|reject)$/)
   if (method === 'POST' && taskAction) {
     const taskId = decodeURIComponent(taskAction[1]!)
     const action = taskAction[2] as 'complete' | 'reject'
-    const body = (await readJsonBody(req).catch(() => ({}))) as {
-      output?: unknown
-      error?: string
-    }
 
     const human = findHumanWithPending(ctx.hub, taskId)
     if (!human) {
       sendJson(res, { error: `no human has task ${taskId} pending` }, 404)
       return
+    }
+    if (!(await requireAdminOrTaskAssignee(ctx, req, res, human.id))) return
+
+    const body = (await readJsonBody(req).catch(() => ({}))) as {
+      output?: unknown
+      error?: string
     }
 
     const ok =
@@ -1565,32 +1671,124 @@ function readBearer(req: IncomingMessage): string | undefined {
   return m ? m[1]!.trim() : undefined
 }
 
-async function requireAdmin(
+/**
+ * Pure check — return the admin behind the request, or `null`, without
+ * writing to `res`. Use {@link requireAdmin} when the caller wants the
+ * auto-401-on-miss behaviour; use this when you need to compose admin
+ * auth with a fallback (e.g. "admin OR the worker who owns this task"
+ * — see {@link requireAdminOrTaskAssignee}).
+ *
+ * Returns:
+ *   - `{ kind: 'admin', admin }` on Bearer/cookie hit
+ *   - `{ kind: 'rate_limited' }` when Bearer was tried but the IP is
+ *     over budget (caller must write 429 if it wants to bail here)
+ *   - `{ kind: 'none' }` when neither path matched
+ */
+async function findAdminFromRequest(
   ctx: HandlerCtx,
   req: IncomingMessage,
-  res: ServerResponse,
-): Promise<AdminRecord | null> {
-  // Bearer token: verify against admins.json directly (for CLI callers).
-  // Rate-limited like the browser login path — same anti-bruteforce budget.
+): Promise<
+  | { kind: 'admin'; admin: AdminRecord }
+  | { kind: 'rate_limited' }
+  | { kind: 'none' }
+> {
   const bearer = readBearer(req)
   if (bearer) {
-    if (!ctx.adminLoginLimiter.check(clientIp(req))) {
-      res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
-      res.end('too many auth attempts; try again in a minute')
-      return null
+    if (!ctx.adminLoginLimiter.check(clientIp(ctx, req))) {
+      return { kind: 'rate_limited' }
     }
     const admin = await ctx.space.verifyAdminToken(bearer)
-    if (admin) return admin
+    if (admin) return { kind: 'admin', admin }
   }
-  // Cookie-based session (no rate limit — cookie is already a signed-in proof)
   const sid = readCookie(req, ADMIN_COOKIE)
   const sess = await ctx.space.findAdminSession(sid)
   if (sess) {
     const admins = await ctx.space.admins()
     const a = admins.find((x) => x.id === sess.principalId)
-    if (a) return a
+    if (a) return { kind: 'admin', admin: a }
   }
+  return { kind: 'none' }
+}
+
+/**
+ * Pure check — return the worker behind the request, or `null`. Does
+ * not write to `res`. The worker cookie is set by `POST /api/workers`
+ * and stays valid until logout or session expiry.
+ */
+async function findCurrentWorker(
+  ctx: HandlerCtx,
+  req: IncomingMessage,
+): Promise<WorkerRecord | null> {
+  const sid = readCookie(req, WORKER_COOKIE)
+  if (!sid) return null
+  const sess = await ctx.space.findWorkerSession(sid)
+  if (!sess) return null
+  const workers = await ctx.space.workers()
+  return workers.find((w) => w.id === sess.principalId) ?? null
+}
+
+async function requireAdmin(
+  ctx: HandlerCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<AdminRecord | null> {
+  const r = await findAdminFromRequest(ctx, req)
+  if (r.kind === 'rate_limited') {
+    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+    res.end('too many auth attempts; try again in a minute')
+    return null
+  }
+  if (r.kind === 'admin') return r.admin
   sendJson(res, { error: 'admin auth required' }, 401)
+  return null
+}
+
+/**
+ * Authn for endpoints that any signed-in principal may read (admin
+ * dashboard fields or workers viewing their own room). Either an
+ * admin cookie/Bearer or a worker cookie unlocks the route. The
+ * caller is responsible for any per-principal authorisation (e.g.
+ * projecting state down to what the worker may see).
+ */
+async function requireAdminOrWorker(
+  ctx: HandlerCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<{ admin?: AdminRecord; worker?: WorkerRecord } | null> {
+  const a = await findAdminFromRequest(ctx, req)
+  if (a.kind === 'rate_limited') {
+    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+    res.end('too many auth attempts; try again in a minute')
+    return null
+  }
+  if (a.kind === 'admin') return { admin: a.admin }
+  const worker = await findCurrentWorker(ctx, req)
+  if (worker) return { worker }
+  sendJson(res, { error: 'auth required' }, 401)
+  return null
+}
+
+/**
+ * Authz for `POST /api/tasks/:id/(complete|reject)` — either an admin
+ * (who can act on any human's behalf) or the worker whose
+ * `HumanParticipant.id` matches the task's assignee.
+ */
+async function requireAdminOrTaskAssignee(
+  ctx: HandlerCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  assigneeId: ParticipantId,
+): Promise<true | null> {
+  const a = await findAdminFromRequest(ctx, req)
+  if (a.kind === 'rate_limited') {
+    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+    res.end('too many auth attempts; try again in a minute')
+    return null
+  }
+  if (a.kind === 'admin') return true
+  const worker = await findCurrentWorker(ctx, req)
+  if (worker && worker.id === assigneeId) return true
+  sendJson(res, { error: 'auth required (admin or assigned worker)' }, 403)
   return null
 }
 

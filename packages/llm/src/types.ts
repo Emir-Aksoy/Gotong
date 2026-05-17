@@ -35,8 +35,27 @@ export interface LlmRequest {
 export type LlmStopReason = 'end_turn' | 'max_tokens' | 'error'
 
 export interface LlmUsage {
+  /**
+   * Fresh (un-cached) input tokens. For providers without prompt
+   * caching this is the full prompt size. For providers WITH prompt
+   * caching (Anthropic, OpenAI 2024+), this is only the slice that
+   * was neither written to cache nor read from cache.
+   */
   inputTokens: number
   outputTokens: number
+  /**
+   * Tokens written to the prompt cache on this call (Anthropic
+   * `cache_creation_input_tokens`). Billed at a premium (~1.25× input).
+   * Omitted when zero or when the provider doesn't expose it.
+   */
+  cacheCreationTokens?: number
+  /**
+   * Tokens read from the prompt cache on this call (Anthropic
+   * `cache_read_input_tokens`, OpenAI `prompt_tokens_details.cached_tokens`).
+   * Billed at a steep discount (~0.1× input). Omitted when zero or
+   * when the provider doesn't expose it.
+   */
+  cacheReadTokens?: number
 }
 
 export interface LlmResponse {

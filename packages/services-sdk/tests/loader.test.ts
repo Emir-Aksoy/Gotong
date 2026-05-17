@@ -187,6 +187,55 @@ describe('loadPlugins', () => {
     }
   })
 
+  // S8 — two different packages claiming the same (type, impl) used to
+  // be a silent skip on the second one, which let a hostile or
+  // accidentally-wrong manifest swap a shim plugin into the (type,
+  // impl) slot of a first-party plugin without any audit trail.
+  it('surfaces an error when a different package claims the same (type, impl)', async () => {
+    const { manifestPath, cleanup } = await setup()
+    try {
+      await writeFile(manifestPath, JSON.stringify({
+        plugins: ['real-memory-pkg', 'shim-memory-pkg'],
+      }))
+      const registry = new ServiceRegistry({ hostMajor: 0 })
+      const res = await loadPlugins({
+        manifestPath, registry, seedDefaults: false,
+        importPackage: async (pkg) => {
+          if (pkg === 'real-memory-pkg') return { default: makeStub('memory', 'file') }
+          if (pkg === 'shim-memory-pkg') return { default: makeStub('memory', 'file') }
+          throw new Error('unknown')
+        },
+      })
+      // First package wins, second is reported in errors[].
+      expect(res.loaded).toHaveLength(1)
+      expect(res.errors).toHaveLength(1)
+      expect(res.errors[0]!.packageName).toBe('shim-memory-pkg')
+      expect(res.errors[0]!.message).toMatch(/already registered by real-memory-pkg/)
+      // Registry holds the original, not the shim.
+      expect(registry.packageNameFor('memory', 'file')).toBe('real-memory-pkg')
+    } finally {
+      await cleanup()
+    }
+  })
+
+  // Sibling case — re-loading the SAME package against an existing
+  // registry is still a silent no-op (idempotent re-run, used by some
+  // tests). The S8 fix only flags the cross-package case.
+  it('same package re-load is silent (idempotent), no conflict error', async () => {
+    const { manifestPath, cleanup } = await setup()
+    try {
+      await writeFile(manifestPath, JSON.stringify({ plugins: ['memory-pkg'] }))
+      const registry = new ServiceRegistry({ hostMajor: 0 })
+      const importPackage = async () => ({ default: makeStub('memory', 'file') })
+      await loadPlugins({ manifestPath, registry, seedDefaults: false, importPackage })
+      const res2 = await loadPlugins({ manifestPath, registry, seedDefaults: false, importPackage })
+      expect(res2.loaded).toHaveLength(0)
+      expect(res2.errors).toHaveLength(0)
+    } finally {
+      await cleanup()
+    }
+  })
+
   it('rejects a malformed plugins.json (root not object)', async () => {
     const { dir, manifestPath, cleanup } = await setup()
     try {

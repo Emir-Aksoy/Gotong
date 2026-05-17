@@ -15,6 +15,7 @@ export {
   ownerKey,
   parseOwnerKey,
   ownersEqual,
+  assertSafeOwnerId,
 } from './owner.js'
 export type { Owner, OwnerKind, Scope, ScopeContext } from './owner.js'
 

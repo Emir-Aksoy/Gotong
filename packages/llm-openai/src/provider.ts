@@ -214,11 +214,19 @@ export class OpenAIProvider implements LlmProvider {
 export function isTransientError(err: unknown): boolean {
   if (!err || typeof err !== 'object') return false
   const e = err as {
+    name?: unknown
     message?: unknown
     code?: unknown
     status?: unknown
-    cause?: { code?: unknown; message?: unknown }
+    cause?: { name?: unknown; code?: unknown; message?: unknown }
   }
+  // AbortController.abort() throws a DOMException with name='AbortError'.
+  // The caller deliberately cancelled the request — retrying would
+  // both ignore their intent and defeat the cancellation semantics.
+  // Distinguished from network-layer "aborted" disconnects (which
+  // raise a regular Error and are matched by the regex below).
+  if (e.name === 'AbortError' || e.cause?.name === 'AbortError') return false
+  if (e.code === 'ABORT_ERR' || e.cause?.code === 'ABORT_ERR') return false
   const msg = typeof e.message === 'string' ? e.message : ''
   if (
     /premature close|socket hang up|fetch failed|aborted|read econnreset|etimedout/i.test(msg)

@@ -67,15 +67,18 @@ export interface ScopeContext {
 export function resolveOwner(scope: Scope, ctx: ScopeContext): Owner {
   if (scope === 'private') {
     if (!ctx.agentId) throw new Error(`scope 'private' requires ctx.agentId`)
+    assertSafeOwnerId(ctx.agentId)
     return { kind: 'agent', id: ctx.agentId }
   }
   if (scope === 'workflow') {
     if (!ctx.runId) throw new Error(`scope 'workflow' requires ctx.runId`)
+    assertSafeOwnerId(ctx.runId)
     return { kind: 'workflow-run', id: ctx.runId }
   }
   if (scope.startsWith('shared:')) {
     const groupId = ctx.groupId ?? scope.slice('shared:'.length)
     if (!groupId) throw new Error(`scope 'shared:<group>' requires a non-empty group id`)
+    assertSafeOwnerId(groupId)
     return { kind: 'shared', id: groupId }
   }
   throw new Error(`unknown scope: ${scope}`)
@@ -114,4 +117,46 @@ export function parseOwnerKey(key: string): Owner {
 /** Reference-style equality. Two owners are equal iff kind+id match. */
 export function ownersEqual(a: Owner, b: Owner): boolean {
   return a.kind === b.kind && a.id === b.id
+}
+
+/**
+ * Reject Owner.id values that would escape per-tenant directories
+ * when interpolated into a filesystem path.
+ *
+ * First-party plugins build paths as `join(rootDir, owner.kind, owner.id)`
+ * and treat the result as per-tenant. Without this guard, a hostile or
+ * buggy caller passing `{kind:'agent', id:'../shared/group-x'}` walks
+ * into another tenant's tree on platforms where `join` honours the
+ * `..` segment (i.e. every POSIX system + Windows).
+ *
+ * Rejects:
+ *   - non-string or empty id
+ *   - null byte (`\0`) — POSIX terminates paths at the byte, attack on bridges
+ *   - path separators (`/` or `\\`)
+ *   - bare `.` or `..` (the dangerous standalone segments)
+ *
+ * Allows:
+ *   - ASCII alphanumeric + `_-.`
+ *   - Unicode letters (e.g. Chinese agent ids like `writer-中文`)
+ *   - UUIDs (no separators)
+ *
+ * Plugins SHOULD call this from their own `ownerDir`-equivalent
+ * function as defense-in-depth — `resolveOwner` validates at scope-
+ * translation time, but a plugin may receive an `Owner` constructed
+ * through any path the host wires up, so it's worth checking again at
+ * the point of `join()`.
+ */
+export function assertSafeOwnerId(id: string): void {
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new Error('Owner.id must be a non-empty string')
+  }
+  if (id.includes('\0')) {
+    throw new Error(`Owner.id contains a null byte: ${JSON.stringify(id)}`)
+  }
+  if (id.includes('/') || id.includes('\\')) {
+    throw new Error(`Owner.id must not contain path separators: ${JSON.stringify(id)}`)
+  }
+  if (id === '.' || id === '..') {
+    throw new Error(`Owner.id must not be a relative-path segment: ${JSON.stringify(id)}`)
+  }
 }

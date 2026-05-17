@@ -36,9 +36,9 @@ const writer = new LlmAgent({
 - `stop_reason: 'end_turn' | 'stop_sequence'` → `'end_turn'`; `'max_tokens'` → `'max_tokens'`; anything else → `'error'`
 - `usage.input_tokens` / `output_tokens` → `inputTokens` / `outputTokens`
 
-## Note on Claude Opus 4.7
+## Note on Claude Opus 4.x (thinking models)
 
-Opus 4.7 does not accept `temperature` / `top_p` / `top_k`. If you pass `temperature` to a request targeting `claude-opus-4-7`, the API returns 400; the provider forwards the parameter verbatim and the error surfaces in the resulting failed `TaskResult`. Drop `temperature` to use adaptive thinking, or pick a different model.
+Opus 4.x ("thinking" model family) does not accept `temperature` / `top_p` / `top_k`; the API returns 400 if any of them is set. The provider detects these models by prefix (`claude-opus-4-*`) and **silently drops** any user-supplied `temperature` before sending — adaptive thinking takes over. If you need a specific temperature, target a non-thinking model (e.g. `claude-sonnet-4-6`, `claude-haiku-4-5`).
 
 ## License
 

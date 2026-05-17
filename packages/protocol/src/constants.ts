@@ -15,6 +15,17 @@ export const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
 /** A connection that has not sent HELLO within this window is closed. */
 export const HELLO_TIMEOUT_MS = 5_000
 
+/**
+ * How long an `AWAIT_APPROVAL` session can sit waiting for an admin
+ * decision before the server gives up and rejects it. The session is
+ * otherwise unprotected — heartbeat hasn't started, the admin may be
+ * AFK indefinitely — so without this an attacker can pile up
+ * connections in AWAIT_APPROVAL until file descriptors run out (DoS).
+ * 5 minutes is long enough for a real admin pinged by a UI badge,
+ * short enough that an attacker can't stockpile sockets cheaply.
+ */
+export const AWAIT_APPROVAL_TIMEOUT_MS = 5 * 60_000
+
 /** Max in-flight unanswered PINGs before the server gives up on the connection. */
 export const MAX_MISSED_PINGS = 2
 

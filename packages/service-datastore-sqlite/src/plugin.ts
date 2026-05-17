@@ -41,6 +41,7 @@ import type {
   TrashRef,
 } from '@aipehub/services-sdk'
 import {
+  assertSafeOwnerId,
   makeTrashRef,
   ownerKey,
   PREVIEW_MAX_BYTES,
@@ -76,6 +77,16 @@ export class DatastoreSqlitePlugin
   private now: () => number = Date.now
   /** Keyed by `${ownerKey}::${config.name}`. */
   private readonly handles = new Map<string, DatastoreSqliteHandle>()
+  /**
+   * In-flight attach promises, keyed the same way as `handles`. Two
+   * concurrent `attach()` calls for the same (owner, name) used to
+   * race past the cache check, both `await mkdir()`, both open their
+   * own SQLite connection, and the second `handles.set()` would
+   * orphan the first handle — connection leaked permanently.
+   * Sharing the promise means the second caller gets back the same
+   * handle the first one constructed.
+   */
+  private readonly attaching = new Map<string, Promise<DatastoreSqliteHandle>>()
 
   async validateConfig(raw: unknown): Promise<DatastoreSqliteConfig> {
     return validateDatastoreSqliteConfig(raw)
@@ -94,17 +105,33 @@ export class DatastoreSqlitePlugin
     owner: Owner,
     config: DatastoreSqliteConfig,
   ): Promise<DatastoreSqliteHandle> {
+    // Fail fast on a malicious / buggy Owner.id (`../foo`, `\0`, etc.)
+    // — defense-in-depth alongside the same check inside `ownerDir`.
+    assertSafeOwnerId(owner.id)
     const key = handleKey(owner, config.name)
     const existing = this.handles.get(key)
     if (existing) return existing
-    await mkdir(ownerDir(this.rootDir, owner), { recursive: true })
-    const handle = new DatastoreSqliteHandle({
-      dbPath: dbFile(this.rootDir, owner, config.name),
-      config,
-      logger: this.logger,
-    })
-    this.handles.set(key, handle)
-    return handle
+    // Dedupe concurrent attaches: if another caller is already mid-
+    // attach for the same key, await their promise instead of opening
+    // a second SQLite connection. See `attaching` docs above.
+    const inFlight = this.attaching.get(key)
+    if (inFlight) return inFlight
+    const promise = (async () => {
+      try {
+        await mkdir(ownerDir(this.rootDir, owner), { recursive: true })
+        const handle = new DatastoreSqliteHandle({
+          dbPath: dbFile(this.rootDir, owner, config.name),
+          config,
+          logger: this.logger,
+        })
+        this.handles.set(key, handle)
+        return handle
+      } finally {
+        this.attaching.delete(key)
+      }
+    })()
+    this.attaching.set(key, promise)
+    return promise
   }
 
   async detach(owner: Owner): Promise<void> {
@@ -169,6 +196,19 @@ export class DatastoreSqlitePlugin
     if (await exists(payloadPath)) {
       await mkdir(dirname(dstDir), { recursive: true })
       await rename(payloadPath, dstDir)
+    }
+    // Same-day re-deletes stash extra user data in `payload-<ts>/`
+    // siblings. Pre-3.1 the unconditional `rm -rf trashDir` wiped
+    // them out on the first restore — irrecoverable .sqlite files.
+    // Now we keep the trash entry alive so the siblings remain
+    // visible to listTrash + retrievable by an operator.
+    const siblings = (await readdir(trashDir).catch(() => []))
+      .filter((e) => e.startsWith('payload-'))
+    if (siblings.length > 0) {
+      this.logger.warn('restore left sibling payloads in trash', {
+        trashId: ref.id, siblings,
+      })
+      return
     }
     await rm(trashDir, { recursive: true, force: true })
   }

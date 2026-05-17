@@ -165,6 +165,87 @@ describe('Space (v2.0 — file-first persistence)', () => {
   it('atomic writes: tmp file does not survive a successful write', async () => {
     const { space } = await Space.init(root, { name: 'test' })
     await space.updateConfig({ webPort: 4242 })
-    expect(existsSync(space.paths.config + '.tmp')).toBe(false)
+    // Pre-3.1 the temp name was fixed (`<path>.tmp`); post-D1 it gets
+    // a unique pid+nanotime+random suffix so concurrent writers don't
+    // collide. Either way, the rename should have cleared the tmp.
+    const { readdirSync } = await import('node:fs')
+    const { basename, dirname } = await import('node:path')
+    const dir = dirname(space.paths.config)
+    const base = basename(space.paths.config)
+    const stragglers = readdirSync(dir).filter(
+      (f) => f.startsWith(base) && f !== base,
+    )
+    expect(stragglers).toEqual([])
+  })
+
+  // D1: two concurrent writes to the same Space file used to collide
+  // because both built `<path>.tmp` — second writeFile clobbered the
+  // first mid-rename and the rename moved a partially-written tmp
+  // over the live file. Now each writer gets a unique tmp suffix,
+  // both finish, last rename wins, no half-written JSON.
+  it('two parallel updateConfig writes both succeed without corruption', async () => {
+    const { space } = await Space.init(root, { name: 'test' })
+    await Promise.all([
+      space.updateConfig({ webPort: 5000 }),
+      space.updateConfig({ webPort: 6000 }),
+      space.updateConfig({ webPort: 7000 }),
+      space.updateConfig({ webPort: 8000 }),
+    ])
+    // File must be a valid JSON document — none of the parallel
+    // writers should have left a torn write behind.
+    const final = await space.config()
+    expect([5000, 6000, 7000, 8000]).toContain(final.webPort)
+  })
+
+  // D2: read-modify-write methods (upsertAgent, createWorker, …)
+  // used to drop updates when callers raced — both reads saw the same
+  // list, both modifications dropped to the same in-memory copy,
+  // both writes overwrote each other. `withFileLock` serialises the
+  // RMW window so every concurrent upsert ends up in the file.
+  it('parallel upsertAgent calls all land in the file (no lost writes)', async () => {
+    const { space } = await Space.init(root, { name: 'test' })
+    const N = 20
+    await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        space.upsertAgent({
+          id: `agent-${i}`,
+          allowedCapabilities: ['cap'],
+        }),
+      ),
+    )
+    const agents = await space.agents()
+    expect(agents.length).toBe(N)
+    const ids = agents.map((a) => a.id).sort()
+    expect(ids).toEqual(
+      Array.from({ length: N }, (_, i) => `agent-${i}`).sort(),
+    )
+  })
+
+  it('parallel createWorker calls all persist (no lost workers)', async () => {
+    const { space } = await Space.init(root, { name: 'test' })
+    const N = 10
+    await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        space.createWorker(`w-${i}`, ['cap']),
+      ),
+    )
+    const workers = await space.workers()
+    expect(workers.length).toBe(N)
+  })
+
+  // D2 corollary: createWorker enforces id uniqueness via
+  // `workers.some((w) => w.id === id)` — without a lock, two parallel
+  // calls for the same id used to both pass the dup check and write
+  // duplicate rows. Now exactly one wins.
+  it('parallel createWorker(same id) wins exactly once', async () => {
+    const { space } = await Space.init(root, { name: 'test' })
+    const results = await Promise.allSettled([
+      space.createWorker('alice', []),
+      space.createWorker('alice', []),
+      space.createWorker('alice', []),
+    ])
+    const fulfilled = results.filter((r) => r.status === 'fulfilled')
+    expect(fulfilled).toHaveLength(1)
+    expect(await space.workers()).toHaveLength(1)
   })
 })
