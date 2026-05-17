@@ -37,6 +37,6 @@
   "devDependencies": {
     "@aipehub/transport-ws": "workspace:*",
     "@types/ws": "^8.5.13",
-    "vitest": "^2.0.0"
+    "vitest": "^4.1.6"
   }
 }
