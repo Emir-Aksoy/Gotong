@@ -149,15 +149,20 @@ jobs:
       - name: Healthcheck the image starts and serves /healthz
         run: |
           set -euo pipefail
-          # Bind to host ports 13000/14000 to avoid any collision with the
-          # runner's own services. Mount an ephemeral tmpfs for /data so
-          # the container can write the first-run admin token + space
-          # bootstrap without persisting state past this job.
+          # Bind to host ports 13000/14000 to avoid colliding with anything
+          # else the runner might bring up. The container writes its
+          # workspace bootstrap (first-run admin token + space files)
+          # into the image-layer /data, which the Dockerfile created
+          # with the right node:node ownership; --rm cleans up on stop.
+          # We deliberately do NOT mount a tmpfs over /data: the default
+          # kernel tmpfs is root-owned, and `USER node` then can't write
+          # the workspace — Space.openOrInit crashes the moment it
+          # tries to mkdir, the container exits, and the only thing
+          # the job sees is "container disappeared".
           docker run -d --rm \
             --name aipehub-ci \
             -p 13000:3000 \
             -p 14000:4000 \
-            --tmpfs /data:rw,size=64m \
             aipehub/host:ci
           # The image declares a HEALTHCHECK with 15s start-period; give
           # it 30s to settle, then poll /healthz directly.
