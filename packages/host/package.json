@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/host",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
   "description": "Production host binary for AipeHub — runs Hub + WebSocket + Web from environment variables. No demo state, no built-in agents.",
   "license": "MIT",
@@ -27,7 +27,12 @@
       "import": "./dist/services/index.js"
     }
   },
-  "files": ["dist", "src", "bin", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "bin",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

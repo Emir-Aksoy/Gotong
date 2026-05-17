@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/llm-openai",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
   "description": "AipeHub LLM provider for OpenAI — wraps openai and implements LlmProvider.",
   "license": "MIT",
@@ -20,7 +20,11 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
