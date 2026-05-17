@@ -4,7 +4,11 @@ build-backend = "hatchling.build"
 
 [project]
 name = "aipehub"
-version = "1.0.0"
+# Keep in sync with `src/aipehub/__init__.py: __version__`. The
+# `aipehub.protocol.hello` builder reads its `client_version` default
+# from `__version__` so all three sources of truth (wheel, dunder,
+# wire HELLO) stay aligned automatically — see P5 in the v3.1 audit.
+version = "1.1.0"
 description = "AipeHub Python SDK — connect Python agents to an AipeHub Hub over WebSocket."
 readme = "README.md"
 license = { text = "MIT" }

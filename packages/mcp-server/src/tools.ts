@@ -221,9 +221,14 @@ function buildStrategy(
   recipient: string | undefined,
   capabilities: string[] | undefined,
 ): import('./hub-client.js').DispatchBody['strategy'] {
+  // MCP tool keeps the user-facing `direct` / `recipient` vocabulary
+  // (reads more naturally for an LLM); we translate to core's
+  // `explicit` / `to` shape on the way out so the scheduler sees a
+  // kind it actually handles. See hub-client.ts DispatchBody for the
+  // pre-3.1 hang this used to cause.
   if (kind === 'direct') {
     if (!recipient) throw new Error("strategy='direct' requires `recipient`")
-    return { kind: 'direct', recipient }
+    return { kind: 'explicit', to: recipient }
   }
   if (kind === 'capability') {
     if (!capabilities || capabilities.length === 0) {
