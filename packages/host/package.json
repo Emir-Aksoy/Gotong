@@ -31,15 +31,17 @@
     "dist",
     "src",
     "bin",
+    "scripts",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build-version.mjs && tsc -p tsconfig.json",
+    "build:version": "node scripts/build-version.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "start": "tsx src/main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepack": "tsc -p tsconfig.json"
+    "prepack": "node scripts/build-version.mjs && tsc -p tsconfig.json"
   },
   "dependencies": {
     "@aipehub/core": "workspace:*",

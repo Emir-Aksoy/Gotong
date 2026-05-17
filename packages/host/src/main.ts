@@ -57,6 +57,8 @@ import { join } from 'node:path'
 
 import { Hub, Space, createLogger, type SpaceConfig, type TranscriptEntry } from '@aipehub/core'
 
+import { BAKED_VERSION } from './version.js'
+
 const log = createLogger('host')
 import { serveWebSocket } from '@aipehub/transport-ws'
 import { serveWeb } from '@aipehub/web'
@@ -98,12 +100,18 @@ if (ARGV[0] === 'mint-admin-token') {
 }
 
 function pkgVersion(): string {
+  // Prefer reading from disk so an in-place upgrade (`npm install -g
+  // @aipehub/host@new` without restarting tsc) reflects in --version.
+  // Fall through to BAKED_VERSION when the disk read fails — in the
+  // bun --compile single-file binary, package.json isn't on the
+  // embedded /$bunfs/ virtual filesystem, so readFileSync throws
+  // ENOENT and the baked constant kicks in.
   try {
     const url = new URL('../package.json', import.meta.url)
     const pkg = JSON.parse(readFileSync(url, 'utf8')) as { version?: string }
-    return pkg.version ?? 'unknown'
+    return pkg.version ?? BAKED_VERSION
   } catch {
-    return 'unknown'
+    return BAKED_VERSION
   }
 }
 
