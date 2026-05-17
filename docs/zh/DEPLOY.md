@@ -53,6 +53,33 @@ aipehub-host
 
 ---
 
+## 0.5 单文件二进制（无需 Node 运行时）
+
+`aipehub-host` 也以 `bun build --compile` 产出的自包含可执行文件形式分发。当你想在一台干净机器上跑 hub、不想装 Node.js / pnpm / 整个 workspace 时，用这个。
+
+```bash
+# Linux x64 —— 换成 -darwin-arm64 / -darwin-x64 / -windows-x64.exe
+# / -linux-arm64 即可对应其它平台。
+curl -L -o aipehub-host \
+  https://github.com/Emir-Aksoy/AipeHub/releases/latest/download/aipehub-host-linux-x64
+chmod +x aipehub-host
+./aipehub-host
+```
+
+二进制读的还是同样那套 `AIPE_*` 环境变量，所以下面（A / B / C）的所有方案都直接适用 —— 把 `pnpm host` 或 `aipehub-host`（npm 安装版）替换成 `./aipehub-host` 就行。
+
+二进制**里面**有什么：
+- 整个 `@aipehub/host` workspace —— Hub、WebSocket transport、Web UI（HTML/CSS/JS 静态资源在 build 时已经 embed 进二进制，不再从磁盘读）、各 LLM 适配器。
+- 两个不依赖 native 代码的 first-party plugin：`@aipehub/service-memory-file` 和 `@aipehub/service-artifact-file`。
+
+二进制**没有**包含的：
+- `@aipehub/service-datastore-sqlite` —— 依赖 `better-sqlite3`，后者带 native `.node` binding，bundler 没办法 embed。二进制运行时会自我识别身份，写出一份**不含 sqlite** 的默认 `plugins.json`，首启零 warning。要 SQL 后端的 datastore，请走 npm 或 docker 安装路径。
+- 安装到 space 里的第三方 plugin —— 二进制无法解析自己 embedded module graph 外的包。要做 plugin 开发，走 npm 路径。
+
+二进制大小约 60 MB（所有平台都差不多）。启动比 `tsx src/main.ts` 快 5 倍左右，因为没有 module loader walk。
+
+---
+
 ## A. 本机（默认）
 
 ```bash

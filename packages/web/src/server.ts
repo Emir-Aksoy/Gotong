@@ -33,6 +33,7 @@ import {
   validateUsesArray,
   type ParsedAgent,
 } from './manifest.js'
+import { STATIC_ASSETS_BASE64 } from './static-assets.js'
 
 /**
  * Reference web UI for AipeHub (v2.0 — file-first).
@@ -63,8 +64,28 @@ import {
  */
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-// dist/server.js is one level below the package root, so the static dir is ../static
+// dist/server.js is one level below the package root, so the static dir is ../static.
+// Only used as a development fallback when STATIC_ASSETS_BASE64 is empty (i.e.
+// someone is running source-tree files directly without first running
+// `pnpm -C packages/web build:assets`). Production builds — npm install,
+// docker, bun --compile single-file binary — all serve from the embedded
+// in-memory map below.
 const STATIC_DIR = join(__dirname, '..', 'static')
+
+// Decode-once cache. The base64 map is constant; the first request per asset
+// pays the decode cost, every subsequent request gets a cached Buffer. Using
+// the global Buffer (Node + Bun both have it) keeps this runtime-agnostic.
+const STATIC_ASSETS_CACHE = new Map<string, Buffer>()
+
+function getEmbeddedAsset(name: string): Buffer | undefined {
+  const cached = STATIC_ASSETS_CACHE.get(name)
+  if (cached) return cached
+  const b64 = STATIC_ASSETS_BASE64[name]
+  if (b64 === undefined) return undefined
+  const buf = Buffer.from(b64, 'base64')
+  STATIC_ASSETS_CACHE.set(name, buf)
+  return buf
+}
 
 const MIME: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -1661,15 +1682,39 @@ async function serveStatic(res: ServerResponse, requested: string): Promise<void
   if (safe.startsWith('..') || safe.includes(`..${sep}`)) {
     res.writeHead(400); res.end(); return
   }
+
+  // Normalise to forward slashes so the lookup key matches what the
+  // generator emitted (it always uses '/' regardless of the host OS).
+  const key = safe.split(sep).join('/')
+  const ext = extname(safe)
+  const contentType = MIME[ext] ?? 'application/octet-stream'
+
+  // Production path: embedded asset map. Populated by
+  // scripts/build-static-assets.mjs; works in node, bun, and bun --compile
+  // single-file binaries (where filesystem reads relative to import.meta.url
+  // are not available).
+  const embedded = getEmbeddedAsset(key)
+  if (embedded) {
+    res.writeHead(200, {
+      'content-type': contentType,
+      'cache-control': 'no-cache',
+    })
+    res.end(embedded)
+    return
+  }
+
+  // Dev fallback: read from disk. Only reached when the build:assets
+  // generator hasn't been run yet (fresh checkout, `pnpm dev`-style
+  // workflow, or someone editing static/ files and serving without a
+  // rebuild). Identical 404 semantics as before.
   const full = join(STATIC_DIR, safe)
   if (!full.startsWith(STATIC_DIR + sep) && full !== STATIC_DIR) {
     res.writeHead(400); res.end(); return
   }
   try {
     const data = await readFile(full)
-    const ext = extname(safe)
     res.writeHead(200, {
-      'content-type': MIME[ext] ?? 'application/octet-stream',
+      'content-type': contentType,
       'cache-control': 'no-cache',
     })
     res.end(data)

@@ -62,7 +62,13 @@ import { serveWebSocket } from '@aipehub/transport-ws'
 import { serveWeb } from '@aipehub/web'
 
 import { LocalAgentPool } from './local-agent-pool.js'
-import { bootstrapServices, LifecycleSweeper, type HubServices } from './services/index.js'
+import {
+  BINARY_SAFE_PLUGINS,
+  bootstrapServices,
+  isCompiledBinary,
+  LifecycleSweeper,
+  type HubServices,
+} from './services/index.js'
 import { createWorkflowController } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 
@@ -304,7 +310,17 @@ async function main(): Promise<void> {
   let services: HubServices | undefined
   let sweeper: LifecycleSweeper | undefined
   try {
-    const boot = await bootstrapServices({ space, hub })
+    // In `bun --compile` single-file binary mode, omit
+    // `@aipehub/service-datastore-sqlite` from the auto-seeded
+    // plugins.json so operators don't see a spurious "failed to load"
+    // warning on every first run — `better-sqlite3`'s native bindings
+    // can't be embedded by the bundler. npm / docker / source runs
+    // keep the full default seed.
+    const boot = await bootstrapServices({
+      space,
+      hub,
+      ...(isCompiledBinary() ? { seedPlugins: BINARY_SAFE_PLUGINS } : {}),
+    })
     services = boot.services
     if (boot.seeded) {
       log.info('services: bootstrapped (seeded)', {

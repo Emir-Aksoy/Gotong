@@ -23,15 +23,17 @@
   "files": [
     "dist",
     "src",
+    "scripts",
     "static",
     "README.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build-static-assets.mjs && tsc -p tsconfig.json",
+    "build:assets": "node scripts/build-static-assets.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepack": "tsc -p tsconfig.json"
+    "prepack": "node scripts/build-static-assets.mjs && tsc -p tsconfig.json"
   },
   "dependencies": {
     "@aipehub/core": "workspace:*",

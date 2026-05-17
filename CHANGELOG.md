@@ -4,6 +4,25 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — 2026-05-17 — Single-file binary distribution
+
+A no-Node-required install path. Operators who don't want to provision Node + pnpm just to run a chat server can now grab a single ~60 MB executable from GitHub Releases. Same `AIPE_*` env-var contract as the npm / docker paths — every recipe in `docs/DEPLOY.md` works unmodified.
+
+### Added
+
+- **`bun build --compile` single-file binary** built per-platform: `aipehub-host-{darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64.exe}`. Cuts the install story from "install Node 20, install pnpm, install the workspace, build TS" to "curl + chmod +x + run."
+- **`.github/workflows/release.yml`** — fires on `release: published`, matrix-builds all five targets (native runner per platform except linux-arm64 which cross-compiles from x64), `--version` smoke-tests on every native target, and uploads the binaries as Assets on the triggering release. Also runs on `workflow_dispatch` for manual verification without publishing.
+- **`packages/web/scripts/build-static-assets.mjs`** — embeds `static/*` (admin/worker HTML/CSS/JS, 212 KB total) into `src/static-assets.ts` as base64 so the bundler can ship the UI inside the binary. `serveStatic` checks the embedded map first, falling back to disk reads in dev mode.
+- **`packages/host/src/services/builtin-plugins.ts`** — static `import` of `@aipehub/service-memory-file` + `@aipehub/service-artifact-file` so `bun --compile` links them into the binary. `hostAnchoredImport` in `bootstrap.ts` short-circuits to the builtin map before falling through to `import.meta.resolve(...)`, leaving the npm / docker behaviour unchanged.
+- **`isCompiledBinary()` + `BINARY_SAFE_PLUGINS`** — runtime detection of binary mode (asset URL starts with `/$bunfs/` or `embedded://`). In binary mode the host seeds `plugins.json` with the two plugins that work, omitting `@aipehub/service-datastore-sqlite` (its `better-sqlite3` native binding can't be embedded). Binary first-run is now warning-free.
+- **`services-sdk/loader.ts: LoadPluginsOpts.seedPlugins`** — new optional override letting hosts customise the default-seed list. Defaults to `DEFAULT_FIRST_PARTY_PLUGINS` so existing callers are unaffected.
+- **`docs/DEPLOY.md` §0.5 + `docs/zh/DEPLOY.md` §0.5** — "Single-file binary (no Node required)" section documents the install path, what's inside vs not, and size/startup characteristics.
+
+### Notes
+
+- Binary excludes SQLite-backed datastore. Operators who need it stay on the npm or docker install paths — both keep full plugin support.
+- `packages/web/package.json` adds `scripts/` to `files`, so the published npm tarball ships the asset generator alongside the source. `prepack` runs it before `tsc`, so consumers who install from npm get the embedded asset map without having to think about it.
+
 ## 3.0.0 — 2026-05-17 — Services
 
 The "agents as first-class infrastructure" release. v3.0 cuts the

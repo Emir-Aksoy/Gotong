@@ -21,6 +21,12 @@ export {
   type BootstrapServicesResult,
 } from './bootstrap.js'
 
+export {
+  BINARY_SAFE_PLUGINS,
+  BUILTIN_PLUGINS,
+  isCompiledBinary,
+} from './builtin-plugins.js'
+
 export { LifecycleSweeper, type LifecycleSweeperOpts } from './sweeper.js'
 
 export {
