@@ -80,6 +80,17 @@ if (ARGV.includes('--version') || ARGV.includes('-V')) {
   process.exit(0)
 }
 
+// Subcommand: `aipehub-host mint-admin-token [displayName]`
+// Mints a fresh admin against the AIPE_SPACE workspace WITHOUT starting
+// the Hub / listeners. Use when the first-run admin URL got lost
+// (window closed, .command script went away, scrollback gone). Reads
+// AIPE_SPACE / AIPE_HOST / AIPE_WEB_PORT / AIPE_COOKIE_SECURE from the
+// environment so the printed URL matches your deployment.
+if (ARGV[0] === 'mint-admin-token') {
+  await mintAdminTokenCmd(ARGV[1])
+  process.exit(0)
+}
+
 function pkgVersion(): string {
   try {
     const url = new URL('../package.json', import.meta.url)
@@ -90,13 +101,82 @@ function pkgVersion(): string {
   }
 }
 
+/**
+ * `aipehub-host mint-admin-token [displayName]` — emergency recovery
+ * when the first-run admin URL was lost. Reads AIPE_SPACE from the env
+ * exactly like the main path so the same `.aipehub` directory is
+ * reached. Does NOT start the Hub or open any listeners; only creates
+ * a new admin row in admins.json and prints the URL (token shown
+ * exactly once, matching createAdmin's contract).
+ *
+ * The printed URL uses AIPE_HOST + AIPE_WEB_PORT + AIPE_COOKIE_SECURE
+ * so what gets printed actually points at where the running host
+ * would serve. Behind a reverse proxy you'll have to substitute the
+ * external hostname yourself — same caveat as the first-run print.
+ */
+async function mintAdminTokenCmd(displayNameArg: string | undefined): Promise<void> {
+  const dir = env('AIPE_SPACE', '.aipehub')!
+  const displayName = displayNameArg && displayNameArg.length > 0
+    ? displayNameArg
+    : env('AIPE_ADMIN_DISPLAY_NAME', 'Recovered Operator')!
+
+  let space: Space
+  try {
+    space = await Space.open(dir)
+  } catch (err) {
+    process.stderr.write(
+      `error: could not open space '${dir}': ${
+        err instanceof Error ? err.message : String(err)
+      }\n` +
+        `hint: AIPE_SPACE must point at an already-initialised workspace.\n` +
+        `      Run \`aipehub-host\` (or your launcher) once to create it first.\n`,
+    )
+    process.exit(2)
+  }
+
+  const { admin, token } = await space.createAdmin(displayName)
+
+  const host = env('AIPE_HOST', '127.0.0.1')!
+  const port = envInt('AIPE_WEB_PORT', 3000)
+  const proto = envBool('AIPE_COOKIE_SECURE', false) ? 'https' : 'http'
+
+  process.stdout.write(
+    `\n` +
+      `  New admin '${admin.displayName}' (${admin.id}) added to ${dir}/admins.json.\n` +
+      `\n` +
+      `  Admin URL (shown ONCE — save it):\n` +
+      `    ${proto}://${host}:${port}/admin?token=${token}\n` +
+      `\n` +
+      `  Open this URL once; the cookie that gets set is what subsequent\n` +
+      `  logins use. The token itself is hashed in admins.json — there is\n` +
+      `  no way to recover the plaintext from disk after this print.\n` +
+      `  Behind a reverse proxy: substitute your public hostname for\n` +
+      `  '${host}:${port}'.\n\n`,
+  )
+}
+
 function printUsage(): void {
-  process.stdout.write(`Usage: aipehub-host [--help] [--version]
+  process.stdout.write(`Usage:
+  aipehub-host                            run the host (env-driven)
+  aipehub-host mint-admin-token [name]    add a fresh admin (recovery)
+  aipehub-host --version | -V             print version + exit
+  aipehub-host --help    | -h             this message + exit
 
 Production AipeHub host. Reads all configuration from environment
 variables (12-factor style). No CLI flags drive runtime behavior — set
 the env, run the command. The same binary works for local dev, LAN
 deployments, and public VPS behind Caddy / nginx.
+
+SUBCOMMANDS
+
+  mint-admin-token [displayName]
+      Recover when the first-run admin URL got lost (.command window
+      closed, scrollback gone, etc). Opens AIPE_SPACE without starting
+      any listeners, creates a fresh admin in admins.json, prints the
+      one-time login URL, and exits. Existing admins are unaffected.
+      Default displayName: AIPE_ADMIN_DISPLAY_NAME, else 'Recovered Operator'.
+      Exits with status 2 if AIPE_SPACE does not point at an
+      initialised workspace.
 
 ENVIRONMENT
   AIPE_SPACE              workspace directory (default: .aipehub)
@@ -135,8 +215,8 @@ EXAMPLES
   npx @aipehub/host
 
 DOCS
-  https://github.com/AipeHub/AipeHub/blob/main/docs/OVERVIEW.md
-  https://github.com/AipeHub/AipeHub/blob/main/docs/DEPLOY.md
+  https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/OVERVIEW.md
+  https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/DEPLOY.md
 `)
 }
 

@@ -109,3 +109,80 @@ jobs:
 
       - name: Test
         run: pytest -q
+
+  # ---------------------------------------------------------------------------
+  # Docker — smoke-build the production image so Dockerfile drift is caught.
+  #
+  # The README's recommended quick-start path is `docker compose up`. If
+  # the Dockerfile's `COPY packages/<name>/package.json` block drifts out
+  # of sync with `pnpm-workspace.yaml` (a real bug we hit in v3 prep), the
+  # build fails at `pnpm install --frozen-lockfile` with
+  # `ERR_PNPM_OUTDATED_LOCKFILE`. This job catches that within minutes of
+  # the bad commit, not after a user tries to run the image. We don't
+  # push the image anywhere — `--load` keeps the artefact in the local
+  # daemon for the duration of the job, then GitHub discards it.
+  # ---------------------------------------------------------------------------
+  docker:
+    name: Docker · production image smoke build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build production image (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+          load: true
+          tags: aipehub/host:ci
+          # Use the inline cache so back-to-back PRs reuse the npm install
+          # layer when the lockfile hasn't moved.
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Healthcheck the image starts and serves /healthz
+        run: |
+          set -uo pipefail
+          # Bind to host ports 13000/14000 to avoid colliding with anything
+          # else the runner might bring up. Skipping --rm: when the
+          # container exits early (e.g. workspace bootstrap crash),
+          # --rm reaps it and `docker logs` then dies with
+          # "no such container" — opaque. Without --rm the exited
+          # container sticks around long enough to grab logs and an
+          # inspect snapshot before we explicitly `docker rm -f` at the
+          # end.
+          docker run -d \
+            --name aipehub-ci \
+            -p 13000:3000 \
+            -p 14000:4000 \
+            aipehub/host:ci
+          # The image declares a HEALTHCHECK with 15s start-period; give
+          # it 30s to settle, then poll /healthz directly.
+          rc=1
+          for i in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:13000/healthz >/dev/null 2>&1; then
+              echo "✓ /healthz responded after $((i * 2))s"
+              docker logs aipehub-ci 2>&1 | head -40
+              rc=0
+              break
+            fi
+            sleep 2
+          done
+          if [ "$rc" -ne 0 ]; then
+            echo "✗ /healthz never responded — diagnostics follow"
+            echo "--- docker ps -a (state + exit code) ---"
+            docker ps -a --filter name=aipehub-ci \
+              --format 'table {{.Status}}\t{{.RunningFor}}\t{{.Names}}'
+            echo "--- docker inspect (state.error / oom / exit) ---"
+            docker inspect aipehub-ci --format '{{json .State}}' | head -3 || true
+            echo "--- docker logs (full) ---"
+            docker logs aipehub-ci 2>&1 || true
+          fi
+          docker rm -f aipehub-ci >/dev/null 2>&1 || true
+          exit "$rc"

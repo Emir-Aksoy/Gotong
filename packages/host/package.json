@@ -1,12 +1,12 @@
 {
   "name": "@aipehub/host",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
   "description": "Production host binary for AipeHub — runs Hub + WebSocket + Web from environment variables. No demo state, no built-in agents.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AipeHub/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
     "directory": "packages/host"
   },
   "publishConfig": {
@@ -27,7 +27,12 @@
       "import": "./dist/services/index.js"
     }
   },
-  "files": ["dist", "src", "bin", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "bin",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -48,7 +53,10 @@
     "@aipehub/services-sdk": "workspace:*",
     "@aipehub/transport-ws": "workspace:*",
     "@aipehub/web": "workspace:*",
-    "@aipehub/workflow": "workspace:*"
+    "@aipehub/workflow": "workspace:*",
+    "@anthropic-ai/sdk": "^0.96.0",
+    "openai": "^6.38.0",
+    "better-sqlite3": "^12.10.0"
   },
   "devDependencies": {
     "@aipehub/sdk-node": "workspace:*",

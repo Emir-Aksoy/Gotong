@@ -1,6 +1,6 @@
 # @aipehub/llm
 
-`LlmAgent` base class + neutral `LlmProvider` interface for [AipeHub](https://github.com/AipeHub/AipeHub). Builds an LLM-backed `Participant` in three lines.
+`LlmAgent` base class + neutral `LlmProvider` interface for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Builds an LLM-backed `Participant` in three lines.
 
 The Hub does not call LLMs. `LlmAgent` does. The provider is the only place vendor SDKs are imported — pick one:
 

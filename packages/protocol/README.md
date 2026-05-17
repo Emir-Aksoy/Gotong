@@ -1,8 +1,8 @@
 # @aipehub/protocol
 
-Wire-protocol types and JSON codec for [AipeHub](https://github.com/AipeHub/AipeHub). Zero runtime — everything here is `interface`s and tiny `encode` / `decode` helpers.
+Wire-protocol types and JSON codec for [AipeHub](https://github.com/Emir-Aksoy/AipeHub). Zero runtime — everything here is `interface`s and tiny `encode` / `decode` helpers.
 
-If you're building a Hub-side transport or a non-Node SDK in TypeScript, this is the package to depend on. The full spec lives in [docs/PROTOCOL.md](https://github.com/AipeHub/AipeHub/blob/main/docs/PROTOCOL.md).
+If you're building a Hub-side transport or a non-Node SDK in TypeScript, this is the package to depend on. The full spec lives in [docs/PROTOCOL.md](https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/PROTOCOL.md).
 
 ## Install
 

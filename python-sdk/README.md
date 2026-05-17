@@ -11,7 +11,7 @@ The Hub is the TypeScript reference implementation; this SDK speaks the same wir
 pip install -e python-sdk/
 
 # from PyPI — NOT yet published, decision tracked in
-# https://github.com/AipeHub/AipeHub/blob/main/.github/RELEASE-CHECKLIST.md
+# https://github.com/Emir-Aksoy/AipeHub/blob/main/.github/RELEASE-CHECKLIST.md
 # pip install aipehub
 ```
 

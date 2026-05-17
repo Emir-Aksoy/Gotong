@@ -97,7 +97,7 @@ TOOLS PROVIDED
   evaluate_task      — attach a rating + comment to a completed task
 
 DOCS
-  https://github.com/AipeHub/AipeHub/blob/main/docs/MCP.md
+  https://github.com/Emir-Aksoy/AipeHub/blob/main/docs/MCP.md
 `)
 }
 

@@ -1,12 +1,12 @@
 {
   "name": "@aipehub/llm",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
   "description": "AipeHub LLM agent base — provider interface and LlmAgent for building LLM-backed participants.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AipeHub/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
     "directory": "packages/llm"
   },
   "publishConfig": {
@@ -20,7 +20,11 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

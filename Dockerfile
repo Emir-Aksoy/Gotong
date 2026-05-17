@@ -3,7 +3,15 @@
 # ─── 1. build stage ─────────────────────────────────────────────────────────
 # pnpm workspace, install + typecheck + build. Heavier image, discarded
 # after extraction.
-FROM node:20-bookworm-slim AS build
+#
+# Uses the *non-slim* node:20-bookworm so python3 + g++ + make are on
+# PATH for native-module builds. better-sqlite3 12.x's prebuild-install
+# falls back to node-gyp when it can't resolve a prebuilt binary
+# (intermittently true on Docker hub-bookworm-slim — its trimmed cert
+# store + missing build tools mean the fallback then explodes). The
+# runtime stage below stays on slim, so the production image size is
+# unaffected.
+FROM node:20-bookworm AS build
 
 # Install pnpm via corepack (shipped with Node 20).
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
@@ -23,6 +31,13 @@ COPY packages/host/package.json            packages/host/package.json
 COPY packages/llm/package.json             packages/llm/package.json
 COPY packages/llm-anthropic/package.json   packages/llm-anthropic/package.json
 COPY packages/llm-openai/package.json      packages/llm-openai/package.json
+COPY packages/services-sdk/package.json    packages/services-sdk/package.json
+COPY packages/service-memory-file/package.json     packages/service-memory-file/package.json
+COPY packages/service-artifact-file/package.json   packages/service-artifact-file/package.json
+COPY packages/service-datastore-sqlite/package.json packages/service-datastore-sqlite/package.json
+COPY packages/workflow/package.json        packages/workflow/package.json
+COPY packages/cli/package.json             packages/cli/package.json
+COPY packages/mcp-server/package.json      packages/mcp-server/package.json
 
 # Use the lockfile verbatim. We don't add --frozen-lockfile because the
 # image is built from the repo, not from a fresh clone — but pnpm will
@@ -36,8 +51,15 @@ COPY tsconfig*.json ./
 RUN pnpm -r build
 
 # ─── 2. runtime stage ───────────────────────────────────────────────────────
-# Slim image, only built dist + production-pruned node_modules.
-FROM node:20-bookworm-slim AS runtime
+# Only built dist + production-pruned node_modules.
+#
+# Also uses non-slim node:20-bookworm because `pnpm install --prod`
+# below re-runs better-sqlite3's install script, which needs the same
+# python3 + g++ + make toolchain when the prebuilt binary resolution
+# falls through. Image grows by ~100 MB vs slim; an optimisation pass
+# using `pnpm deploy` or a distroless final stage is tracked for
+# later.
+FROM node:20-bookworm AS runtime
 
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 

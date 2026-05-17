@@ -135,7 +135,7 @@ sudo chown aipehub:aipehub /srv/aipehub-data
 sudo mkdir -p /opt/aipehub && sudo chown aipehub:aipehub /opt/aipehub
 
 # as the aipehub user
-sudo -u aipehub -H git clone https://github.com/AipeHub/AipeHub.git /opt/aipehub
+sudo -u aipehub -H git clone https://github.com/Emir-Aksoy/AipeHub.git /opt/aipehub
 sudo -u aipehub -H bash -lc 'cd /opt/aipehub && pnpm install && pnpm build'
 ```
 
@@ -180,10 +180,10 @@ User=aipehub
 Group=aipehub
 WorkingDirectory=/opt/aipehub
 EnvironmentFile=/etc/aipehub.env
-# Use the published bin once installed:
-#   ExecStart=/usr/bin/env aipehub-host
-# Or run from source via tsx:
-ExecStart=/usr/bin/env node --experimental-strip-types /opt/aipehub/packages/host/src/main.ts
+# Run the built host. `pnpm build` (step C.2) produced dist/. This is
+# the recommended path: zero runtime transpile, fewer moving parts, no
+# Node-version sensitivity.
+ExecStart=/usr/bin/env node /opt/aipehub/packages/host/dist/main.js
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
@@ -200,17 +200,23 @@ StandardError=journal
 WantedBy=multi-user.target
 ```
 
-> Node 20 doesn't ship `--experimental-strip-types` (Node 22 does). Two
-> simpler routes: (a) `pnpm build` and point `ExecStart` at
-> `dist/main.js` directly, or (b) install `tsx` globally and use
-> `/usr/bin/env tsx /opt/aipehub/packages/host/src/main.ts`. Build is
-> the safer production choice — fewer moving parts.
-
-Build-then-run flavour:
-
-```ini
-ExecStart=/usr/bin/env node /opt/aipehub/packages/host/dist/main.js
-```
+> Three alternative `ExecStart` lines you might use **instead** of the
+> default above — pick one of these only if you have a specific reason:
+>
+> ```ini
+> # If you `pnpm install -g @aipehub/host` (or once it's on a registry):
+> ExecStart=/usr/bin/env aipehub-host
+>
+> # Skip the build step entirely — requires Node 22+:
+> ExecStart=/usr/bin/env node --experimental-strip-types /opt/aipehub/packages/host/src/main.ts
+>
+> # Run from source via tsx (Node 20 friendly, extra global dep):
+> ExecStart=/usr/bin/env tsx /opt/aipehub/packages/host/src/main.ts
+> ```
+>
+> `--experimental-strip-types` requires **Node 22+** — on Node 20 the
+> process exits immediately with `bad option: --experimental-strip-types`,
+> so don't pick it unless you've actually deployed Node 22.
 
 ### C.5 Caddyfile
 
@@ -304,6 +310,23 @@ Replace `http://127.0.0.1:3000` with `https://hub.example.com` and open
 it in your browser. The cookie sticks because `AIPE_COOKIE_SECURE=1`
 and the page is served over TLS. Subsequent restarts of the service do
 not re-print the token — admins persist in `admins.json`.
+
+> **Lost the URL?** If you missed the bootstrap line (terminal closed,
+> log shipper filtered it, scrollback gone), use the no-listener
+> recovery subcommand:
+>
+> ```bash
+> sudo -u aipehub -H AIPE_SPACE=/srv/aipehub-data \
+>   AIPE_HOST=hub.example.com AIPE_COOKIE_SECURE=1 \
+>   /opt/aipehub/packages/host/bin/aipehub-host.js mint-admin-token
+> ```
+>
+> Opens `AIPE_SPACE` without starting the Hub or WebSocket / Web
+> listeners, appends a new admin to `admins.json`, prints the one-time
+> URL (respecting `AIPE_HOST` / `AIPE_WEB_PORT` / `AIPE_COOKIE_SECURE`
+> so the printed URL points at your public hostname), and exits.
+> Existing admins, cookies, and sessions are untouched. Pass an
+> optional display name to label the row: `mint-admin-token "Carol"`.
 
 ### C.8 Onboard more admins
 

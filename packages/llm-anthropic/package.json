@@ -1,12 +1,12 @@
 {
   "name": "@aipehub/llm-anthropic",
-  "version": "2.0.0",
+  "version": "3.0.0",
   "type": "module",
   "description": "AipeHub LLM provider for Anthropic — wraps @anthropic-ai/sdk and implements LlmProvider.",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/AipeHub/AipeHub.git",
+    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
     "directory": "packages/llm-anthropic"
   },
   "publishConfig": {
@@ -20,7 +20,11 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

@@ -14,7 +14,7 @@ list keeps the checklist honest.
   - [`SECURITY.md`](../SECURITY.md) → "Backup — email"
   - [`.well-known/security.txt`](../.well-known/security.txt) → `Contact: mailto:` line
 - [ ] **Enable Private Vulnerability Reporting** on
-      `github.com/AipeHub/AipeHub` (Settings → Security & analysis).
+      `github.com/Emir-Aksoy/AipeHub` (Settings → Security & analysis).
       Without this the `/security/advisories/new` URL returns 404 for
       external reporters.
 - [ ] **Refresh `Expires:` in `security.txt`** to a date < 1 year out
@@ -87,16 +87,26 @@ can stay "no" indefinitely:
 
 ## Repo hygiene
 
-- [ ] Add `.github/ISSUE_TEMPLATE/` (bug / feature / docs) and
-      `.github/PULL_REQUEST_TEMPLATE.md`.
+- [x] Add `.github/ISSUE_TEMPLATE/` (bug / feature / docs) and
+      `.github/PULL_REQUEST_TEMPLATE.md`. Done — four issue forms
+      (`bug_report.yml`, `feature_request.yml`, `documentation.yml`,
+      `config.yml`) plus the PR template.
 - [ ] Enable GitHub Discussions; seed categories: Q&A, Show & Tell, Ideas.
-- [ ] Add `.github/dependabot.yml` for npm + pnpm + GitHub Actions
-      updates.
+- [x] Add `.github/dependabot.yml` for npm + pnpm + GitHub Actions
+      updates. Done — weekly cadence, grouped by `patch-and-minor` /
+      `test-tooling` / `actions`. First batch (#4–#11) landed
+      2026-05-17; `vitest` major is `ignore`d until vite 5→6 is
+      coordinated, `actions/setup-node` major is `ignore`d until the
+      v6 prebuild-libc detection issue with `better-sqlite3@12`
+      resolves upstream.
 - [x] Decide on a CI provider — GitHub Actions, live in
-      `.github/workflows/ci.yml`. Two jobs: Node 20/22 (`pnpm -r build
-      typecheck test`) + Python 3.10/3.11/3.12 (`pytest python-sdk`).
-      Concurrency cancels in-flight PR runs but lets post-merge `main`
-      runs finish. Template parse check is covered by `pnpm -r test`.
+      `.github/workflows/ci.yml`. Three jobs now: Node 20/22 (`pnpm
+      -r build typecheck test`), Python 3.10/3.11/3.12 (`pytest
+      python-sdk`), and the production Docker image smoke build
+      added 2026-05-17 (catches `pnpm-workspace.yaml` vs Dockerfile
+      drift). Template parse check is covered by `pnpm -r test`.
+      Concurrency cancels in-flight PR runs but lets post-merge
+      `main` runs finish.
 
 ## Operational
 
@@ -112,4 +122,4 @@ can stay "no" indefinitely:
 Once every box is checked, delete this file. Its absence == "we shipped
 the placeholder cleanup".
 
-Last reviewed: 2026-05-12.
+Last reviewed: 2026-05-17.
