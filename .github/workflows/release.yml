@@ -200,6 +200,18 @@ jobs:
 
       - name: Smoke-test binary (--version)
         if: matrix.target.canRun == true
+        # Native runs are load-bearing — if `--version` fails on a
+        # platform we natively support, the binary is broken and the
+        # matrix leg should turn red. The arm64 cross-compile is
+        # different: we run it through qemu-user-static, which has
+        # well-known gaps around Bun's JIT and a handful of syscalls.
+        # When the smoke fails under QEMU it's almost always an
+        # emulator limitation, not a regression in the binary — real
+        # arm64 hardware reports separately at install time. So
+        # `continue-on-error` is gated on `matrix.target.qemu` so the
+        # QEMU leg surfaces the failure (red step in the UI) without
+        # sinking the whole job.
+        continue-on-error: ${{ matrix.target.qemu == true }}
         shell: bash
         # Native runs execute the binary directly. The arm64 cross-
         # compile relies on the QEMU binfmt handler registered above
@@ -209,10 +221,14 @@ jobs:
           ./${{ matrix.target.artifact }} --version
 
       - name: Upload artefact (always)
-        # Always upload — workflow_dispatch runs use this for manual
-        # download, release runs use this as a backup if the gh-release
-        # upload below fails for any reason. The aggregate jobs below
-        # (checksums, provenance, sbom) also pull from these artefacts.
+        # `if: always()` is load-bearing — when the smoke-test step
+        # above fails on a non-QEMU target the job is heading red
+        # anyway, but the binary itself is still useful for triage
+        # (`gh run download` from the Actions UI). Always upload so
+        # the file is accessible even on a failed run; the aggregate
+        # jobs below short-circuit on `needs.build.result == success`
+        # so they won't fire on a red build.
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.target.artifact }}
