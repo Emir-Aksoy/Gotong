@@ -162,6 +162,22 @@ the cert spend. Sketch of the macOS flow:
 
 ---
 
+## Private-repo gates (auto-activate on public-flip)
+
+Three workflows / jobs gracefully skip on user-owned private repos
+because the underlying GitHub feature requires public visibility or
+GitHub Advanced Security:
+
+| Workflow / job | Gate | Reason |
+| --- | --- | --- |
+| `dependency-review.yml` (job) | `!github.event.repository.private` | Dependency-review-action 404s on private free-tier repos |
+| `codeql.yml` (analyze) | `!github.event.repository.private` | SARIF upload to Security tab needs GHAS on private |
+| `release.yml` → `provenance` | `!github.event.repository.private` | `Feature not available for user-owned private repositories` from the attestation API |
+
+These are not deferred work — they're already implemented and
+parked. The moment the repo flips to public (or GHAS is enabled),
+all three activate with no further edits.
+
 ## Summary table
 
 | ID | Item | Blocker | Estimated cost | Priority |

@@ -327,7 +327,15 @@ jobs:
   provenance:
     name: SLSA build provenance
     needs: build
-    if: always() && needs.build.result == 'success'
+    # The GitHub attestation API is free for public repos but
+    # explicitly unsupported on user-owned private repositories:
+    # `Feature not available for user-owned private repositories.
+    # To enable this feature, please make this repository public.`
+    # (verified via run #26027482645). Skip on private repos so the
+    # release pipeline doesn't go red over a known infra gap; the
+    # workflow re-activates automatically the moment the repo goes
+    # public.
+    if: always() && needs.build.result == 'success' && !github.event.repository.private
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -428,7 +436,9 @@ jobs:
         run: |
           set -u
           fail=0
-          for job in build checksums provenance sbom; do
+          # Strict jobs: must be `success`. Skipped or failed sinks
+          # the aggregate.
+          for job in build checksums sbom; do
             result_var="result_${job}"
             case "${!result_var}" in
               success) echo "✓ $job: success" ;;
@@ -436,6 +446,17 @@ jobs:
               *)       echo "✗ $job: ${!result_var}"; fail=1 ;;
             esac
           done
+          # `provenance` is the one job that's allowed to skip — it
+          # gates on `!github.event.repository.private` because the
+          # GitHub attestation API isn't available for user-owned
+          # private repos. Once the repo goes public this job
+          # activates and the strict check below tightens with no
+          # further workflow edits.
+          case "$result_provenance" in
+            success) echo "✓ provenance: success" ;;
+            skipped) echo "⚪ provenance: skipped (private-repo infra gap)" ;;
+            *)       echo "✗ provenance: $result_provenance"; fail=1 ;;
+          esac
           exit "$fail"
         env:
           result_build: ${{ needs.build.result }}
