@@ -278,6 +278,23 @@ describe('sdk-node — services roundtrip', () => {
       autoReconnect: false,
     })
     const mem = session.services!.memory!
+    // Force a server-side attach so we can monkey-patch the handle to
+    // hang. Without this, the next recall is the one that triggers the
+    // lazy attach and we have no handle reference to slow down.
+    await mem.remember({ kind: 'note', text: 'force-attach' })
+    // Find the just-attached handle and make its recall slow enough
+    // that `await session.close()` reliably wins the race. Pre-fix this
+    // test was timing-dependent: on macOS GitHub runners (faster JS
+    // microtask scheduling than ubuntu) the SERVICE_RESULT for recall
+    // landed BEFORE close() called failAllPending, so pending resolved
+    // with [] instead of rejecting. Hanging the server side eliminates
+    // the race without changing the SDK's close semantics.
+    const handle = [...gateway.memoryHandles.values()][0]!
+    const originalRecall = handle.recall.bind(handle)
+    handle.recall = async (query: Parameters<typeof originalRecall>[0]) => {
+      await new Promise((r) => setTimeout(r, 200))
+      return originalRecall(query)
+    }
     // Fire a recall, immediately close before result can arrive.
     const pending = mem.recall({ k: 1 })
     await session.close('test')
