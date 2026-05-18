@@ -29,7 +29,7 @@ import { readFileSync } from 'node:fs'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 
-import { HubClient } from './hub-client.js'
+import { HubClient, redactError } from './hub-client.js'
 import { registerTools } from './tools.js'
 
 const ARGV = process.argv.slice(2)
@@ -139,8 +139,21 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
+  // H3 — top-level catch must NOT leak the admin Bearer token to stderr.
+  // The HubClient already redacts errors it produces, but this catch
+  // also fires for errors from McpServer, transport, or process-level
+  // failures whose stack may have visited code that saw the token.
+  // Take a defensive second pass here keyed off the token literal from
+  // env / args (the same source the HubClient was built with). When no
+  // token is configured (the early --help / --version paths exit
+  // before this catch fires), `redactError(err, '')` is a no-op except
+  // for the generic `Bearer …` regex, which is also harmless.
+  //
+  // See AUDIT-v3.3.md finding H3.
+  const token = process.env.AIPE_ADMIN_TOKEN ?? flag('--token') ?? ''
+  const safe = redactError(err, token)
   process.stderr.write(
-    `[aipehub-mcp] fatal: ${err instanceof Error ? err.stack ?? err.message : String(err)}\n`,
+    `[aipehub-mcp] fatal: ${safe.stack ?? safe.message}\n`,
   )
   process.exit(1)
 })

@@ -18,6 +18,111 @@ import { z } from 'zod'
 
 import type { HubClient } from './hub-client.js'
 
+/**
+ * Hard caps applied to the `dispatch_task` tool input (H4).
+ *
+ * Pre-3.4 `payload: z.unknown()` and `title: z.string()` had no upper
+ * bound. An LLM in a long agent loop could mint MB-sized payloads which
+ * the Hub would happily accept, write to `transcript.jsonl` on disk,
+ * AND broadcast to every connected participant. One stuck loop could
+ * fill the workspace dir + saturate every agent's inbox; on a small
+ * VPS that's the whole machine.
+ *
+ * 256 KiB matches the WebSocket `maxPayload` default (PR #23 C1 fix),
+ * so any payload accepted here also fits cleanly down the wire. 2000
+ * chars on `title` is comfortable for transcript UIs and shorter than
+ * any sane window-title field. Both limits are intentional caller-
+ * facing constants so a future audit grep finds them.
+ *
+ * See AUDIT-v3.3.md finding H4.
+ */
+export const MAX_DISPATCH_PAYLOAD_BYTES = 256 * 1024
+export const MAX_DISPATCH_TITLE_LENGTH = 2000
+
+/**
+ * Best-effort JSON byte length. Returns Infinity when the value cannot
+ * be serialised (circular, BigInt, function, etc.) — callers treat
+ * "can't measure" as "must reject" rather than guessing.
+ */
+function payloadJsonLength(v: unknown): number {
+  if (v === undefined) return 0
+  try {
+    return JSON.stringify(v).length
+  } catch {
+    return Number.POSITIVE_INFINITY
+  }
+}
+
+/**
+ * Raw Zod shape for the `dispatch_task` MCP tool input. Exported so
+ * regression tests can hit the H4 caps (`payload` size, `title`
+ * length) directly without booting an MCP server. Used inline by
+ * `registerTools` below — the SDK accepts a raw shape (not a wrapping
+ * `z.object`), which is also how the audit-fix can be unit-tested
+ * by wrapping it in `z.object(...)` on the test side.
+ */
+export const DISPATCH_TASK_INPUT_SHAPE = {
+  strategy: z
+    .enum(['direct', 'capability', 'broadcast'])
+    .describe('Routing strategy.'),
+  recipient: z
+    .string()
+    .optional()
+    .describe('Required when strategy=direct: the participant id to route to.'),
+  capabilities: z
+    .array(z.string())
+    .optional()
+    .describe(
+      'Required when strategy=capability or broadcast (with filter): capability tags the recipient must have.',
+    ),
+  payload: z
+    .unknown()
+    .optional()
+    .refine(
+      (v) => payloadJsonLength(v) <= MAX_DISPATCH_PAYLOAD_BYTES,
+      {
+        message:
+          `payload exceeds ${MAX_DISPATCH_PAYLOAD_BYTES} bytes when ` +
+          `JSON-serialised (or contains values that cannot be ` +
+          `serialised — circular references, BigInt, functions). ` +
+          `See AUDIT-v3.3.md finding H4.`,
+      },
+    )
+    .describe(
+      `Task payload, free-form. Stringified into the participant's message body. JSON objects survive serialization. ` +
+        `Capped at ${MAX_DISPATCH_PAYLOAD_BYTES} bytes when JSON-encoded (H4 — keeps a runaway LLM loop from filling the transcript / agent inboxes).`,
+    ),
+  title: z
+    .string()
+    .max(MAX_DISPATCH_TITLE_LENGTH, {
+      message: `title exceeds ${MAX_DISPATCH_TITLE_LENGTH} characters (H4)`,
+    })
+    .optional()
+    .describe(
+      `Short human-readable title for the transcript. Capped at ${MAX_DISPATCH_TITLE_LENGTH} characters (H4).`,
+    ),
+  weight: z
+    .number()
+    .min(0.1)
+    .max(10)
+    .optional()
+    .describe('Contribution weight in [0.1, 10.0], 1 decimal. Default 1.0.'),
+  priority: z
+    .number()
+    .optional()
+    .describe('Scheduler priority hint. Higher = more urgent. Ignored by the default scheduler.'),
+  countContribution: z
+    .boolean()
+    .optional()
+    .describe('Set false to exclude this single task from the leaderboard.'),
+  timeoutMs: z
+    .number()
+    .min(1000)
+    .max(600_000)
+    .optional()
+    .describe('How long to wait for the result before failing. Default 60_000 (60s).'),
+} as const
+
 export function registerTools(server: McpServer, client: HubClient): void {
   // 1. List the participants currently online in the room.
   server.registerTool(
@@ -60,48 +165,10 @@ export function registerTools(server: McpServer, client: HubClient): void {
         'Use `direct` when you know the recipient id, `capability` for "whoever has these tags is least busy", ' +
         'or `broadcast` for "first-responder wins, others cancel". The task is recorded on the transcript and ' +
         'counts toward the contribution leaderboard unless `countContribution: false` is passed.',
-      inputSchema: {
-        strategy: z
-          .enum(['direct', 'capability', 'broadcast'])
-          .describe('Routing strategy.'),
-        recipient: z
-          .string()
-          .optional()
-          .describe('Required when strategy=direct: the participant id to route to.'),
-        capabilities: z
-          .array(z.string())
-          .optional()
-          .describe(
-            'Required when strategy=capability or broadcast (with filter): capability tags the recipient must have.',
-          ),
-        payload: z
-          .unknown()
-          .optional()
-          .describe(
-            'Task payload, free-form. Stringified into the participant`s message body. JSON objects survive serialization.',
-          ),
-        title: z.string().optional().describe('Short human-readable title for the transcript.'),
-        weight: z
-          .number()
-          .min(0.1)
-          .max(10)
-          .optional()
-          .describe('Contribution weight in [0.1, 10.0], 1 decimal. Default 1.0.'),
-        priority: z
-          .number()
-          .optional()
-          .describe('Scheduler priority hint. Higher = more urgent. Ignored by the default scheduler.'),
-        countContribution: z
-          .boolean()
-          .optional()
-          .describe('Set false to exclude this single task from the leaderboard.'),
-        timeoutMs: z
-          .number()
-          .min(1000)
-          .max(600_000)
-          .optional()
-          .describe('How long to wait for the result before failing. Default 60_000 (60s).'),
-      },
+      // Defined at module scope (DISPATCH_TASK_INPUT_SHAPE) so the H4
+      // payload-size / title-length caps can be unit-tested directly
+      // without booting an MCP server.
+      inputSchema: DISPATCH_TASK_INPUT_SHAPE,
     },
     async (input) => {
       const strategy = buildStrategy(input.strategy, input.recipient, input.capabilities)
