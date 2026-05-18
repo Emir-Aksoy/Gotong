@@ -19,8 +19,10 @@ import asyncio
 import contextlib
 import json
 import logging
+import ssl as _ssl
 import time
 from typing import Any, Awaitable, Callable, Literal
+from urllib.parse import urlparse
 
 import websockets
 
@@ -29,6 +31,36 @@ from .agent import AgentParticipant
 from .services import ServiceClient, ServiceUseRequest, to_wire_decls
 
 log = logging.getLogger("aipehub.session")
+
+
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _is_loopback_host(url: str) -> bool:
+    """Return True if the URL points at the local machine.
+
+    Mirrors `isLoopbackHost` in `packages/sdk-node/src/session.ts`. We
+    treat the four canonical loopback identities as safe destinations
+    for a plaintext apiKey; everything else (private LAN, public IP,
+    hostname) is rejected unless the user opts in via
+    ``allow_plaintext_auth=True``.
+
+    Malformed URLs return False (fail-safe — if we can't decide the
+    host is loopback, callers treat it as remote). The empty / None
+    hostname case (e.g. ``urlparse('not-a-url')`` returns
+    ``hostname=None``) MUST count as non-loopback for that reason;
+    otherwise any garbage URL would silently be treated as safe.
+
+    See AUDIT-v3.3.md finding H10.
+    """
+    try:
+        parsed = urlparse(url)
+    except ValueError:
+        return False
+    host = parsed.hostname
+    if not host:  # None or empty string -> fail-safe
+        return False
+    return host.lower() in _LOOPBACK_HOSTS
 
 # Duck-typed connection handle — websockets >= 14 deprecated the named
 # WebSocketClientProtocol / WebSocketServerProtocol classes. We treat the
@@ -65,12 +97,56 @@ class Session:
         reconnect_max_backoff_ms: int = 30_000,
         on_state_change: Callable[[SessionState, dict[str, Any] | None], None] | None = None,
         services: list[ServiceUseRequest] | None = None,
+        ssl: _ssl.SSLContext | None = None,
+        allow_plaintext_auth: bool = False,
     ) -> None:
         if not agents:
             raise ValueError("connect() requires at least one agent")
         ids = [a.id for a in agents]
         if len(set(ids)) != len(ids):
             raise ValueError(f"duplicate agent ids: {ids}")
+
+        # H10 — refuse to send apiKey over plaintext ``ws://`` to a
+        # non-loopback host. The Python SDK has the same exposure as
+        # sdk-node: ``api_key`` ends up in the HELLO JSON, and on any
+        # unencrypted link an on-path observer can read it. The user
+        # must consciously opt out — either by switching to ``wss://``
+        # (correct) or by passing ``allow_plaintext_auth=True``. See
+        # AUDIT-v3.3.md finding H10.
+        if (
+            api_key is not None
+            and url.startswith("ws://")
+            and not _is_loopback_host(url)
+            and not allow_plaintext_auth
+        ):
+            try:
+                hostname = urlparse(url).hostname or "<unparseable>"
+            except ValueError:
+                hostname = "<unparseable>"
+            raise ValueError(
+                f"connect: refusing to send api_key over plaintext ws:// to "
+                f"non-loopback host '{hostname}'. Switch to wss:// for "
+                f"production, or pass allow_plaintext_auth=True to override "
+                f"(UNSAFE — only on trusted networks where any on-path "
+                f"observer is acceptable). See AUDIT-v3.3.md finding H10."
+            )
+        # Loud warning on the explicit-opt-out path so it's audit-traceable
+        # in operator logs. Silently honouring an unsafe flag is itself a
+        # smell — keep this WARNING (not INFO) so default log configs see it.
+        if (
+            api_key is not None
+            and url.startswith("ws://")
+            and not _is_loopback_host(url)
+            and allow_plaintext_auth
+        ):
+            log.warning(
+                "api_key is being sent over plaintext ws:// to %r. "
+                "allow_plaintext_auth=True was explicitly passed; honoring "
+                "it but logging here so auditors can see it. Switch to "
+                "wss:// when feasible.",
+                url,
+            )
+
         self._url = url
         self._agents: dict[str, AgentParticipant] = {a.id: a for a in agents}
         self._api_key = api_key
@@ -79,6 +155,12 @@ class Session:
         self._max_backoff = reconnect_max_backoff_ms
         self._on_state_change = on_state_change
         self._services_decls: list[ServiceUseRequest] = list(services) if services else []
+        # C3 — forwarded to ``websockets.connect(..., ssl=...)`` when the
+        # URL uses ``wss://``. ``None`` keeps the library default (system
+        # CA bundle). Use an explicit ``ssl.SSLContext`` to trust an
+        # internal CA (``ctx.load_verify_locations('./internal-ca.pem')``)
+        # or to pin a server cert. See AUDIT-v3.3.md finding C3.
+        self._ssl = ssl
 
         self._ws: _WSConnection | None = None
         self._state: SessionState = "connecting"
@@ -198,7 +280,13 @@ class Session:
 
     async def _one_connection(self) -> None:
         self._set_state("connecting", None)
-        async with websockets.connect(self._url) as ws:
+        # C3 — forward the optional ``ssl.SSLContext`` to ``websockets``.
+        # When the URL is ``ws://`` the kwarg is ignored by the library;
+        # we still pass it so the call site stays unconditional.
+        connect_kwargs: dict[str, Any] = {}
+        if self._ssl is not None:
+            connect_kwargs["ssl"] = self._ssl
+        async with websockets.connect(self._url, **connect_kwargs) as ws:
             self._ws = ws
             await ws.send(json.dumps(protocol.hello(
                 agents=[{"id": a.id, "capabilities": a.capabilities} for a in self._agents.values()],
@@ -317,6 +405,8 @@ async def connect(
     reconnect_max_backoff_ms: int = 30_000,
     on_state_change: Callable[[SessionState, dict[str, Any] | None], None] | None = None,
     services: list[ServiceUseRequest] | None = None,
+    ssl: _ssl.SSLContext | None = None,
+    allow_plaintext_auth: bool = False,
 ) -> Session:
     """Open a session, send HELLO, await WELCOME, return the live ``Session``.
 
@@ -328,6 +418,17 @@ async def connect(
     ``services`` (v1.1) is the list of Hub Services this connection wants
     to call. Each entry is a :class:`aipehub.services.ServiceUseRequest`.
     See ``docs/AGENT.md`` for the model.
+
+    ``ssl`` (v3.4) — an optional ``ssl.SSLContext`` forwarded to
+    ``websockets.connect`` when the URL uses ``wss://``. Use this to
+    trust an internal CA or present a client certificate. ``None``
+    keeps the library default (system CA bundle). Ignored on ``ws://``.
+
+    ``allow_plaintext_auth`` (v3.4) — set to ``True`` to permit sending
+    ``api_key`` over an unencrypted ``ws://`` link to a non-loopback
+    host. The default (``False``) raises ``ValueError`` from
+    ``connect()`` to prevent silent credential leakage. Loopback
+    destinations (localhost / 127.0.0.1 / ::1) are always allowed.
 
     Caller is expected to ``await session.wait_closed()`` if it needs to
     keep the process alive, or build its own join logic.
@@ -341,6 +442,8 @@ async def connect(
         reconnect_max_backoff_ms=reconnect_max_backoff_ms,
         on_state_change=on_state_change,
         services=services,
+        ssl=ssl,
+        allow_plaintext_auth=allow_plaintext_auth,
     )
     await session._start()
     return session

@@ -30,6 +30,28 @@ export type SessionState =
   | 'closing'
   | 'closed'
 
+/**
+ * TLS knobs forwarded to the underlying `ws` WebSocket constructor when
+ * the URL uses `wss://`. Structurally compatible with Node's
+ * `tls.ConnectionOptions` — re-exported as a type alias so consumers
+ * don't have to import from `node:tls` themselves.
+ *
+ * Common entries:
+ *   - `ca` — trusted CA bundle (one or more PEM/DER) for internal CAs.
+ *     Add your private CA here instead of disabling all verification
+ *     globally with `NODE_TLS_REJECT_UNAUTHORIZED=0`.
+ *   - `cert` + `key` — client certificate for mutual TLS.
+ *   - `rejectUnauthorized` — keep at `true` (the default). Setting
+ *     `false` is unsafe — use `ca` to add trust roots instead.
+ *   - `checkServerIdentity` — override the default hostname-vs-cert check.
+ *   - `servername` — SNI hostname when the URL contains an IP.
+ *
+ * Ignored when the URL uses `ws://` (no TLS to configure).
+ *
+ * See AUDIT-v3.3.md finding C2.
+ */
+export type TlsClientOptions = import('node:tls').ConnectionOptions
+
 export interface ConnectOptions {
   url: string
   agents: AgentParticipant[]
@@ -40,6 +62,40 @@ export interface ConnectOptions {
   autoReconnect?: boolean
   reconnectInitialBackoffMs?: number
   reconnectMaxBackoffMs?: number
+  /**
+   * TLS options for `wss://` connections. Forwarded to the underlying
+   * `ws` WebSocket constructor. Use this to trust an internal CA,
+   * present a client certificate (mTLS), or pin a specific server
+   * identity.
+   *
+   * **Security**: do NOT set `NODE_TLS_REJECT_UNAUTHORIZED=0` in the
+   * environment — that disables TLS verification globally for the
+   * entire Node process. Instead pass `tls: { ca: fs.readFileSync(...) }`
+   * here so only THIS connection uses the custom trust store.
+   *
+   * Ignored when `url` starts with `ws://` (no TLS handshake).
+   *
+   * See AUDIT-v3.3.md finding C2.
+   */
+  tls?: TlsClientOptions
+  /**
+   * Permit sending `apiKey` over plaintext `ws://` to a non-loopback
+   * host. Default false — the SDK refuses to send credentials in
+   * cleartext to a remote host and throws in `connect()`.
+   *
+   * Localhost destinations (`127.0.0.1`, `::1`, `localhost`) are always
+   * allowed regardless of this flag, so the common dev workflow
+   * `ws://127.0.0.1:4000` keeps working.
+   *
+   * Set this to `true` ONLY when you are certain the network between
+   * SDK and Hub is trusted end-to-end (e.g. a Tailscale mesh, a
+   * privileged K8s pod-to-pod network) and you accept that any
+   * unprivileged on-path observer can read the apiKey. For Internet
+   * traffic, switch to `wss://` instead.
+   *
+   * See AUDIT-v3.3.md finding H10.
+   */
+  allowPlaintextAuth?: boolean
   /**
    * Initial-handshake budget: how long the first `connect()` call
    * will wait for the server's WELCOME (or REJECT) after the TCP
@@ -99,6 +155,26 @@ interface ResolvedOptions extends ConnectOptions {
   clientName: string
   clientVersion: string
   connectTimeoutMs: number
+  allowPlaintextAuth: boolean
+}
+
+/**
+ * Loopback heuristic for H10: an apiKey may travel over `ws://` only when
+ * the destination is the same machine (or the user explicitly opts in via
+ * `allowPlaintextAuth`). We treat the four canonical loopback identities
+ * as safe; anything else (private LAN, public IP, hostname) is rejected.
+ *
+ * Returns `true` for `localhost`, `127.0.0.1`, `::1`, `[::1]`.
+ *
+ * Returns `false` (callers reject the connection) on malformed URLs —
+ * fail-safe: if we can't decide the host is loopback, we treat it as
+ * remote. The legitimate path always carries a parseable URL.
+ */
+export function isLoopbackHost(url: string): boolean {
+  let parsed: URL
+  try { parsed = new URL(url) } catch { return false }
+  const h = parsed.hostname.toLowerCase()
+  return h === 'localhost' || h === '127.0.0.1' || h === '::1' || h === '[::1]'
 }
 
 /**
@@ -117,6 +193,7 @@ export async function connect(opts: ConnectOptions): Promise<Session> {
     clientName: opts.clientName ?? '@aipehub/sdk-node',
     clientVersion: opts.clientVersion ?? '0.0.0',
     connectTimeoutMs: opts.connectTimeoutMs ?? 10_000,
+    allowPlaintextAuth: opts.allowPlaintextAuth ?? false,
     ...opts,
   }
   if (resolved.agents.length === 0) {
@@ -126,6 +203,48 @@ export async function connect(opts: ConnectOptions): Promise<Session> {
   for (const a of resolved.agents) {
     if (seen.has(a.id)) throw new Error(`duplicate agent id '${a.id}'`)
     seen.add(a.id)
+  }
+
+  // H10 — refuse to send apiKey over plaintext `ws://` to a non-loopback
+  // host. `apiKey` ends up in the HELLO JSON; on any unencrypted link
+  // anyone on the path can read it (Ethernet sniffer, compromised
+  // router, public-WiFi attacker, even an unprivileged process on a
+  // shared box reading /proc/<sshd>/net/tcp). The user has to consciously
+  // opt out — either by switching to `wss://` (correct) or by passing
+  // `allowPlaintextAuth: true` (acknowledging the risk).
+  //
+  // We allow loopback unconditionally because the common dev workflow is
+  // `ws://127.0.0.1:4000` against a local Hub; the apiKey can't leave
+  // the host. See AUDIT-v3.3.md finding H10.
+  if (
+    resolved.apiKey !== undefined &&
+    resolved.url.startsWith('ws://') &&
+    !isLoopbackHost(resolved.url) &&
+    !resolved.allowPlaintextAuth
+  ) {
+    const hostname = (() => {
+      try { return new URL(resolved.url).hostname } catch { return '<unparseable>' }
+    })()
+    throw new Error(
+      `connect: refusing to send apiKey over plaintext ws:// to non-loopback host '${hostname}'. ` +
+        `Switch to wss:// for production, or pass { allowPlaintextAuth: true } to override ` +
+        `(UNSAFE — only on trusted networks where any on-path observer is acceptable). ` +
+        `See AUDIT-v3.3.md finding H10.`,
+    )
+  }
+  // Loud warning on the explicit-opt-out path so it's audit-traceable in
+  // operator logs — silently honouring an unsafe flag is itself a smell.
+  if (
+    resolved.apiKey !== undefined &&
+    resolved.url.startsWith('ws://') &&
+    !isLoopbackHost(resolved.url) &&
+    resolved.allowPlaintextAuth
+  ) {
+    console.warn(
+      `[sdk-node] apiKey is being sent over plaintext ws:// to '${resolved.url}'. ` +
+        `allowPlaintextAuth=true was explicitly passed; honoring it but logging here so ` +
+        `auditors can see it. Switch to wss:// when feasible.`,
+    )
   }
 
   // Federation glue (v1.2.1+): each TeamBridgeAgent may declare
@@ -251,7 +370,22 @@ class SessionImpl implements Session {
   }
 
   private openSocket(): void {
-    const ws = new WebSocket(this.opts.url)
+    // C2 — forward `tls` options to the underlying ws client so users
+    // can trust an internal CA, present a client cert (mTLS), or pin
+    // a server identity WITHOUT having to disable verification globally
+    // via NODE_TLS_REJECT_UNAUTHORIZED. `tls.ConnectionOptions` and
+    // ws's `ClientOptions` overlap structurally (both extend the same
+    // http/tls option shape) — we cast through a `Record<string,
+    // unknown>` intermediate so the SDK's public type stays decoupled
+    // from `ws` itself. `ws` ignores keys it doesn't recognise at
+    // runtime; the audit point is the *hook*, not field-by-field
+    // schema enforcement. See AUDIT-v3.3.md C2.
+    const ws = this.opts.tls === undefined
+      ? new WebSocket(this.opts.url)
+      : new WebSocket(
+          this.opts.url,
+          { ...(this.opts.tls as Record<string, unknown>) } as unknown as import('ws').ClientOptions,
+        )
     this.ws = ws
 
     ws.on('open', () => {
