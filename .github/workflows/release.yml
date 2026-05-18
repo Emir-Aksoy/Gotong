@@ -97,10 +97,18 @@ jobs:
             artifact: aipehub-host-darwin-arm64
             canRun: true
           - label: darwin-x64
-            runner: macos-13
+            # Cross-compiled from the arm64 macos-latest runner. The
+            # macos-13 (Intel) hosted runners are deprecated and routinely
+            # queue 6h+; building on macos-latest with bun's
+            # `--target=bun-darwin-x64` flag cuts a binary that runs
+            # natively on Intel Macs without depending on the slow pool.
+            # We can't natively smoke-test (the runner is arm64), so the
+            # smoke step is marked best-effort below — same pattern as
+            # linux-arm64.
+            runner: macos-latest
             bunTarget: bun-darwin-x64
             artifact: aipehub-host-darwin-x64
-            canRun: true
+            canRun: false
           - label: linux-x64
             runner: ubuntu-latest
             bunTarget: bun-linux-x64
@@ -109,8 +117,9 @@ jobs:
           - label: linux-arm64
             # Cross-compiled from x64. GitHub Actions has arm64 runners
             # but they cost extra. We smoke-test the binary via QEMU
-            # binfmt below — not as good as a real arm64 host, but
-            # catches anything that fails to even load the ELF.
+            # binfmt below — best-effort because bun's JIT trips on a
+            # handful of syscalls qemu-user doesn't translate cleanly.
+            # Real arm64 hardware reports separately at install time.
             runner: ubuntu-latest
             bunTarget: bun-linux-arm64
             artifact: aipehub-host-linux-arm64
