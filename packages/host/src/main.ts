@@ -402,6 +402,12 @@ async function main(): Promise<void> {
     // tolerated under structural typing).
     ...(services ? { services } : {}),
   })
+  // Readiness flag — flips to true after workflow resume finishes (see
+  // the setTimeout block below). `/readyz` reads this; `/healthz` is
+  // always 200. Splitting liveness from readiness lets k8s-style probes
+  // hold the pod in `NotReady` during the resume grace window instead
+  // of restarting it.
+  let bootReady = false
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
@@ -413,6 +419,7 @@ async function main(): Promise<void> {
     ...(services ? { services: services.asAdminSurface() } : {}),
     ...(allowedHosts ? { allowedHosts } : {}),
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },
+    readinessGate: { isReady: () => bootReady },
   })
 
   // P6: recover from crashes — any run still marked 'running' on disk
@@ -439,6 +446,12 @@ async function main(): Promise<void> {
       }
     }).catch((err) => {
       log.error('workflow resume scan failed', { err })
+    }).finally(() => {
+      // Flip readiness regardless of resume outcome — partial / failed
+      // resume is still a "running host"; readiness is about boot
+      // completion, not workflow health. The admin UI's "run history"
+      // tab is the right place to surface resume failures.
+      bootReady = true
     })
   }, resumeGraceMs)
 

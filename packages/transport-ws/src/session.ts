@@ -4,6 +4,7 @@ import type { Hub, ParticipantId } from '@aipehub/core'
 import {
   AWAIT_APPROVAL_TIMEOUT_MS,
   decodeFrame,
+  decodeFrameStrict,
   encodeFrame,
   HELLO_TIMEOUT_MS,
   MAX_MISSED_PINGS,
@@ -145,9 +146,20 @@ export class Session {
 
   private async onMessage(text: string): Promise<void> {
     if (this.state === 'DEAD') return
-    const r = decodeFrame(text)
+    // AIPE_PROTOCOL_STRICT=1 enables the dev-only per-frame validation
+    // path. The check is O(n) on object size and the production hot path
+    // doesn't need it (we trust well-behaved SDKs); reserved for
+    // operators debugging third-party SDK implementations that send
+    // malformed frames. Read fresh on every message so the env can be
+    // toggled at runtime via SIGHUP-style restarts of the process.
+    const decode = process.env.AIPE_PROTOCOL_STRICT === '1' ? decodeFrameStrict : decodeFrame
+    const r = decode(text)
     if (!r.ok) {
-      this.sendError('bad_frame', r.reason)
+      // `detail` (only present on strict mode's `invalid_frame`) gives
+      // the operator a useful "HELLO.client.name must be a string"
+      // diagnostic instead of just "invalid_frame".
+      const msg = r.reason === 'invalid_frame' && r.detail ? `invalid_frame: ${r.detail}` : r.reason
+      this.sendError('bad_frame', msg)
       return
     }
     const frame = r.frame as ClientFrame

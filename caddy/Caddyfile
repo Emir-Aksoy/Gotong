@@ -1,0 +1,83 @@
+# Caddyfile for the production docker-compose blueprint.
+#
+# Two virtual hosts:
+#   - {$AIPE_DOMAIN}     — the admin / worker web UI (HTTP)
+#   - {$AIPE_WS_DOMAIN}  — the WebSocket port for remote agents
+#
+# Letting them share the same hostname is fine — set AIPE_WS_DOMAIN
+# to the same value as AIPE_DOMAIN (the compose file does this by
+# default) and the second block becomes a no-op duplicate; Caddy
+# tolerates it.
+#
+# TLS: Caddy auto-provisions Let's Encrypt certs on first request to
+# each name. ACME_EMAIL is used for the registration. If you want to
+# pin to staging certs during initial setup, prepend `acme_ca
+# https://acme-staging-v02.api.letsencrypt.org/directory` to the
+# global block below — production rate limits will otherwise lock you
+# out if your DNS is misconfigured.
+
+{
+    email {$ACME_EMAIL}
+    servers {
+        # Trust XFF only from the loopback interface (Caddy itself).
+        # The aipehub container sees Caddy's IP as the source; this
+        # tells Caddy to populate X-Forwarded-For from the real client
+        # so the host's per-IP rate limiter keys correctly when
+        # AIPE_TRUST_PROXY=1.
+        trusted_proxies static private_ranges
+    }
+}
+
+{$AIPE_DOMAIN} {
+    encode gzip
+
+    # Web UI + admin API. The aipehub container is on the default
+    # compose network as `aipehub`; resolve it via Docker DNS.
+    reverse_proxy aipehub:3000 {
+        # Standard X-Forwarded-* headers; the host honours these
+        # because AIPE_TRUST_PROXY=1.
+        header_up X-Forwarded-Proto https
+        # Don't trust client-supplied XFF — overwrite with the real one.
+        header_up -X-Forwarded-For
+    }
+
+    # Security headers — duplicates what the host already sets, but
+    # belt-and-braces is fine.
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Defence in depth — the host's `/healthz` is plain text but
+        # the rest of the API serves application/json.
+        X-Frame-Options "SAMEORIGIN"
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}
+
+{$AIPE_WS_DOMAIN} {
+    encode gzip
+
+    # WebSocket transport. Caddy auto-detects the Upgrade header and
+    # tunnels the connection — no special directive needed beyond the
+    # bare reverse_proxy. Bumping the read/write timeouts because
+    # idle agents may sit between heartbeats for up to a minute.
+    reverse_proxy aipehub:4000 {
+        header_up X-Forwarded-Proto https
+        header_up -X-Forwarded-For
+        transport http {
+            read_timeout 90s
+            write_timeout 90s
+            # 0 = inherit Caddy default (no max idle). WS is long-lived
+            # by design.
+        }
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}

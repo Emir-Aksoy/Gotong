@@ -182,6 +182,25 @@ export interface WebServerOptions {
    * `@aipehub/services-sdk` — the surface is plain types in `@aipehub/core`.
    */
   services?: ServicesAdminSurface
+  /**
+   * Optional readiness gate. When set, `GET /readyz` returns 200
+   * once `isReady()` first returns true, and 503 with a JSON
+   * `{ error: 'starting' }` body before then. Without this option
+   * `/readyz` aliases `/healthz` (always 200) — backward-compatible.
+   *
+   * `/healthz` is **liveness** (the process is alive enough to answer
+   * an HTTP request); `/readyz` is **readiness** (the process has
+   * finished bootstrap and is ready to serve real traffic). Separating
+   * the two lets a Kubernetes-style probe avoid restarting the pod
+   * during the workflow-resume grace period (P6 in the v3.1 audit).
+   *
+   * The gate is read once per `/readyz` request — no caching — so a
+   * caller can flip the flag freely. Typical use: start with
+   * `{ isReady: () => false }`, then after `resumeRunningRuns()` and
+   * any other boot work finishes, swap to `{ isReady: () => true }`.
+   * Easiest pattern is a let-binding closure (see host main.ts).
+   */
+  readinessGate?: { isReady: () => boolean }
 }
 
 /**
@@ -314,6 +333,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     lifecycle: opts.lifecycle,
     workflows: opts.workflows,
     services: opts.services,
+    readinessGate: opts.readinessGate,
   }
 
   const server = createServer((req, res) => {
@@ -377,6 +397,7 @@ interface HandlerCtx {
   lifecycle: ManagedAgentLifecycle | undefined
   workflows: WorkflowSurface | undefined
   services: ServicesAdminSurface | undefined
+  readinessGate: { isReady: () => boolean } | undefined
 }
 
 /**
@@ -499,10 +520,32 @@ async function handle(
   // disables intermediaries; CSP on SSE breaks nothing but adds nothing)
   for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v)
 
-  // --- healthz (load balancer / systemd / uptime monitors) ----------------
+  // --- healthz (liveness — process is alive enough to answer HTTP) -------
+  // Always 200. Load balancers / systemd / k8s liveness probes restart
+  // the process when this returns non-200. Boot status (have we finished
+  // workflow resume? are plugins attached?) belongs to `/readyz`, not
+  // here — restarting a slow-booting pod is the opposite of what an
+  // operator wants.
   if (path === '/healthz') {
     res.writeHead(200, { 'content-type': 'text/plain' })
     res.end('ok')
+    return
+  }
+
+  // --- readyz (readiness — bootstrap finished, real traffic safe) --------
+  // 200 once the readiness gate (set by the host after resumeRunningRuns
+  // + any other boot work) flips. 503 before that. When no gate is
+  // supplied (older callers / library use), aliases `/healthz` — same
+  // 200 forever — so this remains backward-compatible.
+  if (path === '/readyz') {
+    const ready = ctx.readinessGate ? ctx.readinessGate.isReady() : true
+    if (ready) {
+      res.writeHead(200, { 'content-type': 'text/plain' })
+      res.end('ready')
+    } else {
+      res.writeHead(503, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'starting' }))
+    }
     return
   }
 
