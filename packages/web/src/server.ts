@@ -338,10 +338,22 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
 
   const server = createServer((req, res) => {
     handle(ctx, req, res).catch((err) => {
-      log.error('handler threw', { url: req.url, method: req.method, err })
+      // H18: do NOT leak `err.message` to the client. It can carry
+      // filesystem paths, SQL snippets, stack-trace residue — every one
+      // of which helps an attacker map the deployment. Mint a short
+      // request-id so an operator reading logs can still match the
+      // user-visible 500 to the full trace. See AUDIT-v3.3.md finding
+      // H18.
+      const requestId = randomBytes(6).toString('hex')
+      log.error('handler threw', {
+        requestId,
+        url: req.url,
+        method: req.method,
+        err,
+      })
       if (!res.headersSent) {
         res.writeHead(500, { 'content-type': 'text/plain' })
-        res.end(`server error: ${err instanceof Error ? err.message : String(err)}`)
+        res.end(`internal server error (requestId=${requestId})`)
       } else {
         try { res.end() } catch { /* ignore */ }
       }
@@ -400,21 +412,57 @@ interface HandlerCtx {
   readinessGate: { isReady: () => boolean } | undefined
 }
 
+/** Default upper bound on the `hits` map; sweep is force-triggered above. */
+export const DEFAULT_RATE_LIMITER_MAX_KEYS = 10_000
+
 /**
  * Tiny in-memory sliding-window rate limiter — sufficient for the
  * "small体验版" scale this codebase targets. Behind Caddy the client IP
  * comes from `X-Forwarded-For` (first hop); on bare localhost it falls
  * back to `req.socket.remoteAddress`. Replace with Redis when you have
  * a real fleet.
+ *
+ * v3.4 hardening:
+ *
+ *   - H19: the underlying `hits` Map is periodically swept so an
+ *     attacker rotating source IPs cannot grow the Map without bound.
+ *     A `check()` call only GC's its OWN key's old timestamps; without
+ *     the sweep, every never-revisited IP leaves an entry behind
+ *     forever. Sweep fires when either `sweepIntervalMs` has elapsed
+ *     or the Map crosses `maxKeys`. Worst-case memory is
+ *     `O(maxKeys * max)` integers — under default settings that's a
+ *     few MB, not gigabytes.
+ *
+ *   - H21: `peek` + `recordFailure` lets callers separate "is the
+ *     budget exhausted?" from "this attempt failed". The admin-cookie
+ *     lookup path uses them so a legitimate signed-in admin never
+ *     consumes budget on a successful lookup — only attackers spraying
+ *     random sids burn through it.
+ *
+ * See AUDIT-v3.3.md findings H19 and H21.
+ *
+ * @internal exported for direct unit tests; not re-exported from
+ *   `@aipehub/web`'s package surface.
  */
-class RateLimiter {
+export class RateLimiter {
   private hits = new Map<string, number[]>()
+  private lastSweep = Date.now()
+  private readonly maxKeys: number
+  private readonly sweepIntervalMs: number
   constructor(
     private readonly max: number,
     private readonly windowMs: number,
-  ) {}
+    opts: { maxKeys?: number; sweepIntervalMs?: number } = {},
+  ) {
+    this.maxKeys = opts.maxKeys ?? DEFAULT_RATE_LIMITER_MAX_KEYS
+    // Default sweep cadence == one window. That bounds the lag between
+    // a key's last hit expiring and the GC dropping its entry to a
+    // single window.
+    this.sweepIntervalMs = opts.sweepIntervalMs ?? windowMs
+  }
   /** true if allowed, false if over budget. Records the hit when allowed. */
   check(key: string): boolean {
+    this.maybeSweep()
     if (this.max <= 0) return true
     const now = Date.now()
     const list = this.hits.get(key) ?? []
@@ -426,6 +474,65 @@ class RateLimiter {
     fresh.push(now)
     this.hits.set(key, fresh)
     return true
+  }
+  /**
+   * Inspect the budget without recording a hit. Used by the admin-cookie
+   * lookup path (H21) so a legitimate signed-in admin doesn't burn quota
+   * just by being authenticated — only failed lookups call
+   * {@link recordFailure}.
+   */
+  peek(key: string): boolean {
+    this.maybeSweep()
+    if (this.max <= 0) return true
+    const now = Date.now()
+    const list = this.hits.get(key) ?? []
+    const fresh = list.filter((t) => now - t < this.windowMs)
+    // Keep the freshened list — saves the next call from re-filtering
+    // and matters for sweep correctness when the window has passed.
+    if (fresh.length !== list.length) this.hits.set(key, fresh)
+    return fresh.length < this.max
+  }
+  /**
+   * Record a failed attempt. Counterpart to {@link peek}. Use only when
+   * the auth attempt definitely failed — successful lookups should not
+   * count against the attacker's quota for a given IP.
+   */
+  recordFailure(key: string): void {
+    if (this.max <= 0) return
+    this.maybeSweep()
+    const now = Date.now()
+    const list = this.hits.get(key) ?? []
+    const fresh = list.filter((t) => now - t < this.windowMs)
+    fresh.push(now)
+    this.hits.set(key, fresh)
+  }
+  /** Test-only — expose the Map size so the H19 GC regression can assert it. */
+  size(): number {
+    return this.hits.size
+  }
+  /**
+   * Drop entries whose hits have all expired. Called implicitly at the
+   * head of every public method; the actual sweep only runs when either
+   * the sweep timer has elapsed or the Map has grown past `maxKeys`.
+   *
+   * Cost: O(N) over the Map at sweep time — but the sweep cadence is at
+   * least `windowMs` (default 1 min for the login limiter, 1 min for
+   * worker-create), so amortised per-call cost stays O(1).
+   */
+  private maybeSweep(): void {
+    const now = Date.now()
+    if (now - this.lastSweep < this.sweepIntervalMs && this.hits.size < this.maxKeys) {
+      return
+    }
+    this.lastSweep = now
+    for (const [k, list] of this.hits) {
+      const fresh = list.filter((t) => now - t < this.windowMs)
+      if (fresh.length === 0) {
+        this.hits.delete(k)
+      } else if (fresh.length !== list.length) {
+        this.hits.set(k, fresh)
+      }
+    }
   }
 }
 
@@ -682,7 +789,13 @@ async function handle(
         return
       }
       const ip = clientIp(ctx, req)
-      if (!ctx.adminLoginLimiter.check(ip)) {
+      // Namespaced key (`bearer:`) keeps Bearer/admin-token attempts
+      // separate from the cookie-probing limiter slice introduced for
+      // H21. Same IP, two independent budgets — one for "spray random
+      // tokens at /admin?token=...", one for "spray random cookie
+      // sids at any auth-checking endpoint" — so an attacker can't
+      // double their effective quota by switching auth modes.
+      if (!ctx.adminLoginLimiter.check(`bearer:${ip}`)) {
         res.writeHead(429, { 'content-type': 'text/plain; charset=utf-8', 'retry-after': '60' })
         res.end('too many login attempts; try again in a minute')
         return
@@ -1735,20 +1848,40 @@ async function findAdminFromRequest(
   | { kind: 'rate_limited' }
   | { kind: 'none' }
 > {
+  const ip = clientIp(ctx, req)
   const bearer = readBearer(req)
   if (bearer) {
-    if (!ctx.adminLoginLimiter.check(clientIp(ctx, req))) {
+    if (!ctx.adminLoginLimiter.check(`bearer:${ip}`)) {
       return { kind: 'rate_limited' }
     }
     const admin = await ctx.space.verifyAdminToken(bearer)
     if (admin) return { kind: 'admin', admin }
   }
   const sid = readCookie(req, ADMIN_COOKIE)
-  const sess = await ctx.space.findAdminSession(sid)
-  if (sess) {
-    const admins = await ctx.space.admins()
-    const a = admins.find((x) => x.id === sess.principalId)
-    if (a) return { kind: 'admin', admin: a }
+  if (sid) {
+    // H21 — cookie-probing defence. `findAdminSession` reads
+    // `runtime/admin-sessions.json` from disk; an attacker spraying
+    // random sids could churn that file IO indefinitely without ever
+    // tripping the Bearer limiter above, because they never set an
+    // Authorization header. We `peek` the budget BEFORE the lookup so
+    // the legitimate path (valid sid resolves on the first try) never
+    // burns quota — only failed lookups call `recordFailure`. The
+    // namespaced key (`cookie:`) keeps this budget independent of the
+    // Bearer side so a logged-in admin doing API calls can't be DoS'd
+    // by an attacker filling the Bearer slot with bad tokens.
+    if (!ctx.adminLoginLimiter.peek(`cookie:${ip}`)) {
+      return { kind: 'rate_limited' }
+    }
+    const sess = await ctx.space.findAdminSession(sid)
+    if (sess) {
+      const admins = await ctx.space.admins()
+      const a = admins.find((x) => x.id === sess.principalId)
+      if (a) return { kind: 'admin', admin: a }
+    }
+    // The sid was supplied but resolved to no admin — record the failure
+    // so an attacker's quota burns down. Success path above already
+    // returned without touching the limiter.
+    ctx.adminLoginLimiter.recordFailure(`cookie:${ip}`)
   }
   return { kind: 'none' }
 }
