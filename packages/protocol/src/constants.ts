@@ -29,6 +29,23 @@ export const AWAIT_APPROVAL_TIMEOUT_MS = 5 * 60_000
 /** Max in-flight unanswered PINGs before the server gives up on the connection. */
 export const MAX_MISSED_PINGS = 2
 
+/**
+ * Maximum number of agent declarations a single HELLO may carry (v3.4).
+ *
+ * Pre-3.4 a malicious client could send a HELLO with thousands of agent
+ * entries; the server would register every one into the Hub registry,
+ * each allocating a session-scoped participant and burning per-agent
+ * memory until file descriptors / heap ran out. See AUDIT-v3.3.md
+ * finding H22.
+ *
+ * 256 is well above any realistic legitimate count (a single sidecar
+ * declaring 256 personas is already exotic) and small enough that a
+ * misbehaving peer can't push registry memory by more than a few
+ * megabytes per connection. The transport-ws session terminates a
+ * HELLO that exceeds this with `bad_hello`.
+ */
+export const MAX_HELLO_AGENTS = 256
+
 /** Major versions must match. */
 export function majorVersionOf(v: string): number {
   const m = v.split('.')[0]

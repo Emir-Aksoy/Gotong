@@ -1,10 +1,16 @@
 export { Hub, newId } from './hub.js'
 export type { HubConfig, TaskStatus, TaskView } from './hub.js'
 
-export { Space, DEFAULT_CONFIG, SPACE_FILE_VERSION } from './space.js'
+export {
+  Space,
+  SpaceUnsafeError,
+  DEFAULT_CONFIG,
+  SPACE_FILE_VERSION,
+} from './space.js'
 export type {
   SpaceMeta,
   SpaceConfig,
+  SpaceUnsafeCode,
   AdminRecord,
   AgentRecord,
   ManagedAgentSpec,

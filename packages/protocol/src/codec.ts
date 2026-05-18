@@ -2,15 +2,63 @@ import type { Frame } from './frames.js'
 
 export type DecodeResult<F extends Frame = Frame> =
   | { ok: true; frame: F }
-  | { ok: false; reason: 'invalid_json' | 'not_object' | 'missing_type' | 'invalid_frame'; detail?: string }
+  | {
+      ok: false
+      reason: 'invalid_json' | 'not_object' | 'missing_type' | 'invalid_frame' | 'too_large'
+      detail?: string
+    }
+
+/**
+ * Maximum text payload `decodeFrame` will parse, in **bytes** (UTF-16
+ * code units in JS strings — close enough to bytes for the size
+ * envelope we care about). Frames larger than this fail fast with
+ * `reason: 'too_large'` BEFORE `JSON.parse` runs, so a multi-megabyte
+ * payload can't OOM the host on parse.
+ *
+ * This is defence in depth — the transport layer should already cap
+ * payloads via `WebSocketServer.maxPayload` (see
+ * `@aipehub/transport-ws` finding C1). The check here protects:
+ *
+ *   - Test harnesses and SDK consumers that decode frames without
+ *     going through the WS server.
+ *   - Future transports (HTTP long-poll, named-pipe IPC) that may not
+ *     have a comparable size knob.
+ *
+ * Default 1 MiB — comfortably above the 256 KiB `maxPayload` default
+ * in transport-ws but small enough that a single-frame parse never
+ * pushes the heap past a megabyte. See AUDIT-v3.3.md finding H12.
+ *
+ * Override via `decodeFrame(text, { maxBytes })` for callers that
+ * need to accept larger frames (e.g. artifact-uploaded TASK payloads).
+ */
+export const DEFAULT_DECODE_MAX_BYTES = 1_048_576 // 1 MiB
+
+export interface DecodeFrameOptions {
+  /** Override the default 1 MiB size cap. Pass 0 or a negative value to disable. */
+  maxBytes?: number
+}
 
 /**
  * Decode a WebSocket text payload into a Frame. The check is shallow on
  * purpose: we validate the envelope (`{ type: string, ... }`) and trust
  * the discriminated union for the rest. Callers can narrow with
  * `frame.type` and validate fields as needed.
+ *
+ * Pre-flight size check (v3.4): payloads longer than `maxBytes`
+ * (default 1 MiB) are rejected without invoking `JSON.parse`. The
+ * `detail` field on the failed result carries the actual byte count
+ * so log shippers can correlate with throttle-style alerts. See
+ * AUDIT-v3.3.md finding H12.
  */
-export function decodeFrame(text: string): DecodeResult {
+export function decodeFrame(text: string, options: DecodeFrameOptions = {}): DecodeResult {
+  const maxBytes = options.maxBytes ?? DEFAULT_DECODE_MAX_BYTES
+  if (maxBytes > 0 && text.length > maxBytes) {
+    return {
+      ok: false,
+      reason: 'too_large',
+      detail: `payload is ${text.length} bytes, exceeds limit of ${maxBytes}`,
+    }
+  }
   let obj: unknown
   try {
     obj = JSON.parse(text)
@@ -40,8 +88,8 @@ export function decodeFrame(text: string): DecodeResult {
  * tolerated. We only reject frames whose **required** named field is
  * missing or has the wrong primitive type.
  */
-export function decodeFrameStrict(text: string): DecodeResult {
-  const lax = decodeFrame(text)
+export function decodeFrameStrict(text: string, options: DecodeFrameOptions = {}): DecodeResult {
+  const lax = decodeFrame(text, options)
   if (!lax.ok) return lax
   const detail = validateFrame(lax.frame)
   if (detail) return { ok: false, reason: 'invalid_frame', detail }

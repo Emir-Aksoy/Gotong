@@ -1,7 +1,50 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { chmodSync, existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
-import { chmod, readFile, rename, writeFile } from 'node:fs/promises'
+import { chmod, lstat, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+
+/**
+ * Codes used by {@link SpaceUnsafeError} so callers can branch on
+ * "wrong owner" vs "symlink" without parsing the human-readable
+ * message. Exported for tests and for hosts that want to surface a
+ * specific actionable hint in their UI.
+ */
+export type SpaceUnsafeCode =
+  | 'workspace_symlink'
+  | 'workspace_wrong_owner'
+  | 'workspace_not_directory'
+
+/**
+ * Thrown by `Space.init` / `Space.open` when the workspace root or one
+ * of its sensitive children fails the filesystem-trust checks added
+ * in v3.4 (see AUDIT-v3.3.md finding H7). Two attack scenarios this
+ * defends against:
+ *
+ *   1. Symlink pre-staging — attacker on a shared host creates
+ *      `<root>/runtime/secret.key` as a symbolic link to a victim's
+ *      file BEFORE the victim runs `aipehub-host`. Without this check
+ *      our `writeFile(secret.key, …)` would follow the symlink and
+ *      overwrite the victim's file with random key material.
+ *
+ *   2. Workspace-root hijack — attacker creates `<root>` itself as a
+ *      symlink (or as a regular dir owned by their uid). Our writes
+ *      would either land in the attacker's territory or — worse —
+ *      land in the symlink target (e.g. the victim's home directory).
+ *
+ * The check is strictly POSIX. On Windows we skip both the symlink
+ * and the ownership test: NTFS ACLs are the real boundary there and
+ * `process.getuid` isn't defined.
+ */
+export class SpaceUnsafeError extends Error {
+  readonly code: SpaceUnsafeCode
+  readonly path: string
+  constructor(message: string, code: SpaceUnsafeCode, path: string) {
+    super(message)
+    this.name = 'SpaceUnsafeError'
+    this.code = code
+    this.path = path
+  }
+}
 
 /**
  * File mode for files holding token hashes, encrypted secrets, or session
@@ -138,14 +181,139 @@ export class Space {
         `Space at '${root}' is not initialised. Call Space.init(root, { name }) first, or use Space.openOrInit(root).`,
       )
     }
-    // Migrate pre-3.4 workspaces in place: chmod sensitive files to
-    // 0o600 if they were created when the default umask was 0o022.
+    // H7: refuse to open a workspace whose root or sensitive files
+    // have been replaced with symlinks, or whose ownership doesn't
+    // match the running user. Runs BEFORE any read so the attacker
+    // can't read victim files through us.
+    await s.assertSafeWorkspaceLocation()
+    // C4: migrate pre-3.4 workspaces in place: chmod sensitive files
+    // to 0o600 if they were created when the default umask was 0o022.
     // Idempotent — files already 0o600 see no observable change. Files
     // not yet created (typical on a freshly-opened workspace) ENOENT
     // and are silently skipped; they'll be written with the secure
     // mode by their first writer.
     await s.hardenFilePermissions()
     return s
+  }
+
+  /**
+   * Verify the workspace root and its sensitive children are not
+   * symbolic links and (on POSIX) are owned by the current effective
+   * uid. Called from `Space.init` (after the mkdir cascade, before
+   * the first write) and from `Space.open` (before any read).
+   *
+   * Throws {@link SpaceUnsafeError} with one of three codes:
+   *
+   *   - `workspace_symlink` — the root or a sensitive child is a
+   *     symlink. Following it would let an attacker who pre-staged
+   *     the link redirect our writes outside the intended workspace.
+   *
+   *   - `workspace_wrong_owner` — POSIX uid mismatch. The dir or
+   *     file is owned by a different user. Operating on it would
+   *     trust state we didn't create.
+   *
+   *   - `workspace_not_directory` — the root exists but isn't a
+   *     directory. Most likely an operator typo (e.g.
+   *     `AIPE_SPACE=/some/file.json`); fail loud.
+   *
+   * No-op on Windows (NTFS ACLs are the trust boundary, not POSIX
+   * mode bits / uid). Tolerates ENOENT on individual files — many of
+   * them don't exist on first init.
+   *
+   * See AUDIT-v3.3.md finding H7.
+   */
+  private async assertSafeWorkspaceLocation(): Promise<void> {
+    if (process.platform === 'win32') return
+    // `process.getuid` is undefined on Windows (already filtered
+    // above) but TypeScript types it as `(() => number) | undefined`
+    // so we still need to narrow.
+    const expectedUid = typeof process.getuid === 'function' ? process.getuid() : undefined
+
+    const checkOne = async (path: string, mustExist: boolean): Promise<void> => {
+      let stat
+      try {
+        stat = await lstat(path)
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException).code
+        if (code === 'ENOENT' && !mustExist) return
+        throw err
+      }
+      if (stat.isSymbolicLink()) {
+        throw new SpaceUnsafeError(
+          `refusing to open workspace: '${path}' is a symbolic link. ` +
+            `An attacker who pre-stages a symlink here can redirect our ` +
+            `writes to a file outside the workspace.`,
+          'workspace_symlink',
+          path,
+        )
+      }
+      if (expectedUid !== undefined && stat.uid !== expectedUid) {
+        throw new SpaceUnsafeError(
+          `refusing to open workspace: '${path}' is owned by uid ${stat.uid}, ` +
+            `but this process is running as uid ${expectedUid}. ` +
+            `The workspace must be owned by the user that runs aipehub-host.`,
+          'workspace_wrong_owner',
+          path,
+        )
+      }
+    }
+
+    // 1. The root itself must be a real directory (not a symlink) and
+    //    owned by us. Required to exist — caller has already done the
+    //    mkdir.
+    let rootStat
+    try {
+      rootStat = await lstat(this.root)
+    } catch (err) {
+      // `Space.open` callsite already checked existsSync(space.json)
+      // upstream, so an ENOENT here is genuinely unexpected.
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return
+      throw err
+    }
+    if (rootStat.isSymbolicLink()) {
+      throw new SpaceUnsafeError(
+        `refusing to open workspace: root '${this.root}' is a symbolic link.`,
+        'workspace_symlink',
+        this.root,
+      )
+    }
+    if (!rootStat.isDirectory()) {
+      throw new SpaceUnsafeError(
+        `refusing to open workspace: '${this.root}' exists but is not a directory.`,
+        'workspace_not_directory',
+        this.root,
+      )
+    }
+    if (expectedUid !== undefined && rootStat.uid !== expectedUid) {
+      throw new SpaceUnsafeError(
+        `refusing to open workspace: root '${this.root}' is owned by uid ` +
+          `${rootStat.uid}, but this process is uid ${expectedUid}.`,
+        'workspace_wrong_owner',
+        this.root,
+      )
+    }
+
+    // 2. The runtime subdirectory and every sensitive child. We
+    //    tolerate ENOENT — many of these files don't exist on first
+    //    init (e.g. secret.key is created lazily on first secret
+    //    touch).
+    const sensitiveChildren = [
+      join(this.root, 'runtime'),
+      this.paths.admins,
+      this.paths.agents,
+      this.paths.workers,
+      this.paths.secrets,
+      this.paths.runtime.pendingApps,
+      this.paths.runtime.adminSessions,
+      this.paths.runtime.workerSessions,
+      this.paths.runtime.secretKey,
+    ]
+    for (const p of sensitiveChildren) {
+      // Children are not required to exist on first init; on
+      // subsequent opens they will. `mustExist: false` keeps this
+      // method idempotent across the init and open paths.
+      await checkOne(p, false)
+    }
   }
 
   /**
@@ -205,21 +373,31 @@ export class Space {
   ): Promise<{ space: Space; adminToken: string | null; adminId: string | null }> {
     mkdirSync(root, { recursive: true })
     mkdirSync(join(root, 'runtime'), { recursive: true })
-    // Harden directory permissions IMMEDIATELY after mkdir, BEFORE the
-    // first sensitive write, so that the (admins|agents|workers|
-    // secrets).json files are never visible under a world-traversable
-    // parent. On Linux/macOS this closes the gap where another local
-    // user on the host could even list the workspace contents. POSIX
-    // only — Windows uses ACLs, not mode bits.
-    if (process.platform !== 'win32') {
-      try { chmodSync(root, SECURE_DIR_MODE) } catch { /* tolerate exFAT/SMB */ }
-      try { chmodSync(join(root, 'runtime'), SECURE_DIR_MODE) } catch { /* same */ }
-    }
     // services/ is created up-front so `bootstrapServices` (host-side)
     // can drop `plugins.json` and per-plugin subdirs without re-checking
     // the parent at every boot. It stays empty until plugins register.
     mkdirSync(join(root, 'services'), { recursive: true })
     const s = new Space(root)
+
+    // H7: refuse to init if the workspace location is unsafe (root or
+    // any sensitive child is a symlink, or ownership is wrong). Runs
+    // AFTER the mkdir cascade so the legitimate-state-machine has
+    // already had a chance to create the directory tree, and BEFORE
+    // any sensitive writes so attacker-staged symlinks can't redirect
+    // them. mkdirSync on a symlinked target is a safe no-op (the
+    // target dir already exists), so by the time we lstat we still
+    // see the symlink and can throw.
+    await s.assertSafeWorkspaceLocation()
+
+    // C4: harden directory permissions IMMEDIATELY after the safety
+    // check, BEFORE the first sensitive write, so that the
+    // (admins|agents|workers|secrets).json files are never visible
+    // under a world-traversable parent. POSIX only — Windows uses
+    // ACLs, not mode bits.
+    if (process.platform !== 'win32') {
+      try { chmodSync(root, SECURE_DIR_MODE) } catch { /* tolerate exFAT/SMB */ }
+      try { chmodSync(join(root, 'runtime'), SECURE_DIR_MODE) } catch { /* same */ }
+    }
 
     if (existsSync(s.paths.space)) {
       throw new Error(
