@@ -1,7 +1,32 @@
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
-import { existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
-import { readFile, rename, writeFile } from 'node:fs/promises'
+import { chmodSync, existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { chmod, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+
+/**
+ * File mode for files holding token hashes, encrypted secrets, or session
+ * ids — readable + writable by the owner, nothing for group / other.
+ *
+ * Pre-3.4 these files were written with the process umask (typically
+ * 0o644 on Linux / macOS), meaning any local user on a shared host
+ * could read both `secrets.enc.json` AND the sibling `runtime/secret.key`
+ * — defeating the "encrypted-at-rest" design which assumed the master
+ * key was unrecoverable from on-disk reads alone. See `.github/AUDIT-v3.3.md`
+ * finding C4.
+ *
+ * Applied via the `mode` option to `writeFile` (atomic at file creation
+ * on POSIX) and a best-effort `chmod` sweep at `Space.open` time for
+ * upgrades from pre-3.4 workspaces. No-op on Windows (chmod is honoured
+ * but the POSIX bits aren't a meaningful security boundary there;
+ * BitLocker / ACLs do the work instead).
+ */
+const SECURE_FILE_MODE = 0o600
+/**
+ * Workspace root directory mode — owner-only. Pairs with `SECURE_FILE_MODE`
+ * so that even if an individual file slips through (e.g. tmp file from
+ * a third-party tool), the parent directory denies traversal.
+ */
+const SECURE_DIR_MODE = 0o700
 
 import {
   decryptSecret,
@@ -113,7 +138,54 @@ export class Space {
         `Space at '${root}' is not initialised. Call Space.init(root, { name }) first, or use Space.openOrInit(root).`,
       )
     }
+    // Migrate pre-3.4 workspaces in place: chmod sensitive files to
+    // 0o600 if they were created when the default umask was 0o022.
+    // Idempotent — files already 0o600 see no observable change. Files
+    // not yet created (typical on a freshly-opened workspace) ENOENT
+    // and are silently skipped; they'll be written with the secure
+    // mode by their first writer.
+    await s.hardenFilePermissions()
     return s
+  }
+
+  /**
+   * Idempotent permission sweep over the workspace's sensitive files.
+   * Safe to call after `Space.init` (no-op — the files were already
+   * written with `SECURE_FILE_MODE`) and after `Space.open` on a
+   * pre-3.4 workspace (chmod brings the legacy 0o644 files into line).
+   *
+   * Best-effort: chmod failures (exFAT / SMB / Windows ACLs) are
+   * swallowed. The real defence is the per-write `mode` flag — this
+   * sweep only catches files that pre-date the fix.
+   */
+  private async hardenFilePermissions(): Promise<void> {
+    if (process.platform === 'win32') return
+    const targets = [
+      this.paths.admins,
+      this.paths.agents,
+      this.paths.workers,
+      this.paths.secrets,
+      this.paths.runtime.pendingApps,
+      this.paths.runtime.adminSessions,
+      this.paths.runtime.workerSessions,
+      this.paths.runtime.secretKey,
+    ]
+    await Promise.all(
+      targets.map(async (p) => {
+        try {
+          await chmod(p, SECURE_FILE_MODE)
+        } catch (err) {
+          // ENOENT — file not yet created. Tolerate. Any other error
+          // (EACCES, EROFS, EINVAL on exFAT) is best-effort: the next
+          // write picks up the mode anyway.
+          if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            // Intentionally silent — logger is not available at this
+            // layer (core has no logger dependency). A future
+            // refactor that introduces one should surface this.
+          }
+        }
+      }),
+    )
   }
 
   /**
@@ -133,6 +205,16 @@ export class Space {
   ): Promise<{ space: Space; adminToken: string | null; adminId: string | null }> {
     mkdirSync(root, { recursive: true })
     mkdirSync(join(root, 'runtime'), { recursive: true })
+    // Harden directory permissions IMMEDIATELY after mkdir, BEFORE the
+    // first sensitive write, so that the (admins|agents|workers|
+    // secrets).json files are never visible under a world-traversable
+    // parent. On Linux/macOS this closes the gap where another local
+    // user on the host could even list the workspace contents. POSIX
+    // only — Windows uses ACLs, not mode bits.
+    if (process.platform !== 'win32') {
+      try { chmodSync(root, SECURE_DIR_MODE) } catch { /* tolerate exFAT/SMB */ }
+      try { chmodSync(join(root, 'runtime'), SECURE_DIR_MODE) } catch { /* same */ }
+    }
     // services/ is created up-front so `bootstrapServices` (host-side)
     // can drop `plugins.json` and per-plugin subdirs without re-checking
     // the parent at every boot. It stays empty until plugins register.
@@ -153,12 +235,12 @@ export class Space {
       version: SPACE_FILE_VERSION,
     } satisfies SpaceMeta)
     writeJsonAtomicSync(s.paths.config, { ...DEFAULT_CONFIG, ...opts.config })
-    writeJsonAtomicSync(s.paths.admins, { admins: [] })
-    writeJsonAtomicSync(s.paths.agents, { agents: [] })
-    writeJsonAtomicSync(s.paths.workers, { workers: [] })
-    writeJsonAtomicSync(s.paths.runtime.pendingApps, { apps: [] })
-    writeJsonAtomicSync(s.paths.runtime.adminSessions, { sessions: [] })
-    writeJsonAtomicSync(s.paths.runtime.workerSessions, { sessions: [] })
+    writeJsonAtomicSync(s.paths.admins, { admins: [] }, SECURE_FILE_MODE)
+    writeJsonAtomicSync(s.paths.agents, { agents: [] }, SECURE_FILE_MODE)
+    writeJsonAtomicSync(s.paths.workers, { workers: [] }, SECURE_FILE_MODE)
+    writeJsonAtomicSync(s.paths.runtime.pendingApps, { apps: [] }, SECURE_FILE_MODE)
+    writeJsonAtomicSync(s.paths.runtime.adminSessions, { sessions: [] }, SECURE_FILE_MODE)
+    writeJsonAtomicSync(s.paths.runtime.workerSessions, { sessions: [] }, SECURE_FILE_MODE)
 
     let adminToken: string | null = null
     let adminId: string | null = null
@@ -224,7 +306,7 @@ export class Space {
         createdAt: new Date().toISOString(),
       }
       admins.push(admin)
-      await writeJsonAtomic(this.paths.admins, { admins })
+      await writeJsonAtomic(this.paths.admins, { admins }, SECURE_FILE_MODE)
       return { admin, token }
     })
   }
@@ -233,7 +315,7 @@ export class Space {
       const admins = await this.admins()
       const next = admins.filter((a) => a.id !== id)
       if (next.length === admins.length) return false
-      await writeJsonAtomic(this.paths.admins, { admins: next })
+      await writeJsonAtomic(this.paths.admins, { admins: next }, SECURE_FILE_MODE)
       return true
     })
   }
@@ -251,7 +333,7 @@ export class Space {
       const idx = admins.findIndex((a) => a.id === id)
       if (idx < 0) return null
       admins[idx] = { ...admins[idx]!, contributionOptOut: value }
-      await writeJsonAtomic(this.paths.admins, { admins })
+      await writeJsonAtomic(this.paths.admins, { admins }, SECURE_FILE_MODE)
       return admins[idx]!
     })
   }
@@ -281,7 +363,7 @@ export class Space {
       } else {
         agents.push({ ...rec, createdAt: rec.createdAt ?? new Date().toISOString() })
       }
-      await writeJsonAtomic(this.paths.agents, { agents })
+      await writeJsonAtomic(this.paths.agents, { agents }, SECURE_FILE_MODE)
       return agents.find((a) => a.id === rec.id)!
     })
   }
@@ -290,7 +372,7 @@ export class Space {
       const agents = await this.agents()
       const next = agents.filter((a) => a.id !== id)
       if (next.length === agents.length) return false
-      await writeJsonAtomic(this.paths.agents, { agents: next })
+      await writeJsonAtomic(this.paths.agents, { agents: next }, SECURE_FILE_MODE)
       return true
     })
     if (!removed) return false
@@ -307,7 +389,7 @@ export class Space {
       const idx = agents.findIndex((a) => a.id === id)
       if (idx < 0) return
       agents[idx]!.lastSeen = new Date().toISOString()
-      await writeJsonAtomic(this.paths.agents, { agents })
+      await writeJsonAtomic(this.paths.agents, { agents }, SECURE_FILE_MODE)
     })
   }
 
@@ -334,7 +416,7 @@ export class Space {
         createdAt: new Date().toISOString(),
       }
       workers.push(worker)
-      await writeJsonAtomic(this.paths.workers, { workers })
+      await writeJsonAtomic(this.paths.workers, { workers }, SECURE_FILE_MODE)
       return { worker, token }
     })
   }
@@ -343,7 +425,7 @@ export class Space {
       const workers = await this.workers()
       const next = workers.filter((w) => w.id !== id)
       if (next.length === workers.length) return false
-      await writeJsonAtomic(this.paths.workers, { workers: next })
+      await writeJsonAtomic(this.paths.workers, { workers: next }, SECURE_FILE_MODE)
       return true
     })
   }
@@ -357,7 +439,7 @@ export class Space {
       const idx = workers.findIndex((w) => w.id === id)
       if (idx < 0) return null
       workers[idx] = { ...workers[idx]!, contributionOptOut: value }
-      await writeJsonAtomic(this.paths.workers, { workers })
+      await writeJsonAtomic(this.paths.workers, { workers }, SECURE_FILE_MODE)
       return workers[idx]!
     })
   }
@@ -367,7 +449,7 @@ export class Space {
       const idx = workers.findIndex((w) => w.id === id)
       if (idx < 0) return
       workers[idx]!.lastSeen = new Date().toISOString()
-      await writeJsonAtomic(this.paths.workers, { workers })
+      await writeJsonAtomic(this.paths.workers, { workers }, SECURE_FILE_MODE)
     })
   }
   async verifyWorkerToken(token: string | undefined): Promise<WorkerRecord | null> {
@@ -390,7 +472,7 @@ export class Space {
     await this.withFileLock(this.paths.runtime.adminSessions, async () => {
       const sessions = await this.adminSessions()
       sessions.push({ sessionId, principalId: adminId, createdAt: new Date().toISOString() })
-      await writeJsonAtomic(this.paths.runtime.adminSessions, { sessions })
+      await writeJsonAtomic(this.paths.runtime.adminSessions, { sessions }, SECURE_FILE_MODE)
     })
   }
   async findAdminSession(sessionId: string | undefined): Promise<SessionRecord | null> {
@@ -403,7 +485,7 @@ export class Space {
       const sessions = await this.adminSessions()
       const next = sessions.filter((s) => s.sessionId !== sessionId)
       if (next.length === sessions.length) return false
-      await writeJsonAtomic(this.paths.runtime.adminSessions, { sessions: next })
+      await writeJsonAtomic(this.paths.runtime.adminSessions, { sessions: next }, SECURE_FILE_MODE)
       return true
     })
   }
@@ -416,7 +498,7 @@ export class Space {
     await this.withFileLock(this.paths.runtime.workerSessions, async () => {
       const sessions = await this.workerSessions()
       sessions.push({ sessionId, principalId: workerId, createdAt: new Date().toISOString() })
-      await writeJsonAtomic(this.paths.runtime.workerSessions, { sessions })
+      await writeJsonAtomic(this.paths.runtime.workerSessions, { sessions }, SECURE_FILE_MODE)
     })
   }
   async findWorkerSession(sessionId: string | undefined): Promise<SessionRecord | null> {
@@ -429,7 +511,7 @@ export class Space {
       const sessions = await this.workerSessions()
       const next = sessions.filter((s) => s.sessionId !== sessionId)
       if (next.length === sessions.length) return false
-      await writeJsonAtomic(this.paths.runtime.workerSessions, { sessions: next })
+      await writeJsonAtomic(this.paths.runtime.workerSessions, { sessions: next }, SECURE_FILE_MODE)
       return true
     })
   }
@@ -446,7 +528,7 @@ export class Space {
     // disk write can't get interleaved with the next one and produce
     // a torn JSON.
     await this.withFileLock(this.paths.runtime.pendingApps, async () => {
-      await writeJsonAtomic(this.paths.runtime.pendingApps, { apps: [...apps] })
+      await writeJsonAtomic(this.paths.runtime.pendingApps, { apps: [...apps] }, SECURE_FILE_MODE)
     })
   }
 
@@ -491,7 +573,7 @@ export class Space {
   }
 
   private async writeSecretsFile(file: SecretsFile): Promise<void> {
-    await writeJsonAtomic(this.paths.secrets, file)
+    await writeJsonAtomic(this.paths.secrets, file, SECURE_FILE_MODE)
   }
 
   /**
@@ -897,14 +979,27 @@ function uniqueTmpSuffix(): string {
   return `.${process.pid}.${process.hrtime.bigint().toString(36)}.${randomBytes(3).toString('hex')}.tmp`
 }
 
-async function writeJsonAtomic(path: string, data: unknown): Promise<void> {
+/**
+ * Atomic JSON write. The `mode` parameter sets the file permission bits
+ * **at creation time** on POSIX (via `writeFile`'s mode option), avoiding
+ * the chmod-after-create race that was finding H6 in the v3.3 audit.
+ *
+ * Pass `SECURE_FILE_MODE` (0o600) for any file holding token hashes,
+ * encrypted secrets, or session ids. Pass nothing (or 0o644) for files
+ * that are public-by-design like `space.json`.
+ */
+async function writeJsonAtomic(path: string, data: unknown, mode?: number): Promise<void> {
   const tmp = `${path}${uniqueTmpSuffix()}`
-  await writeFile(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8')
+  const options: Parameters<typeof writeFile>[2] =
+    mode !== undefined ? { encoding: 'utf8', mode } : 'utf8'
+  await writeFile(tmp, JSON.stringify(data, null, 2) + '\n', options)
   await rename(tmp, path)
 }
 
-function writeJsonAtomicSync(path: string, data: unknown): void {
+function writeJsonAtomicSync(path: string, data: unknown, mode?: number): void {
   const tmp = `${path}${uniqueTmpSuffix()}`
-  writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8')
+  const options: Parameters<typeof writeFileSync>[2] =
+    mode !== undefined ? { encoding: 'utf8', mode } : 'utf8'
+  writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', options)
   renameSync(tmp, path)
 }

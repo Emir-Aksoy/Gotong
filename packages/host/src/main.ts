@@ -45,15 +45,25 @@
  *                           precedence over LEVEL and FORMAT.
  *
  * On first launch the space dir is created and a one-time admin URL is
- * printed to stdout. On subsequent launches the printout shows just the
- * /admin entry — admins keep their existing cookies / tokens.
+ * written to `<AIPE_SPACE>/runtime/admin-link.txt` (mode 0o600). The
+ * boot banner on stdout tells the operator where to read it. Writing
+ * the URL to a file — instead of `console.log`-ing it — keeps the
+ * plaintext token out of `journalctl`, `docker logs`, `pm2 logs`, and
+ * any other log shipper that captures process stdout. Anyone who can
+ * read the workspace directory can already mint a fresh admin via
+ * `aipehub-host mint-admin-token`; this just removes the easy log-mining
+ * shortcut. See AUDIT-v3.3.md finding H20.
+ *
+ * On subsequent launches the printout shows just the /admin entry —
+ * admins keep their existing cookies / tokens.
  *
  * The process responds to SIGTERM and SIGINT by closing the listeners,
  * draining the SSE clients, stopping the hub, and exiting cleanly.
  */
 
 import { readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { dirname, join } from 'node:path'
 
 import { Hub, Space, createLogger, type SpaceConfig, type TranscriptEntry } from '@aipehub/core'
 
@@ -153,20 +163,52 @@ async function mintAdminTokenCmd(displayNameArg: string | undefined): Promise<vo
   const host = env('AIPE_HOST', '127.0.0.1')!
   const port = envInt('AIPE_WEB_PORT', 3000)
   const proto = envBool('AIPE_COOKIE_SECURE', false) ? 'https' : 'http'
+  const adminUrl = `${proto}://${host}:${port}/admin?token=${token}`
+
+  // Write the URL to runtime/admin-link.txt (0o600) instead of stdout.
+  // Same H20 rationale as the first-run path in main(): the token is
+  // secret-grade, log shippers should never see it.
+  const linkPath = join(dir, 'runtime', 'admin-link.txt')
+  await writeAdminLinkFile(linkPath, adminUrl)
 
   process.stdout.write(
     `\n` +
       `  New admin '${admin.displayName}' (${admin.id}) added to ${dir}/admins.json.\n` +
       `\n` +
-      `  Admin URL (shown ONCE — save it):\n` +
-      `    ${proto}://${host}:${port}/admin?token=${token}\n` +
+      `  Admin URL saved to (mode 0o600 — read once and delete):\n` +
+      `    ${linkPath}\n` +
       `\n` +
-      `  Open this URL once; the cookie that gets set is what subsequent\n` +
-      `  logins use. The token itself is hashed in admins.json — there is\n` +
-      `  no way to recover the plaintext from disk after this print.\n` +
-      `  Behind a reverse proxy: substitute your public hostname for\n` +
-      `  '${host}:${port}'.\n\n`,
+      `  Open the URL inside that file once; the cookie that gets set is\n` +
+      `  what subsequent logins use. The token itself is hashed in\n` +
+      `  admins.json — there is no way to recover the plaintext from\n` +
+      `  disk after the link file is removed. Behind a reverse proxy:\n` +
+      `  substitute your public hostname for '${host}:${port}' when you\n` +
+      `  open the URL.\n\n`,
   )
+}
+
+/**
+ * Persist the one-time admin URL to `runtime/admin-link.txt` with file
+ * mode 0o600. Idempotent — overwrites any prior link from a previous
+ * run / mint-admin-token invocation. See H20 in AUDIT-v3.3.md.
+ *
+ * Why a file instead of `console.log`:
+ *   - stdout from a daemon process is captured by `journalctl`,
+ *     `docker logs`, `pm2 logs`, container log shippers, etc. Any
+ *     reader of those logs picks up the token.
+ *   - Pre-3.4 also dumped the token into the host's first boot banner,
+ *     which is the easiest "search the logs for the admin URL" target
+ *     for an attacker who lands a low-priv shell on the box.
+ *   - The workspace directory is already protected by `SECURE_DIR_MODE`
+ *     (0o700, see core/space.ts). Writing the link inside it with
+ *     mode 0o600 puts it under exactly the same trust boundary the
+ *     master key already enjoys — no new attack surface.
+ */
+export async function writeAdminLinkFile(path: string, url: string): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  // The runtime/ dir was already chmod'd to 0o700 by Space.init; the
+  // file's own 0o600 is the second layer.
+  await writeFile(path, url + '\n', { encoding: 'utf8', mode: 0o600 })
 }
 
 function printUsage(): void {
@@ -459,6 +501,12 @@ async function main(): Promise<void> {
   // "First-run admin URL" appears once in a host's lifetime and must
   // stand out visually; folding it into the structured log stream
   // would bury it. Operational events below go through the logger.
+  //
+  // v3.4 (H20): the admin URL itself is NOT printed — it goes to
+  // `<space>/runtime/admin-link.txt` (0o600). The banner only tells
+  // the operator where to read it. This keeps the plaintext token
+  // out of journalctl / docker logs / pm2 logs — log shippers that
+  // capture stdout no longer see secret material.
   console.log(`\n=== AipeHub host ready ===`)
   console.log(`Space     : ${SPACE_DIR}`)
   console.log(`Web       : ${web.url}`)
@@ -467,8 +515,31 @@ async function main(): Promise<void> {
   console.log(`CookieSec : ${config.cookieSecure ? 'on (HTTPS expected)' : 'off (HTTP / dev)'}`)
   console.log(`HostCheck : ${allowedHosts ? allowedHosts.join(', ') : 'disabled (loopback only is safe)'}`)
   if (adminToken) {
-    console.log(`\nFirst-run admin URL (shown ONCE — save it):`)
-    console.log(`  ${web.url}/admin?token=${adminToken}\n`)
+    const linkPath = join(SPACE_DIR, 'runtime', 'admin-link.txt')
+    const adminUrl = `${web.url}/admin?token=${adminToken}`
+    try {
+      await writeAdminLinkFile(linkPath, adminUrl)
+      console.log(`\nFirst-run admin URL saved to (read once and delete):`)
+      console.log(`  ${linkPath}`)
+      console.log(`  mode 0o600 — only the user running this host can read it.\n`)
+    } catch (err) {
+      // Falling back to stdout here would re-leak the token. Better
+      // to fail loud: the operator can re-run `mint-admin-token` once
+      // the underlying fs problem is fixed.
+      log.fatal('failed to write admin link file', {
+        path: linkPath,
+        err,
+      })
+      console.error(
+        `\nFATAL: could not write ${linkPath}.\n` +
+          `       The first-run admin token is no longer recoverable from\n` +
+          `       this run; re-init by removing the workspace and starting\n` +
+          `       over, or use \`aipehub-host mint-admin-token\` to create\n` +
+          `       a fresh admin against the existing workspace once the\n` +
+          `       underlying error is fixed.\n`,
+      )
+      process.exit(2)
+    }
   } else {
     console.log(`Admin     : ${web.url}/admin    (existing cookie or token)\n`)
   }

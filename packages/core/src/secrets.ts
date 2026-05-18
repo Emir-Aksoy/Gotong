@@ -26,7 +26,7 @@ import {
   createDecipheriv,
   randomBytes,
 } from 'node:crypto'
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { dirname } from 'node:path'
 
@@ -127,8 +127,18 @@ export async function loadOrCreateMasterKey(keyPath: string): Promise<Buffer> {
   }
   const fresh = randomBytes(KEY_BYTES)
   await mkdir(dirname(keyPath), { recursive: true })
-  await writeFile(keyPath, fresh.toString('hex') + '\n', 'utf8')
-  await chmod(keyPath, 0o600).catch(() => { /* best-effort on weird fs */ })
+  // `mode: 0o600` is honoured by writeFile **at file creation** on POSIX
+  // — owner-only from the very first byte. Pre-3.4 we wrote with the
+  // default umask (≈0o644) and immediately chmod-ed; that left a
+  // microsecond-scale window where another local user could `open()` the
+  // file for read. See AUDIT-v3.3.md finding H6.
+  //
+  // On Windows the mode bits aren't a security boundary (NTFS ACLs are);
+  // writeFile honours the option without error and the resulting file
+  // mode is set per Node's POSIX-compat layer. No try/catch needed —
+  // earlier `.catch(() => {})` silently swallowed real failures on
+  // exFAT / SMB shares, which we now surface as a normal error.
+  await writeFile(keyPath, fresh.toString('hex') + '\n', { encoding: 'utf8', mode: 0o600 })
   return fresh
 }
 
