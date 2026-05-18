@@ -85,14 +85,14 @@ jobs:
             canRun: true
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install pnpm
         # Version sourced from root package.json `packageManager`.
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v6
 
       - name: Setup Node 20
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: pnpm
@@ -133,7 +133,7 @@ jobs:
         # Always upload — workflow_dispatch runs use this for manual
         # download, release runs use this as a backup if the gh-release
         # upload below fails for any reason.
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target.artifact }}
           path: ${{ matrix.target.artifact }}
@@ -142,7 +142,7 @@ jobs:
 
       - name: Attach to GitHub Release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: ${{ matrix.target.artifact }}
           fail_on_unmatched_files: true
