@@ -50,6 +50,13 @@ jobs:
   analyze:
     name: Analyze ${{ matrix.language }}
     runs-on: ubuntu-latest
+    # Code-scanning SARIF upload is free on public repos but requires
+    # GitHub Advanced Security on private ones. Skip cleanly when the
+    # repo is private — the analyze step succeeds, but the upload
+    # would otherwise hard-fail with "Code scanning is not enabled for
+    # this repository". The workflow stays parked, ready to re-engage
+    # the moment the repo flips public (or GHAS is purchased).
+    if: ${{ !github.event.repository.private }}
     # CodeQL on a 16-package TS workspace runs ~7-8 min cold; Python
     # is smaller (~3min). 15min ceiling absorbs the occasional slow
     # query without letting a hang sit for 30+.

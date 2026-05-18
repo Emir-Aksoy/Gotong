@@ -158,6 +158,13 @@ jobs:
         with:
           egress-policy: audit
 
+      - name: Checkout
+        # `dorny/test-reporter` shells out to `git ls-files` to map
+        # test file references in the JUnit XML back to repo-relative
+        # paths so the check annotations land on the right lines.
+        # Without a checkout it dies at `fatal: not a git repository`.
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
       - name: Download JUnit reports
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
