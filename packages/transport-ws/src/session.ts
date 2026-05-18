@@ -7,6 +7,7 @@ import {
   decodeFrameStrict,
   encodeFrame,
   HELLO_TIMEOUT_MS,
+  MAX_HELLO_AGENTS,
   MAX_MISSED_PINGS,
   majorVersionOf,
   PROTOCOL_VERSION,
@@ -357,6 +358,20 @@ export class Session {
 
     if (!Array.isArray(frame.agents) || frame.agents.length === 0) {
       this.sendReject('bad_hello', 'HELLO.agents must be a non-empty array')
+      this.terminate()
+      return
+    }
+    // H22: cap HELLO.agents to prevent a single peer from blowing
+    // registry memory by declaring thousands of agents. The check
+    // runs BEFORE the per-agent shape validation loop below so a
+    // 10 000-element HELLO doesn't spend microseconds-per-iter
+    // type-checking junk that we're going to reject anyway. See
+    // AUDIT-v3.3.md finding H22.
+    if (frame.agents.length > MAX_HELLO_AGENTS) {
+      this.sendReject(
+        'bad_hello',
+        `HELLO.agents has ${frame.agents.length} entries, exceeds limit of ${MAX_HELLO_AGENTS}`,
+      )
       this.terminate()
       return
     }
