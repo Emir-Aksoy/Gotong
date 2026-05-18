@@ -1,0 +1,104 @@
+# CodeQL — static-analysis security scan for TypeScript and Python.
+#
+# Triggers:
+#   - push to `main`: catches what slipped past PR review
+#   - pull_request to `main`: surfaces findings before merge
+#   - weekly cron: catches new CodeQL queries against unchanged code
+#
+# CodeQL queries are essentially a security-flavoured linter — they
+# look for patterns like:
+#   - JS/TS: prototype pollution, hard-coded creds, unsafe regex,
+#     missing auth on Express routes, taint into eval/innerHTML
+#   - Python: command injection, deserialisation of untrusted input,
+#     SSRF, insecure crypto
+#
+# Findings land in the repo's Security tab (Code scanning alerts).
+# Reviewers can also see annotations on the PR diff if a query fires
+# on a touched line.
+#
+# Why two languages in one workflow:
+#   The matrix lets us share the runner + caching setup. Each language
+#   takes a separate slot in the Security tab regardless, so there's
+#   no semantic conflation.
+
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Tuesdays at 14:17 UTC — odd minute to spread runner load away
+    # from the on-the-hour stampede that every other repo's cron uses.
+    - cron: "17 14 * * 2"
+
+permissions:
+  # `security-events: write` is the load-bearing permission — CodeQL
+  # uploads SARIF to the code-scanning API. `contents: read` is for
+  # checkout; `actions: read` is needed when a job runs on private
+  # repos for the workflow-context query.
+  actions: read
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze ${{ matrix.language }}
+    runs-on: ubuntu-latest
+    # Code-scanning SARIF upload is free on public repos but requires
+    # GitHub Advanced Security on private ones. Skip cleanly when the
+    # repo is private — the analyze step succeeds, but the upload
+    # would otherwise hard-fail with "Code scanning is not enabled for
+    # this repository". The workflow stays parked, ready to re-engage
+    # the moment the repo flips public (or GHAS is purchased).
+    if: ${{ !github.event.repository.private }}
+    # CodeQL on a 16-package TS workspace runs ~7-8 min cold; Python
+    # is smaller (~3min). 15min ceiling absorbs the occasional slow
+    # query without letting a hang sit for 30+.
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        # `javascript-typescript` covers both — CodeQL treats them as
+        # one language pack since v2. `python` is a separate pack.
+        language: [javascript-typescript, python]
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@458d36d7d4f47d0dd16ca424c1d3cda0060f1360 # v3.35.5
+        with:
+          languages: ${{ matrix.language }}
+          # `security-and-quality` adds maintainability-oriented
+          # queries on top of the default security pack — catches
+          # things like unused variables that ESLint would normally
+          # flag (we have no ESLint config; CodeQL fills part of the
+          # gap). `security-extended` is also available but tends to
+          # produce more low-signal findings.
+          queries: security-and-quality
+
+      # CodeQL's autobuild for JavaScript/TypeScript Just Works on
+      # workspace projects — it discovers package.json / pnpm-workspace
+      # and follows the build graph. We skip an explicit build step
+      # because adding one would force us to install pnpm here too,
+      # and autobuild is the documented happy path.
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@458d36d7d4f47d0dd16ca424c1d3cda0060f1360 # v3.35.5
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@458d36d7d4f47d0dd16ca424c1d3cda0060f1360 # v3.35.5
+        with:
+          # Categorise findings by language so the Security tab keeps
+          # them separate even when both legs of the matrix complete.
+          category: "/language:${{ matrix.language }}"

@@ -8,6 +8,21 @@
 # when a new commit is pushed. Pushes to `main` are NOT cancelled —
 # we want the post-merge build to complete even if another merge lands
 # right after.
+#
+# Supply-chain hardening (v3.3):
+#   - All third-party actions are pinned to a 40-char commit SHA, with
+#     `# vX.Y.Z` for human readability. Floating tags like `@v4` can be
+#     silently retagged at the source (see the tj-actions/changed-files
+#     compromise of March 2025) — SHA pins make the trust boundary
+#     explicit. Dependabot's `package-ecosystem: github-actions` block
+#     in dependabot.yml will keep these moving forward at a sane pace.
+#   - `step-security/harden-runner` runs first in every job in
+#     `audit` mode: it doesn't block egress yet, but it records the
+#     full call graph so we can graduate to `block` once we know the
+#     legitimate endpoints.
+#   - The common setup steps (pnpm + node + install) are now factored
+#     into `.github/actions/setup-workspace` so any version bump
+#     touches one file instead of nine.
 
 name: CI
 
@@ -46,7 +61,10 @@ jobs:
   node:
     name: Node ${{ matrix.node }} · ${{ matrix.os }} · TS workspace
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # The slowest leg (Windows × node 22) historically lands ~8min
+    # cold-cache and ~5min warm. 12min gives breathing room without
+    # letting a hang sit for 20min.
+    timeout-minutes: 12
     strategy:
       fail-fast: false
       matrix:
@@ -62,22 +80,23 @@ jobs:
           - os: windows-latest
             node: "22"
     steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          # `audit` records all outbound network calls without blocking
+          # them, so we can switch to `block` later with a tight allow
+          # list. The macOS/Windows runners are no-ops for this action
+          # — it only enforces on Linux — but leaving the step
+          # unconditional keeps the workflow uniform.
+          egress-policy: audit
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
-      - name: Install pnpm
-        # Version is picked up from the root package.json `packageManager`
-        # field. Keeping the lockstep means CI uses the same pnpm as devs.
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node ${{ matrix.node }}
-        uses: actions/setup-node@v4
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
         with:
           node-version: ${{ matrix.node }}
-          cache: pnpm
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Build
         run: pnpm -r build
@@ -85,12 +104,91 @@ jobs:
       - name: Typecheck
         run: pnpm -r typecheck
 
-      - name: Test
-        run: pnpm -r test
+      - name: Test (with JUnit reporter)
+        # `pnpm -r test -- <args>` forwards the args to each package's
+        # `vitest run` script. With multiple reporters, vitest needs
+        # the dot-notation `--outputFile.junit=...` to disambiguate
+        # which reporter the output file belongs to. Each package
+        # ends up with a `junit.xml` next to its package.json; the
+        # upload step below collects them all for the test-reporter
+        # job. Local devs keep using `pnpm test` and never see the
+        # extra files (we ignore them in .gitignore).
+        run: pnpm -r test -- --reporter=default --reporter=junit --outputFile.junit=./junit.xml
         env:
           # Some integration tests open ephemeral WS ports — give them a
           # predictable, non-noisy environment.
           CI: "true"
+
+      - name: Upload JUnit reports
+        # Always upload, even on test failure — the report is most
+        # useful when something went red.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: junit-${{ matrix.os }}-node${{ matrix.node }}
+          path: packages/*/junit.xml
+          if-no-files-found: warn
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # Test report — surface failing tests as a check annotation.
+  #
+  # `dorny/test-reporter` reads the JUnit XMLs uploaded above and posts
+  # a check run with per-test annotations on the PR — failed tests show
+  # up as inline review comments on the relevant lines, so reviewers
+  # don't have to wade through workflow logs. The job runs after all
+  # node matrix legs and uses `if: always()` so it surfaces even when
+  # tests fail.
+  # ---------------------------------------------------------------------------
+  test-report:
+    name: Test report · publish JUnit annotations
+    needs: node
+    if: always() && needs.node.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The reporter posts a check run, which requires write access to
+    # the checks API on the PR head.
+    permissions:
+      checks: write
+      pull-requests: write
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        # `dorny/test-reporter` shells out to `git ls-files` to map
+        # test file references in the JUnit XML back to repo-relative
+        # paths so the check annotations land on the right lines.
+        # Without a checkout it dies at `fatal: not a git repository`.
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Download JUnit reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          # Pull every `junit-*` artefact into its own subdirectory.
+          # Don't merge — different matrix legs write to identical
+          # paths like `packages/protocol/junit.xml`, so merging
+          # would silently overwrite all but the last leg and we'd
+          # lose per-platform visibility in the report.
+          pattern: junit-*
+          path: junit-reports
+
+      - name: Publish JUnit report
+        uses: dorny/test-reporter@df6247429542221bc30d46a036ee47af1102c451 # v2.7.0
+        with:
+          name: vitest results
+          # `**` walks both the per-artefact dirs (one per matrix
+          # leg) and the per-package `junit.xml` files inside each.
+          path: "junit-reports/**/junit.xml"
+          # Vitest emits standard JUnit XML; `java-junit` is the
+          # corresponding dorny/test-reporter parser.
+          reporter: java-junit
+          # Don't fail this job when tests fail — the node job already
+          # turned red. We just want the annotations published.
+          fail-on-error: false
 
   # ---------------------------------------------------------------------------
   # Python — exercise the Python SDK against supported interpreter versions.
@@ -102,7 +200,9 @@ jobs:
   python:
     name: Python ${{ matrix.python }} · SDK
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Python SDK is small — install + test is <2min cold. 8min is a
+    # generous ceiling that still catches a true hang.
+    timeout-minutes: 8
     strategy:
       fail-fast: false
       matrix:
@@ -111,11 +211,16 @@ jobs:
       run:
         working-directory: python-sdk
     steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Setup Python ${{ matrix.python }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -144,16 +249,23 @@ jobs:
   docker:
     name: Docker · production image smoke build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Buildx cold-cache lands around 6min; warm hits the GHA cache and
+    # finishes in 2-3. 10min keeps the budget tight.
+    timeout-minutes: 10
     steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
 
       - name: Build production image (no push)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           file: ./Dockerfile
@@ -205,3 +317,48 @@ jobs:
           fi
           docker rm -f aipehub-ci >/dev/null 2>&1 || true
           exit "$rc"
+
+  # ---------------------------------------------------------------------------
+  # ci-passed — a single aggregate gate for branch protection.
+  #
+  # GitHub branch protection rules can only require named jobs. Adding
+  # a new matrix entry (a new Node version, a new platform) would
+  # silently bypass protection unless someone remembers to update the
+  # rule. This aggregate depends on every other job, so the protection
+  # rule only needs to require `ci-passed` and any future job
+  # automatically becomes a blocker.
+  #
+  # The `if: always()` + explicit failure check is the canonical
+  # pattern — without it the job is skipped when a dependency fails,
+  # and a skipped job counts as "success" under branch protection. The
+  # explicit check turns any failed/cancelled dependency into a hard
+  # failure.
+  # ---------------------------------------------------------------------------
+  ci-passed:
+    name: CI passed
+    if: always()
+    needs: [node, test-report, python, docker]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Verify all upstream jobs succeeded
+        # `test-report` is allowed to be skipped (e.g. if node was
+        # cancelled) — only check the load-bearing jobs strictly.
+        # Anything that's not "success" (failure, cancelled) sinks the
+        # aggregate.
+        run: |
+          set -u
+          fail=0
+          for job in node python docker; do
+            result_var="result_${job}"
+            case "${!result_var}" in
+              success) echo "✓ $job: success" ;;
+              skipped) echo "✗ $job: skipped (treated as failure)"; fail=1 ;;
+              *)       echo "✗ $job: ${!result_var}"; fail=1 ;;
+            esac
+          done
+          exit "$fail"
+        env:
+          result_node: ${{ needs.node.result }}
+          result_python: ${{ needs.python.result }}
+          result_docker: ${{ needs.docker.result }}

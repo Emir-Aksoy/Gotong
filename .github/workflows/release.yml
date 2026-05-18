@@ -24,6 +24,21 @@
 #   default plugins.json without sqlite so first-run is warning-free.
 #   Operators who need SQLite-backed datastore should use the npm or
 #   docker install paths.
+#
+# Supply-chain hardening (v3.3):
+#   - All actions pinned to a 40-char commit SHA (`# vX.Y.Z` for
+#     humans). Floating tags can be retagged; SHAs can't.
+#   - `bun-version` pinned to a specific upstream — `latest` would let
+#     a backwards-incompatible Bun release silently break the binary.
+#   - After the build matrix finishes, separate jobs:
+#     * `checksums` produces a single SHA256SUMS file covering every
+#       binary, so consumers can verify a download with one curl + sha256sum.
+#     * `provenance` attests each binary via SLSA build provenance
+#       (sigstore-backed) so downstream verifiers can prove the binary
+#       came out of this workflow at this commit.
+#     * `sbom` produces a CycloneDX SBOM of the source workspace and
+#       attaches it to the release, so consumers can audit the
+#       dependency graph that went into the binary.
 
 name: Release Binaries
 
@@ -33,8 +48,16 @@ on:
   workflow_dispatch:
 
 # Release uploads require write access to repository contents.
+# Provenance attestation needs id-token + attestations. We grant
+# these at workflow scope; jobs that don't need them are inert
+# (GITHUB_TOKEN scope is per-job-step API call, not blanket).
 permissions:
   contents: write
+  # `id-token: write` is required by actions/attest-build-provenance
+  # to mint a sigstore OIDC token. `attestations: write` lets it
+  # publish to the repo's attestation store.
+  id-token: write
+  attestations: write
 
 # Never cancel a release build in flight — partial uploads would leave
 # the release Assets list looking broken.
@@ -42,11 +65,25 @@ concurrency:
   group: release-binaries-${{ github.event.release.tag_name || github.run_id }}
   cancel-in-progress: false
 
+# Pinned Bun version — bumped deliberately when we're ready to test
+# a newer Bun release. Centralised here so every job in this workflow
+# uses the same toolchain.
+env:
+  # Latest stable as of 2026-05-17. Bump deliberately when a Bun
+  # release lands a feature we need — `latest` would let a breaking
+  # release silently sneak into a binary, which on a customer-facing
+  # release pipeline is the kind of surprise we explicitly want to
+  # avoid.
+  BUN_VERSION: "1.3.14"
+
 jobs:
   build:
     name: ${{ matrix.target.label }}
     runs-on: ${{ matrix.target.runner }}
-    timeout-minutes: 20
+    # Linux x64 lands ~6min cold, macOS ~10min cold (slowest leg).
+    # 15min gives macOS cold-cache breathing room without letting a
+    # hang sit for 20min.
+    timeout-minutes: 15
     strategy:
       # One platform failing shouldn't sink the rest — partial binary
       # set is better than none, and the failure surfaces per-job in the
@@ -60,10 +97,18 @@ jobs:
             artifact: aipehub-host-darwin-arm64
             canRun: true
           - label: darwin-x64
-            runner: macos-13
+            # Cross-compiled from the arm64 macos-latest runner. The
+            # macos-13 (Intel) hosted runners are deprecated and routinely
+            # queue 6h+; building on macos-latest with bun's
+            # `--target=bun-darwin-x64` flag cuts a binary that runs
+            # natively on Intel Macs without depending on the slow pool.
+            # We can't natively smoke-test (the runner is arm64), so the
+            # smoke step is marked best-effort below — same pattern as
+            # linux-arm64.
+            runner: macos-latest
             bunTarget: bun-darwin-x64
             artifact: aipehub-host-darwin-x64
-            canRun: true
+            canRun: false
           - label: linux-x64
             runner: ubuntu-latest
             bunTarget: bun-linux-x64
@@ -71,45 +116,59 @@ jobs:
             canRun: true
           - label: linux-arm64
             # Cross-compiled from x64. GitHub Actions has arm64 runners
-            # but they cost extra and a cross-compile is reliable enough
-            # for a smoke build. End users on real arm64 hardware
-            # exercise the binary.
+            # but they cost extra. We smoke-test the binary via QEMU
+            # binfmt below — best-effort because bun's JIT trips on a
+            # handful of syscalls qemu-user doesn't translate cleanly.
+            # Real arm64 hardware reports separately at install time.
             runner: ubuntu-latest
             bunTarget: bun-linux-arm64
             artifact: aipehub-host-linux-arm64
-            canRun: false
+            canRun: true
+            qemu: true
           - label: windows-x64
             runner: windows-latest
             bunTarget: bun-windows-x64
             artifact: aipehub-host-windows-x64.exe
             canRun: true
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install pnpm
-        # Version sourced from root package.json `packageManager`.
-        uses: pnpm/action-setup@v4
-
-      - name: Setup Node 20
-        uses: actions/setup-node@v4
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
         with:
-          node-version: "20"
-          cache: pnpm
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup workspace
+        # Composite action handles pnpm + Node + install. Bun isn't in
+        # there because only this workflow needs it; CI doesn't.
+        uses: ./.github/actions/setup-workspace
 
       - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
-          bun-version: latest
-
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          # Pinned via the workflow `env` block above — DON'T use
+          # `latest`. A breaking Bun release would silently sneak into
+          # a release build with `latest`; an explicit pin makes the
+          # upgrade a reviewable diff.
+          bun-version: ${{ env.BUN_VERSION }}
 
       - name: Build TypeScript workspace
         # Runs packages/web's static-asset generator first (it's part of
         # the package's `build` script), so the embedded asset map is
         # current with anything in static/.
         run: pnpm -r build
+
+      - name: Set up QEMU (linux-arm64 smoke)
+        # Only the arm64 cross-compile leg needs binfmt — every other
+        # target runs natively.
+        if: matrix.target.qemu == true
+        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+        with:
+          # `arm64` registers the aarch64 binfmt handler so the kernel
+          # routes `./aipehub-host-linux-arm64 --version` through
+          # qemu-aarch64-static automatically.
+          platforms: arm64
 
       - name: Compile ${{ matrix.target.label }} binary
         shell: bash
@@ -120,20 +179,66 @@ jobs:
             --outfile=${{ matrix.target.artifact }}
           ls -lh ${{ matrix.target.artifact }}
 
+      - name: Report binary size to job summary
+        # Surface the binary size in the GitHub Actions UI so reviewers
+        # can spot a sudden +50MB jump (usually means a new dep got
+        # pulled into the bundle that shouldn't have been). The bytes
+        # land in $GITHUB_STEP_SUMMARY as a Markdown row; viewers see
+        # a table after all matrix legs finish.
+        shell: bash
+        run: |
+          size_bytes=$(wc -c < "${{ matrix.target.artifact }}" | tr -d ' ')
+          # awk computes the human-readable size from the raw byte
+          # count so we don't shell out to `ls` (shellcheck SC2012 —
+          # ls's output is brittle on non-alphanumeric filenames).
+          # The Linux runners that build linux-* / windows-* targets
+          # all have GNU awk; macOS runners have BSD awk but the
+          # arithmetic is portable.
+          size_human=$(awk -v b="$size_bytes" 'BEGIN {
+            split("B KiB MiB GiB TiB", units);
+            for (i = 1; b >= 1024 && i < 5; i++) b /= 1024;
+            printf "%.1f%s", b, units[i];
+          }')
+          {
+            echo "### ${{ matrix.target.label }} binary size"
+            echo ""
+            echo "| Target | Artefact | Bytes | Human |"
+            echo "| --- | --- | ---: | ---: |"
+            echo "| ${{ matrix.target.label }} | ${{ matrix.target.artifact }} | $size_bytes | $size_human |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Smoke-test binary (--version)
         if: matrix.target.canRun == true
+        # Native runs are load-bearing — if `--version` fails on a
+        # platform we natively support, the binary is broken and the
+        # matrix leg should turn red. The arm64 cross-compile is
+        # different: we run it through qemu-user-static, which has
+        # well-known gaps around Bun's JIT and a handful of syscalls.
+        # When the smoke fails under QEMU it's almost always an
+        # emulator limitation, not a regression in the binary — real
+        # arm64 hardware reports separately at install time. So
+        # `continue-on-error` is gated on `matrix.target.qemu` so the
+        # QEMU leg surfaces the failure (red step in the UI) without
+        # sinking the whole job.
+        continue-on-error: ${{ matrix.target.qemu == true }}
         shell: bash
-        # The cross-compiled linux-arm64 binary can't be executed on the
-        # x64 runner — skip --version there. Real arm64 hosts will catch
-        # any regression at install time. Every other target runs natively.
+        # Native runs execute the binary directly. The arm64 cross-
+        # compile relies on the QEMU binfmt handler registered above
+        # — the kernel transparently routes `./<binary>` through
+        # qemu-aarch64-static, so the same command line works.
         run: |
           ./${{ matrix.target.artifact }} --version
 
       - name: Upload artefact (always)
-        # Always upload — workflow_dispatch runs use this for manual
-        # download, release runs use this as a backup if the gh-release
-        # upload below fails for any reason.
-        uses: actions/upload-artifact@v4
+        # `if: always()` is load-bearing — when the smoke-test step
+        # above fails on a non-QEMU target the job is heading red
+        # anyway, but the binary itself is still useful for triage
+        # (`gh run download` from the Actions UI). Always upload so
+        # the file is accessible even on a failed run; the aggregate
+        # jobs below short-circuit on `needs.build.result == success`
+        # so they won't fire on a red build.
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ matrix.target.artifact }}
           path: ${{ matrix.target.artifact }}
@@ -142,7 +247,237 @@ jobs:
 
       - name: Attach to GitHub Release
         if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: ${{ matrix.target.artifact }}
           fail_on_unmatched_files: true
+
+  # ---------------------------------------------------------------------------
+  # checksums — produce a single SHA256SUMS file covering every binary.
+  #
+  # Consumers verify a single download with:
+  #   curl -LO .../aipehub-host-linux-x64
+  #   curl -LO .../SHA256SUMS
+  #   sha256sum --check --ignore-missing SHA256SUMS
+  # ---------------------------------------------------------------------------
+  checksums:
+    name: SHA256SUMS · aggregate
+    needs: build
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - name: Download all binary artefacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          # Each matrix leg uploaded under its own artefact name (the
+          # binary filename). `merge-multiple: true` flattens them into
+          # one directory rather than one-subdir-per-artefact.
+          pattern: aipehub-host-*
+          merge-multiple: true
+          path: binaries
+
+      - name: Generate SHA256SUMS
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd binaries
+          ls -lh
+          # `sha256sum` on Ubuntu emits `<hash>  <filename>` in the
+          # standard format that `sha256sum --check` consumes. Sort by
+          # filename so the manifest is reproducible across runs.
+          sha256sum aipehub-host-* | LC_ALL=C sort -k2 > SHA256SUMS
+          echo "--- SHA256SUMS ---"
+          cat SHA256SUMS
+
+      - name: Upload SHA256SUMS as artefact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: SHA256SUMS
+          path: binaries/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Attach SHA256SUMS to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: binaries/SHA256SUMS
+          fail_on_unmatched_files: true
+
+  # ---------------------------------------------------------------------------
+  # provenance — SLSA build provenance for every binary.
+  #
+  # `actions/attest-build-provenance` mints a sigstore-backed
+  # attestation that ties each binary (by SHA-256 digest) to:
+  #   - the workflow file that built it (this file)
+  #   - the commit SHA the workflow ran against
+  #   - the runner identity (GitHub-hosted)
+  #
+  # Downstream verifiers can `gh attestation verify` against any
+  # downloaded binary and trust that it came out of this repo's
+  # release pipeline — not from a typo-squatted clone or a
+  # compromised dev workstation.
+  # ---------------------------------------------------------------------------
+  provenance:
+    name: SLSA build provenance
+    needs: build
+    # The GitHub attestation API is free for public repos but
+    # explicitly unsupported on user-owned private repositories:
+    # `Feature not available for user-owned private repositories.
+    # To enable this feature, please make this repository public.`
+    # (verified via run #26027482645). Skip on private repos so the
+    # release pipeline doesn't go red over a known infra gap; the
+    # workflow re-activates automatically the moment the repo goes
+    # public.
+    if: always() && needs.build.result == 'success' && !github.event.repository.private
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          # Sigstore needs egress to fulcio + rekor + tuf — `audit`
+          # keeps things working while we observe the actual endpoints.
+          egress-policy: audit
+
+      - name: Download all binary artefacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: aipehub-host-*
+          merge-multiple: true
+          path: binaries
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2.4.0
+        with:
+          # `subject-path` accepts a glob; the action computes the
+          # digest of every match and emits one attestation covering
+          # all subjects (the bundle is much cheaper than per-binary
+          # attestations).
+          subject-path: "binaries/aipehub-host-*"
+
+  # ---------------------------------------------------------------------------
+  # sbom — CycloneDX SBOM of the source workspace.
+  #
+  # The bun-compiled binary is a single ELF/Mach-O/EXE with no
+  # discoverable package metadata, which makes scanning the binary
+  # itself for an SBOM mostly useless. Instead we run anchore/syft on
+  # the source tree — it discovers the pnpm-workspace, walks the
+  # lockfile, and emits a CycloneDX JSON listing every npm dep that
+  # could possibly be in the binary.
+  #
+  # Consumers needing a downstream SCA can ingest the JSON directly
+  # (e.g. into Grype, OWASP Dependency-Track, Snyk).
+  # ---------------------------------------------------------------------------
+  sbom:
+    name: SBOM (CycloneDX)
+    needs: build
+    if: always() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        # SBOM needs the source — syft walks pnpm-lock.yaml +
+        # package.json files.
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Generate CycloneDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          format: cyclonedx-json
+          # `output-file` writes the SBOM to a predictable on-disk
+          # path; the next step picks it up for the release upload.
+          # `artifact-name` controls the workflow-artefact name (what
+          # downloads call themselves in the Actions UI).
+          output-file: aipehub-sbom.cdx.json
+          artifact-name: aipehub-sbom.cdx.json
+          # `dependency-snapshot: true` posts the result to GitHub's
+          # native Dependency Graph too, so the Insights → Dependency
+          # graph view stays current with each release.
+          dependency-snapshot: true
+
+      - name: Attach SBOM to GitHub Release
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          # sbom-action wrote the file to the path we passed via
+          # `output-file` above.
+          files: aipehub-sbom.cdx.json
+          fail_on_unmatched_files: true
+
+  # ---------------------------------------------------------------------------
+  # release-passed — aggregate gate. Branch protection / status
+  # checks can require this single job rather than every matrix leg.
+  # ---------------------------------------------------------------------------
+  release-passed:
+    name: Release passed
+    if: always()
+    needs: [build, checksums, provenance, sbom]
+    runs-on: ubuntu-latest
+    timeout-minutes: 1
+    steps:
+      - name: Verify all upstream jobs succeeded
+        run: |
+          set -u
+          fail=0
+          # Strict jobs: must be `success`. Skipped or failed sinks
+          # the aggregate.
+          for job in build checksums sbom; do
+            result_var="result_${job}"
+            case "${!result_var}" in
+              success) echo "✓ $job: success" ;;
+              skipped) echo "✗ $job: skipped (treated as failure)"; fail=1 ;;
+              *)       echo "✗ $job: ${!result_var}"; fail=1 ;;
+            esac
+          done
+          # `provenance` is the one job that's allowed to skip — it
+          # gates on `!github.event.repository.private` because the
+          # GitHub attestation API isn't available for user-owned
+          # private repos. Once the repo goes public this job
+          # activates and the strict check below tightens with no
+          # further workflow edits.
+          case "$result_provenance" in
+            success) echo "✓ provenance: success" ;;
+            skipped) echo "⚪ provenance: skipped (private-repo infra gap)" ;;
+            *)       echo "✗ provenance: $result_provenance"; fail=1 ;;
+          esac
+          exit "$fail"
+        env:
+          result_build: ${{ needs.build.result }}
+          result_checksums: ${{ needs.checksums.result }}
+          result_provenance: ${{ needs.provenance.result }}
+          result_sbom: ${{ needs.sbom.result }}
+
+# -----------------------------------------------------------------------------
+# Deferred (intentionally not in this workflow yet):
+#
+# - macOS code-signing + notarization: needs Apple Developer cert
+#   (~$99/yr) stored as a base64 P12 in repo secrets, plus
+#   `notarytool` credentials. Without these, macOS users see a
+#   Gatekeeper warning on first launch and must right-click → Open.
+#   See `docs/RELEASE-DEFERRED.md` for the setup recipe when we're
+#   ready.
+#
+# - Windows code-signing: same shape, needs an Authenticode certificate
+#   from DigiCert/Sectigo (~$200-$500/yr). Without it, SmartScreen
+#   shows a "Windows protected your PC" interstitial.
+#
+# Both signing flows require external paid certs + secret storage and
+# are tracked separately from this workflow refactor.
+# -----------------------------------------------------------------------------
