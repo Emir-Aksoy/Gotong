@@ -55,8 +55,33 @@ export function resolveRefs(value: unknown, ctx: ResolutionContext): unknown {
     return value.map((v) => resolveRefs(v, ctx))
   }
   if (typeof value === 'object') {
-    const out: Record<string, unknown> = {}
+    // H1 — prototype-pollution defence. `JSON.parse('{"__proto__":{…}}')`
+    // produces a parsed object whose OWN-property key is literally
+    // `__proto__`, and `Object.entries` faithfully enumerates it. The
+    // pre-3.4 code then did `out[k] = …`, which on a regular `{}`
+    // *delegates through the `__proto__` setter on Object.prototype* —
+    // every object in the realm starts inheriting the attacker's fields.
+    //
+    // `triggerPayload` here is agent-controlled (it's the body of an
+    // inbound TASK passed through the workflow runner), so the path is
+    // reachable in production. Defence is layered:
+    //
+    //   1. Create `out` with a NULL prototype so accidental assignment
+    //      lands as a plain own-property rather than reaching the
+    //      Object.prototype setter — i.e. even if someone forgets the
+    //      denylist below, the prototype chain is sealed.
+    //   2. Skip the three carriers (`__proto__` / `constructor` /
+    //      `prototype`) outright. A workflow legitimately wanting one
+    //      of those names as a data key has no unambiguous expression
+    //      in our payload language anyway, so the denylist costs
+    //      nothing real.
+    //
+    // See AUDIT-v3.3.md finding H1.
+    const out = Object.create(null) as Record<string, unknown>
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (k === '__proto__' || k === 'constructor' || k === 'prototype') {
+        continue
+      }
       out[k] = resolveRefs(v, ctx)
     }
     return out

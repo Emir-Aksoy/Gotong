@@ -32,6 +32,72 @@ export class HubClientError extends Error {
   }
 }
 
+/**
+ * Strip the Bearer admin token out of any string before it reaches an
+ * operator-visible surface (stderr, MCP tool result, log file).
+ *
+ * Why this is necessary: certain `undici`/Node fetch versions thread the
+ * full request init object — including `headers.authorization` — into
+ * `TypeError` instances they throw on transport failure. Pre-3.4 the
+ * MCP server's top-level catch wrote `err.stack ?? err.message` straight
+ * to stderr, which Claude Desktop / Cursor / Cline all capture into
+ * their long-lived diagnostic logs. Anyone with read access to those
+ * logs effectively held the Hub's admin token.
+ *
+ * The redactor is intentionally over-eager — anything matching
+ * `Bearer\s+\S+` collapses to `Bearer ***`, and the configured token
+ * literal is replaced everywhere. Costs nothing on the success path
+ * (we never call it there).
+ *
+ * See AUDIT-v3.3.md finding H3.
+ */
+export function redactToken(str: string, token: string): string {
+  if (typeof str !== 'string') return str
+  let out = str
+  if (token) {
+    // The token literal can appear naked (e.g. printed via toString of
+    // a fetch-init dump) or right after `Bearer`. Replace BOTH paths.
+    // `replaceAll` with a string operand is literal — no regex meta —
+    // so the token can safely contain regex-special characters.
+    out = out.split(token).join('***')
+  }
+  // Catch any other `Bearer …` form (e.g. an attacker-supplied token
+  // showing up in a server-side error reflected back). Anything from
+  // `Bearer ` up to the next whitespace / quote / backtick / brace is
+  // collapsed; we err on the side of redacting too much.
+  out = out.replace(/Bearer\s+[^\s'"`{}]+/g, 'Bearer ***')
+  return out
+}
+
+/**
+ * Rebuild an Error with its message + stack + nested cause all
+ * redacted. Returns a fresh Error so the original object — which may
+ * be held by an awaiting MCP SDK frame — is left untouched.
+ *
+ * Recursive on `cause` so wrapped undici TypeErrors get cleaned too.
+ *
+ * See AUDIT-v3.3.md finding H3.
+ */
+export function redactError(err: unknown, token: string): Error {
+  if (err instanceof Error) {
+    const cleaned = new Error(redactToken(err.message, token))
+    cleaned.name = err.name
+    if (typeof err.stack === 'string') {
+      cleaned.stack = redactToken(err.stack, token)
+    }
+    // `cause` is a 1-deep chain in practice (undici TypeError → AbortError).
+    // Recurse to redact whatever shape it carries.
+    if ('cause' in err && (err as { cause?: unknown }).cause !== undefined) {
+      ;(cleaned as Error & { cause?: unknown }).cause = redactError(
+        (err as { cause: unknown }).cause,
+        token,
+      )
+    }
+    return cleaned
+  }
+  return new Error(redactToken(String(err), token))
+}
+
 export class HubClient {
   constructor(private readonly opts: HubClientOptions) {
     if (!opts.baseUrl) throw new Error('HubClient: baseUrl is required')
@@ -109,6 +175,16 @@ export class HubClient {
         body: body !== null && body !== undefined ? JSON.stringify(body) : undefined,
         signal: ctrl.signal,
       })
+    } catch (err: unknown) {
+      // H3 — undici/Node fetch can stash the full init object (including
+      // `headers.authorization: Bearer <TOKEN>`) into a TypeError it
+      // throws on transport failure. Without this redaction the
+      // original error reaches `main.ts`'s top-level catch and gets
+      // written to stderr — straight into Claude Desktop / Cursor /
+      // Cline diagnostic logs. Rebuild the error with token literals
+      // and any `Bearer …` substrings stripped before letting it
+      // escape this method. See AUDIT-v3.3.md finding H3.
+      throw redactError(err, this.opts.adminToken)
     } finally {
       clearTimeout(t)
     }
@@ -119,9 +195,21 @@ export class HubClient {
     let parsed: unknown
     try { parsed = text.length > 0 ? JSON.parse(text) : null } catch { parsed = text }
     if (!r.ok) {
-      const msg = (parsed && typeof parsed === 'object' && 'error' in parsed && typeof parsed.error === 'string')
+      const rawMsg = (parsed && typeof parsed === 'object' && 'error' in parsed && typeof parsed.error === 'string')
         ? parsed.error
         : `Hub returned ${r.status} for ${path}`
+      // H3 — even legitimate server-side error strings have been seen
+      // to reflect the inbound `Authorization` header on certain
+      // misconfigured proxies (e.g. an `nginx_error_log` style entry
+      // bouncing back as the upstream's response body). Redact every
+      // message before it leaves the HubClient surface.
+      let msg = redactToken(rawMsg, this.opts.adminToken)
+      // Belt-and-braces: if the redactor missed something (e.g. a
+      // future token format we didn't anticipate), fall back to a
+      // generic stub rather than risk a leak.
+      if (this.opts.adminToken && msg.includes(this.opts.adminToken)) {
+        msg = `Hub returned ${r.status} for ${path} (details redacted)`
+      }
       throw new HubClientError(msg, r.status, parsed)
     }
     return parsed as T
