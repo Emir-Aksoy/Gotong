@@ -6,8 +6,17 @@ between releases.
 
 from __future__ import annotations
 
-import tomllib
+import sys
 from pathlib import Path
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    # `tomllib` only landed in the stdlib in 3.11. Use the `tomli`
+    # backport for older interpreters — declared in the [test] extras
+    # below the 3.11 cutoff so `pip install -e ".[test]"` picks it up.
+    # The alias keeps the rest of this file version-agnostic.
+    import tomli as tomllib  # type: ignore[no-redef,import-not-found]
 
 import aipehub
 from aipehub.protocol import hello

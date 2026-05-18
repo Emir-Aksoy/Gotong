@@ -33,6 +33,11 @@ dependencies = [
 test = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    # `tomllib` is stdlib from 3.11 onward; on 3.10 we fall back to
+    # the `tomli` backport (same API surface). The environment marker
+    # makes the dep a no-op install on 3.11+ — see
+    # tests/test_version_consistency.py for the conditional import.
+    "tomli>=2.0; python_version < '3.11'",
 ]
 
 [tool.hatch.build.targets.wheel]

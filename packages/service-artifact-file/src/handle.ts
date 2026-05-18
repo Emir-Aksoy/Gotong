@@ -106,7 +106,14 @@ export class ArtifactFileHandle implements ArtifactHandle {
     if (!await exists(oDir)) return []
     const refs: ArtifactRef[] = []
     for await (const full of walk(oDir)) {
-      const rel = relative(oDir, full)
+      // Normalise to POSIX separators. `node:path/relative` returns the
+      // host OS's separator (`\` on Windows, `/` on Linux/macOS), but
+      // the wire / on-disk ref policy is "ref === sanitised relative
+      // path with `/`" — guessMime + sanitisePath both assume forward
+      // slashes, and an upstream `prefix` filter like `'reports/'`
+      // wouldn't startsWith-match `'reports\q1.md'`. On Linux `\`
+      // isn't a path separator so the replace is a no-op.
+      const rel = relative(oDir, full).replace(/\\/g, '/')
       if (opts.prefix && !rel.startsWith(opts.prefix)) continue
       try {
         const st = await stat(full)
