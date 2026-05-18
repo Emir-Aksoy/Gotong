@@ -1,0 +1,67 @@
+# Composite action — the boilerplate every CI/Release job repeats.
+#
+# Why a composite:
+#   `ci.yml` (3 jobs) and `release.yml` (5-target matrix) all start
+#   with the same four steps: install pnpm, set up Node with pnpm-cache,
+#   run `pnpm install --frozen-lockfile`, optionally build. Before this
+#   action we had to keep those steps in sync across the two workflows
+#   by hand, and any drift (wrong Node version, missing cache key, etc.)
+#   only showed up at PR time. Putting them in one place means the pnpm
+#   version bump touches one file, not nine.
+#
+# What this does NOT do:
+#   - It does NOT run `actions/checkout`. The caller checks out, then
+#     calls this action. Reason: harden-runner (when used) must run
+#     BEFORE checkout, so the caller controls step ordering.
+#   - It does NOT pin the Bun toolchain. Only the release job needs
+#     bun; CI doesn't. The release job sets up Bun in its own step.
+#   - It does NOT call `pnpm -r build`. Build vs. typecheck vs. test
+#     are caller-controlled — release builds packages then compiles
+#     a binary, CI builds+typechecks+tests, etc.
+#
+# Action pinning:
+#   All sub-actions referenced here are pinned to a full commit SHA
+#   (with a trailing `# vX.Y.Z` comment for human readers). Floating
+#   `@v4` tags can be retagged to point at a different commit, which
+#   is the supply-chain risk we're shutting down — see SLSA L3 / the
+#   tj-actions/changed-files compromise (March 2025) for the canonical
+#   horror story.
+
+name: Setup AipeHub workspace
+description: >-
+  Install pnpm, set up Node with pnpm cache, and run
+  `pnpm install --frozen-lockfile`. Caller must check out the repo
+  first.
+
+inputs:
+  node-version:
+    description: >-
+      Node.js version passed to actions/setup-node. Defaults to 22
+      (the version the project tests against on macOS/Windows + the
+      newest LTS line we support).
+    required: false
+    default: "22"
+
+runs:
+  using: composite
+  steps:
+    - name: Install pnpm
+      # pnpm version is resolved from the root package.json
+      # `packageManager` field — keep CI / release / local dev on the
+      # same pnpm so lockfile semantics never diverge.
+      uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+
+    - name: Setup Node ${{ inputs.node-version }}
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        # `cache: pnpm` keys on pnpm-lock.yaml — flat cache across all
+        # 16 workspace packages means we only re-fetch on lockfile move.
+        cache: pnpm
+
+    - name: Install dependencies
+      shell: bash
+      # `--frozen-lockfile` is a hard correctness gate: if a dev forgot
+      # to commit pnpm-lock.yaml after `pnpm add`, CI fails fast here
+      # rather than silently resolving a different dep tree.
+      run: pnpm install --frozen-lockfile

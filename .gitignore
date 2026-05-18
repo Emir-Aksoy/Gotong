@@ -16,6 +16,12 @@ build/
 .env.local
 coverage/
 .turbo/
+
+# Vitest JUnit reports — CI emits one per package when running with
+# `--reporter=junit --outputFile=junit.xml`; the workflow uploads them
+# as artefacts. Local devs running the same args see the file too.
+junit.xml
+packages/*/junit.xml
 data/
 aipe-data/
 **/aipe-data/
