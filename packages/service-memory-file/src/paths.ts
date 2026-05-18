@@ -29,10 +29,20 @@
 
 import { join } from 'node:path'
 import type { Owner, MemoryKind } from '@aipehub/services-sdk'
-import { ownerKey } from '@aipehub/services-sdk'
+import { assertSafeOwnerId, ownerKey } from '@aipehub/services-sdk'
 
-/** Absolute path to an owner's directory under `<rootDir>`. */
+/**
+ * Absolute path to an owner's directory under `<rootDir>`.
+ *
+ * `assertSafeOwnerId` runs first — defense-in-depth so a hostile or
+ * buggy caller can't pass `{kind:'agent', id:'../shared/group-x'}`
+ * and escape into another tenant's tree. `resolveOwner` in the SDK
+ * already validates at scope-translation time, but plugins receive
+ * Owners through several wire paths and the cost of re-asserting is
+ * a single string check.
+ */
 export function ownerDir(rootDir: string, owner: Owner): string {
+  assertSafeOwnerId(owner.id)
   return join(rootDir, owner.kind, owner.id)
 }
 

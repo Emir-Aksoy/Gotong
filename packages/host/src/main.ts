@@ -384,23 +384,6 @@ async function main(): Promise<void> {
     workflowReport,
   )
 
-  // Recover from crashes: any run still marked 'running' on disk is the
-  // trace of a previous host that died mid-flight. Continue it from the
-  // first incomplete step. Runs whose workflow is no longer loaded get
-  // closed out as 'failed' so the admin history stops claiming they're
-  // still running. We log a one-line summary; resume itself is async
-  // and runs in the background.
-  workflowController.resumeRunningRuns().then((r) => {
-    if (r.resumed > 0 || r.abandoned > 0) {
-      log.info('workflow resume', {
-        resumed: r.resumed,
-        abandoned: r.abandoned,
-      })
-    }
-  }).catch((err) => {
-    log.error('workflow resume scan failed', { err })
-  })
-
   const allowedHosts = envList('AIPE_ALLOWED_HOSTS')
   const adminRateMax = envInt('AIPE_ADMIN_RATE_MAX', 10)
   const adminRateSec = envInt('AIPE_ADMIN_RATE_SEC', 60)
@@ -419,6 +402,12 @@ async function main(): Promise<void> {
     // tolerated under structural typing).
     ...(services ? { services } : {}),
   })
+  // Readiness flag — flips to true after workflow resume finishes (see
+  // the setTimeout block below). `/readyz` reads this; `/healthz` is
+  // always 200. Splitting liveness from readiness lets k8s-style probes
+  // hold the pod in `NotReady` during the resume grace window instead
+  // of restarting it.
+  let bootReady = false
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
@@ -430,7 +419,41 @@ async function main(): Promise<void> {
     ...(services ? { services: services.asAdminSurface() } : {}),
     ...(allowedHosts ? { allowedHosts } : {}),
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },
+    readinessGate: { isReady: () => bootReady },
   })
+
+  // P6: recover from crashes — any run still marked 'running' on disk
+  // is the trace of a previous host that died mid-flight. Continue
+  // from the first incomplete step. Runs whose workflow is no longer
+  // loaded get closed out as 'failed' so admin history stops claiming
+  // they're still running.
+  //
+  // **Order matters.** Pre-3.1 this ran BEFORE serveWebSocket, so any
+  // step whose participant was a remote agent got dispatched into an
+  // empty registry and failed with `no_participant` — the remote
+  // sidecar hadn't had a chance to reconnect yet because the WS port
+  // was still closed. Now we wait until WS is listening + give the
+  // grace window below for sidecars to re-HELLO before kicking off
+  // the resume. Local agents (LocalAgentPool) are already started.
+  const resumeGraceMs = envInt('AIPE_WORKFLOW_RESUME_GRACE_MS', 2_000)
+  setTimeout(() => {
+    workflowController.resumeRunningRuns().then((r) => {
+      if (r.resumed > 0 || r.abandoned > 0) {
+        log.info('workflow resume', {
+          resumed: r.resumed,
+          abandoned: r.abandoned,
+        })
+      }
+    }).catch((err) => {
+      log.error('workflow resume scan failed', { err })
+    }).finally(() => {
+      // Flip readiness regardless of resume outcome — partial / failed
+      // resume is still a "running host"; readiness is about boot
+      // completion, not workflow health. The admin UI's "run history"
+      // tab is the right place to surface resume failures.
+      bootReady = true
+    })
+  }, resumeGraceMs)
 
   // Boot banner — intentionally plain stdout, NOT a log line. The
   // "First-run admin URL" appears once in a host's lifetime and must

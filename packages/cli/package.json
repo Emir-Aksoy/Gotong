@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/cli",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "AipeHub CLI — bootstrap sidecar agents, ping a hub, inspect services. Zero install needed beyond `npx @aipehub/cli`.",
   "license": "MIT",
@@ -23,7 +23,13 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src", "bin", "templates", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "bin",
+    "templates",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

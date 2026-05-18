@@ -1,0 +1,185 @@
+# Production blueprint — AipeHub host behind a Caddy TLS terminator.
+#
+# This file is **opinionated**: it picks Caddy over nginx because Caddy
+# auto-provisions Let's Encrypt certs and reloads them in-place, and
+# pins a small but realistic set of operational guardrails (read-only
+# root fs, dropped capabilities, log rotation, restart policy, daily
+# backup container). All of it is one `docker compose -f docker-compose.prod.yml up -d`
+# away; nothing here requires Kubernetes.
+#
+# Before first run set these env vars (or put them in a `.env` file next
+# to this compose file — `docker compose` reads it automatically):
+#
+#   AIPE_DOMAIN          public hostname, e.g. hub.example.com
+#   AIPE_WS_DOMAIN       optional separate ws hostname; defaults to the same
+#   ACME_EMAIL           contact email for Let's Encrypt registration
+#   AIPE_SECRET_KEY      optional KMS-fetched master key (32 random bytes
+#                        base64); leave unset to let the host generate
+#                        one in ./data/runtime/secret.key
+#
+# Boot:
+#
+#   docker compose -f docker-compose.prod.yml up -d
+#   docker compose -f docker-compose.prod.yml logs -f aipehub
+#       └─ grep for `First-run admin URL` once
+#
+# Backups: the `data` volume is the entire source of truth (transcript,
+# agents, secrets). The included `backup` service tars it once a day to
+# `./backups/aipehub-YYYY-MM-DD.tar.gz` with 14 days of retention. Replace
+# the destination with a real off-host store (S3 / B2 / restic) in real
+# deployments — keeping backups on the same VM as the data is necessary
+# but not sufficient.
+#
+# What this is NOT:
+#   - A multi-instance HA setup. AipeHub v3 host is single-instance by
+#     design (the `space/` directory is the lock); for HA you need
+#     external coordination + a shared filesystem. See docs/DEPLOY.md
+#     §"Distribution" for the discussion.
+#   - A managed-database deployment. Hub state lives in flat files +
+#     optional SQLite for the datastore plugin. No Postgres / Redis.
+
+services:
+  # --- AipeHub host ---------------------------------------------------------
+  aipehub:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: aipehub/host:prod
+    container_name: aipehub-host
+    restart: unless-stopped
+
+    # Bind to loopback only — Caddy is the only thing that should reach
+    # the host directly. Public traffic comes in on :443.
+    ports:
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:4000:4000"
+
+    volumes:
+      - aipehub-data:/data
+      # tmpfs for the runtime cache so the root fs can be read-only
+      # (see read_only: true below). The host writes ./runtime/secret.key
+      # inside /data which IS writable, so the cache is the only thing
+      # that needs an extra tmpfs.
+
+    environment:
+      AIPE_SPACE: /data
+      AIPE_HOST: 0.0.0.0
+      AIPE_WEB_PORT: "3000"
+      AIPE_WS_PORT: "4000"
+      # Production MUST require admin approval — `open` lets anyone
+      # claiming any agent id register.
+      AIPE_GATING: admin-approval
+      # Cookies served over HTTPS only. Caddy terminates TLS so the
+      # browser sees https://; the host sees http:// internally.
+      AIPE_COOKIE_SECURE: "1"
+      # CSRF defence: writes must originate from one of these Host
+      # headers. Without this any port-reachable peer can POST to
+      # /api/admin/dispatch — fine for localhost, lethal in prod.
+      AIPE_ALLOWED_HOSTS: "${AIPE_DOMAIN},${AIPE_WS_DOMAIN:-${AIPE_DOMAIN}}"
+      # Trust XFF from Caddy (single, controlled proxy). With this on,
+      # per-IP rate limiting keys on the real client IP rather than
+      # Caddy's container IP.
+      AIPE_TRUST_PROXY: "1"
+      # Optional: KMS-mounted master key. If unset, the host falls back
+      # to ./data/runtime/secret.key (chmod 600).
+      AIPE_SECRET_KEY: "${AIPE_SECRET_KEY:-}"
+      # Optional managed-agent LLM keys. The admin UI lets you override
+      # per-agent, but baking process-wide defaults here is convenient.
+      ANTHROPIC_API_KEY: "${ANTHROPIC_API_KEY:-}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      # Dev tool — set to "1" to enable per-frame protocol validation.
+      # Costs O(n) per inbound frame; leave off in prod unless
+      # debugging a misbehaving third-party SDK.
+      AIPE_PROTOCOL_STRICT: "0"
+
+    # Operational hardening — none of this is strictly required for
+    # the host to run, but each line is a real attack-surface reduction.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+    # Liveness vs readiness — see docs/DEPLOY.md §"Health endpoints".
+    # `/healthz` always 200 once the HTTP server listens; `/readyz`
+    # turns 200 only after workflow resume completes. Use readyz here
+    # so the container is marked unhealthy during the boot grace window
+    # and Caddy's load_balancing.fail_duration backs off.
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:'+process.env.AIPE_WEB_PORT+'/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  # --- Caddy reverse proxy + TLS terminator --------------------------------
+  caddy:
+    image: caddy:2-alpine
+    container_name: aipehub-caddy
+    restart: unless-stopped
+    depends_on:
+      - aipehub
+    # Public ports — the only thing the internet sees.
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    environment:
+      AIPE_DOMAIN: "${AIPE_DOMAIN}"
+      AIPE_WS_DOMAIN: "${AIPE_WS_DOMAIN:-${AIPE_DOMAIN}}"
+      ACME_EMAIL: "${ACME_EMAIL}"
+
+  # --- Daily backup --------------------------------------------------------
+  # Runs once per 24h. Tars the `aipehub-data` named volume to a
+  # date-stamped file on the host. Replace the inner `tar` command with
+  # `restic backup …` or `rclone copy …` once you have a real off-host
+  # destination; this default just keeps a local rotation.
+  backup:
+    image: alpine:3.20
+    container_name: aipehub-backup
+    restart: unless-stopped
+    depends_on:
+      - aipehub
+    volumes:
+      - aipehub-data:/data:ro
+      - ./backups:/backups
+    entrypoint:
+      - sh
+      - -c
+      - |
+        set -e
+        echo "[backup] daily loop starting; destination=/backups"
+        while true; do
+          stamp=$$(date -u +%Y-%m-%d)
+          out="/backups/aipehub-$$stamp.tar.gz"
+          if [ ! -f "$$out" ]; then
+            echo "[backup] writing $$out"
+            tar -C /data -czf "$$out.tmp" .
+            mv "$$out.tmp" "$$out"
+          fi
+          # Trim anything older than 14 days. `-mtime +14` semantics
+          # vary across find implementations; busybox find supports it.
+          find /backups -name 'aipehub-*.tar.gz' -mtime +14 -delete || true
+          sleep 86400
+        done
+
+volumes:
+  aipehub-data:
+  caddy-data:
+  caddy-config:

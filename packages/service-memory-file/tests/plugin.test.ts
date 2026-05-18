@@ -210,6 +210,68 @@ describe('softDelete-then-reattach-then-softDelete-same-day', () => {
   })
 })
 
+// D3: pre-3.1 the unconditional `rm -rf trashDir` at the end of
+// `restore()` silently destroyed any `payload-<ts>/` siblings created
+// by same-day re-deletes. A user who softDeleted, rewrote, softDeleted
+// again, then restored, lost the second batch of data with no warning.
+// The fix: keep the trash entry alive when siblings remain so they're
+// recoverable.
+describe('restore preserves sibling payload-* (D3)', () => {
+  it('restoring after same-day re-delete leaves siblings in trash', async () => {
+    const fixedNow = 1_910_000_000_000
+    const local = new MemoryFilePlugin()
+    await local.init({
+      rootDir, logger,
+      hub: { now: () => fixedNow, publishEvent: () => undefined },
+    })
+    try {
+      const cfg = await local.validateConfig({})
+      const h1 = await local.attach(owner, cfg)
+      await h1.remember({ kind: 'episodic', text: 'first-batch' })
+      await local.detach(owner)
+      const ref1 = await local.softDelete(owner)
+
+      // Re-attach and add new data, then soft delete again same day.
+      const h2 = await local.attach(owner, cfg)
+      await h2.remember({ kind: 'episodic', text: 'second-batch' })
+      await local.detach(owner)
+      const ref2 = await local.softDelete(owner)
+      expect(ref2.id).toBe(ref1.id) // same trash entry
+
+      // Restore: should pull the canonical `payload/` back but leave
+      // the `payload-*` sibling alone.
+      await local.restore(ref1)
+
+      const { readdir } = await import('node:fs/promises')
+      const remaining = await readdir(trashEntryDir(rootDir, ref1.id))
+      expect(remaining.some((e) => e.startsWith('payload-'))).toBe(true)
+      // meta.json still present so listTrash continues to surface it.
+      expect(remaining).toContain('meta.json')
+
+      const all = await local.listTrash()
+      expect(all.map((r) => r.id)).toContain(ref1.id)
+
+      // Cleanup
+      await local.hardDelete(ref1)
+    } finally {
+      await local.shutdown()
+    }
+  })
+
+  it('restore with no siblings still removes the trash entry cleanly', async () => {
+    const cfg = await plugin.validateConfig({})
+    const h = await plugin.attach(owner, cfg)
+    await h.remember({ kind: 'episodic', text: 'only-batch' })
+    await plugin.detach(owner)
+    const ref = await plugin.softDelete(owner)
+
+    await plugin.restore(ref)
+
+    await expect(access(trashEntryDir(rootDir, ref.id))).rejects.toThrow(/ENOENT/)
+    expect(await plugin.listTrash()).toEqual([])
+  })
+})
+
 describe('listTrash', () => {
   it('returns refs the plugin has created', async () => {
     const cfg = await plugin.validateConfig({})
@@ -239,17 +301,39 @@ describe('soft-delete with nothing to delete', () => {
 })
 
 describe('owner key sanity (no path leakage)', () => {
-  it('owner with slash in id stays inside rootDir', async () => {
+  // Pre-3.1 this test documented that slashes-in-id were "treated as
+  // path" — i.e. an Owner.id like `org/team-1` was silently joined
+  // into the rootDir tree as a nested directory. That was an
+  // isolation hole: any caller (a buggy host wiring, a future
+  // workflow-id that happened to look like a path, a hostile
+  // sidecar) could escape into another tenant's tree by crafting
+  // an Owner.id with `..`. The plugin's `ownerDir` now calls
+  // `assertSafeOwnerId` first; the SDK-level `resolveOwner` does
+  // the same. This test now asserts the new contract: a slash in
+  // Owner.id is rejected at attach time.
+  it('attach() rejects Owner.id containing a path separator', async () => {
     const cfg = await plugin.validateConfig({})
     const o: Owner = { kind: 'agent', id: 'org/team-1' }
-    const h = await plugin.attach(o, cfg)
-    await h.remember({ kind: 'episodic', text: 'nested-id' })
-    // ownerKey is still well-formed
-    expect(ownerKey(o)).toBe('agent/org/team-1')
-    // The owner dir exists inside rootDir (slash treated as path).
-    const path = kindFile(rootDir, o, 'episodic')
-    expect(path.startsWith(rootDir)).toBe(true)
-    const raw = await readFile(path, 'utf8')
-    expect(raw).toMatch(/nested-id/)
+    await expect(plugin.attach(o, cfg)).rejects.toThrow(/path separators/)
+  })
+
+  it('attach() rejects Owner.id == ".." (escape attempt)', async () => {
+    const cfg = await plugin.validateConfig({})
+    const o: Owner = { kind: 'agent', id: '..' }
+    await expect(plugin.attach(o, cfg)).rejects.toThrow(/relative-path segment/)
+  })
+
+  it('attach() rejects Owner.id with a null byte', async () => {
+    const cfg = await plugin.validateConfig({})
+    const o: Owner = { kind: 'agent', id: 'normal escape' }
+    await expect(plugin.attach(o, cfg)).rejects.toThrow(/null byte/)
+  })
+
+  it('ownerKey on a forbidden id is still defined (key format unchanged)', () => {
+    // ownerKey is a pure formatter — kept permissive so it stays
+    // useful for log lines / parseOwnerKey symmetry. The path
+    // layer is what blocks the dangerous id from becoming a real
+    // directory; ownerKey is allowed to render it.
+    expect(ownerKey({ kind: 'agent', id: 'org/team-1' })).toBe('agent/org/team-1')
   })
 })

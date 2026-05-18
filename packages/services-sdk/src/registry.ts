@@ -22,6 +22,13 @@ import { majorMatches, SDK_MAJOR } from './version.js'
 
 interface RegistryEntry {
   plugin: ServicePlugin
+  /**
+   * Name of the npm package that registered this plugin, when known.
+   * Used by the loader to distinguish "same package re-loaded" (no-op,
+   * idempotent) from "different package claims the same (type, impl)"
+   * (a conflict that should surface as an error).
+   */
+  pkgName?: string
   /** True after `init()` has resolved. */
   initialized: boolean
   /** Set after `shutdown()` so re-init can happen. */
@@ -41,8 +48,14 @@ export class ServiceRegistry {
    * or major-version mismatch. Does NOT call `init` — caller must do
    * that separately so they can supply ServiceInitCtx (which requires
    * a rootDir the registry doesn't know).
+   *
+   * `pkgName` is optional but recommended: the loader passes the
+   * declaring package name so a second `loadPlugins` run against the
+   * same registry can tell "this is the same package I already loaded"
+   * (silently skip — idempotent) from "another package is trying to
+   * claim the same (type, impl)" (raise a conflict).
    */
-  register(plugin: ServicePlugin): void {
+  register(plugin: ServicePlugin, pkgName?: string): void {
     if (!majorMatches(plugin.version, this.hostMajor)) {
       throw new PluginVersionMismatchError(
         `${plugin.type}:${plugin.impl}`,
@@ -54,7 +67,16 @@ export class ServiceRegistry {
     if (this.entries.has(key)) {
       throw new PluginConflictError(plugin.type, plugin.impl)
     }
-    this.entries.set(key, { plugin, initialized: false, shuttingDown: false })
+    this.entries.set(key, { plugin, pkgName, initialized: false, shuttingDown: false })
+  }
+
+  /**
+   * Package name that registered the plugin at (type, impl), if any.
+   * Returns `undefined` when no such plugin is registered or when the
+   * caller did not pass `pkgName` to {@link register}.
+   */
+  packageNameFor(type: ServiceType, impl: string): string | undefined {
+    return this.entries.get(registryKey(type, impl))?.pkgName
   }
 
   /**

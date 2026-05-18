@@ -152,6 +152,53 @@ describe('AnthropicProvider — response translation', () => {
     expect(res.stopReason).toBe('error')
   })
 
+  // L2: when prompt caching is in use, Anthropic returns
+  // `cache_creation_input_tokens` + `cache_read_input_tokens` alongside
+  // a smaller `input_tokens` (the FRESH slice). Pre-v3.1 the provider
+  // dropped the cache fields and exposed only `input_tokens`, causing
+  // downstream billing code to undercount the prompt by 10–100x on
+  // long system prompts. Now both cache fields surface.
+  it('surfaces cache_creation_input_tokens and cache_read_input_tokens', async () => {
+    const { client } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+      usage: {
+        input_tokens: 20,
+        output_tokens: 5,
+        cache_creation_input_tokens: 1500,
+        cache_read_input_tokens: 8000,
+      },
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+    const res = await provider.complete({
+      messages: [{ role: 'user', content: 'hi' }],
+    })
+    expect(res.usage).toEqual({
+      inputTokens: 20,
+      outputTokens: 5,
+      cacheCreationTokens: 1500,
+      cacheReadTokens: 8000,
+    })
+  })
+
+  it('omits cache fields when zero (clean snapshot for non-cached calls)', async () => {
+    const { client } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+      usage: {
+        input_tokens: 50,
+        output_tokens: 10,
+        cache_creation_input_tokens: 0,
+        cache_read_input_tokens: 0,
+      },
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+    const res = await provider.complete({
+      messages: [{ role: 'user', content: 'hi' }],
+    })
+    expect(res.usage).toEqual({ inputTokens: 50, outputTokens: 10 })
+  })
+
   it('omits usage when the response has none', async () => {
     const { client } = makeFakeClient(async () => ({
       content: [{ type: 'text', text: 'ok' }],
@@ -168,6 +215,58 @@ describe('AnthropicProvider — response translation', () => {
   it('exposes provider name', () => {
     const provider = new AnthropicProvider({ client: {} as any })
     expect(provider.name).toBe('anthropic')
+  })
+})
+
+// L1: opus-4.x ("thinking") models reject `temperature` outright.
+// The provider used to forward the parameter and the API returned
+// 400, silently breaking every existing caller that had a temperature
+// in their request. Now we drop the param when the target model is in
+// the thinking family.
+describe('AnthropicProvider — temperature handling for thinking models', () => {
+  it('drops temperature when targeting claude-opus-4-7 (default model)', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+    await provider.complete({
+      messages: [{ role: 'user', content: 'hi' }],
+      temperature: 0.5,
+    })
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.temperature).toBeUndefined()
+    expect(body.model).toBe('claude-opus-4-7')
+  })
+
+  it('drops temperature when targeting any claude-opus-4-* model', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      content: [],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+    await provider.complete({
+      messages: [{ role: 'user', content: 'hi' }],
+      model: 'claude-opus-4-9',
+      temperature: 0.7,
+    })
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.temperature).toBeUndefined()
+  })
+
+  it('keeps temperature for non-thinking models', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      content: [],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+    await provider.complete({
+      messages: [{ role: 'user', content: 'hi' }],
+      model: 'claude-sonnet-4-6',
+      temperature: 0.3,
+    })
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.temperature).toBe(0.3)
   })
 })
 

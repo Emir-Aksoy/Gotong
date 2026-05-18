@@ -18,8 +18,18 @@
 
 import { join } from 'node:path'
 import type { Owner } from '@aipehub/services-sdk'
+import { assertSafeOwnerId } from '@aipehub/services-sdk'
 
+/**
+ * Absolute path to an owner's directory under `<rootDir>`.
+ *
+ * `assertSafeOwnerId` runs first — defense-in-depth against a hostile
+ * Owner.id like `../shared/group-x` that would let an agent open
+ * another owner's `.sqlite` file. `name` is already validated upstream
+ * for the `<name>.sqlite` segment.
+ */
 export function ownerDir(rootDir: string, owner: Owner): string {
+  assertSafeOwnerId(owner.id)
   return join(rootDir, owner.kind, owner.id)
 }
 

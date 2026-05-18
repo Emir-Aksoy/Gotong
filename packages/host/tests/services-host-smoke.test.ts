@@ -42,6 +42,19 @@ describe('host process smoke — plugins resolve under native Node', () => {
       console.warn(`[skip] ${hostMain} not built — run 'pnpm --filter @aipehub/host build' first`)
       return
     }
+    if (process.platform === 'win32') {
+      // The test asserts a clean SIGTERM → exit 0 round-trip. On Windows
+      // Node maps `child.kill('SIGTERM')` to `TerminateProcess`, which
+      // forcibly terminates the child with a non-zero exit code (no
+      // chance to run signal handlers). There's no equivalent of a
+      // POSIX graceful-shutdown signal on Windows — the right harness
+      // is wm_close on a console, which Node doesn't expose. The boot
+      // path itself IS exercised by every other in-process test in
+      // this package; this one is specifically about POSIX shutdown
+      // semantics, so skipping on Windows loses no real coverage.
+      console.warn('[skip] services-host-smoke: POSIX SIGTERM not supported on Windows')
+      return
+    }
     const logFile = join(root, 'host.log')
     const child = spawn(process.execPath, [hostMain], {
       env: {

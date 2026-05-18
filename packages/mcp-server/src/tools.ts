@@ -215,15 +215,23 @@ export function registerTools(server: McpServer, client: HubClient): void {
 }
 
 // --- helpers ----------------------------------------------------------
+// `buildStrategy` and `windowToRange` are exported for tests. They're
+// pure functions with no MCP / Hub deps so they're easy to pin down
+// independently of the SDK plumbing.
 
-function buildStrategy(
+export function buildStrategy(
   kind: 'direct' | 'capability' | 'broadcast',
   recipient: string | undefined,
   capabilities: string[] | undefined,
 ): import('./hub-client.js').DispatchBody['strategy'] {
+  // MCP tool keeps the user-facing `direct` / `recipient` vocabulary
+  // (reads more naturally for an LLM); we translate to core's
+  // `explicit` / `to` shape on the way out so the scheduler sees a
+  // kind it actually handles. See hub-client.ts DispatchBody for the
+  // pre-3.1 hang this used to cause.
   if (kind === 'direct') {
     if (!recipient) throw new Error("strategy='direct' requires `recipient`")
-    return { kind: 'direct', recipient }
+    return { kind: 'explicit', to: recipient }
   }
   if (kind === 'capability') {
     if (!capabilities || capabilities.length === 0) {
@@ -237,7 +245,7 @@ function buildStrategy(
     : { kind: 'broadcast' }
 }
 
-function windowToRange(w: 'today' | '7d' | '30d' | 'all'): { from?: number; to?: number } {
+export function windowToRange(w: 'today' | '7d' | '30d' | 'all'): { from?: number; to?: number } {
   const now = Date.now()
   if (w === 'all') return {}
   if (w === 'today') {

@@ -245,6 +245,19 @@ export class Hub {
       methods?: readonly string[]
     }>
   }): { applicationId: string; decision: Promise<AdmissionDecision> } {
+    // C5: pre-3.1 a HELLO that arrived *after* SIGTERM (a window of
+    // milliseconds while the WS server was still accepting connections
+    // but `stop()` had already cleared `this.pending`) would land an
+    // entry the loop in `stop()` never sees — the awaiting session
+    // sits in AWAIT_APPROVAL forever, surviving the host's exit. Now
+    // requestAdmission refuses post-stop applications outright; the
+    // transport rolls back the session via the normal REJECT path.
+    if (this.stopped) {
+      return {
+        applicationId: this.idGen(),
+        decision: Promise.resolve({ approved: false, reason: 'hub_stopped' }),
+      }
+    }
     const application: PendingApplication = {
       id: this.idGen(),
       agents: req.agents.map((a) => ({ id: a.id, capabilities: [...a.capabilities] })),

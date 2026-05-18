@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/service-artifact-file",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "AipeHub artifact service — file-backed implementation. Stores markdown / json / binary artifacts under per-owner directories with path-traversal protection.",
   "license": "MIT",
@@ -20,7 +20,11 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

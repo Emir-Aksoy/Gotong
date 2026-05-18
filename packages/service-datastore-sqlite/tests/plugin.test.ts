@@ -83,6 +83,23 @@ describe('attach', () => {
     const a2 = await plugin.attach(owner, cfg1)
     expect(a2).not.toBe(a)
   })
+
+  // D4: pre-3.1 two parallel attach() calls for the same (owner, name)
+  // both passed the cache check, both `await mkdir()`, and both opened
+  // their own SQLite connection. The second `handles.set()` orphaned
+  // the first handle — its sqlite connection stayed open and leaked
+  // for the life of the process. Now attaches are deduped through
+  // an in-flight promise cache.
+  it('parallel attach(same owner+name) returns the same handle (D4)', async () => {
+    const cfg = await plugin.validateConfig({ name: 'shared' })
+    const [a, b, c] = await Promise.all([
+      plugin.attach(owner, cfg),
+      plugin.attach(owner, cfg),
+      plugin.attach(owner, cfg),
+    ])
+    expect(b).toBe(a)
+    expect(c).toBe(a)
+  })
 })
 
 describe('describe', () => {

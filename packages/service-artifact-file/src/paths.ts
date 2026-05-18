@@ -21,8 +21,17 @@
 
 import { isAbsolute, join, normalize, resolve, sep } from 'node:path'
 import type { Owner } from '@aipehub/services-sdk'
+import { assertSafeOwnerId } from '@aipehub/services-sdk'
 
+/**
+ * Absolute path to an owner's directory under `<rootDir>`.
+ *
+ * `assertSafeOwnerId` runs first — defense-in-depth against a hostile
+ * Owner.id like `../shared/group-x` that would escape into another
+ * tenant. `sanitisePath` further guards user-supplied artifact paths.
+ */
 export function ownerDir(rootDir: string, owner: Owner): string {
+  assertSafeOwnerId(owner.id)
   return join(rootDir, owner.kind, owner.id)
 }
 

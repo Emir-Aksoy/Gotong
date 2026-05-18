@@ -39,6 +39,7 @@ import type {
   TrashRef,
 } from '@aipehub/services-sdk'
 import {
+  assertSafeOwnerId,
   makeTrashRef,
   ownerKey,
   PREVIEW_MAX_BYTES,
@@ -86,6 +87,11 @@ export class MemoryFilePlugin
   }
 
   async attach(owner: Owner, config: MemoryFileConfig): Promise<MemoryFileHandle> {
+    // Fail fast on a malicious / buggy Owner.id (`../foo`, `\0`, etc.)
+    // rather than handing the caller a handle that throws on the first
+    // file op. Defense-in-depth alongside the same check inside
+    // `ownerDir`.
+    assertSafeOwnerId(owner.id)
     const key = ownerKey(owner)
     const existing = this.handles.get(key)
     if (existing) return existing
@@ -153,6 +159,19 @@ export class MemoryFilePlugin
     if (await exists(payloadPath)) {
       await mkdir(dirname(dstDir), { recursive: true })
       await rename(payloadPath, dstDir)
+    }
+    // Sibling payload-* dirs come from same-day re-deletes that
+    // accumulated additional user data. Pre-3.1 `rm -rf trashDir`
+    // silently destroyed them on the first restore — irrecoverable.
+    // Now we keep the trash entry alive (meta + remaining siblings)
+    // so listTrash continues to surface it and an operator can decide.
+    const siblings = (await readdir(trashDir).catch(() => []))
+      .filter((e) => e.startsWith('payload-'))
+    if (siblings.length > 0) {
+      this.logger.warn('restore left sibling payloads in trash', {
+        trashId: ref.id, siblings,
+      })
+      return
     }
     await rm(trashDir, { recursive: true, force: true })
   }

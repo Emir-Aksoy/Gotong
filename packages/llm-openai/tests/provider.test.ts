@@ -383,6 +383,40 @@ describe('isTransientError classifier', () => {
     expect(isTransientError(new Error('your prompt is malformed'))).toBe(false)
   })
 
+  // L3: an AbortController-initiated cancellation surfaces as a
+  // DOMException with name='AbortError' and a message like "The
+  // operation was aborted". The pre-3.1 regex matched "aborted" and
+  // retried — defeating the user's cancel and burning the retry
+  // budget. The classifier now short-circuits on AbortError before
+  // the regex runs.
+  it('does NOT flag AbortError from a deliberate cancellation', () => {
+    const err = new Error('The operation was aborted')
+    ;(err as Error & { name: string }).name = 'AbortError'
+    expect(isTransientError(err)).toBe(false)
+  })
+
+  it('does NOT flag DOMException-like aborts via error.cause.name', () => {
+    // Undici / fetch wrap the AbortError in a TypeError("fetch failed")
+    // with the AbortError on `cause`.
+    const err: Error & { cause?: { name?: string; message?: string } } =
+      new Error('fetch failed')
+    err.cause = { name: 'AbortError', message: 'The operation was aborted' }
+    expect(isTransientError(err)).toBe(false)
+  })
+
+  it('does NOT flag errors with code ABORT_ERR', () => {
+    const err: Error & { code?: string } = new Error('aborted')
+    err.code = 'ABORT_ERR'
+    expect(isTransientError(err)).toBe(false)
+  })
+
+  // Sibling case: a generic Error("aborted") with no AbortError marker
+  // is still treated as transient — this matches the undici-surface
+  // "aborted" message we got on real DeepSeek socket drops.
+  it('still flags a bare Error("aborted") as transient (network-level)', () => {
+    expect(isTransientError(new Error('aborted'))).toBe(true)
+  })
+
   it('handles non-Error throwables gracefully', () => {
     expect(isTransientError(undefined)).toBe(false)
     expect(isTransientError(null)).toBe(false)

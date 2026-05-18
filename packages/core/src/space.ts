@@ -73,6 +73,18 @@ export class Space {
   }
   /** Cached master key — lazily loaded the first time secrets are touched. */
   private masterKey: Buffer | null = null
+  /**
+   * Per-file write serialisation. Read-modify-write methods (upsertAgent,
+   * touchWorker, addAdminSession, set*ApiKey, …) used to lose updates
+   * when two callers raced: both read the same JSON, both modified
+   * their own copy, both wrote — last write wins, first write's diff
+   * silently disappears. `withFileLock(path, fn)` chains every
+   * mutation through a per-path promise so the read-modify-write
+   * window is single-threaded for that file. Reads (admins(), agents(),
+   * …) intentionally bypass the lock — they're snapshot-y and the
+   * caller doesn't expect transactional reads.
+   */
+  private readonly fileLocks = new Map<string, Promise<unknown>>()
 
   private constructor(root: string) {
     this.root = root
@@ -186,10 +198,12 @@ export class Space {
     return { ...DEFAULT_CONFIG, ...c }
   }
   async updateConfig(patch: Partial<SpaceConfig>): Promise<SpaceConfig> {
-    const current = await this.config()
-    const next = { ...current, ...patch }
-    await writeJsonAtomic(this.paths.config, next)
-    return next
+    return this.withFileLock(this.paths.config, async () => {
+      const current = await this.config()
+      const next = { ...current, ...patch }
+      await writeJsonAtomic(this.paths.config, next)
+      return next
+    })
   }
 
   // --- admins --------------------------------------------------------------
@@ -199,25 +213,29 @@ export class Space {
     return data.admins ?? []
   }
   async createAdmin(displayName: string): Promise<{ admin: AdminRecord; token: string }> {
-    const admins = await this.admins()
-    const id = uniqueId(admins.map((a) => a.id), 'admin')
-    const token = mintToken()
-    const admin: AdminRecord = {
-      id,
-      displayName,
-      tokenHash: hashToken(token),
-      createdAt: new Date().toISOString(),
-    }
-    admins.push(admin)
-    await writeJsonAtomic(this.paths.admins, { admins })
-    return { admin, token }
+    return this.withFileLock(this.paths.admins, async () => {
+      const admins = await this.admins()
+      const id = uniqueId(admins.map((a) => a.id), 'admin')
+      const token = mintToken()
+      const admin: AdminRecord = {
+        id,
+        displayName,
+        tokenHash: hashToken(token),
+        createdAt: new Date().toISOString(),
+      }
+      admins.push(admin)
+      await writeJsonAtomic(this.paths.admins, { admins })
+      return { admin, token }
+    })
   }
   async removeAdmin(id: ParticipantId): Promise<boolean> {
-    const admins = await this.admins()
-    const next = admins.filter((a) => a.id !== id)
-    if (next.length === admins.length) return false
-    await writeJsonAtomic(this.paths.admins, { admins: next })
-    return true
+    return this.withFileLock(this.paths.admins, async () => {
+      const admins = await this.admins()
+      const next = admins.filter((a) => a.id !== id)
+      if (next.length === admins.length) return false
+      await writeJsonAtomic(this.paths.admins, { admins: next })
+      return true
+    })
   }
   /**
    * Toggle an admin's "don't count my dispatches in the contribution
@@ -228,12 +246,14 @@ export class Space {
     id: ParticipantId,
     value: boolean,
   ): Promise<AdminRecord | null> {
-    const admins = await this.admins()
-    const idx = admins.findIndex((a) => a.id === id)
-    if (idx < 0) return null
-    admins[idx] = { ...admins[idx]!, contributionOptOut: value }
-    await writeJsonAtomic(this.paths.admins, { admins })
-    return admins[idx]!
+    return this.withFileLock(this.paths.admins, async () => {
+      const admins = await this.admins()
+      const idx = admins.findIndex((a) => a.id === id)
+      if (idx < 0) return null
+      admins[idx] = { ...admins[idx]!, contributionOptOut: value }
+      await writeJsonAtomic(this.paths.admins, { admins })
+      return admins[idx]!
+    })
   }
   /** Return the matched admin (without sensitive fields) on success, null on fail. */
   async verifyAdminToken(token: string | undefined): Promise<AdminRecord | null> {
@@ -253,33 +273,42 @@ export class Space {
     return data.agents ?? []
   }
   async upsertAgent(rec: Omit<AgentRecord, 'createdAt'> & { createdAt?: string }): Promise<AgentRecord> {
-    const agents = await this.agents()
-    const idx = agents.findIndex((a) => a.id === rec.id)
-    if (idx >= 0) {
-      agents[idx] = { ...agents[idx]!, ...rec, createdAt: agents[idx]!.createdAt }
-    } else {
-      agents.push({ ...rec, createdAt: rec.createdAt ?? new Date().toISOString() })
-    }
-    await writeJsonAtomic(this.paths.agents, { agents })
-    return agents.find((a) => a.id === rec.id)!
+    return this.withFileLock(this.paths.agents, async () => {
+      const agents = await this.agents()
+      const idx = agents.findIndex((a) => a.id === rec.id)
+      if (idx >= 0) {
+        agents[idx] = { ...agents[idx]!, ...rec, createdAt: agents[idx]!.createdAt }
+      } else {
+        agents.push({ ...rec, createdAt: rec.createdAt ?? new Date().toISOString() })
+      }
+      await writeJsonAtomic(this.paths.agents, { agents })
+      return agents.find((a) => a.id === rec.id)!
+    })
   }
   async removeAgent(id: ParticipantId): Promise<boolean> {
-    const agents = await this.agents()
-    const next = agents.filter((a) => a.id !== id)
-    if (next.length === agents.length) return false
-    await writeJsonAtomic(this.paths.agents, { agents: next })
-    // If this agent had a per-agent override key, drop it too so an
-    // abandoned key doesn't linger in secrets.enc.json after the record
-    // is gone. Best-effort: the file may not exist on a fresh space.
-    await this.removeAgentApiKey(id).catch(() => { /* ignore */ })
+    const removed = await this.withFileLock(this.paths.agents, async () => {
+      const agents = await this.agents()
+      const next = agents.filter((a) => a.id !== id)
+      if (next.length === agents.length) return false
+      await writeJsonAtomic(this.paths.agents, { agents: next })
+      return true
+    })
+    if (!removed) return false
+    // Drop the per-agent override key (if any) so an abandoned key
+    // doesn't linger in secrets.enc.json. Outside the agents-file
+    // lock so a slow secrets write can't block other agent mutations;
+    // removeAgentApiKey takes its own secrets-file lock.
+    await this.removeAgentApiKey(id).catch(() => { /* best-effort */ })
     return true
   }
   async touchAgent(id: ParticipantId): Promise<void> {
-    const agents = await this.agents()
-    const idx = agents.findIndex((a) => a.id === id)
-    if (idx < 0) return
-    agents[idx]!.lastSeen = new Date().toISOString()
-    await writeJsonAtomic(this.paths.agents, { agents })
+    await this.withFileLock(this.paths.agents, async () => {
+      const agents = await this.agents()
+      const idx = agents.findIndex((a) => a.id === id)
+      if (idx < 0) return
+      agents[idx]!.lastSeen = new Date().toISOString()
+      await writeJsonAtomic(this.paths.agents, { agents })
+    })
   }
 
   // --- workers -------------------------------------------------------------
@@ -292,46 +321,54 @@ export class Space {
     id: ParticipantId,
     capabilities: readonly string[],
   ): Promise<{ worker: WorkerRecord; token: string }> {
-    const workers = await this.workers()
-    if (workers.some((w) => w.id === id)) {
-      throw new Error(`worker id '${id}' is already taken`)
-    }
-    const token = mintToken()
-    const worker: WorkerRecord = {
-      id,
-      capabilities: [...capabilities],
-      tokenHash: hashToken(token),
-      createdAt: new Date().toISOString(),
-    }
-    workers.push(worker)
-    await writeJsonAtomic(this.paths.workers, { workers })
-    return { worker, token }
+    return this.withFileLock(this.paths.workers, async () => {
+      const workers = await this.workers()
+      if (workers.some((w) => w.id === id)) {
+        throw new Error(`worker id '${id}' is already taken`)
+      }
+      const token = mintToken()
+      const worker: WorkerRecord = {
+        id,
+        capabilities: [...capabilities],
+        tokenHash: hashToken(token),
+        createdAt: new Date().toISOString(),
+      }
+      workers.push(worker)
+      await writeJsonAtomic(this.paths.workers, { workers })
+      return { worker, token }
+    })
   }
   async removeWorker(id: ParticipantId): Promise<boolean> {
-    const workers = await this.workers()
-    const next = workers.filter((w) => w.id !== id)
-    if (next.length === workers.length) return false
-    await writeJsonAtomic(this.paths.workers, { workers: next })
-    return true
+    return this.withFileLock(this.paths.workers, async () => {
+      const workers = await this.workers()
+      const next = workers.filter((w) => w.id !== id)
+      if (next.length === workers.length) return false
+      await writeJsonAtomic(this.paths.workers, { workers: next })
+      return true
+    })
   }
   /** Worker counterpart of {@link setAdminContributionOptOut}. */
   async setWorkerContributionOptOut(
     id: ParticipantId,
     value: boolean,
   ): Promise<WorkerRecord | null> {
-    const workers = await this.workers()
-    const idx = workers.findIndex((w) => w.id === id)
-    if (idx < 0) return null
-    workers[idx] = { ...workers[idx]!, contributionOptOut: value }
-    await writeJsonAtomic(this.paths.workers, { workers })
-    return workers[idx]!
+    return this.withFileLock(this.paths.workers, async () => {
+      const workers = await this.workers()
+      const idx = workers.findIndex((w) => w.id === id)
+      if (idx < 0) return null
+      workers[idx] = { ...workers[idx]!, contributionOptOut: value }
+      await writeJsonAtomic(this.paths.workers, { workers })
+      return workers[idx]!
+    })
   }
   async touchWorker(id: ParticipantId): Promise<void> {
-    const workers = await this.workers()
-    const idx = workers.findIndex((w) => w.id === id)
-    if (idx < 0) return
-    workers[idx]!.lastSeen = new Date().toISOString()
-    await writeJsonAtomic(this.paths.workers, { workers })
+    await this.withFileLock(this.paths.workers, async () => {
+      const workers = await this.workers()
+      const idx = workers.findIndex((w) => w.id === id)
+      if (idx < 0) return
+      workers[idx]!.lastSeen = new Date().toISOString()
+      await writeJsonAtomic(this.paths.workers, { workers })
+    })
   }
   async verifyWorkerToken(token: string | undefined): Promise<WorkerRecord | null> {
     if (!token) return null
@@ -350,9 +387,11 @@ export class Space {
     return data.sessions ?? []
   }
   async addAdminSession(sessionId: string, adminId: ParticipantId): Promise<void> {
-    const sessions = await this.adminSessions()
-    sessions.push({ sessionId, principalId: adminId, createdAt: new Date().toISOString() })
-    await writeJsonAtomic(this.paths.runtime.adminSessions, { sessions })
+    await this.withFileLock(this.paths.runtime.adminSessions, async () => {
+      const sessions = await this.adminSessions()
+      sessions.push({ sessionId, principalId: adminId, createdAt: new Date().toISOString() })
+      await writeJsonAtomic(this.paths.runtime.adminSessions, { sessions })
+    })
   }
   async findAdminSession(sessionId: string | undefined): Promise<SessionRecord | null> {
     if (!sessionId) return null
@@ -360,11 +399,13 @@ export class Space {
     return sessions.find((s) => s.sessionId === sessionId) ?? null
   }
   async removeAdminSession(sessionId: string): Promise<boolean> {
-    const sessions = await this.adminSessions()
-    const next = sessions.filter((s) => s.sessionId !== sessionId)
-    if (next.length === sessions.length) return false
-    await writeJsonAtomic(this.paths.runtime.adminSessions, { sessions: next })
-    return true
+    return this.withFileLock(this.paths.runtime.adminSessions, async () => {
+      const sessions = await this.adminSessions()
+      const next = sessions.filter((s) => s.sessionId !== sessionId)
+      if (next.length === sessions.length) return false
+      await writeJsonAtomic(this.paths.runtime.adminSessions, { sessions: next })
+      return true
+    })
   }
 
   async workerSessions(): Promise<SessionRecord[]> {
@@ -372,9 +413,11 @@ export class Space {
     return data.sessions ?? []
   }
   async addWorkerSession(sessionId: string, workerId: ParticipantId): Promise<void> {
-    const sessions = await this.workerSessions()
-    sessions.push({ sessionId, principalId: workerId, createdAt: new Date().toISOString() })
-    await writeJsonAtomic(this.paths.runtime.workerSessions, { sessions })
+    await this.withFileLock(this.paths.runtime.workerSessions, async () => {
+      const sessions = await this.workerSessions()
+      sessions.push({ sessionId, principalId: workerId, createdAt: new Date().toISOString() })
+      await writeJsonAtomic(this.paths.runtime.workerSessions, { sessions })
+    })
   }
   async findWorkerSession(sessionId: string | undefined): Promise<SessionRecord | null> {
     if (!sessionId) return null
@@ -382,11 +425,13 @@ export class Space {
     return sessions.find((s) => s.sessionId === sessionId) ?? null
   }
   async removeWorkerSession(sessionId: string): Promise<boolean> {
-    const sessions = await this.workerSessions()
-    const next = sessions.filter((s) => s.sessionId !== sessionId)
-    if (next.length === sessions.length) return false
-    await writeJsonAtomic(this.paths.runtime.workerSessions, { sessions: next })
-    return true
+    return this.withFileLock(this.paths.runtime.workerSessions, async () => {
+      const sessions = await this.workerSessions()
+      const next = sessions.filter((s) => s.sessionId !== sessionId)
+      if (next.length === sessions.length) return false
+      await writeJsonAtomic(this.paths.runtime.workerSessions, { sessions: next })
+      return true
+    })
   }
 
   // --- pending agent applications (runtime, but persisted) -----------------
@@ -396,7 +441,13 @@ export class Space {
     return data.apps ?? []
   }
   async writePendingApps(apps: readonly PersistedPendingApp[]): Promise<void> {
-    await writeJsonAtomic(this.paths.runtime.pendingApps, { apps: [...apps] })
+    // The Hub calls this fire-and-forget from a concurrency-sensitive
+    // syncPendingFile() — serialise through the file lock so a slow
+    // disk write can't get interleaved with the next one and produce
+    // a torn JSON.
+    await this.withFileLock(this.paths.runtime.pendingApps, async () => {
+      await writeJsonAtomic(this.paths.runtime.pendingApps, { apps: [...apps] })
+    })
   }
 
   // --- transcript storage ---------------------------------------------------
@@ -474,18 +525,22 @@ export class Space {
     }
     const key = await this.getMasterKey()
     const enc = encryptSecret(key, plaintext)
-    const file = await this.readSecretsFile()
-    file.providers[provider] = enc
-    await this.writeSecretsFile(file)
+    await this.withFileLock(this.paths.secrets, async () => {
+      const file = await this.readSecretsFile()
+      file.providers[provider] = enc
+      await this.writeSecretsFile(file)
+    })
   }
 
   /** Remove a workspace-level provider key. Returns true if one was removed. */
   async removeProviderApiKey(provider: string): Promise<boolean> {
-    const file = await this.readSecretsFile()
-    if (!file.providers[provider]) return false
-    delete file.providers[provider]
-    await this.writeSecretsFile(file)
-    return true
+    return this.withFileLock(this.paths.secrets, async () => {
+      const file = await this.readSecretsFile()
+      if (!file.providers[provider]) return false
+      delete file.providers[provider]
+      await this.writeSecretsFile(file)
+      return true
+    })
   }
 
   /** Like {@link listProviderApiKeys} but for per-agent overrides. */
@@ -512,18 +567,39 @@ export class Space {
     }
     const key = await this.getMasterKey()
     const enc = encryptSecret(key, plaintext)
-    const file = await this.readSecretsFile()
-    file.agents[agentId] = enc
-    await this.writeSecretsFile(file)
+    await this.withFileLock(this.paths.secrets, async () => {
+      const file = await this.readSecretsFile()
+      file.agents[agentId] = enc
+      await this.writeSecretsFile(file)
+    })
   }
 
   /** Remove a per-agent key (and called automatically by `removeAgent`). */
   async removeAgentApiKey(agentId: ParticipantId): Promise<boolean> {
-    const file = await this.readSecretsFile()
-    if (!file.agents[agentId]) return false
-    delete file.agents[agentId]
-    await this.writeSecretsFile(file)
-    return true
+    return this.withFileLock(this.paths.secrets, async () => {
+      const file = await this.readSecretsFile()
+      if (!file.agents[agentId]) return false
+      delete file.agents[agentId]
+      await this.writeSecretsFile(file)
+      return true
+    })
+  }
+
+  // --- concurrency helper --------------------------------------------------
+
+  /**
+   * Serialise read-modify-write operations against a single file. The
+   * lock is keyed by absolute path; different files run in parallel.
+   * The chain is rebuilt after each release so a thrown body doesn't
+   * permanently poison the slot (the `.catch(()=>{})` makes downstream
+   * waiters insensitive to upstream errors).
+   */
+  private withFileLock<T>(path: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.fileLocks.get(path) ?? Promise.resolve()
+    const next = prev.then(fn, fn)
+    // Store the swallowed-error variant so we never break the chain.
+    this.fileLocks.set(path, next.catch(() => undefined))
+    return next as Promise<T>
   }
 }
 
@@ -808,14 +884,27 @@ async function readJson<T>(path: string): Promise<T> {
   return JSON.parse(raw) as T
 }
 
+/**
+ * Pre-3.1 used a fixed `${path}.tmp` suffix. Two concurrent writers
+ * to the same file (e.g. two `upsertAgent` calls racing) would both
+ * create the same `.tmp` — the second `writeFile` overwrote the first
+ * mid-rename, breaking the atomic guarantee and occasionally leaving
+ * a half-written JSON behind. Adding pid + nanotime + 6 random bytes
+ * makes the tmp name unique per call; the final `rename` is still
+ * atomic on POSIX so the last-writer-wins semantic is preserved.
+ */
+function uniqueTmpSuffix(): string {
+  return `.${process.pid}.${process.hrtime.bigint().toString(36)}.${randomBytes(3).toString('hex')}.tmp`
+}
+
 async function writeJsonAtomic(path: string, data: unknown): Promise<void> {
-  const tmp = `${path}.tmp`
+  const tmp = `${path}${uniqueTmpSuffix()}`
   await writeFile(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8')
   await rename(tmp, path)
 }
 
 function writeJsonAtomicSync(path: string, data: unknown): void {
-  const tmp = `${path}.tmp`
+  const tmp = `${path}${uniqueTmpSuffix()}`
   writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', 'utf8')
   renameSync(tmp, path)
 }

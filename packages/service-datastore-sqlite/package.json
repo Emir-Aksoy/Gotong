@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/service-datastore-sqlite",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "description": "AipeHub datastore service — SQLite-backed implementation. First-party plugin: per-owner KV (single _kv table) + raw SQL on one .sqlite per declared datastore.",
   "license": "MIT",
@@ -20,7 +20,11 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist", "src", "README.md"],
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

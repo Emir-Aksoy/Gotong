@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto'
 
 import type { Hub, ParticipantId } from '@aipehub/core'
 import {
+  AWAIT_APPROVAL_TIMEOUT_MS,
   decodeFrame,
+  decodeFrameStrict,
   encodeFrame,
   HELLO_TIMEOUT_MS,
   MAX_MISSED_PINGS,
@@ -85,8 +87,23 @@ export class Session {
     private readonly hub: Hub,
     private readonly opts: SessionOptions,
   ) {
-    ws.on('message', (data) => {
-      this.onMessage(data.toString()).catch((err) =>
+    ws.on('message', (data, isBinary) => {
+      // The protocol is text/JSON; a binary frame is either a client
+      // bug or a probe trying to feed us non-UTF-8 bytes. Pre-3.1 we
+      // called `data.toString()` unconditionally — invalid-UTF-8
+      // bytes silently turned into U+FFFD replacement chars and the
+      // frame got "rejected" as malformed JSON with no useful hint.
+      // Reject upfront with a clean reason so the client can see why.
+      if (isBinary) {
+        this.sendError('bad_frame', 'binary frames are not accepted (protocol is JSON/text)')
+        return
+      }
+      const text = typeof data === 'string'
+        ? data
+        : (Array.isArray(data)
+          ? Buffer.concat(data).toString('utf8')
+          : (data as Buffer).toString('utf8'))
+      this.onMessage(text).catch((err) =>
         console.error(`[ws][${this.sessionId}] handler threw:`, err),
       )
     })
@@ -129,9 +146,20 @@ export class Session {
 
   private async onMessage(text: string): Promise<void> {
     if (this.state === 'DEAD') return
-    const r = decodeFrame(text)
+    // AIPE_PROTOCOL_STRICT=1 enables the dev-only per-frame validation
+    // path. The check is O(n) on object size and the production hot path
+    // doesn't need it (we trust well-behaved SDKs); reserved for
+    // operators debugging third-party SDK implementations that send
+    // malformed frames. Read fresh on every message so the env can be
+    // toggled at runtime via SIGHUP-style restarts of the process.
+    const decode = process.env.AIPE_PROTOCOL_STRICT === '1' ? decodeFrameStrict : decodeFrame
+    const r = decode(text)
     if (!r.ok) {
-      this.sendError('bad_frame', r.reason)
+      // `detail` (only present on strict mode's `invalid_frame`) gives
+      // the operator a useful "HELLO.client.name must be a string"
+      // diagnostic instead of just "invalid_frame".
+      const msg = r.reason === 'invalid_frame' && r.detail ? `invalid_frame: ${r.detail}` : r.reason
+      this.sendError('bad_frame', msg)
       return
     }
     const frame = r.frame as ClientFrame
@@ -383,7 +411,18 @@ export class Session {
           : {}),
       })
       this.pendingApplicationId = admission.applicationId
-      const decision = await admission.decision
+
+      // C2: bound AWAIT_APPROVAL so a never-deciding admin (or a DoS
+      // attacker piling up sockets) can't strand the connection forever.
+      // The session is heartbeat-less in this state — without a ceiling,
+      // RAM and file descriptors leak until the host falls over.
+      const APPROVAL_TIMEOUT = Symbol('approval-timeout')
+      let timer: NodeJS.Timeout | undefined
+      const timeoutPromise = new Promise<typeof APPROVAL_TIMEOUT>((resolve) => {
+        timer = setTimeout(() => resolve(APPROVAL_TIMEOUT), AWAIT_APPROVAL_TIMEOUT_MS)
+      })
+      const winner = await Promise.race([admission.decision, timeoutPromise])
+      if (timer) clearTimeout(timer)
 
       // Client may have disconnected while we waited; cleanup() already
       // rolled the application back in that case. We narrow via a runtime
@@ -392,6 +431,20 @@ export class Session {
       // event-loop task.
       if ((this.state as SessionState) === 'DEAD') return
 
+      if (winner === APPROVAL_TIMEOUT) {
+        // Roll back the still-pending application so admin UI cleans up.
+        this.hub.rejectApplication(
+          admission.applicationId,
+          `await-approval exceeded ${AWAIT_APPROVAL_TIMEOUT_MS}ms`,
+          'system',
+        )
+        this.pendingApplicationId = undefined
+        this.sendReject('auth_failed', 'admission decision timed out')
+        this.terminate()
+        return
+      }
+
+      const decision = winner
       this.pendingApplicationId = undefined
       if (!decision.approved) {
         this.sendReject('auth_failed', decision.reason || 'admission rejected')

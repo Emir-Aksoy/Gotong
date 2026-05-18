@@ -26,13 +26,22 @@ def major_version_of(v: str) -> str:
     return v.split(".", 1)[0]
 
 
+def _default_client_version() -> str:
+    # Read the wheel's `__version__` rather than hard-coding here so
+    # the HELLO.client.version always matches the installed package.
+    # Pre-3.1 this was a hand-baked literal that drifted from the
+    # pyproject + dunder (P5 in the v3.1 audit).
+    from . import __version__
+    return __version__
+
+
 # --- outbound frame builders (client -> server) -----------------------------
 
 def hello(
     *,
     agents: list[dict[str, Any]],
     client_name: str = "aipehub-python",
-    client_version: str = "1.1.0",
+    client_version: str | None = None,
     api_key: str | None = None,
     services: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
@@ -44,10 +53,11 @@ def hello(
     None / empty list) for v1.0-compatible behaviour — no service ACL,
     SERVICE_CALL frames will get ``forbidden_service``.
     """
+    resolved_version = client_version if client_version is not None else _default_client_version()
     frame: dict[str, Any] = {
         "type": "HELLO",
         "protocolVersion": PROTOCOL_VERSION,
-        "client": {"name": client_name, "version": client_version},
+        "client": {"name": client_name, "version": resolved_version},
         "agents": agents,
     }
     if api_key is not None:

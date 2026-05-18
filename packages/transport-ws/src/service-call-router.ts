@@ -71,6 +71,16 @@ export class ServiceCallRouter {
   private readonly warn: (msg: string, ctx?: Record<string, unknown>) => void
   /** Keyed by `${type}:${impl}:${ownerKey}`. */
   private readonly cache = new Map<string, CachedHandle>()
+  /**
+   * In-flight attach promises, keyed the same way as `cache`. C4: two
+   * concurrent SERVICE_CALLs on the same (type, impl, owner) used to
+   * both miss the cache, both `await gateway.attach()`, then both set
+   * the cache — the second `set` orphaned the first handle, whose
+   * plugin-side state stayed allocated until the session disposed.
+   * Sharing the promise dedupes the attach so the cache always
+   * reflects the single live handle.
+   */
+  private readonly attaching = new Map<string, Promise<CachedHandle>>()
   private disposed = false
 
   constructor(opts: ServiceCallRouterOptions) {
@@ -280,20 +290,30 @@ export class ServiceCallRouter {
     const key = `${decl.type}:${decl.impl}:${ownerKey(owner)}`
     const existing = this.cache.get(key)
     if (existing) return existing
-    const attached = await this.gateway.attach({
-      type: decl.type,
-      impl: decl.impl,
-      owner,
-      config: decl.config,
-    })
-    const cached: CachedHandle = {
-      type: decl.type,
-      impl: decl.impl,
-      owner,
-      handle: attached.handle,
-    }
-    this.cache.set(key, cached)
-    return cached
+    const inFlight = this.attaching.get(key)
+    if (inFlight) return inFlight
+    const promise = (async () => {
+      try {
+        const attached = await this.gateway.attach({
+          type: decl.type,
+          impl: decl.impl,
+          owner,
+          config: decl.config,
+        })
+        const cached: CachedHandle = {
+          type: decl.type,
+          impl: decl.impl,
+          owner,
+          handle: attached.handle,
+        }
+        this.cache.set(key, cached)
+        return cached
+      } finally {
+        this.attaching.delete(key)
+      }
+    })()
+    this.attaching.set(key, promise)
+    return promise
   }
 
   private makeError(

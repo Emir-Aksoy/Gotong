@@ -62,7 +62,7 @@ see the result back in your chat. Useful for:
 >
 > ```json
 > "command": "node",
-> "args": ["/absolute/path/to/AipeHub/packages/mcp-server/bin/server.js"]
+> "args": ["/absolute/path/to/AipeHub/packages/mcp-server/bin/aipehub-mcp.js"]
 > ```
 >
 > The substitution applies in Claude Desktop, Cursor, Cline, and any

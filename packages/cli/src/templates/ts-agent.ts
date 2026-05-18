@@ -39,7 +39,11 @@ export function renderTsTemplate(opts: TsTemplateOpts): TsTemplateOutput {
         dev: 'tsx watch src/index.ts',
       },
       dependencies: {
-        '@aipehub/sdk-node': '^2.0.0',
+        // Track the current published major. Pre-3.1 this was pinned
+        // to `^2.0.0` — stale across the v3.0 release, so
+        // `aipehub new ts-agent foo && pnpm install` failed with
+        // ERESOLVE for any new user. Bump alongside sdk-node majors.
+        '@aipehub/sdk-node': '^3.0.0',
       },
       devDependencies: {
         tsx: '^4.7.0',

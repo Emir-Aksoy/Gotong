@@ -143,8 +143,13 @@ export interface HubState {
 }
 
 export interface DispatchBody {
+  // Mirrors the core `DispatchStrategy` union exactly. Pre-3.1 this
+  // shape was hand-written and drifted from core — used `'direct'` /
+  // `recipient` while core only ever accepted `'explicit'` / `to`.
+  // Every dispatch from the MCP server therefore hit the scheduler's
+  // unmatched-kind branch and hung the awaiting MCP tool call.
   strategy:
-    | { kind: 'direct'; recipient: string }
+    | { kind: 'explicit'; to: string }
     | { kind: 'capability'; capabilities: string[] }
     | { kind: 'broadcast'; capabilities?: string[] }
   payload?: unknown
