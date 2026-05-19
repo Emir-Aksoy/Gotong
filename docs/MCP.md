@@ -1,17 +1,29 @@
-# MCP — driving a Hub from Claude Desktop / Cursor / Cline
+# MCP — bridging AipeHub and the wider MCP ecosystem
 
-AipeHub ships a [Model Context Protocol](https://modelcontextprotocol.io)
-server so any MCP-aware client can dispatch tasks into a Hub, read who's
-online, browse the contribution leaderboard, and attach evaluations to
-completed work — without touching the admin web UI.
+AipeHub speaks [Model Context Protocol](https://modelcontextprotocol.io)
+in **both directions**:
+
+- **Inbound** (`@aipehub/mcp-server`) — any MCP-aware client
+  (Claude Desktop, Cursor, Cline, Continue, …) can dispatch tasks
+  into a Hub, browse the contribution leaderboard, and attach
+  evaluations without touching the admin web UI. Chapters 1–5 below.
+
+- **Outbound** (`@aipehub/mcp-client`) — your AipeHub agents can
+  attach a fleet of third-party MCP servers (Filesystem, GitHub,
+  Slack, Postgres, …) and use their tools natively from inside
+  `handleTask`. Chapter 6 at the bottom.
+
+The two together close the loop: anything that speaks MCP can plug
+into your Hub from either end.
 
 This document covers:
 
-1. What you can do
+1. What you can do (inbound)
 2. How to wire it into Claude Desktop / Cursor / Cline
-3. Tool reference
+3. Inbound tool reference
 4. Architecture (and why this design)
-5. Troubleshooting
+5. Inbound troubleshooting
+6. **Outbound — using third-party MCP tools from your agent**
 
 > Looking for a 中文 quickstart? The English flow is identical — every
 > setting key is in Latin characters. Translation to `docs/zh/MCP.md`
@@ -291,3 +303,155 @@ AIPE_HUB_URL=http://127.0.0.1:3000 AIPE_ADMIN_TOKEN=<token> aipehub-mcp
 ```
 
 Then type JSON-RPC messages by hand (`{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + Enter). Stderr shows what happened.
+
+---
+
+## 6. Outbound — using third-party MCP tools from your agent
+
+`@aipehub/mcp-client` lets your AipeHub agents drive the MCP server
+ecosystem from the inside. Where chapters 1–5 cover "Claude Desktop
+controls my Hub", this chapter covers "my Hub's `writer-bot` reads
+the repo via Filesystem MCP, opens a PR via GitHub MCP, posts a
+notification via Slack MCP — in one task."
+
+### 6a. Install
+
+```bash
+pnpm add @aipehub/mcp-client
+```
+
+That's it for the client. The servers themselves are typically
+fetched on-demand via `npx -y`, so they don't go in `package.json`.
+
+### 6b. Quick start (no LLM, just the toolset)
+
+```ts
+import { McpToolset } from '@aipehub/mcp-client'
+
+const toolset = new McpToolset({
+  servers: [
+    {
+      name: 'fs',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', './workspace'],
+    },
+    {
+      name: 'github',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-github'],
+      env: { GITHUB_PERSONAL_ACCESS_TOKEN: process.env.GH_TOKEN! },
+    },
+  ],
+})
+
+await toolset.connect()                          // spawn + handshake in parallel
+
+const tools = await toolset.listTools()
+//   [
+//     { name: 'fs__read_file',       serverName: 'fs',     ... },
+//     { name: 'fs__write_file',      serverName: 'fs',     ... },
+//     { name: 'github__list_issues', serverName: 'github', ... },
+//     ...
+//   ]
+
+const out = await toolset.callTool('github__create_issue', {
+  owner: 'foo', repo: 'bar', title: 'hi',
+})
+
+await toolset.disconnect()
+```
+
+Tool names are namespaced `<server>__<tool>` so two servers can both
+declare e.g. `read` without colliding. The result is already in the
+shape Anthropic / OpenAI / DeepSeek tool-use APIs expect — pass it
+straight through.
+
+There's a runnable demo at
+[`examples/mcp-tools-quickstart`](../examples/mcp-tools-quickstart/):
+
+```bash
+pnpm install
+pnpm --filter @aipehub/example-mcp-tools-quickstart start
+```
+
+### 6c. Wiring into an `AgentParticipant`
+
+The natural lifecycle: connect on agent start, disconnect on agent
+stop, hand the tool list to the LLM provider in `handleTask`.
+
+```ts
+import { AgentParticipant, type Task } from '@aipehub/core'
+import { McpToolset } from '@aipehub/mcp-client'
+
+class WriterBot extends AgentParticipant {
+  private readonly toolset = new McpToolset({
+    servers: [
+      {
+        name: 'fs',
+        command: 'npx',
+        args: ['-y', '@modelcontextprotocol/server-filesystem', './workspace'],
+      },
+    ],
+  })
+
+  async onStart() {
+    await this.toolset.connect()
+  }
+
+  async onStop() {
+    await this.toolset.disconnect()
+  }
+
+  protected async handleTask(task: Task): Promise<unknown> {
+    const tools = await this.toolset.listTools()
+    // ... pass `tools` to your LLM provider's tool-use API
+    // ... on each tool_use from the LLM, call:
+    //     await this.toolset.callTool(name, args)
+    // ... feed the result back, loop until the LLM stops requesting tools
+    return { /* final output */ }
+  }
+}
+```
+
+`LlmAgent` (the base class in `@aipehub/llm`) does **not yet** have a
+built-in multi-turn tool-use loop — that's planned for a follow-up.
+For now, an agent that wants to use MCP tools writes its own loop in
+`handleTask`. The provider abstraction (`LlmProvider.complete`) is
+the thing the loop drives.
+
+### 6d. Server lifecycle, security, debugging
+
+`@aipehub/mcp-client`'s README covers operational details:
+
+- **Lifecycle** — servers spawn at `connect()`, get `kill()`-ed at
+  `disconnect()`. A server that crashes mid-session is marked `dead`;
+  its tools throw `server_crashed` until the toolset is fully
+  disconnected and reconnected.
+- **Security** — `command` runs with your host process's privileges.
+  Don't take server commands from untrusted input. Credentials go in
+  `env`, not `args` (so they don't appear in `ps`).
+- **Debugging** — to see a server's stderr, run it directly outside
+  the toolset: `npx -y @modelcontextprotocol/server-foo`. A
+  `toolset.on('server-stderr', …)` event hook is on the roadmap.
+
+See [`packages/mcp-client/README.md`](../packages/mcp-client/README.md)
+for the full API reference + the discriminated `McpClientError.kind`
+table.
+
+### 6e. Common servers worth attaching
+
+Drawn from the [official MCP servers repo](https://github.com/modelcontextprotocol/servers):
+
+| Server | Use case | Credentials |
+|---|---|---|
+| `@modelcontextprotocol/server-filesystem` | Read / write files in a sandboxed directory | None — args restrict access |
+| `@modelcontextprotocol/server-github` | Issues, PRs, code search across GitHub | `GITHUB_PERSONAL_ACCESS_TOKEN` |
+| `@modelcontextprotocol/server-slack` | Post / read messages, list channels | `SLACK_BOT_TOKEN`, `SLACK_TEAM_ID` |
+| `@modelcontextprotocol/server-postgres` | Query a Postgres database read-only | Connection URL in args |
+| `@modelcontextprotocol/server-brave-search` | Web search | `BRAVE_API_KEY` |
+| `@modelcontextprotocol/server-puppeteer` | Browser automation | None |
+| `@modelcontextprotocol/server-memory` | Knowledge-graph memory across runs | None |
+
+…plus several hundred community servers. Pattern is identical: drop
+into the `servers:` array, pass credentials via `env`, the namespaced
+tools appear in `listTools()`.

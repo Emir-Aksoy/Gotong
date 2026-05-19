@@ -108,6 +108,16 @@ importers:
         specifier: ^6.38.0
         version: 6.38.0(ws@8.20.1)(zod@4.4.3)
 
+  examples/mcp-tools-quickstart:
+    dependencies:
+      '@aipehub/mcp-client':
+        specifier: workspace:*
+        version: link:../../packages/mcp-client
+    devDependencies:
+      tsx:
+        specifier: ^4.7.0
+        version: 4.22.0
+
   examples/open-space:
     dependencies:
       '@aipehub/core':
@@ -298,6 +308,19 @@ importers:
       vitest:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@20.19.41)
+
+  packages/mcp-client:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@4.4.3)
+    devDependencies:
+      vitest:
+        specifier: ^2.0.0
+        version: 2.1.9(@types/node@20.19.41)
+      zod:
+        specifier: ^4.4.3
+        version: 4.4.3
 
   packages/mcp-server:
     dependencies:
