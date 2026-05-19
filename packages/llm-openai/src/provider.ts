@@ -1,9 +1,12 @@
 import OpenAI from 'openai'
 import type {
+  LlmContentBlock,
+  LlmMessage,
   LlmProvider,
   LlmRequest,
   LlmResponse,
   LlmStopReason,
+  LlmToolUseBlock,
 } from '@aipehub/llm'
 
 /**
@@ -89,12 +92,23 @@ export interface OpenAIProviderOptions {
  *   chat-completions convention.
  * - We send `max_completion_tokens`, not the deprecated `max_tokens` — newer
  *   reasoning models require the new field and the old one is being removed.
+ *   Override via `maxTokensField` for vendors still on the legacy field.
  * - `finish_reason` of `'stop'` maps to `'end_turn'`, `'length'` to
- *   `'max_tokens'`. Anything else (e.g. `tool_calls`, `content_filter`,
- *   `null`) maps to `'error'` so callers can surface it.
- * - Response text is `choices[0].message.content ?? ''`.
+ *   `'max_tokens'`, `'tool_calls'` to `'tool_use'` (v0.3+). Anything else
+ *   (e.g. `content_filter`, `null`) maps to `'error'` so callers can surface it.
+ * - Response text is `choices[0].message.content ?? ''`. Tool calls are
+ *   extracted into `response.toolUses` (v0.3+).
  * - SDK exceptions (auth, rate-limit, transport) are not caught — they
  *   propagate so `LlmAgent` can map them to a failed `TaskResult`.
+ *
+ * Tool-use translation:
+ * - Provider-neutral `LlmToolDefinition` → OpenAI's `{type:'function',function:{name,description,parameters}}`.
+ * - Provider-neutral assistant `tool_use` blocks → `tool_calls` array on
+ *   the assistant message; `LlmToolUseBlock.input` is JSON-stringified into
+ *   `tool_calls[].function.arguments` (OpenAI's wire format).
+ * - Provider-neutral `tool_result` blocks become standalone `{role:'tool',
+ *   tool_call_id, content}` messages — OpenAI's chat format has no
+ *   `tool_result` block type; instead, each tool result is its own message.
  */
 export class OpenAIProvider implements LlmProvider {
   readonly name: string
@@ -127,12 +141,12 @@ export class OpenAIProvider implements LlmProvider {
   }
 
   async complete(req: LlmRequest): Promise<LlmResponse> {
-    const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = []
+    const messages: Array<Record<string, unknown>> = []
     if (req.system !== undefined) {
       messages.push({ role: 'system', content: req.system })
     }
     for (const m of req.messages) {
-      messages.push({ role: m.role, content: m.content })
+      messages.push(...translateMessage(m))
     }
 
     const body: Record<string, unknown> = {
@@ -141,6 +155,16 @@ export class OpenAIProvider implements LlmProvider {
     }
     if (req.maxTokens !== undefined) body[this.maxTokensField] = req.maxTokens
     if (req.temperature !== undefined) body.temperature = req.temperature
+    if (req.tools && req.tools.length > 0) {
+      body.tools = req.tools.map((t) => ({
+        type: 'function',
+        function: {
+          name: t.name,
+          ...(t.description !== undefined ? { description: t.description } : {}),
+          parameters: t.inputSchema,
+        },
+      }))
+    }
 
     let lastErr: unknown
     const totalAttempts = this.maxRetries + 1
@@ -156,11 +180,13 @@ export class OpenAIProvider implements LlmProvider {
 
         const firstChoice = raw.choices?.[0]
         const text = firstChoice?.message?.content ?? ''
+        const toolUses = extractToolUses(firstChoice?.message?.tool_calls)
         const out: LlmResponse = {
           text,
           stopReason: mapStopReason(firstChoice?.finish_reason),
           raw,
         }
+        if (toolUses.length > 0) out.toolUses = toolUses
         if (raw.usage) {
           out.usage = {
             inputTokens: raw.usage.prompt_tokens,
@@ -185,6 +211,124 @@ export class OpenAIProvider implements LlmProvider {
     // line keeps TypeScript happy if it can't prove the loop always exits.
     throw lastErr instanceof Error ? lastErr : new Error('OpenAIProvider: retry loop exited without result')
   }
+}
+
+/**
+ * Translate one provider-neutral message into one *or more* OpenAI
+ * messages. `tool_result` blocks fan out into their own `{role:'tool', ...}`
+ * messages, which is why this returns an array rather than a single record.
+ */
+function translateMessage(m: LlmMessage): Array<Record<string, unknown>> {
+  if (typeof m.content === 'string') {
+    return [{ role: m.role, content: m.content }]
+  }
+  if (m.role === 'assistant') {
+    // Assistant turns can mix text + tool_use. OpenAI requires `content`
+    // to be either a string OR null when `tool_calls` is set. Collapse
+    // text blocks; carry tool_use blocks across as `tool_calls`.
+    const textParts: string[] = []
+    const toolCalls: Array<Record<string, unknown>> = []
+    for (const block of m.content) {
+      if (block.type === 'text') {
+        textParts.push(block.text)
+      } else if (block.type === 'tool_use') {
+        toolCalls.push({
+          id: block.id,
+          type: 'function',
+          function: {
+            name: block.name,
+            // OpenAI wants a JSON-encoded string here.
+            arguments: JSON.stringify(block.input ?? {}),
+          },
+        })
+      }
+      // tool_result blocks should never appear on an assistant turn; ignore.
+    }
+    const out: Record<string, unknown> = {
+      role: 'assistant',
+      content: textParts.length > 0 ? textParts.join('') : null,
+    }
+    if (toolCalls.length > 0) out.tool_calls = toolCalls
+    return [out]
+  }
+  // User turn: text passes through as content; tool_result blocks fan out
+  // into their own `{role:'tool', ...}` messages. Plain text blocks (rare
+  // on user turns in tool-use loops) are concatenated.
+  const userMessages: Array<Record<string, unknown>> = []
+  const textParts: string[] = []
+  for (const block of m.content) {
+    if (block.type === 'text') {
+      textParts.push(block.text)
+    } else if (block.type === 'tool_result') {
+      const content =
+        typeof block.content === 'string'
+          ? block.content
+          : block.content.map((tb) => tb.text).join('')
+      userMessages.push({
+        role: 'tool',
+        tool_call_id: block.toolUseId,
+        content,
+      })
+    }
+  }
+  if (textParts.length > 0) {
+    userMessages.unshift({ role: 'user', content: textParts.join('') })
+  }
+  if (userMessages.length === 0) {
+    // Defensive: don't drop a message silently — emit an empty user turn.
+    userMessages.push({ role: 'user', content: '' })
+  }
+  return userMessages
+}
+
+/**
+ * Pull `tool_use` blocks out of an OpenAI `tool_calls` array. Returns
+ * `[]` when the field is absent — the caller branches on
+ * `LlmResponse.toolUses` being present + non-empty.
+ */
+function extractToolUses(
+  toolCalls:
+    | ReadonlyArray<{
+        id?: string
+        type?: string
+        function?: { name?: string; arguments?: string }
+      }>
+    | undefined,
+): LlmToolUseBlock[] {
+  if (!toolCalls || toolCalls.length === 0) return []
+  const out: LlmToolUseBlock[] = []
+  for (const tc of toolCalls) {
+    if (
+      tc.type !== 'function' ||
+      typeof tc.id !== 'string' ||
+      !tc.function ||
+      typeof tc.function.name !== 'string'
+    ) {
+      continue
+    }
+    let input: Record<string, unknown> = {}
+    if (typeof tc.function.arguments === 'string' && tc.function.arguments.length > 0) {
+      try {
+        const parsed = JSON.parse(tc.function.arguments)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          input = parsed as Record<string, unknown>
+        }
+      } catch {
+        // OpenAI occasionally emits non-JSON in `arguments` when the
+        // model errors mid-stream. Surface the raw string under a
+        // conventional `_raw` key so the agent can see what happened
+        // without crashing on JSON.parse.
+        input = { _raw: tc.function.arguments }
+      }
+    }
+    out.push({
+      type: 'tool_use',
+      id: tc.id,
+      name: tc.function.name,
+      input,
+    })
+  }
+  return out
 }
 
 // --- transient-error detection -----------------------------------------
@@ -266,7 +410,14 @@ function sleep(ms: number): Promise<void> {
  */
 interface OpenAIChatCompletionLike {
   choices?: ReadonlyArray<{
-    message?: { content?: string | null }
+    message?: {
+      content?: string | null
+      tool_calls?: ReadonlyArray<{
+        id?: string
+        type?: string
+        function?: { name?: string; arguments?: string }
+      }>
+    }
     finish_reason?: string | null
   }>
   usage?: { prompt_tokens: number; completion_tokens: number }
@@ -278,6 +429,8 @@ function mapStopReason(reason: string | null | undefined): LlmStopReason {
       return 'end_turn'
     case 'length':
       return 'max_tokens'
+    case 'tool_calls':
+      return 'tool_use'
     default:
       return 'error'
   }

@@ -72,7 +72,12 @@ async function main(): Promise<void> {
     name: 'mock-writer',
     reply: (req: LlmRequest) => {
       const last = req.messages[req.messages.length - 1]
-      const prompt = last?.content ?? ''
+      // v0.3 made `content` a union of string | content blocks; for this
+      // mock writer the input is always plain text (LlmAgent's default
+      // buildRequest doesn't emit blocks), so narrow to string and skip
+      // the block-array case.
+      const prompt =
+        typeof last?.content === 'string' ? last.content : ''
       // Extract a topic if the prompt follows the "Please write about: X" pattern
       // that LlmAgent's default buildRequest produces from { topic }.
       const m = /^Please write about: (.+)$/.exec(prompt)

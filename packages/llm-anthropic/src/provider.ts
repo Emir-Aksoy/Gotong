@@ -1,9 +1,12 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type {
+  LlmContentBlock,
+  LlmMessage,
   LlmProvider,
   LlmRequest,
   LlmResponse,
   LlmStopReason,
+  LlmToolUseBlock,
 } from '@aipehub/llm'
 
 /**
@@ -39,12 +42,22 @@ export interface AnthropicProviderOptions {
  *
  * Behavior notes:
  * - `stop_reason` of `end_turn` / `stop_sequence` collapses to `'end_turn'`.
- *   `max_tokens` maps to `'max_tokens'`. Everything else (e.g. `tool_use`,
- *   `pause_turn`, future values) maps to `'error'` so callers can surface it.
+ *   `max_tokens` → `'max_tokens'`. `tool_use` → `'tool_use'` (v0.3+).
+ *   Everything else (e.g. `pause_turn`, future values) maps to `'error'`
+ *   so callers can surface it.
  * - Response text is the concatenation of all `content[].text` for blocks
- *   whose `type === 'text'`. Tool-use blocks are ignored in v0.2.
+ *   whose `type === 'text'`. `tool_use` blocks are extracted into
+ *   `response.toolUses` (v0.3+); they are NOT folded into `text`.
  * - SDK exceptions (auth, rate-limit, transport) are not caught — they
  *   propagate so `LlmAgent` can map them to a failed `TaskResult`.
+ *
+ * Tool-use translation:
+ * - Provider-neutral `LlmToolDefinition.inputSchema` → Anthropic's
+ *   `input_schema` (snake_case).
+ * - Provider-neutral `LlmToolResultBlock.{toolUseId,isError}` →
+ *   `tool_use_id` / `is_error`.
+ * - `LlmMessage.content` accepts either a plain string (legacy) or an
+ *   array of content blocks (needed for tool-use round-trips).
  */
 export class AnthropicProvider implements LlmProvider {
   readonly name = 'anthropic'
@@ -71,7 +84,7 @@ export class AnthropicProvider implements LlmProvider {
     const body: Record<string, unknown> = {
       model,
       max_tokens: req.maxTokens ?? this.defaultMaxTokens,
-      messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
+      messages: req.messages.map(translateMessage),
     }
     if (req.system !== undefined) body.system = req.system
     // Opus 4.x ("thinking" models) reject `temperature` outright — the
@@ -81,6 +94,19 @@ export class AnthropicProvider implements LlmProvider {
     // model. See README §"Claude Opus 4.7" for the full picture.
     if (req.temperature !== undefined && !isThinkingModel(model)) {
       body.temperature = req.temperature
+    }
+    if (req.tools && req.tools.length > 0) {
+      // Anthropic expects `input_schema`; our neutral type uses
+      // `inputSchema`. Re-key here so providers/tests don't have to
+      // think about which casing they're holding.
+      body.tools = req.tools.map((t) => {
+        const out: Record<string, unknown> = {
+          name: t.name,
+          input_schema: t.inputSchema,
+        }
+        if (t.description !== undefined) out.description = t.description
+        return out
+      })
     }
 
     // We use the SDK's loosely-typed call signature so the same code path
@@ -93,15 +119,35 @@ export class AnthropicProvider implements LlmProvider {
     )(body)) as AnthropicMessageLike
 
     const text = (raw.content ?? [])
-      .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+      .filter((b): b is { type: 'text'; text: string } => b.type === 'text' && typeof b.text === 'string')
       .map((b) => b.text)
       .join('')
+
+    const toolUses: LlmToolUseBlock[] = []
+    for (const b of raw.content ?? []) {
+      if (b.type === 'tool_use' && typeof b.id === 'string' && typeof b.name === 'string') {
+        toolUses.push({
+          type: 'tool_use',
+          id: b.id,
+          name: b.name,
+          // Anthropic guarantees `input` is a JSON object even when the
+          // model called the tool with no args (it'll be `{}`). Falling
+          // back to `{}` defensively so a malformed response doesn't
+          // produce a non-object input downstream.
+          input:
+            b.input && typeof b.input === 'object' && !Array.isArray(b.input)
+              ? (b.input as Record<string, unknown>)
+              : {},
+        })
+      }
+    }
 
     const out: LlmResponse = {
       text,
       stopReason: mapStopReason(raw.stop_reason),
       raw,
     }
+    if (toolUses.length > 0) out.toolUses = toolUses
     if (raw.usage) {
       const usage: LlmResponse['usage'] = {
         inputTokens: raw.usage.input_tokens,
@@ -124,12 +170,54 @@ export class AnthropicProvider implements LlmProvider {
 }
 
 /**
+ * Translate a provider-neutral message to the Anthropic on-wire shape.
+ * String content passes through; block-array content needs each block
+ * re-keyed (`toolUseId` → `tool_use_id`, `isError` → `is_error`).
+ */
+function translateMessage(m: LlmMessage): Record<string, unknown> {
+  if (typeof m.content === 'string') {
+    return { role: m.role, content: m.content }
+  }
+  return {
+    role: m.role,
+    content: m.content.map(translateBlock),
+  }
+}
+
+function translateBlock(block: LlmContentBlock): Record<string, unknown> {
+  switch (block.type) {
+    case 'text':
+      return { type: 'text', text: block.text }
+    case 'tool_use':
+      return {
+        type: 'tool_use',
+        id: block.id,
+        name: block.name,
+        input: block.input,
+      }
+    case 'tool_result': {
+      const out: Record<string, unknown> = {
+        type: 'tool_result',
+        tool_use_id: block.toolUseId,
+      }
+      if (typeof block.content === 'string') {
+        out.content = block.content
+      } else {
+        out.content = block.content.map((tb) => ({ type: 'text', text: tb.text }))
+      }
+      if (block.isError) out.is_error = true
+      return out
+    }
+  }
+}
+
+/**
  * Minimal structural shape of an Anthropic `Message` we touch. Declared
  * locally rather than imported from the SDK so v0.2 doesn't pin to a
  * particular minor version of the vendor types.
  */
 interface AnthropicMessageLike {
-  content?: ReadonlyArray<{ type: string; text?: string }>
+  content?: ReadonlyArray<AnthropicContentBlock>
   stop_reason?: string | null
   usage?: {
     input_tokens: number
@@ -139,6 +227,18 @@ interface AnthropicMessageLike {
     /** Tokens served from the prompt cache. Heavily discounted. */
     cache_read_input_tokens?: number
   }
+}
+
+/**
+ * Structural superset of every block shape Anthropic can emit; we
+ * discriminate on `type` at the use site.
+ */
+interface AnthropicContentBlock {
+  type: string
+  text?: string
+  id?: string
+  name?: string
+  input?: unknown
 }
 
 /**
@@ -158,6 +258,8 @@ function mapStopReason(reason: string | null | undefined): LlmStopReason {
       return 'end_turn'
     case 'max_tokens':
       return 'max_tokens'
+    case 'tool_use':
+      return 'tool_use'
     default:
       return 'error'
   }

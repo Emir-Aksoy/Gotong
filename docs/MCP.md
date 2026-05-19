@@ -374,50 +374,112 @@ pnpm install
 pnpm --filter @aipehub/example-mcp-tools-quickstart start
 ```
 
-### 6c. Wiring into an `AgentParticipant`
+### 6c. Wiring into an `LlmAgent` (the easy path, v0.3+)
 
-The natural lifecycle: connect on agent start, disconnect on agent
-stop, hand the tool list to the LLM provider in `handleTask`.
+`LlmAgent` (in `@aipehub/llm`) has a built-in multi-turn tool-use loop.
+Pass an `McpToolset` (or anything satisfying `LlmAgentToolset`) as
+`tools:` and it'll declare the tools to the LLM, execute every
+`tool_use` block, feed the results back, and loop until the model is
+done — all inside one `hub.dispatch(...)`.
 
 ```ts
-import { AgentParticipant, type Task } from '@aipehub/core'
+import { Hub } from '@aipehub/core'
+import { LlmAgent } from '@aipehub/llm'
+import { AnthropicProvider } from '@aipehub/llm-anthropic'
 import { McpToolset } from '@aipehub/mcp-client'
 
-class WriterBot extends AgentParticipant {
-  private readonly toolset = new McpToolset({
-    servers: [
-      {
-        name: 'fs',
-        command: 'npx',
-        args: ['-y', '@modelcontextprotocol/server-filesystem', './workspace'],
-      },
-    ],
-  })
+// 1) Spawn the MCP servers
+const toolset = new McpToolset({
+  servers: [
+    {
+      name: 'fs',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', './workspace'],
+    },
+  ],
+})
+await toolset.connect()
 
-  async onStart() {
-    await this.toolset.connect()
-  }
+// 2) Hand them to the agent
+const agent = new LlmAgent({
+  id: 'writer-bot',
+  capabilities: ['draft'],
+  provider: new AnthropicProvider({ defaultModel: 'claude-sonnet-4-6' }),
+  tools: toolset,            // ← this is the only thing required
+  maxToolRounds: 8,          // safety cap; default is 8
+  system: 'You can read files via fs__read_text_file…',
+})
 
-  async onStop() {
-    await this.toolset.disconnect()
-  }
+const hub = Hub.inMemory()
+await hub.start()
+hub.register(agent)
 
-  protected async handleTask(task: Task): Promise<unknown> {
-    const tools = await this.toolset.listTools()
-    // ... pass `tools` to your LLM provider's tool-use API
-    // ... on each tool_use from the LLM, call:
-    //     await this.toolset.callTool(name, args)
-    // ... feed the result back, loop until the LLM stops requesting tools
-    return { /* final output */ }
-  }
+const result = await hub.dispatch({
+  from: 'system',
+  strategy: { kind: 'capability', capabilities: ['draft'] },
+  payload: 'Read the project README and quote its opening line verbatim.',
+})
+
+await hub.stop()
+await toolset.disconnect()
+```
+
+The agent does **not** own the toolset's lifecycle (connect /
+disconnect is your responsibility), so a single toolset can be shared
+across many agents within the same host.
+
+The output object carries a `toolRounds` count when at least one
+tool was called, so dashboards can plot how often the model needed
+the toolbox:
+
+```ts
+const out = result.output as { text: string; toolRounds?: number }
+console.log(`Model answered after ${out.toolRounds ?? 0} tool call(s)`)
+```
+
+Provider support: **Anthropic** (`@aipehub/llm-anthropic`) and
+**OpenAI / OpenAI-compatible** (`@aipehub/llm-openai`) both wire
+through to their native tool-use APIs. Custom providers (DeepSeek,
+Qwen, Zhipu via `baseURL` override) inherit OpenAI's tool-use shape
+as long as the upstream supports `tool_calls`.
+
+There's a runnable end-to-end demo at
+[`examples/mcp-tools-llm-agent`](../examples/mcp-tools-llm-agent/) —
+spawn the MCP filesystem server, hand its tools to Claude, watch it
+read README.md unprompted:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-…
+pnpm install
+pnpm --filter @aipehub/example-mcp-tools-llm-agent start
+```
+
+#### Bring-your-own toolset
+
+`LlmAgent` accepts any `LlmAgentToolset` (from `@aipehub/llm`):
+
+```ts
+interface LlmAgentToolset {
+  listTools(): Promise<LlmToolDefinition[]> | LlmToolDefinition[]
+  callTool(name: string, args: Record<string, unknown>): Promise<{
+    content: ReadonlyArray<unknown>
+    isError?: boolean
+  }>
 }
 ```
 
-`LlmAgent` (the base class in `@aipehub/llm`) does **not yet** have a
-built-in multi-turn tool-use loop — that's planned for a follow-up.
-For now, an agent that wants to use MCP tools writes its own loop in
-`handleTask`. The provider abstraction (`LlmProvider.complete`) is
-the thing the loop drives.
+…so you can plug in a hand-rolled function registry, an internal HTTP
+API wrapper, etc., without depending on `@aipehub/mcp-client`. The
+MCP toolset already implements this shape — it's a drop-in.
+
+### 6c-alt. Wiring into a custom `AgentParticipant` (if you can't use `LlmAgent`)
+
+If you've subclassed `AgentParticipant` directly and have your own
+LLM driver, the pattern is: connect the toolset on agent start, hand
+its tools to your LLM provider in `handleTask`, and call back into
+`toolset.callTool` for each `tool_use` block. This is what
+`LlmAgent.handleTaskWithTools` does for you — read its source for the
+canonical loop.
 
 ### 6d. Server lifecycle, security, debugging
 

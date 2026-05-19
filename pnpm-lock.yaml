@@ -124,6 +124,28 @@ importers:
         specifier: workspace:*
         version: link:../../packages/transport-ws
 
+  examples/mcp-tools-llm-agent:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@aipehub/llm-anthropic':
+        specifier: workspace:*
+        version: link:../../packages/llm-anthropic
+      '@aipehub/mcp-client':
+        specifier: workspace:*
+        version: link:../../packages/mcp-client
+      '@anthropic-ai/sdk':
+        specifier: ^0.96.0
+        version: 0.96.0(zod@4.4.3)
+    devDependencies:
+      tsx:
+        specifier: ^4.7.0
+        version: 4.22.0
+
   examples/mcp-tools-quickstart:
     dependencies:
       '@aipehub/mcp-client':

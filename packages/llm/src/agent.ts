@@ -4,7 +4,16 @@ import {
   type Task,
 } from '@aipehub/core'
 import { EMPTY_SERVICE_CTX, type ServiceCtx } from '@aipehub/services-sdk'
-import type { LlmProvider, LlmRequest, LlmResponse } from './types.js'
+import type {
+  LlmAgentToolset,
+  LlmContentBlock,
+  LlmProvider,
+  LlmRequest,
+  LlmResponse,
+  LlmToolDefinition,
+  LlmToolResultBlock,
+  LlmToolUseBlock,
+} from './types.js'
 
 /**
  * Default shape of a task payload for an LLM agent. Either pass a string
@@ -55,6 +64,32 @@ export interface LlmAgentOptions extends AgentOptions {
    * frozen `{}` so identity comparisons stay cheap.
    */
   services?: ServiceCtx
+  /**
+   * Optional toolset (typically an `McpToolset`) the LLM may call
+   * during `handleTask`. When set, the agent runs a tool-use loop:
+   * if the LLM's response includes `tool_use` blocks, the agent
+   * executes them via `tools.callTool(...)`, feeds the results back,
+   * and re-invokes the provider until a non-`tool_use` stop reason.
+   *
+   * Leave unset for plain text-in/text-out agents — the loop is then
+   * skipped and behavior matches v0.2 exactly.
+   *
+   * The agent does NOT own the toolset's lifecycle: connect / disconnect
+   * is the caller's responsibility, so a single toolset can be shared
+   * across many agents within the same host.
+   */
+  tools?: LlmAgentToolset
+  /**
+   * Safety cap on the number of tool-use rounds within a single
+   * `handleTask` invocation. Each round = one provider.complete() that
+   * returned `tool_use`. After this many rounds the agent aborts the
+   * task with an error rather than risk an infinite loop (e.g. a
+   * model that calls the same broken tool forever). Default: 8.
+   *
+   * Increase for legitimately deep workflows (multi-file refactors,
+   * iterative debugging). Decrease for tight per-task budgets.
+   */
+  maxToolRounds?: number
 }
 
 /**
@@ -67,6 +102,12 @@ export interface LlmTaskOutput {
   usage?: LlmResponse['usage']
   /** Convenience: provider name that produced this output. */
   by: string
+  /**
+   * Number of tool-use rounds executed during this task. 0 when no
+   * toolset was attached, or when the LLM never asked for a tool.
+   * Useful for cost / latency observability.
+   */
+  toolRounds?: number
 }
 
 /**
@@ -80,6 +121,10 @@ export interface LlmTaskOutput {
  *
  * Override `handleTask` directly for full control (e.g. multi-step reasoning,
  * retry policies, JSON parsing with re-prompt on failure).
+ *
+ * When constructed with `tools: McpToolset` (or any `LlmAgentToolset`),
+ * the default `handleTask` runs a multi-round tool-use loop — see
+ * {@link LlmAgentOptions.tools}.
  */
 export class LlmAgent extends AgentParticipant {
   protected readonly provider: LlmProvider
@@ -97,6 +142,14 @@ export class LlmAgent extends AgentParticipant {
    * about an undefined ctx.
    */
   protected readonly services: ServiceCtx
+  /**
+   * Tool runtime attached at construction. Undefined when this agent
+   * was constructed without `tools:`. Subclasses can override
+   * `handleTask` to drive tools differently, but the default loop
+   * works against any `LlmAgentToolset`.
+   */
+  protected readonly toolset: LlmAgentToolset | undefined
+  protected readonly maxToolRounds: number
 
   constructor(opts: LlmAgentOptions) {
     super({ id: opts.id, capabilities: opts.capabilities })
@@ -108,6 +161,8 @@ export class LlmAgent extends AgentParticipant {
       model: opts.model,
     }
     this.services = opts.services ?? EMPTY_SERVICE_CTX
+    this.toolset = opts.tools
+    this.maxToolRounds = opts.maxToolRounds ?? 8
   }
 
   /**
@@ -164,20 +219,185 @@ export class LlmAgent extends AgentParticipant {
   /**
    * Default response → output translation. Override to e.g. parse JSON,
    * extract code blocks, or re-prompt on validation failure.
+   *
+   * `toolRounds` reflects how many tool-use turns ran before this final
+   * response — subclasses that override should preserve / surface it for
+   * cost observability.
    */
-  protected parseResponse(response: LlmResponse, _task: Task): LlmTaskOutput {
+  protected parseResponse(
+    response: LlmResponse,
+    _task: Task,
+    toolRounds = 0,
+  ): LlmTaskOutput {
     const out: LlmTaskOutput = {
       text: response.text,
       stopReason: response.stopReason,
       by: this.provider.name,
     }
     if (response.usage) out.usage = response.usage
+    if (toolRounds > 0) out.toolRounds = toolRounds
     return out
   }
 
+  /**
+   * Default tool-result flattener. The MCP `CallToolResult` `content`
+   * array can contain text / image / resource blocks; only text is
+   * something a current-gen LLM can consume directly. Concatenate all
+   * text blocks; if none exist, fall back to a JSON dump so the model
+   * at least sees that the call succeeded.
+   *
+   * Subclasses can override for richer flattening (e.g. summarize a
+   * resource handle into a URL the next turn can fetch).
+   */
+  protected flattenToolResult(content: ReadonlyArray<unknown>): string {
+    const parts: string[] = []
+    for (const block of content) {
+      if (block && typeof block === 'object') {
+        const b = block as { type?: unknown; text?: unknown }
+        if (b.type === 'text' && typeof b.text === 'string') {
+          parts.push(b.text)
+        }
+      }
+    }
+    if (parts.length > 0) return parts.join('')
+    // No text blocks. Surface the shape so the LLM can at least see
+    // that the call returned something. Truncate so a giant image
+    // payload doesn't blow up the next turn's input.
+    try {
+      const dump = JSON.stringify(content)
+      return dump.length > 2_000 ? dump.slice(0, 2_000) + '…(truncated)' : dump
+    } catch {
+      return '<unrenderable tool output>'
+    }
+  }
+
   protected async handleTask(task: Task): Promise<unknown> {
-    const req = this.buildRequest(task)
-    const res = await this.provider.complete(req)
-    return this.parseResponse(res, task)
+    if (!this.toolset) {
+      // No toolset attached — same code path as v0.2.
+      const req = this.buildRequest(task)
+      const res = await this.provider.complete(req)
+      return this.parseResponse(res, task, 0)
+    }
+    return this.handleTaskWithTools(task)
+  }
+
+  /**
+   * Run the multi-turn tool-use loop. Stops on the first non-`tool_use`
+   * stop reason or after `maxToolRounds` rounds, whichever comes first.
+   *
+   * Loop body per round:
+   *   1. Call `provider.complete(req)`.
+   *   2. If stopReason !== 'tool_use' (or no tool_use blocks present),
+   *      we're done — flatten via `parseResponse`.
+   *   3. Otherwise, execute each tool_use via `toolset.callTool`.
+   *      Errors (transport, unknown_tool, tool_call_failed) are caught
+   *      and surfaced to the model as `isError: true` tool_result blocks
+   *      — this lets the model recover by re-trying or picking a
+   *      different tool, instead of bringing the whole task down.
+   *   4. Append the assistant's `tool_use` blocks + the user's
+   *      `tool_result` blocks to messages, and loop.
+   */
+  protected async handleTaskWithTools(task: Task): Promise<unknown> {
+    const baseReq = this.buildRequest(task)
+    // Snapshot the tool list once per task. Re-listing every round
+    // would be wasteful — MCP tool schemas don't change mid-session
+    // in practice, and the SDK doesn't push a tools-changed event we
+    // can subscribe to.
+    const tools = await this.listToolsForLlm()
+
+    let req: LlmRequest =
+      tools.length > 0 ? { ...baseReq, tools } : { ...baseReq }
+    let rounds = 0
+
+    while (true) {
+      const res = await this.provider.complete(req)
+      const wantsTool =
+        res.stopReason === 'tool_use' &&
+        res.toolUses !== undefined &&
+        res.toolUses.length > 0
+
+      if (!wantsTool) {
+        return this.parseResponse(res, task, rounds)
+      }
+
+      rounds++
+      if (rounds > this.maxToolRounds) {
+        // Surface as a soft-fail response so the caller still gets
+        // partial text + usage rather than an unbounded throw.
+        return this.parseResponse(
+          {
+            ...res,
+            stopReason: 'error',
+            text:
+              (res.text ? res.text + '\n\n' : '') +
+              `[llm-agent: aborted after ${this.maxToolRounds} tool-use rounds]`,
+          },
+          task,
+          rounds,
+        )
+      }
+
+      // toolUses is guaranteed defined by `wantsTool` above.
+      const toolUses = res.toolUses as LlmToolUseBlock[]
+      const assistantBlocks: LlmContentBlock[] = []
+      if (res.text) assistantBlocks.push({ type: 'text', text: res.text })
+      assistantBlocks.push(...toolUses)
+
+      const toolResultBlocks: LlmToolResultBlock[] = []
+      for (const tu of toolUses) {
+        try {
+          const out = await this.toolset!.callTool(tu.name, tu.input)
+          const text = this.flattenToolResult(out.content)
+          const block: LlmToolResultBlock = {
+            type: 'tool_result',
+            toolUseId: tu.id,
+            content: text,
+          }
+          if (out.isError) block.isError = true
+          toolResultBlocks.push(block)
+        } catch (err) {
+          // Errors from the toolset (unknown tool, dead server,
+          // transport failure, tool_call_failed) are converted to
+          // `isError: true` results. The model sees the failure and
+          // can recover; the agent doesn't crash on a flaky tool.
+          toolResultBlocks.push({
+            type: 'tool_result',
+            toolUseId: tu.id,
+            content:
+              err instanceof Error
+                ? err.message
+                : `tool '${tu.name}' threw: ${String(err)}`,
+            isError: true,
+          })
+        }
+      }
+
+      req = {
+        ...req,
+        messages: [
+          ...req.messages,
+          { role: 'assistant', content: assistantBlocks },
+          { role: 'user', content: toolResultBlocks },
+        ],
+      }
+    }
+  }
+
+  /**
+   * Snapshot the toolset's tools, normalizing the names to satisfy
+   * the LLM tool-name regex `^[a-zA-Z0-9_-]+$`. MCP names that pass
+   * through `McpToolset` (`<server>__<tool>`) already satisfy it;
+   * hand-rolled toolsets must do the same.
+   */
+  protected async listToolsForLlm(): Promise<LlmToolDefinition[]> {
+    if (!this.toolset) return []
+    const raw = await this.toolset.listTools()
+    // Strip down to the neutral shape so providers don't see extra
+    // fields they don't understand.
+    return raw.map((t) => ({
+      name: t.name,
+      ...(t.description !== undefined ? { description: t.description } : {}),
+      inputSchema: t.inputSchema,
+    }))
   }
 }

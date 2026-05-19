@@ -1,0 +1,21 @@
+{
+  "name": "@aipehub/example-mcp-tools-llm-agent",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "End-to-end demo: spawn an MCP filesystem server, hand its tools to an LlmAgent backed by Anthropic, watch Claude read a file via the tool-use loop.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/llm": "workspace:*",
+    "@aipehub/llm-anthropic": "workspace:*",
+    "@aipehub/mcp-client": "workspace:*",
+    "@anthropic-ai/sdk": "^0.96.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0"
+  }
+}
