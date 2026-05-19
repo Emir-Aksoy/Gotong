@@ -1,0 +1,59 @@
+# Example Prometheus scrape configuration for an AipeHub host.
+#
+# Drop the relevant block under `scrape_configs:` in your prometheus.yml.
+# Two jobs: one for the AipeHub host itself (auth required), one for
+# node_exporter on the same box (OS-level metrics that AipeHub doesn't
+# export).
+#
+# IMPORTANT — auth: `/api/admin/metrics` is admin-gated. Mint a
+# dedicated *machine* admin (don't reuse a human admin's token) and
+# rotate it on a schedule like any other secret.
+#
+#   pnpm host -- mint-admin --display-name 'prometheus-scraper' \
+#     | grep -oE '[a-f0-9]{64}'   # the token line
+#
+# Store the resulting token in a file that Prometheus can read but
+# nothing else (mode 0600, owned by the prometheus user) and point
+# `bearer_token_file` at it. Rotation = swap the file, no restart needed.
+
+scrape_configs:
+
+  # ----------------------------------------------------------------------
+  # The AipeHub Hub
+  # ----------------------------------------------------------------------
+  - job_name: aipehub
+    metrics_path: /api/admin/metrics
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    # /api/admin/metrics is admin-gated — see the comment block at the
+    # top of this file for how to mint a machine admin.
+    bearer_token_file: /etc/prometheus/aipehub.token
+    scheme: https
+    static_configs:
+      - targets:
+          - hub.example.com:443
+    # If you front the Hub with Caddy / nginx on standard 443, no
+    # tls_config block is needed. For self-signed certs add:
+    # tls_config:
+    #   ca_file: /etc/prometheus/aipehub-ca.crt
+    #   insecure_skip_verify: false
+
+  # ----------------------------------------------------------------------
+  # OS-level metrics — disk, memory, process RSS
+  # ----------------------------------------------------------------------
+  # AipeHub does NOT export these on purpose (the binary stays small +
+  # focused). Install node_exporter from
+  # https://github.com/prometheus/node_exporter on the same host and
+  # scrape it as a separate job. The alert rules in `aipehub.alerts.yml`
+  # under the `aipehub-host` group rely on this job being named "node".
+  - job_name: node
+    static_configs:
+      - targets:
+          - 127.0.0.1:9100         # node_exporter default port
+    # If you want process-level RSS (for the AipehubProcessRssCreep
+    # alert), enable the process collector in node_exporter:
+    #   ExecStart=/usr/local/bin/node_exporter \
+    #     --collector.processes \
+    #     --collector.process.username
+    # and run it as a user that can read /proc for the aipehub-host
+    # process.

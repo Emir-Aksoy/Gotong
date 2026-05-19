@@ -37,6 +37,7 @@ The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI. L
 | 🧠 **Designing on top of it** | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) + [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | Hub is dumb on purpose; wire protocol is v1.0. |
 | 📊 **Sizing a deployment** | [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | Pre-launch baseline numbers + how to rerun the load test against your own hardware. |
 | 🛟 **Operating in production** | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Backup/restore playbook, disaster-recovery drill, `secret.key` handling, troubleshooting. |
+| 📡 **Monitoring + alerts** | [`docs/MONITORING.md`](docs/MONITORING.md) | Prometheus scrape config, 7 alert rules with runbooks, Grafana dashboard JSON. |
 
 ### Adding an agent — two paths
 
