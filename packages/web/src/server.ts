@@ -334,9 +334,24 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     workflows: opts.workflows,
     services: opts.services,
     readinessGate: opts.readinessGate,
+    httpStats: new HttpStats(),
   }
 
   const server = createServer((req, res) => {
+    // Record the final status code as soon as the response is fully
+    // flushed. 'finish' fires regardless of which writeHead the
+    // handler took, so we capture all paths (200 OK / 4xx admin
+    // rejects / 5xx handler throws / SSE clients that disconnected).
+    // SSE streams emit 'close' but not 'finish' — we attach to both
+    // so a long-lived SSE that errors mid-stream still gets counted.
+    let recorded = false
+    const recordOnce = () => {
+      if (recorded) return
+      recorded = true
+      ctx.httpStats.record(res.statusCode)
+    }
+    res.on('finish', recordOnce)
+    res.on('close', recordOnce)
     handle(ctx, req, res).catch((err) => {
       log.error('handler threw', { url: req.url, method: req.method, err })
       if (!res.headersSent) {
@@ -398,6 +413,44 @@ interface HandlerCtx {
   workflows: WorkflowSurface | undefined
   services: ServicesAdminSurface | undefined
   readinessGate: { isReady: () => boolean } | undefined
+  /**
+   * Counters incremented on every HTTP response. Surfaced via
+   * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
+   * dashboard / alert can fire on \"something's wrong\" without
+   * scraping nginx logs). Counts reset on host restart — Prometheus
+   * expects counter resets and handles them via `rate()`.
+   */
+  httpStats: HttpStats
+}
+
+/**
+ * Per-server response counters. Indexed by status_class (2xx / 3xx /
+ * 4xx / 5xx) — a single-dimension axis keeps cardinality low. We
+ * deliberately don't track per-route counters here: the AipeHub admin
+ * surface has hundreds of endpoints (admin + worker + SSE + auth + …)
+ * and routes that take ids in the path would explode label cardinality.
+ *
+ * Operators who need per-route visibility can put a reverse proxy
+ * (Caddy / nginx) in front and scrape its logs — that's what those
+ * layers are for. AipeHub's metrics are about \"is the host healthy\"
+ * not \"is this specific endpoint slow.\"
+ */
+export class HttpStats {
+  /** byStatusClass: '2xx' / '3xx' / '4xx' / '5xx' → count. */
+  readonly byStatusClass = new Map<string, number>()
+
+  /** Record a single response. Called from the server's 'finish' hook. */
+  record(statusCode: number): void {
+    if (!Number.isFinite(statusCode) || statusCode < 0) return
+    // Status codes outside the 1xx-5xx range get bucketed into a synthetic
+    // 'other' label so we don't drop them silently. Servers that emit
+    // 0 (a quirk on some socket-closed-early paths) end up there too.
+    const klass =
+      statusCode >= 100 && statusCode < 600
+        ? `${Math.floor(statusCode / 100)}xx`
+        : 'other'
+    this.byStatusClass.set(klass, (this.byStatusClass.get(klass) ?? 0) + 1)
+  }
 }
 
 /**
@@ -1426,9 +1479,12 @@ async function handle(
   // Scrape-friendly: no JSON, stable key names, HELP/TYPE annotations.
   // Auth-required (admin) because the leaderboard exposes participant ids.
   if (method === 'GET' && path === '/api/admin/metrics') {
+    // Pass the per-server httpStats through so /metrics surfaces
+    // HTTP response-class counters. Counter resets across host
+    // restart are expected and handled by Prometheus's rate().
     const admin = await requireAdmin(ctx, req, res)
     if (!admin) return
-    const text = renderMetrics(ctx.hub)
+    const text = renderMetrics(ctx.hub, { httpStats: ctx.httpStats })
     res.writeHead(200, {
       // OpenMetrics content-type so Prometheus's scraper does the right thing.
       'content-type': 'text/plain; version=0.0.4; charset=utf-8',
@@ -2114,7 +2170,36 @@ function sendJson(res: ServerResponse, data: unknown, status = 200): void {
  * If a deployment hits 100k+ entries the right next step is to maintain a
  * rolling counter — out of scope for v1.2.
  */
-export function renderMetrics(hub: Hub): string {
+/**
+ * Bucket boundaries for the service-call latency histogram, in
+ * milliseconds. Chosen to cover the realistic span of in-process
+ * (memory plugin: sub-millisecond) and IO-bound (datastore: tens to
+ * hundreds of ms) calls without ballooning cardinality. The `+Inf`
+ * bucket is appended automatically and matches every observation.
+ *
+ * Bucket choice rationale:
+ *   5/10 ms      — separates in-process memory hits from anything
+ *                  that touched disk
+ *   25/50/100 ms — typical sqlite + file IO
+ *   250/500 ms   — pathological slowness; an alert can fire on
+ *                  growth here
+ *   1000/2500/5000/+Inf — runaway / timeout territory
+ */
+const SERVICE_CALL_BUCKETS_MS = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000] as const
+
+/** Options recognised by {@link renderMetrics}. */
+export interface RenderMetricsOptions {
+  /**
+   * Per-server HTTP response counters to surface alongside the
+   * Hub-derived metrics. Pass `ctx.httpStats` from the server; the
+   * metric is omitted when this is undefined (callers that scrape
+   * /metrics from a non-server context — tests, scripts — won't see
+   * HTTP-related output).
+   */
+  httpStats?: HttpStats
+}
+
+export function renderMetrics(hub: Hub, opts: RenderMetricsOptions = {}): string {
   const lines: string[] = []
   const w = (...ls: string[]) => { for (const l of ls) lines.push(l) }
 
@@ -2154,6 +2239,12 @@ export function renderMetrics(hub: Hub): string {
   const svcCalls: Record<string, number> = {}     // key: "type|impl|outcome"
   const svcDurSum: Record<string, number> = {}    // key: "type|impl"
   const svcDurCnt: Record<string, number> = {}    // key: "type|impl"
+  // Histogram bucket counts. Each value is a cumulative-count array
+  // aligned with SERVICE_CALL_BUCKETS_MS + a trailing `+Inf` slot
+  // (Prometheus histograms are cumulative: each `le="X"` includes
+  // every observation ≤ X). Keyed by `type|impl` so service-call
+  // latency can be sliced per backing plugin.
+  const svcDurBuckets: Record<string, number[]> = {}
 
   for (const e of hub.transcript.all()) {
     if (e.kind === 'task_result') {
@@ -2171,6 +2262,21 @@ export function renderMetrics(hub: Hub): string {
         Number.isFinite(d.durationMs) && d.durationMs >= 0 ? d.durationMs : 0
       svcDurSum[dkey] = (svcDurSum[dkey] ?? 0) + dur
       svcDurCnt[dkey] = (svcDurCnt[dkey] ?? 0) + 1
+      // Bucket the observation. Cumulative semantics: increment every
+      // bucket whose upper bound is ≥ the duration, including the
+      // trailing +Inf slot (index = SERVICE_CALL_BUCKETS_MS.length).
+      let buckets = svcDurBuckets[dkey]
+      if (!buckets) {
+        buckets = new Array(SERVICE_CALL_BUCKETS_MS.length + 1).fill(0)
+        svcDurBuckets[dkey] = buckets
+      }
+      for (let i = 0; i < SERVICE_CALL_BUCKETS_MS.length; i++) {
+        if (dur <= SERVICE_CALL_BUCKETS_MS[i]!) buckets[i]! += 1
+      }
+      // Trailing slot is the +Inf bucket and is always initialised
+      // to 0 by `new Array(...).fill(0)` above — the non-null
+      // assertion just tells TS what we already know.
+      buckets[SERVICE_CALL_BUCKETS_MS.length]! += 1 // +Inf — matches everything
     }
   }
   pendingApps = hub.pendingApplications().length
@@ -2229,6 +2335,79 @@ export function renderMetrics(hub: Hub): string {
     w(
       `aipehub_service_call_duration_ms_count{type="${escapeLabel(type)}",impl="${escapeLabel(impl)}"} ${n}`,
     )
+  }
+  w('')
+
+  // --- SERVICE_CALL latency histogram ----------------------------------------
+  // Buckets enable Prometheus `histogram_quantile()` for p50 / p95 /
+  // p99 latencies. The naming and shape follow Prom convention: emit
+  // each `<metric>_bucket{le="..."}` line cumulatively, with `+Inf` as
+  // the topmost slot. Sum / count are deliberately re-used from the
+  // existing `_sum` / `_count` counters above — Prometheus accepts
+  // both pre-existing and re-declared metrics, and we already emit
+  // them with the same names a histogram would.
+  w(
+    '# HELP aipehub_service_call_duration_ms Histogram of SERVICE_CALL frame durations (ms), cumulative buckets.',
+    '# TYPE aipehub_service_call_duration_ms histogram',
+  )
+  if (Object.keys(svcDurBuckets).length === 0) {
+    // Emit a single +Inf zero-count bucket so the metric exists from
+    // the very first scrape (some dashboards complain about
+    // \"no data\" if the series never appears).
+    w('aipehub_service_call_duration_ms_bucket{le="+Inf"} 0')
+  } else {
+    for (const [key, counts] of Object.entries(svcDurBuckets)) {
+      const [type, impl] = key.split('|') as [string, string]
+      const typeLabel = `type="${escapeLabel(type)}",impl="${escapeLabel(impl)}"`
+      for (let i = 0; i < SERVICE_CALL_BUCKETS_MS.length; i++) {
+        w(
+          `aipehub_service_call_duration_ms_bucket{${typeLabel},le="${SERVICE_CALL_BUCKETS_MS[i]}"} ${counts[i]}`,
+        )
+      }
+      w(
+        `aipehub_service_call_duration_ms_bucket{${typeLabel},le="+Inf"} ${counts[SERVICE_CALL_BUCKETS_MS.length]}`,
+      )
+    }
+  }
+  w('')
+
+  // --- HTTP responses (by status class) --------------------------------------
+  // Only emitted when the caller supplied an HttpStats object — i.e.
+  // when /metrics is being scraped from a live server. Tests and
+  // out-of-band callers that pass just `hub` still get a clean output.
+  if (opts.httpStats) {
+    w(
+      '# HELP aipehub_http_responses_total HTTP responses sent, bucketed by status class (2xx/3xx/4xx/5xx/other).',
+      '# TYPE aipehub_http_responses_total counter',
+    )
+    const classes = opts.httpStats.byStatusClass
+    if (classes.size === 0) {
+      // Zero-row variant so /metrics has the series even before any
+      // request arrives (rate() on a never-existed series returns
+      // NaN; an explicit zero turns the dashboard into a clean line
+      // at 0 rps).
+      for (const klass of ['2xx', '3xx', '4xx', '5xx']) {
+        w(`aipehub_http_responses_total{class="${klass}"} 0`)
+      }
+    } else {
+      // Iterate the seen classes, plus emit zeros for any of the
+      // canonical four that haven't seen traffic yet, so dashboards
+      // querying \"rate(... {class='5xx'} [5m])\" don't return
+      // NaN before the first 5xx appears.
+      const canonical = ['2xx', '3xx', '4xx', '5xx']
+      const seen = new Set(classes.keys())
+      for (const klass of canonical) {
+        const n = classes.get(klass) ?? 0
+        w(`aipehub_http_responses_total{class="${klass}"} ${n}`)
+        seen.delete(klass)
+      }
+      // Any non-canonical class ('other' / '1xx') the server saw.
+      for (const klass of seen) {
+        w(
+          `aipehub_http_responses_total{class="${escapeLabel(klass)}"} ${classes.get(klass) ?? 0}`,
+        )
+      }
+    }
   }
   // Trailing newline — Prometheus accepts both with/without, but the
   // de-facto convention is one.
