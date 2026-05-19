@@ -73,9 +73,12 @@ export function decodeFrame(text: string, options: DecodeFrameOptions = {}): Dec
 
 /**
  * Strict-mode decode. Same as `decodeFrame` but additionally validates the
- * per-type required fields. Intended for dev / integration testing of
- * third-party SDK implementations — production hot path stays on
- * `decodeFrame` for cost reasons (validation is O(n) on object size).
+ * per-type required fields, recursing one layer into `TASK.task`,
+ * `RESULT.result`, and `MESSAGE.msg` so a malformed inner payload is
+ * caught here instead of crashing the downstream SDK (H14). Intended
+ * for dev / integration testing of third-party SDK implementations —
+ * production hot path stays on `decodeFrame` for cost reasons
+ * (validation is O(n) on object size).
  *
  * Gated by callers via `AIPE_PROTOCOL_STRICT=1` env (see
  * `@aipehub/transport-ws` for the wire-up). The function itself reads
@@ -87,11 +90,33 @@ export function decodeFrame(text: string, options: DecodeFrameOptions = {}): Dec
  * doesn't hard-fail), and unknown extra fields on a known frame are
  * tolerated. We only reject frames whose **required** named field is
  * missing or has the wrong primitive type.
+ *
+ * For an even tighter contract that rejects unknown frame types too,
+ * see {@link decodeFrameClosed} (H15).
  */
 export function decodeFrameStrict(text: string, options: DecodeFrameOptions = {}): DecodeResult {
   const lax = decodeFrame(text, options)
   if (!lax.ok) return lax
-  const detail = validateFrame(lax.frame)
+  const detail = validateFrame(lax.frame, { rejectUnknownType: false })
+  if (detail) return { ok: false, reason: 'invalid_frame', detail }
+  return lax
+}
+
+/**
+ * Closed-mode decode. Strict validation + unknown frame `type` values are
+ * REJECTED instead of silently passed through. Intended for integration
+ * testing where an operator wants to assert "anything I don't already
+ * recognise is a bug" — usually because they're hunting down a new SDK
+ * that's emitting frames you've never seen.
+ *
+ * Closed mode breaks the forward-compatibility promise the lax /
+ * strict paths make. Don't ship this on the production hot path; gate
+ * it behind `AIPE_PROTOCOL_STRICT=closed`. See AUDIT-v3.3.md finding H15.
+ */
+export function decodeFrameClosed(text: string, options: DecodeFrameOptions = {}): DecodeResult {
+  const lax = decodeFrame(text, options)
+  if (!lax.ok) return lax
+  const detail = validateFrame(lax.frame, { rejectUnknownType: true })
   if (detail) return { ok: false, reason: 'invalid_frame', detail }
   return lax
 }
@@ -114,8 +139,30 @@ export function encodeFrame(frame: Frame): string {
 // reasons — the string is fed back to the operator who set
 // `AIPE_PROTOCOL_STRICT=1` because they were debugging a bad-frame
 // situation in the first place.
+//
+// H14 — strict mode now recurses one layer into `TASK.task`,
+// `RESULT.result`, and `MESSAGE.msg`. Pre-3.4 those only checked
+// that the inner field was an object; a malformed `{ task: {} }`
+// passed strict and crashed the SDK downstream with a less useful
+// error. The recursive checks below catch each required subfield by
+// primitive type — same forward-compat rule as the envelope (unknown
+// extras are fine).
+//
+// H15 — unknown frame `type` values now have TWO behaviours:
+//   - `rejectUnknownType: false` (called from `decodeFrameStrict`) →
+//     pass, preserving the forward-compat promise.
+//   - `rejectUnknownType: true`  (called from `decodeFrameClosed`) →
+//     reject with a diagnostic. Used by operators who want to
+//     deliberately fail-loud on new frame types from a SDK under
+//     development. Breaks forward compat — never the production
+//     default.
 
-function validateFrame(frame: Frame): string | null {
+interface ValidateFrameOptions {
+  /** When true, unknown discriminator values (`type`) fail closed. */
+  rejectUnknownType: boolean
+}
+
+function validateFrame(frame: Frame, opts: ValidateFrameOptions): string | null {
   const f = frame as Record<string, unknown>
   switch (f.type) {
     case 'HELLO':
@@ -145,10 +192,10 @@ function validateFrame(frame: Frame): string | null {
     case 'TASK':
       if (typeof f.recipient !== 'string') return 'TASK.recipient must be a string'
       if (!isObject(f.task)) return 'TASK.task must be an object'
-      return null
+      return validateTask(f.task as Record<string, unknown>)
     case 'RESULT':
       if (!isObject(f.result)) return 'RESULT.result must be an object'
-      return null
+      return validateTaskResult(f.result as Record<string, unknown>)
     case 'PUBLISH':
       if (typeof f.from !== 'string') return 'PUBLISH.from must be a string'
       if (typeof f.channel !== 'string') return 'PUBLISH.channel must be a string'
@@ -167,7 +214,7 @@ function validateFrame(frame: Frame): string | null {
     case 'MESSAGE':
       if (typeof f.recipient !== 'string') return 'MESSAGE.recipient must be a string'
       if (!isObject(f.msg)) return 'MESSAGE.msg must be an object'
-      return null
+      return validateMessageBody(f.msg as Record<string, unknown>)
     case 'ERROR':
       if (typeof f.code !== 'string') return 'ERROR.code must be a string'
       if (typeof f.message !== 'string') return 'ERROR.message must be a string'
@@ -201,12 +248,82 @@ function validateFrame(frame: Frame): string | null {
       // value (ok=true) may be anything — no check
       return null
     default:
+      if (opts.rejectUnknownType) {
+        // H15 — closed mode rejects unknown discriminators so an
+        // operator chasing a SDK regression sees the type they don't
+        // recognise instead of having it silently pass.
+        return `unknown frame type '${String(f.type)}'`
+      }
       // Forward-compat: unknown discriminator passes. A v1.5 server can
       // legitimately send a frame type a v1.2 client has never heard of;
       // the lax decode path is what surfaces it, the caller decides
       // whether to log + ignore.
       return null
   }
+}
+
+// --- recursive sub-validators (H14) ---------------------------------------
+
+/**
+ * Validate `Task` required fields. Mirrors `core/src/types.ts: Task`.
+ * `payload` is intentionally unchecked (the wire contract allows any
+ * JSON value, including `null`).
+ */
+function validateTask(t: Record<string, unknown>): string | null {
+  if (typeof t.id !== 'string') return 'TASK.task.id must be a string'
+  if (typeof t.from !== 'string') return 'TASK.task.from must be a string'
+  if (!isObject(t.strategy)) return 'TASK.task.strategy must be an object'
+  const strategyKind = (t.strategy as { kind?: unknown }).kind
+  if (typeof strategyKind !== 'string') return 'TASK.task.strategy.kind must be a string'
+  // payload is intentionally permissive — `unknown` on the wire.
+  if (!('payload' in t)) return 'TASK.task.payload is required (may be null)'
+  if (typeof t.createdAt !== 'number') return 'TASK.task.createdAt must be a number'
+  return null
+}
+
+/**
+ * Validate `TaskResult` required fields. The discriminator is `kind` and
+ * the per-variant fields differ; we check the common ones first then
+ * branch.
+ *
+ * Mirrors `core/src/types.ts: TaskResult` — `ok` / `failed` / `cancelled`
+ * / `no_participant`.
+ */
+function validateTaskResult(r: Record<string, unknown>): string | null {
+  if (typeof r.kind !== 'string') return 'RESULT.result.kind must be a string'
+  if (typeof r.taskId !== 'string') return 'RESULT.result.taskId must be a string'
+  if (typeof r.ts !== 'number') return 'RESULT.result.ts must be a number'
+  switch (r.kind) {
+    case 'ok':
+      if (typeof r.by !== 'string') return 'RESULT.result.by must be a string (kind=ok)'
+      if (!('output' in r)) return 'RESULT.result.output is required (kind=ok; may be null)'
+      return null
+    case 'failed':
+      if (typeof r.by !== 'string') return 'RESULT.result.by must be a string (kind=failed)'
+      if (typeof r.error !== 'string') return 'RESULT.result.error must be a string (kind=failed)'
+      return null
+    case 'cancelled':
+    case 'no_participant':
+      if (typeof r.reason !== 'string') return `RESULT.result.reason must be a string (kind=${r.kind})`
+      return null
+    default:
+      // Unknown kind passes — forward-compat with future TaskResult
+      // variants. The receiving side already needs a `default` branch.
+      return null
+  }
+}
+
+/**
+ * Validate `Message` required fields. Mirrors `core/src/types.ts: Message`.
+ * `body` is unchecked (any JSON value).
+ */
+function validateMessageBody(m: Record<string, unknown>): string | null {
+  if (typeof m.id !== 'string') return 'MESSAGE.msg.id must be a string'
+  if (typeof m.channel !== 'string') return 'MESSAGE.msg.channel must be a string'
+  if (typeof m.from !== 'string') return 'MESSAGE.msg.from must be a string'
+  if (!('body' in m)) return 'MESSAGE.msg.body is required (may be null)'
+  if (typeof m.ts !== 'number') return 'MESSAGE.msg.ts must be a number'
+  return null
 }
 
 function isObject(v: unknown): v is Record<string, unknown> {

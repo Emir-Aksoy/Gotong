@@ -4,6 +4,7 @@ import type { Hub, ParticipantId } from '@aipehub/core'
 import {
   AWAIT_APPROVAL_TIMEOUT_MS,
   decodeFrame,
+  decodeFrameClosed,
   decodeFrameStrict,
   encodeFrame,
   HELLO_TIMEOUT_MS,
@@ -12,6 +13,7 @@ import {
   majorVersionOf,
   PROTOCOL_VERSION,
   type ClientFrame,
+  type DecodeResult,
   type HelloFrame,
   type RejectCode,
   type ServerFrame,
@@ -84,29 +86,38 @@ export class Session {
   private serviceRouter?: ServiceCallRouter
 
   /**
-   * Whether to use the strict (validateFrame-after-decode) codec path.
+   * Inbound-frame decoder picked at session construction.
    *
-   * H13 — captured ONCE here at construction, not re-read per message.
-   * Pre-3.4 the hot path read `process.env.AIPE_PROTOCOL_STRICT` for
-   * every inbound frame. `process.env` lookups go through a Node
-   * binding (linear scan over a string-keyed object) and the env is
+   * H13 — captured ONCE here, not re-read per message. Pre-3.4 the
+   * hot path read `process.env.AIPE_PROTOCOL_STRICT` for every
+   * inbound frame. `process.env` lookups go through a Node binding
+   * (linear scan over a string-keyed object) and the env is
    * effectively immutable at the host's runtime — there's no
    * SIGHUP-style reload anywhere in the codebase. A long-running
    * session amortises tens of thousands of these reads for zero
    * functional benefit. Capturing once keeps the dev knob (set it
    * before `host start`) and drops the cost on the production path.
    *
+   * H15 — value is now tri-state, picked by env:
+   *   - unset / anything else → `decodeFrame` (envelope shape only,
+   *     forward-compat)
+   *   - `1`                  → `decodeFrameStrict` (envelope + per-
+   *     type required fields, recurses into TASK.task / RESULT.result
+   *     / MESSAGE.msg)
+   *   - `closed`             → `decodeFrameClosed` (strict + reject
+   *     unknown discriminators)
+   *
    * Documented in `docs/PROTOCOL.md` § Debug / development env vars
    * and `docs/SIDECAR.md` § Mistake gallery.
    */
-  private readonly strictMode: boolean
+  private readonly decode: (text: string) => DecodeResult
 
   constructor(
     private readonly ws: WebSocket,
     private readonly hub: Hub,
     private readonly opts: SessionOptions,
   ) {
-    this.strictMode = process.env.AIPE_PROTOCOL_STRICT === '1'
+    this.decode = pickDecoder(process.env.AIPE_PROTOCOL_STRICT)
     ws.on('message', (data, isBinary) => {
       // The protocol is text/JSON; a binary frame is either a client
       // bug or a probe trying to feed us non-UTF-8 bytes. Pre-3.1 we
@@ -166,13 +177,13 @@ export class Session {
 
   private async onMessage(text: string): Promise<void> {
     if (this.state === 'DEAD') return
-    // H13 — strict-mode decision was captured at construction
-    // (`this.strictMode`). Strict mode is a dev knob: it adds an
-    // O(n) per-frame validation pass for operators debugging
-    // third-party SDK implementations that ship malformed frames.
-    // Production hot path skips it entirely.
-    const decode = this.strictMode ? decodeFrameStrict : decodeFrame
-    const r = decode(text)
+    // H13 / H15 — decoder was chosen at construction (`this.decode`).
+    // Production hot path is `decodeFrame` (envelope only). Operators
+    // chasing a bad-frame regression can set `AIPE_PROTOCOL_STRICT=1`
+    // (deep field checks) or `AIPE_PROTOCOL_STRICT=closed` (deep
+    // checks + reject unknown discriminators) BEFORE starting the
+    // host; the value is captured once per session.
+    const r = this.decode(text)
     if (!r.ok) {
       // `detail` (only present on strict mode's `invalid_frame`) gives
       // the operator a useful "HELLO.client.name must be a string"
@@ -739,3 +750,26 @@ function validateServiceDecls(
   }
   return { ok: true }
 }
+
+/**
+ * Pick the decode function based on the `AIPE_PROTOCOL_STRICT` env value
+ * captured at session construction (H13 / H15).
+ *
+ *   - `'1'`      → strict: envelope + per-type required fields, recurses
+ *                  into TASK.task / RESULT.result / MESSAGE.msg.
+ *   - `'closed'` → strict + reject unknown frame discriminators. Breaks
+ *                  forward compat — only useful when integrating a new
+ *                  SDK and you WANT to fail loud on unrecognised types.
+ *   - anything else (unset, '0', misspelled) → lax: envelope only.
+ *
+ * Exported for tests so a unit test can drive the decision table
+ * without re-creating the whole Session.
+ */
+export function pickDecoder(
+  envValue: string | undefined,
+): (text: string) => DecodeResult {
+  if (envValue === '1') return decodeFrameStrict
+  if (envValue === 'closed') return decodeFrameClosed
+  return decodeFrame
+}
+
