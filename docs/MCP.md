@@ -430,9 +430,20 @@ the thing the loop drives.
 - **Security** — `command` runs with your host process's privileges.
   Don't take server commands from untrusted input. Credentials go in
   `env`, not `args` (so they don't appear in `ps`).
-- **Debugging** — to see a server's stderr, run it directly outside
-  the toolset: `npx -y @modelcontextprotocol/server-foo`. A
-  `toolset.on('server-stderr', …)` event hook is on the roadmap.
+- **Debugging** — subscribe to `'server-stderr'` events for a
+  per-line tail of every spawned server's stderr:
+
+  ```ts
+  toolset.on('server-stderr', ({ serverName, line }) => {
+    console.error(`[${serverName}] ${line}`)
+  })
+  ```
+
+  Useful for catching Slack MCP auth failures, Python server stack
+  traces, etc. See
+  [`packages/mcp-client/README.md`](../packages/mcp-client/README.md#debugging--the-server-stderr-event)
+  for the full behaviour contract (line buffering, backpressure
+  notes).
 
 See [`packages/mcp-client/README.md`](../packages/mcp-client/README.md)
 for the full API reference + the discriminated `McpClientError.kind`

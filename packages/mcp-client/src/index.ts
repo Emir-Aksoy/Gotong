@@ -10,6 +10,7 @@
 export { McpToolset } from './toolset.js'
 export type {
   McpToolsetOptions,
+  McpToolsetEvents,
 } from './toolset.js'
 export { McpClientError } from './errors.js'
 export type { McpClientErrorKind } from './errors.js'
