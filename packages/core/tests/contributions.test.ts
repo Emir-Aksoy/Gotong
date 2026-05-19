@@ -1,8 +1,28 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
+import { mkdtempSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { Hub } from '../src/hub.js'
 import { AgentParticipant } from '../src/participants/agent.js'
+import { Space } from '../src/space.js'
 import type { Task } from '../src/types.js'
+
+// H16: Space-backed tests previously leaked their `mkdtempSync` dirs.
+// Sweep them up in afterEach — best-effort, never mask the real failure.
+const tempDirs: string[] = []
+function makeTempDir(prefix: string): string {
+  const d = mkdtempSync(join(tmpdir(), prefix))
+  tempDirs.push(d)
+  return d
+}
+afterEach(async () => {
+  const dirs = tempDirs.splice(0)
+  await Promise.all(
+    dirs.map((d) => rm(d, { recursive: true, force: true }).catch(() => {})),
+  )
+})
 
 /**
  * Contribution-system tests (v2.1).
@@ -458,11 +478,7 @@ describe('Per-task contribution opt-out', () => {
 
 describe('Space.setAdminContributionOptOut / setWorkerContributionOptOut', () => {
   it('persists and round-trips per-record opt-out flags', async () => {
-    const { mkdtempSync } = await import('node:fs')
-    const { tmpdir } = await import('node:os')
-    const { join } = await import('node:path')
-    const { Space } = await import('../src/space.js')
-    const root = mkdtempSync(join(tmpdir(), 'aipehub-optout-'))
+    const root = makeTempDir('aipehub-optout-')
     const { space } = await Space.init(root, { name: 'test', adminDisplayName: 'Op' })
     const admins = await space.admins()
     const adminId = admins[0]!.id
