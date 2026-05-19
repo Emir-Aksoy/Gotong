@@ -147,19 +147,24 @@ describe('H13 — AIPE_PROTOCOL_STRICT captured once at session construction', (
 
   it('source has no per-frame process.env read (textual guard)', async () => {
     // Hard guard: a future regression could re-introduce the
-    // env-per-frame read. Grep the compiled source to make sure no
+    // env-per-frame read. Grep the source to make sure no
     // `process.env.AIPE_PROTOCOL_STRICT` shows up inside
     // `onMessage` (i.e. anywhere downstream of the constructor).
     //
-    // We read the source file directly. Build artefacts are not
-    // checked because the source is the source of truth.
+    // Batch 6 (H15) refactored the boolean capture into a tri-state
+    // `decode` function picked by `pickDecoder(env)`. Both forms
+    // satisfy the H13 invariant — env is read at construction only.
     const fs = await import('node:fs/promises')
     const src = await fs.readFile(
       new URL('../src/session.ts', import.meta.url),
       'utf8',
     )
-    // The constructor-scope capture is allowed.
-    expect(src).toMatch(/this\.strictMode\s*=\s*process\.env\.AIPE_PROTOCOL_STRICT/)
+    // The constructor-scope capture is allowed. We accept either the
+    // pre-3.4 boolean form (`this.strictMode = process.env...`) or
+    // the v3.4 tri-state form (`this.decode = pickDecoder(process.env...)`).
+    expect(src).toMatch(
+      /(this\.strictMode\s*=\s*process\.env\.AIPE_PROTOCOL_STRICT|this\.decode\s*=\s*pickDecoder\(process\.env\.AIPE_PROTOCOL_STRICT)/,
+    )
     // And `onMessage` (or anywhere else) must NOT read the env
     // again.
     const onMessageIdx = src.indexOf('private async onMessage')

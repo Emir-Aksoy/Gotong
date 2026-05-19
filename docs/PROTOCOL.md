@@ -332,8 +332,12 @@ A future protocol revision may add a `RESUME` frame with the prior `sessionId` t
 
 These are knobs read by the transport at startup. They are **not** for production tuning — they exist to help operators debug a misbehaving third-party SDK. Set them in the shell before launching the Hub.
 
+`AIPE_PROTOCOL_STRICT` has three values: unset (lax / default), `1` (strict), and `closed` (strict + reject-unknown-discriminator).
+
 | Variable | Effect | When to use |
 |---|---|---|
-| `AIPE_PROTOCOL_STRICT=1` | Switch the inbound decoder to `decodeFrameStrict`. Every inbound frame is run through `validateFrame` in addition to the envelope shape check. Bad frames are rejected with `bad_frame: <detail>` instead of the generic `bad_frame`. O(n) cost per message, so leave it off in production. | You're integrating a new SDK and the server keeps rejecting its frames as `bad_frame` with no useful hint. Turn this on, retry, and the `detail` field tells you which field of the envelope is wrong. |
+| `AIPE_PROTOCOL_STRICT` (unset) | Inbound decoder is `decodeFrame` — envelope shape only (`{ type: string, ... }`). Cheap; the production hot path. Unknown frame types pass through (forward-compat). | Default. Production. |
+| `AIPE_PROTOCOL_STRICT=1` | Decoder becomes `decodeFrameStrict`. Every inbound frame is run through `validateFrame` in addition to the envelope shape check. Strict mode RECURSES into `TASK.task` / `RESULT.result` / `MESSAGE.msg` so missing inner fields are caught here (H14), and unknown discriminator values still pass (forward-compat). Bad frames are rejected with `bad_frame: invalid_frame: <field> must be …`. O(n) cost per message. | You're integrating a new SDK and the server keeps rejecting its frames as `bad_frame` with no useful hint. Turn this on, retry, and the `detail` field tells you which field is wrong. |
+| `AIPE_PROTOCOL_STRICT=closed` | Decoder becomes `decodeFrameClosed`. Same deep validation as `=1`, plus unknown frame `type` values are rejected with `bad_frame: invalid_frame: unknown frame type '...'`. **Breaks forward compatibility** — a v1.5 client cannot read a v2.0 frame in closed mode. | You want to fail-loud on any new frame type from a sidecar under development (e.g. the sidecar emitted `FROM_THE_FUTURE` because of a copy-paste bug and you want the server to refuse it instead of silently ignoring). Never enable in production. (H15) |
 
-Both knobs are **captured once at session construction** (H13). Toggling the env var on a running host will not affect existing sessions — restart the host to pick up a change. |
+The decoder choice is **captured once at session construction** (H13). Toggling the env var on a running host will not affect existing sessions — restart the host to pick up a change. |
