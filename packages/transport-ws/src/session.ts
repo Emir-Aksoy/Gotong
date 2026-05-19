@@ -83,11 +83,30 @@ export class Session {
    */
   private serviceRouter?: ServiceCallRouter
 
+  /**
+   * Whether to use the strict (validateFrame-after-decode) codec path.
+   *
+   * H13 — captured ONCE here at construction, not re-read per message.
+   * Pre-3.4 the hot path read `process.env.AIPE_PROTOCOL_STRICT` for
+   * every inbound frame. `process.env` lookups go through a Node
+   * binding (linear scan over a string-keyed object) and the env is
+   * effectively immutable at the host's runtime — there's no
+   * SIGHUP-style reload anywhere in the codebase. A long-running
+   * session amortises tens of thousands of these reads for zero
+   * functional benefit. Capturing once keeps the dev knob (set it
+   * before `host start`) and drops the cost on the production path.
+   *
+   * Documented in `docs/PROTOCOL.md` § Debug / development env vars
+   * and `docs/SIDECAR.md` § Mistake gallery.
+   */
+  private readonly strictMode: boolean
+
   constructor(
     private readonly ws: WebSocket,
     private readonly hub: Hub,
     private readonly opts: SessionOptions,
   ) {
+    this.strictMode = process.env.AIPE_PROTOCOL_STRICT === '1'
     ws.on('message', (data, isBinary) => {
       // The protocol is text/JSON; a binary frame is either a client
       // bug or a probe trying to feed us non-UTF-8 bytes. Pre-3.1 we
@@ -147,13 +166,12 @@ export class Session {
 
   private async onMessage(text: string): Promise<void> {
     if (this.state === 'DEAD') return
-    // AIPE_PROTOCOL_STRICT=1 enables the dev-only per-frame validation
-    // path. The check is O(n) on object size and the production hot path
-    // doesn't need it (we trust well-behaved SDKs); reserved for
-    // operators debugging third-party SDK implementations that send
-    // malformed frames. Read fresh on every message so the env can be
-    // toggled at runtime via SIGHUP-style restarts of the process.
-    const decode = process.env.AIPE_PROTOCOL_STRICT === '1' ? decodeFrameStrict : decodeFrame
+    // H13 — strict-mode decision was captured at construction
+    // (`this.strictMode`). Strict mode is a dev knob: it adds an
+    // O(n) per-frame validation pass for operators debugging
+    // third-party SDK implementations that ship malformed frames.
+    // Production hot path skips it entirely.
+    const decode = this.strictMode ? decodeFrameStrict : decodeFrame
     const r = decode(text)
     if (!r.ok) {
       // `detail` (only present on strict mode's `invalid_frame`) gives

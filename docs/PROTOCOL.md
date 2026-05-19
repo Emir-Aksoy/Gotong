@@ -327,3 +327,13 @@ A future protocol revision may add a `RESUME` frame with the prior `sessionId` t
 | `unknown_agent` | SERVICE_RESULT (v1.1) | SERVICE_CALL.from not owned by this connection |
 | `session_not_ready` | SERVICE_RESULT (v1.1) | Call before WELCOME or after teardown |
 | `unknown_service` | SERVICE_RESULT (v1.1) | `(type, impl)` has no plugin registered host-side |
+
+## Debug / development env vars
+
+These are knobs read by the transport at startup. They are **not** for production tuning — they exist to help operators debug a misbehaving third-party SDK. Set them in the shell before launching the Hub.
+
+| Variable | Effect | When to use |
+|---|---|---|
+| `AIPE_PROTOCOL_STRICT=1` | Switch the inbound decoder to `decodeFrameStrict`. Every inbound frame is run through `validateFrame` in addition to the envelope shape check. Bad frames are rejected with `bad_frame: <detail>` instead of the generic `bad_frame`. O(n) cost per message, so leave it off in production. | You're integrating a new SDK and the server keeps rejecting its frames as `bad_frame` with no useful hint. Turn this on, retry, and the `detail` field tells you which field of the envelope is wrong. |
+
+Both knobs are **captured once at session construction** (H13). Toggling the env var on a running host will not affect existing sessions — restart the host to pick up a change. |

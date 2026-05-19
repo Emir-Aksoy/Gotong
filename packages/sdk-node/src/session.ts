@@ -15,6 +15,7 @@ import {
 } from '@aipehub/protocol'
 import WebSocket from 'ws'
 
+import { redactSecrets } from './redact.js'
 import {
   ServiceClientImpl,
   toWireDecls,
@@ -461,7 +462,15 @@ class SessionImpl implements Session {
         break
       }
       case 'REJECT': {
-        const err = new Error(`hub rejected: ${frame.code}: ${frame.message}`)
+        // H11 — `frame.message` is server-controlled and a leaky Hub /
+        // upstream proxy can put the client's own credentials back
+        // into it (e.g. "apiKey 'sk-...' not recognised"). The Error
+        // we throw here typically ends up in Sentry / app logs, so
+        // run the message through `redactSecrets` first. The `code`
+        // is a constrained enum (`bad_hello`, `unauthorized`, …) so
+        // it's safe verbatim.
+        const safeMessage = redactSecrets(frame.message)
+        const err = new Error(`hub rejected: ${frame.code}: ${safeMessage}`)
         if (this.welcomeWaiter) {
           this.welcomeWaiter.reject(err)
           this.welcomeWaiter = undefined

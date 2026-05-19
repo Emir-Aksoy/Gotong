@@ -273,6 +273,7 @@ The errors people actually hit, with what each one means.
 | `session_not_ready` | The SDK's pending-call table got fail-all'd. Either the connection dropped, or `session.close()` was called while a call was in flight. |
 | `bad_args` | The wire `args` field wasn't a JSON array. Don't pass non-serialisable objects (functions, class instances with private fields, etc). |
 | `unknown_agent` | The `from` on your SERVICE_CALL doesn't match any agent declared in your HELLO. This is usually a bug — the SDK fills `from` automatically from the first agent. |
+| `bad_frame` (no `detail`) | The Hub rejected one of your frames at the envelope shape check, but didn't say which field is wrong. **Restart the Hub with `AIPE_PROTOCOL_STRICT=1` set in the env**, retry your sidecar, and the rejection comes back as `bad_frame: invalid_frame: <field> must be …`. See `docs/PROTOCOL.md` § Debug / development env vars. The flag is captured at session construction, so restart the host to pick up a change. |
 
 ---
 

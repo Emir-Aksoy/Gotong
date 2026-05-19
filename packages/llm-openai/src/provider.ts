@@ -340,8 +340,13 @@ function extractToolUses(
  *   - `Premature close` — server closed connection mid-response. This is the
  *     specific failure we saw on DeepSeek and the original motivation for
  *     this helper.
- *   - `socket hang up`, `fetch failed`, `aborted`, `read ECONNRESET` — TCP
- *     /HTTP-client surface terms for "connection died mid-flight".
+ *   - `socket hang up`, `fetch failed`, `read ECONNRESET` — TCP / HTTP-client
+ *     surface terms for "connection died mid-flight".
+ *   - `socket aborted` / `request aborted` (undici socket / request abort
+ *     distinct from a user-issued AbortController). Pre-3.4 the regex
+ *     matched the bare word `aborted`, which silently doubled charges
+ *     when a user-supplied AbortController triggered with a message like
+ *     "aborted by user" (H5).
  *   - Node socket error codes: `ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`,
  *     `EPIPE`, `EAI_AGAIN`, undici's `UND_ERR_SOCKET`. Looked up on both
  *     the error and `error.cause` (undici nests the underlying socket
@@ -352,6 +357,11 @@ function extractToolUses(
  *   - `401` / `403` — bad key.
  *   - `404` — wrong model id.
  *   - Other 4xx — bad request body.
+ *   - Any error whose `name === 'AbortError'` or `code === 'ABORT_ERR'` —
+ *     a user-driven cancellation. The whole point of `AbortController`
+ *     is "stop doing this"; retrying would both ignore intent AND
+ *     double-charge the user (the failed request still consumes API
+ *     credit for input tokens). See AUDIT-v3.3.md finding H5.
  *
  * Exposed for tests; not part of the public API.
  */
@@ -366,14 +376,22 @@ export function isTransientError(err: unknown): boolean {
   }
   // AbortController.abort() throws a DOMException with name='AbortError'.
   // The caller deliberately cancelled the request — retrying would
-  // both ignore their intent and defeat the cancellation semantics.
-  // Distinguished from network-layer "aborted" disconnects (which
-  // raise a regular Error and are matched by the regex below).
+  // both ignore their intent AND double-bill the input tokens already
+  // counted by the upstream provider (H5). We treat any abort-by-name
+  // / abort-by-code as PERMANENT.
   if (e.name === 'AbortError' || e.cause?.name === 'AbortError') return false
   if (e.code === 'ABORT_ERR' || e.cause?.code === 'ABORT_ERR') return false
   const msg = typeof e.message === 'string' ? e.message : ''
+  // H5 — the regex below intentionally does NOT match the bare word
+  // `aborted`. A user `AbortController` whose abort reason is a string
+  // like "aborted by user" would otherwise trip this branch (the
+  // AbortError name check above doesn't always catch user-raised
+  // throwables in higher-level wrappers — `AggregateError`, custom
+  // `Error` subclasses, etc.). We only match the two undici-internal
+  // phrases that signal "the TCP socket aborted underneath us", which
+  // genuinely is a network-layer transient.
   if (
-    /premature close|socket hang up|fetch failed|aborted|read econnreset|etimedout/i.test(msg)
+    /premature close|socket hang up|fetch failed|socket aborted|request aborted|read econnreset|etimedout/i.test(msg)
   ) {
     return true
   }

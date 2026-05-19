@@ -619,11 +619,15 @@ describe('isTransientError classifier', () => {
     expect(isTransientError(err)).toBe(false)
   })
 
-  // Sibling case: a generic Error("aborted") with no AbortError marker
-  // is still treated as transient — this matches the undici-surface
-  // "aborted" message we got on real DeepSeek socket drops.
-  it('still flags a bare Error("aborted") as transient (network-level)', () => {
-    expect(isTransientError(new Error('aborted'))).toBe(true)
+  // H5 (v3.4) — a bare Error("aborted") is now classified as
+  // PERMANENT. Pre-3.4 it was retried on the theory that undici
+  // socket drops surface as that message; the audit found this
+  // doubles billing whenever a wrapping layer strips the
+  // AbortError marker from a user-initiated cancel. The fix is to
+  // require a network-specific prefix (`socket aborted` /
+  // `request aborted`) — see h5-abort-classifier.test.ts.
+  it('does NOT flag a bare Error("aborted") (H5 — could be a stripped user cancel)', () => {
+    expect(isTransientError(new Error('aborted'))).toBe(false)
   })
 
   it('handles non-Error throwables gracefully', () => {
