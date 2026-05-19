@@ -31,6 +31,8 @@
  * compare references.
  */
 
+import { randomBytes } from 'node:crypto'
+
 import type {
   ServiceCallFrame,
   ServiceErrorCode,
@@ -319,7 +321,18 @@ export class ServiceClientImpl implements ServiceClient {
       throw new ServiceCallError('session_not_ready', 'service client closed')
     }
     this.callCounter += 1
-    const callId = `c${this.callCounter.toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+    // H8 — callId entropy comes from a CSPRNG, not Math.random().
+    //
+    // The local pending-call table matches purely on `callId`, so today
+    // collisions are at worst "wrong handler resolves a stale frame
+    // from the same session". Tomorrow's mux (SERVICE_RESULT routed
+    // across sessions) makes this a security boundary, and after a
+    // `fork()` Math.random() PRNGs share seed across processes — same
+    // 6 bytes pop out in lockstep. `randomBytes(6).toString('hex')`
+    // gives 48 bits of high-quality entropy, costs nothing measurable,
+    // and stays the same 12 characters wide as the old form. See
+    // AUDIT-v3.3.md finding H8.
+    const callId = `c${this.callCounter.toString(36)}_${randomBytes(6).toString('hex')}`
     const frame: ServiceCallFrame = {
       type: 'SERVICE_CALL',
       callId,

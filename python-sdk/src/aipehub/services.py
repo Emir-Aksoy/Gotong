@@ -37,9 +37,8 @@ re-create the rich TS types in Python; callers introspect dicts.
 from __future__ import annotations
 
 import asyncio
-import random
-import string
-from dataclasses import dataclass, field
+import secrets
+from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
 
 from . import protocol
@@ -416,7 +415,25 @@ class ServiceClient:
 
 
 def _rand_id() -> str:
-    return "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    """Return a 12-char hex token for use as a SERVICE_CALL ``callId`` suffix.
+
+    H8 — uses :mod:`secrets` (a CSPRNG) rather than :mod:`random` (a
+    Mersenne Twister with a process-level seed). Today the pending-call
+    table matches on ``callId`` locally, so the worst a collision could
+    cause is a stale frame resolving the wrong handler within a single
+    session. But two issues bite once SERVICE_RESULT is multiplexed
+    across sessions (next protocol bump):
+
+      * collisions become a routing security boundary;
+      * after ``os.fork()`` the Mersenne Twister carries the parent's
+        seed into every child, so identical callIds pop out in lockstep
+        until the child happens to reseed.
+
+    ``secrets.token_hex(6)`` gives 48 bits of high-quality entropy and
+    stays the same 12 characters wide as the pre-3.4 form. See
+    AUDIT-v3.3.md finding H8.
+    """
+    return secrets.token_hex(6)
 
 
 def to_wire_decls(reqs: list[ServiceUseRequest]) -> list[dict[str, Any]]:

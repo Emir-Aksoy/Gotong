@@ -170,6 +170,23 @@ class Session:
         self._welcome_event = asyncio.Event()
         self._welcome_error: ConnectionRejected | None = None
 
+        # H9 — strong references to in-flight fire-and-forget tasks.
+        #
+        # `asyncio` documents this footgun explicitly: the event loop
+        # only keeps a WEAK reference to tasks created via
+        # `asyncio.create_task`. Anything fire-and-forget (an
+        # un-awaited send coroutine, an un-awaited TASK handler) can
+        # be collected mid-flight under memory pressure on CPython
+        # 3.11+. Symptom: SERVICE_CALL frame never hits the wire, the
+        # peer never replies, the awaiter trips its own timeout 30s
+        # later with `session_not_ready` — and nothing in the logs
+        # points back at the GC as the cause.
+        #
+        # The fix is the stdlib-recommended pattern: park the task in
+        # a set so the loop sees a strong ref, and let a done-callback
+        # discard it once it resolves. See AUDIT-v3.3.md finding H9.
+        self._background_tasks: set[asyncio.Task[Any]] = set()
+
         # Build the ServiceClient eagerly (before the socket opens) so agents
         # can read `session.services` immediately after connect() returns —
         # SERVICE_CALL frames just queue against the session and ship as the
@@ -193,10 +210,26 @@ class Session:
         ws = self._ws
         if ws is None or not _is_open(ws):
             raise RuntimeError("websocket not connected")
-        # ws.send is a coroutine; fire-and-forget the task and let
-        # exceptions bubble through the SERVICE_RESULT timeout if delivery
-        # never completes.
-        asyncio.create_task(ws.send(json.dumps(frame)))
+        # ws.send is a coroutine; we fire-and-forget the send task and
+        # let any delivery exception surface as a SERVICE_RESULT
+        # timeout on the awaiting handle. The task is tracked in
+        # `_background_tasks` so the event loop's weak-reference
+        # garbage-collection (H9) can't reap it mid-flight.
+        self._spawn_background(ws.send(json.dumps(frame)))
+
+    def _spawn_background(self, coro: Awaitable[Any]) -> asyncio.Task[Any]:
+        """Schedule a coroutine as a tracked background task (H9).
+
+        Adds the resulting Task to `_background_tasks` (a strong-ref
+        set) and installs a done-callback that discards it on
+        completion. Without this, fire-and-forget `asyncio.create_task`
+        calls can be GC'd before they run — see the `_background_tasks`
+        docstring for the failure mode.
+        """
+        task = asyncio.create_task(coro)
+        self._background_tasks.add(task)
+        task.add_done_callback(self._background_tasks.discard)
+        return task
 
     # ----- public API -------------------------------------------------------
 
@@ -327,7 +360,10 @@ class Session:
     async def _on_frame(self, frame: dict[str, Any]) -> None:
         t = frame.get("type")
         if t == "TASK":
-            asyncio.create_task(self._handle_task_frame(frame))
+            # H9 — track the handler task so the loop's weak ref
+            # doesn't let it get GC'd while the agent is still working
+            # on the request.
+            self._spawn_background(self._handle_task_frame(frame))
         elif t == "SERVICE_RESULT":
             # Hand back to the ServiceClient pending-call table. Tolerated
             # if the client never instantiated services — late results

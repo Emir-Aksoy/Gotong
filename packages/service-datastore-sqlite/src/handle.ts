@@ -67,13 +67,27 @@ export class DatastoreSqliteHandle implements DatastoreHandle {
         )
       }
     }
+    // H2 — single writeGuard shared between the KV and SQL surfaces.
+    //
+    // Pre-3.4 only `sql.exec` ran through the size cap; `kv.set` called
+    // straight into the prepared statement, so an agent could pour
+    // unbounded data through the KV API and silently blow past
+    // `cfg.maxBytes`. The fix lifts the guard out of `makeSqlHandle` so
+    // it's the SAME function both surfaces invoke — there's now exactly
+    // one chokepoint for "is this write allowed?". See AUDIT-v3.3.md
+    // finding H2.
+    const writeGuard = makeWriteGuard({
+      dbPath: this.dbPath,
+      maxBytes: this.cfg.maxBytes,
+      isClosed: () => this.closed,
+    })
+
     const preparedKv = new PreparedKv(this.db)
-    this.kv = makeKvHandle(preparedKv)
+    this.kv = makeKvHandle(preparedKv, writeGuard, () => this.closed)
     this.sql = makeSqlHandle({
       db: this.db,
       stmtCache: this.stmtCache,
-      maxBytes: this.cfg.maxBytes,
-      dbPath: this.dbPath,
+      writeGuard,
       isClosed: () => this.closed,
     })
   }
@@ -87,43 +101,25 @@ export class DatastoreSqliteHandle implements DatastoreHandle {
   }
 }
 
-function makeKvHandle(prep: PreparedKv): KvHandle {
-  return {
-    async get<T = unknown>(key: string): Promise<T | undefined> {
-      return prep.get(key) as T | undefined
-    },
-    async set(key: string, value: unknown): Promise<void> {
-      prep.set(key, value)
-    },
-    async del(key: string): Promise<void> {
-      prep.del(key)
-    },
-    async keys(prefix?: string): Promise<string[]> {
-      return prep.keys(prefix)
-    },
-  }
-}
-
-function makeSqlHandle(opts: {
-  db: SqliteDb
-  stmtCache: Map<string, SqliteStmt>
-  maxBytes: number
+/**
+ * The size-cap guard used by both the KV and SQL write paths.
+ *
+ * Exported as a factory so `DatastoreSqliteHandle`'s constructor can
+ * build one guard and hand the SAME function to both surface
+ * builders. That's the H2 invariant: every write — KV or SQL — runs
+ * through one chokepoint.
+ *
+ * The check is best-effort: SQLite will keep growing during a single
+ * statement if we already passed the gate. For interactive agent
+ * workloads this is fine — they hit the threshold over many
+ * statements, not one giant insert. See AUDIT-v3.3.md finding H2.
+ */
+function makeWriteGuard(opts: {
   dbPath: string
+  maxBytes: number
   isClosed: () => boolean
-}): SqlHandle {
-  const prep = (sql: string): SqliteStmt => {
-    const cached = opts.stmtCache.get(sql)
-    if (cached) return cached
-    const stmt = opts.db.prepare(sql)
-    opts.stmtCache.set(sql, stmt)
-    return stmt
-  }
-  // The size-cap guard: cheap stat before each write. The check is
-  // best-effort; SQLite will keep growing during a single statement
-  // if we already passed the gate. For interactive agent workloads
-  // this is fine — they hit the threshold over many statements, not
-  // one giant insert.
-  const writeGuard = (): void => {
+}): () => void {
+  return (): void => {
     if (opts.isClosed()) {
       throw new Error('datastore:sqlite handle is closed')
     }
@@ -141,9 +137,63 @@ function makeSqlHandle(opts: {
       )
     }
   }
+}
+
+function makeKvHandle(
+  prep: PreparedKv,
+  writeGuard: () => void,
+  isClosed: () => boolean,
+): KvHandle {
+  // Reads still need the closed check; otherwise a use-after-close
+  // would dive into a torn-down better-sqlite3 handle. They DO NOT go
+  // through writeGuard — over-quota DBs should still be readable so
+  // an operator can dump / vacuum / migrate the data out.
+  const readGuard = (): void => {
+    if (isClosed()) {
+      throw new Error('datastore:sqlite handle is closed')
+    }
+  }
+  return {
+    async get<T = unknown>(key: string): Promise<T | undefined> {
+      readGuard()
+      return prep.get(key) as T | undefined
+    },
+    async set(key: string, value: unknown): Promise<void> {
+      // H2 — kv writes go through the same guard sql.exec does.
+      writeGuard()
+      prep.set(key, value)
+    },
+    async del(key: string): Promise<void> {
+      // `del` is intentionally NOT gated by writeGuard: if the DB is
+      // already over quota, blocking deletes would leave the operator
+      // no way to free space. SQLite WAL deletion does still touch
+      // pages, but the file can't grow from a DELETE on existing rows.
+      readGuard()
+      prep.del(key)
+    },
+    async keys(prefix?: string): Promise<string[]> {
+      readGuard()
+      return prep.keys(prefix)
+    },
+  }
+}
+
+function makeSqlHandle(opts: {
+  db: SqliteDb
+  stmtCache: Map<string, SqliteStmt>
+  writeGuard: () => void
+  isClosed: () => boolean
+}): SqlHandle {
+  const prep = (sql: string): SqliteStmt => {
+    const cached = opts.stmtCache.get(sql)
+    if (cached) return cached
+    const stmt = opts.db.prepare(sql)
+    opts.stmtCache.set(sql, stmt)
+    return stmt
+  }
   return {
     async exec(sql: string, params?: unknown[]): Promise<{ changes: number }> {
-      writeGuard()
+      opts.writeGuard()
       const stmt = prep(sql)
       const out = params && params.length > 0 ? stmt.run(...params) : stmt.run()
       return { changes: out.changes }
