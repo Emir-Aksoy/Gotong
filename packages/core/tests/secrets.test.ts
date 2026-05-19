@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -25,6 +26,25 @@ import { Space } from '../src/space.js'
  *   - List configured providers/agents without leaking plaintext
  *   - Drop an agent's override key when the agent is removed
  */
+
+// H16: every `mkdtempSync` was previously leaked into $TMPDIR — on CI
+// that's harmless but on a dev box it adds up. Centralise so afterEach
+// can sweep them up, regardless of whether the test passed or threw.
+const tempDirs: string[] = []
+function makeTempDir(prefix: string): string {
+  const d = mkdtempSync(join(tmpdir(), prefix))
+  tempDirs.push(d)
+  return d
+}
+afterEach(async () => {
+  // Drain the list before awaiting so a parallel-test rerun doesn't
+  // double-remove. Cleanup is best-effort; teardown errors must not
+  // mask the actual test failure.
+  const dirs = tempDirs.splice(0)
+  await Promise.all(
+    dirs.map((d) => rm(d, { recursive: true, force: true }).catch(() => {})),
+  )
+})
 
 describe('encryptSecret / decryptSecret', () => {
   it('round-trips plaintext with the same key', () => {
@@ -80,7 +100,7 @@ describe('encryptSecret / decryptSecret', () => {
 
 describe('loadOrCreateMasterKey', () => {
   it('generates a fresh 32-byte key on first call and reuses it after', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'aipehub-secrets-'))
+    const dir = makeTempDir('aipehub-secrets-')
     const path = join(dir, 'secret.key')
     const k1 = await loadOrCreateMasterKey(path)
     expect(k1.length).toBe(32)
@@ -89,7 +109,7 @@ describe('loadOrCreateMasterKey', () => {
   })
 
   it('prefers AIPE_SECRET_KEY env over the on-disk key', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'aipehub-secrets-'))
+    const dir = makeTempDir('aipehub-secrets-')
     const path = join(dir, 'secret.key')
     await loadOrCreateMasterKey(path)                  // writes random
     const envHex = '00'.repeat(32)
@@ -118,7 +138,7 @@ describe('loadOrCreateMasterKey', () => {
 
 describe('Space secret methods', () => {
   it('persists, lists, and reads back a workspace provider key (no plaintext leak)', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'aipehub-space-secrets-'))
+    const root = makeTempDir('aipehub-space-secrets-')
     const { space } = await Space.init(root, { name: 'test' })
 
     expect(await space.listProviderApiKeys()).toEqual({})
@@ -138,7 +158,7 @@ describe('Space secret methods', () => {
   })
 
   it('per-agent key is preferred and is dropped when the agent is removed', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'aipehub-space-agentkey-'))
+    const root = makeTempDir('aipehub-space-agentkey-')
     const { space } = await Space.init(root, { name: 'test' })
 
     await space.upsertAgent({ id: 'alice', allowedCapabilities: ['x'] })
@@ -156,7 +176,7 @@ describe('Space secret methods', () => {
   })
 
   it('round-trips secrets across two Space instances (on-disk file is canonical)', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'aipehub-space-cross-'))
+    const root = makeTempDir('aipehub-space-cross-')
     const { space } = await Space.init(root, { name: 'test' })
     await space.setProviderApiKey('openai', 'sk-openai-x')
 
@@ -167,7 +187,7 @@ describe('Space secret methods', () => {
   })
 
   it('empty plaintext is rejected (you can\'t set "" as a key)', async () => {
-    const root = mkdtempSync(join(tmpdir(), 'aipehub-empty-'))
+    const root = makeTempDir('aipehub-empty-')
     const { space } = await Space.init(root, { name: 'test' })
     await expect(space.setProviderApiKey('anthropic', '')).rejects.toThrow(/non-empty/)
     await expect(space.setAgentApiKey('alice', '')).rejects.toThrow(/non-empty/)
