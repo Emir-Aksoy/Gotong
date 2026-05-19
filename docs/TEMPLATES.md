@@ -107,6 +107,8 @@ single-agent schema. Duplicate ids inside one team are rejected.
 | `model` | Optional. Pass-through to the provider — you're responsible for matching the provider's accepted model strings. |
 | `system` | Required, non-empty. The agent's system prompt. |
 | `weightDefault` | Optional. Number in [0.1, 10.0]. Sanitised by the Hub anyway. |
+| `uses` | Optional array. Hub Services declarations (memory / artifact / datastore). See [services-rfc.md §6](../docs/services-rfc.md). |
+| `mcpServers` | Optional array. Third-party MCP tool servers spawned alongside the agent. Each entry: `{ name, command, args?, env?, cwd? }`. `env` values support `${VAR}` expansion against the host environment so credentials never sit in the manifest. See [MCP.md § 6c-yaml](./MCP.md#6c-yaml-declaring-servers-in-an-agent-template-no-code). |
 
 API keys **never** appear in a template. Keys come from three sources
 (see [HUMAN.md](./HUMAN.md) "API Key 管理"):

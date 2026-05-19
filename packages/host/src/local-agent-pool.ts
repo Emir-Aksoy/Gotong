@@ -4,6 +4,7 @@ import {
   type Hub,
   type ManagedAgentLifecycle,
   type ManagedAgentSpec,
+  type McpServerSpec,
   type ParticipantId,
   type ServiceUseSpec,
   type Space,
@@ -11,6 +12,7 @@ import {
 import { LlmAgent, MockLlmProvider, type LlmProvider } from '@aipehub/llm'
 import { AnthropicProvider } from '@aipehub/llm-anthropic'
 import { OpenAIProvider } from '@aipehub/llm-openai'
+import { McpToolset, type McpServerConfig } from '@aipehub/mcp-client'
 import {
   resolveOwner,
   type ArtifactHandle,
@@ -68,6 +70,15 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * keep the owner explicit to avoid re-deriving on tear-down.
    */
   private readonly serviceOwnerForAgent = new Map<ParticipantId, Owner>()
+  /**
+   * Per-agent record of the live `McpToolset` (only present when the
+   * agent's manifest declared `mcpServers:`). Held here so `stop(id)`
+   * can disconnect the child processes alongside the Hub unregister.
+   * Each agent gets its own toolset — sharing across agents is left
+   * to applications that need it (they can pass `tools:` to `LlmAgent`
+   * directly).
+   */
+  private readonly mcpToolsetForAgent = new Map<ParticipantId, McpToolset>()
 
   constructor(opts: { hub: Hub; space: Space; services?: HubServices }) {
     this.hub = opts.hub
@@ -126,6 +137,18 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       }
     }
     this.serviceOwnerForAgent.delete(id)
+    // Tear down any MCP toolset that was spawned alongside this
+    // agent. Same swallow-on-shutdown discipline: a hung server
+    // shouldn't block the host from shutting down.
+    const toolset = this.mcpToolsetForAgent.get(id)
+    if (toolset) {
+      try {
+        await toolset.disconnect()
+      } catch (err) {
+        log.warn('mcp toolset disconnect failed during stop', { id, err })
+      }
+      this.mcpToolsetForAgent.delete(id)
+    }
   }
 
   /**
@@ -218,6 +241,31 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
 
     const apiKey = await this.resolveApiKey(record.id, record.managed.provider)
     const provider = buildProvider(record.managed, apiKey)
+
+    // If the manifest declared `mcpServers:`, spawn the toolset NOW
+    // (before constructing LlmAgent) so the connect()'s child-process
+    // failures bubble up as a spawn failure rather than first
+    // manifesting on the very first hub.dispatch into this agent.
+    // A failed-to-spawn server still leaves its peers usable — see
+    // McpToolset's "one server crashed, others stay live" contract.
+    let toolset: McpToolset | undefined
+    if (record.managed.mcpServers && record.managed.mcpServers.length > 0) {
+      toolset = buildToolset(record.id, record.managed.mcpServers)
+      try {
+        await toolset.connect()
+      } catch (err) {
+        // Don't let a transient `npx -y` network hiccup tank the spawn.
+        // Mark the toolset as failed-to-connect by leaving its dead
+        // state visible via `.status()`; LlmAgent's tool-use loop will
+        // just see an empty tool list and skip the loop entirely. The
+        // operator sees the failure in `'server-stderr'` events.
+        log.error('mcp toolset connect failed (continuing with empty toolset)', {
+          id: record.id,
+          err,
+        })
+      }
+    }
+
     const agent = new LlmAgent({
       id: record.id,
       capabilities: record.allowedCapabilities,
@@ -225,15 +273,20 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       system: record.managed.system,
       model: record.managed.model,
       services: ctx,
+      ...(toolset ? { tools: toolset } : {}),
     })
     this.hub.register(agent)
     this.running.set(record.id, agent)
     if (owner) this.serviceOwnerForAgent.set(record.id, owner)
+    if (toolset) this.mcpToolsetForAgent.set(record.id, toolset)
     log.info('spawned', {
       id: record.id,
       provider: record.managed.provider,
       services: record.managed.uses
         ? record.managed.uses.map((u) => `${u.type}:${u.impl}`)
+        : [],
+      mcpServers: record.managed.mcpServers
+        ? record.managed.mcpServers.map((m) => m.name)
         : [],
     })
   }
@@ -464,4 +517,82 @@ function buildProvider(spec: ManagedAgentSpec, apiKey: string | undefined): LlmP
       throw new Error(`unknown provider: ${exhaustive as string}`)
     }
   }
+}
+
+/**
+ * Build an `McpToolset` from the yaml-level `mcpServers:` declaration.
+ *
+ * Two transformations happen here vs. raw `McpServerConfig`:
+ *
+ *   1. **`${ENV_VAR}` expansion in env values** — credentials stay in
+ *      the host's environment rather than persisted plain-text in
+ *      `agents.json`. A missing var expands to an empty string and
+ *      the spawn proceeds; the MCP server itself will fail loudly if
+ *      it actually needed that variable (typical: `401 Unauthorized`
+ *      bubbling up as a `server-stderr` line).
+ *
+ *   2. **Server stderr → host log forwarding** — auto-subscribe to
+ *      `'server-stderr'` events and dump them to the structured
+ *      logger so operators see Slack-MCP auth errors / Python
+ *      stack traces in their normal log stream. The line carries
+ *      the agent id + server name so multi-agent hosts can grep.
+ */
+function buildToolset(
+  agentId: ParticipantId,
+  servers: readonly McpServerSpec[],
+): McpToolset {
+  const configs: McpServerConfig[] = servers.map((s) => {
+    const cfg: McpServerConfig = {
+      name: s.name,
+      command: s.command,
+    }
+    if (s.args) cfg.args = [...s.args]
+    if (s.env) {
+      cfg.env = expandEnvRefs(s.env, agentId, s.name)
+    }
+    if (s.cwd) cfg.cwd = s.cwd
+    return cfg
+  })
+  const toolset = new McpToolset({ servers: configs })
+  // Route MCP-server stderr into our structured logger. Operators
+  // running `journalctl -u aipehub` get one unified stream.
+  toolset.on('server-stderr', ({ serverName, line }) => {
+    log.info('mcp server stderr', { agentId, serverName, line })
+  })
+  return toolset
+}
+
+/**
+ * Expand `${ENV_VAR}` references in a `name → value` env map against
+ * `process.env`. Unknown refs become empty strings (with a warning
+ * log so the operator knows the spawn proceeded with a missing
+ * credential). The case-sensitivity matches POSIX env var conventions.
+ *
+ * Exported only for unit tests — the production path always passes
+ * `process.env` via the wrapper `buildToolset`.
+ */
+export function expandEnvRefs(
+  raw: Record<string, string>,
+  agentId: ParticipantId,
+  serverName: string,
+): Record<string, string> {
+  const out: Record<string, string> = {}
+  // ${NAME} — anchored to standard POSIX env-var name shape so a
+  // literal "$5.99" in a value isn't mistaken for a reference.
+  const REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g
+  for (const [k, v] of Object.entries(raw)) {
+    out[k] = v.replace(REF, (_match, name: string) => {
+      const env = process.env[name]
+      if (env === undefined) {
+        log.warn('mcp env ref missing — expanded to empty string', {
+          agentId,
+          serverName,
+          var: name,
+        })
+        return ''
+      }
+      return env
+    })
+  }
+  return out
 }

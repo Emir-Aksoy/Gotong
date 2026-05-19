@@ -835,6 +835,68 @@ export interface ManagedAgentSpec {
    * The Hub forwards `config` verbatim to `plugin.validateConfig`.
    */
   uses?: ServiceUseSpec[]
+  /**
+   * Third-party MCP servers to attach to this agent's tool-use loop
+   * (v0.3 — see docs/MCP.md § 6c). Each entry spawns a stdio MCP
+   * server child process at agent-spawn time; the resulting toolset
+   * is injected as `LlmAgent.tools`. Tool names are namespaced
+   * `<server>__<tool>` so two servers can both declare e.g. `read`
+   * without colliding.
+   *
+   * Empty / absent means no MCP tools — the agent's tool-use loop is
+   * never engaged, behaviour matches v0.2 exactly.
+   *
+   * Lifecycle is owned by `LocalAgentPool`: the toolset is connected
+   * just before `new LlmAgent(...)` and disconnected on `stop(id)` /
+   * pool shutdown. A single agent can declare many servers; one
+   * server that fails to spawn becomes `dead` but doesn't tank the
+   * agent (its tools just won't appear in the LLM-facing list).
+   */
+  mcpServers?: McpServerSpec[]
+}
+
+/**
+ * One entry under `ManagedAgentSpec.mcpServers`. A stripped-down,
+ * yaml-friendly view of `@aipehub/mcp-client`'s `McpServerConfig` —
+ * fields are 1:1 mapped at spawn time inside `LocalAgentPool`.
+ *
+ * `env` supports `${ENV_VAR}` expansion at spawn time so credentials
+ * stay in the host's environment rather than persisted in plain text
+ * in `agents.json`. Unknown env-var refs (`${MISSING}`) become empty
+ * strings and the agent's spawn logs warn about it.
+ */
+export interface McpServerSpec {
+  /**
+   * Short identifier, used as the prefix on namespaced tool names
+   * (`<name>__<tool>`). Must be unique within this agent's
+   * `mcpServers[]` and match `/^[a-zA-Z][a-zA-Z0-9_-]*$/`
+   * (a-z, A-Z, 0-9, `_`, `-`; can't start with a digit).
+   */
+  name: string
+  /**
+   * Executable to spawn. Typically `npx` for installed-on-demand
+   * servers (`npx -y @modelcontextprotocol/server-filesystem`), or an
+   * absolute path for site-installed ones.
+   */
+  command: string
+  /** Command-line arguments. No shell interpolation — one arg per slot. */
+  args?: string[]
+  /**
+   * Environment variables to expose to the child. Values may contain
+   * `${ENV_VAR}` placeholders, expanded against the host process's
+   * env at spawn time. Use this for credentials:
+   * `{ GITHUB_PERSONAL_ACCESS_TOKEN: '${GITHUB_TOKEN}' }`.
+   * Setting this at all means only the keys you provide reach the
+   * child (the SDK's default-inheritance set is dropped). Spell out
+   * PATH yourself if your server needs it.
+   */
+  env?: Record<string, string>
+  /**
+   * Working directory for the child process. Defaults to the host's
+   * own CWD. Set this for servers that look at `process.cwd()` to
+   * find a project root.
+   */
+  cwd?: string
 }
 
 /**

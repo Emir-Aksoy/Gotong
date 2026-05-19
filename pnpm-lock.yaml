@@ -267,6 +267,9 @@ importers:
       '@aipehub/llm-openai':
         specifier: workspace:*
         version: link:../llm-openai
+      '@aipehub/mcp-client':
+        specifier: workspace:*
+        version: link:../mcp-client
       '@aipehub/protocol':
         specifier: workspace:*
         version: link:../protocol

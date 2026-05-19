@@ -472,6 +472,54 @@ interface LlmAgentToolset {
 API wrapper, etc., without depending on `@aipehub/mcp-client`. The
 MCP toolset already implements this shape — it's a drop-in.
 
+### 6c-yaml. Declaring servers in an agent template (no code)
+
+If your agent ships as a `aipehub.agent/v1` manifest (host-managed via
+the admin UI), drop the `mcpServers:` field into the agent block —
+the host's `LocalAgentPool` will spawn the toolset at boot and inject
+it into the `LlmAgent` for you. No code required.
+
+```yaml
+schema: aipehub.agent/v1
+agent:
+  id: repo-reader
+  displayName: 仓库阅读助手
+  capabilities: [explain, summarize]
+  kind: llm
+  provider: anthropic
+  model: claude-sonnet-4-6
+  system: |
+    You read repo files via fs__read_text_file. Don't guess contents;
+    actually read.
+  mcpServers:
+    - name: fs
+      command: npx
+      args:
+        - -y
+        - '@modelcontextprotocol/server-filesystem'
+        - /var/work/your-repo
+    - name: github
+      command: npx
+      args: [-y, '@modelcontextprotocol/server-github']
+      env:
+        # ${GITHUB_TOKEN} is expanded against the host's environment at
+        # spawn time. Credentials don't get persisted in agents.json.
+        GITHUB_PERSONAL_ACCESS_TOKEN: ${GITHUB_TOKEN}
+```
+
+Manifest-level validation enforced at parse time:
+
+- `name` must match `/^[a-zA-Z][a-zA-Z0-9_-]*$/` and be unique within
+  this agent's `mcpServers[]` list.
+- `command` is required; `args` / `env` / `cwd` are optional.
+- `env` values support `${ENV_VAR}` placeholders. Missing variables
+  expand to `''` (with a warning in the host log) so a forgotten
+  credential doesn't crash boot — the MCP server itself surfaces the
+  auth error.
+
+A runnable sample template ships at
+[`templates/agents/repo-reader.yaml`](../templates/agents/repo-reader.yaml).
+
 ### 6c-alt. Wiring into a custom `AgentParticipant` (if you can't use `LlmAgent`)
 
 If you've subclassed `AgentParticipant` directly and have your own

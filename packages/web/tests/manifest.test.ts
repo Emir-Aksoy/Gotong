@@ -420,6 +420,174 @@ agent:
   })
 })
 
+// v0.3+ — agent manifests can declare third-party MCP servers under
+// `mcpServers:`. The parser validates shape (name regex, type
+// constraints) at import time; the actual spawn happens later in
+// LocalAgentPool.
+describe('parseManifest — mcpServers: (third-party MCP tools)', () => {
+  function withMcpServers(extra: string): string {
+    return `
+schema: aipehub.agent/v1
+agent:
+  id: writer
+  capabilities: [draft]
+  kind: llm
+  provider: anthropic
+  system: writes things
+  mcpServers:${extra}
+`.trim()
+  }
+
+  it('parses a minimal mcpServers entry (name + command)', () => {
+    const parsed = parseManifest(
+      withMcpServers(`
+    - name: fs
+      command: npx
+      args: [-y, '@modelcontextprotocol/server-filesystem', './workspace']`),
+    )
+    expect(parsed.schema).toBe(AGENT_SCHEMA_V1)
+    expect(parsed.agents).toHaveLength(1)
+    expect(parsed.agents[0]!.managed.mcpServers).toHaveLength(1)
+    expect(parsed.agents[0]!.managed.mcpServers![0]).toEqual({
+      name: 'fs',
+      command: 'npx',
+      args: ['-y', '@modelcontextprotocol/server-filesystem', './workspace'],
+    })
+  })
+
+  it('parses env + cwd', () => {
+    const parsed = parseManifest(
+      withMcpServers(`
+    - name: github
+      command: npx
+      args: [-y, '@modelcontextprotocol/server-github']
+      env:
+        GITHUB_PERSONAL_ACCESS_TOKEN: \${GITHUB_TOKEN}
+      cwd: /var/work/repo`),
+    )
+    expect(parsed.agents).toHaveLength(1)
+    const s = parsed.agents[0]!.managed.mcpServers![0]!
+    expect(s.env).toEqual({
+      GITHUB_PERSONAL_ACCESS_TOKEN: '${GITHUB_TOKEN}',
+    })
+    expect(s.cwd).toBe('/var/work/repo')
+  })
+
+  it('parses multiple servers in order', () => {
+    const parsed = parseManifest(
+      withMcpServers(`
+    - { name: fs,     command: npx, args: [-y, '@modelcontextprotocol/server-filesystem', './work'] }
+    - { name: github, command: npx, args: [-y, '@modelcontextprotocol/server-github'] }
+    - { name: slack,  command: npx, args: [-y, '@modelcontextprotocol/server-slack'] }`),
+    )
+    expect(parsed.agents).toHaveLength(1)
+    expect(parsed.agents[0]!.managed.mcpServers!.map((s) => s.name)).toEqual([
+      'fs',
+      'github',
+      'slack',
+    ])
+  })
+
+  it('rejects an mcpServers entry without name', () => {
+    expect(() =>
+      parseManifest(
+        withMcpServers(`
+    - command: npx`),
+      ),
+    ).toThrow(ManifestError)
+  })
+
+  it('rejects an mcpServers entry without command', () => {
+    expect(() =>
+      parseManifest(
+        withMcpServers(`
+    - name: fs`),
+      ),
+    ).toThrow(ManifestError)
+  })
+
+  it('rejects a duplicate server name within the same agent', () => {
+    expect(() =>
+      parseManifest(
+        withMcpServers(`
+    - { name: fs, command: npx }
+    - { name: fs, command: npx }`),
+      ),
+    ).toThrowError(/duplicates/)
+  })
+
+  it('rejects an invalid name (starts with digit, has dot, has space)', () => {
+    for (const bad of ['1fs', 'fs.io', 'has space']) {
+      expect(() =>
+        parseManifest(
+          withMcpServers(`
+    - { name: '${bad}', command: npx }`),
+        ),
+      ).toThrowError(/must match/)
+    }
+  })
+
+  it('rejects non-string args entries', () => {
+    expect(() =>
+      parseManifest(
+        withMcpServers(`
+    - name: fs
+      command: npx
+      args: [42, 'ok']`),
+      ),
+    ).toThrowError(/must be a string/)
+  })
+
+  it('rejects non-string env values', () => {
+    expect(() =>
+      parseManifest(
+        withMcpServers(`
+    - name: github
+      command: npx
+      env:
+        TOKEN: 12345`),
+      ),
+    ).toThrowError(/must be a string/)
+  })
+
+  it('renderAgentManifest round-trips mcpServers', () => {
+    const yaml = withMcpServers(`
+    - name: fs
+      command: npx
+      args: [-y, '@modelcontextprotocol/server-filesystem', './workspace']
+      env:
+        FOO: bar
+      cwd: /tmp/work`)
+    const parsed = parseManifest(yaml)
+    expect(parsed.agents).toHaveLength(1)
+    const rendered = renderAgentManifest({
+      id: parsed.agents[0]!.id,
+      allowedCapabilities: parsed.agents[0]!.capabilities,
+      managed: parsed.agents[0]!.managed,
+    })
+    const reparsed = parseManifest(JSON.stringify(rendered))
+    expect(reparsed.agents).toHaveLength(1)
+    expect(reparsed.agents[0]!.managed.mcpServers).toEqual(
+      parsed.agents[0]!.managed.mcpServers,
+    )
+  })
+
+  it('absent mcpServers (the common case) yields undefined, not []', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: writer
+  capabilities: [draft]
+  kind: llm
+  provider: anthropic
+  system: hi
+`.trim()
+    const parsed = parseManifest(yaml)
+    expect(parsed.agents).toHaveLength(1)
+    expect(parsed.agents[0]!.managed.mcpServers).toBeUndefined()
+  })
+})
+
 /**
  * The repo ships standard YAML templates under /templates. Smoke them
  * through the parser so a typo in a template trips CI rather than

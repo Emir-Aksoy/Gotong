@@ -1,6 +1,10 @@
 import { parse as parseYaml } from 'yaml'
 
-import type { ManagedAgentSpec, ServiceUseSpec } from '@aipehub/core'
+import type {
+  ManagedAgentSpec,
+  McpServerSpec,
+  ServiceUseSpec,
+} from '@aipehub/core'
 
 /**
  * Agent / team manifests are the file format the public template library
@@ -213,6 +217,17 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
   if (a.uses !== undefined) {
     managed.uses = validateUsesArray(a.uses, `${path}.uses`)
   }
+  // Optional `mcpServers:` — third-party MCP tool servers to spawn
+  // alongside this agent. Same parse-time approach as `uses`: we
+  // validate shape only; the actual child-process spawn happens at
+  // agent-spawn time (LocalAgentPool). A bad `command` won't show up
+  // until then.
+  if (a.mcpServers !== undefined) {
+    managed.mcpServers = validateMcpServersArray(
+      a.mcpServers,
+      `${path}.mcpServers`,
+    )
+  }
   const out: ParsedAgent = { id: a.id, capabilities, managed }
   if (typeof a.displayName === 'string') out.displayName = a.displayName
   return out
@@ -285,6 +300,100 @@ export function validateUsesArray(raw: unknown, path: string): ServiceUseSpec[] 
 }
 
 /**
+ * Walk a raw `mcpServers:` array, returning a typed `McpServerSpec[]`.
+ *
+ * Rules enforced at parse time (no spawn yet — that happens in
+ * `LocalAgentPool`):
+ *
+ *   - top-level must be an array
+ *   - each entry must have non-empty `name` matching the prefix regex
+ *     `/^[a-zA-Z][a-zA-Z0-9_-]*$/` (same as `McpToolset`'s — `name` is
+ *     used as a tool-name prefix so it has to satisfy the LLM tool-name
+ *     regex `[a-zA-Z0-9_-]+`)
+ *   - `name` must be unique within this agent's `mcpServers[]`
+ *   - `command` must be a non-empty string
+ *   - `args` if present must be an array of strings
+ *   - `env` if present must be a plain object of `{ string: string }`
+ *   - `cwd` if present must be a non-empty string
+ *
+ * Exported so the admin POST/PUT path in `server.ts` can run the same
+ * checks against form data without re-implementing them. `path` is the
+ * cosmetic prefix for error messages.
+ */
+const MCP_SERVER_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/
+
+export function validateMcpServersArray(raw: unknown, path: string): McpServerSpec[] {
+  if (!Array.isArray(raw)) {
+    throw new ManifestError(`${path} must be an array`)
+  }
+  const out: McpServerSpec[] = []
+  const seenNames = new Set<string>()
+  for (let i = 0; i < raw.length; i++) {
+    const entry = raw[i]
+    const ep = `${path}[${i}]`
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new ManifestError(`${ep} must be an object`)
+    }
+    const e = entry as Record<string, unknown>
+    if (typeof e.name !== 'string' || e.name.length === 0) {
+      throw new ManifestError(`${ep}.name is required (non-empty string)`)
+    }
+    if (!MCP_SERVER_NAME_RE.test(e.name)) {
+      throw new ManifestError(
+        `${ep}.name must match ${MCP_SERVER_NAME_RE} — got '${e.name}'`,
+      )
+    }
+    if (seenNames.has(e.name)) {
+      throw new ManifestError(`${ep}.name '${e.name}' duplicates an earlier server`)
+    }
+    seenNames.add(e.name)
+    if (typeof e.command !== 'string' || e.command.length === 0) {
+      throw new ManifestError(`${ep}.command is required (non-empty string)`)
+    }
+    const spec: McpServerSpec = { name: e.name, command: e.command }
+    if (e.args !== undefined) {
+      if (!Array.isArray(e.args)) {
+        throw new ManifestError(`${ep}.args must be an array of strings if present`)
+      }
+      const args: string[] = []
+      for (let j = 0; j < e.args.length; j++) {
+        const a = e.args[j]
+        if (typeof a !== 'string') {
+          throw new ManifestError(`${ep}.args[${j}] must be a string`)
+        }
+        args.push(a)
+      }
+      spec.args = args
+    }
+    if (e.env !== undefined) {
+      if (
+        typeof e.env !== 'object' ||
+        e.env === null ||
+        Array.isArray(e.env)
+      ) {
+        throw new ManifestError(`${ep}.env must be an object (string→string) if present`)
+      }
+      const env: Record<string, string> = {}
+      for (const [k, v] of Object.entries(e.env as Record<string, unknown>)) {
+        if (typeof v !== 'string') {
+          throw new ManifestError(`${ep}.env['${k}'] must be a string (got ${typeof v})`)
+        }
+        env[k] = v
+      }
+      spec.env = env
+    }
+    if (e.cwd !== undefined) {
+      if (typeof e.cwd !== 'string' || e.cwd.length === 0) {
+        throw new ManifestError(`${ep}.cwd must be a non-empty string if present`)
+      }
+      spec.cwd = e.cwd
+    }
+    out.push(spec)
+  }
+  return out
+}
+
+/**
  * Render a single AgentRecord back into a v1 agent manifest. Used by the
  * `GET /api/admin/agents/export/:id` endpoint so a user can grab a
  * working agent's config, edit it elsewhere, and re-import.
@@ -318,6 +427,18 @@ export function renderAgentManifest(rec: {
     agent.uses = rec.managed.uses.map((u) => {
       const out: Record<string, unknown> = { type: u.type, impl: u.impl }
       if (u.config !== undefined) out.config = { ...u.config }
+      return out
+    })
+  }
+  if (rec.managed.mcpServers && rec.managed.mcpServers.length > 0) {
+    agent.mcpServers = rec.managed.mcpServers.map((m) => {
+      const out: Record<string, unknown> = {
+        name: m.name,
+        command: m.command,
+      }
+      if (m.args) out.args = [...m.args]
+      if (m.env) out.env = { ...m.env }
+      if (m.cwd) out.cwd = m.cwd
       return out
     })
   }

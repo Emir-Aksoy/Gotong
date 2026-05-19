@@ -9,6 +9,7 @@ export type {
   AgentRecord,
   ManagedAgentSpec,
   ManagedAgentLifecycle,
+  McpServerSpec,
   ServiceUseSpec,
   WorkerRecord,
   SessionRecord,
