@@ -112,6 +112,18 @@ importers:
         specifier: ^6.38.0
         version: 6.38.0(ws@8.20.1)(zod@4.4.3)
 
+  examples/loadtest:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/sdk-node':
+        specifier: workspace:*
+        version: link:../../packages/sdk-node
+      '@aipehub/transport-ws':
+        specifier: workspace:*
+        version: link:../../packages/transport-ws
+
   examples/open-space:
     dependencies:
       '@aipehub/core':
