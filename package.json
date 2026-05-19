@@ -35,5 +35,12 @@
     "typescript": "^5.6.0",
     "@types/node": "^20.14.0",
     "tsx": "^4.22.0"
+  },
+  "pnpm": {
+    "//": "Audit-fix overrides — force transitive vite/esbuild to the patched majors so vitest's dev-server tree can't hit GHSA-4w7w-66w2-5vf9 (vite .map path traversal) or GHSA-67mh-4wv8-2f99 (esbuild dev-server CORS). Tree is dev-only — production binary is unaffected — but devs running `pnpm test` shouldn't have a known-vulnerable dev server. Remove this block when vitest's vite peer floor rises past 6.4.2 organically.",
+    "overrides": {
+      "vite": "^6.4.2",
+      "esbuild": "^0.25.0"
+    }
   }
 }
