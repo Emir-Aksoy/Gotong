@@ -19,6 +19,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 import ssl as _ssl
 import time
 from typing import Any, Awaitable, Callable, Literal
@@ -74,13 +75,52 @@ SessionState = Literal[
 ]
 
 
+# H11 — patterns matched by `_redact_secrets`. Mirrors
+# `packages/sdk-node/src/redact.ts` PATTERNS so a server REJECT.message
+# containing credentials gets the same treatment whichever SDK the
+# caller used. Keep the two lists in lockstep.
+_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
+    # 1. sk-... API keys (OpenAI / Anthropic / DeepSeek).
+    re.compile(r"sk-[A-Za-z0-9_-]+"),
+    # 2. HTTP Authorization Bearer.
+    re.compile(r"Bearer\s+[^\s'\"`{}]+", re.IGNORECASE),
+    # 3. aipe-... admin / agent tokens.
+    re.compile(r"aipe-[A-Za-z0-9_-]+"),
+)
+
+
+def _redact_secrets(s: str) -> str:
+    """Scrub credential-shaped substrings out of a server-controlled
+    message before raising it into user code.
+
+    A misconfigured Hub or upstream proxy can put the caller's own
+    apiKey / Bearer header back into a REJECT.message; the resulting
+    :class:`ConnectionRejected` then typically flows into application
+    logs / Sentry / stderr where it can be read by anyone with log
+    access. We replace each matched span with ``<redacted>`` and leave
+    everything else intact — error messages stay useful for
+    diagnostics. See AUDIT-v3.3.md finding H11.
+    """
+    if not isinstance(s, str):
+        return s
+    out = s
+    for pat in _SECRET_PATTERNS:
+        out = pat.sub("<redacted>", out)
+    return out
+
+
 class ConnectionRejected(RuntimeError):
     """Raised when the server replies REJECT to our HELLO."""
 
     def __init__(self, code: str, message: str) -> None:
-        super().__init__(f"REJECT {code}: {message}")
+        # H11 — redact secrets before storing or formatting. The
+        # ``code`` is a constrained enum from the protocol so it
+        # passes through verbatim; only the free-form ``message``
+        # field needs scrubbing.
+        safe_message = _redact_secrets(message)
+        super().__init__(f"REJECT {code}: {safe_message}")
         self.code = code
-        self.message = message
+        self.message = safe_message
 
 
 class Session:
