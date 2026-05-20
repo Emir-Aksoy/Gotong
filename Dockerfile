@@ -38,6 +38,7 @@ COPY packages/service-datastore-sqlite/package.json packages/service-datastore-s
 COPY packages/workflow/package.json        packages/workflow/package.json
 COPY packages/cli/package.json             packages/cli/package.json
 COPY packages/mcp-server/package.json      packages/mcp-server/package.json
+COPY packages/mcp-client/package.json      packages/mcp-client/package.json
 
 # Use the lockfile verbatim. We don't add --frozen-lockfile because the
 # image is built from the repo, not from a fresh clone — but pnpm will
