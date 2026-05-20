@@ -1,0 +1,41 @@
+# Repository reader — demos `mcpServers:` (v0.3+).
+#
+# Spawns the official MCP filesystem server alongside the agent at
+# host boot. The agent's tool-use loop sees `fs__read_text_file`,
+# `fs__list_directory`, etc. and uses them autonomously when the user
+# asks about the repo's contents.
+#
+# Tweak `args: [.,/path/to/your/repo]` to whatever directory the agent
+# should be allowed to read. Use multiple entries to let the same
+# agent read several roots (the toolset namespaces them by `name:`).
+schema: aipehub.agent/v1
+
+agent:
+  id: repo-reader
+  displayName: 仓库阅读助手 (Repo reader)
+  capabilities: [explain, summarize]
+  kind: llm
+  provider: anthropic
+  model: claude-sonnet-4-6
+  weightDefault: 1.0
+  system: |
+    You read files from the repository the operator has handed you and
+    answer questions about them. Use `fs__read_text_file` for actual
+    file contents — never guess. Quote opening lines verbatim when the
+    user asks what a file says. For "what's in this directory?" use
+    `fs__list_directory`.
+
+    Keep responses tight. Quote, don't paraphrase, when the user is
+    looking for an exact wording.
+
+  # Third-party MCP servers spawned at host boot, alongside this agent.
+  # Each entry becomes a child process; tools are namespaced
+  # `<name>__<tool>` and handed to the LLM automatically.
+  mcpServers:
+    - name: fs
+      command: npx
+      args:
+        - -y
+        - '@modelcontextprotocol/server-filesystem'
+        - .                          # sandbox to the host's CWD; pin to
+                                     # an absolute path in production.
