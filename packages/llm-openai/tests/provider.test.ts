@@ -338,6 +338,215 @@ describe('OpenAIProvider — openai-compatible extensions', () => {
   })
 })
 
+// v0.3 added tool-use plumbing. These tests exercise the request +
+// response translation paths the LlmAgent's tool-use loop drives end-to-end.
+describe('OpenAIProvider — tool-use translation', () => {
+  it('sends tools as {type:function,function:{name,description,parameters}}', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+
+    await provider.complete({
+      messages: [{ role: 'user', content: 'list files' }],
+      tools: [
+        {
+          name: 'fs__list',
+          description: 'List directory contents',
+          inputSchema: {
+            type: 'object',
+            properties: { path: { type: 'string' } },
+          },
+        },
+      ],
+    })
+
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.tools).toEqual([
+      {
+        type: 'function',
+        function: {
+          name: 'fs__list',
+          description: 'List directory contents',
+          parameters: {
+            type: 'object',
+            properties: { path: { type: 'string' } },
+          },
+        },
+      },
+    ])
+  })
+
+  it('extracts tool_calls into response.toolUses and maps finish_reason=tool_calls', async () => {
+    const { client } = makeFakeClient(async () => ({
+      choices: [
+        {
+          message: {
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_xyz',
+                type: 'function',
+                function: {
+                  name: 'fs__read',
+                  arguments: '{"path":"README.md"}',
+                },
+              },
+            ],
+          },
+          finish_reason: 'tool_calls',
+        },
+      ],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+
+    const res = await provider.complete({
+      messages: [{ role: 'user', content: 'read README' }],
+      tools: [{ name: 'fs__read', inputSchema: { type: 'object' } }],
+    })
+
+    expect(res.stopReason).toBe('tool_use')
+    expect(res.text).toBe('')
+    expect(res.toolUses).toEqual([
+      {
+        type: 'tool_use',
+        id: 'call_xyz',
+        name: 'fs__read',
+        input: { path: 'README.md' },
+      },
+    ])
+  })
+
+  it('survives malformed JSON in tool_calls.function.arguments by surfacing _raw', async () => {
+    const { client } = makeFakeClient(async () => ({
+      choices: [
+        {
+          message: {
+            content: null,
+            tool_calls: [
+              {
+                id: 'call_bad',
+                type: 'function',
+                function: { name: 'fs__list', arguments: 'not-json-at-all' },
+              },
+            ],
+          },
+          finish_reason: 'tool_calls',
+        },
+      ],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+
+    const res = await provider.complete({
+      messages: [{ role: 'user', content: 'x' }],
+      tools: [{ name: 'fs__list', inputSchema: { type: 'object' } }],
+    })
+
+    expect(res.toolUses?.[0]!.input).toEqual({ _raw: 'not-json-at-all' })
+  })
+
+  it('translates assistant tool_use blocks to {role:assistant, tool_calls:[…]}', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'done' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+
+    await provider.complete({
+      messages: [
+        { role: 'user', content: 'read it' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'sure' },
+            {
+              type: 'tool_use',
+              id: 'call_abc',
+              name: 'fs__read',
+              input: { path: 'a.md' },
+            },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', toolUseId: 'call_abc', content: '# A' },
+          ],
+        },
+      ],
+      tools: [{ name: 'fs__read', inputSchema: { type: 'object' } }],
+    })
+
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.messages).toEqual([
+      { role: 'user', content: 'read it' },
+      {
+        role: 'assistant',
+        content: 'sure',
+        tool_calls: [
+          {
+            id: 'call_abc',
+            type: 'function',
+            function: {
+              name: 'fs__read',
+              arguments: '{"path":"a.md"}',
+            },
+          },
+        ],
+      },
+      // tool_result fans out into a standalone {role:'tool', tool_call_id, content}
+      // message — this is OpenAI's wire shape, distinct from Anthropic's
+      // tool_result-block-inside-a-user-message convention.
+      { role: 'tool', tool_call_id: 'call_abc', content: '# A' },
+    ])
+  })
+
+  it('emits content:null on assistant message when only tool_calls (no text)', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'done' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+
+    await provider.complete({
+      messages: [
+        { role: 'user', content: 'go' },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'c1',
+              name: 'fs__read',
+              input: { path: 'a.md' },
+            },
+          ],
+        },
+        {
+          role: 'user',
+          content: [{ type: 'tool_result', toolUseId: 'c1', content: 'x' }],
+        },
+      ],
+      tools: [{ name: 'fs__read', inputSchema: { type: 'object' } }],
+    })
+
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as Array<Record<string, unknown>>
+    expect(msgs[1]!.content).toBeNull()
+  })
+
+  it('omits tools field when request.tools is empty or undefined', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+
+    await provider.complete({ messages: [{ role: 'user', content: 'hi' }] })
+    expect(create.mock.calls[0]![0]).not.toHaveProperty('tools')
+
+    await provider.complete({ messages: [{ role: 'user', content: 'hi' }], tools: [] })
+    expect(create.mock.calls[1]![0]).not.toHaveProperty('tools')
+  })
+})
+
 describe('isTransientError classifier', () => {
   it('flags Premature close as transient (the original motivation)', () => {
     expect(

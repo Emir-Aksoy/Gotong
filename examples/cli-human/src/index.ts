@@ -141,7 +141,11 @@ async function main(): Promise<void> {
     name: 'mock-writer',
     reply: (req) => {
       const last = req.messages[req.messages.length - 1]
-      const m = /Please write about: (.+)$/.exec(last?.content ?? '')
+      // v0.3 widened LlmMessage.content to support tool-use content blocks.
+      // This mock only ever sees plain text from LlmAgent's default
+      // buildRequest, so narrow to string before regexing.
+      const text = typeof last?.content === 'string' ? last.content : ''
+      const m = /Please write about: (.+)$/.exec(text)
       const topic = m ? m[1] : 'something'
       return `Draft on ${topic}: it matters because the join of intent and action is where systems live or die.`
     },

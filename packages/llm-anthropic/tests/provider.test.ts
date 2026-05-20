@@ -140,9 +140,12 @@ describe('AnthropicProvider — response translation', () => {
   })
 
   it('maps unknown stop_reason values to error', async () => {
+    // v0.3 made `tool_use` a known stop reason — use a value Anthropic
+    // hasn't introduced yet (e.g. `pause_turn`) to exercise the
+    // unknown-fallback branch.
     const { client } = makeFakeClient(async () => ({
       content: [{ type: 'text', text: '' }],
-      stop_reason: 'tool_use',
+      stop_reason: 'pause_turn',
     }))
     const provider = new AnthropicProvider({ client: client as any })
 
@@ -280,5 +283,212 @@ describe('AnthropicProvider — error propagation', () => {
     await expect(
       provider.complete({ messages: [{ role: 'user', content: 'hi' }] }),
     ).rejects.toThrow('auth_denied')
+  })
+})
+
+// v0.3 added tool-use plumbing. These tests exercise the request +
+// response translation paths the LlmAgent's tool-use loop drives end-to-end.
+describe('AnthropicProvider — tool-use translation', () => {
+  it('sends tools with input_schema (snake_case for the wire)', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+
+    await provider.complete({
+      messages: [{ role: 'user', content: 'read README' }],
+      tools: [
+        {
+          name: 'fs__read_file',
+          description: 'Read a file',
+          inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
+        },
+      ],
+    })
+
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.tools).toEqual([
+      {
+        name: 'fs__read_file',
+        description: 'Read a file',
+        input_schema: {
+          type: 'object',
+          properties: { path: { type: 'string' } },
+        },
+      },
+    ])
+  })
+
+  it('omits tools field when request.tools is empty or undefined', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+
+    await provider.complete({ messages: [{ role: 'user', content: 'hi' }] })
+    const body1 = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body1).not.toHaveProperty('tools')
+
+    await provider.complete({ messages: [{ role: 'user', content: 'hi' }], tools: [] })
+    const body2 = create.mock.calls[1]![0] as Record<string, unknown>
+    expect(body2).not.toHaveProperty('tools')
+  })
+
+  it('extracts tool_use blocks into response.toolUses + maps stop_reason', async () => {
+    const { client } = makeFakeClient(async () => ({
+      content: [
+        { type: 'text', text: 'let me check that file' },
+        {
+          type: 'tool_use',
+          id: 'toolu_01abc',
+          name: 'fs__read_file',
+          input: { path: 'README.md' },
+        },
+      ],
+      stop_reason: 'tool_use',
+      usage: { input_tokens: 30, output_tokens: 20 },
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+
+    const res = await provider.complete({
+      messages: [{ role: 'user', content: 'read README' }],
+      tools: [
+        {
+          name: 'fs__read_file',
+          inputSchema: { type: 'object' },
+        },
+      ],
+    })
+
+    expect(res.stopReason).toBe('tool_use')
+    expect(res.text).toBe('let me check that file')
+    expect(res.toolUses).toEqual([
+      {
+        type: 'tool_use',
+        id: 'toolu_01abc',
+        name: 'fs__read_file',
+        input: { path: 'README.md' },
+      },
+    ])
+  })
+
+  it('coerces malformed tool_use.input into an empty object rather than passing junk through', async () => {
+    const { client } = makeFakeClient(async () => ({
+      content: [
+        // SDK is forgiving and would normally produce {} here; the
+        // provider guards against pathological responses too.
+        { type: 'tool_use', id: 't1', name: 'fs__list', input: ['oops', 'array'] },
+        { type: 'tool_use', id: 't2', name: 'fs__list', input: 'string-not-object' },
+      ],
+      stop_reason: 'tool_use',
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+
+    const res = await provider.complete({
+      messages: [{ role: 'user', content: 'list' }],
+      tools: [{ name: 'fs__list', inputSchema: { type: 'object' } }],
+    })
+
+    expect(res.toolUses?.[0]!.input).toEqual({})
+    expect(res.toolUses?.[1]!.input).toEqual({})
+  })
+
+  it('translates assistant tool_use blocks + user tool_result blocks to Anthropic wire shape', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'all done' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+
+    await provider.complete({
+      messages: [
+        { role: 'user', content: 'read README' },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: 'on it' },
+            {
+              type: 'tool_use',
+              id: 'toolu_01abc',
+              name: 'fs__read_file',
+              input: { path: 'README.md' },
+            },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              toolUseId: 'toolu_01abc',
+              content: '# AipeHub\n…',
+            },
+          ],
+        },
+      ],
+      tools: [{ name: 'fs__read_file', inputSchema: { type: 'object' } }],
+    })
+
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.messages).toEqual([
+      { role: 'user', content: 'read README' },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'on it' },
+          {
+            type: 'tool_use',
+            id: 'toolu_01abc',
+            name: 'fs__read_file',
+            input: { path: 'README.md' },
+          },
+        ],
+      },
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'tool_result',
+            tool_use_id: 'toolu_01abc',
+            content: '# AipeHub\n…',
+          },
+        ],
+      },
+    ])
+  })
+
+  it('forwards isError on tool_result blocks (snake_case is_error on the wire)', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'noted' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+
+    await provider.complete({
+      messages: [
+        { role: 'user', content: 'do thing' },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              toolUseId: 't1',
+              content: 'ENOENT',
+              isError: true,
+            },
+          ],
+        },
+      ],
+      tools: [{ name: 'fs__read', inputSchema: { type: 'object' } }],
+    })
+
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as Array<Record<string, unknown>>
+    const toolResultBlock = (msgs[1]!.content as Array<Record<string, unknown>>)[0]!
+    expect(toolResultBlock.tool_use_id).toBe('t1')
+    expect(toolResultBlock.is_error).toBe(true)
+    expect(toolResultBlock.content).toBe('ENOENT')
   })
 })

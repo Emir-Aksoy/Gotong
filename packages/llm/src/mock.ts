@@ -1,4 +1,9 @@
-import type { LlmProvider, LlmRequest, LlmResponse } from './types.js'
+import type {
+  LlmProvider,
+  LlmRequest,
+  LlmResponse,
+  LlmToolUseBlock,
+} from './types.js'
 
 export interface MockProviderOptions {
   /**
@@ -18,7 +23,30 @@ export interface MockProviderOptions {
   stopReason?: LlmResponse['stopReason']
   /** Override the provider name. Defaults to 'mock'. */
   name?: string
+  /**
+   * Tool-use scripting. When set, the mock returns the next entry from the
+   * list each time `complete()` is called. Entry semantics:
+   *   - `tool_use` entries: emit `toolUses` and set `stopReason: 'tool_use'`.
+   *   - `text` entries: behave like the `reply` shortcut — text response,
+   *     `stopReason: 'end_turn'` (or whatever the entry overrides).
+   * Once exhausted, falls back to `reply`. Lets tests script a multi-turn
+   * tool-use loop without spinning up a real provider.
+   */
+  script?: ReadonlyArray<MockScriptEntry>
 }
+
+export type MockScriptEntry =
+  | {
+      kind: 'tool_use'
+      toolUses: LlmToolUseBlock[]
+      /** Optional companion text that accompanies the tool calls. */
+      text?: string
+    }
+  | {
+      kind: 'text'
+      text: string
+      stopReason?: LlmResponse['stopReason']
+    }
 
 /**
  * Deterministic in-process LlmProvider for tests and the `llm-mock` example.
@@ -26,6 +54,7 @@ export interface MockProviderOptions {
  */
 export class MockLlmProvider implements LlmProvider {
   readonly name: string
+  private scriptCursor = 0
 
   constructor(private readonly opts: MockProviderOptions) {
     this.name = opts.name ?? 'mock'
@@ -37,6 +66,32 @@ export class MockLlmProvider implements LlmProvider {
     }
     if (this.opts.throwError) {
       throw new Error(this.opts.throwError)
+    }
+    // Scripted entry, if any remain.
+    const entry = this.opts.script?.[this.scriptCursor]
+    if (entry) {
+      this.scriptCursor++
+      if (entry.kind === 'tool_use') {
+        const res: LlmResponse = {
+          text: entry.text ?? '',
+          stopReason: 'tool_use',
+          toolUses: entry.toolUses,
+          usage: {
+            inputTokens: estimateTokens(req),
+            outputTokens: 16, // arbitrary stand-in
+          },
+        }
+        return res
+      }
+      // entry.kind === 'text'
+      return {
+        text: entry.text,
+        stopReason: entry.stopReason ?? 'end_turn',
+        usage: {
+          inputTokens: estimateTokens(req),
+          outputTokens: Math.ceil(entry.text.length / 4),
+        },
+      }
     }
     const text =
       typeof this.opts.reply === 'function' ? this.opts.reply(req) : this.opts.reply
@@ -53,6 +108,19 @@ export class MockLlmProvider implements LlmProvider {
 
 function estimateTokens(req: LlmRequest): number {
   let chars = req.system?.length ?? 0
-  for (const m of req.messages) chars += m.content.length
+  for (const m of req.messages) {
+    if (typeof m.content === 'string') {
+      chars += m.content.length
+    } else {
+      // Sum text-block lengths; ignore tool_use / tool_result for token
+      // estimation since their JSON envelope is small + variable.
+      for (const block of m.content) {
+        if (block.type === 'text') chars += block.text.length
+        else if (block.type === 'tool_result' && typeof block.content === 'string') {
+          chars += block.content.length
+        }
+      }
+    }
+  }
   return Math.ceil(chars / 4)
 }
