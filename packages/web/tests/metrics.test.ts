@@ -204,4 +204,91 @@ describe('renderMetrics', () => {
     // count is still 2 (both calls happened, both audited).
     expect(text).toMatch(/aipehub_service_call_duration_ms_count\{type="memory",impl="file"\} 2/)
   })
+
+  // PR #41 — service-call latency histogram for p50/p95/p99 dashboards.
+  it('emits service-call duration histogram buckets', () => {
+    // Two fast (≤ 5ms) calls + one slow (200ms) call. Expect cumulative
+    // bucket counts: le=5 → 2, le=10 → 2, le=25 → 2, …, le=250 → 3,
+    // le=+Inf → 3.
+    const append = (hub.transcript as unknown as {
+      append: (e: { ts: number; kind: string; data: unknown }) => void
+    }).append.bind(hub.transcript)
+    for (const dur of [3, 4, 200]) {
+      append({
+        ts: Date.now(),
+        kind: 'service_call',
+        data: {
+          from: 'a',
+          type: 'memory',
+          impl: 'file',
+          ownerKind: 'agent',
+          ownerId: 'a',
+          method: 'recall',
+          outcome: 'ok',
+          durationMs: dur,
+        },
+      })
+    }
+    const text = renderMetrics(hub)
+    expect(text).toContain('# TYPE aipehub_service_call_duration_ms histogram')
+    // Bucket le=5 captures the two 3ms / 4ms calls but not the 200ms one.
+    expect(text).toMatch(/aipehub_service_call_duration_ms_bucket\{type="memory",impl="file",le="5"\} 2/)
+    expect(text).toMatch(/aipehub_service_call_duration_ms_bucket\{type="memory",impl="file",le="100"\} 2/)
+    // le=250 captures all three.
+    expect(text).toMatch(/aipehub_service_call_duration_ms_bucket\{type="memory",impl="file",le="250"\} 3/)
+    expect(text).toMatch(/aipehub_service_call_duration_ms_bucket\{type="memory",impl="file",le="\+Inf"\} 3/)
+  })
+
+  it('histogram emits a zero +Inf bucket when no service calls have run', () => {
+    const text = renderMetrics(hub)
+    expect(text).toContain('# TYPE aipehub_service_call_duration_ms histogram')
+    // The placeholder zero series so scrapers see the metric exists.
+    expect(text).toMatch(/aipehub_service_call_duration_ms_bucket\{le="\+Inf"\} 0/)
+  })
+
+  // PR #41 — HTTP response-class counter. Driven via HttpStats; the
+  // metric is omitted when no httpStats is supplied (tests + scripts
+  // that scrape metrics out-of-band).
+  it('omits HTTP counters when httpStats is not supplied', () => {
+    const text = renderMetrics(hub)
+    expect(text).not.toContain('aipehub_http_responses_total')
+  })
+
+  it('emits HTTP counters with all canonical classes when httpStats is supplied', async () => {
+    const { HttpStats } = await import('../src/server.js')
+    const stats = new HttpStats()
+    stats.record(200)
+    stats.record(200)
+    stats.record(201)
+    stats.record(404)
+    stats.record(503)
+    const text = renderMetrics(hub, { httpStats: stats })
+    expect(text).toContain('# TYPE aipehub_http_responses_total counter')
+    expect(text).toMatch(/aipehub_http_responses_total\{class="2xx"\} 3/)
+    expect(text).toMatch(/aipehub_http_responses_total\{class="3xx"\} 0/)
+    expect(text).toMatch(/aipehub_http_responses_total\{class="4xx"\} 1/)
+    expect(text).toMatch(/aipehub_http_responses_total\{class="5xx"\} 1/)
+  })
+
+  it('HTTP counters surface a zero row for every canonical class even before traffic', async () => {
+    const { HttpStats } = await import('../src/server.js')
+    const stats = new HttpStats()
+    const text = renderMetrics(hub, { httpStats: stats })
+    expect(text).toMatch(/aipehub_http_responses_total\{class="2xx"\} 0/)
+    expect(text).toMatch(/aipehub_http_responses_total\{class="5xx"\} 0/)
+  })
+
+  it('HttpStats.record clamps out-of-range / non-finite codes into an "other" bucket', async () => {
+    const { HttpStats } = await import('../src/server.js')
+    const stats = new HttpStats()
+    stats.record(0)            // socket-closed-early on some Node paths
+    stats.record(99)           // sub-1xx, never legal HTTP
+    stats.record(700)          // beyond 5xx
+    stats.record(NaN)           // ignored — not finite
+    stats.record(-1)           // ignored — negative
+    stats.record(200)          // canonical
+    const text = renderMetrics(hub, { httpStats: stats })
+    expect(text).toMatch(/aipehub_http_responses_total\{class="2xx"\} 1/)
+    expect(text).toMatch(/aipehub_http_responses_total\{class="other"\} 3/)
+  })
 })
