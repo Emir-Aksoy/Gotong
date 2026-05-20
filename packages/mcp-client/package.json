@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/mcp-client",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "MCP (Model Context Protocol) client toolkit for AipeHub agents — attach a fleet of MCP servers to an LlmAgent and let it use GitHub / filesystem / Slack / Postgres / etc. tools natively.",
   "license": "MIT",
