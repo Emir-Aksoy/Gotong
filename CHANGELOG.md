@@ -4,6 +4,30 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
+## Unreleased — 2026-05-20 — v3.4 audit hardening (post-3.1.0)
+
+The nine `claude/audit-v3.3-batch*` items from the v3.3 audit that didn't make the 3.1.0 cut. Each batch is a self-contained group of high-severity (`H<n>`) or critical (`C<n>`) findings folded into the codebase as a single commit. Held back from the 3.1.0 release tag so the trial-ready cut stays focused; will roll into the next release (3.1.1 or 3.2.0) once a few have soaked under real traffic.
+
+### Security
+
+- **Batch 1.5** (H7 + H12 + H22) — defence-in-depth pairs for PR #23: workspace symlink + uid-ownership refusal at `Space.init` / `Space.open`; bearer-token leak through error responses; admission-flow logger redaction.
+- **Batch 1.6** (H18 + H19 + H21) — web-server hygiene: stop leaking handler errors via `res.end()`, bound `RateLimiter.hits` Map under IP rotation, plug cookie-sid lookup back into the limiter.
+- **Batch 2** (C2 + C3 + H10) — SDK TLS surface: forbid plaintext over `wss://`, require explicit opt-in for self-signed cert acceptance, surface TLS errors instead of swallowing them.
+- **Batch 3** (H1 + H3 + H4) — workflow resolver prototype-pollution close + MCP admin Bearer token redaction in stderr + MCP tool-error redaction.
+- **Batch 4** (H2 + H8 + H9) — SQLite per-agent quota + SDK call-id collision guard + SDK task-handle GC.
+- **Batch 5** (H5 + H11 + H13) — retry-budget redaction in logs + reject-reason redaction + dev-knob (`AIPE_DEBUG_*`) hygiene in production.
+- **Batch 6** (H14 + H15) — protocol strict-mode max-depth + closed-mode rejection paths for unknown verbs.
+
+### Fixed
+
+- **Batch 7a** (H16) — core test `mkdtemp` race cleanup: the metrics test could fail on a slow file system because the temp-dir cleanup ran while `Hub.stop()` was still flushing the transcript.
+- **Batch 7b** (H17) — web CSRF + cookie branch coverage: explicit tests for the missing-cookie / mismatched-token / origin-header paths so future refactors can't regress them silently.
+
+### Notes
+
+- Adds 20 new TypeScript test files + 3 Python SDK test files. Total suite is now 109 TS test files (was 89 at 3.1.0) and 57 python-sdk tests.
+- No package version bump in this entry — these are tightenings of already-shipped surfaces, not new APIs.
+
 ## 3.1.0 — 2026-05-20 — Trial-ready: binary, observability, MCP tools, hardening
 
 The first release after v3.0. Folds in three months of operability work, an MCP client toolkit, an LLM agent tool-use loop, and the v3.4 audit's launch-readiness batch — packaged so an operator can curl a binary or `docker compose up` and have a working hub in under a minute.
