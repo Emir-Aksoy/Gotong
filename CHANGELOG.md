@@ -4,24 +4,74 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
-## Unreleased — 2026-05-17 — Single-file binary distribution
+## 3.1.0 — 2026-05-20 — Trial-ready: binary, observability, MCP tools, hardening
 
-A no-Node-required install path. Operators who don't want to provision Node + pnpm just to run a chat server can now grab a single ~60 MB executable from GitHub Releases. Same `AIPE_*` env-var contract as the npm / docker paths — every recipe in `docs/DEPLOY.md` works unmodified.
+The first release after v3.0. Folds in three months of operability work, an MCP client toolkit, an LLM agent tool-use loop, and the v3.4 audit's launch-readiness batch — packaged so an operator can curl a binary or `docker compose up` and have a working hub in under a minute.
+
+Headline themes:
+- **Frictionless install** — single-file `bun --compile` binary (no Node required) and a top-level `docker-compose.yml` (no manual `docker run` flags).
+- **Observability you can ship to ops** — Prometheus alert rules, Grafana dashboard, structured HTTP response-class counter, service-call latency histogram with p50/p95/p99 buckets.
+- **Tools-using agents** — `LlmAgent` now drives `LlmAgentToolset` natively; `@aipehub/mcp-client` plugs any MCP server (filesystem, GitHub, Postgres, …) straight into an agent via `tools:`; workflow templates declare `mcpServers:` so a YAML file is all the operator needs.
+- **Audit-1 hardening** — WS upgrade input validation, workspace file permissions, admin link off stdout, supply-chain hardening (SHA-pinned actions + harden-runner audit), CVE fixes (vite/esbuild via vitest 3 bump).
+- **Operations runbooks** — backup/restore/verify shell scripts with documented drill, load-test harness with pre-launch baseline report.
 
 ### Added
 
-- **`bun build --compile` single-file binary** built per-platform: `aipehub-host-{darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64.exe}`. Cuts the install story from "install Node 20, install pnpm, install the workspace, build TS" to "curl + chmod +x + run."
-- **`.github/workflows/release.yml`** — fires on `release: published`, matrix-builds all five targets (native runner per platform except linux-arm64 which cross-compiles from x64), `--version` smoke-tests on every native target, and uploads the binaries as Assets on the triggering release. Also runs on `workflow_dispatch` for manual verification without publishing.
-- **`packages/web/scripts/build-static-assets.mjs`** — embeds `static/*` (admin/worker HTML/CSS/JS, 212 KB total) into `src/static-assets.ts` as base64 so the bundler can ship the UI inside the binary. `serveStatic` checks the embedded map first, falling back to disk reads in dev mode.
-- **`packages/host/src/services/builtin-plugins.ts`** — static `import` of `@aipehub/service-memory-file` + `@aipehub/service-artifact-file` so `bun --compile` links them into the binary. `hostAnchoredImport` in `bootstrap.ts` short-circuits to the builtin map before falling through to `import.meta.resolve(...)`, leaving the npm / docker behaviour unchanged.
-- **`isCompiledBinary()` + `BINARY_SAFE_PLUGINS`** — runtime detection of binary mode (asset URL starts with `/$bunfs/` or `embedded://`). In binary mode the host seeds `plugins.json` with the two plugins that work, omitting `@aipehub/service-datastore-sqlite` (its `better-sqlite3` native binding can't be embedded). Binary first-run is now warning-free.
-- **`services-sdk/loader.ts: LoadPluginsOpts.seedPlugins`** — new optional override letting hosts customise the default-seed list. Defaults to `DEFAULT_FIRST_PARTY_PLUGINS` so existing callers are unaffected.
-- **`docs/DEPLOY.md` §0.5 + `docs/zh/DEPLOY.md` §0.5** — "Single-file binary (no Node required)" section documents the install path, what's inside vs not, and size/startup characteristics.
+- **Single-file binary** (`bun build --compile`) per-platform: `aipehub-host-{darwin-arm64, darwin-x64, linux-x64, linux-arm64, windows-x64.exe}`. Install becomes `curl + chmod +x + run`. ~60 MB per arch. (Earlier dev-cycle commit; first release with a tag.)
+- **`docker-compose.yml`** at repo root — `docker compose up` boots the hub with the published image, a named volume for `/data`, sensible `AIPE_*` defaults, and ports 3000/4000 exposed.
+- **`@aipehub/mcp-client`** (#37) — MCP client toolkit (`McpToolset`) that connects to one or many stdio MCP servers, exposes their tools as a single `LlmAgentToolset`, and surfaces tool-call results back as `LlmToolResultBlock`s. Includes structured `server-stderr` event (#39) so operators can ingest MCP-server logs through the host's logger.
+- **`LlmAgent.tools` + `maxToolRounds`** (#38) — built-in multi-turn tool-use loop. Drop an `LlmAgentToolset` in `LlmAgentOptions` and the agent will tool-call → result → re-prompt until the model emits `end_turn` (capped by `maxToolRounds`, default 8). Anthropic + OpenAI providers translate the neutral `tool_use` / `tool_result` shape natively. Out-of-band toolsets work too — `McpToolset` is a drop-in but not a dependency of `@aipehub/llm`.
+- **`workflow.yaml mcpServers:`** (#40) — declarative MCP wiring for templated agents. Spawning resolves `${ENV_VAR}` references from the host environment so credentials never live in the manifest. `templates/agents/repo-reader.yaml` demoes the filesystem MCP server end-to-end.
+- **Service-call latency histogram + HTTP response-class counter** (#41) — `aipehub_service_call_duration_ms_bucket{type, impl, le}` (10 buckets, 5ms…5000ms) feeds the p50/p95/p99 panels in the Grafana dashboard. `aipehub_http_responses_total{class}` (`2xx/3xx/4xx/5xx/other`) gives uptime monitors a single low-cardinality series to alert on.
+- **Prometheus alerts + Grafana dashboard + monitoring runbook** (#36) — `monitoring/prometheus/aipehub.alerts.yml`, `monitoring/grafana/aipehub-overview.json`, and `docs/MONITORING.md`. Covers WS auth-failure rate, tail-latency spikes, hub stop/restart loops, and process-RSS growth.
+- **Load-test harness** (`examples/loadtest/`, passed through #36 squash) — in-process and over-WS scenarios with shared scenario kit, plus a pre-launch baseline report under `examples/loadtest/runs/`.
+- **Backup playbook** (`scripts/backup/`, passed through #36 squash) — `backup.sh`, `restore.sh`, `verify.sh`, `prune.sh` + a documented disaster-recovery drill in `docs/OPERATIONS.md`.
+
+### Changed
+
+- **`LlmMessage.content`** widened from `string` to `string | LlmContentBlock[]` to carry `tool_use` / `tool_result` blocks. Existing string-only callers are unaffected; the providers narrow back at the wire boundary.
+- **`vitest` 2.x → 3.2.4** (#33) — and `vite` / `esbuild` overrides to clear two transitive CVEs flagged by `pnpm audit`.
+
+### Security
+
+- **Supply-chain hardening** — all third-party actions in `.github/workflows/*.yml` SHA-pinned (40-char hex + `# vX.Y.Z` for humans); `step-security/harden-runner` in audit mode records every job's egress so we can graduate to block once we know the legitimate endpoints. Dependabot's `github-actions` ecosystem keeps the pins moving.
+- **WS upgrade hardening** (#23) — input validation on the upgrade path closes a malformed-header → process-crash trail.
+- **Workspace file permissions** (#23) — newly written transcripts and `space/` files land with `0600` (owner-only), not `0644`.
+- **Admin link off stdout** (#23) — first-run admin URL no longer leaks into operator logs; `docs/OPERATIONS.md` documents the new retrieval flow.
+
+### Fixed
+
+- **Dockerfile build stage** — added `packages/mcp-client/package.json` to the per-package COPY list so `pnpm install` picks up `@modelcontextprotocol/sdk` before `tsc` runs. (Without this, the production image build broke at the typecheck step.)
+- **Counter monotonicity** — `aipehub_service_call_duration_ms_sum` clamps negative `durationMs` (clock-skew artifacts) at zero so `rate()` queries don't decrease.
+- **Test report annotations** — JUnit publication step gracefully tolerates Test report failures so CI's `CI passed` summary tracks the underlying jobs.
 
 ### Notes
 
-- Binary excludes SQLite-backed datastore. Operators who need it stay on the npm or docker install paths — both keep full plugin support.
-- `packages/web/package.json` adds `scripts/` to `files`, so the published npm tarball ships the asset generator alongside the source. `prepack` runs it before `tsc`, so consumers who install from npm get the embedded asset map without having to think about it.
+- Binary excludes the SQLite-backed datastore (`better-sqlite3` native binding can't be embedded). Operators who need it stay on the npm or docker install paths — both keep full plugin support.
+- `packages/web/package.json` adds `scripts/` to `files`, so the published npm tarball ships the asset generator alongside the source. `prepack` runs it before `tsc`.
+- v3.1, v3.2 (post-v3.0 audit + cleanup sweep), and v3.3 (supply-chain hardening on CI/Release workflows) shipped on `main` without a release cut. Their changes are folded into this 3.1.0 entry rather than retro-tagged.
+
+### Package versions
+
+| Package | Old | New |
+|---|---|---|
+| `@aipehub/core` | 3.0.0 | **3.1.0** |
+| `@aipehub/host` | 3.0.0 | **3.1.0** |
+| `@aipehub/llm` | 3.0.0 | **3.1.0** |
+| `@aipehub/llm-anthropic` | 3.0.0 | **3.1.0** |
+| `@aipehub/llm-openai` | 3.0.0 | **3.1.0** |
+| `@aipehub/protocol` | 3.0.0 | **3.1.0** |
+| `@aipehub/sdk-node` | 3.0.0 | **3.1.0** |
+| `@aipehub/transport-ws` | 3.0.0 | **3.1.0** |
+| `@aipehub/web` | 3.0.0 | **3.1.0** |
+| `@aipehub/workflow` | 1.0.0 | **1.1.0** |
+| `@aipehub/mcp-client` | 0.1.0 | **0.2.0** *(new package in this cycle)* |
+| `@aipehub/cli` | 1.0.0 | 1.0.0 *(unchanged)* |
+| `@aipehub/mcp-server` | 1.0.0 | 1.0.0 *(unchanged)* |
+| `@aipehub/services-sdk` | 1.0.0 | 1.0.0 *(unchanged)* |
+| `@aipehub/service-memory-file` | 1.0.0 | 1.0.0 *(unchanged)* |
+| `@aipehub/service-artifact-file` | 1.0.0 | 1.0.0 *(unchanged)* |
+| `@aipehub/service-datastore-sqlite` | 1.0.0 | 1.0.0 *(unchanged)* |
 
 ## 3.0.0 — 2026-05-17 — Services
 

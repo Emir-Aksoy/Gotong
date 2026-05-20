@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/host",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "type": "module",
   "description": "Production host binary for AipeHub — runs Hub + WebSocket + Web from environment variables. No demo state, no built-in agents.",
   "license": "MIT",

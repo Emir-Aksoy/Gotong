@@ -1,6 +1,6 @@
 {
   "name": "@aipehub/core",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "type": "module",
   "description": "AipeHub core — Hub, message bus, registry, scheduler, transcript, storage.",
   "license": "MIT",
