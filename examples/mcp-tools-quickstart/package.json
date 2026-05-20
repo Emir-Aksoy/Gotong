@@ -1,0 +1,17 @@
+{
+  "name": "@aipehub/example-mcp-tools-quickstart",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Stand-alone demo of @aipehub/mcp-client — spawn the filesystem MCP server, list its tools, call one. No Hub, no LLM, just the toolset.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/mcp-client": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0"
+  }
+}
