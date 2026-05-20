@@ -1,4 +1,8 @@
-export { serveWebSocket } from './server.js'
+export {
+  serveWebSocket,
+  DEFAULT_MAX_PAYLOAD_BYTES,
+  DEFAULT_MAX_CONNECTIONS,
+} from './server.js'
 export type {
   WebSocketTransportOptions,
   WebSocketTransportHandle,
