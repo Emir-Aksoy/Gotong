@@ -29,6 +29,7 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { EventEmitter } from 'node:events'
 
 import { McpClientError } from './errors.js'
 import type {
@@ -91,7 +92,60 @@ const DEFAULT_CLIENT_INFO = {
   version: '0.1.0',
 }
 
-export class McpToolset {
+/**
+ * Diagnostic events emitted by {@link McpToolset}. Subscribe to these
+ * to surface server crashes / auth failures / spam without grepping a
+ * process tree. The toolset extends {@link EventEmitter}, so the
+ * standard `.on(event, listener)` / `.off(event, listener)` API works.
+ *
+ * **`'server-stderr'`** — one event per **line** written to the child
+ * server's stderr (line-split on `\n`, with trailing partial lines
+ * buffered until the next `\n` arrives). Emitted at most once per
+ * line; backpressure is handled by Node's stream. Use this to:
+ *
+ *   - tail Slack MCP's auth errors during onboarding;
+ *   - capture stack traces from Python-based MCP servers that crash
+ *     during a request;
+ *   - tee stderr into your own structured logger (pino / bunyan / …).
+ *
+ * Listeners run synchronously inside the toolset's stream-data handler,
+ * so a slow listener slows down the data pump. Forward to your real
+ * logger in a `setImmediate` if you need decoupling.
+ *
+ * The `serverName` field is the prefix the toolset uses for namespacing
+ * (e.g. `'fs'` from `{ name: 'fs', ... }`). The `line` is the raw text
+ * with no trailing newline — ready to pass to `console.error` or your
+ * logger's `info()`.
+ */
+export interface McpToolsetEvents {
+  'server-stderr': (event: { serverName: string; line: string }) => void
+}
+
+/**
+ * Typed `.on` / `.off` / `.emit` for {@link McpToolset}. The actual
+ * implementation is just an {@link EventEmitter}; this interface
+ * exists so TypeScript catches `toolset.on('typo', …)` at compile time.
+ */
+export interface McpToolset {
+  on<E extends keyof McpToolsetEvents>(
+    event: E,
+    listener: McpToolsetEvents[E],
+  ): this
+  off<E extends keyof McpToolsetEvents>(
+    event: E,
+    listener: McpToolsetEvents[E],
+  ): this
+  once<E extends keyof McpToolsetEvents>(
+    event: E,
+    listener: McpToolsetEvents[E],
+  ): this
+  emit<E extends keyof McpToolsetEvents>(
+    event: E,
+    ...args: Parameters<McpToolsetEvents[E]>
+  ): boolean
+}
+
+export class McpToolset extends EventEmitter {
   private readonly servers: Map<string, ServerState>
   private readonly listToolsTimeoutMs: number
   private readonly callToolTimeoutMs: number
@@ -99,6 +153,7 @@ export class McpToolset {
   private connectCalled = false
 
   constructor(opts: McpToolsetOptions) {
+    super()
     if (!opts.servers || opts.servers.length === 0) {
       throw new McpClientError(
         'duplicate_server', // not quite the right kind; reuse rather than introduce 'no_servers'
@@ -328,9 +383,11 @@ export class McpToolset {
       // comment on McpServerConfig.env.
       ...(state.config.env !== undefined ? { env: state.config.env } : {}),
       ...(state.config.cwd !== undefined ? { cwd: state.config.cwd } : {}),
-      // 'pipe' so the parent can attach a stderr listener later if it
-      // wants to surface server errors. Default ('inherit') is noisier
-      // for tests + production.
+      // 'pipe' so we can attach the line-by-line stderr listener below
+      // and forward each line as a `'server-stderr'` event. Operators
+      // who don't subscribe just see the events fall on the floor;
+      // the previous default ('inherit') would dump raw stderr to the
+      // parent process — noisier and harder to control for tests.
       stderr: 'pipe',
     })
     const client = new Client(this.clientInfo, { capabilities: {} })
@@ -344,6 +401,66 @@ export class McpToolset {
     }
     transport.onerror = (err) => {
       state.lastError = err instanceof Error ? err.message : String(err)
+    }
+
+    // Wire up stderr line-streaming. The SDK exposes a PassThrough
+    // stream synchronously (per its docs: "available _immediately_,
+    // allowing callers to attach listeners before start"), so we can
+    // hook it up before `client.connect(transport)` and not lose any
+    // early auth-failure / banner output emitted by the child.
+    //
+    // We buffer partial trailing lines because Node streams hand us
+    // arbitrary byte chunks — a single log line can arrive split across
+    // two chunks or two lines can arrive in one chunk. Emit one event
+    // per `\n`-terminated line, hold the tail until the next chunk.
+    const stderrStream = transport.stderr
+    if (stderrStream) {
+      let lineBuf = ''
+      stderrStream.on('data', (chunk: Buffer | string) => {
+        // Buffer / string both safe: ascii log output is the common case.
+        lineBuf += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+        // Strip carriage returns so CRLF logs (Windows / git-bash MCP
+        // servers) come through clean.
+        const normalized = lineBuf.replace(/\r/g, '')
+        const nl = normalized.lastIndexOf('\n')
+        if (nl === -1) {
+          // No complete line yet — keep buffering. Update lineBuf to
+          // the normalized form so future appends concatenate cleanly.
+          lineBuf = normalized
+          return
+        }
+        const complete = normalized.slice(0, nl)
+        lineBuf = normalized.slice(nl + 1)
+        for (const line of complete.split('\n')) {
+          // Skip blank lines: most servers print a trailing newline
+          // after each log, which would otherwise become an empty event.
+          if (line.length === 0) continue
+          this.emit('server-stderr', {
+            serverName: state.config.name,
+            line,
+          })
+        }
+      })
+      // On stream close, flush any unterminated trailing text so a
+      // server that crashes without `\n` doesn't lose its last gasp.
+      stderrStream.on('end', () => {
+        if (lineBuf.length > 0) {
+          this.emit('server-stderr', {
+            serverName: state.config.name,
+            line: lineBuf,
+          })
+          lineBuf = ''
+        }
+      })
+      // A stderr-stream error doesn't tear the toolset down (it's a
+      // diagnostic channel, not the JSON-RPC channel). Just surface
+      // the failure once on the event bus + on lastError.
+      stderrStream.on('error', (err: Error) => {
+        this.emit('server-stderr', {
+          serverName: state.config.name,
+          line: `[mcp-client] stderr stream error: ${err.message}`,
+        })
+      })
     }
 
     try {

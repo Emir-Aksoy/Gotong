@@ -352,3 +352,141 @@ describe('McpToolset — status reporting', () => {
     }
   })
 })
+
+// =============================================================================
+// `'server-stderr'` event — diagnostic channel for spawned MCP servers.
+//
+// We exercise three paths through the line buffer:
+//   1. Single-line banner emitted at startup (--stderr-banner flag).
+//   2. Multi-line + mid-line chunk split (--stderr-multiline flag).
+//   3. On-demand via the echo tool's `stderr:…` shortcut, so the test
+//      controls timing and asserts ordering relative to a tool call.
+// =============================================================================
+
+describe('McpToolset — server-stderr events', () => {
+  it('emits one event per line of startup stderr', async () => {
+    const events: Array<{ serverName: string; line: string }> = []
+    const ts = new McpToolset({
+      servers: [
+        {
+          name: 'noisy',
+          command: process.execPath,
+          args: [FAKE_SERVER, '--stderr-banner=hello-from-stderr'],
+        },
+      ],
+    })
+    ts.on('server-stderr', (e) => events.push(e))
+    try {
+      await ts.connect()
+      // Give the OS a moment to flush the child's startup stderr.
+      // The MCP handshake already round-tripped before connect()
+      // resolved, so anything printed pre-handshake should already
+      // be in the pipe; this 50ms is to drain it to our 'data' handler.
+      await new Promise((r) => setTimeout(r, 50))
+    } finally {
+      await ts.disconnect()
+    }
+    const banners = events.filter((e) => e.line === 'hello-from-stderr')
+    expect(banners.length).toBeGreaterThanOrEqual(1)
+    expect(banners[0]!.serverName).toBe('noisy')
+  })
+
+  it('reassembles a line split across two stderr chunks', async () => {
+    const events: Array<{ serverName: string; line: string }> = []
+    const ts = new McpToolset({
+      servers: [
+        {
+          name: 'chunked',
+          command: process.execPath,
+          args: [FAKE_SERVER, '--stderr-multiline'],
+        },
+      ],
+    })
+    ts.on('server-stderr', (e) => events.push(e))
+    try {
+      await ts.connect()
+      await new Promise((r) => setTimeout(r, 50))
+    } finally {
+      await ts.disconnect()
+    }
+    const lines = events.map((e) => e.line)
+    expect(lines).toContain('alpha')
+    // This is the crucial assertion: the line `beta-partial` arrived
+    // split across two write() calls. If line-buffering breaks, the
+    // listener will see two distinct (truncated) lines instead.
+    expect(lines).toContain('beta-partial')
+    expect(lines).toContain('gamma')
+  })
+
+  it('emits events triggered by tool calls (stderr after handshake)', async () => {
+    const events: Array<{ serverName: string; line: string }> = []
+    const ts = new McpToolset({ servers: [makeFakeServerConfig('live')] })
+    ts.on('server-stderr', (e) => events.push(e))
+    try {
+      await ts.connect()
+      const before = events.length
+      const out = await ts.callTool('live__echo', { text: 'stderr:mid-session-log' })
+      // Echo returns `wrote-stderr` for the stderr: prefix path.
+      expect(
+        (out.content[0] as { type: string; text: string }).text,
+      ).toBe('wrote-stderr')
+      // Drain whatever the data handler is still scheduling.
+      await new Promise((r) => setTimeout(r, 50))
+      const after = events.slice(before)
+      const matching = after.filter((e) => e.line === 'mid-session-log')
+      expect(matching.length).toBe(1)
+      expect(matching[0]!.serverName).toBe('live')
+    } finally {
+      await ts.disconnect()
+    }
+  })
+
+  it('off() removes the listener so no further events arrive', async () => {
+    const events: Array<{ serverName: string; line: string }> = []
+    const ts = new McpToolset({ servers: [makeFakeServerConfig('detachable')] })
+    const handler = (e: { serverName: string; line: string }) => events.push(e)
+    ts.on('server-stderr', handler)
+    try {
+      await ts.connect()
+      await ts.callTool('detachable__echo', { text: 'stderr:first-log' })
+      await new Promise((r) => setTimeout(r, 50))
+      ts.off('server-stderr', handler)
+      await ts.callTool('detachable__echo', { text: 'stderr:second-log' })
+      await new Promise((r) => setTimeout(r, 50))
+    } finally {
+      await ts.disconnect()
+    }
+    const lines = events.map((e) => e.line)
+    expect(lines).toContain('first-log')
+    expect(lines).not.toContain('second-log')
+  })
+
+  it('forwards stderr lines per-server (events carry the right serverName)', async () => {
+    const events: Array<{ serverName: string; line: string }> = []
+    const ts = new McpToolset({
+      servers: [
+        {
+          name: 'alpha',
+          command: process.execPath,
+          args: [FAKE_SERVER, '--tool-name-suffix=a', '--stderr-banner=from-alpha'],
+        },
+        {
+          name: 'beta',
+          command: process.execPath,
+          args: [FAKE_SERVER, '--tool-name-suffix=b', '--stderr-banner=from-beta'],
+        },
+      ],
+    })
+    ts.on('server-stderr', (e) => events.push(e))
+    try {
+      await ts.connect()
+      await new Promise((r) => setTimeout(r, 50))
+    } finally {
+      await ts.disconnect()
+    }
+    const alpha = events.find((e) => e.line === 'from-alpha')
+    const beta = events.find((e) => e.line === 'from-beta')
+    expect(alpha?.serverName).toBe('alpha')
+    expect(beta?.serverName).toBe('beta')
+  })
+})

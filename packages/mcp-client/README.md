@@ -282,19 +282,51 @@ arbitrary-code-execution vector. In practice this means:
   through (the SDK's `getDefaultEnvironment()` default-inheritance is
   dropped). Spell `PATH` out explicitly when your server needs it.
 
-### Debugging
+### Debugging — the `server-stderr` event
 
-`stderr` from each spawned server is captured (the SDK uses `stderr: 'pipe'`
-under the hood) but not yet surfaced through the toolset API. For now,
-if a server is misbehaving, run it directly outside the toolset to see
-its log output:
+`McpToolset` extends `EventEmitter`. Subscribe to `'server-stderr'`
+to tail every line of stderr from every spawned MCP server:
 
-```bash
-npx -y @modelcontextprotocol/server-filesystem ./workspace
-# stdin/stdout are MCP JSON-RPC; type ^D to exit
+```ts
+import { McpToolset } from '@aipehub/mcp-client'
+
+const toolset = new McpToolset({ servers: [/* … */] })
+
+toolset.on('server-stderr', ({ serverName, line }) => {
+  // serverName is the namespacing prefix (e.g. 'github'); line has
+  // no trailing newline. Forward to your real logger:
+  console.error(`[${serverName}] ${line}`)
+})
+
+await toolset.connect()
 ```
 
-A `toolset.on('server-stderr', ...)` event hook is a likely follow-up.
+This is the right channel for:
+
+- watching Slack MCP's auth errors during onboarding (`"token expired"`),
+- catching Python-based servers' stack traces when a tool crashes,
+- routing per-server logs into your structured logger (pino / winston / …).
+
+Behaviour notes:
+
+- One event per `\n`-terminated line. Partial trailing chunks are
+  buffered until the next `\n` arrives, so a log line split across
+  two `write()` calls still arrives as a single event.
+- Blank lines are dropped (most servers emit a trailing `\n` after
+  each log, which would otherwise become an empty event).
+- The listener runs **synchronously** inside the stream's `'data'`
+  handler. If your listener is slow (e.g. it pings a remote
+  logger), wrap the body in `setImmediate(...)` so you don't apply
+  backpressure to the child's stdio.
+- The serverName matches the prefix used for namespaced tool names
+  (`fs__read_file` → `serverName: 'fs'`).
+- Stderr from servers that fail to spawn at all (ENOENT, etc.) is
+  reflected via `toolset.status()[i].lastError` instead — there's
+  no stream to listen to in that case.
+
+If you'd rather not subscribe at all, the toolset still consumes
+stderr internally (it has to, because the SDK pipes it). The events
+just fall on the floor.
 
 ---
 
