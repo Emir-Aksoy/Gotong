@@ -1,0 +1,176 @@
+# Prometheus alerting rules for an AipeHub host.
+#
+# Drop this into your Alertmanager / Prometheus rules dir. Every rule
+# has a `for:` window long enough to ignore single-scrape blips but
+# short enough that an operator gets paged within ~10 minutes of a
+# real problem.
+#
+# Three of the five rules use only metrics emitted by AipeHub itself
+# (`aipehub_*`). Two require node_exporter alongside the Hub to cover
+# the OS-level concerns (memory, disk) — those are at the bottom under
+# a clearly-labelled section.
+#
+# Severity convention used here:
+#   page    — wake someone up (PagerDuty / on-call rotation)
+#   ticket  — file a ticket for next-business-day; don't page
+#
+# See docs/MONITORING.md for the runbook each alert links to.
+
+groups:
+  - name: aipehub-core
+    interval: 30s
+    rules:
+
+      # ----------------------------------------------------------------
+      # 1. Host unreachable
+      # ----------------------------------------------------------------
+      # The fact that Prometheus can't scrape /api/admin/metrics is the
+      # most important signal. Could be: process crashed, port closed,
+      # admin token rotated and not propagated, network partition.
+      # for=2m so a deploy-window restart doesn't page.
+      - alert: AipehubHostDown
+        expr: up{job="aipehub"} == 0
+        for: 2m
+        labels:
+          severity: page
+          component: hub
+        annotations:
+          summary: "AipeHub host unreachable (job={{ $labels.job }}, instance={{ $labels.instance }})"
+          description: >
+            Prometheus has been unable to scrape /api/admin/metrics for
+            2 minutes. Process crashed, port closed, admin Bearer token
+            rotated without updating the scrape config, or network
+            partition. Runbook: docs/MONITORING.md § Host down.
+
+      # ----------------------------------------------------------------
+      # 2. Task failure rate elevated
+      # ----------------------------------------------------------------
+      # Anything > ~6 failures/minute sustained over 10 min is unusual
+      # in a small-team deployment. Could be: an LLM provider key
+      # expired, a downstream service is down, a buggy agent is being
+      # dispatched to repeatedly.
+      - alert: AipehubTaskFailureRateHigh
+        expr: |
+          rate(aipehub_tasks_total{kind="failed"}[5m]) > 0.1
+        for: 10m
+        labels:
+          severity: ticket
+          component: hub
+        annotations:
+          summary: "Task failure rate elevated: {{ printf \"%.2f\" $value }} fails/sec for 10m"
+          description: >
+            More than ~6 failures/minute over a 10-minute window. Common
+            causes: expired provider API key, downstream service outage,
+            buggy agent. Check recent admin transcript and provider
+            health. Runbook: docs/MONITORING.md § Task failure spike.
+
+      # ----------------------------------------------------------------
+      # 3. Tasks dispatched with no matching agent
+      # ----------------------------------------------------------------
+      # `no_participant` means the capability matcher found nothing. A
+      # handful is fine (someone typed a wrong capability). A continuous
+      # stream means an agent is down or unregistered when it shouldn't be.
+      - alert: AipehubNoMatchingAgent
+        expr: |
+          increase(aipehub_tasks_total{kind="no_participant"}[15m]) > 5
+        for: 5m
+        labels:
+          severity: ticket
+          component: hub
+        annotations:
+          summary: "{{ $value }} tasks with no matching agent in the last 15m"
+          description: >
+            Either an agent went offline without anyone noticing, or a
+            new capability is being dispatched that no agent is
+            registered for. Check `aipehub_participants` by kind.
+            Runbook: docs/MONITORING.md § No matching agent.
+
+      # ----------------------------------------------------------------
+      # 4. Pending applications stale
+      # ----------------------------------------------------------------
+      # admin-approval gating means new agents queue waiting for review.
+      # >5 unresolved for 30 min is the "admin forgot to check the
+      # admissions tab" signal.
+      - alert: AipehubPendingApplicationsStale
+        expr: aipehub_pending_applications > 5
+        for: 30m
+        labels:
+          severity: ticket
+          component: admin
+        annotations:
+          summary: "{{ $value }} admission applications pending for 30m+"
+          description: >
+            New agents have been waiting > 30 min for admin approval.
+            Either ping the on-call admin or check whether the admin
+            UI is reachable. Runbook: docs/MONITORING.md § Pending
+            applications.
+
+      # ----------------------------------------------------------------
+      # 5. Service-call slowness (when services are wired)
+      # ----------------------------------------------------------------
+      # Coarse-grained average latency over 5 min. We don't have
+      # histograms (yet); _sum / _count gives mean — fine for catching
+      # an order-of-magnitude regression in service-call latency
+      # (memory / artifact / datastore).
+      - alert: AipehubServiceCallSlow
+        expr: |
+          (
+            increase(aipehub_service_call_duration_ms_sum[5m])
+            /
+            clamp_min(increase(aipehub_service_call_duration_ms_count[5m]), 1)
+          ) > 500
+        for: 10m
+        labels:
+          severity: ticket
+          component: services
+        annotations:
+          summary: "Service `{{ $labels.type }}/{{ $labels.impl }}` mean latency {{ printf \"%.0f\" $value }}ms (>500ms for 10m)"
+          description: >
+            Mean SERVICE_CALL latency for {{ $labels.type }}/{{ $labels.impl }}
+            crossed 500 ms for 10 minutes. Likely causes: SQLite
+            contention, disk full, slow upstream. Runbook:
+            docs/MONITORING.md § Service call slow.
+
+  # ----------------------------------------------------------------
+  # OS-level alerts via node_exporter
+  # ----------------------------------------------------------------
+  # These require node_exporter scraped from the same host. They are
+  # not coupled to AipeHub but are part of "is your AipeHub box
+  # healthy" — disk and memory are the most common silent killers.
+  - name: aipehub-host
+    interval: 30s
+    rules:
+
+      - alert: AipehubDiskAlmostFull
+        expr: |
+          node_filesystem_avail_bytes{mountpoint="/", job="node"} /
+          node_filesystem_size_bytes{mountpoint="/", job="node"} < 0.1
+        for: 15m
+        labels:
+          severity: page
+          component: host
+        annotations:
+          summary: "Hub disk < 10% free for 15m (instance={{ $labels.instance }})"
+          description: >
+            Root filesystem is below 10% free. `.aipehub/transcript.jsonl`
+            grows monotonically; investigate retention or compress.
+            Runbook: docs/MONITORING.md § Disk almost full.
+
+      - alert: AipehubProcessRssCreep
+        # Use the node_exporter process_resident_memory_bytes for the
+        # aipehub-host process if you've enabled the process collector.
+        # The threshold is generous: small-team hosts shouldn't cross
+        # 2 GB without a reason.
+        expr: |
+          process_resident_memory_bytes{job="aipehub"} > 2 * 1024 * 1024 * 1024
+        for: 30m
+        labels:
+          severity: ticket
+          component: hub
+        annotations:
+          summary: "AipeHub RSS > 2 GB for 30m (instance={{ $labels.instance }})"
+          description: >
+            Hub process holding > 2 GB resident for 30 min. Most likely
+            a slow leak in a long-running service plugin. Restart will
+            release it (transcript persists). Runbook:
+            docs/MONITORING.md § RSS creep.

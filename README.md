@@ -36,6 +36,9 @@ The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI. L
 | 🧰 **Giving your agents the MCP tool ecosystem** | [`docs/MCP.md`](docs/MCP.md#6-outbound--using-third-party-mcp-tools-from-your-agent) | `@aipehub/mcp-client` lets your AipeHub agents attach Filesystem / GitHub / Slack / Postgres / any MCP server. Tool names are namespaced and ready for any LLM provider's tool-use API. |
 | ⚖️ **Worried about license / commercial use** | [`docs/LICENSE-FAQ.md`](docs/LICENSE-FAQ.md) | MIT throughout. Embeddable in closed-source / SaaS. Community templates are CC0 + MIT. |
 | 🧠 **Designing on top of it** | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) + [`docs/PROTOCOL.md`](docs/PROTOCOL.md) | Hub is dumb on purpose; wire protocol is v1.0. |
+| 📊 **Sizing a deployment** | [`docs/PERFORMANCE.md`](docs/PERFORMANCE.md) | Pre-launch baseline numbers + how to rerun the load test against your own hardware. |
+| 🛟 **Operating in production** | [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Backup/restore playbook, disaster-recovery drill, `secret.key` handling, troubleshooting. |
+| 📡 **Monitoring + alerts** | [`docs/MONITORING.md`](docs/MONITORING.md) | Prometheus scrape config, 7 alert rules with runbooks, Grafana dashboard JSON. |
 
 ### Adding an agent — two paths
 

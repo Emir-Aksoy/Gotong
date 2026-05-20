@@ -17,6 +17,12 @@ There are three deployment shapes. Pick the smallest that fits your need
 The same `@aipehub/host` binary is used for all three. Only environment
 variables change.
 
+> **Going beyond first-run?** Once your host is up, the day-2 playbook
+> — backups, disaster recovery drill, secret-key handling, monitoring
+> — lives in [`docs/OPERATIONS.md`](OPERATIONS.md). The performance
+> baseline (sizing guidance + headroom) is in
+> [`docs/PERFORMANCE.md`](PERFORMANCE.md).
+
 ---
 
 ## 0. The production binary

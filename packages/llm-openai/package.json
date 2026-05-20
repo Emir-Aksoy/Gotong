@@ -40,6 +40,6 @@
   },
   "devDependencies": {
     "openai": "^6.38.0",
-    "vitest": "^2.0.0"
+    "vitest": "^3.2.4"
   }
 }
