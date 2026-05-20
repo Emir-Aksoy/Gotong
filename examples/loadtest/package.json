@@ -1,0 +1,18 @@
+{
+  "name": "@aipehub/example-loadtest",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Pre-launch load-test harness — measures dispatch throughput, latency percentiles, and memory growth for a Hub under N parallel agents.",
+  "scripts": {
+    "inproc": "tsx src/inproc.ts",
+    "ws": "tsx src/ws.ts",
+    "report": "tsx src/report.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/sdk-node": "workspace:*",
+    "@aipehub/transport-ws": "workspace:*"
+  }
+}
