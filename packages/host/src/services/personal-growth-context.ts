@@ -17,25 +17,27 @@
  * agent's `memory` handle via `meta.caseId`, and the agent recalls
  * + filters it on every step.
  *
- * # caseId choice (v0.2)
+ * # caseId choice (v0.3 — multi-user)
  *
- * For now, caseId === admin id. The personal-growth workflow is
- * "you for yourself", so admin = user = one human running the flow
- * for themselves. This means:
+ * caseId is **per-coachee**, NOT per-admin. The mapping rule
+ * depends on the dispatch surface:
  *
- *   - All 7 step outputs for the same admin pile into the same memory
- *     timeline (with `topic` = step kind to filter).
- *   - Re-runs (week 6, week 12, …) read the prior timeline as
- *     context and append to it.
- *   - Different admins on the same host have completely separate
- *     timelines (memory owner is per-agent, so the admin id within
- *     the meta is the only inter-admin discriminator the agent has;
- *     in practice each admin will have their own agent instance via
- *     `agents.json` so isolation is at the owner level too).
+ *   - `/api/me/dispatch` (v4 user-facing) → caseId = userId, forced
+ *     server-side. A member cannot read or write another user's
+ *     timeline because the route handler stamps caseId itself.
+ *   - `/api/admin/dispatch` (owner) → caseId comes from the request
+ *     payload's `case_id` field, defaulting to `'self'` if missing.
+ *     This lets an owner debug another coachee's timeline by passing
+ *     their userId explicitly.
  *
- * Future v0.3+ may let admins juggle multiple "coachees" by passing
- * an explicit `case_id` in trigger payload; the helper already takes
- * caseId as a parameter, so it's a payload-routing change only.
+ * Reports are stored under `reports/<caseId>/…` on the synthesist
+ * agent's artifact handle, so caseId is also the ACL key for
+ * `/api/me/growth-reports*`. The route handler rejects any path
+ * whose caseId segment ≠ the caller's userId.
+ *
+ * Memory isolation: every entry carries `meta.caseId`. Recall
+ * filters in memory (`isForCase`) — the file plugin doesn't index on
+ * meta so the wide-recall + filter pattern is intentional.
  *
  * # Storage model
  *

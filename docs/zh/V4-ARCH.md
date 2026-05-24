@@ -177,6 +177,51 @@ admin URL 继续工作**,用户不需要重新登录。
    - HITL human-review 步骤的 reviewer 不再是「任意 admin」,而是被
      分配到某个 user / role(approver 字段)
 
+### Phase 2 已落地 — `/me` member-facing surface(2026-05-24)
+
+PG / industry-consultation 的"多用户化"原本是 Phase 2 计划。落地形式如下:
+
+**新增路由**(`packages/web/src/me-routes.ts`):
+
+- `POST /api/me/dispatch` —— body `{ workflowId, payload }`,任何 v4
+  session 用户(member+ 任意角色)可调。route handler 做三件事:
+  1. 校验 `workflowId` 在 `ALLOWED_WORKFLOWS` 允许列表里(目前只有
+     `personal-growth-flow` → capability `plan-personal-growth`)
+  2. 从 body.payload 里只拿允许列表声明的字段(白名单);未声明的
+     字段全部丢弃
+  3. **强制** `from = userId`,**强制** `payload.case_id = userId`
+     —— member 无法 spoof 他人 caseId
+- `GET /api/me/growth-reports` —— 只返回 `caseId === userId` 的报告
+- `GET /api/me/growth-reports/download?path=…` —— 解析 path 里的
+  caseId 段,严格等值才放行(否则 403 `cross_user_forbidden`)
+- `GET /api/me/allowed-workflows` —— 暴露允许列表,UI 用它渲染表单
+- `GET /me` —— 独立静态页(`static/me.html` + `static/me.js`),
+  vanilla DOM,登录 / 触发 / 报告三段式
+
+**v3-admin Bearer/cookie 故意不被 /me 接受** —— v3 admin 没有 v4 user id
+可绑定 caseId,所以走 /admin。owner 想跑 /me 工作流时,以自己的 v4
+user 身份登录(`admin@local` + 设过的密码)即可。
+
+**安全契约**:case_id 由后端拍板,member 哪怕 curl 直接构造
+`{payload: {case_id: 'someone-else'}}` 也会被丢弃。报告路径里的
+caseId 段是 path-traversal 防线的最后一道(不只是
+`..` 拦截,还要等值校验)。15 个新加的 HTTP 测试把这套契约全部钉死。
+
+**PG agent 改动**:`personal-growth-context.ts` 的注释从「caseId = admin
+id」更新为「caseId = userId,由 /me 路由强制」。agent 本身的 `pickCaseId`
+已经从 `task.payload.case_id` 读,无需代码改动 —— 也就是说,从 PG
+agent 的角度看,/me/dispatch 跟 owner 手填 case_id 在 /admin/dispatch
+是同一码事。
+
+**industry-consultation** 无代码改动 —— 该 example 本来就是 programmatic
++ payload.caseId-driven 的多 case 设计,可以作为参考模板。
+
+**未覆盖**(后续):
+- `/me` 上没有"查看 / 重启某次 workflow run"的 UI(暂只是触发 + 看报告)
+- 报告 markdown 还是直接下载,没在 /me 页面里渲染
+- 没加 `/me/whoami` 别名(目前仍走 `/api/admin/identity/me`,该路由已
+  被搬到 owner gate 之上,member 也能调)
+
 ## 五、Phase 3 + 计划(更远)
 
 - **federation 与 identity 衔接** —— HubLink 跨 org 调用时,带上发起方

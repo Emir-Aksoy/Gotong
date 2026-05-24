@@ -1,0 +1,399 @@
+/**
+ * /api/me/* — member-facing user routes.
+ *
+ * Anyone with a v4 IdentityStore session cookie (any role: owner / admin
+ * / member / viewer) can hit these. The handlers force `from = userId`
+ * and `case_id = userId` server-side so a member can never act on
+ * another user's behalf, even if they tamper with the request body.
+ *
+ * # Route inventory
+ *
+ *   POST /api/me/dispatch                       { workflowId, payload }
+ *   GET  /api/me/growth-reports
+ *   GET  /api/me/growth-reports/download?path=…
+ *
+ * # Auth
+ *
+ * Owner-gating intentionally does NOT apply here — the whole point of
+ * /me is "any signed-in user runs their own thing". v3 admin Bearer /
+ * cookie is NOT accepted: a v3 admin has no v4 user id, so there's no
+ * caseId to scope to. v3 admins manage the org via /admin; v4 owners
+ * who also want to use the /me surface can — they have a v4 user id.
+ *
+ * # Workflow allowlist
+ *
+ * Dispatch is limited to a small allowlist (currently just
+ * `personal-growth-flow`). The handler maps workflowId → capability +
+ * accepted payload fields, then forwards via hub.dispatch with the
+ * caller's userId as both `from` and `case_id`. Future workflows
+ * that want a /me entry add themselves to `ALLOWED_WORKFLOWS`.
+ *
+ * Why an allowlist instead of a generic "dispatch anything" route:
+ * the workflow runner's `from` field is normally a privileged admin
+ * id (or 'system' for in-process demos). Letting an arbitrary v4 user
+ * trigger an arbitrary workflow with their userId as `from` would
+ * effectively grant them v3 admin's dispatch authority. The allowlist
+ * keeps the surface narrow to workflows that have been audited as
+ * safe for member-initiated runs.
+ */
+
+import type { IncomingMessage, ServerResponse } from 'node:http'
+
+import type { Hub } from '@aipehub/core'
+import type { GrowthReportsAdminSurface } from '@aipehub/core'
+
+import {
+  resolveV4Auth,
+  type IdentitySurface,
+} from './identity-routes.js'
+
+// ---------------------------------------------------------------------------
+// Allowlist
+// ---------------------------------------------------------------------------
+
+interface AllowedWorkflow {
+  /** Capability the workflow runner listens on. */
+  capability: string
+  /**
+   * Whitelisted payload field names. Anything else in the request body
+   * is dropped before dispatch — defence-in-depth so a member can't
+   * smuggle extra fields the workflow might consume in unexpected ways.
+   * `case_id` is forced server-side and never sourced from the body.
+   */
+  payloadFields: readonly string[]
+  /** Human-readable label used by the /me page. */
+  label: string
+}
+
+const ALLOWED_WORKFLOWS: Record<string, AllowedWorkflow> = {
+  'personal-growth-flow': {
+    capability: 'plan-personal-growth',
+    payloadFields: [
+      'present_state',
+      'aspirations',
+      'struggles',
+      'focus_request',
+    ],
+    label: 'Personal Growth (7-coach team)',
+  },
+}
+
+// ---------------------------------------------------------------------------
+// Helpers — kept private to this module to mirror identity-routes.ts.
+// ---------------------------------------------------------------------------
+
+const MAX_BODY_BYTES = 1_000_000 // 1MB — matches server.ts / identity-routes.ts
+
+function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let buf = ''
+    req.on('data', (chunk) => {
+      buf += chunk
+      if (buf.length > MAX_BODY_BYTES) {
+        req.destroy()
+        reject(new Error('body too large'))
+      }
+    })
+    req.on('end', () => {
+      if (!buf) return resolve(undefined)
+      try {
+        resolve(JSON.parse(buf))
+      } catch (err) {
+        reject(err)
+      }
+    })
+    req.on('error', reject)
+  })
+}
+
+function sendJson(res: ServerResponse, data: unknown, status = 200): void {
+  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
+  res.end(JSON.stringify(data))
+}
+
+/**
+ * Pull the caseId out of a `reports/<caseId>/<file>.md` path. Returns
+ * null on any path that doesn't match (refuses paths with `..`, paths
+ * not under `reports/`, paths with no caseId segment).
+ */
+function parseCaseIdFromReportPath(path: string): string | null {
+  if (path.includes('..')) return null
+  const prefix = 'reports/'
+  if (!path.startsWith(prefix)) return null
+  const rest = path.slice(prefix.length)
+  const slashIdx = rest.indexOf('/')
+  if (slashIdx <= 0) return null
+  return rest.slice(0, slashIdx)
+}
+
+// ---------------------------------------------------------------------------
+// Dispatcher
+// ---------------------------------------------------------------------------
+
+export interface HandleMeRouteCtx {
+  identity: IdentitySurface
+  hub: Hub
+  /**
+   * Optional — `/api/me/growth-reports*` returns 503 when the host
+   * didn't wire a growth-reports surface (eg. personal-growth team not
+   * loaded). /me/dispatch still works for any allowlisted workflow even
+   * without this surface.
+   */
+  growthReports: GrowthReportsAdminSurface | undefined
+}
+
+export async function handleMeRoute(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+): Promise<void> {
+  // Auth gate: every /me route needs a v4 user. v3-admin is not
+  // accepted because v3 admins don't have a v4 user id to scope by.
+  const v4 = resolveV4Auth(ctx.identity, req)
+  if (v4.user === null || v4.role === null) {
+    sendJson(
+      res,
+      {
+        error:
+          'sign in at /me first (POST /api/admin/identity/login)',
+        code: 'authentication_required',
+      },
+      401,
+    )
+    return
+  }
+  const userId = v4.user.id
+
+  if (method === 'GET' && path === '/api/me/allowed-workflows') {
+    sendJson(res, { workflows: listAllowedWorkflowsForMe() })
+    return
+  }
+  if (method === 'POST' && path === '/api/me/dispatch') {
+    await handleMeDispatch(ctx, req, res, userId)
+    return
+  }
+  if (method === 'GET' && path === '/api/me/growth-reports') {
+    await handleMeListReports(ctx, res, userId)
+    return
+  }
+  if (method === 'GET' && path === '/api/me/growth-reports/download') {
+    await handleMeDownloadReport(ctx, req, res, userId)
+    return
+  }
+
+  sendJson(res, { error: `unknown /me route: ${method} ${path}` }, 404)
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/me/dispatch
+// ---------------------------------------------------------------------------
+
+async function handleMeDispatch(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (err) {
+    sendJson(res, { error: (err as Error).message ?? 'bad body' }, 400)
+    return
+  }
+  if (!body || typeof body !== 'object') {
+    sendJson(
+      res,
+      { error: 'body required: {workflowId, payload}' },
+      400,
+    )
+    return
+  }
+  const b = body as { workflowId?: unknown; payload?: unknown }
+  if (typeof b.workflowId !== 'string') {
+    sendJson(
+      res,
+      { error: 'workflowId must be a string (see /api/me/allowed-workflows)' },
+      400,
+    )
+    return
+  }
+  const wf = ALLOWED_WORKFLOWS[b.workflowId]
+  if (!wf) {
+    sendJson(
+      res,
+      {
+        error: `workflowId '${b.workflowId}' is not enabled on the /me surface`,
+        code: 'workflow_not_allowed',
+        allowed: Object.keys(ALLOWED_WORKFLOWS),
+      },
+      403,
+    )
+    return
+  }
+  const payloadIn =
+    b.payload && typeof b.payload === 'object' && !Array.isArray(b.payload)
+      ? (b.payload as Record<string, unknown>)
+      : {}
+  // Build a payload from the allowlist's accepted fields ONLY. Drop
+  // any caller-supplied extras (including case_id — we force that
+  // ourselves below to userId, no exceptions).
+  const payload: Record<string, unknown> = {}
+  for (const field of wf.payloadFields) {
+    if (field in payloadIn) payload[field] = payloadIn[field]
+  }
+  // Force the scoping fields server-side. The agent's pickCaseId
+  // reads `payload.case_id`; any value the member tried to pass under
+  // that key was already dropped (case_id is not in payloadFields).
+  payload.case_id = userId
+
+  // Fire-and-forget: hub.dispatch returns a promise that only resolves
+  // when the assigned participant produces a result, which for human
+  // participants can be hours. Mirroring /api/admin/dispatch's default
+  // pattern, we hand the response back immediately and log dispatch
+  // failures asynchronously — the workflow runner is the right place
+  // to observe progress, not this 200 OK.
+  try {
+    void ctx.hub
+      .dispatch({
+        from: userId,
+        strategy: { kind: 'capability', capabilities: [wf.capability] },
+        payload,
+        title: `${wf.label} — ${userId}`,
+        // countContribution: default true; this user IS contributing.
+      })
+      .catch((err) => {
+        // Best-effort log only — by this point the user already saw 200.
+        // Re-throwing here would unhandled-promise the process.
+        // eslint-disable-next-line no-console
+        console.error('me-routes: dispatch failed', err)
+      })
+    sendJson(res, {
+      ok: true,
+      workflowId: b.workflowId,
+      caseId: userId,
+    })
+  } catch (err) {
+    // Synchronous throw from dispatch (eg. bad strategy shape) — the
+    // promise branch above can't be hit. Surface as 400.
+    sendJson(
+      res,
+      {
+        error: err instanceof Error ? err.message : String(err),
+      },
+      400,
+    )
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/me/growth-reports
+// ---------------------------------------------------------------------------
+
+async function handleMeListReports(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.growthReports) {
+    sendJson(res, { error: 'growth reports not enabled on this host' }, 503)
+    return
+  }
+  try {
+    const all = await ctx.growthReports.list()
+    // Filter to the caller's own caseId. The growth-reports list returns
+    // every report on the host (it was designed for owner-gated UI); the
+    // /me surface narrows it. This is the ONLY place we enforce per-user
+    // visibility — getting it right is the security contract.
+    const mine = all.filter((r) => r.caseId === userId)
+    sendJson(res, { reports: mine })
+  } catch (err) {
+    sendJson(
+      res,
+      { error: err instanceof Error ? err.message : String(err) },
+      500,
+    )
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/me/growth-reports/download?path=…
+// ---------------------------------------------------------------------------
+
+async function handleMeDownloadReport(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.growthReports) {
+    sendJson(res, { error: 'growth reports not enabled on this host' }, 503)
+    return
+  }
+  const url = new URL(
+    req.url ?? '/api/me/growth-reports/download',
+    `http://${req.headers.host ?? 'localhost'}`,
+  )
+  const reportPath = url.searchParams.get('path')
+  if (!reportPath) {
+    sendJson(res, { error: 'missing path' }, 400)
+    return
+  }
+  // Defence-in-depth ACL: refuse if the path's caseId segment is not
+  // the caller's userId. growthReports.read itself sanitises the path
+  // (via the artifact plugin's sanitisePath), but the per-user filter
+  // is OUR responsibility — without this check, any signed-in member
+  // could download every other member's reports by URL guessing.
+  const caseId = parseCaseIdFromReportPath(reportPath)
+  if (!caseId) {
+    sendJson(res, { error: 'invalid report path' }, 400)
+    return
+  }
+  if (caseId !== userId) {
+    sendJson(
+      res,
+      {
+        error: 'forbidden: that report belongs to a different user',
+        code: 'cross_user_forbidden',
+      },
+      403,
+    )
+    return
+  }
+  try {
+    const { markdown } = await ctx.growthReports.read(reportPath)
+    const filename = reportPath.split('/').pop() ?? 'report.md'
+    res.writeHead(200, {
+      'content-type': 'text/markdown; charset=utf-8',
+      'content-disposition': `attachment; filename="${filename.replace(/"/g, '')}"`,
+      'cache-control': 'no-store',
+    })
+    res.end(markdown)
+  } catch {
+    // Hide whether the file exists vs read-failed for any other reason —
+    // either way the caller has no business knowing more than "not found".
+    sendJson(res, { error: 'not found' }, 404)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Public catalogue — exported so the /me HTML page (or future API users)
+// can render the allowlist without hardcoding the workflowId list. Kept
+// as a function so the constant above stays the single source of truth.
+// ---------------------------------------------------------------------------
+
+export function listAllowedWorkflowsForMe(): ReadonlyArray<{
+  workflowId: string
+  capability: string
+  payloadFields: readonly string[]
+  label: string
+}> {
+  return Object.entries(ALLOWED_WORKFLOWS).map(([workflowId, wf]) => ({
+    workflowId,
+    capability: wf.capability,
+    payloadFields: wf.payloadFields,
+    label: wf.label,
+  }))
+}

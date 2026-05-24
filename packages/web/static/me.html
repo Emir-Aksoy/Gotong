@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>AipeHub · 我的工作流</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <style>
+      /* Page-local — kept inline so /me has zero dependency on admin's
+         CSS evolving and accidentally breaking this surface. The styles
+         here are intentionally tiny; the page is a flat single-column
+         layout with three sections (login / dispatch / reports). */
+      body { font-family: system-ui, sans-serif; max-width: 44rem; margin: 2rem auto; padding: 0 1rem; color: #222; }
+      h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+      h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; }
+      section { margin-bottom: 1.5rem; }
+      label { display: block; font-size: 0.85rem; color: #555; margin: 0.5rem 0 0.15rem; }
+      input, textarea, button, select { font: inherit; padding: 0.4rem; box-sizing: border-box; width: 100%; }
+      textarea { min-height: 5rem; resize: vertical; }
+      button { background: #1f6feb; color: #fff; border: none; cursor: pointer; padding: 0.5rem 0.75rem; }
+      button:hover { background: #1759c8; }
+      button.muted { background: #888; }
+      .hidden { display: none !important; }
+      .status { font-size: 0.9rem; min-height: 1.2em; margin: 0.5rem 0; }
+      .status.error { color: #c0392b; }
+      .status.ok { color: #27ae60; }
+      .row { display: flex; gap: 0.5rem; align-items: center; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.9rem; margin-top: 0.5rem; }
+      th, td { text-align: left; border-bottom: 1px solid #eee; padding: 0.4rem 0.5rem; }
+      .meta { color: #666; font-size: 0.85rem; }
+    </style>
+  </head>
+  <body>
+    <h1>AipeHub · 我的工作流</h1>
+    <p class="meta">登录后可以触发属于你自己的 AI 工作流,并查看你自己的报告。 owner / admin 想管理整个组织请去 <a href="/admin">/admin</a>。</p>
+
+    <div id="status" class="status"></div>
+
+    <!-- Login section: visible when not authenticated. -->
+    <section id="login-section" class="hidden">
+      <h2>登录</h2>
+      <form id="login-form">
+        <label>Email
+          <input name="email" type="email" required autocomplete="username" placeholder="you@example.com" />
+        </label>
+        <label>密码
+          <input name="password" type="password" required autocomplete="current-password" />
+        </label>
+        <div class="row" style="margin-top:0.6rem;">
+          <button type="submit">登录</button>
+          <span class="meta">还没有账号? 联系 owner 给你创建 (POST /api/admin/identity/users)。</span>
+        </div>
+      </form>
+    </section>
+
+    <!-- Whoami banner: visible when authenticated. -->
+    <section id="me-section" class="hidden">
+      <h2>当前用户</h2>
+      <div id="me-info" class="meta"></div>
+      <button id="logout-btn" type="button" class="muted" style="margin-top:0.5rem;width:auto;">登出</button>
+    </section>
+
+    <!-- Dispatch section: visible when authenticated. -->
+    <section id="dispatch-section" class="hidden">
+      <h2>触发新一次工作流</h2>
+      <p class="meta">case_id 会自动绑定到你的 userId,你不需要也无法填写它 — 不同用户的对话历史不会互通。</p>
+      <label>选择工作流
+        <select id="wf-select"></select>
+      </label>
+      <div id="wf-form-fields"></div>
+      <button id="dispatch-btn" type="button" style="margin-top:0.75rem;">发起</button>
+    </section>
+
+    <!-- Reports section: visible when authenticated. -->
+    <section id="reports-section" class="hidden">
+      <h2>我的报告</h2>
+      <button id="refresh-reports-btn" type="button" class="muted" style="width:auto;margin-bottom:0.5rem;">刷新</button>
+      <table>
+        <thead>
+          <tr><th>文件</th><th>大小</th><th>时间</th><th></th></tr>
+        </thead>
+        <tbody id="reports-tbody">
+          <tr><td colspan="4" class="meta">尚未加载</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <script src="/me.js"></script>
+  </body>
+</html>

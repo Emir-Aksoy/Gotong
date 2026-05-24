@@ -42,6 +42,7 @@ import {
   handleIdentityRoute,
   type IdentitySurface,
 } from './identity-routes.js'
+import { handleMeRoute } from './me-routes.js'
 
 export type {
   IdentitySurface,
@@ -970,6 +971,45 @@ async function handle(
       'content-type': 'application/json; charset=utf-8',
     })
     res.end(JSON.stringify({ ok: true }))
+    return
+  }
+
+  // --- /me page (member-facing UI) ---------------------------------------
+  // Serves the static SPA at GET /me — distinct from /admin so the
+  // member experience doesn't accidentally inherit owner-only UI.
+  // Anonymous access is fine (the page itself shows a login form;
+  // the JS calls /api/admin/identity/login → /api/admin/identity/me
+  // to decide what to render). No cookie / session required here.
+  if (method === 'GET' && (path === '/me' || path === '/me/')) {
+    await serveStatic(res, 'me.html')
+    return
+  }
+
+  // --- /api/me/* (member surface) ----------------------------------------
+  // Member-gated routes for "any signed-in user can run their own thing".
+  // Auth is checked inside handleMeRoute (v4 session required; any role).
+  // Returns 503 when no IdentityStore is wired — the static /me page
+  // gracefully shows the error.
+  if (path.startsWith('/api/me/')) {
+    if (!ctx.identity) {
+      sendJson(
+        res,
+        { error: 'v4 identity store not enabled on this host' },
+        503,
+      )
+      return
+    }
+    await handleMeRoute(
+      {
+        identity: ctx.identity,
+        hub: ctx.hub,
+        growthReports: ctx.growthReports,
+      },
+      req,
+      res,
+      method,
+      path,
+    )
     return
   }
 

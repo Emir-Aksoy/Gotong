@@ -476,6 +476,16 @@ export async function handleIdentityRoute(
     return
   }
 
+  // GET /me sits BEFORE the owner gate — "tell me who I am" must be
+  // reachable by every authenticated user (any role). The member-facing
+  // /me page needs this to bootstrap. handleMe distinguishes between
+  // v3-admin / v4-* / anonymous itself and reports the truth.
+  if (method === 'GET' && path === '/api/admin/identity/me') {
+    const v4Whoami = resolveV4Auth(ctx.identity, req)
+    handleMe(ctx, v4Whoami, res)
+    return
+  }
+
   // -- owner gate for everything below ----------------------------------
   const v4 = resolveV4Auth(ctx.identity, req)
   const isOwner =
@@ -485,10 +495,6 @@ export async function handleIdentityRoute(
     return
   }
 
-  if (method === 'GET' && path === '/api/admin/identity/me') {
-    handleMe(ctx, v4, res)
-    return
-  }
   if (method === 'GET' && path === '/api/admin/identity/users') {
     handleListUsers(ctx, res)
     return
@@ -666,11 +672,21 @@ function handleMe(
   // `admin@local` user is the conceptual owner, but the v3 admin
   // cookie principal isn't joined to it here). Phase 3.1+ can fold
   // them together — for now we report the v3 view honestly.
-  sendJson(res, {
-    authSource: 'v3-admin',
-    user: null,
-    role: 'owner' as IdentityRole,
-  })
+  if (ctx.isV3Admin) {
+    sendJson(res, {
+      authSource: 'v3-admin',
+      user: null,
+      role: 'owner' as IdentityRole,
+    })
+    return
+  }
+  // Truly anonymous (no v3 admin, no v4 session). Before the gate moved,
+  // the dispatcher's owner check filtered this case out. With /me now
+  // sitting BEFORE the gate (so members can call it too), we must
+  // explicitly refuse anonymous — otherwise the response above would
+  // hand an "owner" role to anyone who hit the route, a textbook
+  // privilege escalation.
+  sendJson(res, { error: 'authentication required' }, 401)
 }
 
 function handleListUsers(ctx: HandleIdentityRouteCtx, res: ServerResponse): void {
