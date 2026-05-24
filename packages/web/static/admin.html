@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="/styles.css" />
     <script src="/app-core.js" defer></script>
     <script src="/admin.js" defer></script>
+    <script src="/identity-ui.js" defer></script>
   </head>
   <body class="admin">
     <header class="site-header">
@@ -35,6 +36,7 @@
       <button class="tabbar-btn" type="button" data-tab="tasks"     data-i18n="tabTasks">任务</button>
       <button class="tabbar-btn" type="button" data-tab="activity"  data-i18n="tabActivity">活动</button>
       <button class="tabbar-btn" type="button" data-tab="services"  data-i18n="tabServices">服务</button>
+      <button class="tabbar-btn" type="button" data-tab="users"     data-i18n="tabUsers">用户</button>
     </nav>
 
     <main id="main-grid" class="admin-grid">
@@ -609,6 +611,10 @@
           <tbody id="services-audit-tbody"></tbody>
         </table>
       </section>
+
+      <!-- v4 identity / user management. Content rendered entirely by
+           /identity-ui.js (self-contained, no admin.js coupling). -->
+      <section id="users-panel" class="users-panel" data-tab="users"></section>
     </main>
   </body>
 </html>

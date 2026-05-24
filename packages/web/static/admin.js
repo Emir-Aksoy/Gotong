@@ -2170,7 +2170,7 @@
   // a `tab-hidden` class. Keeping them in the DOM means cross-tab
   // interactions (e.g. clicking a task_result row in Activity auto-
   // fills the eval form in Tasks) keep working without rewiring.
-  const TABS = ['overview', 'agents', 'workflows', 'tasks', 'activity', 'services']
+  const TABS = ['overview', 'agents', 'workflows', 'tasks', 'activity', 'services', 'users']
 
   function activeTabFromHash() {
     const h = (location.hash || '').replace(/^#/, '')

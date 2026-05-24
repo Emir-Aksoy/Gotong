@@ -518,6 +518,9 @@ async function main(): Promise<void> {
     ...(allowedHosts ? { allowedHosts } : {}),
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },
     readinessGate: { isReady: () => bootReady },
+    // v4 identity surface. When absent (identity bootstrap failed
+    // above), /api/admin/identity/* returns 503.
+    ...(identity ? { identity } : {}),
   })
 
   // P6: recover from crashes — any run still marked 'running' on disk

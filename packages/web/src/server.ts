@@ -38,6 +38,19 @@ import {
   type ParsedAgent,
 } from './manifest.js'
 import { STATIC_ASSETS_BASE64 } from './static-assets.js'
+import {
+  handleIdentityRoute,
+  type IdentitySurface,
+} from './identity-routes.js'
+
+export type {
+  IdentitySurface,
+  IdentityRole,
+  IdentityUserDTO,
+  IdentitySessionDTO,
+  IdentityCredentialDTO,
+  IdentityResolved,
+} from './identity-routes.js'
 
 /**
  * Reference web UI for AipeHub (v2.0 — file-first).
@@ -221,6 +234,20 @@ export interface WebServerOptions {
    * Easiest pattern is a let-binding closure (see host main.ts).
    */
   readinessGate?: { isReady: () => boolean }
+  /**
+   * Optional v4 identity store. When set, `/api/admin/identity/*`
+   * endpoints become live; without it those routes return 503 so the
+   * admin UI can hide the user-management tab. Web takes no runtime
+   * dep on `@aipehub/identity` — `IdentitySurface` is a structural
+   * type in `./identity-routes`, satisfied by `IdentityStore` from
+   * the package.
+   *
+   * The v4 IdentityStore session cookie (`aipehub_identity`) is also
+   * accepted by `requireAdmin` as a fallback when no v3 cookie /
+   * Bearer is present — this lets users who logged in via the v4
+   * surface reach v3 admin endpoints with the same browser session.
+   */
+  identity?: IdentitySurface
 }
 
 /**
@@ -363,6 +390,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     services: opts.services,
     growthReports: opts.growthReports,
     readinessGate: opts.readinessGate,
+    identity: opts.identity,
     httpStats: new HttpStats(),
   }
 
@@ -477,6 +505,7 @@ interface HandlerCtx {
   services: ServicesAdminSurface | undefined
   growthReports: GrowthReportsAdminSurface | undefined
   readinessGate: { isReady: () => boolean } | undefined
+  identity: IdentitySurface | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -939,6 +968,41 @@ async function handle(
       'content-type': 'application/json; charset=utf-8',
     })
     res.end(JSON.stringify({ ok: true }))
+    return
+  }
+
+  // --- v4 identity routes -------------------------------------------------
+  // `/api/admin/identity/*` is the v4 multi-user surface. Auth is handled
+  // inside `handleIdentityRoute` (owner is established by EITHER a valid
+  // v3 admin OR a v4 IdentityStore session). When the host didn't wire
+  // an IdentityStore, return 503 so the admin UI can hide the tab.
+  if (path.startsWith('/api/admin/identity/')) {
+    if (!ctx.identity) {
+      sendJson(
+        res,
+        { error: 'v4 identity store not enabled on this host' },
+        503,
+      )
+      return
+    }
+    // We compute `isV3Admin` here (cheap) so handleIdentityRoute can
+    // skip a redundant lookup. Note: this does NOT enforce v3 admin —
+    // a missing v3 admin is fine if the caller has a v4 session.
+    let isV3Admin = false
+    const adminResolution = await findAdminFromRequest(ctx, req)
+    if (adminResolution.kind === 'rate_limited') {
+      res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+      res.end('too many auth attempts; try again in a minute')
+      return
+    }
+    if (adminResolution.kind === 'admin') isV3Admin = true
+    await handleIdentityRoute(
+      { identity: ctx.identity, cookieSecure: ctx.cookieSecure, isV3Admin },
+      req,
+      res,
+      method,
+      path,
+    )
     return
   }
 

@@ -518,6 +518,9 @@ importers:
         specifier: ^2.6.0
         version: 2.9.0
     devDependencies:
+      '@aipehub/identity':
+        specifier: workspace:*
+        version: link:../identity
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@20.19.41)(tsx@4.22.0)(yaml@2.9.0)
