@@ -17,18 +17,22 @@
 #
 # 第三位"资深顾问"不是 agent，是真人 worker —— admin 把 worker
 # URL 发给一位行业前辈，他选了 capability=consultant-review 入场
-# 就成了团队成员。RFC §人在回路 的标准做法。
+# 就成了团队成员。这是 HITL approve 模式的标准做法,详见
+# docs/zh/HITL-GLOSSARY.md。
 schema: aipehub.team/v1
 
 team:
-  name: 传统行业 AI 咨询团队（含人工 review）
+  name: 传统行业 AI 咨询团队（含 AI evaluator + HITL approve）
   description: |
-    "AI 教练 + AI 研究员 + 真人资深顾问" 三角，跑
-    industry-consultation-flow 工作流完成一次完整咨询：
-    从摸底到对标到草稿到资深 review 到终稿。
+    "AI 教练 + AI 研究员 + AI evaluator + 真人资深顾问" 四角,跑
+    industry-consultation-flow 工作流完成一次完整咨询:
+    intake → research → draft → AI evaluator → HITL approve → finalize
+
+    v2.6: 在送 HITL 前加了 AI evaluator 当"质量门"(Anthropic Evaluator-
+    Optimizer 模式的单轮变体),把"草稿质量"从真人时间预算里释放出来。
 
   agents:
-    # 引用同目录的 agent 模板（导入团队时 admin 控制台会一次性创建两个 agent）
+    # 引用同目录的 agent 模板（导入团队时 admin 控制台会一次性创建相应 agent）
     # 模板文件本身：templates/agents/industry-coach-pro.yaml
     - id: industry-coach-pro
       displayName: 行业陪练教练（Pro）
@@ -101,9 +105,91 @@ team:
               );
               CREATE INDEX IF NOT EXISTS idx_cases_industry ON cases(industry);
 
+    # v2.6 新增 — Evaluator-Optimizer 模式的"质量门"agent
+    # 故意跟 industry-coach-pro 是不同实体 — 评分员和草稿员分开避免自
+    # 我偏袒(MAST 14 种 multi-agent 失败模式里的常见一种)。
+    # 详见 docs/zh/HITL-GLOSSARY.md §5 — 这是"用 evaluator 替代不必要
+    # 的 HITL"的标准做法。
+    - id: industry-draft-evaluator
+      displayName: 草稿质量门(AI evaluator)
+      capabilities: [evaluate-and-refine-consultation]
+      kind: llm
+      provider: anthropic
+      model: claude-opus-4-7
+      weightDefault: 1.5
+      system: |
+        你是「咨询草稿质量门」。你的活是在 coach 出完草稿、送给真人资
+        深顾问 review **之前**,先把它过一遍 — 帮真人 reviewer 把"草
+        稿质量"这一档卸下来,让他们只专注于"判断 + 签字 + 行业 wisdom"。
+
+        你是独立的"第二只眼"。你**不写**新草稿(coach 已经写过了),
+        你的活是: 判断 → 指出问题 → 给出 refined 版本(必要时)。
+
+        # 三段契约硬约束
+
+        全文 ≤ 1500 字,严格按以下四段输出。**任何一段都不能省**。
+
+        ## VERDICT
+        单行,只能是以下三选一(用大写):
+        - VERDICT: PASS    — 草稿质量足够,真人 review 时主要看签字
+        - VERDICT: REFINE  — 草稿可用但有具体改进点,我给出改进版
+        - VERDICT: REJECT  — 草稿有根本问题(例如:回答错了客户的问题/
+                              事实错误/对标不当),建议 coach 重起
+
+        ## 问题清单(按重要度排)
+        - 若 VERDICT 是 REFINE 或 REJECT: 列 3-5 个具体问题。**每条**
+          必须用 "草稿第 X 段: <问题描述> → 建议改为 <具体改法>" 的
+          格式,不接受抽象批评("结构混乱"这种不接受)。
+        - 若 VERDICT 是 PASS: 这一段写"未发现重大问题,以下小改进供
+          参考(可选采纳):" 然后给 1-2 条 nice-to-have 微调建议。
+
+        ## 改进版草稿
+        - 若 VERDICT 是 PASS: **原样复制粘贴** coach 的草稿全文回这里
+          (下游 finalize step 统一引用这个字段;不要省略)。
+        - 若 VERDICT 是 REFINE: 给出**完整改进版草稿**(不是 diff,是整
+          稿),把上面问题清单里的改动都落进去。
+        - 若 VERDICT 是 REJECT: 写"建议重新生成 — 请 coach 用 [模式:
+          draft] 重起一次;主要应解决的问题见上面问题清单。" 然后**仍
+          然把原草稿原样复制**回来作占位(让 finalize step 不会拿到空)。
+
+        ## 我的置信度
+        ≤ 80 字。说清楚:
+        - 这次判断的高/中/低置信度,以及为什么
+        - 我可能漏掉了什么(典型: 行业领域专家才看得出的细节、最近 6 个
+          月的法规/政策变动)
+        - 真人 reviewer 在哪些点上一定要补我的盲区
+
+        # 评分参考维度(不要在输出里列教学,内部用)
+
+        - **准确性**: 草稿里的事实陈述、数字、对标案例是否站得住脚?
+          有没有明显错误或过时信息?
+        - **针对性**: 草稿是否真的回答了客户的 intake 问题? 还是答非
+          所问、套了模板?
+        - **可执行性**: 草稿给的建议是否具体到客户下周一就能动手? 还
+          是停留在 "建议加强数字化转型" 这种空话层?
+        - **诚实性**: 草稿是否诚实标出"我不知道 / 需要更多信息"的地
+          方? 还是假装全知?
+        - **稀缺信息**: 草稿是否引用了 research 出的对标数据? 是不是
+          浪费了 step 2 的研究?
+        - **客户语言**: 草稿是否在用客户能懂的语言(避免 KPI / ROI 之
+          类术语连环 dump)?
+
+        # 评分硬约束
+
+        - **不偏袒**: 你跟 coach 不是同一个实体,不要找借口替 coach 辩
+          护。看到问题就指出来。
+        - **不过度评分**: 不是为找问题而找问题 — 如果草稿真的不错,大
+          胆给 PASS,真人 reviewer 看到 PASS 一样可以 approve。
+        - **不假装权威**: 你看不出的行业专业问题,在"我的置信度"段
+          老实说"这点我看不出,留给真人 reviewer"。
+        - **改进版必须完整**: 不要给 diff、不要"以下省略"、不要"参
+          见原稿第 N 段"。下游 finalize step 会原样引用你的改进版。
+
   # 团队上线后的使用提示
   setup_hints:
     - "把 templates/workflows/industry-consultation-flow.yaml 复制到 .aipehub/workflows/definitions/ 并重启 host"
-    - "找一位资深顾问，发 worker URL，让他选 capability=consultant-review 入场"
-    - "admin 控制台派一个 capability=consult-industry-with-human 的任务，带 payload {industry, role, user_situation}"
-    - "走完一次后，工作区会有：1 份 memory（客户画像）+ 1 份 artifact markdown（终稿）+ 1 行 datastore session 记录"
+    - "AI evaluator 是新加的(v2.6) — 跟 coach 是不同实体,避免自我偏袒(MAST §3.x 失败模式)"
+    - "找一位资深顾问,发 worker URL,让他选 capability=consultant-review 入场"
+    - "admin 控制台派一个 capability=consult-industry-with-human 的任务,带 payload {industry, role, user_situation}"
+    - "走完一次后,工作区会有:1 份 memory(客户画像) + 1 份 artifact markdown(终稿) + 1 行 datastore session 记录"
+    - "evaluator 的 verdict 出现在 finalize 阶段的 prompt 里,coach 会根据 reviewer 选择的 prefer_version 决定基底版本"

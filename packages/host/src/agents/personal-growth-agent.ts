@@ -201,10 +201,15 @@ export class PersonalGrowthAgent extends LlmAgent {
     let out = await super.handleTask(augmentedTask)
 
     // ────────────────────────────────────────────────────────────────
-    // 3b. (v2.5, HITL) Interviewer-only: detect a `<NEED_INPUT>{...}
-    //     </NEED_INPUT>` marker in the first LLM response, dispatch a
-    //     human follow-up question, then re-run the LLM with the
-    //     answers stitched in.
+    // 3b. (v2.5, HITL collect-mode) Interviewer-only: detect a
+    //     `<NEED_INPUT>{...}</NEED_INPUT>` marker in the first LLM
+    //     response, dispatch a human follow-up question, then re-run
+    //     the LLM with the answers stitched in.
+    //
+    //     Mode classification: this is HITL **collect** mode per
+    //     docs/zh/HITL-GLOSSARY.md §2.4 — agent realizes it's missing
+    //     facts it needs and proactively asks the human. Bounded by a
+    //     hard 1-round budget (per §2.4 constraint).
     //
     //     Scope is intentionally limited to topic === 'portrait' (the
     //     access point for user info). 5 dimension coaches and the
@@ -300,6 +305,24 @@ export class PersonalGrowthAgent extends LlmAgent {
     const reportPath = `reports/${binding.caseId}/${stamp}.md`
 
     const payload = (task.payload ?? {}) as Record<string, unknown>
+
+    // (P1-4 Replanning hook) Parse <REPLAN>{...}</REPLAN> marker from
+    // the synthesist's text. If present, the report header gets a
+    // highlighted "⚠️ 综合规划师建议重跑 X 步" banner. The hint is also
+    // logged at info level so admins watching host logs see it without
+    // having to open the artifact. We do NOT auto-trigger a re-dispatch
+    // — that would risk loops without per-run budget tracking; the admin
+    // looks at the hint and decides whether to manually re-run that step.
+    const replan = parseReplanMarker(synthesisText)
+    if (replan) {
+      log.info('synthesist emitted REPLAN hint', {
+        id: this.id,
+        caseId: binding.caseId,
+        replanStep: replan.step,
+        replanReason: replan.reason,
+      })
+    }
+
     const fullReport = renderFullReport({
       caseId: binding.caseId,
       at,
@@ -311,6 +334,7 @@ export class PersonalGrowthAgent extends LlmAgent {
       resource: stringField(payload, 'resource'),
       social: stringField(payload, 'social'),
       synthesis: synthesisText,
+      replan,
     })
 
     const ref = await artifact.write(reportPath, fullReport, { mime: 'text/markdown' })
@@ -774,6 +798,11 @@ export function renderQaBlock(
  * elided (no `## 2. 身体维度\n\n_(无)_`) so a partial run — e.g.
  * one where a dimension failed and the workflow continued — still
  * produces a readable artifact.
+ *
+ * When a P1-4 `<REPLAN>` hint is parsed from the synthesist's text,
+ * a high-visibility banner is rendered between the header and the
+ * first section, so an admin opening the report immediately sees
+ * "the regulator says re-run X — decide whether to act on it".
  */
 function renderFullReport(args: {
   caseId: string
@@ -786,6 +815,7 @@ function renderFullReport(args: {
   resource: string | undefined
   social: string | undefined
   synthesis: string
+  replan?: ParsedReplan | null
 }): string {
   const lines: string[] = []
   lines.push(`# 个人成长发展路径`)
@@ -796,6 +826,18 @@ function renderFullReport(args: {
   lines.push('')
   lines.push('---')
   lines.push('')
+
+  if (args.replan) {
+    lines.push('> ⚠️ **综合规划师建议重跑 `' + args.replan.step + '` 维度**')
+    lines.push('>')
+    lines.push('> 原因: ' + args.replan.reason)
+    lines.push('>')
+    lines.push('> 这是 P1-4 replanning hint — 不会自动触发重跑。admin 看到后决定要不要单独派一个 `analyze-' +
+      args.replan.step + '` 任务覆盖前面那一步的产出,再手动重跑 synthesis。')
+    lines.push('')
+    lines.push('---')
+    lines.push('')
+  }
 
   const sections: Array<[string, string | undefined]> = [
     ['1. 访谈与画像', args.portrait],
@@ -814,6 +856,68 @@ function renderFullReport(args: {
     lines.push('')
   }
   return lines.join('\n')
+}
+
+// ────────────────────────────────────────────────────────────────────
+// P1-4 — Replanning marker helpers (synthesist only)
+// ────────────────────────────────────────────────────────────────────
+
+/** The 5 dimension step ids that a REPLAN can target. */
+export const REPLAN_ALLOWED_STEPS = [
+  'body',
+  'mind',
+  'goal',
+  'resource',
+  'social',
+] as const
+
+export type ReplanStep = (typeof REPLAN_ALLOWED_STEPS)[number]
+
+export interface ParsedReplan {
+  step: ReplanStep
+  reason: string
+}
+
+const REPLAN_RE = /<REPLAN>\s*(\{[\s\S]*?\})\s*<\/REPLAN>/
+
+/**
+ * Parse `<REPLAN>{"step":"body|mind|goal|resource|social","reason":"..."}
+ * </REPLAN>` out of the synthesist's text.
+ *
+ * Returns `null` (and the report falls through to the no-banner code path)
+ * when:
+ *   - no marker present (the common case — synthesist saw no major
+ *     conflicts and didn't ask for a re-run)
+ *   - JSON malformed
+ *   - `step` is not one of the 5 allowed dimensions (portrait /
+ *     synthesis re-runs are out of scope — those are workflow-level
+ *     restarts the admin can trigger directly)
+ *   - `reason` is missing / empty / > 200 chars (defensive: an LLM
+ *     pasting a full coach output here means it didn't understand the
+ *     constraint — better to drop the marker than render a 5-paragraph
+ *     banner)
+ *
+ * Exported for unit tests in `tests/replan-marker.test.ts`.
+ */
+export function parseReplanMarker(text: string): ParsedReplan | null {
+  const m = text.match(REPLAN_RE)
+  if (!m || !m[1]) return null
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(m[1])
+  } catch {
+    return null
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+  const obj = parsed as Record<string, unknown>
+  const step = obj.step
+  if (typeof step !== 'string') return null
+  if (!REPLAN_ALLOWED_STEPS.includes(step as ReplanStep)) return null
+  const reason = obj.reason
+  if (typeof reason !== 'string') return null
+  const trimmed = reason.trim()
+  if (!trimmed || trimmed.length > 200) return null
+  return { step: step as ReplanStep, reason: trimmed }
 }
 
 /**

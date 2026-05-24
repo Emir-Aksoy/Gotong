@@ -1,0 +1,38 @@
+{
+  "name": "@aipehub/evals",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AipeHub workflow + agent prompt eval harness — lightweight structural checkers that catch output-format regressions without burning LLM tokens.",
+  "license": "MIT",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./checkers/three-segment": {
+      "types": "./dist/checkers/three-segment.d.ts",
+      "import": "./dist/checkers/three-segment.js"
+    },
+    "./checkers/structure": {
+      "types": "./dist/checkers/structure.d.ts",
+      "import": "./dist/checkers/structure.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}

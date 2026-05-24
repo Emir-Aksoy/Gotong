@@ -1,14 +1,23 @@
 # =============================================================================
-# Workflow: 传统行业 AI 转型咨询全流程（含资深顾问人工 review + 案主插话）
+# Workflow: 传统行业 AI 转型咨询全流程
+# （含 AI evaluator + 资深顾问 HITL approve + 案主插话）
 # Companion team: templates/teams/industry-consultation-team.yaml
 # Schema: aipehub.workflow/v1
 #
 # v2 增强：相对 v1 的"五步全自动"，本工作流加了：
 #   - v2.2  Hub Services（memory + artifact + datastore）
-#   - v2.2  真实的"人在回路"（capability=consultant-review 派给真人 worker）
+#   - v2.2  HITL approve 模式（capability=consultant-review 派给真人 worker；
+#           详见 docs/zh/HITL-GLOSSARY.md §2.1）
 #   - v2.3  case-context: 案主可以在工作流**任意时刻**找 case-manager
 #           插话提问 / 补充事实 / 重写草稿请求，所有对话写进 case-memory，
 #           下一步 agent 自动看见
+#   - v2.6  Evaluator-Optimizer 模式: 在送 HITL 前先过一道 AI evaluator
+#           (capability=evaluate-and-refine-consultation), 单步既评分又
+#           出改进版。真人 reviewer 看到 evaluator 反馈再判断 — 把"草稿
+#           质量"从真人时间预算里释放出来,只留"判断 + 签字"。这是
+#           Anthropic "Building Effective Agents" 的 evaluator-optimizer
+#           模式,单轮变体(不带 loop,因为 workflow 不支持循环;实测一轮
+#           已能把大部分明显问题挡掉)。
 #
 # # 案主插话怎么集成
 #
@@ -35,9 +44,11 @@
 #   1) intake           coach 出"我想先了解几件事"问题清单
 #   2) research         分析师查行业 cases datastore，出对标案例
 #   3) draft            coach 综合 intake + research 出初稿
-#   4) human-review     真人资深顾问审核草稿，给反馈或通过
-#                       (capability=consultant-review，派给 worker)
-#   5) finalize         coach 吸收顾问反馈，出终稿，写 artifact 落盘
+#   4) draft-eval       AI evaluator 评分草稿 + 出改进版(v2.6 新加)
+#                       (capability=evaluate-and-refine-consultation)
+#   5) human-review     真人资深顾问审核(同时看到原版 + AI 评分 + 改进版)
+#                       (capability=consultant-review,派给 worker,HITL approve)
+#   6) finalize         coach 吸收 evaluator + reviewer 双重反馈,出终稿
 #
 # Q&A：
 # - "step 4 没人在线怎么办？" —— Hub.dispatch 在没人响应时会一直挂着，
@@ -124,58 +135,144 @@ workflow:
             请按 [模式: draft] 的格式出"行业 AI 转型方案草稿（初稿）"。
 
     # ─────────────────────────────────────────────────────────
-    # Step 4: 资深顾问 review —— 真人 worker 介入
+    # Step 4: AI evaluator — 评分草稿 + 出改进版（v2.6 Evaluator-Optimizer）
     # ─────────────────────────────────────────────────────────
-    # 关键一步：dispatch capability=consultant-review 派给任何
+    # 这一步是 Anthropic "Evaluator-Optimizer" 模式的单轮变体:在送给
+    # 真人 reviewer **之前**,先让一个独立 AI 把草稿过一遍。设计目标:
+    #
+    #   - 把"草稿质量门"从真人时间预算里释放出来 — 真人只看判断 +
+    #     签字,不再当编辑;
+    #   - 三种 verdict 处理:
+    #       * PASS    草稿质量足够,改进版 = 原版原样;
+    #       * REFINE  草稿可用但有改进点,改进版是 evaluator 重写的;
+    #       * REJECT  草稿有根本问题,改进版字段写"需要重起"
+    #                 真人看到 REJECT 通常会选择打回去重跑 step 3;
+    #   - 单轮(不带 loop)。workflow 当前不支持循环执行同一 step,
+    #     如果要 N 轮 refine,需要 workflow runner 加 loop 支持;目前
+    #     一轮已经能挡掉大部分明显问题。
+    #
+    # 不属于 HITL — 这是 agent ↔ agent 协调。详见 docs/zh/HITL-GLOSSARY.md
+    # §5 关于"何时不用 HITL"的判定。
+    - id: draft-eval
+      description: AI evaluator 评分草稿 + 出改进版（送 HITL 前的质量门）
+      dispatch:
+        strategy: { kind: capability, capabilities: [evaluate-and-refine-consultation] }
+        title: "AI evaluator: 评分草稿 + 出改进版"
+        payload:
+          prompt: |
+            待评估的咨询草稿(coach 第一轮产出):
+
+            ---
+            $draft.output
+            ---
+
+            原始 intake 信息(供你判断草稿是否真的回应了客户的需求):
+
+            行业: $trigger.payload.industry
+            角色: $trigger.payload.role
+            客户自述:
+            $trigger.payload.user_situation
+
+            初访问题清单:
+            $intake.output
+
+            行业对标:
+            $research.output
+
+            请按 system 里规定的 evaluator 输出格式给出:VERDICT / 问题
+            清单 / 改进版草稿 / 置信度 四段。
+
+    # ─────────────────────────────────────────────────────────
+    # Step 5: 资深顾问 review —— HITL（approve 模式）
+    #
+    # 术语:HITL = Human-in-the-Loop,详见 docs/zh/HITL-GLOSSARY.md。
+    # 这一步属于 approve 模式 —— agent 已经给出完整草稿,真人选「通过」
+    # 或「打回去 + 改动建议」。新加的 HITL 步骤请先回去看 glossary 决
+    # 定属于哪种模式。
+    # ─────────────────────────────────────────────────────────
+    # 关键一步:dispatch capability=consultant-review 派给任何
     # 标了该能力的 HumanParticipant。Hub.dispatch 会挂起直到 worker
     # 在 admin / worker UI 上点 "Complete" 给回结果。
     #
-    # worker 的 Complete 表单（payload 是自由 JSON）建议填：
+    # worker 的 Complete 表单(payload 是自由 JSON)建议填:
     #   { approved: true|false, revisions: "改 quick-win 第 2 条…", reviewer: "李顾问" }
     #
-    # 没人在线 → 任务在 worker 队列里等着，直到有人 join 后看到并处理。
-    # 这是 RFC §人在回路 的核心约定 —— workflow 不替人决策超时。
+    # 没人在线 → 任务在 worker 队列里等着,直到有人 join 后看到并处理。
+    # HITL approve 模式**不强制超时** —— workflow 不替人决策超时。
     - id: human-review
-      description: 资深顾问审核草稿（HUMAN-IN-THE-LOOP）
+      description: 资深顾问审核草稿（HITL approve 模式，看到 AI evaluator 反馈）
       dispatch:
         strategy: { kind: capability, capabilities: [consultant-review] }
         title: "审核草稿：资深顾问决定改哪里"
         payload:
           industry: $trigger.payload.industry
-          draft_report: $draft.output
+          original_draft: $draft.output
+          ai_evaluator_review: $draft-eval.output
           guidance: |
-            请审核上面这份咨询草稿。可以的话回复 JSON：
+            v2.6:你看到的是经过 AI evaluator 把过一遍的草稿。AI 已经
+            给了一个初判 + 改进版,你不需要从头改 — 主要是:
+              (a) AI 改对了哪些 / 改错了哪些
+              (b) AI 没看到的、你作为人类资深顾问看到的真正问题
+
+            请回复 JSON:
               { "approved": true/false,
-                "revisions": "<具体怎么改，或为空表示通过>",
+                "prefer_version": "evaluator"|"original"|"reviewer",
+                "revisions": "<如果选 reviewer 写你的改动建议;如果选其他两个可留空>",
                 "reviewer": "<您的署名>" }
-            实在没法给 JSON 也可以纯文字回；后续步骤会把你的回复
-            原样塞给 coach 当 [reviewer 反馈] 段。
+
+            语义:
+              - approved=true + prefer_version=evaluator: 直接用 AI 改进版定稿
+              - approved=true + prefer_version=original: 直接用原版定稿
+              - approved=true + prefer_version=reviewer: 用你 revisions 里描述的版本定稿
+              - approved=false: 打回去重起 coach 草稿(finalize 会写"被打回")
+
+            实在没法给 JSON 也可以纯文字回;后续步骤会把你的回复原样
+            塞给 coach 当 [reviewer 反馈] 段。
 
     # ─────────────────────────────────────────────────────────
-    # Step 5: 终稿 —— coach 吸收 reviewer 反馈定稿 + 写 artifact
+    # Step 6: 终稿 —— coach 吸收 evaluator + reviewer 双反馈 + 写 artifact
     # ─────────────────────────────────────────────────────────
     - id: finalize
-      description: 吸收资深顾问反馈，出终稿，artifact 落盘
+      description: 吸收 AI evaluator + 真人 reviewer 双反馈,出终稿,artifact 落盘
       dispatch:
         strategy: { kind: capability, capabilities: [finalize-consultation] }
-        title: "终稿：吸收反馈出最终报告"
+        title: "终稿：吸收双反馈出最终报告"
         payload:
           prompt: |
             [模式: finalize]
 
-            草稿全文（已经过资深顾问 review）：
+            ## 第一版草稿(coach 你自己一开始的产出)
             $draft.output
 
-            [reviewer 反馈]
+            ## AI evaluator 反馈(送给真人 reviewer 之前的质量门)
+            $draft-eval.output
+
+            ## 真人 resident reviewer 反馈
             $human-review.output
 
-            请按 [模式: finalize] 的格式给出终稿。宿主胶水会自动把
-            你的输出 artifact.write 到 reports/<industry>-<runId>.md
-            并在 datastore.sessions 表里记一行。你只要专心写好终稿。
+            ---
+
+            请按 [模式: finalize] 的格式给出终稿。判断逻辑:
+
+            1. 如果 reviewer 的 JSON 里 `prefer_version: "evaluator"` 且
+               `approved: true` — 主要采用 evaluator 的"改进版"作为基底。
+            2. 如果 reviewer 选 `prefer_version: "original"` 且 approved
+               — 采用第一版作为基底,evaluator 反馈可参考但不强制采纳。
+            3. 如果 reviewer 选 `prefer_version: "reviewer"` 或给了
+               revisions 文字 — 按 reviewer 的具体改动落到终稿里;此时
+               evaluator 反馈作为次要参考。
+            4. 如果 reviewer `approved: false` — 终稿主题不变,但要在最
+               后加一段"⚠️ 本稿未通过真人 review,reviewer 意见:
+               <revisions>;建议重起 coach 草稿"。
+
+            宿主胶水会自动把你的输出 artifact.write 到 reports/<industry>
+            -<runId>.md 并在 datastore.sessions 表里记一行。你只要专心
+            写好终稿。
 
   output:
     intake_questions: $intake.output
     research_brief: $research.output
     draft_report: $draft.output
+    ai_evaluator_review: $draft-eval.output
     human_review: $human-review.output
     final_report: $finalize.output

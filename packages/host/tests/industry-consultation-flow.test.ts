@@ -2,8 +2,10 @@
  * 集成测试：传统行业咨询全流程（含人工 review）
  *
  * 这是 templates/workflows/industry-consultation-flow.yaml 的端到端
- * 运行测试。它把这一波 v2.2 "Hub Services + 人在回路" 的所有零件
- * 串起来，证明改造后的管线真的能跑通：
+ * 运行测试。它把这一波 v2.2 "Hub Services + HITL（approve 模式）" 的
+ * 所有零件串起来，证明改造后的管线真的能跑通：
+ *
+ * 术语:HITL = Human-in-the-Loop,详见 docs/zh/HITL-GLOSSARY.md。
  *
  *   bootstrap services (3 first-party plugins)
  *     ↓
@@ -24,7 +26,7 @@
  *
  * 这就是改造后的"传统行业 AI 咨询"产品形态：AI 教练 + AI 研究员 +
  * 真人资深顾问三方协作；agent 状态由 Hub Services 持久化；workflow
- * 中嵌入一个 HUMAN-IN-THE-LOOP 步骤。
+ * 中嵌入一个 HITL approve-mode 步骤。
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
