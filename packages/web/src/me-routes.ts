@@ -45,6 +45,7 @@ import type { GrowthReportsAdminSurface } from '@aipehub/core'
 import {
   resolveV4Auth,
   type IdentitySurface,
+  type LoginRateLimiterLike,
 } from './identity-routes.js'
 
 // ---------------------------------------------------------------------------
@@ -140,6 +141,14 @@ export interface HandleMeRouteCtx {
    * without this surface.
    */
   growthReports: GrowthReportsAdminSurface | undefined
+  /**
+   * AUDIT-P3-01 / -02: shared per-IP/per-user limiter (same instance as
+   * the identity login limiter) so members can't loop-dispatch personal-
+   * growth workflows (7 LLM agents per run) to burn the owner's API
+   * quota, or hammer the report-list endpoint to force full-table scans.
+   * Required. The host wires its existing `adminLoginLimiter`.
+   */
+  loginLimiter: LoginRateLimiterLike
 }
 
 export async function handleMeRoute(
@@ -196,6 +205,22 @@ async function handleMeDispatch(
   res: ServerResponse,
   userId: string,
 ): Promise<void> {
+  // AUDIT-P3-01: rate-limit per-user. Each dispatch triggers a
+  // personal-growth workflow (7 LLM agents). Without this, a single
+  // invitee (legitimate, low-privilege member) can loop POST and burn
+  // the host's API quota / agent-pool capacity. Key on userId not IP so
+  // a NAT'd corp office isn't punished collectively. Default budget
+  // (mirrors v3 admin login: 10/min) is generous for human use (PG
+  // workflows take 5-15 min each) and a hard cap for scripts.
+  //
+  // `check()` not `peek()` — every successful dispatch must count, since
+  // the cost is in the action itself, not in detecting attack patterns.
+  const rlKey = `me-dispatch:${userId}`
+  if (!ctx.loginLimiter.check(rlKey)) {
+    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+    res.end('too many dispatches; try again in a minute')
+    return
+  }
   let body: unknown
   try {
     body = await readJsonBody(req)
@@ -297,6 +322,17 @@ async function handleMeListReports(
   res: ServerResponse,
   userId: string,
 ): Promise<void> {
+  // AUDIT-P3-02: rate-limit. growthReports.list() walks every report on
+  // the host then filters in memory (the surface predates /me); a
+  // looping member can force full-table scans. Higher budget than
+  // dispatch (30/min vs 10/min) because list is a read, not a write.
+  // `check()` for the same reason as dispatch: action volume is the cap.
+  const rlKey = `me-reports:${userId}`
+  if (!ctx.loginLimiter.check(rlKey)) {
+    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+    res.end('too many report-list requests; try again in a minute')
+    return
+  }
   if (!ctx.growthReports) {
     sendJson(res, { error: 'growth reports not enabled on this host' }, 503)
     return

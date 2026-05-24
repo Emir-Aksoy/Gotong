@@ -148,9 +148,25 @@
     }
   }
 
+  // AUDIT-P3-05: scrub the token from window.location so it doesn't
+  // hang around in the browser address bar / history / browser-sync /
+  // user screenshots. Called immediately after we've grabbed the token
+  // into a local variable; the in-memory `token` is what we'll POST
+  // with later. After this runs, the URL reads `/invite` (no token).
+  function scrubTokenFromUrl() {
+    try {
+      window.history.replaceState({}, '', '/invite')
+    } catch (_) {
+      /* old browsers without history API — accept the leak */
+    }
+  }
+
   // --- Boot ---------------------------------------------------------------
   async function init() {
     const token = readTokenFromPath()
+    // Scrub immediately — even before lookup, in case the lookup fails
+    // and the user copy-pastes the URL "for help."
+    if (token) scrubTokenFromUrl()
     if (!token) {
       renderFail('链接格式错误', 'URL 里没有有效的 token,请检查邀请链接是否完整。')
       return

@@ -413,6 +413,14 @@ export function resolveV4Auth(
 export interface LoginRateLimiterLike {
   peek(key: string): boolean
   recordFailure(key: string): void
+  /**
+   * Single-call peek + record-on-allow. Use for endpoints where every
+   * SUCCESSFUL action should count (e.g. /me/dispatch — every dispatch
+   * spawns a workflow, so the cap is on action volume, not on attacks).
+   * Returns true if allowed (and the hit was recorded), false if over
+   * budget (no hit recorded).
+   */
+  check(key: string): boolean
 }
 
 export interface HandleIdentityRouteCtx {
@@ -1027,6 +1035,20 @@ async function handleCreateInvite(
     sendJson(res, { error: 'invitation API unavailable on this host' }, 503)
     return
   }
+  // AUDIT-P3-03: owner-mutation rate limit. Defense-in-depth against
+  // a leaked owner credential being used to spam-fill the invitations
+  // table + audit log (every create writes both). The actor key prefers
+  // the v4 userId (stable across IP changes); for v3-admin callers
+  // (no v4 user binding) we fall back to IP. Default 60/min is plenty
+  // for human bulk-onboarding (a 50-person org is 50 calls in 1 min).
+  // `check()` because every create counts — this is action-volume cap.
+  const v4ForRl = resolveV4Auth(ctx.identity, req)
+  const actorKey = v4ForRl.user?.id ?? `v3-admin:${ctx.clientIp}`
+  if (!ctx.loginLimiter.check(`owner-mutation:${actorKey}`)) {
+    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+    res.end('too many owner mutations; try again in a minute')
+    return
+  }
   let body: unknown
   try {
     body = await readJsonBody(req)
@@ -1048,10 +1070,10 @@ async function handleCreateInvite(
     sendJson(res, { error: 'email required' }, 400)
     return
   }
-  // Resolve auth so we can stamp `invitedBy` on the row. For v3-admin
-  // callers (no v4 user binding) we pass null — the store accepts it
-  // and the audit row still records actorSource='v3-admin'.
-  const v4 = resolveV4Auth(ctx.identity, req)
+  // We already resolved v4 above for the rate-limit key — reuse it.
+  // For v3-admin callers (no v4 user binding) we pass null — the store
+  // accepts it and the audit row still records actorSource='v3-admin'.
+  const v4 = v4ForRl
   const invitedBy = v4.user?.id ?? null
 
   const input: Parameters<NonNullable<IdentitySurface['createInvitation']>>[0] = {

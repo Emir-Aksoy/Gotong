@@ -1253,3 +1253,61 @@ describe('/invite — static page', () => {
     expect(r.status).toBe(200)
   })
 })
+
+// ---------------------------------------------------------------------------
+// AUDIT-P3-03 — createInvitation owner-mutation rate limit
+// ---------------------------------------------------------------------------
+
+describe('/api/admin/identity/invites — owner-mutation rate limit (AUDIT-P3-03)', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    // Tight budget so we can prove the cap in a small loop.
+    b = await boot({ adminLoginRateLimit: { max: 2, windowSec: 60 } })
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('returns 429 after the per-actor budget is exhausted', async () => {
+    const post = (email: string) =>
+      fetch(`${b.baseUrl}/api/admin/identity/invites`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+        body: JSON.stringify({ email }),
+      })
+    expect((await post('rl1@team.test')).status).toBe(201)
+    expect((await post('rl2@team.test')).status).toBe(201)
+    const third = await post('rl3@team.test')
+    expect(third.status).toBe(429)
+    expect(third.headers.get('retry-after')).toBe('60')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AUDIT-P3-04 — accept-invite weak_password surfaces as 400 + code, not 500
+// ---------------------------------------------------------------------------
+
+describe('/api/invites/:token/accept — weak_password error mapping (AUDIT-P3-04)', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    b = await boot()
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('responds 400 with code=weak_password (was 500 internal error before fix)', async () => {
+    const minted = await mintInvite(b, 'weak-pw-code@team.test')
+    const r = await fetch(`${b.baseUrl}/api/invites/${minted.token}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'short' }),
+    })
+    expect(r.status).toBe(400)
+    const body = (await r.json()) as { code?: string; error?: string }
+    expect(body.code).toBe('weak_password')
+    // The message survives — operator + user both see "at least 8 chars"
+    // rather than "internal error".
+    expect(body.error || '').toMatch(/at least 8/)
+  })
+})

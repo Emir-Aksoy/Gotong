@@ -31,6 +31,8 @@ import {
   createHash,
 } from 'node:crypto'
 
+import { IdentityError } from './errors.js'
+
 const SCRYPT_KEYLEN = 64
 const PASSWORD_SCHEME = 'scrypt'
 
@@ -51,13 +53,26 @@ export const MAX_PASSWORD_LENGTH = 4096
 
 export function hashPassword(password: string): string {
   if (typeof password !== 'string') {
+    // TypeError, not IdentityError — type mismatch is a programmer bug
+    // in the caller, not a credential-domain failure with a stable code.
     throw new TypeError('password must be a string')
   }
+  // AUDIT-P3-04: length errors throw IdentityError({code: 'weak_password'})
+  // so the web layer's sendIdentityError can map them to 400 with a
+  // meaningful response. Before this, plain `Error` slipped past the
+  // code switch and surfaced as "internal error" / 500 — confusing the
+  // user and burning rate-limit budget on retries.
   if (password.length < MIN_PASSWORD_LENGTH) {
-    throw new Error(`password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+    throw new IdentityError({
+      code: 'weak_password',
+      message: `password must be at least ${MIN_PASSWORD_LENGTH} characters`,
+    })
   }
   if (password.length > MAX_PASSWORD_LENGTH) {
-    throw new Error(`password must be at most ${MAX_PASSWORD_LENGTH} characters`)
+    throw new IdentityError({
+      code: 'weak_password',
+      message: `password must be at most ${MAX_PASSWORD_LENGTH} characters`,
+    })
   }
   const salt = randomBytes(16)
   const hash = scryptSync(password, salt, SCRYPT_KEYLEN)

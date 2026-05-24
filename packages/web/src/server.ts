@@ -1022,6 +1022,12 @@ async function handle(
         identity: ctx.identity,
         hub: ctx.hub,
         growthReports: ctx.growthReports,
+        // AUDIT-P3-01/-02: share the v3 admin login limiter so /me
+        // dispatch + reports rate-limits live in the same per-process
+        // budget machinery. Per-user keys (me-dispatch:<userId> /
+        // me-reports:<userId>) don't collide with the IP-keyed login
+        // limiter under the same instance.
+        loginLimiter: ctx.adminLoginLimiter,
       },
       req,
       res,
@@ -1098,10 +1104,15 @@ async function handle(
         identity: ctx.identity,
         cookieSecure: ctx.cookieSecure,
         isV3Admin,
-        // V4-AUDIT-01: share the v3 limiter so an attacker cannot get
-        // extra budget by switching between v3 admin login and v4
-        // identity login — both consume the same per-IP slot, just
-        // under different namespaces (`bearer:`/`cookie:`/`identity-login:`).
+        // V4-AUDIT-01 / AUDIT-P3-06: reuse the same `RateLimiter`
+        // INSTANCE (avoids a second allocation + GC sweep cycle), but
+        // the budgets are PER-NAMESPACE — bearer:<ip>, cookie:<ip>,
+        // identity-login:<ip>, invite-accept:<ip>, me-dispatch:<userId>,
+        // me-reports:<userId>, owner-mutation:<actorKey> are all
+        // independent buckets. This is intentional: an invite-accept
+        // flood shouldn't punish a legit user's login attempts on the
+        // same IP. The earlier comment claimed "the same per-IP slot,"
+        // which was wrong — corrected here.
         loginLimiter: ctx.adminLoginLimiter,
         clientIp: clientIp(ctx, req),
         ...(userAgent ? { userAgent } : {}),
@@ -2583,16 +2594,32 @@ async function serveStatic(res: ServerResponse, requested: string): Promise<void
   const ext = extname(safe)
   const contentType = MIME[ext] ?? 'application/octet-stream'
 
+  // AUDIT-P3-07: baseline security headers for every static response.
+  // Applied uniformly (not just HTML) — the cost is bytes-per-response,
+  // the benefit is defense-in-depth without per-page bookkeeping.
+  //   X-Content-Type-Options: nosniff — MIME-sniffing prevention.
+  //   X-Frame-Options: DENY — clickjacking prevention (admin / me /
+  //     invite must never be embedded in a third-party page).
+  //   Referrer-Policy: no-referrer — no token / state leaks via Referer
+  //     to any subresource the page might fetch.
+  // Note: full CSP is intentionally NOT added here — admin.js uses
+  // inline event handlers in a few places; a strict CSP would break
+  // them and demands a separate refactor.
+  const securityHeaders: Record<string, string> = {
+    'content-type': contentType,
+    'cache-control': 'no-cache',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer',
+  }
+
   // Production path: embedded asset map. Populated by
   // scripts/build-static-assets.mjs; works in node, bun, and bun --compile
   // single-file binaries (where filesystem reads relative to import.meta.url
   // are not available).
   const embedded = getEmbeddedAsset(key)
   if (embedded) {
-    res.writeHead(200, {
-      'content-type': contentType,
-      'cache-control': 'no-cache',
-    })
+    res.writeHead(200, securityHeaders)
     res.end(embedded)
     return
   }
@@ -2607,10 +2634,7 @@ async function serveStatic(res: ServerResponse, requested: string): Promise<void
   }
   try {
     const data = await readFile(full)
-    res.writeHead(200, {
-      'content-type': contentType,
-      'cache-control': 'no-cache',
-    })
+    res.writeHead(200, securityHeaders)
     res.end(data)
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === 'ENOENT') {

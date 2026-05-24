@@ -3,6 +3,15 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <!--
+      AUDIT-P3-05: the invite token lives in the URL path (which goes
+      out as Referer to any subresource request). Force `no-referrer`
+      on the page so even future additions (web fonts, analytics,
+      images) cannot leak the token to a third-party origin. We also
+      strip the token from window.location via history.replaceState
+      in invite.js immediately after the lookup completes.
+    -->
+    <meta name="referrer" content="no-referrer" />
     <title>AipeHub · 接受邀请</title>
     <link rel="stylesheet" href="/styles.css" />
     <style>

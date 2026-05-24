@@ -64,7 +64,12 @@ class StubGrowthReports implements GrowthReportsAdminSurface {
   }
 }
 
-async function boot(opts: { withGrowthReports?: boolean } = {}): Promise<BootResult> {
+async function boot(
+  opts: {
+    withGrowthReports?: boolean
+    adminLoginRateLimit?: { max: number; windowSec: number }
+  } = {},
+): Promise<BootResult> {
   const withGrowthReports = opts.withGrowthReports ?? true
   const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-me-'))
   const init = await Space.init(tmp, { name: 'me-test' })
@@ -113,6 +118,9 @@ async function boot(opts: { withGrowthReports?: boolean } = {}): Promise<BootRes
     port: 0,
     identity,
     ...(withGrowthReports ? { growthReports } : {}),
+    ...(opts.adminLoginRateLimit
+      ? { adminLoginRateLimit: opts.adminLoginRateLimit }
+      : {}),
   })
 
   // Pre-cook the member's v4 session cookie via password login on the
@@ -405,5 +413,129 @@ describe('/api/me/growth-reports — host without growthReports surface', () => 
       { headers: { cookie: b.memberCookie } },
     )
     expect(r.status).toBe(503)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AUDIT-P3-01 / AUDIT-P3-02 — /me rate-limit coverage
+// ---------------------------------------------------------------------------
+
+describe('/api/me/dispatch — rate limit (AUDIT-P3-01)', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    // Tight budget so we can prove the cap with a small loop. 2 hits
+    // allowed per minute; 3rd should 429.
+    b = await boot({ adminLoginRateLimit: { max: 2, windowSec: 60 } })
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('returns 429 after the per-user budget is exhausted', async () => {
+    const dispatch = () =>
+      fetch(`${b.baseUrl}/api/me/dispatch`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+        body: JSON.stringify({
+          workflowId: 'personal-growth-flow',
+          payload: { present_state: 'p', aspirations: 'a' },
+        }),
+      })
+    expect((await dispatch()).status).toBe(200)
+    expect((await dispatch()).status).toBe(200)
+    const r3 = await dispatch()
+    expect(r3.status).toBe(429)
+    expect(r3.headers.get('retry-after')).toBe('60')
+  })
+})
+
+describe('/api/me/growth-reports — rate limit (AUDIT-P3-02)', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    b = await boot({ adminLoginRateLimit: { max: 2, windowSec: 60 } })
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('returns 429 after the per-user budget is exhausted', async () => {
+    const list = () =>
+      fetch(`${b.baseUrl}/api/me/growth-reports`, {
+        headers: { cookie: b.memberCookie },
+      })
+    expect((await list()).status).toBe(200)
+    expect((await list()).status).toBe(200)
+    expect((await list()).status).toBe(429)
+  })
+
+  it('dispatch budget and reports budget are independent buckets', async () => {
+    // Exhaust dispatch budget (2 hits).
+    const dispatch = () =>
+      fetch(`${b.baseUrl}/api/me/dispatch`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+        body: JSON.stringify({
+          workflowId: 'personal-growth-flow',
+          payload: { present_state: 'p', aspirations: 'a' },
+        }),
+      })
+    expect((await dispatch()).status).toBe(200)
+    expect((await dispatch()).status).toBe(200)
+    expect((await dispatch()).status).toBe(429)
+    // Reports should still have full budget — different namespace key.
+    const r = await fetch(`${b.baseUrl}/api/me/growth-reports`, {
+      headers: { cookie: b.memberCookie },
+    })
+    expect(r.status).toBe(200)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AUDIT-P3-07 — security headers on static assets
+// ---------------------------------------------------------------------------
+
+describe('static asset security headers (AUDIT-P3-07)', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    b = await boot()
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('GET /me ships X-Frame-Options, X-Content-Type-Options, Referrer-Policy', async () => {
+    const r = await fetch(`${b.baseUrl}/me`)
+    expect(r.status).toBe(200)
+    expect(r.headers.get('x-frame-options')).toBe('DENY')
+    expect(r.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(r.headers.get('referrer-policy')).toBe('no-referrer')
+  })
+
+  it('GET /invite ships the same baseline headers', async () => {
+    const r = await fetch(`${b.baseUrl}/invite/inv_anything`)
+    expect(r.status).toBe(200)
+    expect(r.headers.get('x-frame-options')).toBe('DENY')
+    expect(r.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(r.headers.get('referrer-policy')).toBe('no-referrer')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// AUDIT-P3-05 — invite.html has the referrer no-referrer meta
+// ---------------------------------------------------------------------------
+
+describe('/invite — referrer meta (AUDIT-P3-05)', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    b = await boot()
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('invite.html includes <meta name="referrer" content="no-referrer">', async () => {
+    const r = await fetch(`${b.baseUrl}/invite/inv_anything`)
+    const html = await r.text()
+    expect(html).toMatch(/meta\s+name=["']referrer["']\s+content=["']no-referrer["']/)
   })
 })
