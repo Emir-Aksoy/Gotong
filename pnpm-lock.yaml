@@ -37,6 +37,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/llm
 
+  examples/cross-org-rfp:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
   examples/federated-team:
     dependencies:
       '@aipehub/core':

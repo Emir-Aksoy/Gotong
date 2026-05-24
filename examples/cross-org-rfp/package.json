@@ -1,0 +1,14 @@
+{
+  "name": "@aipehub/example-cross-org-rfp",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Cross-organisation RFP demo — two hubs in one process federated via inproc HubLink. Models the smallest 'real' cross-org workflow: Org A (buyer) sends an RFP, Org B (vendor) drafts + HITL-approves + returns a quote.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*"
+  }
+}
