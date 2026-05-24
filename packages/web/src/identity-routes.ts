@@ -80,6 +80,29 @@ export interface IdentityCredentialDTO {
   createdAt: number
   lastUsedAt: number | null
 }
+
+// V4-AUDIT-06: structural projection of @aipehub/identity's
+// AuditLogEntry / AuditActorSource. Kept here so web stays decoupled.
+export type IdentityAuditActorSource =
+  | 'v3-admin'
+  | 'v4-session'
+  | 'v4-bearer'
+  | 'anonymous'
+  | 'system'
+
+export interface IdentityAuditLogEntryDTO {
+  id: string
+  ts: number
+  actorUserId: string | null
+  actorSource: IdentityAuditActorSource
+  action: string
+  targetUserId: string | null
+  targetCredentialId: string | null
+  ip: string | null
+  userAgent: string | null
+  metadata: Record<string, unknown> | null
+  success: boolean
+}
 export interface IdentityResolved {
   user: IdentityUserDTO
   role: IdentityRole
@@ -112,6 +135,29 @@ export interface IdentitySurface {
   }
   listCredentials(userId: string): IdentityCredentialDTO[]
   revokeCredential(credentialId: string): void
+  // V4-AUDIT-06 — audit log surface. Both methods are optional on the
+  // structural type so older host wirings (an IdentityStore that
+  // predates the migration) still typecheck. In practice the host
+  // either has a current `@aipehub/identity` (both methods present)
+  // or doesn't wire `identity` at all (the route stays 503).
+  writeAuditLog?(input: {
+    action: string
+    actorSource: IdentityAuditActorSource
+    actorUserId?: string | null
+    targetUserId?: string | null
+    targetCredentialId?: string | null
+    ip?: string | null
+    userAgent?: string | null
+    metadata?: Record<string, unknown> | null
+    success?: boolean
+  }): IdentityAuditLogEntryDTO
+  listAuditLog?(query?: {
+    limit?: number
+    offset?: number
+    action?: string
+    targetUserId?: string
+    success?: boolean
+  }): IdentityAuditLogEntryDTO[]
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +370,89 @@ export interface HandleIdentityRouteCtx {
    * helper which respects `trustProxy` for the X-Forwarded-For header.
    */
   clientIp: string
+  /**
+   * Raw `User-Agent` header, stored on audit-log rows (V4-AUDIT-06).
+   * Optional — empty / missing → audit row records null. Caller (server.ts)
+   * passes `req.headers['user-agent']` directly; we clamp the length
+   * before persisting to keep the row size bounded.
+   */
+  userAgent?: string
+}
+
+// V4-AUDIT-06: User-Agent is attacker-controlled; cap it before persisting
+// so a 50KB header can't blow up audit rows. The clamp is sized to fit a
+// realistic worst-case browser UA (~250 chars on Edge / Chrome variants)
+// plus margin.
+const MAX_AUDIT_UA_LEN = 512
+
+function clampUserAgent(ua: string | undefined): string | null {
+  if (typeof ua !== 'string' || ua.length === 0) return null
+  return ua.length > MAX_AUDIT_UA_LEN ? ua.slice(0, MAX_AUDIT_UA_LEN) : ua
+}
+
+/**
+ * Resolve the audit actor source from a `(isV3Admin, v4)` pair. Mirror
+ * of `resolveV4Auth.source` but defaults to `anonymous` (login is the
+ * only route reachable without auth, and login_failure must record
+ * something there).
+ */
+function actorSourceFor(
+  isV3Admin: boolean,
+  v4Source: ResolvedAuth['source'],
+): IdentityAuditActorSource {
+  if (v4Source === 'v4-session') return 'v4-session'
+  if (v4Source === 'v4-bearer') return 'v4-bearer'
+  if (isV3Admin) return 'v3-admin'
+  return 'anonymous'
+}
+
+/**
+ * Best-effort audit write. Wrapped in try/catch because an audit failure
+ * MUST NOT cascade into the caller's 200 response — a missing audit row
+ * is a regrettable observability gap, but breaking the user's actual
+ * mutation because audit's DB call threw would be worse.
+ *
+ * Returns nothing; caller never checks success. Errors are swallowed
+ * (the store layer logs to stderr on real DB faults). When the host's
+ * identity surface predates V4-AUDIT-06 (`writeAuditLog` missing on
+ * the structural type) we silently skip — older surface still works.
+ */
+function tryAudit(
+  ctx: HandleIdentityRouteCtx,
+  v4: ResolvedAuth | null,
+  input: {
+    action: string
+    actorUserId?: string | null
+    targetUserId?: string | null
+    targetCredentialId?: string | null
+    metadata?: Record<string, unknown>
+    success?: boolean
+  },
+): void {
+  if (typeof ctx.identity.writeAuditLog !== 'function') return
+  const actorSource = actorSourceFor(
+    ctx.isV3Admin,
+    v4?.source ?? 'none',
+  )
+  const actorUserId =
+    input.actorUserId !== undefined
+      ? input.actorUserId
+      : (v4?.user?.id ?? null)
+  try {
+    ctx.identity.writeAuditLog({
+      action: input.action,
+      actorSource,
+      actorUserId,
+      targetUserId: input.targetUserId ?? null,
+      targetCredentialId: input.targetCredentialId ?? null,
+      ip: ctx.clientIp || null,
+      userAgent: clampUserAgent(ctx.userAgent),
+      metadata: input.metadata ?? null,
+      success: input.success !== false,
+    })
+  } catch {
+    // best-effort; see jsdoc
+  }
 }
 
 export async function handleIdentityRoute(
@@ -364,6 +493,15 @@ export async function handleIdentityRoute(
     handleListUsers(ctx, res)
     return
   }
+  if (method === 'GET' && path === '/api/admin/identity/audit') {
+    // V4-AUDIT-06: parse `?limit=…&offset=…&action=…&targetUserId=…&success=true|false`.
+    const url = new URL(
+      req.url ?? path,
+      `http://${req.headers.host ?? 'localhost'}`,
+    )
+    handleListAuditLog(ctx, url, res)
+    return
+  }
   if (method === 'POST' && path === '/api/admin/identity/users') {
     await handleCreateUser(ctx, req, res)
     return
@@ -389,7 +527,7 @@ export async function handleIdentityRoute(
   // DELETE /api/admin/identity/credentials/:id
   m = /^\/api\/admin\/identity\/credentials\/([^/]+)$/.exec(path)
   if (m && method === 'DELETE') {
-    handleRevokeCredential(ctx, res, m[1]!)
+    handleRevokeCredential(ctx, req, res, m[1]!)
     return
   }
 
@@ -437,6 +575,16 @@ async function handleLogin(
       email: b.email,
       password: b.password,
     })
+    // V4-AUDIT-06: record the successful login. We pass the real
+    // actorUserId from the freshly-minted session (don't rely on the
+    // resolved auth — at login time we haven't called resolveV4Auth
+    // yet for this request).
+    tryAudit(ctx, null, {
+      action: 'login_success',
+      actorUserId: sess.userId,
+      targetUserId: sess.userId,
+      metadata: { email: b.email },
+    })
     res.writeHead(200, {
       'content-type': 'application/json; charset=utf-8',
       'set-cookie': setIdentityCookie(sess.token, ctx.cookieSecure),
@@ -448,6 +596,15 @@ async function handleLogin(
     const ec = asErrorWithCode(err)
     if (ec && ec.code === 'authentication_failed') {
       ctx.loginLimiter.recordFailure(rlKey)
+      // V4-AUDIT-06: failed login → actor is anonymous, target unknown.
+      // The attempted email goes into metadata so an operator hunting
+      // brute-force activity can group by it.
+      tryAudit(ctx, null, {
+        action: 'login_failure',
+        actorUserId: null,
+        success: false,
+        metadata: { email: b.email },
+      })
     }
     sendIdentityError(res, err, 401)
   }
@@ -459,13 +616,30 @@ async function handleLogout(
   res: ServerResponse,
 ): Promise<void> {
   const tok = readCookie(req, IDENTITY_COOKIE)
+  // Resolve the v4 identity (if any) BEFORE revoking the session so
+  // the audit row carries the right actor. After revoke,
+  // getSessionByToken returns null and we'd lose the trail.
+  let actorUserId: string | null = null
   if (tok) {
+    try {
+      const r = ctx.identity.getSessionByToken(tok)
+      if (r) actorUserId = r.user.id
+    } catch {
+      /* swallow — audit is best-effort */
+    }
     try {
       ctx.identity.revokeSession(tok)
     } catch {
       // best-effort; even if revoke throws, clearing the cookie is right
     }
   }
+  // V4-AUDIT-06: record the logout. An anonymous logout (no cookie)
+  // still gets a row so an operator can see a pattern of probes.
+  tryAudit(ctx, null, {
+    action: 'logout',
+    actorUserId,
+    targetUserId: actorUserId,
+  })
   res.writeHead(200, {
     'content-type': 'application/json; charset=utf-8',
     'set-cookie': expireIdentityCookie(ctx.cookieSecure),
@@ -564,6 +738,18 @@ async function handleCreateUser(
   }
   try {
     const u = ctx.identity.createUser(input)
+    // V4-AUDIT-06: record who created the user with what role. The
+    // resolved auth here is the v4 view (cookie/Bearer); v3-admin is
+    // covered by `actorSource: 'v3-admin'` via tryAudit's fallback.
+    tryAudit(ctx, resolveV4Auth(ctx.identity, req), {
+      action: 'create_user',
+      targetUserId: u.id,
+      metadata: {
+        email: u.email,
+        role: input.role ?? 'member',
+        hasPassword: input.password !== undefined,
+      },
+    })
     sendJson(res, { user: u }, 201)
   } catch (err) {
     sendIdentityError(res, err, 400)
@@ -588,12 +774,29 @@ async function handlePatchUser(
     return
   }
   const b = body as { role?: unknown; password?: unknown }
+  // Capture prior role for the audit metadata (only if we'll change it).
+  const priorRole = typeof b.role === 'string'
+    ? (ctx.identity.getMembership(userId)?.role ?? null)
+    : null
   try {
     if (typeof b.role === 'string') {
       ctx.identity.setRole(userId, b.role as IdentityRole)
+      // V4-AUDIT-06: role change is the most security-relevant audit
+      // event (privilege escalation surface).
+      tryAudit(ctx, resolveV4Auth(ctx.identity, req), {
+        action: 'set_role',
+        targetUserId: userId,
+        metadata: { fromRole: priorRole, toRole: b.role },
+      })
     }
     if (typeof b.password === 'string') {
       ctx.identity.setPassword(userId, b.password)
+      // V4-AUDIT-06: password set is also security-relevant — owner
+      // can rotate any user's password, including their own.
+      tryAudit(ctx, resolveV4Auth(ctx.identity, req), {
+        action: 'set_password',
+        targetUserId: userId,
+      })
     }
     // Re-fetch the user and membership to return the post-mutation state.
     const u = ctx.identity.getUserById(userId)
@@ -654,6 +857,16 @@ async function handleIssueApiKey(
     const opts: Parameters<IdentitySurface['issueApiKey']>[0] = { userId }
     if (label !== undefined) opts.label = label
     const issued = ctx.identity.issueApiKey(opts)
+    // V4-AUDIT-06: a new api key is a long-lived authority grant —
+    // audit it. The raw key NEVER goes in audit metadata (it's only
+    // shown once on the wire); we record the label + credentialId so
+    // an operator can correlate later actions to this grant.
+    tryAudit(ctx, resolveV4Auth(ctx.identity, req), {
+      action: 'issue_api_key',
+      targetUserId: userId,
+      targetCredentialId: issued.credentialId,
+      ...(label !== undefined ? { metadata: { label } } : {}),
+    })
     // Returned ONCE — caller must persist immediately.
     sendJson(
       res,
@@ -671,12 +884,69 @@ async function handleIssueApiKey(
 
 function handleRevokeCredential(
   ctx: HandleIdentityRouteCtx,
+  req: IncomingMessage,
   res: ServerResponse,
   credentialId: string,
 ): void {
   try {
     ctx.identity.revokeCredential(credentialId)
+    // V4-AUDIT-06: credential revoke is the symmetric counterpart to
+    // issue. Audit the action; we don't know the target user from the
+    // path alone (the route is /credentials/:id, not /users/:u/...),
+    // so leave targetUserId null.
+    tryAudit(ctx, resolveV4Auth(ctx.identity, req), {
+      action: 'revoke_credential',
+      targetCredentialId: credentialId,
+    })
     sendJson(res, { ok: true })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+// V4-AUDIT-06: list endpoint for the admin UI's audit-log panel. Owner-only
+// (already enforced by the dispatcher above this handler). Filters mirror
+// the store's `listAuditLog` query. The route is documented at the top of
+// this file under the route inventory.
+function handleListAuditLog(
+  ctx: HandleIdentityRouteCtx,
+  url: URL,
+  res: ServerResponse,
+): void {
+  if (typeof ctx.identity.listAuditLog !== 'function') {
+    // Host has an identity surface that predates V4-AUDIT-06. We treat
+    // this as "audit not available" rather than 500 so an upgrade path
+    // exists where the route can come online by swapping the binary.
+    sendJson(res, { entries: [], note: 'audit log unavailable on this host' })
+    return
+  }
+  const q: {
+    limit?: number
+    offset?: number
+    action?: string
+    targetUserId?: string
+    success?: boolean
+  } = {}
+  const lim = url.searchParams.get('limit')
+  if (lim !== null) {
+    const n = Number(lim)
+    if (Number.isFinite(n) && n > 0) q.limit = Math.floor(n)
+  }
+  const off = url.searchParams.get('offset')
+  if (off !== null) {
+    const n = Number(off)
+    if (Number.isFinite(n) && n >= 0) q.offset = Math.floor(n)
+  }
+  const action = url.searchParams.get('action')
+  if (action) q.action = action
+  const targetUserId = url.searchParams.get('targetUserId')
+  if (targetUserId) q.targetUserId = targetUserId
+  const success = url.searchParams.get('success')
+  if (success === 'true') q.success = true
+  else if (success === 'false') q.success = false
+  try {
+    const entries = ctx.identity.listAuditLog(q)
+    sendJson(res, { entries })
   } catch (err) {
     sendIdentityError(res, err)
   }

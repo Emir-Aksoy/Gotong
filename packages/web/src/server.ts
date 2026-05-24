@@ -50,6 +50,8 @@ export type {
   IdentitySessionDTO,
   IdentityCredentialDTO,
   IdentityResolved,
+  IdentityAuditActorSource,
+  IdentityAuditLogEntryDTO,
 } from './identity-routes.js'
 
 /**
@@ -996,6 +998,11 @@ async function handle(
       return
     }
     if (adminResolution.kind === 'admin') isV3Admin = true
+    // V4-AUDIT-06: User-Agent goes into audit rows. Headers can be
+    // string | string[]; we coerce to a single string (Node never
+    // splits User-Agent in practice, but the type allows for it).
+    const uaRaw = req.headers['user-agent']
+    const userAgent = Array.isArray(uaRaw) ? uaRaw.join(' ') : uaRaw
     await handleIdentityRoute(
       {
         identity: ctx.identity,
@@ -1007,6 +1014,7 @@ async function handle(
         // under different namespaces (`bearer:`/`cookie:`/`identity-login:`).
         loginLimiter: ctx.adminLoginLimiter,
         clientIp: clientIp(ctx, req),
+        ...(userAgent ? { userAgent } : {}),
       },
       req,
       res,

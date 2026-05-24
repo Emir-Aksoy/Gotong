@@ -477,6 +477,174 @@ describe('login rate limit (V4-AUDIT-01)', () => {
   })
 })
 
+describe('audit log (V4-AUDIT-06)', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    b = await boot()
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('GET /audit returns the bootstrap-time empty log', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/audit`, {
+      headers: { cookie: b.adminCookie },
+    })
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { entries: unknown[] }
+    expect(Array.isArray(body.entries)).toBe(true)
+    // No actions yet — bootstrap itself doesn't audit (it's host-only)
+    expect(body.entries.length).toBe(0)
+  })
+
+  it('login_failure and login_success appear in audit log', async () => {
+    // Give owner a real password.
+    await fetch(`${b.baseUrl}/api/admin/identity/users/${b.ownerUserId}`, {
+      method: 'PATCH',
+      headers: {
+        'content-type': 'application/json',
+        cookie: b.adminCookie,
+      },
+      body: JSON.stringify({ password: 'audit-test-password' }),
+    })
+
+    // 1 success
+    await fetch(`${b.baseUrl}/api/admin/identity/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'admin@local',
+        password: 'audit-test-password',
+      }),
+    })
+    // 1 failure
+    await fetch(`${b.baseUrl}/api/admin/identity/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'admin@local',
+        password: 'wrong-here',
+      }),
+    })
+
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/audit`, {
+      headers: { cookie: b.adminCookie },
+    })
+    const body = (await r.json()) as {
+      entries: Array<{
+        action: string
+        success: boolean
+        metadata: Record<string, unknown> | null
+      }>
+    }
+    // Filter for the two login rows (the set_password also wrote a row).
+    const logins = body.entries.filter((e) =>
+      e.action === 'login_success' || e.action === 'login_failure',
+    )
+    expect(logins.length).toBe(2)
+    expect(logins.find((e) => e.action === 'login_success')!.success).toBe(true)
+    const failure = logins.find((e) => e.action === 'login_failure')!
+    expect(failure.success).toBe(false)
+    expect(failure.metadata?.email).toBe('admin@local')
+  })
+
+  it('audit log filters by action and success', async () => {
+    // Create two users → two create_user rows
+    await fetch(`${b.baseUrl}/api/admin/identity/users`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      body: JSON.stringify({ email: 'a1@team.test' }),
+    })
+    await fetch(`${b.baseUrl}/api/admin/identity/users`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      body: JSON.stringify({ email: 'a2@team.test' }),
+    })
+    const r = await fetch(
+      `${b.baseUrl}/api/admin/identity/audit?action=create_user`,
+      { headers: { cookie: b.adminCookie } },
+    )
+    const body = (await r.json()) as {
+      entries: Array<{ action: string; metadata: { email?: string } | null }>
+    }
+    expect(body.entries.length).toBe(2)
+    expect(body.entries.every((e) => e.action === 'create_user')).toBe(true)
+    // Newest-first → a2 first
+    expect(body.entries[0]!.metadata?.email).toBe('a2@team.test')
+    expect(body.entries[1]!.metadata?.email).toBe('a1@team.test')
+  })
+
+  it('set_role audit row captures from/to role transition', async () => {
+    // Create a user, then promote to admin.
+    const created = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      body: JSON.stringify({ email: 'promote-me@team.test' }),
+    })
+    const { user } = (await created.json()) as { user: { id: string } }
+    await fetch(`${b.baseUrl}/api/admin/identity/users/${user.id}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      body: JSON.stringify({ role: 'admin' }),
+    })
+    const r = await fetch(
+      `${b.baseUrl}/api/admin/identity/audit?action=set_role`,
+      { headers: { cookie: b.adminCookie } },
+    )
+    const body = (await r.json()) as {
+      entries: Array<{
+        targetUserId: string
+        metadata: { fromRole?: string; toRole?: string } | null
+      }>
+    }
+    expect(body.entries.length).toBe(1)
+    expect(body.entries[0]!.targetUserId).toBe(user.id)
+    expect(body.entries[0]!.metadata?.fromRole).toBe('member')
+    expect(body.entries[0]!.metadata?.toRole).toBe('admin')
+  })
+
+  it('issue + revoke api-key both leave audit rows tied to credentialId', async () => {
+    // Issue
+    const issued = await fetch(
+      `${b.baseUrl}/api/admin/identity/users/${b.ownerUserId}/api-key`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: b.adminCookie,
+        },
+        body: JSON.stringify({ label: 'audit-ci' }),
+      },
+    )
+    const { credentialId } = (await issued.json()) as { credentialId: string }
+    // Revoke
+    await fetch(
+      `${b.baseUrl}/api/admin/identity/credentials/${credentialId}`,
+      { method: 'DELETE', headers: { cookie: b.adminCookie } },
+    )
+    // Read audit
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/audit`, {
+      headers: { cookie: b.adminCookie },
+    })
+    const body = (await r.json()) as {
+      entries: Array<{
+        action: string
+        targetCredentialId: string | null
+        metadata: { label?: string } | null
+      }>
+    }
+    const issue = body.entries.find(
+      (e) => e.action === 'issue_api_key' && e.targetCredentialId === credentialId,
+    )
+    const revoke = body.entries.find(
+      (e) => e.action === 'revoke_credential' && e.targetCredentialId === credentialId,
+    )
+    expect(issue).toBeTruthy()
+    expect(issue!.metadata?.label).toBe('audit-ci')
+    expect(revoke).toBeTruthy()
+  })
+})
+
 describe('bearer session TTL (V4-AUDIT-04)', () => {
   let b: BootResult
   beforeEach(async () => {

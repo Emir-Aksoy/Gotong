@@ -42,6 +42,8 @@ import {
 import { IdentityError } from './errors.js'
 import {
   ROLES,
+  type AuditActorSource,
+  type AuditLogEntry,
   type BootstrapInput,
   type BootstrapResult,
   type CreateUserInput,
@@ -49,10 +51,12 @@ import {
   type CredentialKind,
   type IssuedAdminToken,
   type IssuedApiKey,
+  type ListAuditLogQuery,
   type Membership,
   type Role,
   type Session,
   type User,
+  type WriteAuditLogInput,
 } from './types.js'
 
 const DEFAULT_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -102,6 +106,63 @@ interface SessionRow {
   expires_at: number
   created_at: number
   last_seen_at: number
+}
+interface AuditLogRow {
+  id: string
+  ts: number
+  actor_user_id: string | null
+  actor_source: string
+  action: string
+  target_user_id: string | null
+  target_credential_id: string | null
+  ip: string | null
+  user_agent: string | null
+  metadata: string | null
+  success: number
+}
+
+const AUDIT_ACTOR_SOURCES: readonly AuditActorSource[] = [
+  'v3-admin',
+  'v4-session',
+  'v4-bearer',
+  'anonymous',
+  'system',
+] as const
+
+function isAuditActorSource(s: string): s is AuditActorSource {
+  return (AUDIT_ACTOR_SOURCES as readonly string[]).includes(s)
+}
+
+function rowToAuditLog(r: AuditLogRow): AuditLogEntry {
+  let metadata: Record<string, unknown> | null = null
+  if (r.metadata) {
+    try {
+      const parsed: unknown = JSON.parse(r.metadata)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        metadata = parsed as Record<string, unknown>
+      }
+    } catch {
+      // Corrupt JSON (manual edit / partial write recovery). Surface
+      // it as a stringified blob so the operator still sees it in the
+      // UI — but under a single key so the consumer needn't probe.
+      metadata = { _corrupt: r.metadata }
+    }
+  }
+  return {
+    id: r.id,
+    ts: r.ts,
+    actorUserId: r.actor_user_id,
+    actorSource: isAuditActorSource(r.actor_source)
+      ? r.actor_source
+      : ('system' as AuditActorSource), // graceful fallback on db-edit corruption
+    action: r.action,
+    targetUserId: r.target_user_id,
+    targetCredentialId: r.target_credential_id,
+    ip: r.ip,
+    userAgent: r.user_agent,
+    metadata,
+    success: r.success === 1,
+  }
 }
 
 function rowToUser(r: UserRow): User {
@@ -193,6 +254,8 @@ export class IdentityStore {
   private readonly stmtDeleteExpiredSessions: SqliteStmt
   private readonly stmtDeleteSessionsForUser: SqliteStmt
 
+  private readonly stmtInsertAuditLog: SqliteStmt
+
   constructor(db: SqliteDb, defaultSessionTtlMs: number) {
     this.db = db
     this.defaultSessionTtlMs = defaultSessionTtlMs
@@ -262,6 +325,17 @@ export class IdentityStore {
     this.stmtDeleteSessionsForUser = db.prepare(
       'DELETE FROM auth_sessions WHERE user_id = ?',
     )
+
+    this.stmtInsertAuditLog = db.prepare(
+      `INSERT INTO audit_log(
+         id, ts, actor_user_id, actor_source, action,
+         target_user_id, target_credential_id,
+         ip, user_agent, metadata, success
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    // listAuditLog uses a dynamically-built statement (filters vary
+    // per call) — preparing here would not help. We rely on
+    // better-sqlite3's per-call statement cache instead.
   }
 
   // =====================================================================
@@ -722,6 +796,140 @@ export class IdentityStore {
   cleanupExpiredSessions(): { removed: number } {
     const r = this.stmtDeleteExpiredSessions.run(Date.now())
     return { removed: Number(r.changes) }
+  }
+
+  // =====================================================================
+  // Audit log (V4-AUDIT-06)
+  //
+  // The store exposes a pair of low-level methods (write + list); the web
+  // layer is the canonical call-site because that's where IP / UA /
+  // actor-source are observable. The store never writes audit rows on
+  // its own behalf — that decision is made one layer up so a caller can
+  // suppress audit (eg. internal test helpers) by simply not calling
+  // writeAuditLog.
+  //
+  // No retention / pruning is implemented yet. Rows accumulate forever.
+  // A future migration v3 could add an `expires_at` index + cleanup;
+  // for now, audit volume on a single-org deployment is small enough
+  // (one write per mutation, dozens / day) that bounded growth is fine.
+  // =====================================================================
+
+  writeAuditLog(input: WriteAuditLogInput): AuditLogEntry {
+    if (!input || typeof input !== 'object') {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'writeAuditLog input required',
+      })
+    }
+    if (typeof input.action !== 'string' || input.action.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'audit action must be a non-empty string',
+      })
+    }
+    if (!isAuditActorSource(input.actorSource)) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `audit actorSource must be one of ${AUDIT_ACTOR_SOURCES.join(', ')}; got ${JSON.stringify(input.actorSource)}`,
+      })
+    }
+    // Action verbs are caller-supplied; clamp the length so a confused
+    // caller can't insert a 1MB string and bloat the table. 200 chars is
+    // ~3x our longest known verb and leaves room for future verbs.
+    if (input.action.length > 200) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `audit action too long (max 200 chars); got ${input.action.length}`,
+      })
+    }
+    let metadataJson: string | null = null
+    if (input.metadata !== undefined && input.metadata !== null) {
+      if (typeof input.metadata !== 'object' || Array.isArray(input.metadata)) {
+        throw new IdentityError({
+          code: 'invalid_input',
+          message: 'audit metadata must be a plain object or null',
+        })
+      }
+      try {
+        metadataJson = JSON.stringify(input.metadata)
+      } catch (err) {
+        throw new IdentityError({
+          code: 'invalid_input',
+          message: `audit metadata not JSON-serialisable: ${(err as Error).message}`,
+          cause: err,
+        })
+      }
+      // Cap the serialised blob at 8KB to keep the row size bounded.
+      // Real audit metadata is a few keys × short values — anything
+      // beyond this is almost certainly a caller mistake (eg. dumping a
+      // full request body in).
+      if (metadataJson.length > 8192) {
+        throw new IdentityError({
+          code: 'invalid_input',
+          message: `audit metadata too large (max 8KB serialised); got ${metadataJson.length}`,
+        })
+      }
+    }
+    const id = newId()
+    const ts = Date.now()
+    const success = input.success === false ? 0 : 1
+    this.stmtInsertAuditLog.run(
+      id,
+      ts,
+      input.actorUserId ?? null,
+      input.actorSource,
+      input.action,
+      input.targetUserId ?? null,
+      input.targetCredentialId ?? null,
+      input.ip ?? null,
+      input.userAgent ?? null,
+      metadataJson,
+      success,
+    )
+    return {
+      id,
+      ts,
+      actorUserId: input.actorUserId ?? null,
+      actorSource: input.actorSource,
+      action: input.action,
+      targetUserId: input.targetUserId ?? null,
+      targetCredentialId: input.targetCredentialId ?? null,
+      ip: input.ip ?? null,
+      userAgent: input.userAgent ?? null,
+      metadata:
+        input.metadata !== undefined && input.metadata !== null
+          ? input.metadata
+          : null,
+      success: success === 1,
+    }
+  }
+
+  listAuditLog(query: ListAuditLogQuery = {}): AuditLogEntry[] {
+    // Bound limit so a buggy admin UI can't drain the table in one call.
+    const limit = Math.max(1, Math.min(1000, query.limit ?? 100))
+    const offset = Math.max(0, query.offset ?? 0)
+    const where: string[] = []
+    const params: (string | number)[] = []
+    if (query.action !== undefined) {
+      where.push('action = ?')
+      params.push(query.action)
+    }
+    if (query.targetUserId !== undefined) {
+      where.push('target_user_id = ?')
+      params.push(query.targetUserId)
+    }
+    if (query.success !== undefined) {
+      where.push('success = ?')
+      params.push(query.success ? 1 : 0)
+    }
+    const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
+    // Note on injection: every fragment of `whereSql` is a static string
+    // literal above; user input is bound via `params`. The only dynamic
+    // SQL is the comma-separated AND of static fragments. Safe.
+    const sql = `SELECT * FROM audit_log ${whereSql} ORDER BY ts DESC LIMIT ? OFFSET ?`
+    params.push(limit, offset)
+    const rows = this.db.prepare(sql).all(...params) as AuditLogRow[]
+    return rows.map(rowToAuditLog)
   }
 
   // =====================================================================

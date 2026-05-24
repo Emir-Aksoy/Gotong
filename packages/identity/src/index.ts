@@ -24,4 +24,8 @@ export type {
   CreateUserInput,
   BootstrapInput,
   BootstrapResult,
+  AuditLogEntry,
+  AuditActorSource,
+  WriteAuditLogInput,
+  ListAuditLogQuery,
 } from './types.js'

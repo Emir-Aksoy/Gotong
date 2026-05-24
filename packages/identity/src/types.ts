@@ -117,3 +117,75 @@ export interface IssuedAdminToken {
   token: string
   credentialId: string
 }
+
+// ---------------------------------------------------------------------------
+// Audit log (V4-AUDIT-06)
+// ---------------------------------------------------------------------------
+
+/**
+ * Where the actor came from. `anonymous` is the pre-login attempt
+ * (e.g. a `login_failure` row); `system` is used by host-internal
+ * jobs (cleanupExpiredSessions, bootstrap) that have no human actor.
+ */
+export type AuditActorSource =
+  | 'v3-admin'
+  | 'v4-session'
+  | 'v4-bearer'
+  | 'anonymous'
+  | 'system'
+
+export interface AuditLogEntry {
+  id: string
+  ts: number
+  /** null on `login_failure` and `system` actions. */
+  actorUserId: string | null
+  actorSource: AuditActorSource
+  /**
+   * Action verb. Free-form string by design — adding a new action
+   * type should not require a schema change. Convention:
+   * lowercase_snake_case. Known values today:
+   *   login_success / login_failure / logout
+   *   create_user / set_role / set_password
+   *   issue_api_key / issue_admin_token / revoke_credential
+   *   revoke_session / cleanup_sessions
+   */
+  action: string
+  targetUserId: string | null
+  targetCredentialId: string | null
+  ip: string | null
+  userAgent: string | null
+  /** Parsed back from the on-disk JSON column. Null when nothing was stored. */
+  metadata: Record<string, unknown> | null
+  success: boolean
+}
+
+export interface WriteAuditLogInput {
+  action: string
+  actorSource: AuditActorSource
+  actorUserId?: string | null
+  targetUserId?: string | null
+  targetCredentialId?: string | null
+  ip?: string | null
+  userAgent?: string | null
+  /**
+   * Per-action extras. The store JSON.stringify's it. Keep it small —
+   * the column is meant for "the email that was attempted" or "the
+   * role transition pair", not for arbitrary blobs.
+   */
+  metadata?: Record<string, unknown> | null
+  /** Defaults to `true`. Pass `false` for explicit failures (login bad-password). */
+  success?: boolean
+}
+
+export interface ListAuditLogQuery {
+  /** Newest-first; defaults to 100. Clamped to [1, 1000]. */
+  limit?: number
+  /** Pagination offset; defaults to 0. */
+  offset?: number
+  /** Filter by exact action verb. */
+  action?: string
+  /** Filter by target user id. */
+  targetUserId?: string
+  /** Filter by success/failure. Unset returns both. */
+  success?: boolean
+}

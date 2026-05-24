@@ -512,4 +512,116 @@ describe('IdentityStore', () => {
       )
     })
   })
+
+  // =====================================================================
+  // Audit log (V4-AUDIT-06)
+  // =====================================================================
+
+  describe('audit log', () => {
+    it('writeAuditLog persists a row and listAuditLog reads it back', () => {
+      const u = store.createUser({ email: 'a@x.test' })
+      const entry = store.writeAuditLog({
+        action: 'login_success',
+        actorUserId: u.id,
+        actorSource: 'v4-session',
+        targetUserId: u.id,
+        ip: '127.0.0.1',
+        userAgent: 'curl/8',
+        metadata: { foo: 'bar' },
+      })
+      expect(entry.id).toBeTypeOf('string')
+      expect(entry.ts).toBeGreaterThan(0)
+      const list = store.listAuditLog()
+      expect(list.length).toBe(1)
+      expect(list[0]!.id).toBe(entry.id)
+      expect(list[0]!.action).toBe('login_success')
+      expect(list[0]!.metadata).toEqual({ foo: 'bar' })
+      expect(list[0]!.success).toBe(true)
+    })
+
+    it('records login_failure with success=false + nullable actor', () => {
+      store.writeAuditLog({
+        action: 'login_failure',
+        actorSource: 'anonymous',
+        ip: '127.0.0.1',
+        success: false,
+        metadata: { email: 'ghost@x.test' },
+      })
+      const failures = store.listAuditLog({ success: false })
+      expect(failures.length).toBe(1)
+      expect(failures[0]!.actorUserId).toBeNull()
+      expect(failures[0]!.success).toBe(false)
+      expect(failures[0]!.metadata).toEqual({ email: 'ghost@x.test' })
+    })
+
+    it('listAuditLog returns rows newest-first', async () => {
+      store.writeAuditLog({ action: 'first', actorSource: 'system' })
+      // 1ms gap so ts strictly increases on platforms with ms-resolution Date.now.
+      await new Promise((r) => setTimeout(r, 2))
+      store.writeAuditLog({ action: 'second', actorSource: 'system' })
+      const list = store.listAuditLog()
+      expect(list.map((e) => e.action)).toEqual(['second', 'first'])
+    })
+
+    it('filters by action / targetUserId / success and respects limit + offset', () => {
+      const u1 = store.createUser({ email: 'u1@x.test' })
+      const u2 = store.createUser({ email: 'u2@x.test' })
+      // 3 rows: 2 set_role for u1 (one fail), 1 set_role for u2 (success)
+      store.writeAuditLog({
+        action: 'set_role',
+        actorSource: 'v3-admin',
+        targetUserId: u1.id,
+      })
+      store.writeAuditLog({
+        action: 'set_role',
+        actorSource: 'v3-admin',
+        targetUserId: u1.id,
+        success: false,
+      })
+      store.writeAuditLog({
+        action: 'set_role',
+        actorSource: 'v3-admin',
+        targetUserId: u2.id,
+      })
+      expect(store.listAuditLog({ action: 'set_role' }).length).toBe(3)
+      expect(store.listAuditLog({ targetUserId: u1.id }).length).toBe(2)
+      expect(store.listAuditLog({ success: false }).length).toBe(1)
+      expect(
+        store.listAuditLog({ targetUserId: u1.id, success: true }).length,
+      ).toBe(1)
+      expect(store.listAuditLog({ limit: 2 }).length).toBe(2)
+      // offset 2 skips the first 2 newest, leaving 1
+      expect(store.listAuditLog({ limit: 10, offset: 2 }).length).toBe(1)
+    })
+
+    it('rejects invalid actorSource / oversize metadata / non-string action', () => {
+      expect(() =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        store.writeAuditLog({ action: 'x', actorSource: 'bogus' as any }),
+      ).toThrow(IdentityError)
+      expect(() =>
+        store.writeAuditLog({
+          action: '',
+          actorSource: 'system',
+        }),
+      ).toThrow(IdentityError)
+      const bigMeta: Record<string, string> = {}
+      // 8KB cap on serialised JSON; 1000 entries × ~10 chars overshoots.
+      for (let i = 0; i < 1000; i++) bigMeta['k' + i] = 'value-padding'
+      expect(() =>
+        store.writeAuditLog({
+          action: 'big_meta',
+          actorSource: 'system',
+          metadata: bigMeta,
+        }),
+      ).toThrow(IdentityError)
+    })
+
+    it('limit is clamped to [1, 1000]', () => {
+      // Even with 0 rows, calling with limit:0 should not blow up.
+      expect(store.listAuditLog({ limit: 0 })).toEqual([])
+      // No throw on huge limit either.
+      expect(store.listAuditLog({ limit: 999_999 })).toEqual([])
+    })
+  })
 })
