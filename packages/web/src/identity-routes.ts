@@ -206,6 +206,7 @@ function sendIdentityError(res: ServerResponse, err: unknown, fallbackStatus = 5
   switch (ec.code) {
     case 'duplicate_email':
     case 'duplicate_credential':
+    case 'last_owner': // V4-AUDIT-03: refusing to demote the last owner is a 409 conflict
       sendJson(res, { error: ec.message, code: ec.code }, 409)
       return
     case 'invalid_email':
@@ -273,7 +274,11 @@ export function resolveV4Auth(
   const bearer = readBearer(req)
   if (bearer && (bearer.startsWith('aipk_') || bearer.startsWith('adm_'))) {
     try {
-      const sess = identity.authenticateToken({ token: bearer })
+      // V4-AUDIT-04: Bearer auth amplifies session rows — every API
+      // call mints a fresh row. Cap the TTL at 60s so the rows churn
+      // out quickly, then pair with cleanupExpiredSessions on the
+      // host (V4-AUDIT-05) for steady-state bounded DB size.
+      const sess = identity.authenticateToken({ token: bearer, ttlMs: 60_000 })
       const r = identity.getSessionByToken(sess.token)
       if (r) return { source: 'v4-bearer', user: r.user, role: r.role }
     } catch {
@@ -289,6 +294,20 @@ export function resolveV4Auth(
 // adding a new route never accidentally forgets the gate.
 // ---------------------------------------------------------------------------
 
+/**
+ * Minimal projection of the per-IP rate limiter shared with v3 admin
+ * paths (server.ts exposes `RateLimiter`). V4-AUDIT-01 fix — login is
+ * the one identity route any anonymous caller can hit, and its body
+ * triggers a scrypt verify (~50-100ms each), so spray attacks need a
+ * brake. We reuse the v3 limiter instance under a different key
+ * namespace (`identity-login:`) so an attacker cannot side-step the
+ * v3 budget by switching endpoints.
+ */
+export interface LoginRateLimiterLike {
+  peek(key: string): boolean
+  recordFailure(key: string): void
+}
+
 export interface HandleIdentityRouteCtx {
   identity: IdentitySurface
   cookieSecure: boolean
@@ -297,6 +316,14 @@ export interface HandleIdentityRouteCtx {
    * ADMIN_COOKIE). v3 admin == v4 owner for this host's organisation.
    */
   isV3Admin: boolean
+  /** Per-IP rate limiter; required for V4-AUDIT-01 protection. */
+  loginLimiter: LoginRateLimiterLike
+  /**
+   * Resolved client IP from the request, used as the limiter key. The
+   * caller (server.ts) computes this with its existing `clientIp()`
+   * helper which respects `trustProxy` for the X-Forwarded-For header.
+   */
+  clientIp: string
 }
 
 export async function handleIdentityRoute(
@@ -378,6 +405,17 @@ async function handleLogin(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
+  // V4-AUDIT-01: rate-limit BEFORE parsing the body so an attacker
+  // cannot trigger the scrypt path with malformed bodies either. The
+  // `peek` check follows the H21 pattern: success path never burns
+  // quota, only auth failures do (recorded after the catch below).
+  const rlKey = `identity-login:${ctx.clientIp}`
+  if (!ctx.loginLimiter.peek(rlKey)) {
+    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+    res.end('too many login attempts; try again in a minute')
+    return
+  }
+
   let body: unknown
   try {
     body = await readJsonBody(req)
@@ -405,6 +443,12 @@ async function handleLogin(
     })
     res.end(JSON.stringify({ ok: true, expiresAt: sess.expiresAt }))
   } catch (err) {
+    // Only auth failures burn rate-limit budget — malformed input
+    // (caught above as 400) already burned a peek but no record.
+    const ec = asErrorWithCode(err)
+    if (ec && ec.code === 'authentication_failed') {
+      ctx.loginLimiter.recordFailure(rlKey)
+    }
     sendIdentityError(res, err, 401)
   }
 }

@@ -37,12 +37,27 @@ const PASSWORD_SCHEME = 'scrypt'
 /** Minimum password length we'll accept. Loose — UX gate, not real entropy. */
 export const MIN_PASSWORD_LENGTH = 8
 
+/**
+ * Defensive upper bound on accepted password length (V4-AUDIT-08).
+ * scrypt's cost is essentially constant in input length (work is
+ * dominated by N*r), so this is not a DoS-mitigation per se — but
+ * memory pressure from gigabyte-sized inputs IS a risk, and capping
+ * at 4 KiB keeps the entire flow well within reasonable bounds.
+ *
+ * 4096 is well above any realistic human-typed password while still
+ * being trivial to allocate.
+ */
+export const MAX_PASSWORD_LENGTH = 4096
+
 export function hashPassword(password: string): string {
   if (typeof password !== 'string') {
     throw new TypeError('password must be a string')
   }
   if (password.length < MIN_PASSWORD_LENGTH) {
     throw new Error(`password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+  }
+  if (password.length > MAX_PASSWORD_LENGTH) {
+    throw new Error(`password must be at most ${MAX_PASSWORD_LENGTH} characters`)
   }
   const salt = randomBytes(16)
   const hash = scryptSync(password, salt, SCRYPT_KEYLEN)

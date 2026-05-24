@@ -219,6 +219,31 @@ describe('IdentityStore', () => {
   // =====================================================================
 
   describe('setRole', () => {
+    // V4-AUDIT-03
+    it('refuses to demote the last owner (code=last_owner)', () => {
+      const owner = store.createUser({ email: 'owner@x.test', role: 'owner' })
+      // Add a non-owner so there's plenty of users, but only one owner.
+      store.createUser({ email: 'plain@x.test', role: 'member' })
+      try {
+        store.setRole(owner.id, 'member')
+        throw new Error('expected setRole to throw last_owner')
+      } catch (e) {
+        expect(e).toBeInstanceOf(IdentityError)
+        expect((e as IdentityError).code).toBe('last_owner')
+      }
+      // Sanity: original owner role unchanged.
+      expect(store.getMembership(owner.id)?.role).toBe('owner')
+    })
+
+    it('allows demoting one owner when ≥2 owners exist', () => {
+      const o1 = store.createUser({ email: 'o1@x.test', role: 'owner' })
+      const o2 = store.createUser({ email: 'o2@x.test', role: 'owner' })
+      const m = store.setRole(o2.id, 'admin')
+      expect(m.role).toBe('admin')
+      // o1 still owner.
+      expect(store.getMembership(o1.id)?.role).toBe('owner')
+    })
+
     it('changes role; returns updated membership', () => {
       const u = store.createUser({ email: 'a@x.test' })
       expect(store.getMembership(u.id)?.role).toBe('member')

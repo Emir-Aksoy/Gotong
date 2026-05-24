@@ -997,7 +997,17 @@ async function handle(
     }
     if (adminResolution.kind === 'admin') isV3Admin = true
     await handleIdentityRoute(
-      { identity: ctx.identity, cookieSecure: ctx.cookieSecure, isV3Admin },
+      {
+        identity: ctx.identity,
+        cookieSecure: ctx.cookieSecure,
+        isV3Admin,
+        // V4-AUDIT-01: share the v3 limiter so an attacker cannot get
+        // extra budget by switching between v3 admin login and v4
+        // identity login — both consume the same per-IP slot, just
+        // under different namespaces (`bearer:`/`cookie:`/`identity-login:`).
+        loginLimiter: ctx.adminLoginLimiter,
+        clientIp: clientIp(ctx, req),
+      },
       req,
       res,
       method,

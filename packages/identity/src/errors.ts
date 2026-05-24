@@ -18,6 +18,12 @@ export type IdentityErrorCode =
   | 'session_expired'
   | 'session_not_found'
   | 'weak_password'
+  /**
+   * V4-AUDIT-03: setRole was called on the last remaining owner with a
+   * non-owner target. Refused to prevent permanent lockout. Operator
+   * must promote another user to owner first, then retry the demotion.
+   */
+  | 'last_owner'
 
 export interface IdentityErrorOptions {
   code: IdentityErrorCode

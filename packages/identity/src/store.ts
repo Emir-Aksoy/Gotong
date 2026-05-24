@@ -447,6 +447,24 @@ export class IdentityStore {
       return { id, userId, role, createdAt: now }
     }
     if (existing.role === role) return existing
+    // V4-AUDIT-03: refuse to demote the last owner. Without this, an
+    // admin can lock themselves out of every owner-gated route — the
+    // only recovery is editing the sqlite file directly, which is an
+    // operations break-glass we don't want as the documented path.
+    if (existing.role === 'owner' && role !== 'owner') {
+      const ownerCount = (
+        this.db
+          .prepare(`SELECT COUNT(*) AS c FROM memberships WHERE role = 'owner'`)
+          .get() as { c: number }
+      ).c
+      if (ownerCount <= 1) {
+        throw new IdentityError({
+          code: 'last_owner',
+          message:
+            'refusing to demote the last owner; promote another user to owner first, then retry',
+        })
+      }
+    }
     this.stmtUpdateMembershipRole.run(role, userId)
     return { ...existing, role }
   }

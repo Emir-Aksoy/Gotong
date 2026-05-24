@@ -389,6 +389,27 @@ async function main(): Promise<void> {
     identity = undefined
   }
 
+  // V4-AUDIT-05: periodically reap expired session rows. Bearer auth
+  // (V4-AUDIT-04 fix) mints 60s-TTL sessions on every request — without
+  // this sweep, expired rows accumulate forever. 1h cadence is a balance
+  // between "DB doesn't bloat" and "sweep doesn't churn IO". `unref()`
+  // so the timer never holds the event loop open after a graceful stop.
+  let identityCleanupTimer: NodeJS.Timeout | undefined
+  if (identity) {
+    const sweep = (): void => {
+      try {
+        const r = identity!.cleanupExpiredSessions()
+        if (r.removed > 0) {
+          log.info('identity: expired sessions cleaned', { removed: r.removed })
+        }
+      } catch (err) {
+        log.error('identity: session cleanup failed', { err })
+      }
+    }
+    identityCleanupTimer = setInterval(sweep, 60 * 60 * 1000)
+    identityCleanupTimer.unref?.()
+  }
+
   const hub = new Hub({ space })
   await hub.start()
 
@@ -616,6 +637,10 @@ async function main(): Promise<void> {
     }
     if (services) {
       try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }
+    }
+    if (identityCleanupTimer) {
+      clearInterval(identityCleanupTimer)
+      identityCleanupTimer = undefined
     }
     if (identity) {
       try { identity.close() } catch (err) { log.error('identity close error', { err }) }

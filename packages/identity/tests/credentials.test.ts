@@ -15,7 +15,11 @@ import {
   hashToken,
   tokenHashEquals,
   MIN_PASSWORD_LENGTH,
+  MAX_PASSWORD_LENGTH,
 } from '../src/credentials.js'
+
+// Pin the constant publicly — production should never silently weaken it.
+const _ = MAX_PASSWORD_LENGTH
 
 describe('hashPassword / verifyPassword', () => {
   it('round-trips a correct password', () => {
@@ -40,6 +44,17 @@ describe('hashPassword / verifyPassword', () => {
   it('rejects passwords shorter than MIN_PASSWORD_LENGTH', () => {
     expect(MIN_PASSWORD_LENGTH).toBeGreaterThanOrEqual(8)
     expect(() => hashPassword('short')).toThrow(/at least/)
+  })
+
+  // V4-AUDIT-08
+  it('rejects passwords longer than MAX_PASSWORD_LENGTH (defensive cap)', () => {
+    const tooLong = 'x'.repeat(4097)
+    expect(() => hashPassword(tooLong)).toThrow(/at most/)
+  })
+
+  it('accepts passwords at the MAX_PASSWORD_LENGTH boundary', () => {
+    const justRight = 'x'.repeat(4096)
+    expect(() => hashPassword(justRight)).not.toThrow()
   })
 
   it('verifyPassword returns false on malformed stored strings (no throw)', () => {

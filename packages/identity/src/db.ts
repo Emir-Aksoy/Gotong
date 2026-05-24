@@ -13,7 +13,7 @@
  */
 
 import { createRequire } from 'node:module'
-import { mkdirSync } from 'node:fs'
+import { mkdirSync, chmodSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 export interface SqliteDb {
@@ -49,6 +49,20 @@ export function openDb(path: string): SqliteDb {
     mkdirSync(dirname(path), { recursive: true })
   }
   const db = new Ctor(path)
+  // V4-AUDIT-02: harden file mode to 0o600 before the first write —
+  // contains password scrypt hashes, sha256-hashed API tokens, and live
+  // session tokens (those are the most sensitive: leaking them = direct
+  // account takeover). Better-sqlite3 creates the file with the process
+  // umask (typically 022 → 0o644 world-readable). chmod ASAP closes
+  // the window between create and harden. POSIX only — Windows uses
+  // ACLs, and exFAT / SMB sometimes refuse chmod (tolerate).
+  if (path !== ':memory:' && process.platform !== 'win32') {
+    try {
+      chmodSync(path, 0o600)
+    } catch {
+      /* tolerate exFAT / SMB / sandboxed fs that reject chmod */
+    }
+  }
   // WAL: concurrent readers + one writer. Same default as service-
   // datastore-sqlite for consistency.
   db.pragma('journal_mode = WAL')
