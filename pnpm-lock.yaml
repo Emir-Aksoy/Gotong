@@ -317,6 +317,18 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@20.19.41)(tsx@4.22.0)(yaml@2.9.0)
 
+  packages/identity:
+    devDependencies:
+      '@types/better-sqlite3':
+        specifier: ^7.6.0
+        version: 7.6.13
+      better-sqlite3:
+        specifier: ^12.10.0
+        version: 12.10.0
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@20.19.41)(tsx@4.22.0)(yaml@2.9.0)
+
   packages/llm:
     dependencies:
       '@aipehub/core':

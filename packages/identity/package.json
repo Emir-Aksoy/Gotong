@@ -1,0 +1,40 @@
+{
+  "name": "@aipehub/identity",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AipeHub v4 identity layer — users, credentials, memberships, sessions. SQLite-backed, zero-dep on other workspace packages (host/web wire it in).",
+  "license": "MIT",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "better-sqlite3": ">=11.0.0"
+  },
+  "peerDependenciesMeta": {
+    "better-sqlite3": {
+      "optional": false
+    }
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "better-sqlite3": "^12.10.0",
+    "vitest": "^3.2.4"
+  }
+}

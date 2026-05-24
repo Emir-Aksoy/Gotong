@@ -1,0 +1,226 @@
+# AipeHub v4 架构 ——「灵活组织级 agent 框架」
+
+> Status: Phase 1 (基础设施) 进行中。本文档记录架构选择 + Phase 1 已落地 +
+> Phase 2/3 计划草图,供后续 commit 校对方向用。
+>
+> Last updated: 2026-05-24
+>
+> Previous reading: `docs/zh/HITL-GLOSSARY.md` (HITL 四模式词典),
+> v3 examples `federated-team` / `open-space` (federation 基础)。
+
+## 一、为什么需要 v4
+
+v3.1 是一个**单 admin 的工作流引擎**:
+
+- 一个 host 进程 = 一个 `.aipehub/` workspace
+- 启动时 mint **一个** admin token,所有 web/api 访问都靠它
+- 没有用户概念,没有角色,没有审计单位
+
+这套模型对"个人 / solo dev"够用,但满足不了用户的目标:
+
+> 每一个人、每一个小组织都可以灵活的和 ai 连接,整个组织的工作流和 ai 高效绑定。
+
+所以 v4 的目标是把"agent 框架"扩展成"**组织级** agent 框架"。
+
+## 二、核心架构选择
+
+### 选择 A:**单 host = 单 organization,federation 跨 org**
+
+```
+   组织 acme.local          组织 widgets.local        组织 personal.bob
+   ┌──────────────┐         ┌──────────────┐         ┌──────────────┐
+   │ aipehub-host │ ◀──HubLink──▶ │ aipehub-host │ ◀──▶ │ aipehub-host │
+   │  ( m users ) │         │   ( n users ) │         │   ( 1 user ) │
+   │  .aipehub/   │         │   .aipehub/   │         │   .aipehub/  │
+   └──────────────┘         └──────────────┘         └──────────────┘
+```
+
+每个组织起一个 host 实例。组织内有多个 user + role。组织间通过 v3 已经
+做好的 `HubLink` / `Capability mesh routing` / `Feedback ledger` 互联。
+
+**为什么不走 SaaS multi-tenant 单进程多 org?**
+
+| 维度 | 单 host = 单 org(A) | 单 host = 多 org(B) |
+|---|---|---|
+| 数据隔离 | 物理隔离(各自 `.sqlite`) | 逻辑隔离(`org_id` 渗透每条 SQL) |
+| 备份恢复 | 单文件 tar 即可 | 必须按 org 切片,运维麻烦 |
+| 跨 org 协作 | HubLink(v3 已做) | 单进程内部调用,但 federation 还是要做才能跨进程 |
+| Noisy neighbor | 不存在 | 一个 org 的爆量 prompt 拖累所有 org |
+| 改动量 | 加 user/role 表 + auth 中间件 | 重写 v3 几十处 data path,加 tenant scoping |
+| SaaS 模式 | hosted control plane + 每 org 一个隔离的 host runtime | 一个进程跑 N 个 org |
+
+A 路线代码改动可控,复用 v3 federation,符合"代码尽量简化、节点尽量轻量"。
+SaaS 部署模式仍然可以构建在 A 之上 —— 控制面给每个新签约组织开一个
+host 容器即可。
+
+### 选择 B:credential 模型「password + admin_token + api_key」三合一
+
+不引入 OAuth/SSO 的复杂度,先做最朴实的三种凭证:
+
+- `password` — 用户密码,scrypt 哈希(node 内置 `crypto`,零外部依赖)
+- `admin_token` — owner 级 bearer 令牌(v3 的 admin URL 就是这个 kind,
+  迁移后保持兼容)
+- `api_key` — 程序级 bearer 令牌(`aipk_<24 字节 base64url>`)
+
+三者共用一张 `credentials` 表,通过 `kind` 字段区分。后续 Phase 2+ 可以
+新增 `kind = 'oauth_google'` / `'sso_lark'` 等,**不需要改 schema**,只需要
+新插件按约定生成 `identifier` + `secret_hash`。
+
+### 选择 C:**Session 与 Credential 解耦**
+
+Session 在 `auth_sessions` 表,独立于 `credentials`。一次成功 auth → mint 一个
+session token(`ses_<24 字节 base64url>`,默认 7d TTL)。Session 可以单独
+revoke,credential 也可以单独 revoke,两者互不影响。
+
+这避免了 v3 里 admin token 同时承担"凭证 + 会话"两个角色的耦合问题。
+
+## 三、Phase 1 已落地(本提交)
+
+### 新增 package:`@aipehub/identity` (v0.1.0)
+
+- 零 workspace 依赖(纯领域库,host/web 来 import 它,不反过来)
+- 唯一外部依赖:`better-sqlite3`(peer dep,与 `@aipehub/service-datastore-sqlite`
+  共用)
+- 51 个单元测试全 pass
+
+### Schema(SQLite,`.aipehub/identity.sqlite`)
+
+```
+users           id PK, email UNIQUE COLLATE NOCASE, display_name, created_at, last_login_at
+credentials     id PK, user_id FK CASCADE, kind, identifier, secret_hash,
+                label, created_at, last_used_at  (UNIQUE on (kind, identifier))
+memberships     id PK, user_id FK CASCADE UNIQUE, role, created_at
+auth_sessions   token PK, user_id FK CASCADE, expires_at, created_at, last_seen_at
+schema_migrations  version PK, name, applied_at
+```
+
+(单 host = 单 org 模型下,`memberships` 表里没有 `org_id` —— 隐含的 org 就是
+本 host。当未来需要"一个 host 服务多 org"时,这就是要加 `org_id` 列的地方。
+其他三张表保持 org-agnostic。)
+
+### 公共 API(`@aipehub/identity` 导出)
+
+```ts
+openIdentityStore({ dbPath, defaultSessionTtlMs? }) → IdentityStore
+
+class IdentityStore {
+  // 初始化
+  bootstrap({ adminToken?, ownerEmail?, ownerDisplayName? }) → BootstrapResult
+
+  // 用户
+  createUser({ email, displayName?, password?, role? }) → User
+  getUserById(id) / getUserByEmail(email) / listUsers() / countUsers()
+
+  // 角色
+  getMembership(userId) / setRole(userId, role)
+
+  // 凭证
+  setPassword(userId, password)
+  issueAdminToken({ userId, label? }) → { token, credentialId }   // 仅展示一次
+  issueApiKey({ userId, label? }) → { key, credentialId }          // 仅展示一次
+  listCredentials(userId) / revokeCredential(credentialId)
+
+  // 鉴权 → mint Session
+  authenticatePassword({ email, password, ttlMs? }) → Session
+  authenticateToken({ token, ttlMs? }) → Session
+
+  // Session 查询(hot path)
+  getSessionByToken(token) → { user, role, session } | null
+  revokeSession(token) / revokeAllSessionsForUser(userId) / cleanupExpiredSessions()
+
+  close()
+}
+```
+
+### 安全决策
+
+| 决策 | 选择 | 理由 |
+|---|---|---|
+| 密码哈希 | scrypt(node 内置) | 零依赖、~50-100ms/次,适合交互登录 |
+| token 哈希 | sha256 | token 已经是 192-bit 高熵随机,sha256 防 db dump 即可 |
+| timing attack | `authenticatePassword` 在 email 找不到时仍跑一次 dummy scrypt | 不让"用户不存在"通过响应时间泄漏 |
+| Compare | 全部走 `timingSafeEqual` | 防远程 timing 攻击 hash 比较 |
+| TTL | 默认 7d,可 per-call override | session revoke 用 `revokeSession`,不靠 TTL 兜底 |
+| FK 行为 | `ON DELETE CASCADE` 用户删 → 凭证 + 会话连带删 | 避免悬挂引用 |
+
+### 兼容 v3 admin token 迁移
+
+v3 host 启动时 mint 的 admin token 通过 `bootstrap({ adminToken: <现有 token> })`
+迁移成新模型下的 `admin_token` credential,绑定到新建的 owner user `admin@local`。
+**Idempotent** —— 二次启动不会重复创建。这意味着:升级到 v4 后,**旧的
+admin URL 继续工作**,用户不需要重新登录。
+
+## 四、Phase 2 计划(下一刀)
+
+集成 `@aipehub/identity` 到 host / web:
+
+1. **host 启动序列**
+   - `packages/host/src/index.ts` 加载 `openIdentityStore({ dbPath: <space>/identity.sqlite })`
+   - 调用 `store.bootstrap({ adminToken: <v3 mint 的 admin token> })`
+   - admin URL 仍打印一次(向后兼容)
+
+2. **web 中间件**
+   - 新增 `requireAuth(store)`:从 cookie / Authorization header 取 token,
+     调 `store.getSessionByToken`,把 `{user, role}` 挂到 `req.locals`
+   - 每个 admin 路由加 `requireRole('admin' | 'owner')` gate
+   - 每个 worker 路由保持现状(worker token 是另一套,Phase 3 再迁)
+
+3. **admin UI 增「用户管理」页**
+   - 列表 / 创建 / 改角色 / revoke session / 重置密码 / issue api key
+   - 用现成的 admin SPA 框架,新增一个路由 `/admin/users`
+
+4. **PG 工作流迁移成 per-user**
+   - 现在 PG 的所有 7 agents + caseId 是 admin 级共享的
+   - Phase 2 在 caseId 上加 `owner_user_id`,UI 上每个 user 只看到自己的 case
+
+5. **industry-consultation 的 reviewer 角色化**
+   - HITL human-review 步骤的 reviewer 不再是「任意 admin」,而是被
+     分配到某个 user / role(approver 字段)
+
+## 五、Phase 3 + 计划(更远)
+
+- **federation 与 identity 衔接** —— HubLink 跨 org 调用时,带上发起方
+  org + user 的 verifiable claim(可能需要简单的 JWT 签名,共用 host 的
+  master key)
+- **OAuth / SSO 插件** —— `@aipehub/identity-oauth-google` / `-lark` /
+  `-azure-ad`,通过新增 `credentials.kind` 接入
+- **审计日志** —— `audit_log` 表,记录每次"谁 / 什么时候 / 对谁 / 做了什么"
+- **配额 / 计费** —— per-user / per-org 的 token 用量统计 + 软上限
+
+## 六、不在 v4 里的事情
+
+| 项 | 为什么 |
+|---|---|
+| 多 org 单进程 | 见上方"选择 A" |
+| 可视化 workflow 编辑器 | 需要前端栈大改,放进 Phase 3+(或独立产品决策) |
+| RAG / 文档上传 / 知识库 | 独立的 Phase 3+ track,和身份正交 |
+| 邮件发送(密码重置 / 邀请通知) | 等真正有多用户场景再做,Phase 2 用 admin 直接 issue 临时密码 |
+| MFA / 2FA | Phase 3,先把单因子打磨稳 |
+
+## 七、Migration 注意事项
+
+升级到 v4 时,host 启动序列需要:
+
+1. 跑 `applyMigrations(db)` —— 自动幂等
+2. 读取现有 admin token(从 `<space>/runtime/admin-token` 或环境变量)
+3. 调 `store.bootstrap({ adminToken: <token> })`
+4. 第一次:owner user `admin@local` + 该 token 作为 admin_token credential
+5. 之后:no-op(`bootstrapped: false`)
+
+这意味着:**没有数据迁移脚本,没有破坏性变更,旧用户的 admin URL 在
+v4 上继续工作。**
+
+如果用户想升级到「真正的用户名 + 密码」登录:
+
+```ts
+// 用现有 admin token 登录 → 获得 session token → 拿 session token 创建新用户
+const session = store.authenticateToken({ token: oldAdminToken })
+const me = store.createUser({
+  email: 'real-name@company.com',
+  password: '<chosen-pw>',
+  role: 'owner',
+})
+store.setPassword(me.id, '<chosen-pw>')
+```
+
+(后续 admin UI 会把上面这套包装成一个「初始化我的账户」向导。)
