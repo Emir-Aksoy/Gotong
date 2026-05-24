@@ -945,8 +945,22 @@ export interface AgentRecord {
 
 /**
  * Recipe for an agent the **host** will spawn in-process and keep alive.
- * The `kind` discriminator gives us room to grow (webhook-driven agents,
- * shell-command agents, …); today only `llm` exists.
+ * The `kind` discriminator picks which agent class the loader
+ * instantiates:
+ *
+ *   - `'llm'` — base {@link LlmAgent}. No automatic services/memory
+ *     plumbing; the LLM sees `task.payload` straight.
+ *   - `'personal-growth'` — {@link PersonalGrowthAgent} subclass.
+ *     Auto-recalls prior `growth-history` entries from `memory` before
+ *     each step, prepends them as context, and auto-writes the step's
+ *     output back into `memory` as a new history entry. Designed for
+ *     the `personal-growth-flow` workflow but reusable by any
+ *     workflow that wants the same recall/write pattern. Falls back
+ *     to base LlmAgent behaviour when `services.memory` is absent.
+ *
+ * All other fields below apply to both kinds — same provider, system,
+ * uses, mcpServers. The kind just picks the class; the wiring is the
+ * same.
  *
  * **Why providers are strings, not classes**: the agents.json file must
  * be readable & writable by people who can't reach into the running
@@ -955,7 +969,7 @@ export interface AgentRecord {
  * fail loudly with a clear error.
  */
 export interface ManagedAgentSpec {
-  kind: 'llm'
+  kind: 'llm' | 'personal-growth'
   /**
    * Provider name. Mapped to a concrete `LlmProvider` by the host. API
    * keys come from the host's environment — never from this file. The

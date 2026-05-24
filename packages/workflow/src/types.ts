@@ -59,6 +59,55 @@ export interface WorkflowDefinition {
 export interface TriggerSpec {
   /** The capability admins dispatch to in order to start this workflow. */
   capability: string
+  /**
+   * Optional ordered list of payload field descriptors. When present,
+   * the admin UI renders a field-by-field form for this workflow
+   * instead of asking the user to write JSON by hand.
+   *
+   * The workflow runner ignores this — it's purely a UI hint. Steps
+   * reference fields via `$trigger.payload.<id>` exactly as they
+   * always have; payloadSchema doesn't change validation semantics
+   * (a step's resolver still treats every payload field as optional
+   * and stringly-typed at the JSON level).
+   *
+   * Use cases this targets: long-form workflows where the payload is
+   * "the human's self-description" (personal-growth-flow's 4 段
+   * 自述), structured surveys, anything that would otherwise force
+   * a non-technical user to learn the payload's JSON shape.
+   */
+  payloadSchema?: PayloadFieldSpec[]
+}
+
+/**
+ * One field descriptor for the admin UI's workflow-specific dispatch
+ * form. Mirrors HTML form controls 1:1 so the UI can render without
+ * having to interpret types.
+ */
+export interface PayloadFieldSpec {
+  /** Payload key — becomes `$trigger.payload.<id>` inside the workflow. */
+  id: string
+  /** Human-readable label, shown above the input. */
+  label: string
+  /**
+   * Control kind:
+   *   - 'text': single-line input
+   *   - 'textarea': multi-line input (use `rows` to size)
+   *   - 'number': numeric input (sent as number, not string)
+   *   - 'select': dropdown; requires `options`
+   */
+  type: 'text' | 'textarea' | 'number' | 'select'
+  /** Tooltip / hint string displayed under the label. */
+  hint?: string
+  /** Placeholder text inside the empty input. */
+  placeholder?: string
+  /** Default value (string or number per type). */
+  defaultValue?: string | number
+  /** Submit-time required check (UI-side; runner doesn't enforce). */
+  required?: boolean
+  /** For type='textarea': number of visible rows (default 4). */
+  rows?: number
+  /** For type='select': option list. */
+  options?: { value: string; label: string }[]
 }
 
 // --- Steps -----------------------------------------------------------------
@@ -163,6 +212,13 @@ export interface RunState {
   workflowId: string
   /** The Hub task id that triggered this run (so admins can correlate). */
   triggeredByTaskId: string
+  /**
+   * The ParticipantId of whoever fired the triggering task — typically
+   * an admin id. Optional for back-compat with pre-v2.5 run files; new
+   * runs always set it so HITL steps inside the workflow can ask
+   * follow-up questions of the originator via `$trigger.from` refs.
+   */
+  triggeredByFrom?: string
   /** Initial payload received from the triggering task. */
   triggerPayload: unknown
   /** Per-step records, in execution order. */

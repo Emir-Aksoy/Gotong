@@ -127,11 +127,43 @@
       maGhImportSubmit: $('ma-gh-import-submit'),
       maGhImportMsg: $('ma-gh-import-msg'),
       maImportDropdown: document.querySelector('.ma-import-dropdown'),
+      // Growth reports (v2.4 personal-growth)
+      grSection: $('growth-reports'),
+      grTable: $('growth-reports-table'),
+      grTbody: $('growth-reports-tbody'),
+      grEmpty: $('growth-reports-empty'),
+      grSummary: $('growth-reports-summary'),
+      grRefreshBtn: $('growth-reports-refresh'),
+      // One-time disclaimer (v2.4)
+      disclaimerModal: $('disclaimer-modal'),
+      disclaimerAccept: $('disclaimer-accept'),
+      // Growth report inline-viewer modal (v2.4)
+      grReportModal: $('growth-report-modal'),
+      grReportTitle: $('growth-report-title'),
+      grReportBody: $('growth-report-body'),
+      grReportDownload: $('growth-report-download'),
       // Workflows (v2.1)
       wfSection: $('workflows'),
       wfList: $('workflows-list'),
       wfSummary: $('wf-summary'),
       wfImportBtn: $('wf-import-btn'),
+      // Workflow start (v2.4) — payload-schema-driven dispatch form
+      wfStartModal: $('wf-start-modal'),
+      wfStartTitle: $('wf-start-title'),
+      wfStartDesc: $('wf-start-desc'),
+      wfStartFields: $('wf-start-fields'),
+      wfStartSubmit: $('wf-start-submit'),
+      wfStartMsg: $('wf-start-msg'),
+      // Bundle import (v2.4) — team + workflow + apiKey in one upload
+      bundleImportBtn: $('bundle-import-btn'),
+      bundleImportModal: $('bundle-import-modal'),
+      bundleImportFile: $('bundle-import-file'),
+      bundleImportText: $('bundle-import-text'),
+      bundleImportKey: $('bundle-import-key'),
+      bundleKeyLabel: $('bundle-key-label'),
+      bundleImportSubmit: $('bundle-import-submit'),
+      bundleImportMsg: $('bundle-import-msg'),
+      bundleBuiltinPgBtn: $('bundle-builtin-pg-btn'),
       wfImportModal: $('wf-import-modal'),
       wfImportFile: $('wf-import-file'),
       wfImportText: $('wf-import-text'),
@@ -234,12 +266,39 @@
     renderKnownRoster()
     renderManagedAgents()
     if (wf.available) renderWorkflows()
+    // v2.5 HITL — re-decorate the Tasks tab with a count of pending
+    // agent-question tasks so the badge is right after every snapshot.
+    renderAgentQuestionBadge()
     // The leaderboard is its own async pull — re-fetch on every full
     // render so a fresh task_result / evaluation immediately re-ranks.
     // Cheap (one /api/leaderboard call), but we swallow failures so a
     // transient hiccup doesn't disable the rest of the page.
     refreshLeaderboard().catch((err) => console.warn('leaderboard refresh failed:', err))
     refreshHealth().catch((err) => console.warn('health refresh failed:', err))
+  }
+
+  // v2.5 — count pending agent-question tasks and stick a red badge
+  // on the Tasks tab so the admin notices when an agent is paused
+  // waiting for them. Idempotent; safe to call from renderAll on
+  // every snapshot.
+  function renderAgentQuestionBadge() {
+    const btn = document.querySelector('.tabbar-btn[data-tab="tasks"]')
+    if (!btn) return
+    const n = (state.tasks || []).filter(
+      (v) => v.status === 'pending' && isAgentQuestionPayload(v.task && v.task.payload),
+    ).length
+    let badge = btn.querySelector('.tab-badge')
+    if (n === 0) {
+      if (badge) badge.remove()
+      return
+    }
+    if (!badge) {
+      badge = document.createElement('span')
+      badge.className = 'tab-badge'
+      btn.appendChild(badge)
+    }
+    badge.textContent = String(n)
+    badge.title = `${n} 个 agent 正在等你回答`
   }
 
   // Room health banner — counts derived from /api/leaderboard?from=<7d> +
@@ -488,6 +547,17 @@
   function renderTaskDetail(v) {
     const sections = []
 
+    // v2.5 HITL — agent-question form. When a pending task carries
+    // payload.kind === 'agent-question' (interviewer asked a follow-
+    // up) we render the questions as a form right at the top of the
+    // detail panel, before timing/payload/etc. Submitting POSTs
+    // /api/tasks/<id>/complete with { output: { answers } } which
+    // resolves the parked HumanParticipant promise and unblocks the
+    // agent's nested dispatch.
+    if (v.status === 'pending' && isAgentQuestionPayload(v.task.payload)) {
+      sections.push(renderAgentQuestionForm(v))
+    }
+
     // timing
     const created = new Date(v.createdAt).toLocaleString()
     const completed = v.completedAt ? new Date(v.completedAt).toLocaleString() : '—'
@@ -713,7 +783,33 @@
       ? t.maEmpty
       : t.maSummary(managedCount, onlineManaged, list.length - managedCount)
     if (list.length === 0) {
-      dom.maList.innerHTML = `<p class="empty">${escapeHtml(t.maEmpty)}</p>`
+      // Empty space — offer the one-click onboarding bundle alongside
+      // the bare "no agents yet" message. Acts as the "is this thing on?"
+      // wizard for non-technical users who just installed AipeHub.
+      dom.maList.innerHTML = `<div class="empty-state" style="padding: 1.2rem; line-height: 1.7;">
+        <p style="margin: 0 0 0.6rem; font-weight: 600;">${escapeHtml(t.maEmpty)}</p>
+        <p style="margin: 0 0 0.8rem; color: #555;">第一次用?试试 5 分钟出一份"12 周个人成长计划":</p>
+        <p style="margin: 0;">
+          <button type="button" id="onboarding-pg-btn" class="ma-btn">🎁 装个人成长团队 (7 教练 · DeepSeek)</button>
+        </p>
+        <small class="hint" style="display: block; margin-top: 0.6rem; color: #777;">
+          先去 <a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a> 申请 API key (新用户送 10 元额度 ≈ 几十次跑工作流)。
+        </small>
+      </div>`
+      // Wire the button right after innerHTML — it's destroyed and
+      // recreated on every refresh so we re-bind each time.
+      const btn = document.getElementById('onboarding-pg-btn')
+      btn?.addEventListener('click', async () => {
+        // 1. open the bundle import modal
+        openBundleImportModal()
+        // 2. auto-click "use built-in template" so the user lands with
+        //    the yaml pre-loaded — they only need to paste the key.
+        await new Promise((r) => setTimeout(r, 50))
+        dom.bundleBuiltinPgBtn?.click()
+        // 3. focus the key input so they can paste-and-go.
+        await new Promise((r) => setTimeout(r, 100))
+        dom.bundleImportKey?.focus()
+      })
       return
     }
     const html = list.map((a) => {
@@ -1198,10 +1294,17 @@
       const name = w.name ? escapeHtml(w.name) : escapeHtml(w.id)
       const desc = w.description ? `<p class="hint">${escapeHtml(w.description)}</p>` : ''
       const file = w.file ? `<small class="hint">${escapeHtml(w.file)}</small>` : ''
+      // "开始" button: primary action — opens a payload-schema-driven
+      // form modal so users don't have to write JSON by hand. For
+      // workflows without a schema, the button opens the generic
+      // dispatch form pre-filled with the trigger capability.
       return `<article class="ma-card">
         <header>
           <strong>${name}</strong>
           <code>${escapeHtml(w.participantId)}</code>
+          <button type="button" class="ma-btn"
+                  data-act="start-workflow"
+                  data-id="${escapeHtml(w.id)}">开始</button>
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="open-workflow-runs"
                   data-id="${escapeHtml(w.id)}">${escapeHtml(t.workflowRunsBtn)}</button>
@@ -1233,6 +1336,524 @@
       await refreshWorkflows()
     } catch (err) {
       alert(t.failedAlert(err.message || String(err)))
+    }
+  }
+
+  // --- growth reports (v2.4 personal-growth) -----------------------------
+  // Sibling of the workflows panel — only present when the host wired
+  // a GrowthReportsAdminSurface (i.e. loaded the personal-growth team).
+  // 503 → hide; 200 with empty list → empty-state.
+
+  async function refreshGrowthReports() {
+    if (!dom?.grSection) return
+    try {
+      const r = await fetch('/api/admin/growth-reports')
+      if (r.status === 503) {
+        dom.grSection.hidden = true
+        return
+      }
+      if (!r.ok) {
+        console.warn('refreshGrowthReports: HTTP', r.status)
+        return
+      }
+      const body = await r.json()
+      const reports = Array.isArray(body.reports) ? body.reports : []
+      dom.grSection.hidden = false
+      renderGrowthReports(reports)
+    } catch (err) {
+      console.warn('refreshGrowthReports:', err)
+    }
+  }
+
+  function renderGrowthReports(reports) {
+    if (!dom.grTbody) return
+    if (dom.grSummary) {
+      dom.grSummary.textContent = reports.length === 0
+        ? ''
+        : `共 ${reports.length} 份`
+    }
+    if (reports.length === 0) {
+      dom.grTable.hidden = true
+      dom.grEmpty.hidden = false
+      dom.grTbody.innerHTML = ''
+      return
+    }
+    dom.grEmpty.hidden = true
+    dom.grTable.hidden = false
+    dom.grTbody.innerHTML = reports.map((rep) => {
+      const when = new Date(rep.ts).toLocaleString('zh-CN', { hour12: false })
+      const sizeKb = (rep.sizeBytes / 1024).toFixed(1) + ' KB'
+      const dlHref = '/api/admin/growth-reports/download?path=' + encodeURIComponent(rep.path)
+      return `<tr>
+        <td>${escapeHtml(when)}</td>
+        <td><code>${escapeHtml(rep.caseId)}</code></td>
+        <td>${escapeHtml(sizeKb)}</td>
+        <td>
+          <button type="button" class="ma-btn ma-btn-secondary"
+                  data-act="view-growth-report"
+                  data-path="${escapeHtml(rep.path)}"
+                  data-when="${escapeHtml(when)}">查看</button>
+          <a class="ma-btn ma-btn-secondary" href="${escapeHtml(dlHref)}" download>下载</a>
+        </td>
+      </tr>`
+    }).join('')
+  }
+
+  // --- markdown viewer (v2.4) --------------------------------------------
+  // Tiny subset converter — handles the structured markdown the
+  // synthesist emits (headers, lists, bold, italic, blockquote, hr, code,
+  // line breaks). Escapes HTML first to neutralize any injection from
+  // synthesist output. Lives inline (no CDN) because CSP allows only
+  // 'self' scripts.
+
+  function renderMarkdown(md) {
+    if (!md) return ''
+    // 1. escape HTML
+    let text = md
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+    // 2. headers (#, ##, ###, ####)
+    text = text.replace(/^#### (.+)$/gm, '<h4>$1</h4>')
+    text = text.replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    text = text.replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    text = text.replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    // 3. horizontal rule
+    text = text.replace(/^---+\s*$/gm, '<hr>')
+    // 4. blockquote (single-line, the synthesist uses them as examples)
+    text = text.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>')
+    // 5. simple table — pipe-separated rows. Detect by '|' at line start
+    //    and a separator line (|---|---|) right after.
+    //    For v1, just leave them as preformatted text since the
+    //    synthesist's 12-week plan uses a list-style layout, not real tables.
+    // 6. ordered + unordered lists
+    text = text.replace(/^(?:\s*[-*] .+(?:\n|$))+/gm, (block) => {
+      const items = block.trim().split(/\n/).map((l) =>
+        '<li>' + l.replace(/^\s*[-*] /, '') + '</li>'
+      ).join('')
+      return '<ul>' + items + '</ul>'
+    })
+    text = text.replace(/^(?:\s*\d+\. .+(?:\n|$))+/gm, (block) => {
+      const items = block.trim().split(/\n/).map((l) =>
+        '<li>' + l.replace(/^\s*\d+\. /, '') + '</li>'
+      ).join('')
+      return '<ol>' + items + '</ol>'
+    })
+    // 7. bold + italic + inline code
+    //    bold first so the **x** doesn't get partially consumed by italic.
+    text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    text = text.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+    text = text.replace(/`([^`]+)`/g, '<code>$1</code>')
+    // 8. paragraph + line breaks — every double-newline ends a paragraph,
+    //    single-newline becomes <br>. Skip wrapping for block-level
+    //    elements (h1..h4, ul, ol, blockquote, hr).
+    const blocks = text.split(/\n{2,}/).map((para) => {
+      const trimmed = para.trim()
+      if (!trimmed) return ''
+      if (/^<(?:h[1-4]|ul|ol|blockquote|hr|pre|table)/.test(trimmed)) {
+        return trimmed
+      }
+      return '<p>' + trimmed.replace(/\n/g, '<br>') + '</p>'
+    })
+    return blocks.join('\n')
+  }
+
+  async function openGrowthReport(path, when) {
+    if (!dom.grReportModal) return
+    dom.grReportTitle.textContent = `成长报告 · ${when}`
+    dom.grReportDownload.href = '/api/admin/growth-reports/download?path=' + encodeURIComponent(path)
+    dom.grReportBody.innerHTML = '<p class="hint">加载中...</p>'
+    dom.grReportModal.hidden = false
+    try {
+      const r = await fetch('/api/admin/growth-reports/download?path=' + encodeURIComponent(path))
+      if (!r.ok) {
+        dom.grReportBody.innerHTML = `<p class="hint">加载失败:HTTP ${r.status}</p>`
+        return
+      }
+      const text = await r.text()
+      dom.grReportBody.innerHTML = renderMarkdown(text)
+    } catch (err) {
+      dom.grReportBody.innerHTML = `<p class="hint">加载失败:${escapeHtml(err.message || String(err))}</p>`
+    }
+  }
+
+  function closeGrowthReport() {
+    if (dom.grReportModal) dom.grReportModal.hidden = true
+  }
+
+  // --- start workflow (v2.4 payload-schema-driven form) -------------------
+  // Each workflow card has an "开始" button that opens this modal.
+  // If the workflow's WorkflowSummary carries a `payloadSchema`, we
+  // render one input per field (text / textarea / number / select).
+  // Otherwise we fall back to a single JSON textarea (legacy parity
+  // with the generic dispatch form).
+
+  let wfStartCurrent = null
+
+  function openWorkflowStart(workflowId) {
+    const w = wf.workflows.find((x) => x.id === workflowId)
+    if (!w) { alert(`unknown workflow '${workflowId}'`); return }
+    wfStartCurrent = w
+    if (dom.wfStartTitle) {
+      dom.wfStartTitle.textContent = w.name || w.id
+    }
+    if (dom.wfStartDesc) {
+      const cap = `<code>${escapeHtml(w.triggerCapability)}</code>`
+      dom.wfStartDesc.innerHTML = w.description
+        ? `${escapeHtml(w.description)}<br/><small>派发能力:${cap}</small>`
+        : `派发能力:${cap}`
+    }
+    renderWorkflowStartFields(w.payloadSchema)
+    if (dom.wfStartMsg) {
+      dom.wfStartMsg.textContent = ''
+      dom.wfStartMsg.classList.remove('ok', 'err')
+    }
+    if (dom.wfStartModal) dom.wfStartModal.hidden = false
+  }
+
+  function closeWorkflowStart() {
+    if (dom.wfStartModal) dom.wfStartModal.hidden = true
+    wfStartCurrent = null
+  }
+
+  function renderWorkflowStartFields(schema) {
+    if (!dom.wfStartFields) return
+    const fields = Array.isArray(schema) ? schema : null
+    if (!fields || fields.length === 0) {
+      // No schema → fall back to one JSON textarea, like the generic
+      // dispatch form. Lets a non-PG workflow still be triggered from
+      // its card.
+      dom.wfStartFields.innerHTML = `<label>
+        <span>Payload (JSON)</span>
+        <textarea id="wf-start-json" rows="8" placeholder='{ "key": "value" }'>{}</textarea>
+        <small class="hint">这条工作流没声明 payload_schema,要手填 JSON。看 workflow.yaml 的 trigger 段了解需要哪些字段。</small>
+      </label>`
+      return
+    }
+    dom.wfStartFields.innerHTML = fields.map(renderOneField).join('')
+  }
+
+  // ── HITL: agent-question payload shape + form rendering ─────────────
+  //
+  // The interviewer (and any future HITL-capable agent) can pause its
+  // step by dispatching a task at the originating admin with this
+  // payload:
+  //
+  //   { kind: 'agent-question',
+  //     fromAgent: 'growth-interviewer',
+  //     context: '(optional one-line explainer to show above the form)',
+  //     questions: [{ id, label, hint?, type, rows?, required? }, ...] }
+  //
+  // The admin fills in answers, this UI POSTs them as the task result
+  // payload, the parked agent resumes with the merged answers.
+
+  function isAgentQuestionPayload(p) {
+    return (
+      p && typeof p === 'object' &&
+      p.kind === 'agent-question' &&
+      Array.isArray(p.questions) &&
+      p.questions.length > 0
+    )
+  }
+
+  function renderAgentQuestionForm(v) {
+    const payload = v.task.payload
+    const qs = payload.questions || []
+    const ctx = typeof payload.context === 'string' ? payload.context : ''
+    const fromAgent = typeof payload.fromAgent === 'string' ? payload.fromAgent : '(agent)'
+
+    // Use task-scoped field ids so multiple expanded agent-question
+    // cards can coexist on the page without colliding form state.
+    const fields = qs.map((q, i) => renderAgentQuestionField(v.id, q, i)).join('')
+
+    return (
+      `<div class="task-detail-section agent-question-form" data-aq-id="${escapeHtml(v.id)}">` +
+        `<div class="aq-header">` +
+          `<strong>🤖 ${escapeHtml(fromAgent)} 想再问你 ${qs.length} 件事</strong>` +
+          (ctx ? `<p class="aq-context">${escapeHtml(ctx)}</p>` : '') +
+        `</div>` +
+        `<div class="aq-fields">${fields}</div>` +
+        `<div class="aq-actions">` +
+          `<button class="primary" data-act="submit-agent-question" data-id="${escapeHtml(v.id)}">提交回答 (agent 会接着跑)</button>` +
+          `<button class="secondary" data-act="skip-agent-question" data-id="${escapeHtml(v.id)}" title="跳过 — agent 会按它第一轮的判断继续">跳过</button>` +
+          `<span class="aq-msg" data-aq-msg="${escapeHtml(v.id)}"></span>` +
+        `</div>` +
+      `</div>`
+    )
+  }
+
+  function renderAgentQuestionField(taskId, q, idx) {
+    const fid = q && typeof q.id === 'string' ? q.id : `q${idx}`
+    const fieldDomId = `aq-${taskId}-${fid}`
+    const label = q && typeof q.label === 'string' ? q.label : `Q${idx + 1}`
+    const hint = q && typeof q.hint === 'string'
+      ? `<small class="hint">${escapeHtml(q.hint)}</small>`
+      : ''
+    const required = q && q.required ? ' <span style="color:#c33">*</span>' : ''
+    let control
+    if (q && q.type === 'text') {
+      control = `<input type="text" id="${escapeHtml(fieldDomId)}" data-aq-fid="${escapeHtml(fid)}" />`
+    } else if (q && q.type === 'number') {
+      control = `<input type="number" id="${escapeHtml(fieldDomId)}" data-aq-fid="${escapeHtml(fid)}" />`
+    } else {
+      // textarea is the default. Rows defaults to 4; the parser
+      // clamps to [1, 20] before sending so we trust it here.
+      const rows = q && typeof q.rows === 'number' && q.rows > 0 ? q.rows : 4
+      control = `<textarea id="${escapeHtml(fieldDomId)}" data-aq-fid="${escapeHtml(fid)}" rows="${rows}"></textarea>`
+    }
+    return (
+      `<label class="aq-field">` +
+        `<span>${escapeHtml(label)}${required}</span>` +
+        control +
+        hint +
+      `</label>`
+    )
+  }
+
+  async function submitAgentQuestion(taskId) {
+    const card = document.querySelector(`.agent-question-form[data-aq-id="${cssEscape(taskId)}"]`)
+    if (!card) return
+    const msg = card.querySelector(`[data-aq-msg="${cssEscape(taskId)}"]`)
+    const setMsg = (text, kind) => {
+      if (!msg) return
+      msg.textContent = text
+      msg.className = 'aq-msg' + (kind ? ' ' + kind : '')
+    }
+    setMsg('提交中…')
+
+    const view = state.tasks.find((x) => x.id === taskId)
+    const qs = view?.task?.payload?.questions || []
+    const answers = {}
+    for (const q of qs) {
+      const el = card.querySelector(`[data-aq-fid="${cssEscape(q.id)}"]`)
+      if (!el) continue
+      const v = el.value
+      if (q.required && (v == null || String(v).trim() === '')) {
+        setMsg(`${q.label} 必填`, 'err')
+        return
+      }
+      if (v != null && String(v).length > 0) answers[q.id] = String(v)
+    }
+
+    try {
+      await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/complete`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ output: { answers } }),
+      })
+      setMsg('已提交 — agent 收到了,正在继续', 'ok')
+    } catch (err) {
+      setMsg('提交失败: ' + (err.message || String(err)), 'err')
+    }
+  }
+
+  async function skipAgentQuestion(taskId) {
+    // Skip = reject the task. The agent's nested dispatch resolves
+    // with kind='failed', the agent's HITL branch sees the failure
+    // and falls back to its first-round output.
+    const card = document.querySelector(`.agent-question-form[data-aq-id="${cssEscape(taskId)}"]`)
+    const msg = card?.querySelector(`[data-aq-msg="${cssEscape(taskId)}"]`)
+    if (msg) { msg.textContent = '跳过中…'; msg.className = 'aq-msg' }
+    try {
+      await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/reject`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ error: 'admin skipped' }),
+      })
+      if (msg) { msg.textContent = '已跳过 — agent 用了第一轮的判断'; msg.className = 'aq-msg ok' }
+    } catch (err) {
+      if (msg) { msg.textContent = '跳过失败: ' + (err.message || String(err)); msg.className = 'aq-msg err' }
+    }
+  }
+
+  // CSS.escape polyfill for older browsers — used to inject task ids
+  // into selectors. Cookie-style escape would be heavier; this covers
+  // anything the dispatcher might emit.
+  function cssEscape(s) {
+    return typeof CSS !== 'undefined' && CSS.escape
+      ? CSS.escape(String(s))
+      : String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&')
+  }
+
+  function renderOneField(f) {
+    const id = `wf-start-field-${escapeHtml(f.id)}`
+    const required = f.required ? ' <span style="color:#c33">*</span>' : ''
+    const hint = f.hint ? `<small class="hint">${escapeHtml(f.hint)}</small>` : ''
+    const ph = f.placeholder ? ` placeholder="${escapeHtml(f.placeholder)}"` : ''
+    const defaultV = f.defaultValue != null ? escapeHtml(String(f.defaultValue)) : ''
+    let control
+    if (f.type === 'textarea') {
+      const rows = typeof f.rows === 'number' ? f.rows : 4
+      control = `<textarea id="${id}" rows="${rows}"${ph}>${defaultV}</textarea>`
+    } else if (f.type === 'select') {
+      const opts = (f.options || [])
+        .map((o) => `<option value="${escapeHtml(o.value)}"${o.value === f.defaultValue ? ' selected' : ''}>${escapeHtml(o.label)}</option>`)
+        .join('')
+      control = `<select id="${id}">${opts}</select>`
+    } else if (f.type === 'number') {
+      control = `<input type="number" id="${id}"${ph} value="${defaultV}" />`
+    } else {
+      control = `<input type="text" id="${id}"${ph} value="${defaultV}" />`
+    }
+    return `<label>
+      <span>${escapeHtml(f.label)}${required}</span>
+      ${control}
+      ${hint}
+    </label>`
+  }
+
+  async function submitWorkflowStart() {
+    if (!wfStartCurrent) return
+    if (dom.wfStartMsg) {
+      dom.wfStartMsg.textContent = ''
+      dom.wfStartMsg.classList.remove('ok', 'err')
+    }
+    const w = wfStartCurrent
+    let payload
+    const schema = Array.isArray(w.payloadSchema) ? w.payloadSchema : null
+    if (schema) {
+      payload = {}
+      for (const f of schema) {
+        const el = document.getElementById(`wf-start-field-${f.id}`)
+        if (!el) continue
+        let v = el.value
+        if (f.required && (v == null || v.trim() === '')) {
+          dom.wfStartMsg.textContent = `${f.label} 必填`
+          dom.wfStartMsg.classList.add('err')
+          return
+        }
+        if (v === '') continue  // skip empty optional fields
+        if (f.type === 'number') {
+          const n = Number(v)
+          if (!Number.isFinite(n)) {
+            dom.wfStartMsg.textContent = `${f.label} 必须是数字`
+            dom.wfStartMsg.classList.add('err')
+            return
+          }
+          payload[f.id] = n
+        } else {
+          payload[f.id] = v
+        }
+      }
+    } else {
+      const jsonEl = document.getElementById('wf-start-json')
+      try {
+        payload = JSON.parse(jsonEl?.value || '{}')
+      } catch (err) {
+        dom.wfStartMsg.textContent = 'Payload JSON 不合法:' + (err.message || String(err))
+        dom.wfStartMsg.classList.add('err')
+        return
+      }
+    }
+    try {
+      const r = await fetch('/api/admin/dispatch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          strategy: { kind: 'capability', capabilities: [w.triggerCapability] },
+          title: `${w.name || w.id}`,
+          payload,
+        }),
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        dom.wfStartMsg.textContent = '失败:' + (body.error || `HTTP ${r.status}`)
+        dom.wfStartMsg.classList.add('err')
+        return
+      }
+      dom.wfStartMsg.textContent = '已派发 — 在「运行历史」面板看进度。'
+      dom.wfStartMsg.classList.add('ok')
+      setTimeout(closeWorkflowStart, 1500)
+    } catch (err) {
+      dom.wfStartMsg.textContent = '失败:' + (err.message || String(err))
+      dom.wfStartMsg.classList.add('err')
+    }
+  }
+
+  // --- bundle import (v2.4) ----------------------------------------------
+  // Bundles let a non-technical user upload one yaml and get N agents +
+  // 1 workflow + a one-shot apiKey in a single round-trip. POSTs to
+  // /api/admin/bundles/import which the host wired in P0 #1.
+  //
+  // The key field is optional in the schema; the bundle yaml may carry
+  // an `apiKeyPrompt` hint (label/baseURL) that tells us what to ask
+  // for. We sniff the pasted/uploaded text for that hint and update
+  // the key field's label on the fly.
+
+  function openBundleImportModal() {
+    if (!dom?.bundleImportModal) return
+    dom.bundleImportText.value = ''
+    dom.bundleImportFile.value = ''
+    dom.bundleImportKey.value = ''
+    dom.bundleKeyLabel.textContent = 'API key (optional)'
+    dom.bundleImportMsg.textContent = ''
+    dom.bundleImportMsg.classList.remove('ok', 'err')
+    dom.bundleImportModal.hidden = false
+  }
+
+  function closeBundleImportModal() {
+    if (dom?.bundleImportModal) dom.bundleImportModal.hidden = true
+  }
+
+  /**
+   * Pluck a one-line "apiKeyPrompt.label" hint out of pasted/uploaded
+   * yaml so we can localise the key input label ("DeepSeek API key"
+   * instead of just "API key"). We do a regex sniff rather than full
+   * yaml parse — the modal stays decoupled from any yaml lib.
+   */
+  function sniffApiKeyLabel(text) {
+    const m = text.match(/apiKeyPrompt[\s\S]{0,200}?label:\s*"?([^"\n\r]+)/)
+    if (!m) return null
+    return m[1].trim()
+  }
+
+  async function submitBundleImport() {
+    dom.bundleImportMsg.textContent = ''
+    dom.bundleImportMsg.classList.remove('ok', 'err')
+    let text = dom.bundleImportText.value
+    const file = dom.bundleImportFile.files?.[0]
+    if (file && !text) {
+      text = await file.text()
+    }
+    if (!text || !text.trim()) {
+      dom.bundleImportMsg.textContent = '请上传或粘贴 bundle yaml'
+      dom.bundleImportMsg.classList.add('err')
+      return
+    }
+    const apiKey = dom.bundleImportKey.value.trim() || undefined
+    const payload = apiKey ? { yaml: text, apiKey } : { yaml: text }
+    try {
+      const r = await fetch('/api/admin/bundles/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        dom.bundleImportMsg.textContent = '失败:' + (body.error || `HTTP ${r.status}`)
+        dom.bundleImportMsg.classList.add('err')
+        return
+      }
+      // Build a human summary: N created, M skipped, workflow id if loaded
+      const createdN = body.team?.created?.length ?? 0
+      const skippedN = body.team?.skipped?.length ?? 0
+      const wfId = body.workflow?.id
+      const parts = []
+      if (createdN > 0) parts.push(`新增 ${createdN} 个 agent`)
+      if (skippedN > 0) parts.push(`跳过 ${skippedN} 个(已存在)`)
+      if (wfId) parts.push(`workflow ${wfId} 已注册`)
+      if (body.workflowError) parts.push(`(workflow 警告:${body.workflowError})`)
+      if (body.team?.spawnErrors?.length) {
+        parts.push(`(${body.team.spawnErrors.length} 个 spawn 失败:看 agent tab)`)
+      }
+      dom.bundleImportMsg.textContent = '导入完成 — ' + parts.join('、')
+      dom.bundleImportMsg.classList.add('ok')
+      await refreshManagedAgents().catch(() => {})
+      await refreshWorkflows().catch(() => {})
+      setTimeout(closeBundleImportModal, 1200)
+    } catch (err) {
+      dom.bundleImportMsg.textContent = '失败:' + (err.message || String(err))
+      dom.bundleImportMsg.classList.add('err')
     }
   }
 
@@ -1570,6 +2191,13 @@
     // leave an empty third column). Overview keeps the original
     // 3-col layout.
     document.body.dataset.activeTab = name
+    // Workflows tab carries the growth-reports panel too — refresh
+    // when the user lands on the tab so an upload from the
+    // synthesist mid-session shows up without needing the manual
+    // refresh button.
+    if (name === 'workflows') {
+      refreshGrowthReports().catch(() => {})
+    }
   }
 
   function gotoTab(name) {
@@ -1674,6 +2302,57 @@
     // Workflow panel events
     dom.wfImportBtn?.addEventListener('click', openWorkflowImportModal)
     dom.wfImportSubmit?.addEventListener('click', submitWorkflowImport)
+    dom.wfStartSubmit?.addEventListener('click', submitWorkflowStart)
+    dom.bundleImportBtn?.addEventListener('click', openBundleImportModal)
+    dom.bundleImportSubmit?.addEventListener('click', submitBundleImport)
+    // "Use built-in template" button — fetches the embedded
+    // personal-growth bundle yaml from the static-asset path
+    // (web build embeds it under /builtin-bundles/). Pre-populates
+    // the textarea so the user can review before submitting.
+    dom.bundleBuiltinPgBtn?.addEventListener('click', async () => {
+      try {
+        const r = await fetch('/builtin-bundles/personal-growth.yaml')
+        if (!r.ok) {
+          dom.bundleImportMsg.textContent = `加载内置模板失败:HTTP ${r.status}`
+          dom.bundleImportMsg.classList.add('err')
+          return
+        }
+        const text = await r.text()
+        dom.bundleImportText.value = text
+        dom.bundleImportFile.value = ''
+        // Trigger the same sniff that the input handler does, so the
+        // key label updates to "DeepSeek API key".
+        const label = sniffApiKeyLabel(text)
+        if (label && dom.bundleKeyLabel) {
+          dom.bundleKeyLabel.textContent = `${label} API key (optional)`
+        }
+        dom.bundleImportMsg.textContent = '已加载个人成长 bundle。粘贴 DeepSeek key 后点"导入"。'
+        dom.bundleImportMsg.classList.remove('err')
+        dom.bundleImportMsg.classList.add('ok')
+      } catch (err) {
+        dom.bundleImportMsg.textContent = '加载内置模板失败:' + (err.message || String(err))
+        dom.bundleImportMsg.classList.add('err')
+      }
+    })
+    // Sniff the pasted/uploaded bundle for an `apiKeyPrompt.label` and
+    // relabel the key input — "DeepSeek API key" reads less generic
+    // than just "API key" and helps confirm the right key.
+    const onBundleTextChange = () => {
+      const label = sniffApiKeyLabel(dom.bundleImportText?.value || '')
+      if (label && dom.bundleKeyLabel) {
+        dom.bundleKeyLabel.textContent = `${label} API key (optional)`
+      } else if (dom.bundleKeyLabel) {
+        dom.bundleKeyLabel.textContent = 'API key (optional)'
+      }
+    }
+    dom.bundleImportText?.addEventListener('input', onBundleTextChange)
+    dom.bundleImportFile?.addEventListener('change', async () => {
+      const f = dom.bundleImportFile.files?.[0]
+      if (!f) return
+      // Preload the textarea so the user can review before submitting.
+      dom.bundleImportText.value = await f.text()
+      onBundleTextChange()
+    })
     dom.maApiKeyClear?.addEventListener('click', () => {
       // Trigger an explicit-empty apiKey on the next submit. We don't
       // wipe the persisted key here — that happens on Save so the user
@@ -1693,6 +2372,9 @@
         if (!dom.maKeysModal.hidden) closeKeysModal()
         if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal()
         if (dom.wfRunsModal && !dom.wfRunsModal.hidden) closeWorkflowRunsModal()
+        if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal()
+        if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart()
+        if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport()
       }
       const act = target.dataset.act
       // Provider key actions live in the keys modal — they take a
@@ -1725,6 +2407,12 @@
       } else if (act === 'open-workflow-run') {
         const runId = target.dataset.runId
         if (runId) openWorkflowRunDetail(runId)
+      } else if (act === 'start-workflow') {
+        openWorkflowStart(id)
+      } else if (act === 'view-growth-report') {
+        const reportPath = actEl?.dataset?.path
+        const when = actEl?.dataset?.when || ''
+        if (reportPath) openGrowthReport(reportPath, when)
       }
     })
     // ESC closes any open modal
@@ -1736,9 +2424,34 @@
       if (!dom.maKeysModal.hidden) closeKeysModal()
       if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal()
       if (dom.wfRunsModal && !dom.wfRunsModal.hidden) closeWorkflowRunsModal()
+      if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal()
+      if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart()
+      if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport()
     })
+    // First-visit disclaimer. localStorage flag is per-browser, so a
+    // user who clears storage or visits from a different machine sees
+    // it again — intentional. Failures (private browsing without
+    // storage permission) just skip the modal silently.
+    try {
+      if (dom.disclaimerModal && !localStorage.getItem('aipehub_disclaimer_v1')) {
+        dom.disclaimerModal.hidden = false
+      }
+    } catch (err) {
+      console.debug('disclaimer storage check failed:', err)
+    }
+    dom.disclaimerAccept?.addEventListener('click', () => {
+      try { localStorage.setItem('aipehub_disclaimer_v1', String(Date.now())) } catch {}
+      if (dom.disclaimerModal) dom.disclaimerModal.hidden = true
+    })
+
     refreshManagedAgents().catch((err) => console.warn('initial agents refresh:', err))
     refreshWorkflows().catch((err) => console.warn('initial workflows refresh:', err))
+    refreshGrowthReports().catch((err) => console.warn('initial growth-reports refresh:', err))
+    if (dom.grRefreshBtn) {
+      dom.grRefreshBtn.addEventListener('click', () => {
+        refreshGrowthReports().catch((err) => console.warn('manual growth-reports refresh:', err))
+      })
+    }
 
     document.addEventListener('click', async (e) => {
       const target = e.target
@@ -1793,6 +2506,10 @@
           await rejectApp(id, reason)
         } else if (act === 'retry') {
           await retryTask(id)
+        } else if (act === 'submit-agent-question') {
+          await submitAgentQuestion(id)
+        } else if (act === 'skip-agent-question') {
+          await skipAgentQuestion(id)
         }
       } catch (err) {
         alert(t.failedAlert(err.message || String(err)))

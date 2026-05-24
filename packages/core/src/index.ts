@@ -32,6 +32,11 @@ export type {
   ServiceTrashRef,
 } from './services-admin.js'
 
+export type {
+  GrowthReportsAdminSurface,
+  GrowthReportSummary,
+} from './growth-reports-admin.js'
+
 export {
   encryptSecret,
   decryptSecret,
@@ -47,7 +52,12 @@ export type { Deliverer } from './bus.js'
 export { Registry } from './registry.js'
 
 export { DefaultScheduler } from './scheduler.js'
-export type { Scheduler, TaskInvoker, CancelNotifier } from './scheduler.js'
+export type {
+  Scheduler,
+  TaskInvoker,
+  CancelNotifier,
+  ReputationLookup,
+} from './scheduler.js'
 
 export {
   PriorityQueueScheduler,
@@ -67,6 +77,41 @@ export type { AgentOptions } from './participants/agent.js'
 
 export { HumanParticipant } from './participants/human.js'
 export type { HumanOptions } from './participants/human.js'
+
+export { HubAsParticipant } from './participants/hub-adapter.js'
+export type { HubAsParticipantOptions } from './participants/hub-adapter.js'
+
+export { createInprocHubLinkPair } from './hub-link.js'
+export type {
+  HubLink,
+  HubLinkDirection,
+  HubLinkStatus,
+} from './hub-link.js'
+
+export { RemoteHubViaLink } from './participants/remote-hub.js'
+export type { RemoteHubViaLinkOptions } from './participants/remote-hub.js'
+
+export { installPeerLink } from './peer-link-install.js'
+export type {
+  InstallPeerLinkOptions,
+  InstalledPeerLink,
+} from './peer-link-install.js'
+
+export {
+  FeedbackLedger,
+  FileFeedbackStorage,
+  MemoryFeedbackStorage,
+  statusOf,
+} from './feedback/index.js'
+export type {
+  FeedbackEntry,
+  FeedbackEntryDraft,
+  FeedbackScope,
+  FeedbackStatus,
+  FeedbackStorage,
+  FeedbackQuery,
+  LedgerLine,
+} from './feedback/index.js'
 
 export type {
   // ids

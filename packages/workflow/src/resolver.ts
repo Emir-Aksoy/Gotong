@@ -35,6 +35,16 @@ export interface ResolutionContext {
   /** The triggering task's payload. */
   triggerPayload: unknown
   /**
+   * Optional: the `from` ParticipantId of the task that triggered
+   * this run. When set, workflow yaml can reference `$trigger.from`
+   * to thread the originating admin id through to a step's payload
+   * — used by HITL flows so an agent can ask follow-up questions
+   * of the user who started the run. Resume of older pre-v2.5 run
+   * files leaves this `undefined`; refs against `$trigger.from`
+   * then throw a helpful WorkflowRefError.
+   */
+  triggerFrom?: string
+  /**
    * Map from step id to the *resolved output* of that step.
    * For simple steps, the value is whatever the step returned.
    * For parallel steps, the value is `{ branchId → branchOutput }`.
@@ -131,12 +141,28 @@ export function lookupRef(ref: string, ctx: ResolutionContext): unknown {
   const parts = ref.slice(1).split('.')
   const head = parts[0]
   if (head === 'trigger') {
-    if (parts[1] !== 'payload') {
-      throw new WorkflowRefError(
-        `bad ref '${ref}' — only '$trigger.payload[.…]' is supported`,
-      )
+    if (parts[1] === 'payload') {
+      return walkPath(ctx.triggerPayload, parts.slice(2), ref)
     }
-    return walkPath(ctx.triggerPayload, parts.slice(2), ref)
+    if (parts[1] === 'from') {
+      // `$trigger.from` is a scalar — no further dot-walk allowed.
+      // It resolves to the ParticipantId of whoever started the run.
+      // Older run files (pre-v2.5) don't carry triggerFrom; explain.
+      if (parts.length > 2) {
+        throw new WorkflowRefError(
+          `bad ref '${ref}' — '$trigger.from' is a scalar, no further path allowed`,
+        )
+      }
+      if (ctx.triggerFrom === undefined) {
+        throw new WorkflowRefError(
+          `bad ref '${ref}' — triggerFrom is unset (pre-v2.5 run state or non-Task entry point)`,
+        )
+      }
+      return ctx.triggerFrom
+    }
+    throw new WorkflowRefError(
+      `bad ref '${ref}' — only '$trigger.payload[.…]' or '$trigger.from' are supported`,
+    )
   }
   // step ref
   const stepId = head

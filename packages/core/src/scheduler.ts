@@ -26,11 +26,22 @@ export type CancelNotifier = (
   reason: string,
 ) => void
 
+/**
+ * Optional callback returning a peer's reputation score in [-1, +1].
+ * When supplied, `DefaultScheduler.dispatchCapability` ranks candidates
+ * by score (descending) before falling back to least-loaded.
+ *
+ * Wired by `Hub` from its `ReputationStore` (M5b). New / unknown peers
+ * return 0 — neutral, no penalty.
+ */
+export type ReputationLookup = (participantId: ParticipantId) => number
+
 export class DefaultScheduler implements Scheduler {
   constructor(
     private readonly registry: Registry,
     private readonly invoke: TaskInvoker,
     private readonly notifyCancel: CancelNotifier,
+    private readonly reputationOf?: ReputationLookup,
   ) {}
 
   dispatch(task: Task): Promise<TaskResult> {
@@ -72,8 +83,20 @@ export class DefaultScheduler implements Scheduler {
         `no participant covers capabilities: ${required.join(', ') || '(none)'}`,
       )
     }
-    // least-loaded wins; ties broken by registration order (Map preserves it)
-    candidates.sort((a, b) => this.registry.loadOf(a.id) - this.registry.loadOf(b.id))
+    // Reputation-aware ranking (M5b): higher score first, ties broken by
+    // least-loaded, then by registration order (Map preserves it).
+    // When reputationOf is not supplied, all scores are 0 and ranking
+    // degrades to pure least-loaded — preserving pre-M5b behaviour.
+    const repOf = this.reputationOf
+    candidates.sort((a, b) => {
+      if (repOf) {
+        const ra = repOf(a.id)
+        const rb = repOf(b.id)
+        // Treat tiny floating-point noise as a tie.
+        if (Math.abs(ra - rb) > 1e-9) return rb - ra
+      }
+      return this.registry.loadOf(a.id) - this.registry.loadOf(b.id)
+    })
     const chosen = candidates[0]!
     return runOne(task, chosen, this.registry, this.invoke)
   }

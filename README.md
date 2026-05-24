@@ -90,6 +90,29 @@ pnpm exec aipehub-host --version    # current host version
 
 After it boots, follow [`docs/OVERVIEW.md`](docs/OVERVIEW.md) for the "what now" walkthrough.
 
+### 5-minute personal growth workflow (新)
+
+The first ready-to-run shipped experience. 7 教练 (访谈 + 身体 / 心理 / 目标 / 资源 / 关系 + 综合规划师) 跑一遍 → 一份 markdown 12 周墙上计划落到磁盘。Default LLM 是 **DeepSeek**(国内可达、便宜)。
+
+```text
+1. 装好 host (Docker 或源码,见上)
+2. 打开打印的 admin URL → 进 admin
+3. 申请 DeepSeek API key: https://platform.deepseek.com (新用户送 10 元额度,够跑几十次)
+4. Admin → 工作流 tab → 点 [导入团队 (bundle)] → 点 [🎁 用内置模板:个人成长]
+   → 粘贴 DeepSeek key → [导入]
+   (7 个 agent 一键创建,workflow 自动注册)
+5. 工作流卡片上点 [开始] → 弹 4 段表单 (现状 / 愿望 / 卡点 / 这次最想想清楚什么)
+6. 派发 → 等 ~3.5 分钟 (7 次 DeepSeek API call)
+7. 工作流 tab 滚到底 → "成长报告" 面板 → 点 [下载]
+   或: <space>/services/artifact/file/agent/growth-synthesist/reports/<caseId>/<date>.md
+```
+
+报告里有:画像 + 身体/心理/目标/资源/关系 五份维度分析 + 一句话发展路径 + **12 周墙上计划** (主线 + 副线,每周做什么) + **5 个权衡判断** + "做不到怎么办" 降级方案 + "v2 跑工作流时建议你回答的 5 个种子问题"(下次回来用)。
+
+> 🙏 **关于隐私 / 数据**:你的 4 段自述会发给 DeepSeek (中国大陆服务器) 做推理。Workflow 跑完后,所有产出落在你自己电脑的 `.aipehub-*/services/` 目录,不会上传任何云。每位教练都设计成有边界的陪伴者 — 身体教练触及红旗(持续胸痛 / 不明出血等)会让你找医生;心理教练触及风险信号会给出 24h 危机热线(全国 400-161-9995 / 马来西亚 Befrienders 03-7956 8144)。**这不是医生 / 心理咨询师 / 财务顾问 / 关系治疗师的替代品。**
+
+想换 Anthropic Claude 或 OpenAI?编辑 `templates/teams/personal-growth-team.yaml`,把每个 agent 的 `provider` / `baseURL` / `model` 改掉就行 — system 提示词跟 vendor 无关。
+
 ### Logging
 
 Structured logging is **on by default** — JSON line per event when stdout is piped (for `jq` / Loki / ELK / Datadog), pretty-printed when stdout is a terminal. Three env vars control it:

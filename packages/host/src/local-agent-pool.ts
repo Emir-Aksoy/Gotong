@@ -10,11 +10,15 @@ import {
   type Space,
 } from '@aipehub/core'
 import { LlmAgent, MockLlmProvider, type LlmProvider } from '@aipehub/llm'
+import { PersonalGrowthAgent } from './agents/personal-growth-agent.js'
 import { AnthropicProvider } from '@aipehub/llm-anthropic'
 import { OpenAIProvider } from '@aipehub/llm-openai'
 import { McpToolset, type McpServerConfig } from '@aipehub/mcp-client'
 import {
   resolveOwner,
+  type AgentDispatchOpts,
+  type AgentDispatchResult,
+  type AgentDispatchSurface,
   type ArtifactHandle,
   type DatastoreHandle,
   type MemoryHandle,
@@ -70,6 +74,19 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * keep the owner explicit to avoid re-deriving on tear-down.
    */
   private readonly serviceOwnerForAgent = new Map<ParticipantId, Owner>()
+  /**
+   * Per-agent record of the live `ServiceCtx` that was built from
+   * `attachServicesIfDeclared(record)` at spawn time. Kept here so
+   * out-of-band callers — the v2.4 growth-reports admin endpoint,
+   * future workflow-driven introspection — can fetch the same
+   * handles the agent uses, instead of re-attaching against the
+   * plugin (which would race against the agent's own writes).
+   *
+   * Entries appear at spawn and disappear at stop. The map only ever
+   * contains agents that declared `uses:` — agents with no service
+   * declaration never get a key written here.
+   */
+  private readonly serviceCtxForAgent = new Map<ParticipantId, ServiceCtx>()
   /**
    * Per-agent record of the live `McpToolset` (only present when the
    * agent's manifest declared `mcpServers:`). Held here so `stop(id)`
@@ -137,6 +154,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       }
     }
     this.serviceOwnerForAgent.delete(id)
+    this.serviceCtxForAgent.delete(id)
     // Tear down any MCP toolset that was spawned alongside this
     // agent. Same swallow-on-shutdown discipline: a hung server
     // shouldn't block the host from shutting down.
@@ -176,6 +194,21 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     // is the only source of credentials and is enforced at spawn time.
     list.push('openai-compatible')
     return list
+  }
+
+  /**
+   * Return the live `ServiceCtx` for `id`, or `undefined` when the
+   * agent isn't running, didn't declare any `uses:`, or hasn't been
+   * spawned yet. Used by the v2.4 growth-reports admin endpoint to
+   * borrow the synthesist's artifact handle for list / download.
+   *
+   * The returned ctx is the same reference the agent itself uses, so
+   * readers see the agent's latest writes without lag — and we avoid
+   * an extra `attach` (which would race against the agent's own
+   * handle and could fight for plugin-internal caches).
+   */
+  liveServicesFor(id: ParticipantId): ServiceCtx | undefined {
+    return this.serviceCtxForAgent.get(id)
   }
 
   /** Stop every managed agent — called by host shutdown. */
@@ -231,6 +264,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     }
     this.running.delete(record.id)
     this.serviceOwnerForAgent.delete(record.id)
+    this.serviceCtxForAgent.delete(record.id)
 
     // Resolve service handles BEFORE we build the agent — the spawn
     // must fail atomically if any plugin attach throws (e.g. config
@@ -266,18 +300,75 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       }
     }
 
-    const agent = new LlmAgent({
+    // v2.5: inject a reverse-dispatch surface so agents can ask
+    // questions of the human who triggered them ("human-in-the-loop"
+    // — e.g. the personal-growth interviewer pausing to ask follow-
+    // up questions when the user's 4-段自述 is too thin). The agent
+    // calls `services.dispatch?.dispatch({...})` and `await`s the
+    // human task result. We stamp `from = record.id` (the asking
+    // agent's id) so accounting + audit can trace "agent X asked
+    // admin Y" cleanly. The narrowing to `kind: 'explicit'` only is
+    // intentional — broad capability fan-out from inside an agent
+    // would be a footgun (think: dispatch storms).
+    //
+    // We build a fresh object that spreads ctx; never mutate the
+    // shared ctx from `attachServicesIfDeclared` (the plugin layer
+    // may keep a reference).
+    const hub = this.hub
+    const dispatchSurface: AgentDispatchSurface = {
+      dispatch: async (opts: AgentDispatchOpts): Promise<AgentDispatchResult> => {
+        const r = await hub.dispatch({
+          from: record.id,
+          strategy: opts.strategy,
+          payload: opts.payload,
+          title: opts.title,
+          priority: opts.priority,
+        })
+        // Hub returns the full TaskResult; mirror it across to the
+        // narrower AgentDispatchResult (drop taskId — agents don't
+        // need it and it'd leak hub-internal ids into agent code).
+        switch (r.kind) {
+          case 'ok':
+            return { kind: 'ok', output: r.output, by: r.by, ts: r.ts }
+          case 'failed':
+            return { kind: 'failed', error: r.error, by: r.by, ts: r.ts }
+          case 'cancelled':
+            return { kind: 'cancelled', reason: r.reason, ts: r.ts }
+          case 'no_participant':
+            return { kind: 'no_participant', reason: r.reason, ts: r.ts }
+        }
+      },
+    }
+    const ctxWithDispatch: ServiceCtx = { ...ctx, dispatch: dispatchSurface }
+
+    // Pick the agent class by `managed.kind`. v2.4 added
+    // `'personal-growth'` as the first non-base kind; the switch is
+    // structured so a future `'custom'` kind that names a package
+    // class fits in cleanly. Default `'llm'` is the historical
+    // behaviour — all pre-v2.4 agents.json entries land here.
+    const agentOpts = {
       id: record.id,
       capabilities: record.allowedCapabilities,
       provider,
       system: record.managed.system,
       model: record.managed.model,
-      services: ctx,
+      services: ctxWithDispatch,
       ...(toolset ? { tools: toolset } : {}),
-    })
+    }
+    let agent: LlmAgent
+    switch (record.managed.kind) {
+      case 'personal-growth':
+        agent = new PersonalGrowthAgent(agentOpts)
+        break
+      case 'llm':
+      default:
+        agent = new LlmAgent(agentOpts)
+        break
+    }
     this.hub.register(agent)
     this.running.set(record.id, agent)
     if (owner) this.serviceOwnerForAgent.set(record.id, owner)
+    if (ctx) this.serviceCtxForAgent.set(record.id, ctx)
     if (toolset) this.mcpToolsetForAgent.set(record.id, toolset)
     log.info('spawned', {
       id: record.id,

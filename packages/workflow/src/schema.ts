@@ -23,6 +23,7 @@ import {
   type Branch,
   type DispatchSpec,
   type ParallelStep,
+  type PayloadFieldSpec,
   type SimpleStep,
   type Step,
   type StepFailurePolicy,
@@ -90,12 +91,20 @@ function validateWorkflow(w: Record<string, unknown>): WorkflowDefinition {
   if (!trigger || typeof trigger !== 'object') {
     throw new WorkflowSchemaError(`workflow.trigger is required (object)`)
   }
-  const cap = (trigger as Record<string, unknown>).capability
+  const triggerObj = trigger as Record<string, unknown>
+  const cap = triggerObj.capability
   if (typeof cap !== 'string' || cap.length === 0) {
     throw new WorkflowSchemaError(
       `workflow.trigger.capability is required (non-empty string)`,
     )
   }
+  // Optional payload_schema — pure UI hint for the admin dispatch
+  // form. Accept either snake_case (yaml convention) or camelCase
+  // (json convention).
+  const rawSchema = triggerObj.payload_schema ?? triggerObj.payloadSchema
+  const payloadSchema = rawSchema !== undefined
+    ? validatePayloadSchema(rawSchema, 'workflow.trigger.payload_schema')
+    : undefined
   // steps
   const stepsRaw = w.steps
   if (!Array.isArray(stepsRaw) || stepsRaw.length === 0) {
@@ -120,7 +129,9 @@ function validateWorkflow(w: Record<string, unknown>): WorkflowDefinition {
   const out: WorkflowDefinition = {
     schema: WORKFLOW_SCHEMA_V1,
     id: w.id,
-    trigger: { capability: cap },
+    trigger: payloadSchema
+      ? { capability: cap, payloadSchema }
+      : { capability: cap },
     steps,
     onFailure,
   }
@@ -335,4 +346,80 @@ function parseStepFailurePolicy(
   throw new WorkflowSchemaError(
     `${path}.action must be 'halt' | 'continue' | 'retry', got '${String(fp.action)}'`,
   )
+}
+
+/**
+ * Validate `trigger.payload_schema`. Pure structural check — the
+ * runner doesn't use these values, the admin UI does. We're picky
+ * about shape so a bad schema fails at workflow load time (admin
+ * sees the error on import) instead of silently rendering an empty
+ * dispatch form.
+ */
+function validatePayloadSchema(raw: unknown, path: string): PayloadFieldSpec[] {
+  if (!Array.isArray(raw)) {
+    throw new WorkflowSchemaError(`${path} must be an array`)
+  }
+  const ids = new Set<string>()
+  const out: PayloadFieldSpec[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const entry = raw[i]
+    const ep = `${path}[${i}]`
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new WorkflowSchemaError(`${ep} must be an object`)
+    }
+    const e = entry as Record<string, unknown>
+    if (typeof e.id !== 'string' || e.id.length === 0) {
+      throw new WorkflowSchemaError(`${ep}.id is required (non-empty string)`)
+    }
+    if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(e.id)) {
+      throw new WorkflowSchemaError(
+        `${ep}.id must match /^[a-zA-Z][a-zA-Z0-9_]*$/ — got '${e.id}'`,
+      )
+    }
+    if (ids.has(e.id)) {
+      throw new WorkflowSchemaError(`${ep}.id '${e.id}' duplicates an earlier payload field`)
+    }
+    ids.add(e.id)
+    if (typeof e.label !== 'string' || e.label.length === 0) {
+      throw new WorkflowSchemaError(`${ep}.label is required (non-empty string)`)
+    }
+    const type = e.type
+    if (type !== 'text' && type !== 'textarea' && type !== 'number' && type !== 'select') {
+      throw new WorkflowSchemaError(
+        `${ep}.type must be 'text' | 'textarea' | 'number' | 'select' — got '${String(type)}'`,
+      )
+    }
+    const spec: PayloadFieldSpec = { id: e.id, label: e.label, type }
+    if (typeof e.hint === 'string') spec.hint = e.hint
+    if (typeof e.placeholder === 'string') spec.placeholder = e.placeholder
+    if (e.required === true) spec.required = true
+    if (typeof e.defaultValue === 'string' || typeof e.defaultValue === 'number') {
+      spec.defaultValue = e.defaultValue
+    }
+    if (typeof e.rows === 'number' && e.rows >= 1 && e.rows <= 50) {
+      spec.rows = e.rows
+    }
+    if (type === 'select') {
+      if (!Array.isArray(e.options) || e.options.length === 0) {
+        throw new WorkflowSchemaError(`${ep}.options is required and non-empty when type='select'`)
+      }
+      const opts: { value: string; label: string }[] = []
+      for (let j = 0; j < e.options.length; j++) {
+        const o = e.options[j]
+        if (!o || typeof o !== 'object') {
+          throw new WorkflowSchemaError(`${ep}.options[${j}] must be an object`)
+        }
+        const oo = o as Record<string, unknown>
+        if (typeof oo.value !== 'string' || typeof oo.label !== 'string') {
+          throw new WorkflowSchemaError(
+            `${ep}.options[${j}] requires string {value, label}`,
+          )
+        }
+        opts.push({ value: oo.value, label: oo.label })
+      }
+      spec.options = opts
+    }
+    out.push(spec)
+  }
+  return out
 }

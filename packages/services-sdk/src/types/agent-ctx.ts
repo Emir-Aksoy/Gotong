@@ -30,6 +30,72 @@ import type { ArtifactHandle } from './artifact.js'
 import type { DatastoreHandle } from './datastore.js'
 import type { MemoryHandle } from './memory.js'
 
+/**
+ * Minimal task-result shape an agent sees when its nested
+ * `ctx.dispatch?.dispatch(...)` call resolves. Mirrors `@aipehub/core`'s
+ * `TaskResult` discriminated union but declared inline so this package
+ * doesn't take a runtime dep on `core` (services-sdk → core would be a
+ * reverse arrow). At the seam (LocalAgentPool wiring) we just cast.
+ *
+ * Callers care about three things:
+ *   - `kind === 'ok'` → use `output`
+ *   - `kind === 'failed'` → use `error` for log
+ *   - anything else (cancelled / no_participant) → treat as "human
+ *     never answered" and degrade gracefully
+ */
+export type AgentDispatchResult =
+  | { kind: 'ok'; output: unknown; by: string; ts: number }
+  | { kind: 'failed'; error: string; by: string; ts: number }
+  | { kind: 'cancelled'; reason: string; ts: number }
+  | { kind: 'no_participant'; reason: string; ts: number }
+
+/**
+ * Args accepted by `AgentDispatchSurface.dispatch`. Narrower than
+ * `core.DispatchOpts` on purpose — nested dispatches from inside an
+ * agent are for human-in-the-loop questions and similar tightly-
+ * scoped flows; broader strategies (capability fan-out, weights,
+ * contribution accounting) are deliberately not exposed here so that
+ * agents can't accidentally trigger broad workflow side effects.
+ *
+ * The `kind: 'explicit'` strategy points at a single ParticipantId
+ * (usually the admin who triggered the parent workflow run, available
+ * on `task.from`). Use it to ask "the user who started this" a
+ * follow-up question.
+ */
+export interface AgentDispatchOpts {
+  strategy: { kind: 'explicit'; to: string }
+  payload: unknown
+  title?: string
+  /** Optional priority hint; default behaves like 0. */
+  priority?: number
+}
+
+/**
+ * Reverse-direction dispatch primitive injected into an agent's
+ * `ServiceCtx` by the host. Lets an agent that is currently handling
+ * a task dispatch a NEW task and `await` its result before responding
+ * — the building block for human-in-the-loop ("I need more info, ask
+ * the user") flows.
+ *
+ * Design notes:
+ *   - Optional on `ServiceCtx`. Agents MUST defensively handle the
+ *     case where the host didn't wire it in (SDK-connected agents
+ *     have no host-local hub, for instance).
+ *   - The host's wiring is responsible for stamping the agent's own
+ *     `id` as `from` on the nested task so accounting + audit stay
+ *     coherent ("agent X asked admin Y a question").
+ *   - This is intentionally NOT a full re-export of `core.dispatch`:
+ *     no `wait`, `timeoutMs`, `weight`, `countContribution`, etc.
+ *     Agents that need finer control should use a dedicated service.
+ *
+ * Re-entrancy: the Hub's dispatch is already async + queue-based, so
+ * calling it from inside `onTask` is safe — the parent task will sit
+ * `await`ing the nested promise without blocking the event loop.
+ */
+export interface AgentDispatchSurface {
+  dispatch(opts: AgentDispatchOpts): Promise<AgentDispatchResult>
+}
+
 export interface ServiceCtx {
   /**
    * Per-owner memory handle. Present iff the agent yaml had a
@@ -55,6 +121,14 @@ export interface ServiceCtx {
    * the use site.
    */
   readonly extra?: Readonly<Record<string, unknown>>
+  /**
+   * Optional reverse-dispatch surface (v2.5). When present, the agent
+   * can `await ctx.dispatch.dispatch({...})` to ask a question of
+   * (e.g.) the admin who started the parent workflow and resume with
+   * the answer. Absent on hosts that haven't opted in (SDK agents,
+   * older host versions). Callers must null-check before using.
+   */
+  readonly dispatch?: AgentDispatchSurface
 }
 
 /** Convenience: an empty ctx — same object reuse, no garbage. */

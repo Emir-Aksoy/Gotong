@@ -10,3 +10,15 @@ export type {
 } from './server.js'
 export { RemoteAgentParticipant } from './remote-participant.js'
 export type { SessionInfo } from './session.js'
+
+export {
+  connectHubLink,
+  acceptHubLinks,
+  MESH_PROTOCOL_VERSION,
+} from './hub-link.js'
+export type {
+  MeshFrame,
+  WebSocketHubLinkOptions,
+  ConnectHubLinkOptions,
+  AcceptHubLinksOptions,
+} from './hub-link.js'

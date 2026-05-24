@@ -9,7 +9,7 @@
     <script src="/admin.js" defer></script>
   </head>
   <body class="admin">
-    <header>
+    <header class="site-header">
       <h1>AipeHub</h1>
       <span class="subtitle" data-i18n="adminTitle">管理员控制台</span>
       <span id="conn" class="conn" data-status="pending" data-i18n="connecting">连接中…</span>
@@ -175,13 +175,86 @@
         <h2>
           <span data-i18n="workflowsTitle">工作流</span>
           <span id="wf-summary" class="lb-summary"></span>
-          <button type="button" id="wf-import-btn" class="ma-btn" data-i18n="importWorkflow">导入工作流</button>
+          <button type="button" id="bundle-import-btn" class="ma-btn">导入团队 (bundle)</button>
+          <button type="button" id="wf-import-btn" class="ma-btn ma-btn-secondary" data-i18n="importWorkflow">导入工作流</button>
         </h2>
         <div id="workflows-list" class="managed-agents-list"></div>
         <p class="hint">
           <span data-i18n="workflowsHint">工作流把多个 agent 按顺序串起来。admin 派一个任务到 workflow 的触发能力，整个流程自动跑完。模板：</span>
           <a href="https://github.com/AipeHub/AipeHub/tree/main/templates/workflows" target="_blank" rel="noopener">templates/workflows/</a>
         </p>
+      </section>
+
+      <!-- One-time disclaimer (v2.4) — shown the first time an admin
+           opens this page. Stores a `aipehub_disclaimer_v1` flag in
+           localStorage so subsequent visits skip it. The disclaimer is
+           workflow-agnostic but the language tilts toward
+           personal-growth use (the first shipped workflow that touches
+           private info + does real-world advice). -->
+      <div id="disclaimer-modal" class="modal" hidden>
+        <div class="modal-backdrop"></div>
+        <div class="modal-card" role="dialog" aria-modal="true" style="max-width: 36rem;">
+          <header class="modal-head">
+            <h3>欢迎使用 AipeHub · 先看几条</h3>
+          </header>
+          <div class="dispatch-form" style="line-height: 1.7;">
+            <p><strong>1. 这是个人本地工具,不是云服务。</strong>你的对话、画像、报告、API key 都存在你这台机器的 <code>.aipehub-*</code> 目录里。我们不收集任何数据,host 也不上报任何遥测。</p>
+            <p><strong>2. LLM 推理走第三方 API。</strong>你的 4 段自述会发给你配置的模型供应商(DeepSeek / Anthropic / OpenAI 等)做推理。供应商各自有自己的数据政策,看他们的隐私条款。如果有顾虑,可以用 mock provider 或本地 LLM。</p>
+            <p><strong>3. 这不是医生 / 心理咨询师 / 财务顾问 / 关系治疗师的替代品。</strong>个人成长教练们都被设计成"有边界的陪伴者"——触及红旗信号会让你去找专业人。不要把它们当成诊断或处方。</p>
+            <p><strong>4. 如果你正在心理危机中,请立即联系:</strong></p>
+            <ul style="margin: 0.2rem 0 0.5rem 1.2rem;">
+              <li>🇨🇳 北京心理危机研究与干预中心:<strong>010-82951332</strong></li>
+              <li>🇨🇳 全国心理援助热线:<strong>400-161-9995</strong></li>
+              <li>🇲🇾 Befrienders Kuala Lumpur:<strong>03-7956 8144</strong></li>
+              <li>🌏 其他地区:<a href="https://findahelpline.com" target="_blank" rel="noopener">findahelpline.com</a></li>
+            </ul>
+            <p><strong>5. 你可以随时删除自己的数据。</strong>停掉 host,删除 <code>.aipehub-*</code> 目录即可彻底清掉。</p>
+            <p style="margin-top: 1rem; text-align: center;">
+              <button type="button" id="disclaimer-accept" class="ma-btn" style="padding: 0.5rem 1.6rem;">我看完了,开始用</button>
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: render a single growth report as HTML (markdown → HTML
+           done client-side; see renderMarkdown in admin.js). Lets the
+           admin read the report inline without downloading. -->
+      <div id="growth-report-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card modal-card-wide" role="dialog" aria-modal="true">
+          <header class="modal-head">
+            <h3 id="growth-report-title">成长报告</h3>
+            <a id="growth-report-download" class="ma-btn ma-btn-secondary" href="#" download>下载</a>
+            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+          </header>
+          <div id="growth-report-body" class="growth-report-body"></div>
+        </div>
+      </div>
+
+      <!-- Personal-growth reports (v2.4) — hidden when the host hasn't
+           loaded the personal-growth team (the list endpoint returns 503
+           and we set `hidden`). When loaded, lists every consolidated
+           markdown report the synthesist has written and lets the admin
+           download one with a click. -->
+      <section id="growth-reports" class="managed-agents" data-tab="workflows" hidden>
+        <h2>
+          <span>成长报告</span>
+          <span id="growth-reports-summary" class="lb-summary"></span>
+          <button type="button" id="growth-reports-refresh" class="ma-btn ma-btn-secondary">刷新</button>
+        </h2>
+        <p class="hint">个人成长工作流跑完一轮后,综合规划师把 7 段产出汇总成一篇 Markdown 报告,落在这里。点"下载"把它存成本地文件。</p>
+        <div id="growth-reports-empty" class="empty-state" hidden>还没有报告 — 跑一次"个人成长发展路径"工作流就会出现。</div>
+        <table id="growth-reports-table" class="services-table" hidden>
+          <thead>
+            <tr>
+              <th>生成时间</th>
+              <th>caseId</th>
+              <th>大小</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="growth-reports-tbody"></tbody>
+        </table>
       </section>
 
       <!-- Modal: workflow run history (list + detail panes) -->
@@ -230,6 +303,65 @@
             </label>
             <button type="button" id="wf-import-submit" data-i18n="doImport">导入</button>
             <p id="wf-import-msg" class="form-msg"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: start a workflow with a payload-schema-driven form.
+           Rendered dynamically from the workflow's `trigger.payloadSchema`
+           (set on workflow.yaml). When that field is absent, the modal
+           falls back to a single JSON textarea — same shape as the
+           generic dispatch panel — so legacy workflows still work. -->
+      <div id="wf-start-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card" role="dialog" aria-modal="true">
+          <header class="modal-head">
+            <h3>开始工作流 <span id="wf-start-title" class="lb-summary"></span></h3>
+            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+          </header>
+          <div id="wf-start-body" class="dispatch-form">
+            <p id="wf-start-desc" class="hint"></p>
+            <div id="wf-start-fields"></div>
+            <button type="button" id="wf-start-submit">派发任务</button>
+            <p id="wf-start-msg" class="form-msg"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: import a bundle (team + workflow + optional apiKey).
+           Bundles are the "one-click" path for non-technical users —
+           one yaml file replaces (a) importing N agents, (b) importing
+           the workflow, (c) pasting an API key into each openai-compatible
+           agent. See templates/bundles/personal-growth.yaml for the
+           reference bundle. -->
+      <div id="bundle-import-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card" role="dialog" aria-modal="true">
+          <header class="modal-head">
+            <h3>导入团队 (bundle)</h3>
+            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+          </header>
+          <div class="dispatch-form">
+            <p class="hint">aipehub.bundle/v1 格式 — 一个文件包含一组 agent + 一条 workflow + API key 输入提示。导入后所有 agent 一次创建,workflow 自动注册,可直接派发。</p>
+            <p class="hint">模板：<a href="https://github.com/AipeHub/AipeHub/tree/main/templates/bundles" target="_blank" rel="noopener">templates/bundles/</a> · 或用内置模板:</p>
+            <p>
+              <button type="button" id="bundle-builtin-pg-btn" class="ma-btn ma-btn-secondary">🎁 用内置模板:个人成长 (7 教练 + 12 周墙上计划)</button>
+            </p>
+            <label>
+              <span>上传文件</span>
+              <input id="bundle-import-file" type="file" accept=".yaml,.yml,.json" />
+            </label>
+            <label>
+              <span>或粘贴内容</span>
+              <textarea id="bundle-import-text" rows="10" placeholder="schema: aipehub.bundle/v1&#10;bundle:&#10;  name: ...&#10;  team: ..."></textarea>
+            </label>
+            <label>
+              <span id="bundle-key-label">API key (optional)</span>
+              <input id="bundle-import-key" type="password" autocomplete="off" placeholder="为 openai-compatible 类 agent 一次性填 key (留空跳过)" />
+              <small class="hint">如果 bundle 里有 <code>openai-compatible</code> 类 agent (e.g. DeepSeek),粘贴一次 API key,自动应用到所有该类 agent — 不再需要逐个手填。</small>
+            </label>
+            <button type="button" id="bundle-import-submit">导入</button>
+            <p id="bundle-import-msg" class="form-msg"></p>
           </div>
         </div>
       </div>

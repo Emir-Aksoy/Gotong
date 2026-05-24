@@ -1,0 +1,244 @@
+# =============================================================================
+# Workflow: 个人成长发展路径（实战级）
+# Companion team: templates/teams/personal-growth-team.yaml
+# Schema: aipehub.workflow/v1
+#
+# 这条工作流帮一个具体的人把接下来 3-12 个月的发展路径想清楚。
+# 不替代医生 / 心理咨询师 / 财务顾问 / 关系治疗师 —— 触及红旗会主动
+# 让你去找专业人。
+#
+# # 设计取舍（实战 ≠ demo）
+#
+# 1) **输入是 4 段 free-form 自述**，不是 7 个分类字段。真人不会按
+#    "body_inputs / mind_inputs / ..." 精确归类自己的生活。给 4 个
+#    开放式段落（现状 / 愿望 / 卡点 / 特别想谈的），用户写多写少都行。
+#    访谈师识别缺失维度后会反问。
+#
+# 2) **输出强制可执行**。每个建议必须能抄进日历/便签：
+#    动作 = 动词 + 何时 + 持续时长 + 频次。
+#    "改善睡眠" 不行，"今晚 23:00 把手机放客厅，连续 14 天" 才行。
+#
+# 3) **敢说硬话**。识别到目标不现实 / 资源高估 / 心理风险信号 /
+#    关系正在伤害用户时，温柔但明确点名，不当回避型陪伴者。
+#
+# 4) **迭代机制**。每个教练输出末尾给 "我还想再了解你的 2-3 件事"。
+#    用户带新答复跑 v2、v3，逐次沉淀画像。综合规划师专门产出
+#    "v2 跑工作流时建议你回答的 5 个问题"。
+#
+# # 触发
+#
+# admin 派一个 capability=plan-personal-growth 的任务,payload 4 段:
+#   present_state    （200-500 字）你最近半年的生活样貌
+#   aspirations      （150-300 字）你想往哪儿走（1 年 / 3 年 / 10 年）
+#   struggles        （100-300 字）你被什么牵绊
+#   focus_request    （可选,30-100 字）这次最想想清楚什么
+#
+# 注意:不需要手填 previous_run_summary —— PersonalGrowthAgent 在每步
+# 派发前已经自动 recall 该 case 的全部历史(包括 M2 压缩摘要),把它
+# prepend 到 prompt context里。所以一旦同一台 host 跑过 v1 / v2,v3
+# 访谈师天然会读到"上次你说了什么"。
+#
+# # 路线图
+#
+# v0.2(当前)L1+L3+L4:实战 prompts + 跨 session memory (auto-compact)
+#   + artifact 落盘综合报告 + sqlite 元数据 + brave-search MCP (可选)
+# v0.3 计划:UI 上的历史对比视图(v1 vs v2 vs v3 画像变化并列)
+# v0.4 计划:多 caseId 支持(payload.case_id 字段),让一个 admin 给
+#   家人 / 朋友各跑一份
+# v0.4（L4）：接 MCP 外部知识
+#   - 身体教练：睡眠科学 / 营养学指南
+#   - 心理教练：PHQ-9 / GAD-7 / Luthans 心理资本框架
+#   - 目标教练：implementation intention / WOOP 等行为科学
+#   - 资源教练：80/20 时间研究 / 个人金融基线
+#   - 关系教练：Gottman / Brown 等关系科学
+#   - workflow mcp_servers 字段挂 brave-search 或本地知识库 MCP server
+# =============================================================================
+
+schema: aipehub.workflow/v1
+
+workflow:
+  id: personal-growth-flow
+  name: 个人成长发展路径
+  description: 访谈 → 五维度分析（身体 / 心理 / 目标 / 资源 / 关系）→ 综合发展路径
+
+  trigger:
+    capability: plan-personal-growth
+    # 让 admin UI 渲染一份字段化表单(4 段 textarea + 1 段可选)。
+    # 普通人不用写 JSON payload — 在浏览器里直接打字。
+    # workflow runner 不消费这个字段,只是 UI 用 — payload key 仍然走
+    # $trigger.payload.<id> 引用,跟手填 JSON 一样。
+    payload_schema:
+      - id: case_id
+        label: 为谁跑(默认你自己)
+        type: text
+        defaultValue: self
+        hint: "字母+数字+_-. 64 字符内。同 admin 可以给家人 / 朋友各起一个 caseId,每个有独立的成长时间线。默认 'self' 即可。"
+      - id: present_state
+        label: 你最近半年的生活样貌
+        type: textarea
+        rows: 7
+        required: true
+        hint: "200-500 字 — 工作 / 睡眠 / 身体 / 关系状态; 越具体越好"
+        placeholder: "例:34 岁,产品经理,每天工作 10 小时左右,1 点睡 7 点起..."
+      - id: aspirations
+        label: 你想往哪儿走
+        type: textarea
+        rows: 6
+        required: true
+        hint: "150-300 字 — 一年 / 三年 / 十年 想活成什么样"
+        placeholder: "例:一年内每周三次运动、睡眠提前到 12 点;三年内转去做产品咨询..."
+      - id: struggles
+        label: 你被什么牵绊
+        type: textarea
+        rows: 5
+        required: true
+        hint: "100-300 字 — 想做但做不到的事 / 一直绕不开的卡点"
+        placeholder: "例:想运动想睡早,每次到点又拖;副业想了一年多了,怕辞职后扛不住..."
+      - id: focus_request
+        label: 这次最想想清楚什么(可选)
+        type: textarea
+        rows: 3
+        hint: '30-100 字 — 综合规划师会把这条当成"路径优先级"的指南针'
+        placeholder: "例:接下来 12 周到底应该先做哪一件事 — 先动身体、先理顺夫妻关系、还是先动副业?"
+
+  # MCP brave-search 不在 workflow 层挂(workflow.yaml 的 mcp_servers
+  # 字段只对工作流内**模板化**的 agent 生效)。本工作流是 capability-
+  # dispatch 风格 —— 5 位教练在 agents.json 里独立定义,所以 MCP
+  # 直接挂在每个教练的 managed.mcpServers 上(由 scripts/seed-personal-
+  # growth-demo.mjs 的 MCP_SEARCH_SERVERS 注入)。
+  #
+  # 启用步骤:
+  #   1. 拿 Brave key: https://api.search.brave.com (free tier)
+  #   2. export BRAVE_API_KEY=<your-key>
+  #   3. 重启 host —— LocalAgentPool 在 spawn 5 位教练时启动 brave-search
+  #      stdio child。Key 缺失 → child 起不来,但 spawn 不会失败,
+  #      只是教练那一侧拿到空工具列表,prompt 里"工具不可用就不要假
+  #      装搜过"分支兜住。
+
+  steps:
+    # ─────────────────────────────────────────────────────────
+    # Step 1: 访谈师 —— 读懂 4 段自述,反问 5 个跨维度挖深问题
+    #
+    # v2.5: 加了 asking_admin: $trigger.from。访谈师如果觉得信息不全,
+    # 会通过框架的反向 dispatch 给这个 admin 发一个"agent-question"
+    # 任务,admin 在 UI 里看到 -> 填补充答案 -> 访谈师拿到答案重新
+    # 生成画像。$trigger.from 是触发本次 workflow run 的 admin 的
+    # ParticipantId,resolver 自动 resolve。其他 6 个 agent 不用串
+    # 这条 —— 1 轮硬边界 + 只允许访谈师在开场补问。
+    # ─────────────────────────────────────────────────────────
+    - id: portrait
+      description: 访谈师读懂用户自述,生成画像 + 5 个跨维度挖深问题
+      dispatch:
+        strategy: { kind: capability, capabilities: [user-portrait] }
+        title: "访谈与画像"
+        payload:
+          # case_id 串到每一步的 payload — PersonalGrowthAgent 用它
+          # 在 memory namespace 里区分多 case(同 admin 给家人 / 朋友
+          # 各跑一份时)。缺省走 'self'。
+          case_id: $trigger.payload.case_id
+          # HITL 路由 —— 访谈师补问时往这个 admin id 上发任务。
+          asking_admin: $trigger.from
+          # `previous` 字段以前手动从 trigger.payload 拿,现在 PG agent
+          # 跨 session memory(`recallGrowthHistory` + 自动压缩)已经
+          # 在 prompt prepend 里注入了"上次跑工作流的核心判断"。访谈师
+          # 不用走这条路径 — payload 里只放本次新输入即可。
+          present: $trigger.payload.present_state
+          aspirations: $trigger.payload.aspirations
+          struggles: $trigger.payload.struggles
+          focus: $trigger.payload.focus_request
+
+    # ─────────────────────────────────────────────────────────
+    # Step 2-6: 五位维度教练
+    #
+    # 每位教练收到画像 + 完整 4 段自述原文（不是预先切好的"身体输入"）。
+    # 教练自己从自述里识别"用户提到 / 没提到我这一维的什么"。
+    # 没提到的部分,教练在"我还想再了解你的"段落里反问。
+    # ─────────────────────────────────────────────────────────
+    - id: body
+      description: 身体维度 —— 健康基线 / 精力 / 红旗信号 / 医生边界
+      dispatch:
+        strategy: { kind: capability, capabilities: [analyze-body] }
+        title: "身体维度分析"
+        payload:
+          case_id: $trigger.payload.case_id
+          portrait: $portrait.output
+          user_present: $trigger.payload.present_state
+          user_aspirations: $trigger.payload.aspirations
+          user_struggles: $trigger.payload.struggles
+
+    - id: mind
+      description: 心理维度 —— 情绪 / 心理资本 / 风险信号 / 咨询师边界
+      dispatch:
+        strategy: { kind: capability, capabilities: [analyze-mind] }
+        title: "心理维度分析"
+        payload:
+          case_id: $trigger.payload.case_id
+          portrait: $portrait.output
+          user_present: $trigger.payload.present_state
+          user_aspirations: $trigger.payload.aspirations
+          user_struggles: $trigger.payload.struggles
+
+    - id: goal
+      description: 目标维度 —— 目标地图 / 现实校准 / 卡点 / 12 周路径
+      dispatch:
+        strategy: { kind: capability, capabilities: [analyze-goal] }
+        title: "目标维度分析"
+        payload:
+          case_id: $trigger.payload.case_id
+          portrait: $portrait.output
+          user_present: $trigger.payload.present_state
+          user_aspirations: $trigger.payload.aspirations
+          user_struggles: $trigger.payload.struggles
+          user_focus: $trigger.payload.focus_request
+
+    - id: resource
+      description: 资源维度 —— 资源盘点 / 杠杆点 / 被高估和低估的资源
+      dispatch:
+        strategy: { kind: capability, capabilities: [analyze-resource] }
+        title: "资源维度分析"
+        payload:
+          case_id: $trigger.payload.case_id
+          portrait: $portrait.output
+          user_present: $trigger.payload.present_state
+          user_aspirations: $trigger.payload.aspirations
+          user_struggles: $trigger.payload.struggles
+
+    - id: social
+      description: 关系维度 —— 关系生态 / 缺位 / 被伤害的关系
+      dispatch:
+        strategy: { kind: capability, capabilities: [analyze-social] }
+        title: "关系维度分析"
+        payload:
+          case_id: $trigger.payload.case_id
+          portrait: $portrait.output
+          user_present: $trigger.payload.present_state
+          user_aspirations: $trigger.payload.aspirations
+          user_struggles: $trigger.payload.struggles
+
+    # ─────────────────────────────────────────────────────────
+    # Step 7: 综合规划师 —— 12 周墙上计划 + 做不到怎么办 + v2 种子
+    # ─────────────────────────────────────────────────────────
+    - id: synthesis
+      description: 综合 —— 一句话路径 / 12 周墙上计划 / 权衡 / v2 种子问题
+      dispatch:
+        strategy: { kind: capability, capabilities: [synthesize-growth-path] }
+        title: "综合发展路径"
+        payload:
+          case_id: $trigger.payload.case_id
+          portrait: $portrait.output
+          body: $body.output
+          mind: $mind.output
+          goal: $goal.output
+          resource: $resource.output
+          social: $social.output
+          user_focus: $trigger.payload.focus_request
+
+  output:
+    portrait: $portrait.output
+    dimensions:
+      body: $body.output
+      mind: $mind.output
+      goal: $goal.output
+      resource: $resource.output
+      social: $social.output
+    growth_path: $synthesis.output

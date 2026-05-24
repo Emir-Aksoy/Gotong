@@ -10,6 +10,8 @@ import {
   type AdminRecord,
   type AgentRecord,
   type DispatchStrategy,
+  type FeedbackQuery,
+  type GrowthReportsAdminSurface,
   type Hub,
   type ManagedAgentLifecycle,
   type ManagedAgentSpec,
@@ -26,8 +28,10 @@ const log = createLogger('web')
 
 import {
   AGENT_SCHEMA_V1,
+  BUNDLE_SCHEMA_V1,
   TEAM_SCHEMA_V1,
   ManifestError,
+  parseBundle,
   parseManifest,
   renderAgentManifest,
   validateUsesArray,
@@ -92,6 +96,13 @@ const MIME: Record<string, string> = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  // Built-in templates (templates/bundles/*.yaml) are copied under
+  // static/builtin-bundles/ at build time and served directly. The
+  // text/* MIME lets the admin UI's bundle-import "use built-in" button
+  // fetch and read them as plain text without binary decoding.
+  '.yaml': 'text/yaml; charset=utf-8',
+  '.yml': 'text/yaml; charset=utf-8',
+  '.md': 'text/markdown; charset=utf-8',
 }
 
 const ADMIN_COOKIE = 'aipehub_admin'
@@ -183,6 +194,15 @@ export interface WebServerOptions {
    */
   services?: ServicesAdminSurface
   /**
+   * Optional personal-growth reports admin surface (v2.4). The host
+   * wires a `GrowthReportsAdmin` instance here when it has loaded
+   * the personal-growth team. When absent, the two
+   * `/api/admin/growth-reports*` endpoints return 503 so the admin
+   * UI can hide the panel. Web has no runtime dep on the host —
+   * the surface is plain types in `@aipehub/core`.
+   */
+  growthReports?: GrowthReportsAdminSurface
+  /**
    * Optional readiness gate. When set, `GET /readyz` returns 200
    * once `isReady()` first returns true, and 503 with a JSON
    * `{ error: 'starting' }` body before then. Without this option
@@ -245,6 +265,14 @@ export interface WorkflowSummary {
   name?: string
   description?: string
   triggerCapability: string
+  /**
+   * Optional dispatch-form field schema (v2.4). When present, the
+   * admin UI renders a workflow-specific dispatch form (one input
+   * per field) instead of the generic JSON textarea. Shape mirrors
+   * `PayloadFieldSpec` in `@aipehub/workflow`'s types — kept as
+   * `unknown` here to avoid a runtime dep on the workflow package.
+   */
+  payloadSchema?: unknown
   stepCount: number
   /**
    * Absolute path of the YAML file backing this workflow on disk, or
@@ -333,6 +361,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     lifecycle: opts.lifecycle,
     workflows: opts.workflows,
     services: opts.services,
+    growthReports: opts.growthReports,
     readinessGate: opts.readinessGate,
     httpStats: new HttpStats(),
   }
@@ -391,6 +420,28 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
       } else {
         log.info('no admins yet — run Space.createAdmin(name) to mint one')
       }
+
+      // v2.5 — auto-register every admin as a HumanParticipant on the
+      // Hub so they can RECEIVE tasks dispatched at them by `kind:
+      // 'explicit', to: <admin-id>`. Workers already self-register on
+      // /api/me; admins didn't have a parallel path because the
+      // historical task surface only DISPATCHED from admins, never TO
+      // them. HITL changes that: a PG interviewer that detects "info
+      // too thin" sends a follow-up question task to the admin who
+      // started the workflow run, and that dispatch returns
+      // 'no_participant' unless the admin is sitting in the registry.
+      // Registering here makes admins always present from boot — same
+      // semantics as workers post-rehydrate.
+      //
+      // Capabilities: admins have an open-ended toolkit (they triage
+      // everything), so we mark them as capability-less here. Agent-
+      // question dispatches use `kind: explicit`, which doesn't
+      // consult capabilities, so this doesn't affect routing.
+      for (const a of admins) {
+        if (!hub.participant(a.id)) {
+          hub.register(new HumanParticipant({ id: a.id, capabilities: [] }))
+        }
+      }
       log.info('worker URL', { url: `${url}/` })
       resolve({
         host,
@@ -424,6 +475,7 @@ interface HandlerCtx {
   lifecycle: ManagedAgentLifecycle | undefined
   workflows: WorkflowSurface | undefined
   services: ServicesAdminSurface | undefined
+  growthReports: GrowthReportsAdminSurface | undefined
   readinessGate: { isReady: () => boolean } | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
@@ -1168,6 +1220,134 @@ async function handle(
     return
   }
 
+  // --- bundle import (v2.4 personal-growth-ready) -------------------------
+  //
+  // One-call upload that:
+  //   1. upserts every agent in `bundle.team`
+  //   2. (optional) applies the supplied `apiKey` to every openai-
+  //      compatible agent in the team — solves the "new user has to
+  //      paste a DeepSeek key into 7 agents" friction
+  //   3. forwards `bundle.workflow` (if present) to the workflow importer
+  //   4. spawns every agent it just upserted (best-effort)
+  //
+  // Body: JSON `{ yaml: string, apiKey?: string }`.
+  // Response: `{ ok, bundle, team: {created, skipped, spawnErrors}, workflow }`.
+  //
+  // Why a separate endpoint (rather than extending /agents/import):
+  // bundle import has materially different semantics — it talks to the
+  // workflow surface, it accepts a key (which agents/import never has),
+  // and the response shape carries workflow info. Keeping them separate
+  // means /agents/import stays backward-compatible (template authors
+  // who curl yaml at it keep working) and the bundle endpoint is free
+  // to evolve.
+  if (method === 'POST' && path === '/api/admin/bundles/import') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    const rawBody = await readTextBody(req).catch(() => '')
+    if (!rawBody) { sendJson(res, { error: 'empty body' }, 400); return }
+    let body: { yaml?: unknown; apiKey?: unknown }
+    try {
+      body = JSON.parse(rawBody)
+    } catch (err) {
+      sendJson(res, {
+        error: `body must be JSON {"yaml": "<bundle yaml>", "apiKey": "<optional key>"} — got: ${err instanceof Error ? err.message : String(err)}`,
+      }, 400)
+      return
+    }
+    if (typeof body.yaml !== 'string' || body.yaml.length === 0) {
+      sendJson(res, { error: 'body.yaml is required (non-empty string)' }, 400)
+      return
+    }
+    const apiKey = typeof body.apiKey === 'string' && body.apiKey.length > 0
+      ? body.apiKey
+      : undefined
+
+    let bundle
+    try {
+      bundle = parseBundle(body.yaml)
+    } catch (err) {
+      const msg = err instanceof ManifestError ? err.message : (err instanceof Error ? err.message : String(err))
+      sendJson(res, { error: msg }, 400)
+      return
+    }
+
+    // Upsert agents. We apply the apiKey first (so the spawn after
+    // upsert has the key in place) and skip ones that already exist
+    // unchanged — same semantics as /agents/import. A bundle re-import
+    // is therefore safe: existing agents stay put, the workflow gets
+    // re-loaded.
+    const existing = new Set((await ctx.space.agents()).map((a) => a.id))
+    const created: AgentRecord[] = []
+    const skipped: string[] = []
+    for (const a of bundle.team.agents) {
+      if (existing.has(a.id)) { skipped.push(a.id); continue }
+      const rec = await ctx.space.upsertAgent({
+        id: a.id,
+        allowedCapabilities: a.capabilities,
+        displayName: a.displayName,
+        managed: a.managed,
+      })
+      // Apply the supplied key to every openai-compatible agent. This
+      // is the one and only place we touch encrypted secret storage;
+      // anthropic / openai agents read from workspace defaults so they
+      // don't need a per-agent key.
+      if (apiKey && a.managed.provider === 'openai-compatible') {
+        try { await ctx.space.setAgentApiKey(a.id, apiKey) }
+        catch (err) {
+          log.warn('bundle import: failed to set per-agent key', { id: a.id, err })
+        }
+      }
+      created.push(rec)
+      existing.add(a.id)
+    }
+
+    // Best-effort spawn. Failures don't roll back — the operator can
+    // re-edit any broken agent from the agents tab.
+    const spawnErrors: { id: string; error: string }[] = []
+    if (ctx.lifecycle) {
+      for (const rec of created) {
+        try { await ctx.lifecycle.start(rec) }
+        catch (err) {
+          spawnErrors.push({ id: rec.id, error: err instanceof Error ? err.message : String(err) })
+        }
+      }
+    }
+
+    // Forward the embedded workflow yaml to the workflow runner.
+    // Workflow import failures don't roll back the agents either —
+    // the agents are usable on their own (capability dispatch) even
+    // without the workflow.
+    let workflowSummary: unknown = undefined
+    let workflowError: string | undefined
+    if (bundle.workflowYaml) {
+      if (!ctx.workflows) {
+        workflowError = 'workflows surface not enabled on this host — agents were imported but the bundle workflow is unavailable'
+      } else {
+        try {
+          workflowSummary = await ctx.workflows.importFromText(bundle.workflowYaml)
+        } catch (err) {
+          workflowError = err instanceof Error ? err.message : String(err)
+        }
+      }
+    }
+
+    sendJson(res, {
+      ok: true,
+      bundle: {
+        name: bundle.bundleName,
+        description: bundle.bundleDescription,
+      },
+      team: {
+        created: created.map((r) => publicAgent(r, ctx.hub)),
+        skipped,
+        spawnErrors,
+      },
+      workflow: workflowSummary,
+      workflowError,
+    })
+    return
+  }
+
   // --- workflows (v2.1) ------------------------------------------------
   // The Web layer does not depend on `@aipehub/workflow` directly — it
   // talks to `ctx.workflows` (a duck-typed `WorkflowSurface`) which the
@@ -1255,6 +1435,47 @@ async function handle(
     } catch (err) {
       sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
     }
+    return
+  }
+
+  // --- Hub-mesh feedback inbound (M8) -------------------------------------
+  // Shows evaluations OTHER hubs have written about us, pulled via the
+  // mesh feedback protocol. Read-only — write happens on the evaluator
+  // side via `hub.feedback.appendEntry(...)` over the link.
+  //
+  // Query params (all optional):
+  //   taskRunId   — restrict to one workflow run
+  //   fromHub     — restrict to one evaluator hub id
+  //   status      — pending|delivered|read|rejected
+  //   unreadOnly  — 'true' shorthand for status=pending
+  //
+  // Entries are returned sorted by createdAt descending (most recent first).
+  if (method === 'GET' && path === '/api/admin/feedback/inbound') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+
+    const filter: FeedbackQuery = {}
+    const taskRunId = url.searchParams.get('taskRunId')
+    const fromHub = url.searchParams.get('fromHub')
+    const status = url.searchParams.get('status')
+    const unreadOnly = url.searchParams.get('unreadOnly')
+
+    if (taskRunId) filter.taskRunId = taskRunId
+    if (fromHub) filter.evaluatorHub = fromHub
+    if (
+      status === 'pending' ||
+      status === 'delivered' ||
+      status === 'read' ||
+      status === 'rejected'
+    ) {
+      filter.status = status
+    } else if (unreadOnly === 'true' || unreadOnly === '1') {
+      filter.status = 'delivered'
+    }
+
+    const entries = ctx.hub.inboundFeedback.query(filter)
+    entries.sort((a, b) => b.createdAt - a.createdAt)
+    sendJson(res, { entries })
     return
   }
 
@@ -1408,6 +1629,67 @@ async function handle(
       sendJson(res, { ok: true })
     } catch (err) {
       sendServiceError(res, err)
+    }
+    return
+  }
+
+  // --- Growth reports (v2.4 personal-growth-flow) -------------------------
+  // Two routes, both admin-only and both 503 when the host didn't
+  // wire a `growthReports` surface (i.e. the personal-growth team
+  // isn't loaded). The admin UI checks the list endpoint's 503
+  // response and hides the panel cleanly.
+
+  if (method === 'GET' && path === '/api/admin/growth-reports') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.growthReports) {
+      sendJson(res, { error: 'growth reports not enabled' }, 503)
+      return
+    }
+    try {
+      const reports = await ctx.growthReports.list()
+      sendJson(res, { reports })
+    } catch (err) {
+      log.error('growth-reports list failed', { err })
+      sendJson(res, { error: 'list failed' }, 500)
+    }
+    return
+  }
+
+  // GET /api/admin/growth-reports/download?path=reports/<caseId>/<file>.md
+  // Streams the markdown back as `text/markdown; charset=utf-8` with a
+  // `Content-Disposition: attachment` header so the browser saves it.
+  // Inline rendering can come later — markdown isn't a content-type
+  // browsers display natively, so the download UX is right for v0.2.
+  if (method === 'GET' && path === '/api/admin/growth-reports/download') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.growthReports) {
+      sendJson(res, { error: 'growth reports not enabled' }, 503)
+      return
+    }
+    // Pull `?path=...` from the URL — we never trust the path to
+    // route the request; `growthReports.read` is the only thing
+    // that resolves it against the artifact handle (which itself
+    // sanitises via service-artifact-file's `sanitisePath`).
+    const url = new URL(req.url ?? '/', 'http://localhost')
+    const reportPath = url.searchParams.get('path')
+    if (!reportPath) {
+      sendJson(res, { error: 'missing path' }, 400)
+      return
+    }
+    try {
+      const { markdown } = await ctx.growthReports.read(reportPath)
+      const filename = reportPath.split('/').pop() ?? 'report.md'
+      res.writeHead(200, {
+        'content-type': 'text/markdown; charset=utf-8',
+        'content-disposition': `attachment; filename="${filename.replace(/"/g, '')}"`,
+        'cache-control': 'no-store',
+      })
+      res.end(markdown)
+    } catch (err) {
+      log.warn('growth-reports read failed', { path: reportPath, err })
+      sendJson(res, { error: 'not found' }, 404)
     }
     return
   }
@@ -1907,11 +2189,21 @@ async function findAdminFromRequest(
   const ip = clientIp(ctx, req)
   const bearer = readBearer(req)
   if (bearer) {
-    if (!ctx.adminLoginLimiter.check(`bearer:${ip}`)) {
+    // Symmetric to the cookie path below (H21). `peek` BEFORE the
+    // verify so an attacker can't churn token-lookup IO indefinitely,
+    // but `recordFailure` ONLY when verify returns null — otherwise
+    // a legitimate Bearer holder (MCP server, CI script, polling SPA)
+    // would burn 1 quota point per authenticated request, which means
+    // any client making > max requests/window gets falsely rate-limited
+    // despite never having a single failed auth. Before this fix the
+    // Bearer side used `check` (always consumes), so a workflow-runs
+    // poll every 5s tripped the 10/60s limit after the 10th request.
+    if (!ctx.adminLoginLimiter.peek(`bearer:${ip}`)) {
       return { kind: 'rate_limited' }
     }
     const admin = await ctx.space.verifyAdminToken(bearer)
     if (admin) return { kind: 'admin', admin }
+    ctx.adminLoginLimiter.recordFailure(`bearer:${ip}`)
   }
   const sid = readCookie(req, ADMIN_COOKIE)
   if (sid) {

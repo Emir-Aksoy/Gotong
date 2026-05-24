@@ -132,6 +132,10 @@ export class WorkflowRunner extends AgentParticipant {
       runId,
       workflowId: this.definition.id,
       triggeredByTaskId: task.id,
+      // v2.5 — capture who fired the triggering task so HITL steps
+      // can ask follow-up questions of that admin via `$trigger.from`.
+      // Persisted into RunState so resume reconstructs the same value.
+      triggeredByFrom: task.from,
       triggerPayload: task.payload,
       steps: [],
       startedAt: this.now(),
@@ -141,6 +145,7 @@ export class WorkflowRunner extends AgentParticipant {
 
     const ctx: ResolutionContext = {
       triggerPayload: task.payload,
+      triggerFrom: task.from,
       stepOutputs: new Map<string, unknown>(),
     }
     return this.executeStartingAt(state, ctx, 0, undefined, { throwOnHaltFailure: true })
@@ -185,6 +190,10 @@ export class WorkflowRunner extends AgentParticipant {
     const state = initial
     const ctx: ResolutionContext = {
       triggerPayload: state.triggerPayload,
+      // triggerFrom may be undefined on pre-v2.5 run files; that's OK
+      // — resolver throws a helpful error if a workflow yaml uses
+      // `$trigger.from` and the run state predates the field.
+      triggerFrom: state.triggeredByFrom,
       stepOutputs: new Map<string, unknown>(),
     }
     const workflowFailureMode: 'halt' | 'continue' = this.definition.onFailure ?? 'halt'

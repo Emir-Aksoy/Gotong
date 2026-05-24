@@ -7,7 +7,10 @@ body {
 }
 
 /* --- header ---------------------------------------------------------- */
-header {
+/* Scoped to `.site-header` so nested <header> elements (workflow card
+   banners, modal heads, etc.) keep default user-agent styling instead
+   of inheriting the dark page-banner treatment.                       */
+.site-header {
   display: flex;
   align-items: baseline;
   gap: 0.75rem;
@@ -16,13 +19,13 @@ header {
   color: #fff;
   height: 3rem;
 }
-header h1 {
+.site-header h1 {
   margin: 0;
   font-size: 1.05rem;
   letter-spacing: 0.06em;
   font-weight: 700;
 }
-header h1::before { content: "◉ "; color: #6cc; }
+.site-header h1::before { content: "◉ "; color: #6cc; }
 .subtitle { font-size: 0.75rem; opacity: 0.55; }
 .conn {
   margin-left: auto;
@@ -1154,6 +1157,44 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   padding: 0.6rem 0.7rem;
   font-size: 0.78rem;
 }
+/* Workflow cards (Workflows tab). Visual language matches .ma-row so
+   the Workflows panel feels like the Agents panel; the difference is
+   that .ma-card has a structured <header> for name + participantId +
+   action buttons while .ma-row keeps that data in flat divs.
+   The explicit padding/background/height reset on `> header` is a
+   defence-in-depth against the legacy global `header { ... }` rule
+   (now scoped to .site-header) — if any future CSS reintroduces a
+   generic header rule, this card stays readable. */
+.ma-card {
+  background: #f9f9f5;
+  border: 1px solid #e2e2dd;
+  border-radius: 5px;
+  padding: 0.6rem 0.7rem;
+  font-size: 0.78rem;
+}
+.ma-card > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.4rem;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  height: auto;
+  margin: 0 0 0.4rem 0;
+}
+.ma-card > header strong { font-size: 0.9rem; }
+.ma-card > header code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.72rem;
+  color: #888;
+  background: #f0f0eb;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+.ma-card > header .ma-btn { flex-shrink: 0; white-space: nowrap; }
+.ma-card > header .ma-btn:first-of-type { margin-left: auto; }
 .agent-online  { border-left-color: #1a8a4a; }
 .agent-offline { border-left-color: #999; }
 .ma-head {
@@ -1514,3 +1555,116 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   transition: opacity 800ms ease;
 }
 .toast.fade { opacity: 0; }
+
+/* ─── v2.4 personal-growth report viewer ──────────────────────────────── */
+.growth-report-body {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 0.75rem 1rem 1rem;
+  background: #fafaf7;
+  border-top: 1px solid #e0e0d8;
+  line-height: 1.6;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Hiragino Sans GB", sans-serif;
+}
+.growth-report-body h1 { font-size: 1.5rem; margin: 1.2rem 0 0.5rem; }
+.growth-report-body h2 { font-size: 1.2rem; margin: 1.3rem 0 0.4rem; padding-bottom: 0.2rem; border-bottom: 1px solid #e2e2da; color: #333; }
+.growth-report-body h3 { font-size: 1.05rem; margin: 1rem 0 0.3rem; color: #444; }
+.growth-report-body h4 { font-size: 0.98rem; margin: 0.8rem 0 0.2rem; color: #555; }
+.growth-report-body p { margin: 0.4rem 0; }
+.growth-report-body ul, .growth-report-body ol { margin: 0.4rem 0; padding-left: 1.5rem; }
+.growth-report-body li { margin: 0.15rem 0; }
+.growth-report-body blockquote { margin: 0.5rem 0; padding: 0.4rem 0.8rem; border-left: 3px solid #c5b358; background: #fff8dc; color: #555; }
+.growth-report-body hr { margin: 1rem 0; border: 0; border-top: 1px solid #d8d8ce; }
+.growth-report-body code { background: #eee; padding: 0.1rem 0.35rem; border-radius: 3px; font-family: "SF Mono", Menlo, monospace; font-size: 0.92em; }
+.growth-report-body strong { color: #222; }
+.growth-report-body table { border-collapse: collapse; margin: 0.5rem 0; }
+.growth-report-body th, .growth-report-body td { border: 1px solid #d8d8ce; padding: 0.3rem 0.5rem; }
+.growth-report-body th { background: #f0f0e8; }
+
+/* ─── v2.5 HITL: agent-question form inside task detail panel ──────── */
+.agent-question-form {
+  background: #fffaf0;
+  border: 1px solid #f5d57b;
+  border-radius: 5px;
+  padding: 0.8rem 1rem;
+  margin-bottom: 0.8rem;
+}
+.agent-question-form .aq-header {
+  margin-bottom: 0.6rem;
+  color: #7a5500;
+}
+.agent-question-form .aq-context {
+  margin: 0.3rem 0 0;
+  font-size: 0.9rem;
+  color: #886;
+}
+.agent-question-form .aq-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+.agent-question-form .aq-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+.agent-question-form .aq-field > span {
+  font-weight: 500;
+  color: #444;
+}
+.agent-question-form .aq-field input,
+.agent-question-form .aq-field textarea {
+  font-family: inherit;
+  font-size: 0.95rem;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #d9d6c2;
+  border-radius: 3px;
+  background: #fff;
+}
+.agent-question-form .aq-field textarea {
+  resize: vertical;
+}
+.agent-question-form .aq-actions {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.agent-question-form .aq-actions button.primary {
+  background: #2a7;
+  color: #fff;
+  border: 0;
+  padding: 0.5rem 1rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font-weight: 500;
+}
+.agent-question-form .aq-actions button.primary:hover { background: #1c6; }
+.agent-question-form .aq-actions button.secondary {
+  background: #fff;
+  color: #666;
+  border: 1px solid #ccc;
+  padding: 0.5rem 1rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.agent-question-form .aq-actions button.secondary:hover { background: #f6f6f0; }
+.agent-question-form .aq-msg { font-size: 0.85rem; }
+.agent-question-form .aq-msg.ok { color: #2a7; }
+.agent-question-form .aq-msg.err { color: #c33; }
+
+/* tabbar badge — pending agent-questions count */
+.tabbar-btn .tab-badge {
+  display: inline-block;
+  background: #c33;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  margin-left: 0.4rem;
+  padding: 0.05rem 0.45rem;
+  border-radius: 999px;
+  min-width: 1.1rem;
+  text-align: center;
+  vertical-align: middle;
+}

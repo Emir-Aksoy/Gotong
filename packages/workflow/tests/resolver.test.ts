@@ -111,3 +111,34 @@ describe('resolveRefs — inline templating', () => {
     expect(resolveRefs('no refs here', ctx({}))).toBe('no refs here')
   })
 })
+
+// v2.5 — `$trigger.from` lets workflow yaml thread the originating
+// admin's ParticipantId through to a step's payload, so a HITL agent
+// can dispatch a follow-up question back to that admin.
+describe('resolveRefs — $trigger.from (v2.5)', () => {
+  function withFrom(from: string | undefined): ResolutionContext {
+    return {
+      triggerPayload: { case_id: 'self' },
+      triggerFrom: from,
+      stepOutputs: new Map(),
+    }
+  }
+
+  it('resolves $trigger.from to the originating participant id', () => {
+    expect(resolveRefs('$trigger.from', withFrom('admin-abc'))).toBe('admin-abc')
+  })
+
+  it('throws WorkflowRefError when triggerFrom is unset (pre-v2.5 runs)', () => {
+    expect(() => resolveRefs('$trigger.from', withFrom(undefined))).toThrow(WorkflowRefError)
+  })
+
+  it('rejects further dot-path after $trigger.from (it is a scalar)', () => {
+    expect(() => resolveRefs('$trigger.from.foo', withFrom('admin-abc'))).toThrow(WorkflowRefError)
+  })
+
+  it('still supports $trigger.payload alongside $trigger.from in the same context', () => {
+    const c = withFrom('admin-abc')
+    expect(resolveRefs('$trigger.payload.case_id', c)).toBe('self')
+    expect(resolveRefs('$trigger.from', c)).toBe('admin-abc')
+  })
+})

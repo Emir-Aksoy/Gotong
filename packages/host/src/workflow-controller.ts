@@ -55,6 +55,15 @@ export interface WorkflowSummary {
   name?: string
   description?: string
   triggerCapability: string
+  /**
+   * Optional UI form schema, lifted from the workflow definition's
+   * `trigger.payloadSchema`. When present, the admin UI renders a
+   * workflow-specific dispatch form instead of the generic JSON
+   * textarea. Absent for legacy workflows — they fall back to the
+   * generic form. Pass-through; the host doesn't enforce shape
+   * (the workflow parser already did).
+   */
+  payloadSchema?: unknown
   stepCount: number
   file: string | null
 }
@@ -312,6 +321,9 @@ export class WorkflowController {
     }
     if (w.definition.name) out.name = w.definition.name
     if (w.definition.description) out.description = w.definition.description
+    if (w.definition.trigger.payloadSchema) {
+      out.payloadSchema = w.definition.trigger.payloadSchema
+    }
     return out
   }
 }

@@ -74,6 +74,7 @@ import { serveWebSocket } from '@aipehub/transport-ws'
 import { serveWeb } from '@aipehub/web'
 
 import { LocalAgentPool } from './local-agent-pool.js'
+import { GrowthReportsAdmin } from './services/growth-reports-admin.js'
 import {
   BINARY_SAFE_PLUGINS,
   bootstrapServices,
@@ -409,6 +410,17 @@ async function main(): Promise<void> {
   const localAgents = new LocalAgentPool({ hub, space, services })
   await localAgents.start()
 
+  // Growth-reports admin surface — only meaningful if the
+  // personal-growth team is loaded. The accessor closure
+  // re-resolves on every web call so admin/restart of the
+  // synthesist agent picks up cleanly.
+  const growthReports = new GrowthReportsAdmin({
+    artifactAccessor: () => {
+      const ctx = localAgents.liveServicesFor('growth-synthesist')
+      return ctx?.artifact
+    },
+  })
+
   // Workflow runners. Optional — the loader silently no-ops when the
   // directory doesn't exist, so users who aren't using workflows see no
   // extra log output. Errors are reported per-file; one bad workflow
@@ -459,6 +471,7 @@ async function main(): Promise<void> {
     // services may be undefined if bootstrap failed; serveWeb handles
     // that by responding 503 on the /api/admin/services/* routes.
     ...(services ? { services: services.asAdminSurface() } : {}),
+    growthReports,
     ...(allowedHosts ? { allowedHosts } : {}),
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },
     readinessGate: { isReady: () => bootReady },

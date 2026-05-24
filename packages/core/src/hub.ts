@@ -1,6 +1,13 @@
 import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 
 import { MessageBus } from './bus.js'
+import {
+  FeedbackLedger,
+  FileFeedbackStorage,
+  MemoryFeedbackStorage,
+  ReputationStore,
+} from './feedback/index.js'
 import { createLogger } from './logger.js'
 import { Registry } from './registry.js'
 import { DefaultScheduler, type CancelNotifier, type Scheduler, type TaskInvoker } from './scheduler.js'
@@ -78,6 +85,28 @@ export class Hub {
   readonly bus: MessageBus
   readonly transcript: Transcript
   readonly space?: Space
+  /**
+   * Outbound feedback ledger. Append-only event-sourced jsonl backing
+   * the hub-mesh feedback system (M5+). When the hub is bound to a
+   * `Space`, this writes to `<space>/feedback/outbound.jsonl`;
+   * otherwise (e.g. `Hub.inMemory()`) it uses an in-process store
+   * that is lost on hub disposal.
+   */
+  readonly feedback: FeedbackLedger
+  /**
+   * INBOUND feedback ledger — evaluations OTHER hubs have written
+   * about us, fetched over a HubLink via the pull protocol (M6).
+   * Same schema as `feedback`; lives at `<space>/feedback/inbound.jsonl`.
+   * Read by `hub.feedback`-style queries on the receiving end (M8).
+   */
+  readonly inboundFeedback: FeedbackLedger
+  /**
+   * Per-peer reputation derived from the feedback ledger (M5b). Drives
+   * the scheduler's capability-dispatch ranking: high-reputation peers
+   * are tried first. Persisted to `<space>/feedback/reputation/<id>.json`
+   * when bound to a Space.
+   */
+  readonly reputation: ReputationStore
   private readonly scheduler: Scheduler
   private readonly storage: Storage
   private readonly idGen: () => string
@@ -101,6 +130,36 @@ export class Hub {
     this.now = config.now ?? (() => Date.now())
     this.transcript = new Transcript(this.storage)
     this.registry = new Registry()
+    this.feedback = new FeedbackLedger(
+      this.space
+        ? new FileFeedbackStorage({ dir: join(this.space.root, 'feedback') })
+        : new MemoryFeedbackStorage(),
+    )
+    this.inboundFeedback = new FeedbackLedger(
+      this.space
+        ? new FileFeedbackStorage({
+            dir: join(this.space.root, 'feedback'),
+            file: 'inbound.jsonl',
+          })
+        : new MemoryFeedbackStorage(),
+    )
+    this.reputation = new ReputationStore({
+      dir: this.space ? join(this.space.root, 'feedback', 'reputation') : undefined,
+    })
+    // Bootstrap reputation from existing ledger entries (e.g. after a
+    // restart where on-disk reputation may have lagged behind ledger
+    // appends). Cheap when ledger is empty / small.
+    this.reputation.rebuild(this.feedback.query())
+    // Wire the live feedback → reputation pipe so every future append
+    // / rejection updates the score automatically.
+    this.feedback.setHooks({
+      onAppend: (entry) => this.reputation.recordEntry(entry.toHub, entry.rating),
+      onRejected: (entry) =>
+        this.reputation.recordRejection(
+          entry.toHub,
+          this.feedback.query({ toHub: entry.toHub }),
+        ),
+    })
 
     this.bus = new MessageBus(async (recipientId, msg) => {
       const p = this.registry.get(recipientId)
@@ -135,7 +194,14 @@ export class Hub {
       }
     }
 
-    const factory = config.schedulerFactory ?? ((r, inv, can) => new DefaultScheduler(r, inv, can))
+    // Inject reputation lookup into the default scheduler so capability
+    // dispatch ranks peers by score (M5b). Custom schedulers passed via
+    // `schedulerFactory` are responsible for using reputation
+    // themselves if they want it.
+    const factory =
+      config.schedulerFactory ??
+      ((r, inv, can) =>
+        new DefaultScheduler(r, inv, can, (id) => this.reputation.scoreOf(id)))
     this.scheduler = factory(this.registry, invoke, notifyCancel)
   }
 

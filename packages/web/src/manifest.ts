@@ -34,6 +34,42 @@ import type {
 export const AGENT_SCHEMA_V1 = 'aipehub.agent/v1'
 export const TEAM_SCHEMA_V1 = 'aipehub.team/v1'
 
+/**
+ * `aipehub.bundle/v1` — combine one team + one workflow + (optional)
+ * inline default settings into a single yaml the user imports once.
+ *
+ * Motivation: shipping the personal-growth experience as a downloadable
+ * required users to import templates/teams/personal-growth-team.yaml,
+ * THEN templates/workflows/personal-growth-flow.yaml, THEN paste a key
+ * into each of 7 agents. Bundle collapses all three into one upload.
+ *
+ * Shape:
+ *
+ *   schema: aipehub.bundle/v1
+ *   bundle:
+ *     name: 个人成长
+ *     description: …
+ *     team:        # required — uses the same shape as aipehub.team/v1's `team:`
+ *       name: …
+ *       agents: [ … ]
+ *     workflow:    # optional — same shape as aipehub.workflow/v1's `workflow:`
+ *       id: …
+ *       trigger: …
+ *       steps: [ … ]
+ *     defaults:    # optional — UI hints for the import dialog
+ *       apiKeyPrompt:        # if set, UI asks "paste your <name> API key"
+ *         provider: openai-compatible
+ *         baseURL: https://api.deepseek.com/v1
+ *         label: DeepSeek
+ *
+ * Parsing here returns the team agents (so the existing import-agents
+ * endpoint can upsert them) plus an opaque `workflowYaml` blob (re-
+ * serialized) the server-side bundle endpoint forwards to the workflow
+ * importer. We don't validate the workflow shape here — that's the
+ * workflow runtime's job at load time.
+ */
+export const BUNDLE_SCHEMA_V1 = 'aipehub.bundle/v1'
+
 export interface ParsedAgent {
   id: string
   capabilities: string[]
@@ -46,6 +82,23 @@ export interface ParsedManifest {
   teamName?: string
   teamDescription?: string
   agents: ParsedAgent[]
+}
+
+/** Hint for the admin UI's bundle-import dialog. */
+export interface BundleApiKeyPrompt {
+  provider: string
+  baseURL?: string
+  label?: string
+}
+
+export interface ParsedBundle {
+  schema: typeof BUNDLE_SCHEMA_V1
+  bundleName?: string
+  bundleDescription?: string
+  team: ParsedManifest
+  /** Raw workflow yaml (re-serialized) to forward to the workflow importer. */
+  workflowYaml?: string
+  apiKeyPrompt?: BundleApiKeyPrompt
 }
 
 export class ManifestError extends Error {
@@ -136,6 +189,129 @@ export function parseManifest(raw: string): ParsedManifest {
   )
 }
 
+/**
+ * Parse a textual bundle manifest. Returns the team (already validated)
+ * + the raw workflow yaml + UI hints. Throws `ManifestError` on any
+ * structural issue.
+ *
+ * The workflow block is re-serialized as yaml so we can hand it to the
+ * workflow runner's importer without coupling on its parser. The
+ * workflow runner is the source of truth for `aipehub.workflow/v1`
+ * validation; this parser stays deliberately dumb about it.
+ */
+export function parseBundle(raw: string): ParsedBundle {
+  const trimmed = raw.trim()
+  if (trimmed.length === 0) throw new ManifestError('bundle is empty')
+
+  let doc: unknown
+  if (trimmed.startsWith('{') || trimmed.startsWith('[')) {
+    try {
+      doc = JSON.parse(trimmed)
+    } catch (err) {
+      throw new ManifestError(
+        `bundle is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+  } else {
+    try {
+      doc = parseYaml(trimmed)
+    } catch (err) {
+      throw new ManifestError(
+        `bundle is not valid YAML: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
+  }
+
+  if (!doc || typeof doc !== 'object') {
+    throw new ManifestError('bundle must be an object at the top level')
+  }
+  const root = doc as Record<string, unknown>
+  if (root.schema !== BUNDLE_SCHEMA_V1) {
+    throw new ManifestError(
+      `bundle.schema must be '${BUNDLE_SCHEMA_V1}' — got '${String(root.schema)}'`,
+    )
+  }
+  const bundle = root.bundle
+  if (!bundle || typeof bundle !== 'object') {
+    throw new ManifestError(`bundle.bundle is required (object)`)
+  }
+  const b = bundle as Record<string, unknown>
+
+  if (!b.team || typeof b.team !== 'object') {
+    throw new ManifestError(`bundle.team is required (object)`)
+  }
+  // Re-use the team parser by wrapping. parseManifest is the one and
+  // only source of agent validation — bundle inherits its rules for free.
+  const teamManifestYaml = `schema: ${TEAM_SCHEMA_V1}\nteam:\n` +
+    indentYaml(stringifyYamlSafe(b.team), 2)
+  const team = parseManifest(teamManifestYaml)
+
+  const out: ParsedBundle = {
+    schema: BUNDLE_SCHEMA_V1,
+    team,
+  }
+  if (typeof b.name === 'string') out.bundleName = b.name
+  if (typeof b.description === 'string') out.bundleDescription = b.description
+
+  // Workflow is optional — a bundle that ships only agents is valid
+  // (rare but legal). When present, re-serialize so the workflow
+  // importer sees an aipehub.workflow/v1 yaml verbatim.
+  if (b.workflow !== undefined) {
+    if (!b.workflow || typeof b.workflow !== 'object') {
+      throw new ManifestError(`bundle.workflow must be an object when present`)
+    }
+    out.workflowYaml = `schema: aipehub.workflow/v1\nworkflow:\n` +
+      indentYaml(stringifyYamlSafe(b.workflow), 2)
+  }
+
+  // Optional defaults — pure UI hints, parser doesn't enforce shape
+  // beyond "looks like a dict and has the expected keys."
+  if (b.defaults !== undefined) {
+    if (!b.defaults || typeof b.defaults !== 'object') {
+      throw new ManifestError(`bundle.defaults must be an object when present`)
+    }
+    const d = b.defaults as Record<string, unknown>
+    if (d.apiKeyPrompt !== undefined) {
+      if (!d.apiKeyPrompt || typeof d.apiKeyPrompt !== 'object') {
+        throw new ManifestError(`bundle.defaults.apiKeyPrompt must be an object`)
+      }
+      const p = d.apiKeyPrompt as Record<string, unknown>
+      if (typeof p.provider !== 'string' || p.provider.length === 0) {
+        throw new ManifestError(`bundle.defaults.apiKeyPrompt.provider is required`)
+      }
+      const prompt: BundleApiKeyPrompt = { provider: p.provider }
+      if (typeof p.baseURL === 'string') prompt.baseURL = p.baseURL
+      if (typeof p.label === 'string') prompt.label = p.label
+      out.apiKeyPrompt = prompt
+    }
+  }
+
+  return out
+}
+
+/**
+ * Tiny YAML serializer for the re-wrap step in `parseBundle`. We
+ * deliberately don't import a heavier yaml emitter — the parser already
+ * has `yaml` (parse only), and we just need to round-trip a Plain Old
+ * JS Object out as yaml that parseYaml can read again.
+ *
+ * Strategy: lean on `JSON.stringify` and let parseYaml's JSON tolerance
+ * handle it. (YAML is a superset of JSON; any valid JSON object is a
+ * valid YAML document.) That keeps us off a yaml-emitter dependency.
+ */
+function stringifyYamlSafe(value: unknown): string {
+  return JSON.stringify(value, null, 2)
+}
+
+/**
+ * Prepend `count` spaces to every line. Used so the inlined JSON
+ * payload sits under its parent key in the wrapper yaml document.
+ */
+function indentYaml(text: string, count: number): string {
+  const pad = ' '.repeat(count)
+  return text.split('\n').map((l) => pad + l).join('\n')
+}
+
 /** Validate one agent dict in either schema. `path` is for error messages. */
 function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
   if (typeof a.id !== 'string' || a.id.length === 0) {
@@ -162,8 +338,10 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
     capabilities.push(c)
   }
   const kind = a.kind ?? 'llm'
-  if (kind !== 'llm') {
-    throw new ManifestError(`${path}.kind: only 'llm' is supported today, got '${String(kind)}'`)
+  if (kind !== 'llm' && kind !== 'personal-growth') {
+    throw new ManifestError(
+      `${path}.kind: must be 'llm' or 'personal-growth' (the only kinds the host knows how to spawn today) — got '${String(kind)}'`,
+    )
   }
   const provider = a.provider
   if (
@@ -191,7 +369,7 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
     }
   }
   const managed: ManagedAgentSpec = {
-    kind: 'llm',
+    kind,
     provider,
     system,
   }

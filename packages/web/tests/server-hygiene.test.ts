@@ -309,3 +309,47 @@ describe('H21: cookie path is rate-limited (failed lookups only)', () => {
     expect(bearerRes.status).toBe(200)
   })
 })
+
+// -------------------------------------------------------------------------
+// H22 — symmetric fix for the Bearer auth path. The original H21 fix only
+// migrated the cookie branch to peek + recordFailure, leaving the Bearer
+// branch on raw `check()` — which burns 1 quota point per request, valid
+// or not. Any legitimate Bearer client polling more than `max` times per
+// window (e.g. the admin SPA polling workflow runs every 5s, or a CI
+// script driving the bundle-import endpoint) would 429 after `max`
+// requests despite never having a single auth failure. Caught while
+// running scripts/test-fresh-space-e2e.mjs — the workflow-runs poll loop
+// died at request #11.
+// -------------------------------------------------------------------------
+describe('H22: Bearer path is peek + recordFailure (matches cookie path)', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    b = await boot({ adminLoginRateLimit: { max: 2, windowSec: 60 } })
+  })
+  afterEach(async () => { await b.server.close(); await rm(b.tmp, { recursive: true, force: true }) })
+
+  it('does NOT consume budget on a successful Bearer lookup', async () => {
+    // Budget = 2. Pre-H22 fix the 3rd authenticated request would have
+    // 429'd because check() consumed quota on every hit. After the fix,
+    // valid tokens are free — only verifyAdminToken misses cost quota.
+    for (let i = 0; i < 5; i++) {
+      const ok = await fetch(`${b.baseUrl}/api/admin/metrics`, {
+        headers: { authorization: `Bearer ${b.adminToken}` },
+      })
+      expect(ok.status).toBe(200)
+    }
+  })
+
+  it('returns 429 after enough invalid Bearer tokens from the same IP', async () => {
+    // The security property must be preserved: an attacker spraying
+    // random tokens still gets cut off after `max` failures.
+    const bogus = (token: string) =>
+      fetch(`${b.baseUrl}/api/admin/metrics`, {
+        headers: { authorization: `Bearer ${token}` },
+      })
+    expect((await bogus('not-a-real-token-1')).status).toBe(401)
+    expect((await bogus('not-a-real-token-2')).status).toBe(401)
+    // 3rd attempt is over budget — should 429, not 401.
+    expect((await bogus('not-a-real-token-3')).status).toBe(429)
+  })
+})
