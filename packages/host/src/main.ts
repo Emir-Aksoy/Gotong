@@ -66,6 +66,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import { Hub, Space, createLogger, type SpaceConfig, type TranscriptEntry } from '@aipehub/core'
+import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
 
 import { BAKED_VERSION } from './version.js'
 
@@ -346,6 +347,48 @@ async function main(): Promise<void> {
   }
   const config = await space.config()
 
+  // v4 identity layer. Opens (or creates) `<space>/identity.sqlite` and
+  // bootstraps an `owner` user. When this is the very first init we
+  // also migrate the freshly-minted v3 admin token into the identity
+  // store as an `admin_token` credential, so the URL printed at the
+  // bottom of this boot also works against the new IdentityStore
+  // surface (Phase 2.4 will wire web routes to use both paths).
+  //
+  // Bootstrap is idempotent: on every subsequent boot it returns
+  // `bootstrapped: false` and never mutates. Upgrades from a v3 host
+  // that's already past first-init therefore see no owner user with
+  // a credential — they keep authenticating via the v3 admin URL
+  // (Space.admins) until they explicitly issue themselves a password
+  // / api_key in the (Phase 2.3) admin UI.
+  let identity: IdentityStore | undefined
+  try {
+    identity = openIdentityStore({
+      dbPath: join(SPACE_DIR, 'identity.sqlite'),
+    })
+    const bootstrapInput: Parameters<IdentityStore['bootstrap']>[0] = {
+      ownerEmail: env('AIPE_OWNER_EMAIL', 'admin@local')!,
+      ownerDisplayName: env('AIPE_ADMIN_DISPLAY_NAME', 'Operator')!,
+    }
+    if (adminToken !== null) bootstrapInput.adminToken = adminToken
+    const ib = identity.bootstrap(bootstrapInput)
+    if (ib.bootstrapped) {
+      log.info('identity: bootstrapped owner', {
+        userId: ib.ownerUserId,
+        adminTokenMigrated: ib.adminTokenMigrated,
+      })
+    } else {
+      log.info('identity: already populated', {
+        users: identity.countUsers(),
+      })
+    }
+  } catch (err) {
+    // Degrade gracefully: if SQLite open / migrate failed, log loudly
+    // but keep the host up. Pre-v4 auth paths (Space.admins) still
+    // work — the operator just loses access to v4-only surfaces.
+    log.error('identity: bootstrap failed (continuing without v4 identity)', { err })
+    identity = undefined
+  }
+
   const hub = new Hub({ space })
   await hub.start()
 
@@ -570,6 +613,9 @@ async function main(): Promise<void> {
     }
     if (services) {
       try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }
+    }
+    if (identity) {
+      try { identity.close() } catch (err) { log.error('identity close error', { err }) }
     }
     try { await hub.stop() } catch (err) { log.error('hub stop error', { err }) }
     log.info('stopped cleanly')

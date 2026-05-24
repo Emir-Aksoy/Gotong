@@ -264,6 +264,9 @@ importers:
       '@aipehub/core':
         specifier: workspace:*
         version: link:../core
+      '@aipehub/identity':
+        specifier: workspace:*
+        version: link:../identity
       '@aipehub/llm':
         specifier: workspace:*
         version: link:../llm
