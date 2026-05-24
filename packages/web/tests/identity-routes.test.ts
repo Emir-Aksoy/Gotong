@@ -686,3 +686,570 @@ describe('bearer session TTL (V4-AUDIT-04)', () => {
     // covered by a unit-level review of resolveV4Auth.
   })
 })
+
+// ---------------------------------------------------------------------------
+// Phase 3 — invitation flow
+//
+// Two endpoint families to cover:
+//   - /api/admin/identity/invites      (owner-gated CRUD)
+//   - /api/invites/:token              (anonymous lookup + accept)
+// ---------------------------------------------------------------------------
+
+// Common helper — POST a fresh invite via the owner path, return {token, id}.
+async function mintInvite(
+  b: BootResult,
+  email: string,
+  extras: { role?: string; displayName?: string; ttlMs?: number } = {},
+): Promise<{ token: string; id: string; role: string }> {
+  const body: Record<string, unknown> = { email }
+  if (extras.role) body.role = extras.role
+  if (extras.displayName) body.displayName = extras.displayName
+  if (extras.ttlMs !== undefined) body.ttlMs = extras.ttlMs
+  const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+    body: JSON.stringify(body),
+  })
+  if (!r.ok) {
+    const text = await r.text()
+    throw new Error(`mintInvite failed (${r.status}): ${text}`)
+  }
+  const json = (await r.json()) as {
+    token: string
+    invitation: { id: string; role: string }
+  }
+  return { token: json.token, id: json.invitation.id, role: json.invitation.role }
+}
+
+describe('/api/admin/identity/invites — service availability + gate', () => {
+  it('returns 503 when serveWeb was not given an identity store', async () => {
+    const b = await boot({ withIdentity: false })
+    try {
+      const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
+        headers: { cookie: b.adminCookie },
+      })
+      // No identity store at all → the top-level wiring in server.ts
+      // refuses with 503 BEFORE reaching the route dispatcher.
+      expect(r.status).toBe(503)
+    } finally {
+      await teardown(b)
+    }
+  })
+
+  it('rejects unauthenticated invite create with 403', async () => {
+    const b = await boot()
+    try {
+      const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ email: 'bystander@team.test' }),
+      })
+      expect(r.status).toBe(403)
+    } finally {
+      await teardown(b)
+    }
+  })
+})
+
+describe('/api/admin/identity/invites — create / list / revoke', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    b = await boot()
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('POST creates an invite + returns token ONCE (prefixed inv_)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      body: JSON.stringify({ email: 'newhire@team.test', role: 'member' }),
+    })
+    expect(r.status).toBe(201)
+    const body = (await r.json()) as {
+      token: string
+      invitation: {
+        id: string
+        email: string
+        role: string
+        status: string
+        expiresAt: number
+      }
+      warning: string
+    }
+    expect(body.token).toMatch(/^inv_/)
+    expect(body.invitation.email).toBe('newhire@team.test')
+    expect(body.invitation.role).toBe('member')
+    expect(body.invitation.status).toBe('pending')
+    // Default TTL is 24h — expiresAt should be ~24h in the future.
+    const delta = body.invitation.expiresAt - Date.now()
+    expect(delta).toBeGreaterThan(23 * 60 * 60 * 1000)
+    expect(delta).toBeLessThan(25 * 60 * 60 * 1000)
+    expect(body.warning).toMatch(/only shown once/)
+  })
+
+  it('POST refuses role=owner with 400 invalid_role', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      body: JSON.stringify({ email: 'evilowner@team.test', role: 'owner' }),
+    })
+    expect(r.status).toBe(400)
+    const body = (await r.json()) as { code: string }
+    expect(body.code).toBe('invalid_role')
+  })
+
+  it('POST refuses email that already belongs to an existing user (409)', async () => {
+    // admin@local was bootstrapped at boot()
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      body: JSON.stringify({ email: 'admin@local' }),
+    })
+    expect(r.status).toBe(409)
+    const body = (await r.json()) as { code: string }
+    expect(body.code).toBe('duplicate_email')
+  })
+
+  it('POST refuses second pending invite for same email (409 invitation_pending_exists)', async () => {
+    await mintInvite(b, 'twice@team.test')
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      body: JSON.stringify({ email: 'twice@team.test' }),
+    })
+    expect(r.status).toBe(409)
+    const body = (await r.json()) as { code: string }
+    expect(body.code).toBe('invitation_pending_exists')
+  })
+
+  it('GET lists all invites (3 created) all in pending status', async () => {
+    await mintInvite(b, 'a@team.test')
+    await mintInvite(b, 'b@team.test')
+    await mintInvite(b, 'c@team.test')
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
+      headers: { cookie: b.adminCookie },
+    })
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as {
+      invitations: Array<{ email: string; status: string }>
+    }
+    expect(body.invitations.length).toBe(3)
+    // We don't pin the inter-row order: when all three inserts land in
+    // the same ms, only the rowid tie-breaker distinguishes them, and
+    // that breaks ties deterministically but tells us nothing about
+    // "what the operator intuitively expects." Assert the set instead.
+    const emails = body.invitations.map((i) => i.email).sort()
+    expect(emails).toEqual(['a@team.test', 'b@team.test', 'c@team.test'])
+    expect(body.invitations.every((i) => i.status === 'pending')).toBe(true)
+  })
+
+  it('GET filters by status=expired (overlay on TTL-elapsed rows)', async () => {
+    // Mint with the minimum 60_000ms TTL (clamped by the store) then
+    // we can't actually wait for it to expire in unit tests. Instead
+    // we mint with the legal minimum and rely on the SAME row showing
+    // up under status=pending. Then create a SECOND invite that we
+    // immediately revoke, and assert the status filter splits them.
+    await mintInvite(b, 'still-pending@team.test')
+    const toRevoke = await mintInvite(b, 'will-revoke@team.test')
+    const rev = await fetch(
+      `${b.baseUrl}/api/admin/identity/invites/${toRevoke.id}`,
+      { method: 'DELETE', headers: { cookie: b.adminCookie } },
+    )
+    expect(rev.status).toBe(200)
+
+    const pending = await fetch(
+      `${b.baseUrl}/api/admin/identity/invites?status=pending`,
+      { headers: { cookie: b.adminCookie } },
+    )
+    const pendingBody = (await pending.json()) as {
+      invitations: Array<{ email: string }>
+    }
+    expect(pendingBody.invitations.map((i) => i.email)).toEqual([
+      'still-pending@team.test',
+    ])
+
+    const revoked = await fetch(
+      `${b.baseUrl}/api/admin/identity/invites?status=revoked`,
+      { headers: { cookie: b.adminCookie } },
+    )
+    const revokedBody = (await revoked.json()) as {
+      invitations: Array<{ email: string }>
+    }
+    expect(revokedBody.invitations.map((i) => i.email)).toEqual([
+      'will-revoke@team.test',
+    ])
+  })
+
+  it('GET filters by email (exact, case-insensitive)', async () => {
+    await mintInvite(b, 'Bob@team.test')
+    await mintInvite(b, 'carol@team.test')
+    const r = await fetch(
+      `${b.baseUrl}/api/admin/identity/invites?email=BOB@team.test`,
+      { headers: { cookie: b.adminCookie } },
+    )
+    const body = (await r.json()) as { invitations: Array<{ email: string }> }
+    expect(body.invitations.length).toBe(1)
+    // Server normalises to lowercase on insert.
+    expect(body.invitations[0]!.email).toBe('bob@team.test')
+  })
+
+  it('GET rejects invalid status filter with 400 invalid_input', async () => {
+    const r = await fetch(
+      `${b.baseUrl}/api/admin/identity/invites?status=bogus`,
+      { headers: { cookie: b.adminCookie } },
+    )
+    expect(r.status).toBe(400)
+    const body = (await r.json()) as { code: string }
+    expect(body.code).toBe('invalid_input')
+  })
+
+  it('DELETE marks a pending invite revoked', async () => {
+    const created = await mintInvite(b, 'goodbye@team.test')
+    const r = await fetch(
+      `${b.baseUrl}/api/admin/identity/invites/${created.id}`,
+      { method: 'DELETE', headers: { cookie: b.adminCookie } },
+    )
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { invitation: { status: string } }
+    expect(body.invitation.status).toBe('revoked')
+  })
+
+  it('DELETE on unknown id → 404 invitation_not_found', async () => {
+    const r = await fetch(
+      `${b.baseUrl}/api/admin/identity/invites/does-not-exist`,
+      { method: 'DELETE', headers: { cookie: b.adminCookie } },
+    )
+    expect(r.status).toBe(404)
+    const body = (await r.json()) as { code: string }
+    expect(body.code).toBe('invitation_not_found')
+  })
+
+  it('audit log records create_invitation + revoke_invitation', async () => {
+    const created = await mintInvite(b, 'audit-me@team.test')
+    await fetch(`${b.baseUrl}/api/admin/identity/invites/${created.id}`, {
+      method: 'DELETE',
+      headers: { cookie: b.adminCookie },
+    })
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/audit`, {
+      headers: { cookie: b.adminCookie },
+    })
+    const body = (await r.json()) as {
+      entries: Array<{
+        action: string
+        metadata: { email?: string; invitationId?: string } | null
+      }>
+    }
+    const actions = body.entries.map((e) => e.action)
+    expect(actions).toContain('create_invitation')
+    expect(actions).toContain('revoke_invitation')
+    const createRow = body.entries.find((e) => e.action === 'create_invitation')!
+    expect(createRow.metadata?.email).toBe('audit-me@team.test')
+    expect(createRow.metadata?.invitationId).toBe(created.id)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// /api/invites/* — anonymous lookup + accept
+// ---------------------------------------------------------------------------
+
+describe('/api/invites/:token — anonymous lookup', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    b = await boot()
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('GET unknown token → 404 invitation_not_found', async () => {
+    const r = await fetch(`${b.baseUrl}/api/invites/inv_not-a-real-token`)
+    expect(r.status).toBe(404)
+    const body = (await r.json()) as { code: string }
+    expect(body.code).toBe('invitation_not_found')
+  })
+
+  it('GET valid token → returns invitation WITHOUT invitedBy field', async () => {
+    const minted = await mintInvite(b, 'lookup@team.test', { displayName: 'Lookup User' })
+    const r = await fetch(`${b.baseUrl}/api/invites/${minted.token}`)
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as {
+      invitation: Record<string, unknown>
+    }
+    expect(body.invitation.email).toBe('lookup@team.test')
+    expect(body.invitation.role).toBe('member')
+    expect(body.invitation.status).toBe('pending')
+    expect(body.invitation.displayName).toBe('Lookup User')
+    // invitedBy is intentionally stripped — exposing the inviter's
+    // user id to an unauthenticated stranger leaks org structure.
+    expect('invitedBy' in body.invitation).toBe(false)
+  })
+
+  it('GET on revoked invite → still returns invitation with status=revoked', async () => {
+    const minted = await mintInvite(b, 'will-be-revoked@team.test')
+    await fetch(`${b.baseUrl}/api/admin/identity/invites/${minted.id}`, {
+      method: 'DELETE',
+      headers: { cookie: b.adminCookie },
+    })
+    const r = await fetch(`${b.baseUrl}/api/invites/${minted.token}`)
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { invitation: { status: string } }
+    expect(body.invitation.status).toBe('revoked')
+  })
+})
+
+describe('/api/invites/:token/accept — anonymous accept', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    b = await boot()
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('POST with valid token + password → mints user + session cookie, /me works', async () => {
+    const minted = await mintInvite(b, 'accept-me@team.test', {
+      displayName: 'Default Name',
+    })
+    const acc = await fetch(`${b.baseUrl}/api/invites/${minted.token}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'strong-password-123' }),
+    })
+    expect(acc.status).toBe(200)
+    const accBody = (await acc.json()) as {
+      ok: boolean
+      user: { id: string; email: string; displayName: string | null }
+      role: string
+    }
+    expect(accBody.ok).toBe(true)
+    expect(accBody.user.email).toBe('accept-me@team.test')
+    expect(accBody.user.displayName).toBe('Default Name')
+    expect(accBody.role).toBe('member')
+
+    // Cookie header should be present.
+    const sc = acc.headers.get('set-cookie') || ''
+    expect(sc).toContain('aipehub_identity=')
+    expect(sc).toContain('HttpOnly')
+
+    // Take the cookie and hit /me — should report the new user.
+    const ck = sc.split(';')[0]!
+    const me = await fetch(`${b.baseUrl}/api/admin/identity/me`, {
+      headers: { cookie: ck },
+    })
+    expect(me.status).toBe(200)
+    const meBody = (await me.json()) as {
+      user: { id: string; email: string }
+      role: string
+      authSource: string
+    }
+    expect(meBody.user.email).toBe('accept-me@team.test')
+    expect(meBody.role).toBe('member')
+    expect(meBody.authSource).toBe('v4-session')
+  })
+
+  it('POST overrides displayName from body when provided', async () => {
+    const minted = await mintInvite(b, 'rename@team.test', { displayName: 'From Invite' })
+    const acc = await fetch(`${b.baseUrl}/api/invites/${minted.token}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        password: 'strong-password-123',
+        displayName: 'From User',
+      }),
+    })
+    const body = (await acc.json()) as { user: { displayName: string | null } }
+    expect(body.user.displayName).toBe('From User')
+  })
+
+  it('POST twice on the same token → second is 410 invitation_already_used', async () => {
+    const minted = await mintInvite(b, 'double-spend@team.test')
+    const first = await fetch(`${b.baseUrl}/api/invites/${minted.token}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'strong-password-123' }),
+    })
+    expect(first.status).toBe(200)
+    const second = await fetch(`${b.baseUrl}/api/invites/${minted.token}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'another-strong-pw-456' }),
+    })
+    expect(second.status).toBe(410)
+    const body = (await second.json()) as { code: string }
+    expect(body.code).toBe('invitation_already_used')
+  })
+
+  it('POST after revoke → 410 invitation_revoked', async () => {
+    const minted = await mintInvite(b, 'gone@team.test')
+    await fetch(`${b.baseUrl}/api/admin/identity/invites/${minted.id}`, {
+      method: 'DELETE',
+      headers: { cookie: b.adminCookie },
+    })
+    const acc = await fetch(`${b.baseUrl}/api/invites/${minted.token}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'strong-password-123' }),
+    })
+    expect(acc.status).toBe(410)
+    const body = (await acc.json()) as { code: string }
+    expect(body.code).toBe('invitation_revoked')
+  })
+
+  it('POST with weak password → 400, does NOT consume the invite', async () => {
+    const minted = await mintInvite(b, 'weak-pw@team.test')
+    const bad = await fetch(`${b.baseUrl}/api/invites/${minted.token}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'short' }),
+    })
+    expect(bad.status).toBe(400)
+    // The invite should still be pending — verify by accepting again
+    // with a strong password.
+    const good = await fetch(`${b.baseUrl}/api/invites/${minted.token}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'strong-password-123' }),
+    })
+    expect(good.status).toBe(200)
+  })
+
+  it('accepted user can immediately log in with the password they set', async () => {
+    const minted = await mintInvite(b, 'login-after-accept@team.test')
+    await fetch(`${b.baseUrl}/api/invites/${minted.token}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'strong-password-123' }),
+    })
+    const login = await fetch(`${b.baseUrl}/api/admin/identity/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        email: 'login-after-accept@team.test',
+        password: 'strong-password-123',
+      }),
+    })
+    expect(login.status).toBe(200)
+  })
+
+  it('audit log records accept_invitation with the new user as actor', async () => {
+    const minted = await mintInvite(b, 'audit-accept@team.test')
+    const acc = await fetch(`${b.baseUrl}/api/invites/${minted.token}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'strong-password-123' }),
+    })
+    const accBody = (await acc.json()) as { user: { id: string } }
+    const newUserId = accBody.user.id
+
+    const audit = await fetch(
+      `${b.baseUrl}/api/admin/identity/audit?action=accept_invitation`,
+      { headers: { cookie: b.adminCookie } },
+    )
+    const body = (await audit.json()) as {
+      entries: Array<{
+        action: string
+        actorUserId: string | null
+        targetUserId: string | null
+        actorSource: string
+        metadata: { invitationId?: string } | null
+      }>
+    }
+    expect(body.entries.length).toBe(1)
+    const row = body.entries[0]!
+    expect(row.action).toBe('accept_invitation')
+    // Self-actor: the freshly-minted user is recorded as both actor + target.
+    expect(row.actorUserId).toBe(newUserId)
+    expect(row.targetUserId).toBe(newUserId)
+    expect(row.actorSource).toBe('anonymous')
+    expect(row.metadata?.invitationId).toBe(minted.id)
+  })
+})
+
+describe('/api/invites/:token/accept — rate limiting', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    // Tight budget so we can prove the limiter without 50 fake requests.
+    b = await boot({ adminLoginRateLimit: { max: 2, windowSec: 60 } })
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('repeated bad-token accepts get rate-limited (429)', async () => {
+    // Two bad attempts inside the budget → 410 (invite not found counts).
+    // Third → 429.
+    const r1 = await fetch(`${b.baseUrl}/api/invites/inv_bogus-1/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'whatever-strong-pw' }),
+    })
+    expect(r1.status).toBe(404)
+    const r2 = await fetch(`${b.baseUrl}/api/invites/inv_bogus-2/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'whatever-strong-pw' }),
+    })
+    expect(r2.status).toBe(404)
+    const r3 = await fetch(`${b.baseUrl}/api/invites/inv_bogus-3/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'whatever-strong-pw' }),
+    })
+    expect(r3.status).toBe(429)
+  })
+
+  it('weak-password attempts do NOT burn the limiter budget', async () => {
+    const minted = await mintInvite(b, 'pw-typo@team.test')
+    // Burn ALL 2 budget slots with weak passwords — these should NOT
+    // count (user typo, not an attack).
+    for (let i = 0; i < 5; i++) {
+      const r = await fetch(`${b.baseUrl}/api/invites/${minted.token}/accept`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ password: 'short' }),
+      })
+      expect(r.status).toBe(400)
+    }
+    // Now the user types a strong password — should still succeed.
+    const ok = await fetch(`${b.baseUrl}/api/invites/${minted.token}/accept`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: 'strong-password-123' }),
+    })
+    expect(ok.status).toBe(200)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// /invite page (static surface) — make sure the html is reachable both
+// with and without a token in the path. Token never reaches the server
+// (it's read from window.location.pathname by invite.js).
+// ---------------------------------------------------------------------------
+
+describe('/invite — static page', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    b = await boot()
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('GET /invite/<token> returns the static accept HTML', async () => {
+    const r = await fetch(`${b.baseUrl}/invite/inv_anything-here`)
+    expect(r.status).toBe(200)
+    const ctype = r.headers.get('content-type') || ''
+    expect(ctype).toContain('text/html')
+    const html = await r.text()
+    // Just confirm we're hitting the right page (not the SPA's 404 fallback).
+    expect(html).toContain('接受邀请')
+    expect(html).toContain('/invite.js')
+  })
+
+  it('GET /invite (no token) also returns the static page', async () => {
+    const r = await fetch(`${b.baseUrl}/invite`)
+    expect(r.status).toBe(200)
+  })
+})

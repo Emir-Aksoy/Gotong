@@ -186,6 +186,83 @@ export interface ListAuditLogQuery {
   action?: string
   /** Filter by target user id. */
   targetUserId?: string
-  /** Filter by success/failure. Unset returns both. */
+  /** Filter by success / failure. Unset returns both. */
   success?: boolean
+}
+
+// ---------------------------------------------------------------------------
+// Invitations (Phase 3 — user invitation flow)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lifecycle of an invitation row.
+ *
+ *   pending  → freshly minted, token still valid.
+ *   accepted → consumer redeemed it (one-shot, terminal).
+ *   revoked  → owner cancelled before redemption (terminal).
+ *   expired  → COMPUTED at read time when `expiresAt < now`. Never
+ *              persisted as a column value — keeps the store free of
+ *              sweeper jobs that mutate rows just to flip a flag.
+ */
+export type InvitationStatus = 'pending' | 'accepted' | 'revoked' | 'expired'
+
+export interface Invitation {
+  id: string
+  email: string
+  role: Role
+  /** v4 user id of the inviter. Null when minted by v3-admin (no v4 binding). */
+  invitedBy: string | null
+  /** Pre-filled display name suggestion shown on the /invite landing page. */
+  displayName: string | null
+  expiresAt: number
+  /**
+   * Effective status. The store overlays `'expired'` on top of the
+   * persisted column when `expiresAt < now` AND the row is still
+   * `'pending'`. `accepted` / `revoked` rows keep their terminal status
+   * regardless of expiry.
+   */
+  status: InvitationStatus
+  createdAt: number
+  acceptedAt: number | null
+  /** Set only when `status === 'accepted'`. */
+  acceptedUserId: string | null
+}
+
+export interface CreateInvitationInput {
+  email: string
+  /** Defaults to 'member'. Cannot mint 'owner' invites — promote post-accept. */
+  role?: Role
+  /** Pre-filled name on the landing page; user can override at accept time. */
+  displayName?: string
+  /** v4 user id of the inviter; null for v3-admin callers. */
+  invitedBy?: string | null
+  /** Time-to-live in ms. Defaults to 24h, clamped to [60_000, 30 days]. */
+  ttlMs?: number
+}
+
+export interface IssuedInvitation {
+  /** Raw token — shown ONCE to the inviter. Delivered out-of-band. */
+  token: string
+  invitation: Invitation
+}
+
+export interface AcceptInvitationInput {
+  /** Raw `inv_*` token from the landing URL. */
+  token: string
+  /** New user's password. Subject to MAX_PASSWORD_LENGTH + scrypt rules. */
+  password: string
+  /** Override the suggested displayName from the invite row. */
+  displayName?: string
+  /** Defaults to 7d (mirrors normal login). */
+  sessionTtlMs?: number
+}
+
+export interface ListInvitationsQuery {
+  /** Filter by effective status. `'expired'` matches pending rows past TTL. */
+  status?: InvitationStatus
+  /** Exact-match (case-insensitive via COLLATE NOCASE). */
+  email?: string
+  /** Newest-first; defaults to 100. Clamped to [1, 500]. */
+  limit?: number
+  offset?: number
 }

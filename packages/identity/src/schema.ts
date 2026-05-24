@@ -121,6 +121,60 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
     `,
   },
+  {
+    // Invitations table (Phase 3 — user invitation flow).
+    //
+    // Each row is a one-time invite that an owner mints for a
+    // prospective user. The raw token is shown to the owner ONCE at
+    // creation (out-of-band delivery: Signal, 1Password, etc) — only
+    // sha256(token) is persisted, mirroring the api_key / admin_token
+    // pattern in `credentials.identifier`.
+    //
+    // Schema notes:
+    //   - `token_hash` is UNIQUE — collisions on 192-bit randoms are
+    //     mathematically impossible at any scale, but the constraint is
+    //     defence-in-depth.
+    //   - `email` is the email the invite will assign at accept time.
+    //     COLLATE NOCASE so a re-invite of the same address (different
+    //     case) collides on the index lookup.
+    //   - `role` is the role the new user is assigned at accept time.
+    //   - `invited_by` is the inviting v4 user id, nullable for v3-admin
+    //     (which has no v4 user binding). NO FK — keeping the audit
+    //     trail intact if the inviter is later deleted.
+    //   - `status` transitions: pending → accepted | revoked. Expiry
+    //     is computed on read (`expires_at < now`) so a row never sits
+    //     in an "expired" state requiring a sweeper to flip it.
+    //   - `accepted_user_id` ties the invite to the freshly-created
+    //     user row. Informational only; no FK so user deletion doesn't
+    //     cascade out the invite history.
+    //
+    // Indexes:
+    //   - idx_invitations_email_pending: lets `createInvitation` cheaply
+    //     refuse "you already have a pending invite for this email".
+    //   - idx_invitations_status: list-pending is the admin UI's hot
+    //     query.
+    version: 3,
+    name: 'invitations',
+    sql: `
+      CREATE TABLE IF NOT EXISTS invitations (
+        id TEXT PRIMARY KEY,
+        token_hash TEXT NOT NULL UNIQUE,
+        email TEXT NOT NULL COLLATE NOCASE,
+        role TEXT NOT NULL,
+        invited_by TEXT,
+        display_name TEXT,
+        expires_at INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        created_at INTEGER NOT NULL,
+        accepted_at INTEGER,
+        accepted_user_id TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_invitations_email_pending
+        ON invitations(email) WHERE status = 'pending';
+      CREATE INDEX IF NOT EXISTS idx_invitations_status
+        ON invitations(status);
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {

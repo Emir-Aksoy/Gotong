@@ -40,6 +40,7 @@ import {
 import { STATIC_ASSETS_BASE64 } from './static-assets.js'
 import {
   handleIdentityRoute,
+  handlePublicInvitationRoute,
   type IdentitySurface,
 } from './identity-routes.js'
 import { handleMeRoute } from './me-routes.js'
@@ -53,6 +54,8 @@ export type {
   IdentityResolved,
   IdentityAuditActorSource,
   IdentityAuditLogEntryDTO,
+  IdentityInvitationStatus,
+  IdentityInvitationDTO,
 } from './identity-routes.js'
 
 /**
@@ -985,6 +988,21 @@ async function handle(
     return
   }
 
+  // --- /invite page (Phase 3 anonymous accept) ---------------------------
+  // GET /invite or GET /invite/<token> → serve the static accept page.
+  // The page's JS reads the token from window.location.pathname; we
+  // don't need to forward it server-side. Anonymous by design — the
+  // whole point is the recipient hasn't signed up yet.
+  if (
+    method === 'GET' &&
+    (path === '/invite' ||
+      path === '/invite/' ||
+      /^\/invite\/[^/?#]+\/?$/.test(path))
+  ) {
+    await serveStatic(res, 'invite.html')
+    return
+  }
+
   // --- /api/me/* (member surface) ----------------------------------------
   // Member-gated routes for "any signed-in user can run their own thing".
   // Auth is checked inside handleMeRoute (v4 session required; any role).
@@ -1004,6 +1022,38 @@ async function handle(
         identity: ctx.identity,
         hub: ctx.hub,
         growthReports: ctx.growthReports,
+      },
+      req,
+      res,
+      method,
+      path,
+    )
+    return
+  }
+
+  // --- /api/invites/* (anonymous invitation accept) ----------------------
+  // Phase 3 — public surface for redeeming an invitation link. No auth
+  // gate here by design (the whole point is the recipient hasn't signed
+  // up yet). Rate-limiting on the accept POST lives inside the dispatcher
+  // and reuses the v3 admin login limiter under a distinct namespace.
+  if (path.startsWith('/api/invites/')) {
+    if (!ctx.identity) {
+      sendJson(
+        res,
+        { error: 'v4 identity store not enabled on this host' },
+        503,
+      )
+      return
+    }
+    const uaRawInv = req.headers['user-agent']
+    const userAgentInv = Array.isArray(uaRawInv) ? uaRawInv.join(' ') : uaRawInv
+    await handlePublicInvitationRoute(
+      {
+        identity: ctx.identity,
+        cookieSecure: ctx.cookieSecure,
+        loginLimiter: ctx.adminLoginLimiter,
+        clientIp: clientIp(ctx, req),
+        ...(userAgentInv ? { userAgent: userAgentInv } : {}),
       },
       req,
       res,

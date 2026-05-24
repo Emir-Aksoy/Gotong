@@ -37,21 +37,28 @@ import {
   newAdminToken,
   newApiKey,
   newId,
+  newInvitationToken,
   newSessionToken,
 } from './tokens.js'
 import { IdentityError } from './errors.js'
 import {
   ROLES,
+  type AcceptInvitationInput,
   type AuditActorSource,
   type AuditLogEntry,
   type BootstrapInput,
   type BootstrapResult,
+  type CreateInvitationInput,
   type CreateUserInput,
   type Credential,
   type CredentialKind,
+  type Invitation,
+  type InvitationStatus,
   type IssuedAdminToken,
   type IssuedApiKey,
+  type IssuedInvitation,
   type ListAuditLogQuery,
+  type ListInvitationsQuery,
   type Membership,
   type Role,
   type Session,
@@ -60,6 +67,15 @@ import {
 } from './types.js'
 
 const DEFAULT_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
+// Invitation TTL bounds. Default 24h matches the operator's mental model
+// ("link is good for a day"). Lower bound is 1 minute (smoke-test floor;
+// anything shorter is almost certainly a typo). Upper bound is 30 days —
+// past that you should be issuing accounts directly, not a "join soon"
+// invite.
+const DEFAULT_INVITATION_TTL_MS = 24 * 60 * 60 * 1000
+const MIN_INVITATION_TTL_MS = 60_000
+const MAX_INVITATION_TTL_MS = 30 * 24 * 60 * 60 * 1000
 
 // Deliberately loose: requires only `local-part@domain` shape. We do NOT
 // enforce a dot in the domain so the default bootstrap sentinel
@@ -120,6 +136,19 @@ interface AuditLogRow {
   metadata: string | null
   success: number
 }
+interface InvitationRow {
+  id: string
+  token_hash: string
+  email: string
+  role: string
+  invited_by: string | null
+  display_name: string | null
+  expires_at: number
+  status: string
+  created_at: number
+  accepted_at: number | null
+  accepted_user_id: string | null
+}
 
 const AUDIT_ACTOR_SOURCES: readonly AuditActorSource[] = [
   'v3-admin',
@@ -131,6 +160,50 @@ const AUDIT_ACTOR_SOURCES: readonly AuditActorSource[] = [
 
 function isAuditActorSource(s: string): s is AuditActorSource {
   return (AUDIT_ACTOR_SOURCES as readonly string[]).includes(s)
+}
+
+const INVITATION_STATUSES: readonly InvitationStatus[] = [
+  'pending',
+  'accepted',
+  'revoked',
+  'expired',
+] as const
+
+function isInvitationStatus(s: string): s is InvitationStatus {
+  return (INVITATION_STATUSES as readonly string[]).includes(s)
+}
+
+/**
+ * Overlay 'expired' on top of a still-'pending' row when its TTL has
+ * elapsed. Terminal statuses (accepted/revoked) are NOT overridden — an
+ * accepted invite past its expiry is still 'accepted', not 'expired'.
+ * Corrupt status falls back to 'pending' (visible in admin UI, surface
+ * for manual cleanup).
+ */
+function computeInvitationStatus(
+  rowStatus: string,
+  expiresAt: number,
+  now: number,
+): InvitationStatus {
+  if (rowStatus === 'pending') {
+    return expiresAt < now ? 'expired' : 'pending'
+  }
+  return isInvitationStatus(rowStatus) ? rowStatus : 'pending'
+}
+
+function rowToInvitation(r: InvitationRow, now: number): Invitation {
+  return {
+    id: r.id,
+    email: r.email,
+    role: r.role as Role,
+    invitedBy: r.invited_by,
+    displayName: r.display_name,
+    expiresAt: r.expires_at,
+    status: computeInvitationStatus(r.status, r.expires_at, now),
+    createdAt: r.created_at,
+    acceptedAt: r.accepted_at,
+    acceptedUserId: r.accepted_user_id,
+  }
 }
 
 function rowToAuditLog(r: AuditLogRow): AuditLogEntry {
@@ -256,6 +329,13 @@ export class IdentityStore {
 
   private readonly stmtInsertAuditLog: SqliteStmt
 
+  private readonly stmtInsertInvitation: SqliteStmt
+  private readonly stmtInvitationByTokenHash: SqliteStmt
+  private readonly stmtInvitationById: SqliteStmt
+  private readonly stmtInvitationPendingByEmail: SqliteStmt
+  private readonly stmtMarkInvitationAccepted: SqliteStmt
+  private readonly stmtMarkInvitationRevoked: SqliteStmt
+
   constructor(db: SqliteDb, defaultSessionTtlMs: number) {
     this.db = db
     this.defaultSessionTtlMs = defaultSessionTtlMs
@@ -336,6 +416,37 @@ export class IdentityStore {
     // listAuditLog uses a dynamically-built statement (filters vary
     // per call) — preparing here would not help. We rely on
     // better-sqlite3's per-call statement cache instead.
+
+    this.stmtInsertInvitation = db.prepare(
+      `INSERT INTO invitations(
+         id, token_hash, email, role, invited_by, display_name,
+         expires_at, status, created_at, accepted_at, accepted_user_id
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, 'pending', ?, NULL, NULL)`,
+    )
+    this.stmtInvitationByTokenHash = db.prepare(
+      'SELECT * FROM invitations WHERE token_hash = ?',
+    )
+    this.stmtInvitationById = db.prepare(
+      'SELECT * FROM invitations WHERE id = ?',
+    )
+    // "Pending" for the createInvitation gate excludes expired rows too —
+    // an expired invite shouldn't block a fresh one.
+    this.stmtInvitationPendingByEmail = db.prepare(
+      `SELECT * FROM invitations
+        WHERE email = ? AND status = 'pending' AND expires_at >= ?
+        LIMIT 1`,
+    )
+    // Guarded UPDATE — `status = 'pending'` in the WHERE clause means a
+    // race between two accepts can never both succeed; the second one's
+    // `changes === 0` and the caller surfaces invitation_already_used.
+    this.stmtMarkInvitationAccepted = db.prepare(
+      `UPDATE invitations
+          SET status = 'accepted', accepted_at = ?, accepted_user_id = ?
+        WHERE id = ? AND status = 'pending'`,
+    )
+    this.stmtMarkInvitationRevoked = db.prepare(
+      `UPDATE invitations SET status = 'revoked' WHERE id = ? AND status = 'pending'`,
+    )
   }
 
   // =====================================================================
@@ -926,10 +1037,450 @@ export class IdentityStore {
     // Note on injection: every fragment of `whereSql` is a static string
     // literal above; user input is bound via `params`. The only dynamic
     // SQL is the comma-separated AND of static fragments. Safe.
-    const sql = `SELECT * FROM audit_log ${whereSql} ORDER BY ts DESC LIMIT ? OFFSET ?`
+    //
+    // Tie-breaker on rowid: ts is Date.now() ms precision, so two rows
+    // written in the same millisecond have identical ts. Without a
+    // secondary sort, SQLite's order is unspecified and tests that
+    // depend on insertion order go flaky. rowid is the implicit auto-
+    // increment PK, monotonic per writer.
+    const sql = `SELECT * FROM audit_log ${whereSql} ORDER BY ts DESC, rowid DESC LIMIT ? OFFSET ?`
     params.push(limit, offset)
     const rows = this.db.prepare(sql).all(...params) as AuditLogRow[]
     return rows.map(rowToAuditLog)
+  }
+
+  // =====================================================================
+  // Invitations (Phase 3 — user invitation flow)
+  //
+  // Design summary:
+  //   - One row per invite. Raw token shown ONCE at create time; only
+  //     sha256 is persisted (mirrors api_key / admin_token pattern).
+  //   - Status lifecycle: pending → accepted | revoked. `expired` is a
+  //     COMPUTED status (pending + TTL elapsed) — never persisted, so we
+  //     never need a sweeper to flip rows just to keep state accurate.
+  //   - `createInvitation` refuses if there's already a NON-EXPIRED
+  //     pending invite for the same email. The operator can revoke the
+  //     older one and retry. Goal: one live link per email at a time, so
+  //     "the link I got is the one to use" is unambiguous.
+  //   - `acceptInvitation` runs in a single transaction: status guard
+  //     UPDATE + user create + membership + password credential +
+  //     session mint. If any sub-step fails the whole thing rolls back
+  //     — no half-accepted state.
+  //   - `role` cannot be 'owner' on invite. Owner promotion requires an
+  //     existing owner intentionally calling setRole post-accept; this
+  //     prevents a leaked invite link from silently minting an admin.
+  // =====================================================================
+
+  createInvitation(input: CreateInvitationInput): IssuedInvitation {
+    if (!input || typeof input !== 'object') {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'createInvitation input required',
+      })
+    }
+    if (typeof input.email !== 'string') {
+      throw new IdentityError({
+        code: 'invalid_email',
+        message: 'email required',
+      })
+    }
+    const email = normaliseEmail(input.email)
+    assertEmailShape(email)
+
+    const role: Role = input.role ?? 'member'
+    assertRole(role)
+    if (role === 'owner') {
+      // Owner via invite is an escalation footgun — anyone with the link
+      // becomes owner without an existing owner reviewing the post-create
+      // state. Block at the store; setRole is the documented path.
+      throw new IdentityError({
+        code: 'invalid_role',
+        message: 'cannot invite as owner; promote post-accept via setRole',
+      })
+    }
+
+    let displayName: string | null = null
+    if (input.displayName !== undefined) {
+      if (typeof input.displayName !== 'string') {
+        throw new IdentityError({
+          code: 'invalid_input',
+          message: 'displayName must be a string',
+        })
+      }
+      displayName = input.displayName
+    }
+
+    let invitedBy: string | null = null
+    if (input.invitedBy !== undefined && input.invitedBy !== null) {
+      if (typeof input.invitedBy !== 'string') {
+        throw new IdentityError({
+          code: 'invalid_input',
+          message: 'invitedBy must be a user id string or null',
+        })
+      }
+      invitedBy = input.invitedBy
+    }
+
+    const ttlRaw = input.ttlMs ?? DEFAULT_INVITATION_TTL_MS
+    if (typeof ttlRaw !== 'number' || !isFinite(ttlRaw)) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `ttlMs must be a finite number; got ${ttlRaw}`,
+      })
+    }
+    const ttl = Math.max(MIN_INVITATION_TTL_MS, Math.min(MAX_INVITATION_TTL_MS, ttlRaw))
+
+    const now = Date.now()
+    return transaction(this.db, () => {
+      // Pending-by-email check INSIDE the transaction so a concurrent
+      // create can't slip past. SQLite's default serializable isolation
+      // for write transactions means the second one re-reads after the
+      // first commits — they can't both see "no pending" and both insert.
+      const existing = this.stmtInvitationPendingByEmail.get(email, now) as
+        | InvitationRow
+        | undefined
+      if (existing) {
+        throw new IdentityError({
+          code: 'invitation_pending_exists',
+          message: `a pending invitation already exists for ${email}; revoke it first`,
+        })
+      }
+
+      // Defensive: also refuse if the email already belongs to a real
+      // user. (Owner can setPassword on the existing account instead of
+      // re-inviting.) This isn't strictly enforced by schema — the
+      // invites table has no FK to users — but creating an invite for an
+      // existing email is almost certainly a mistake.
+      const existingUser = this.stmtUserByEmail.get(email) as
+        | UserRow
+        | undefined
+      if (existingUser) {
+        throw new IdentityError({
+          code: 'duplicate_email',
+          message: `email already belongs to an existing user: ${email}`,
+        })
+      }
+
+      const token = newInvitationToken()
+      const tokenHash = hashToken(token)
+      const id = newId()
+      const expiresAt = now + ttl
+      this.stmtInsertInvitation.run(
+        id,
+        tokenHash,
+        email,
+        role,
+        invitedBy,
+        displayName,
+        expiresAt,
+        now,
+      )
+      const invitation: Invitation = {
+        id,
+        email,
+        role,
+        invitedBy,
+        displayName,
+        expiresAt,
+        status: 'pending',
+        createdAt: now,
+        acceptedAt: null,
+        acceptedUserId: null,
+      }
+      return { token, invitation }
+    })
+  }
+
+  /**
+   * Lookup by raw token. Returns the invite row (with computed status)
+   * or null if the token doesn't match any row. The /invite landing
+   * page uses this to render "Welcome <displayName>, set your password
+   * for <email>" — so we surface the row even on expired / revoked /
+   * accepted statuses; the caller decides whether to refuse.
+   */
+  getInvitationByToken(token: string): Invitation | null {
+    if (typeof token !== 'string' || token.length === 0) return null
+    const row = this.stmtInvitationByTokenHash.get(hashToken(token)) as
+      | InvitationRow
+      | undefined
+    return row ? rowToInvitation(row, Date.now()) : null
+  }
+
+  getInvitationById(id: string): Invitation | null {
+    if (typeof id !== 'string' || id.length === 0) return null
+    const row = this.stmtInvitationById.get(id) as InvitationRow | undefined
+    return row ? rowToInvitation(row, Date.now()) : null
+  }
+
+  /**
+   * One-shot redemption: validate token → mint user + password + session,
+   * mark invite as accepted, all in one transaction. Returns the new
+   * session so the caller can set the cookie + redirect to /me without
+   * a second login round-trip.
+   */
+  acceptInvitation(input: AcceptInvitationInput): {
+    user: User
+    session: Session
+    invitation: Invitation
+  } {
+    if (!input || typeof input !== 'object') {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'acceptInvitation input required',
+      })
+    }
+    if (typeof input.token !== 'string' || input.token.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'token required',
+      })
+    }
+    if (typeof input.password !== 'string') {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'password required',
+      })
+    }
+    if (input.displayName !== undefined && typeof input.displayName !== 'string') {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'displayName must be a string when provided',
+      })
+    }
+    const ttl = input.sessionTtlMs ?? this.defaultSessionTtlMs
+    if (typeof ttl !== 'number' || !isFinite(ttl) || ttl <= 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `sessionTtlMs must be a positive finite number; got ${ttl}`,
+      })
+    }
+
+    // Hash password OUTSIDE the transaction — scrypt is intentionally
+    // slow (~100ms) and we don't want it holding a write lock the whole
+    // time. May throw weak_password; propagate before opening tx.
+    const passwordHash = hashPassword(input.password)
+    const tokenHash = hashToken(input.token)
+
+    return transaction(this.db, () => {
+      const now = Date.now()
+      const row = this.stmtInvitationByTokenHash.get(tokenHash) as
+        | InvitationRow
+        | undefined
+      if (!row) {
+        throw new IdentityError({
+          code: 'invitation_not_found',
+          message: 'invitation not found',
+        })
+      }
+      const effective = computeInvitationStatus(row.status, row.expires_at, now)
+      if (effective === 'accepted') {
+        throw new IdentityError({
+          code: 'invitation_already_used',
+          message: 'invitation already accepted',
+        })
+      }
+      if (effective === 'revoked') {
+        throw new IdentityError({
+          code: 'invitation_revoked',
+          message: 'invitation has been revoked',
+        })
+      }
+      if (effective === 'expired') {
+        throw new IdentityError({
+          code: 'invitation_expired',
+          message: 'invitation has expired',
+        })
+      }
+      // effective === 'pending' from here.
+
+      const role = row.role as Role
+      // Defensive: db-corruption check. The status enum is enforced at
+      // create time, but a manual edit could plant a bad value.
+      if (!ROLES.includes(role)) {
+        throw new IdentityError({
+          code: 'invalid_role',
+          message: `invitation row has corrupt role: ${row.role}`,
+        })
+      }
+
+      const displayName: string | null =
+        input.displayName !== undefined ? input.displayName : row.display_name
+
+      // Insert user. Email collision means someone else registered (or
+      // an admin createUser'd) the same email between create + accept;
+      // surface as duplicate_email rather than silently overwriting.
+      const userId = newId()
+      try {
+        this.stmtInsertUser.run(userId, row.email, displayName, now)
+      } catch (err) {
+        if (isUniqueViolation(err)) {
+          throw new IdentityError({
+            code: 'duplicate_email',
+            message: `email already in use: ${row.email}`,
+            cause: err,
+          })
+        }
+        throw err
+      }
+      this.stmtInsertMembership.run(newId(), userId, role, now)
+      this.stmtInsertCredential.run(
+        newId(),
+        userId,
+        'password',
+        row.email,
+        passwordHash,
+        null,
+        now,
+      )
+
+      // Mark invite accepted. The WHERE clause includes status='pending'
+      // so a concurrent accept (rare; we're already in a tx) gets
+      // changes=0 and we abort.
+      const upd = this.stmtMarkInvitationAccepted.run(now, userId, row.id)
+      if (upd.changes === 0) {
+        throw new IdentityError({
+          code: 'invitation_already_used',
+          message: 'invitation already accepted (concurrent)',
+        })
+      }
+
+      // Mint session inline (avoid calling beginSession — we already
+      // know everything and we're inside a transaction; nesting
+      // transaction() calls is fine but the inline form is clearer).
+      const sessionToken = newSessionToken()
+      const sessionExpiresAt = now + ttl
+      this.stmtInsertSession.run(
+        sessionToken,
+        userId,
+        sessionExpiresAt,
+        now,
+        now,
+      )
+      this.stmtUpdateLastLogin.run(now, userId)
+
+      const invitation: Invitation = {
+        id: row.id,
+        email: row.email,
+        role,
+        invitedBy: row.invited_by,
+        displayName: row.display_name,
+        expiresAt: row.expires_at,
+        status: 'accepted',
+        createdAt: row.created_at,
+        acceptedAt: now,
+        acceptedUserId: userId,
+      }
+      const user: User = {
+        id: userId,
+        email: row.email,
+        displayName,
+        createdAt: now,
+        lastLoginAt: now,
+      }
+      const session: Session = {
+        token: sessionToken,
+        userId,
+        expiresAt: sessionExpiresAt,
+        createdAt: now,
+        lastSeenAt: now,
+      }
+      return { user, session, invitation }
+    })
+  }
+
+  listInvitations(query: ListInvitationsQuery = {}): Invitation[] {
+    const limit = Math.max(1, Math.min(500, query.limit ?? 100))
+    const offset = Math.max(0, query.offset ?? 0)
+    const now = Date.now()
+
+    const where: string[] = []
+    const params: (string | number)[] = []
+
+    if (query.email !== undefined) {
+      where.push('email = ?')
+      params.push(normaliseEmail(query.email))
+    }
+    // Status filter has to handle 'pending' / 'expired' specially since
+    // 'expired' is computed, not stored:
+    //   - filter pending → stored='pending' AND expires_at >= now
+    //   - filter expired → stored='pending' AND expires_at <  now
+    //   - filter accepted/revoked → straight equality on the column
+    if (query.status !== undefined) {
+      if (!isInvitationStatus(query.status)) {
+        throw new IdentityError({
+          code: 'invalid_input',
+          message: `invalid status filter: ${JSON.stringify(query.status)}`,
+        })
+      }
+      switch (query.status) {
+        case 'pending':
+          where.push(`status = 'pending' AND expires_at >= ?`)
+          params.push(now)
+          break
+        case 'expired':
+          where.push(`status = 'pending' AND expires_at < ?`)
+          params.push(now)
+          break
+        case 'accepted':
+          where.push(`status = 'accepted'`)
+          break
+        case 'revoked':
+          where.push(`status = 'revoked'`)
+          break
+      }
+    }
+    const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
+    // rowid tie-breaker — see listAuditLog for the rationale.
+    const sql = `SELECT * FROM invitations ${whereSql} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`
+    params.push(limit, offset)
+    const rows = this.db.prepare(sql).all(...params) as InvitationRow[]
+    return rows.map((r) => rowToInvitation(r, now))
+  }
+
+  /**
+   * Cancel a pending invite. Idempotent on terminal states — if the
+   * invite is already accepted or revoked, returns the row unchanged
+   * (no error). Throws invitation_not_found only if no such id exists.
+   */
+  revokeInvitation(invitationId: string): Invitation {
+    if (typeof invitationId !== 'string' || invitationId.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'invitationId required',
+      })
+    }
+    return transaction(this.db, () => {
+      const row = this.stmtInvitationById.get(invitationId) as
+        | InvitationRow
+        | undefined
+      if (!row) {
+        throw new IdentityError({
+          code: 'invitation_not_found',
+          message: `invitation not found: ${invitationId}`,
+        })
+      }
+      const now = Date.now()
+      const effective = computeInvitationStatus(row.status, row.expires_at, now)
+      if (effective === 'accepted') {
+        // Accepted invites can't be revoked — that would mean
+        // revoking a real user account. Refuse loudly so the caller
+        // doesn't think their click did something.
+        throw new IdentityError({
+          code: 'invitation_already_used',
+          message: 'cannot revoke an already-accepted invitation',
+        })
+      }
+      // Pending OR expired OR revoked: in all cases we mark the column
+      // 'revoked' so it stops showing in the pending list. Guarded
+      // UPDATE with status='pending' means we only mutate when the
+      // column is actually 'pending'; revoking an already-revoked or
+      // already-expired-but-stored-as-pending row is a no-op or a
+      // flip-to-revoked respectively.
+      this.stmtMarkInvitationRevoked.run(invitationId)
+      // Re-read to return the post-state.
+      const after = this.stmtInvitationById.get(invitationId) as InvitationRow
+      return rowToInvitation(after, now)
+    })
   }
 
   // =====================================================================

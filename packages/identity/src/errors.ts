@@ -24,6 +24,17 @@ export type IdentityErrorCode =
    * must promote another user to owner first, then retry the demotion.
    */
   | 'last_owner'
+  // Invitation flow (Phase 3 — user invitations).
+  | 'invitation_not_found'
+  | 'invitation_expired'
+  | 'invitation_already_used'
+  | 'invitation_revoked'
+  /**
+   * createInvitation refused because a pending (non-expired, non-revoked,
+   * non-accepted) invite for this email already exists. The owner can
+   * revoke the older invite first, then create a fresh one.
+   */
+  | 'invitation_pending_exists'
 
 export interface IdentityErrorOptions {
   code: IdentityErrorCode

@@ -24,6 +24,12 @@
 
   const API_BASE = '/api/admin/identity'
   const ROLES = ['owner', 'admin', 'member', 'viewer']
+  // Owner is intentionally NOT here — the store refuses owner invites
+  // (link leak == owner escalation). Promote post-accept via setRole.
+  const INVITE_ROLES = ['admin', 'member', 'viewer']
+  const INVITE_STATUSES = ['pending', 'expired', 'accepted', 'revoked']
+  const ONE_HOUR_MS = 60 * 60 * 1000
+  const ONE_DAY_MS = 24 * ONE_HOUR_MS
 
   // ---- DOM helpers --------------------------------------------------------
   function $(sel, root) {
@@ -374,6 +380,148 @@
     })
   }
 
+  // -------------------------------------------------------------------------
+  // Phase 3 — invitation panel.
+  //
+  // The flow: owner fills in {email, role, displayName?, ttl?}, server
+  // mints a row + token, UI shows the resulting URL ONCE in a prompt so
+  // the operator can copy it and deliver it out-of-band (Signal, 1Password,
+  // a piece of paper, whatever — that's the org's call).
+  //
+  // Status column displays the COMPUTED status from the server (it does
+  // the "expired" overlay for us). Revoke turns a pending/expired row
+  // into revoked; we refuse to revoke an already-accepted row at the
+  // store level so the button is hidden in that case.
+  // -------------------------------------------------------------------------
+
+  function buildInviteUrl(token) {
+    return window.location.origin + '/invite/' + encodeURIComponent(token)
+  }
+
+  async function refreshInvites() {
+    const tbody = $('#id-invites-tbody')
+    if (!tbody) return
+    tbody.innerHTML = '<tr><td colspan="6">载入中…</td></tr>'
+    try {
+      const params = new URLSearchParams()
+      const status = $('#id-invites-status')
+      if (status && status.value) params.set('status', status.value)
+      const qs = params.toString()
+      const data = await api('GET', '/invites' + (qs ? '?' + qs : ''))
+      renderInviteRows(tbody, (data && data.invitations) || [])
+    } catch (err) {
+      tbody.innerHTML = ''
+      setStatus('邀请列表加载失败: ' + err.message, true)
+    }
+  }
+
+  function renderInviteRows(tbody, items) {
+    tbody.innerHTML = ''
+    if (items.length === 0) {
+      tbody.innerHTML =
+        '<tr><td colspan="6" style="text-align:center;color:#888;padding:1rem;">没有匹配的邀请</td></tr>'
+      return
+    }
+    for (const inv of items) {
+      const tr = document.createElement('tr')
+      tr.dataset.invId = inv.id
+      tr.dataset.invEmail = inv.email
+      const statusColor =
+        inv.status === 'pending'
+          ? '#27ae60'
+          : inv.status === 'accepted'
+          ? '#1f6feb'
+          : inv.status === 'revoked'
+          ? '#c0392b'
+          : '#888' // expired
+      const statusCell =
+        '<span style="color:' + statusColor + ';">' + escHtml(inv.status) + '</span>'
+      // Only pending / expired / revoked invites can be revoked at the
+      // store level (accepted is terminal — it's a real user now). We
+      // also skip the button on already-revoked rows to avoid a no-op
+      // click; the column then shows '—'.
+      const canRevoke = inv.status === 'pending' || inv.status === 'expired'
+      const actionCell = canRevoke
+        ? '<button type="button" data-act="revoke" title="撤销邀请">撤销</button>'
+        : '—'
+      tr.innerHTML =
+        '<td>' + escHtml(inv.email) + '</td>' +
+        '<td>' + escHtml(inv.role) + '</td>' +
+        '<td>' + statusCell + '</td>' +
+        '<td>' + escHtml(fmtTime(inv.createdAt)) + '</td>' +
+        '<td>' + escHtml(fmtTime(inv.expiresAt)) + '</td>' +
+        '<td class="id-actions">' + actionCell + '</td>'
+      tbody.appendChild(tr)
+    }
+    wireInviteRowActions(tbody)
+  }
+
+  function wireInviteRowActions(tbody) {
+    $$('tr', tbody).forEach(function (tr) {
+      const invId = tr.dataset.invId
+      const invEmail = tr.dataset.invEmail
+      if (!invId) return
+      const btn = $('button[data-act="revoke"]', tr)
+      if (!btn) return
+      btn.addEventListener('click', async function () {
+        if (!confirm('撤销给 ' + invEmail + ' 的邀请?')) return
+        try {
+          await api('DELETE', '/invites/' + encodeURIComponent(invId))
+          setStatus('邀请已撤销')
+          await refreshInvites()
+        } catch (err) {
+          setStatus('撤销失败: ' + err.message, true)
+        }
+      })
+    })
+  }
+
+  async function handleCreateInviteSubmit(e) {
+    e.preventDefault()
+    const form = e.target
+    const email = (form.email.value || '').trim()
+    if (!email) {
+      setStatus('email 必填', true)
+      return
+    }
+    const role = form.role.value || 'member'
+    const ttlHoursRaw = form.ttlHours.value
+    const ttlHours = ttlHoursRaw ? Number(ttlHoursRaw) : 24
+    if (!Number.isFinite(ttlHours) || ttlHours <= 0) {
+      setStatus('TTL 必须是正数小时', true)
+      return
+    }
+    const body = {
+      email: email,
+      role: role,
+      ttlMs: Math.round(ttlHours * ONE_HOUR_MS),
+    }
+    const dn = (form.displayName.value || '').trim()
+    if (dn) body.displayName = dn
+    try {
+      const out = await api('POST', '/invites', body)
+      const url = buildInviteUrl(out.token)
+      // Show ONCE — alert + prompt pair mirrors the API key path. The
+      // prompt's auto-select lets the operator hit Ctrl/Cmd+C
+      // immediately, no clicking around to highlight.
+      window.prompt(
+        '邀请链接仅显示一次,请立即复制后通过私密渠道(Signal/1Password/纸条)发给 ' +
+          email +
+          '。\n\n链接 24 小时内 (或你设置的 TTL) 有效,点击后由受邀人设置自己的密码。',
+        url,
+      )
+      setStatus('已为 ' + email + ' 创建邀请')
+      form.reset()
+      // Set the TTL input back to the default after reset (form.reset
+      // clears even the default value attribute on type=number).
+      const ttlInput = form.ttlHours
+      if (ttlInput) ttlInput.value = '24'
+      await refreshInvites()
+    } catch (err) {
+      setStatus('创建邀请失败: ' + err.message, true)
+    }
+  }
+
   async function handleCreateSubmit(e) {
     e.preventDefault()
     const form = e.target
@@ -446,6 +594,48 @@
       '</tr></thead>' +
       '<tbody id="id-users-tbody"></tbody>' +
       '</table>' +
+      // Phase 3 — invitation panel. Open-by-default because "invite a
+      // teammate" is the headline owner action on a fresh install.
+      '<details open style="margin-top:2rem;">' +
+      '<summary style="cursor:pointer;font-weight:bold;">邀请 / Invitations</summary>' +
+      '<form id="id-invite-form" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0.5rem;margin:0.75rem 0;">' +
+      '<input name="email" type="email" placeholder="email" required autocomplete="off" />' +
+      '<input name="displayName" type="text" placeholder="显示名 (可选)" autocomplete="off" />' +
+      '<select name="role">' +
+      INVITE_ROLES.map(function (r) {
+        const sel = r === 'member' ? ' selected' : ''
+        return '<option value="' + r + '"' + sel + '>' + r + '</option>'
+      }).join('') +
+      '</select>' +
+      '<input name="ttlHours" type="number" min="1" max="720" value="24" title="链接有效期 (小时); 最长 30 天" />' +
+      '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">创建邀请链接</button>' +
+      '</form>' +
+      '<p style="font-size:0.8rem;color:#666;margin:0.25rem 0 0.75rem;">' +
+      '链接含一次性 token,创建后会弹窗显示请立即复制。owner 不能通过邀请创建,需先邀请普通角色再 setRole 提升。' +
+      '</p>' +
+      '<div style="display:flex;gap:0.5rem;align-items:end;flex-wrap:wrap;margin:0.5rem 0;">' +
+      '<label style="display:flex;flex-direction:column;font-size:0.8rem;color:#555;">status' +
+      '<select id="id-invites-status" style="padding:0.25rem;">' +
+      '<option value="">all</option>' +
+      INVITE_STATUSES.map(function (s) {
+        return '<option value="' + s + '">' + s + '</option>'
+      }).join('') +
+      '</select>' +
+      '</label>' +
+      '<button id="id-invites-refresh" type="button" style="padding:0.4rem 0.75rem;">刷新</button>' +
+      '</div>' +
+      '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">' +
+      '<thead><tr style="text-align:left;border-bottom:1px solid #ccc;background:#fafafa;">' +
+      '<th style="padding:0.4rem;">Email</th>' +
+      '<th style="padding:0.4rem;">角色</th>' +
+      '<th style="padding:0.4rem;">状态</th>' +
+      '<th style="padding:0.4rem;">创建</th>' +
+      '<th style="padding:0.4rem;">过期</th>' +
+      '<th style="padding:0.4rem;">操作</th>' +
+      '</tr></thead>' +
+      '<tbody id="id-invites-tbody"></tbody>' +
+      '</table>' +
+      '</details>' +
       // V4-AUDIT-06: collapsed-by-default audit log panel. Owner-only
       // (the route is gated; the panel is hidden from UI when the host
       // didn't wire identity at all — the section never renders then).
@@ -482,6 +672,14 @@
       '</div>'
     const form = $('#id-create-form', root)
     if (form) form.addEventListener('submit', handleCreateSubmit)
+    const inviteForm = $('#id-invite-form', root)
+    if (inviteForm) inviteForm.addEventListener('submit', handleCreateInviteSubmit)
+    const invitesBtn = $('#id-invites-refresh', root)
+    if (invitesBtn) {
+      invitesBtn.addEventListener('click', function () {
+        refreshInvites().catch(function () { /* setStatus reported it */ })
+      })
+    }
     const auditBtn = $('#id-audit-refresh', root)
     if (auditBtn) {
       auditBtn.addEventListener('click', function () {
@@ -498,6 +696,7 @@
     if (!isUsersTabActive()) return
     await refreshMe()
     await refreshUsers()
+    await refreshInvites()
     await refreshAudit()
   }
 

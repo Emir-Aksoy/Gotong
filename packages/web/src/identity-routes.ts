@@ -103,6 +103,28 @@ export interface IdentityAuditLogEntryDTO {
   metadata: Record<string, unknown> | null
   success: boolean
 }
+
+// Phase 3 — invitation flow. Structural projection of @aipehub/identity's
+// Invitation + InvitationStatus, kept here so web stays decoupled.
+export type IdentityInvitationStatus =
+  | 'pending'
+  | 'accepted'
+  | 'revoked'
+  | 'expired'
+
+export interface IdentityInvitationDTO {
+  id: string
+  email: string
+  role: IdentityRole
+  invitedBy: string | null
+  displayName: string | null
+  expiresAt: number
+  status: IdentityInvitationStatus
+  createdAt: number
+  acceptedAt: number | null
+  acceptedUserId: string | null
+}
+
 export interface IdentityResolved {
   user: IdentityUserDTO
   role: IdentityRole
@@ -158,6 +180,35 @@ export interface IdentitySurface {
     targetUserId?: string
     success?: boolean
   }): IdentityAuditLogEntryDTO[]
+  // Phase 3 — invitation flow. Optional on the structural type for the
+  // same reason as the audit-log methods above: a pre-migration host's
+  // IdentityStore still typechecks; the routes refuse with 503 at runtime
+  // when the method is missing.
+  createInvitation?(input: {
+    email: string
+    role?: IdentityRole
+    displayName?: string
+    invitedBy?: string | null
+    ttlMs?: number
+  }): { token: string; invitation: IdentityInvitationDTO }
+  getInvitationByToken?(token: string): IdentityInvitationDTO | null
+  acceptInvitation?(input: {
+    token: string
+    password: string
+    displayName?: string
+    sessionTtlMs?: number
+  }): {
+    user: IdentityUserDTO
+    session: IdentitySessionDTO
+    invitation: IdentityInvitationDTO
+  }
+  listInvitations?(query?: {
+    status?: IdentityInvitationStatus
+    email?: string
+    limit?: number
+    offset?: number
+  }): IdentityInvitationDTO[]
+  revokeInvitation?(id: string): IdentityInvitationDTO
 }
 
 // ---------------------------------------------------------------------------
@@ -253,6 +304,7 @@ function sendIdentityError(res: ServerResponse, err: unknown, fallbackStatus = 5
     case 'duplicate_email':
     case 'duplicate_credential':
     case 'last_owner': // V4-AUDIT-03: refusing to demote the last owner is a 409 conflict
+    case 'invitation_pending_exists': // same family — "you already have one of these"
       sendJson(res, { error: ec.message, code: ec.code }, 409)
       return
     case 'invalid_email':
@@ -268,7 +320,16 @@ function sendIdentityError(res: ServerResponse, err: unknown, fallbackStatus = 5
       return
     case 'user_not_found':
     case 'credential_not_found':
+    case 'invitation_not_found':
       sendJson(res, { error: ec.message, code: ec.code }, 404)
+      return
+    // 410 Gone: the invitation existed but is no longer valid. Distinct
+    // from 404 (never existed) so the UI can render "this link has been
+    // used / expired / revoked" instead of "not found".
+    case 'invitation_expired':
+    case 'invitation_already_used':
+    case 'invitation_revoked':
+      sendJson(res, { error: ec.message, code: ec.code }, 410)
       return
     default:
       sendJson(res, { error: ec.message, code: ec.code }, fallbackStatus)
@@ -534,6 +595,25 @@ export async function handleIdentityRoute(
   m = /^\/api\/admin\/identity\/credentials\/([^/]+)$/.exec(path)
   if (m && method === 'DELETE') {
     handleRevokeCredential(ctx, req, res, m[1]!)
+    return
+  }
+  // Phase 3 — invitations (owner-gated; anonymous accept lives at
+  // /api/invites/* via handlePublicInvitationRoute below).
+  if (method === 'POST' && path === '/api/admin/identity/invites') {
+    await handleCreateInvite(ctx, req, res)
+    return
+  }
+  if (method === 'GET' && path === '/api/admin/identity/invites') {
+    const url = new URL(
+      req.url ?? path,
+      `http://${req.headers.host ?? 'localhost'}`,
+    )
+    handleListInvites(ctx, url, res)
+    return
+  }
+  m = /^\/api\/admin\/identity\/invites\/([^/]+)$/.exec(path)
+  if (m && method === 'DELETE') {
+    handleRevokeInvite(ctx, req, res, m[1]!)
     return
   }
 
@@ -924,6 +1004,369 @@ function handleRevokeCredential(
 // (already enforced by the dispatcher above this handler). Filters mirror
 // the store's `listAuditLog` query. The route is documented at the top of
 // this file under the route inventory.
+// ---------------------------------------------------------------------------
+// Phase 3 — invitation handlers.
+//
+// Owner-gated trio (handleCreateInvite / handleListInvites / handleRevokeInvite)
+// is invoked from `handleIdentityRoute`. The anonymous duo
+// (handleLookupInvite / handleAcceptInvite) sits behind a SEPARATE
+// dispatcher (`handlePublicInvitationRoute`) because the route prefix
+// is /api/invites/* — outside the /api/admin/identity/* owner gate.
+// ---------------------------------------------------------------------------
+
+function isInvitationStatus(s: unknown): s is IdentityInvitationStatus {
+  return s === 'pending' || s === 'accepted' || s === 'revoked' || s === 'expired'
+}
+
+async function handleCreateInvite(
+  ctx: HandleIdentityRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  if (typeof ctx.identity.createInvitation !== 'function') {
+    sendJson(res, { error: 'invitation API unavailable on this host' }, 503)
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (err) {
+    sendJson(res, { error: (err as Error).message ?? 'bad body' }, 400)
+    return
+  }
+  if (!body || typeof body !== 'object') {
+    sendJson(res, { error: 'createInvite body required: {email, role?, displayName?, ttlMs?}' }, 400)
+    return
+  }
+  const b = body as {
+    email?: unknown
+    role?: unknown
+    displayName?: unknown
+    ttlMs?: unknown
+  }
+  if (typeof b.email !== 'string') {
+    sendJson(res, { error: 'email required' }, 400)
+    return
+  }
+  // Resolve auth so we can stamp `invitedBy` on the row. For v3-admin
+  // callers (no v4 user binding) we pass null — the store accepts it
+  // and the audit row still records actorSource='v3-admin'.
+  const v4 = resolveV4Auth(ctx.identity, req)
+  const invitedBy = v4.user?.id ?? null
+
+  const input: Parameters<NonNullable<IdentitySurface['createInvitation']>>[0] = {
+    email: b.email,
+    invitedBy,
+  }
+  if (b.role !== undefined) {
+    if (typeof b.role !== 'string') {
+      sendJson(res, { error: 'role must be a string' }, 400)
+      return
+    }
+    input.role = b.role as IdentityRole
+  }
+  if (b.displayName !== undefined) {
+    if (typeof b.displayName !== 'string') {
+      sendJson(res, { error: 'displayName must be a string' }, 400)
+      return
+    }
+    input.displayName = b.displayName
+  }
+  if (b.ttlMs !== undefined) {
+    if (typeof b.ttlMs !== 'number' || !Number.isFinite(b.ttlMs)) {
+      sendJson(res, { error: 'ttlMs must be a finite number' }, 400)
+      return
+    }
+    input.ttlMs = b.ttlMs
+  }
+  try {
+    const issued = ctx.identity.createInvitation(input)
+    // V4-AUDIT-06: invitation creation grants a future seat. Audit it.
+    // The raw token NEVER appears in audit metadata — only the
+    // invitation id (which is opaque + not a credential).
+    tryAudit(ctx, v4, {
+      action: 'create_invitation',
+      targetUserId: null,
+      metadata: {
+        invitationId: issued.invitation.id,
+        email: issued.invitation.email,
+        role: issued.invitation.role,
+        expiresAt: issued.invitation.expiresAt,
+      },
+    })
+    // Returned ONCE — caller must deliver out-of-band.
+    sendJson(
+      res,
+      {
+        token: issued.token,
+        invitation: issued.invitation,
+        warning: 'This invite token is only shown once. Deliver it out-of-band.',
+      },
+      201,
+    )
+  } catch (err) {
+    sendIdentityError(res, err, 400)
+  }
+}
+
+function handleListInvites(
+  ctx: HandleIdentityRouteCtx,
+  url: URL,
+  res: ServerResponse,
+): void {
+  if (typeof ctx.identity.listInvitations !== 'function') {
+    sendJson(res, { invitations: [], note: 'invitation API unavailable on this host' })
+    return
+  }
+  const q: {
+    status?: IdentityInvitationStatus
+    email?: string
+    limit?: number
+    offset?: number
+  } = {}
+  const status = url.searchParams.get('status')
+  if (status) {
+    if (!isInvitationStatus(status)) {
+      sendJson(res, { error: `invalid status filter: ${status}`, code: 'invalid_input' }, 400)
+      return
+    }
+    q.status = status
+  }
+  const email = url.searchParams.get('email')
+  if (email) q.email = email
+  const lim = url.searchParams.get('limit')
+  if (lim !== null) {
+    const n = Number(lim)
+    if (Number.isFinite(n) && n > 0) q.limit = Math.floor(n)
+  }
+  const off = url.searchParams.get('offset')
+  if (off !== null) {
+    const n = Number(off)
+    if (Number.isFinite(n) && n >= 0) q.offset = Math.floor(n)
+  }
+  try {
+    const invitations = ctx.identity.listInvitations(q)
+    sendJson(res, { invitations })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+function handleRevokeInvite(
+  ctx: HandleIdentityRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  invitationId: string,
+): void {
+  if (typeof ctx.identity.revokeInvitation !== 'function') {
+    sendJson(res, { error: 'invitation API unavailable on this host' }, 503)
+    return
+  }
+  try {
+    const after = ctx.identity.revokeInvitation(invitationId)
+    tryAudit(ctx, resolveV4Auth(ctx.identity, req), {
+      action: 'revoke_invitation',
+      targetUserId: null,
+      metadata: {
+        invitationId: after.id,
+        email: after.email,
+        priorStatus: after.status,
+      },
+    })
+    sendJson(res, { invitation: after })
+  } catch (err) {
+    sendIdentityError(res, err, 400)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Anonymous invitation routes — /api/invites/*
+//
+// These are reachable WITHOUT auth (the whole point of an invite link is
+// the recipient hasn't signed up yet). The accept route hashes a fresh
+// password (~100ms scrypt) and writes a row, so it MUST be rate-limited
+// the same way login is. We reuse the same RateLimiter instance under a
+// distinct key namespace.
+//
+// Lookup (GET) is intentionally NOT rate-limited beyond what the host
+// already does globally: it's a single hashed-token sqlite lookup; if an
+// attacker wants to brute-force `inv_` tokens they need ~10^54 attempts
+// for one hit. The scrypt path is the only thing worth protecting here.
+// ---------------------------------------------------------------------------
+
+export interface HandlePublicInvitationRouteCtx {
+  identity: IdentitySurface
+  cookieSecure: boolean
+  loginLimiter: LoginRateLimiterLike
+  clientIp: string
+  userAgent?: string
+}
+
+export async function handlePublicInvitationRoute(
+  ctx: HandlePublicInvitationRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+): Promise<void> {
+  let m = /^\/api\/invites\/([^/]+)$/.exec(path)
+  if (m && method === 'GET') {
+    handleLookupInvite(ctx, res, m[1]!)
+    return
+  }
+  m = /^\/api\/invites\/([^/]+)\/accept$/.exec(path)
+  if (m && method === 'POST') {
+    await handleAcceptInvite(ctx, req, res, m[1]!)
+    return
+  }
+  sendJson(res, { error: `unknown invite route: ${method} ${path}` }, 404)
+}
+
+function handleLookupInvite(
+  ctx: HandlePublicInvitationRouteCtx,
+  res: ServerResponse,
+  token: string,
+): void {
+  if (typeof ctx.identity.getInvitationByToken !== 'function') {
+    sendJson(res, { error: 'invitation API unavailable on this host' }, 503)
+    return
+  }
+  try {
+    const inv = ctx.identity.getInvitationByToken(token)
+    if (!inv) {
+      sendJson(res, { error: 'invitation not found', code: 'invitation_not_found' }, 404)
+      return
+    }
+    // Return the row so the /invite page can render the right copy
+    // ("Welcome, set a password for foo@example.com"). We deliberately
+    // include status so a 410-after-expiry can be rendered as
+    // "this link has expired" rather than a generic error.
+    //
+    // We strip `invitedBy` — exposing the inviter's user id to an
+    // unauthenticated stranger leaks org structure. The accept POST
+    // doesn't need it either.
+    sendJson(res, {
+      invitation: {
+        id: inv.id,
+        email: inv.email,
+        role: inv.role,
+        displayName: inv.displayName,
+        expiresAt: inv.expiresAt,
+        status: inv.status,
+        createdAt: inv.createdAt,
+      },
+    })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+async function handleAcceptInvite(
+  ctx: HandlePublicInvitationRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  token: string,
+): Promise<void> {
+  if (typeof ctx.identity.acceptInvitation !== 'function') {
+    sendJson(res, { error: 'invitation API unavailable on this host' }, 503)
+    return
+  }
+  // Rate-limit BEFORE parsing the body so a malformed-body flood still
+  // burns budget — same defense pattern as handleLogin.
+  const rlKey = `invite-accept:${ctx.clientIp}`
+  if (!ctx.loginLimiter.peek(rlKey)) {
+    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+    res.end('too many accept attempts; try again in a minute')
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (err) {
+    sendJson(res, { error: (err as Error).message ?? 'bad body' }, 400)
+    return
+  }
+  if (!body || typeof body !== 'object') {
+    sendJson(res, { error: 'acceptInvite body required: {password, displayName?}' }, 400)
+    return
+  }
+  const b = body as { password?: unknown; displayName?: unknown }
+  if (typeof b.password !== 'string') {
+    sendJson(res, { error: 'password required' }, 400)
+    return
+  }
+  const input: Parameters<NonNullable<IdentitySurface['acceptInvitation']>>[0] = {
+    token,
+    password: b.password,
+  }
+  if (b.displayName !== undefined) {
+    if (typeof b.displayName !== 'string') {
+      sendJson(res, { error: 'displayName must be a string' }, 400)
+      return
+    }
+    input.displayName = b.displayName
+  }
+  try {
+    const result = ctx.identity.acceptInvitation(input)
+    // V4-AUDIT-06: a freshly-created user accepting their invite is its
+    // OWN actor (they just minted themselves). actorSource is technically
+    // 'anonymous' at request time — but the actor IS the new user — so
+    // we override actorUserId to the new user id for traceability.
+    // tryAudit lives on the owner-gated module; we can't use it here
+    // (different ctx shape), so inline the best-effort write.
+    if (typeof ctx.identity.writeAuditLog === 'function') {
+      try {
+        ctx.identity.writeAuditLog({
+          action: 'accept_invitation',
+          actorSource: 'anonymous',
+          actorUserId: result.user.id,
+          targetUserId: result.user.id,
+          ip: ctx.clientIp || null,
+          userAgent: clampUserAgent(ctx.userAgent),
+          metadata: {
+            invitationId: result.invitation.id,
+            email: result.user.email,
+            role: result.invitation.role,
+          },
+        })
+      } catch {
+        /* best-effort */
+      }
+    }
+    // Mint the session cookie so the /invite landing page can redirect
+    // straight to /me without a second login round-trip.
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'set-cookie': setIdentityCookie(result.session.token, ctx.cookieSecure),
+    })
+    res.end(
+      JSON.stringify({
+        ok: true,
+        user: result.user,
+        role: result.invitation.role,
+        session: {
+          expiresAt: result.session.expiresAt,
+        },
+      }),
+    )
+  } catch (err) {
+    // Only the not-actually-expired / not-actually-already-used / wrong-
+    // token failures burn limit — weak_password is a user typo, no need
+    // to punish it.
+    const ec = asErrorWithCode(err)
+    if (
+      ec &&
+      (ec.code === 'invitation_not_found' ||
+        ec.code === 'invitation_expired' ||
+        ec.code === 'invitation_already_used' ||
+        ec.code === 'invitation_revoked')
+    ) {
+      ctx.loginLimiter.recordFailure(rlKey)
+    }
+    sendIdentityError(res, err, 400)
+  }
+}
+
 function handleListAuditLog(
   ctx: HandleIdentityRouteCtx,
   url: URL,

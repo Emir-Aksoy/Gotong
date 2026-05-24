@@ -25,6 +25,10 @@ const PREFIX = {
   session: 'ses_',
   adminToken: 'adm_',
   apiKey: 'aipk_',
+  // Invitation tokens — single-use, short-lived (default 24h). The
+  // `inv_` prefix lets the /invite landing page distinguish them at
+  // a glance from other secret shapes.
+  invitation: 'inv_',
 } as const
 
 export function newSessionToken(): string {
@@ -37,6 +41,10 @@ export function newAdminToken(): string {
 
 export function newApiKey(): string {
   return PREFIX.apiKey + randomBytes(24).toString('base64url')
+}
+
+export function newInvitationToken(): string {
+  return PREFIX.invitation + randomBytes(24).toString('base64url')
 }
 
 /**

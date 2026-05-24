@@ -28,4 +28,10 @@ export type {
   AuditActorSource,
   WriteAuditLogInput,
   ListAuditLogQuery,
+  Invitation,
+  InvitationStatus,
+  CreateInvitationInput,
+  IssuedInvitation,
+  AcceptInvitationInput,
+  ListInvitationsQuery,
 } from './types.js'
