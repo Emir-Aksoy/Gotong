@@ -55,6 +55,11 @@ export type {
   AddPeerInput,
   UpdatePeerInput,
   ListPeersQuery,
+  // Per-org soft quotas (E1 — Phase 5)
+  OrgQuota,
+  OrgQuotaState,
+  SetOrgQuotaInput,
+  CheckOrgQuotaResult,
 } from './types.js'
 export {
   AUDIT_ACTIONS,
@@ -63,6 +68,7 @@ export {
   OWNER_KINDS,
   USAGE_PERIODS,
   USAGE_METRIC_MAX_LEN,
+  ORG_QUOTA_STATES,
 } from './types.js'
 // A1 — exported so hosts can wire the workspace .key file into
 // openIdentityStore. crypto primitives (encryptSecret / decryptSecret)

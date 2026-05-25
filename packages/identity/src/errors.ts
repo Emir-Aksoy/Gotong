@@ -60,6 +60,9 @@ export type IdentityErrorCode =
   | 'peer_id_taken'
   /** No peers row by that internal id. */
   | 'peer_not_found'
+  // E1 (Phase 5) — org soft quotas.
+  /** No org_quotas row for the requested (metric, period) tuple. */
+  | 'org_quota_not_found'
 
 export interface IdentityErrorOptions {
   code: IdentityErrorCode

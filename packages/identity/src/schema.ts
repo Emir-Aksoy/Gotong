@@ -311,6 +311,54 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_peers_enabled ON peers(enabled);
     `,
   },
+  {
+    // E1 (v4 Phase 5) — per-org soft quotas.
+    //
+    // One row per (metric, period). The host's orgQuotaSweep timer pulls
+    // every row on a 1h cadence, sums `usage_counters.used` across all
+    // users (sumUsage) for that (metric, period), and compares against
+    // `quota`. State transitions (ok→warn, warn→over, *→ok) emit an
+    // audit_log entry. `last_state` is stored so re-checks at the same
+    // threshold don't spam audit (idempotency).
+    //
+    // Why a SEPARATE table from usage_counters:
+    //   - usage_counters is per-user (PK includes user_id); quotas here
+    //     are aggregate. Mixing them would require a sentinel user_id
+    //     value and confuse every per-user query.
+    //   - The cap policy lifecycle (admin sets/edits/removes) is
+    //     decoupled from the hot-path counter writes — two surfaces,
+    //     two tables.
+    //
+    // Schema notes:
+    //   - Composite PK (metric, period) — same rationale as
+    //     usage_counters: every read is by exactly this tuple.
+    //   - `quota` is NOT NULL — "unlimited" is represented by NOT having
+    //     a row (deleteOrgQuota). Avoids the ambiguity of "row with
+    //     quota=null means unlimited" vs "no row means unconfigured".
+    //   - `warn_pct` defaults to 80 (% of quota). Operators can tune
+    //     per-quota — a soft "memo" alert at 50% for something
+    //     expensive, vs 95% for plentiful resources.
+    //   - `last_state` ∈ {'ok','warn','over'}. Updated atomically inside
+    //     checkOrgQuotaThreshold when the state changes, so the sweep
+    //     can `transitioned=true` ⇒ write audit, `false` ⇒ skip.
+    //   - `last_checked` is informational, useful for "when did the
+    //     sweep last see this row" admin diagnostics.
+    version: 7,
+    name: 'org-quotas',
+    sql: `
+      CREATE TABLE IF NOT EXISTS org_quotas (
+        metric        TEXT NOT NULL,
+        period        TEXT NOT NULL,
+        quota         INTEGER NOT NULL,
+        warn_pct      INTEGER NOT NULL DEFAULT 80,
+        last_state    TEXT NOT NULL DEFAULT 'ok',
+        last_checked  INTEGER,
+        created_at    INTEGER NOT NULL,
+        updated_at    INTEGER NOT NULL,
+        PRIMARY KEY (metric, period)
+      );
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {

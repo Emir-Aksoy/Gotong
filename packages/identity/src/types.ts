@@ -237,6 +237,13 @@ export const AUDIT_ACTIONS = {
   PEER_DISCONNECT: 'peer_disconnect',
   // Phase 5 — org-wide settings (C1+).
   ORG_SET_QUOTA: 'org_set_quota',
+  // Phase 5 — org soft quotas (E1).
+  /** Aggregate org usage crossed the warn_pct threshold (default 80%). */
+  ORG_QUOTA_WARN: 'org_quota_warn',
+  /** Aggregate org usage crossed 100% — over the soft cap. */
+  ORG_QUOTA_OVER: 'org_quota_over',
+  /** Aggregate org usage fell back below warn_pct (period roll or manual reset). */
+  ORG_QUOTA_RECOVER: 'org_quota_recover',
 } as const
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS]
@@ -627,4 +634,86 @@ export interface UpdatePeerInput {
 export interface ListPeersQuery {
   /** When true, omit rows with enabled=0. */
   enabledOnly?: boolean
+}
+
+// ---------------------------------------------------------------------------
+// E1 (v4 Phase 5) — per-org soft quotas
+//
+// Aggregate caps across ALL users of the host, evaluated on a 1h sweep
+// tick by the host process. Soft because we never refuse a call here —
+// the per-user `checkAndIncrement` is the only hard gate. This layer
+// only emits audit warnings when aggregate usage crosses configurable
+// thresholds (default warn at 80%, over at 100%).
+//
+// Why "soft":
+//   - Refusing a single user's call because the ORG as a whole is over
+//     budget would be opaque and surprising ("why did MY request fail?
+//     I'm at 10/100"). Operators want a warning to act on (raise the
+//     cap, throttle the noisy user, etc), not an outage.
+//   - For hard org-level enforcement, an operator can sum per-user
+//     quotas to match — `sum(users) <= org_quota` makes the org cap
+//     mathematically unreachable via per-user `checkAndIncrement`
+//     denials alone.
+// ---------------------------------------------------------------------------
+
+/**
+ * State of an org quota relative to current aggregate usage.
+ *
+ *   ok    — usage < warn_pct% of quota
+ *   warn  — warn_pct% ≤ usage < 100%
+ *   over  — usage ≥ 100% of quota (soft cap exceeded)
+ */
+export type OrgQuotaState = 'ok' | 'warn' | 'over'
+
+export const ORG_QUOTA_STATES: readonly OrgQuotaState[] = ['ok', 'warn', 'over'] as const
+
+/**
+ * One configured org-level cap. `warnPct` is the threshold (0-100) at
+ * which the state transitions ok→warn; 100% transitions warn→over.
+ * `lastState` is the snapshot from the most recent
+ * {@link IdentityStore.checkOrgQuotaThreshold} call — used to make the
+ * audit-emit logic idempotent (only audit on state CHANGE).
+ */
+export interface OrgQuota {
+  metric: string
+  period: UsagePeriod
+  /** Soft cap (non-negative integer; no NULL — delete the row to remove). */
+  quota: number
+  /** 1-99. Default 80. */
+  warnPct: number
+  lastState: OrgQuotaState
+  /** ms timestamp of most recent checkOrgQuotaThreshold; null if never. */
+  lastChecked: number | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface SetOrgQuotaInput {
+  metric: string
+  period: UsagePeriod
+  /** Non-negative integer. To remove, call {@link IdentityStore.deleteOrgQuota}. */
+  quota: number
+  /** 1-99. Defaults to 80 on create; existing rows keep their current value when omitted. */
+  warnPct?: number
+}
+
+/**
+ * Result of {@link IdentityStore.checkOrgQuotaThreshold}. `transitioned`
+ * is the bit the host's orgQuotaSweep keys on — write audit_log only on
+ * true. `pct` is the integer percent for human-readable audit metadata.
+ */
+export interface CheckOrgQuotaResult {
+  metric: string
+  period: UsagePeriod
+  quota: number
+  warnPct: number
+  /** Aggregate sum of `usage_counters.used` for (metric, period) in current period. */
+  usage: number
+  /** Math.floor((usage / quota) * 100); clamped to [0, 999] for readability. */
+  pct: number
+  state: OrgQuotaState
+  /** Previous lastState value before this check overwrote it. */
+  previousState: OrgQuotaState
+  /** state !== previousState — host sweep gates audit emission on this. */
+  transitioned: boolean
 }

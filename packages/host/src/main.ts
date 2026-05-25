@@ -67,6 +67,7 @@ import { dirname, join } from 'node:path'
 
 import { Hub, Space, createLogger, type SpaceConfig, type TranscriptEntry } from '@aipehub/core'
 import {
+  AUDIT_ACTIONS,
   loadOrCreateMasterKey,
   openIdentityStore,
   type IdentityStore,
@@ -415,6 +416,7 @@ async function main(): Promise<void> {
   // so the timer never holds the event loop open after a graceful stop.
   let identityCleanupTimer: NodeJS.Timeout | undefined
   let usageSweepTimer: NodeJS.Timeout | undefined
+  let orgQuotaSweepTimer: NodeJS.Timeout | undefined
   if (identity) {
     const sweep = (): void => {
       try {
@@ -450,6 +452,66 @@ async function main(): Promise<void> {
     }
     usageSweepTimer = setInterval(sweepUsage, 60 * 60 * 1000)
     usageSweepTimer.unref?.()
+
+    // E1 — per-org soft quota sweep. After usage_counters are fresh
+    // (sweepUsage has just run), walk every configured org_quota row and
+    // emit an audit_log entry on state TRANSITIONS only (ok⇄warn⇄over).
+    // The store's checkOrgQuotaThreshold writes lastState atomically so
+    // re-checks at the same state are silent — admins see one event per
+    // threshold crossing, not one per tick.
+    //
+    // Soft: we never refuse a call here. The per-user checkAndIncrement
+    // remains the only hard gate; this layer is operator visibility.
+    const sweepOrgQuotas = (): void => {
+      try {
+        const quotas = identity!.listOrgQuotas()
+        if (quotas.length === 0) return
+        for (const q of quotas) {
+          try {
+            const r = identity!.checkOrgQuotaThreshold(q.metric, q.period)
+            if (!r.transitioned) continue
+            // Map state → audit action. Recover covers any transition
+            // INTO 'ok' (from warn or over). The reverse direction
+            // (warn → over) emits ORG_QUOTA_OVER, etc.
+            let action: string
+            if (r.state === 'ok') action = AUDIT_ACTIONS.ORG_QUOTA_RECOVER
+            else if (r.state === 'warn') action = AUDIT_ACTIONS.ORG_QUOTA_WARN
+            else action = AUDIT_ACTIONS.ORG_QUOTA_OVER
+            identity!.writeAuditLog({
+              action,
+              actorSource: 'system',
+              metadata: {
+                metric: r.metric,
+                period: r.period,
+                quota: r.quota,
+                usage: r.usage,
+                pct: r.pct,
+                warnPct: r.warnPct,
+                previousState: r.previousState,
+                state: r.state,
+              },
+            })
+            log.info('org quota state transition', {
+              metric: r.metric,
+              period: r.period,
+              from: r.previousState,
+              to: r.state,
+              pct: r.pct,
+            })
+          } catch (err) {
+            log.error('org quota check failed', {
+              metric: q.metric,
+              period: q.period,
+              err,
+            })
+          }
+        }
+      } catch (err) {
+        log.error('org quota sweep failed', { err })
+      }
+    }
+    orgQuotaSweepTimer = setInterval(sweepOrgQuotas, 60 * 60 * 1000)
+    orgQuotaSweepTimer.unref?.()
   }
 
   const hub = new Hub({ space })
@@ -724,6 +786,10 @@ async function main(): Promise<void> {
     if (usageSweepTimer) {
       clearInterval(usageSweepTimer)
       usageSweepTimer = undefined
+    }
+    if (orgQuotaSweepTimer) {
+      clearInterval(orgQuotaSweepTimer)
+      orgQuotaSweepTimer = undefined
     }
     if (identity) {
       try { identity.close() } catch (err) { log.error('identity close error', { err }) }
