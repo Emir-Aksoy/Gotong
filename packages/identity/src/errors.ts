@@ -35,6 +35,26 @@ export type IdentityErrorCode =
    * revoke the older invite first, then create a fresh one.
    */
   | 'invitation_pending_exists'
+  // Vault (Phase 5 A1 — encrypted application-layer secret storage).
+  /**
+   * Vault row not found (or already hard-deleted — soft-delete rows
+   * stay queryable until you pass `activeOnly:false`, so this code
+   * means "no row by that id at all").
+   */
+  | 'vault_entry_not_found'
+  /**
+   * Attempted to call a vault method but the IdentityStore was opened
+   * without a `masterKey`. Vault APIs require the key to encrypt /
+   * decrypt; without it they refuse rather than no-op or silently fail.
+   */
+  | 'vault_not_configured'
+  /**
+   * Decryption failed: format mismatch, unknown version prefix, AES-GCM
+   * auth tag rejection, or wrong master key. Surface code is opaque on
+   * purpose — distinguishing "tampered" from "wrong key" leaks
+   * information to an attacker who can repeatedly poke the API.
+   */
+  | 'vault_decrypt_failed'
 
 export interface IdentityErrorOptions {
   code: IdentityErrorCode

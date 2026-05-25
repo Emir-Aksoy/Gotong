@@ -273,3 +273,105 @@ export interface ListInvitationsQuery {
   limit?: number
   offset?: number
 }
+
+// ---------------------------------------------------------------------------
+// Vault (Phase 5 A1 — encrypted application-layer secret storage)
+//
+// Different from `Credential` (which holds auth material hashed for
+// VERIFY-only): vault rows are AES-256-GCM encrypted with the host
+// master key and can be decrypted to original plaintext via
+// `readVaultSecret(id)`. Use cases: LLM provider keys, MCP server
+// tokens, peer-hub mutual-auth tokens, third-party API keys —
+// anything the host needs to RELAY rather than just verify.
+// ---------------------------------------------------------------------------
+
+/**
+ * Categories of secret stored in the vault. New kinds are added as
+ * higher-level subsystems land (`peer_token` lands with D1 Peer
+ * Registry; `mcp_server` lands when host wires per-org MCP tool keys).
+ */
+export type VaultKind =
+  | 'llm_provider'
+  | 'mcp_server'
+  | 'peer_token'
+  | 'third_party_api'
+
+export const VAULT_KINDS: readonly VaultKind[] = [
+  'llm_provider',
+  'mcp_server',
+  'peer_token',
+  'third_party_api',
+] as const
+
+/**
+ * Unified ownership taxonomy. Used by vault here (A1) and — once A3
+ * lands — extended across memory / artifact / knowledge stores. Keeps
+ * "who owns this resource" expressible without parsing string
+ * conventions.
+ *
+ *   user  — bound to a specific v4 user id (personal scope)
+ *   org   — owned by the host itself (organisation-wide scope; ownerId
+ *           is null because the host IS the implicit org)
+ *   peer  — owned by a remote peer hub (federation scope; ownerId is
+ *           the peer's hub id)
+ */
+export type OwnerKind = 'user' | 'org' | 'peer'
+
+export const OWNER_KINDS: readonly OwnerKind[] = ['user', 'org', 'peer'] as const
+
+/**
+ * Vault row metadata. Deliberately omits the encrypted blob — listing
+ * vault entries should never expose secret material. Callers obtain the
+ * plaintext via `readVaultSecret(id)` (which checks revocation +
+ * touches `last_used_at`).
+ */
+export interface VaultEntry {
+  id: string
+  kind: VaultKind
+  ownerKind: OwnerKind
+  /** null when ownerKind === 'org' (the host's own org is implicit). */
+  ownerId: string | null
+  label: string | null
+  /** Free-form context (provider, model, region…). null when absent. */
+  metadata: Record<string, unknown> | null
+  createdAt: number
+  lastUsedAt: number | null
+  /** Soft-delete timestamp. null === active. */
+  revokedAt: number | null
+}
+
+export interface CreateVaultEntryInput {
+  kind: VaultKind
+  ownerKind: OwnerKind
+  /**
+   * Required for ownerKind 'user' | 'peer'. MUST be null/omitted for
+   * ownerKind 'org' (the host is the implicit org owner — passing an
+   * id here is rejected to avoid silent misclassification).
+   */
+  ownerId?: string | null
+  /**
+   * Plaintext secret. Encrypted before persisting; never logged. The
+   * caller is responsible for shape-validating provider-specific
+   * formats (e.g. that an Anthropic key starts with `sk-ant-`).
+   */
+  secret: string
+  label?: string | null
+  /**
+   * Per-kind context (provider/model/region). Plain object,
+   * JSON-stringified to ≤8KB. Useful for the admin UI to render
+   * "Anthropic · opus-4" without re-parsing the secret.
+   */
+  metadata?: Record<string, unknown> | null
+}
+
+export interface ListVaultEntriesQuery {
+  kind?: VaultKind
+  ownerKind?: OwnerKind
+  /** Match a specific owner id. Use `null` to query org-owned rows. */
+  ownerId?: string | null
+  /** Defaults true. Set false to include revoked rows (admin/audit views). */
+  activeOnly?: boolean
+  /** Newest-first; defaults to 100. Clamped to [1, 500]. */
+  limit?: number
+  offset?: number
+}

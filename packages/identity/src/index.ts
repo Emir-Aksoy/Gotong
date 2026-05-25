@@ -34,4 +34,17 @@ export type {
   IssuedInvitation,
   AcceptInvitationInput,
   ListInvitationsQuery,
+  // Vault (A1 — Phase 5)
+  VaultKind,
+  OwnerKind,
+  VaultEntry,
+  CreateVaultEntryInput,
+  ListVaultEntriesQuery,
 } from './types.js'
+export { ROLES, VAULT_KINDS, OWNER_KINDS } from './types.js'
+// A1 — exported so hosts can wire the workspace .key file into
+// openIdentityStore. crypto primitives (encryptSecret / decryptSecret)
+// are NOT re-exported: callers should only ever touch plaintext via
+// IdentityStore.readVaultSecret, which enforces the masterKey config
+// gate and last_used_at tracking.
+export { loadOrCreateMasterKey, MASTER_KEY_LEN_BYTES } from './crypto.js'

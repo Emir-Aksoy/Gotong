@@ -175,6 +175,63 @@ const MIGRATIONS: Migration[] = [
         ON invitations(status);
     `,
   },
+  {
+    // A1 (v4 Phase 5) — vault table for two-way (encrypted, recoverable)
+    // secrets. Distinct from `credentials`, which holds one-way HASHED
+    // auth material for user login. Different threat models, different
+    // primitives.
+    //
+    // What lives here:
+    //   - LLM provider keys (Anthropic / OpenAI / DeepSeek) — must be
+    //     readable to call the upstream API.
+    //   - MCP server tokens (github / brave-search / private MCP) — same.
+    //   - Peer-hub mutual-auth tokens — read at HubLink connection time.
+    //   - Generic third-party API tokens.
+    //
+    // Schema notes:
+    //   - `owner_kind` is 'user' | 'org' | 'peer' (mirrors the unified
+    //     OwnerRef model that A3 will roll out across memory/artifact).
+    //   - `owner_id` is NULL when owner_kind == 'org' (the host itself
+    //     is the implicit org). For 'user' / 'peer' it holds the
+    //     respective foreign id. NO FK because owner_kind switches the
+    //     referenced table (users / peer_registry-not-yet-built /
+    //     conceptual self-org). Integrity is application-layer at
+    //     create time.
+    //   - `secret_enc` holds the AES-256-GCM blob in format
+    //     `v1.gcm$<nonce>$<ct>$<tag>` (see crypto.ts). Plaintext is
+    //     never persisted, never logged.
+    //   - `revoked_at` is a timestamp, NULL when active. Soft-delete:
+    //     rows survive forever for audit forensics; the active-rows hot
+    //     path filters `WHERE revoked_at IS NULL`.
+    //   - `metadata` is a JSON blob for provider-specific context
+    //     (e.g. {provider: 'anthropic', model: 'claude-opus-4'}).
+    //     Optional; clamped to 8KB at write time (same as audit_log).
+    //
+    // Indexes:
+    //   - idx_vault_kind: filter "show me all llm_provider entries".
+    //   - idx_vault_owner: lookup by (owner_kind, owner_id) tuple.
+    //   - idx_vault_active: hot-path partial index for "currently active".
+    version: 4,
+    name: 'vault',
+    sql: `
+      CREATE TABLE IF NOT EXISTS vault (
+        id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        owner_kind TEXT NOT NULL,
+        owner_id TEXT,
+        label TEXT,
+        secret_enc TEXT NOT NULL,
+        metadata TEXT,
+        created_at INTEGER NOT NULL,
+        last_used_at INTEGER,
+        revoked_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_vault_kind ON vault(kind);
+      CREATE INDEX IF NOT EXISTS idx_vault_owner ON vault(owner_kind, owner_id);
+      CREATE INDEX IF NOT EXISTS idx_vault_active
+        ON vault(revoked_at) WHERE revoked_at IS NULL;
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {
