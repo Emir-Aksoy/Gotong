@@ -66,7 +66,13 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
 import { Hub, Space, createLogger, type SpaceConfig, type TranscriptEntry } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import {
+  loadOrCreateMasterKey,
+  openIdentityStore,
+  type IdentityStore,
+} from '@aipehub/identity'
+
+import { OrgApiPool } from './org-api-pool.js'
 
 import { BAKED_VERSION } from './version.js'
 
@@ -361,9 +367,18 @@ async function main(): Promise<void> {
   // remains valid for host-level admin routes (agents/secrets/
   // workflows), but `/api/admin/identity/*` no longer accepts it.
   let identity: IdentityStore | undefined
+  let orgApiPool: OrgApiPool | undefined
   try {
+    // B1.2 — also load the vault master key from the same workspace.
+    // `loadOrCreateMasterKey` creates the file 0600 on first run; a
+    // pre-existing file with the wrong length throws (a stale key
+    // means existing vault rows can't decrypt — fail loudly).
+    const masterKey = loadOrCreateMasterKey(
+      join(SPACE_DIR, 'identity-master.key'),
+    )
     identity = openIdentityStore({
       dbPath: join(SPACE_DIR, 'identity.sqlite'),
+      masterKey,
     })
     const ib = identity.bootstrap({
       ownerEmail: env('AIPE_OWNER_EMAIL', 'admin@local')!,
@@ -376,12 +391,20 @@ async function main(): Promise<void> {
         users: identity.countUsers(),
       })
     }
+    // B1.2 — org-level LLM key pool wraps the vault. Created here so
+    // both LocalAgentPool (key resolution chain) and any future B-tier
+    // consumer (knowledge service, mcp pool) share the same memoised
+    // view of org-owned credentials.
+    orgApiPool = new OrgApiPool({ identity })
   } catch (err) {
-    // Degrade gracefully: if SQLite open / migrate failed, log loudly
-    // but keep the host up. Pre-v4 auth paths (Space.admins) still
-    // work — the operator just loses access to v4-only surfaces.
+    // Degrade gracefully: if SQLite open / migrate / master-key load
+    // failed, log loudly but keep the host up. Pre-v4 auth paths
+    // (Space.admins) still work and the LLM key chain falls back to
+    // the v3 workspace store + env — the operator just loses access
+    // to v4-only surfaces (identity routes + org-pool key resolution).
     log.error('identity: bootstrap failed (continuing without v4 identity)', { err })
     identity = undefined
+    orgApiPool = undefined
   }
 
   // V4-AUDIT-05: periodically reap expired session rows. Bearer auth
@@ -466,7 +489,7 @@ async function main(): Promise<void> {
   // get their handles attached at spawn time (PR-8). When services
   // failed to bootstrap, agents without `uses:` still spawn normally;
   // agents with `uses:` fail loudly with a clear log line.
-  const localAgents = new LocalAgentPool({ hub, space, services })
+  const localAgents = new LocalAgentPool({ hub, space, services, orgApiPool })
   await localAgents.start()
 
   // Growth-reports admin surface — only meaningful if the

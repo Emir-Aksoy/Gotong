@@ -28,6 +28,7 @@ import {
 } from '@aipehub/services-sdk'
 
 import type { HubServices, ServiceUseSpec as AttachSpec } from './services/index.js'
+import type { OrgApiPool } from './org-api-pool.js'
 
 const log = createLogger('local-agents')
 
@@ -48,13 +49,17 @@ const log = createLogger('local-agents')
  * Key resolution (per spawn):
  *   1. per-agent override (Space.getAgentApiKey) — set in the create
  *      form's "this agent uses its own key" field
- *   2. workspace default for that provider (Space.getProviderApiKey)
- *   3. host environment (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`)
- *   4. throw — and the spawn fails loudly so the admin sees an error
+ *   2. org pool (v4 identity vault, ownerKind='org' llm_provider row)
+ *      — admin UI / CLI writes here; this is the authoritative v4 path
+ *   3. workspace default for that provider (Space.getProviderApiKey)
+ *      — v3 legacy fallback, kept until B1.3 retires it
+ *   4. host environment (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`)
+ *   5. throw — and the spawn fails loudly so the admin sees an error
  *
  * API keys never appear on the wire after the initial POST that sets
- * them; the Space encrypts them at rest with AES-256-GCM and a master
- * key that lives outside any backup (`runtime/secret.key`, 0600).
+ * them; the Space encrypts v3 keys at rest with AES-256-GCM (key in
+ * `runtime/secret.key`, 0600) and the v4 identity vault uses its own
+ * master key (`identity-master.key`, 0600).
  */
 export class LocalAgentPool implements ManagedAgentLifecycle {
   private readonly hub: Hub
@@ -96,11 +101,25 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * directly).
    */
   private readonly mcpToolsetForAgent = new Map<ParticipantId, McpToolset>()
+  /**
+   * B1.2 — optional v4 identity-vault key pool. When present,
+   * `resolveApiKey` consults the org pool between the per-agent
+   * override and the legacy workspace fallback. Absent on hosts that
+   * couldn't open the identity store (missing masterKey, sqlite open
+   * failure) — the chain transparently skips the pool.
+   */
+  private readonly orgApiPool?: OrgApiPool
 
-  constructor(opts: { hub: Hub; space: Space; services?: HubServices }) {
+  constructor(opts: {
+    hub: Hub
+    space: Space
+    services?: HubServices
+    orgApiPool?: OrgApiPool
+  }) {
     this.hub = opts.hub
     this.space = opts.space
     this.services = opts.services
+    this.orgApiPool = opts.orgApiPool
   }
 
   /**
@@ -429,14 +448,13 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   }
 
   /**
-   * Walk the three sources of API keys in order and return the first
-   * hit. `mock` never needs a key — return undefined and the provider
-   * builder will skip the check.
-   *
-   * `openai-compatible` short-circuits to per-agent only: every baseURL
-   * is a different vendor (DeepSeek vs. Qwen vs. Zhipu), so a single
-   * workspace-level `openai-compatible` key wouldn't make sense. The
-   * spawn step throws a clear error if the per-agent key is missing.
+   * Collect every key source the host has wired up and let
+   * {@link selectLlmApiKey} pick the first hit. `mock` short-circuits;
+   * `openai-compatible` short-circuits after the per-agent check (every
+   * baseURL is a different vendor — DeepSeek vs. Qwen vs. Zhipu — so a
+   * generic workspace/org-pool key for the umbrella tag wouldn't
+   * disambiguate). The spawn step throws a clear error when no source
+   * yields a key.
    */
   private async resolveApiKey(
     agentId: ParticipantId,
@@ -444,15 +462,67 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   ): Promise<string | undefined> {
     if (provider === 'mock') return undefined
     const perAgent = await this.space.getAgentApiKey(agentId).catch(() => null)
-    if (perAgent) return perAgent
-    // openai-compatible has no workspace / env fallback — see comment above.
-    if (provider === 'openai-compatible') return undefined
-    const workspace = await this.space.getProviderApiKey(provider).catch(() => null)
-    if (workspace) return workspace
-    if (provider === 'anthropic') return process.env.ANTHROPIC_API_KEY
-    if (provider === 'openai')    return process.env.OPENAI_API_KEY
-    return undefined
+    // openai-compatible: skip workspace + env sources outright (vendor
+    // ambiguity), but org-pool may still hold a vendor-specific row.
+    const workspace =
+      provider === 'openai-compatible'
+        ? null
+        : await this.space.getProviderApiKey(provider).catch(() => null)
+    const env =
+      provider === 'anthropic'
+        ? process.env.ANTHROPIC_API_KEY ?? null
+        : provider === 'openai'
+          ? process.env.OPENAI_API_KEY ?? null
+          : null
+    return selectLlmApiKey({
+      provider,
+      perAgent,
+      orgPool: this.orgApiPool ?? null,
+      workspace,
+      env,
+    })
   }
+}
+
+/**
+ * Pure key-selection logic. Exported for unit-testability so we don't
+ * need to boot a full LocalAgentPool just to assert the order. Callers
+ * gather every source up-front (Space lookups + env reads + the org
+ * pool reference) and this function picks the first non-empty hit.
+ *
+ * Priority (B1.2):
+ *   1. per-agent override
+ *   2. org pool (v4 vault, ownerKind='org' llm_provider row)
+ *   3. workspace default (v3 Space-stored per-provider key)
+ *   4. host env (ANTHROPIC_API_KEY / OPENAI_API_KEY)
+ *
+ * Special cases:
+ *   - `mock`: returns undefined unconditionally — no provider needs a
+ *     key for the mock backend.
+ *   - `openai-compatible`: only per-agent is considered for the workspace
+ *     and env tiers (callers should pass `workspace=null` and `env=null`
+ *     for this provider). The org pool tier is still consulted because
+ *     a vault row with `metadata.provider='openai-compatible'` is a
+ *     legitimate way to scope a vendor-specific key org-wide.
+ *
+ * @internal
+ */
+export function selectLlmApiKey(args: {
+  provider: ManagedAgentSpec['provider']
+  perAgent: string | null
+  orgPool: OrgApiPool | null
+  workspace: string | null
+  env: string | null
+}): string | undefined {
+  if (args.provider === 'mock') return undefined
+  if (args.perAgent) return args.perAgent
+  if (args.orgPool) {
+    const hit = args.orgPool.resolveLlmKey(args.provider)
+    if (hit) return hit.apiKey
+  }
+  if (args.workspace) return args.workspace
+  if (args.env) return args.env
+  return undefined
 }
 
 /**
