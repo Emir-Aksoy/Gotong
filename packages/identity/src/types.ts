@@ -567,3 +567,64 @@ export interface SweepUsageResult {
     monthly: number
   }
 }
+
+// ---------------------------------------------------------------------------
+// D1 (v4 Phase 5) — Peer Registry
+// ---------------------------------------------------------------------------
+
+/**
+ * One row in the `peers` table. The shared HELLO secret is NOT in this
+ * shape — it lives in vault.id = `vaultEntryId`, decrypted on demand
+ * via `getPeerToken()`. `enabled=false` keeps the row + token around
+ * (one-click re-enable) but tells the host's PeerRegistry to drop the
+ * HubLink on the next tick.
+ */
+export interface PeerRegistration {
+  /** Internal row id (newId()). */
+  id: string
+  /** The remote hub's wire selfId; UNIQUE in the table. */
+  peerId: string
+  /** ws:// or wss:// URL the host will dial. */
+  endpointUrl: string
+  /** Human-readable label for admin UI; nullable. */
+  label: string | null
+  /** Active in the PeerRegistry reconciliation loop. */
+  enabled: boolean
+  /** Soft FK into `vault.id` (kind='peer_token', ownerKind='peer'). */
+  vaultEntryId: string
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AddPeerInput {
+  /** Remote hub's wire selfId. Must be unique. */
+  peerId: string
+  /** ws:// or wss:// dial URL. */
+  endpointUrl: string
+  /** Optional human label. */
+  label?: string | null
+  /**
+   * The shared HELLO secret. Stored encrypted via createVaultEntry;
+   * never returned in any subsequent read. To rotate, call updatePeer
+   * with a fresh `peerToken`.
+   */
+  peerToken: string
+}
+
+export interface UpdatePeerInput {
+  label?: string | null
+  enabled?: boolean
+  /** Rotates: old vault entry revoked, fresh one created in same txn. */
+  peerToken?: string
+  /**
+   * Allow moving a peer to a new endpoint (load-balancer change, DNS
+   * cutover) without losing the token. peerId is intentionally NOT
+   * mutable — that's a different peer, use addPeer/removePeer.
+   */
+  endpointUrl?: string
+}
+
+export interface ListPeersQuery {
+  /** When true, omit rows with enabled=0. */
+  enabledOnly?: boolean
+}

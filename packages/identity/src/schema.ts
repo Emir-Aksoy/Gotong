@@ -276,6 +276,41 @@ const MIGRATIONS: Migration[] = [
       CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_counters(user_id);
     `,
   },
+  {
+    // D1 (v4 Phase 5) — Peer Registry. Replaces "peer config baked into
+    // an env var / json file" with vault-encrypted tokens + a sqlite row
+    // per remote hub. The host's PeerRegistry polls this table on a
+    // 5s tick (default; AIPE_PEER_POLL_MS overrides) and reconciles
+    // its set of open HubLinks: new rows trigger connectHubLink, vanished
+    // / disabled rows trigger uninstall().
+    //
+    // - `peer_id` is the remote hub's wire selfId (used as
+    //   expectedPeerId on outbound HELLO_ACK verification). UNIQUE
+    //   because you can't have two simultaneous connections to "the
+    //   same hub" — second add would be ambiguous routing.
+    // - `vault_entry_id` is the soft FK to vault.id holding the peer's
+    //   shared secret (kind='peer_token', ownerKind='peer'). NOT a hard
+    //   FK because vault entries are revoked (not deleted) on token
+    //   rotation; we want the peer row to outlive a revoke for audit
+    //   continuity (mirrors invitations table pattern above).
+    // - `enabled` toggle keeps a peer row around for one-click
+    //   re-enable without losing the token, vs DELETE which also revokes.
+    version: 6,
+    name: 'peers',
+    sql: `
+      CREATE TABLE IF NOT EXISTS peers (
+        id              TEXT PRIMARY KEY,
+        peer_id         TEXT NOT NULL UNIQUE,
+        endpoint_url    TEXT NOT NULL,
+        label           TEXT,
+        enabled         INTEGER NOT NULL DEFAULT 1,
+        vault_entry_id  TEXT NOT NULL,
+        created_at      INTEGER NOT NULL,
+        updated_at      INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_peers_enabled ON peers(enabled);
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {

@@ -55,6 +55,11 @@ export type IdentityErrorCode =
    * information to an attacker who can repeatedly poke the API.
    */
   | 'vault_decrypt_failed'
+  // D1 (Phase 5) — Peer Registry.
+  /** UNIQUE constraint violated on peers.peer_id during addPeer. */
+  | 'peer_id_taken'
+  /** No peers row by that internal id. */
+  | 'peer_not_found'
 
 export interface IdentityErrorOptions {
   code: IdentityErrorCode

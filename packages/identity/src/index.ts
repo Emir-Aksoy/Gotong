@@ -49,6 +49,12 @@ export type {
   CheckAndIncrementInput,
   CheckAndIncrementResult,
   ResetUsageInput,
+  SweepUsageResult,
+  // Peer registry (D1 — Phase 5)
+  PeerRegistration,
+  AddPeerInput,
+  UpdatePeerInput,
+  ListPeersQuery,
 } from './types.js'
 export {
   AUDIT_ACTIONS,
