@@ -348,34 +348,29 @@ async function main(): Promise<void> {
   const config = await space.config()
 
   // v4 identity layer. Opens (or creates) `<space>/identity.sqlite` and
-  // bootstraps an `owner` user. When this is the very first init we
-  // also migrate the freshly-minted v3 admin token into the identity
-  // store as an `admin_token` credential, so the URL printed at the
-  // bottom of this boot also works against the new IdentityStore
-  // surface (Phase 2.4 will wire web routes to use both paths).
+  // bootstraps an `owner` user with NO credentials.
+  //
+  // A2.2 — bootstrap no longer migrates the v3 admin token; the v4
+  // surface is the documented login path. The first operator gets a
+  // password via the (C1) setup wizard, OR via the `aipehub-host
+  // mint-admin-token` subcommand as an emergency fallback.
   //
   // Bootstrap is idempotent: on every subsequent boot it returns
-  // `bootstrapped: false` and never mutates. Upgrades from a v3 host
-  // that's already past first-init therefore see no owner user with
-  // a credential — they keep authenticating via the v3 admin URL
-  // (Space.admins) until they explicitly issue themselves a password
-  // / api_key in the (Phase 2.3) admin UI.
+  // `bootstrapped: false` and never mutates. The legacy v3 admin URL
+  // (`/admin?token=...`) is printed at the bottom of this boot and
+  // remains valid for host-level admin routes (agents/secrets/
+  // workflows), but `/api/admin/identity/*` no longer accepts it.
   let identity: IdentityStore | undefined
   try {
     identity = openIdentityStore({
       dbPath: join(SPACE_DIR, 'identity.sqlite'),
     })
-    const bootstrapInput: Parameters<IdentityStore['bootstrap']>[0] = {
+    const ib = identity.bootstrap({
       ownerEmail: env('AIPE_OWNER_EMAIL', 'admin@local')!,
       ownerDisplayName: env('AIPE_ADMIN_DISPLAY_NAME', 'Operator')!,
-    }
-    if (adminToken !== null) bootstrapInput.adminToken = adminToken
-    const ib = identity.bootstrap(bootstrapInput)
+    })
     if (ib.bootstrapped) {
-      log.info('identity: bootstrapped owner', {
-        userId: ib.ownerUserId,
-        adminTokenMigrated: ib.adminTokenMigrated,
-      })
+      log.info('identity: bootstrapped owner', { userId: ib.ownerUserId })
     } else {
       log.info('identity: already populated', {
         users: identity.countUsers(),

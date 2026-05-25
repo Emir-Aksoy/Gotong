@@ -1071,9 +1071,10 @@ async function handle(
 
   // --- v4 identity routes -------------------------------------------------
   // `/api/admin/identity/*` is the v4 multi-user surface. Auth is handled
-  // inside `handleIdentityRoute` (owner is established by EITHER a valid
-  // v3 admin OR a v4 IdentityStore session). When the host didn't wire
-  // an IdentityStore, return 503 so the admin UI can hide the tab.
+  // inside `handleIdentityRoute` — owner is established exclusively by a
+  // v4 IdentityStore session / api_key. v3-admin was removed in A2.2.
+  // When the host didn't wire an IdentityStore, return 503 so the admin
+  // UI can hide the tab.
   if (path.startsWith('/api/admin/identity/')) {
     if (!ctx.identity) {
       sendJson(
@@ -1083,17 +1084,10 @@ async function handle(
       )
       return
     }
-    // We compute `isV3Admin` here (cheap) so handleIdentityRoute can
-    // skip a redundant lookup. Note: this does NOT enforce v3 admin —
-    // a missing v3 admin is fine if the caller has a v4 session.
-    let isV3Admin = false
-    const adminResolution = await findAdminFromRequest(ctx, req)
-    if (adminResolution.kind === 'rate_limited') {
-      res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
-      res.end('too many auth attempts; try again in a minute')
-      return
-    }
-    if (adminResolution.kind === 'admin') isV3Admin = true
+    // A2.2 — v3-admin no longer participates in identity-route auth.
+    // The owner gate inside handleIdentityRoute now reads v4 session /
+    // bearer exclusively. server.ts still verifies v3 admin for the
+    // host-level routes (agents, secrets, workflows) further below.
     // V4-AUDIT-06: User-Agent goes into audit rows. Headers can be
     // string | string[]; we coerce to a single string (Node never
     // splits User-Agent in practice, but the type allows for it).
@@ -1103,7 +1097,6 @@ async function handle(
       {
         identity: ctx.identity,
         cookieSecure: ctx.cookieSecure,
-        isV3Admin,
         // V4-AUDIT-01 / AUDIT-P3-06: reuse the same `RateLimiter`
         // INSTANCE (avoids a second allocation + GC sweep cycle), but
         // the budgets are PER-NAMESPACE — bearer:<ip>, cookie:<ip>,

@@ -184,12 +184,14 @@ interface VaultRow {
 }
 
 const AUDIT_ACTOR_SOURCES: readonly AuditActorSource[] = [
-  'v3-admin',
   'v4-session',
   'v4-bearer',
   'anonymous',
   'system',
   'federated', // FED-M4
+  // A2.2 (v4 Phase 5) — 'v3-admin' removed from the writable enum.
+  // rowToAuditLog still tolerates pre-A2.2 rows that carry the old
+  // string in `actor_source` (clamped to 'system' via the fallback).
 ] as const
 
 function isAuditActorSource(s: string): s is AuditActorSource {
@@ -508,11 +510,7 @@ export class IdentityStore {
   bootstrap(input: BootstrapInput = {}): BootstrapResult {
     const count = (this.stmtCountUsers.get() as { c: number }).c
     if (count > 0) {
-      return {
-        bootstrapped: false,
-        ownerUserId: null,
-        adminTokenMigrated: false,
-      }
+      return { bootstrapped: false, ownerUserId: null }
     }
 
     const email = normaliseEmail(input.ownerEmail ?? 'admin@local')
@@ -526,33 +524,16 @@ export class IdentityStore {
     }
     const displayName = input.ownerDisplayName ?? 'Admin'
 
+    // A2.2 — owner is created WITHOUT any credentials. The setup wizard
+    // (delivered with C1) is the documented path for the first operator
+    // to set a password. Until then, the `mint-admin-token` host
+    // subcommand mints a one-shot admin_token they can use to log in.
     return transaction(this.db, () => {
       const userId = newId()
       const now = Date.now()
       this.stmtInsertUser.run(userId, email, displayName, now)
       this.stmtInsertMembership.run(newId(), userId, 'owner', now)
-
-      let migrated = false
-      const adminToken = input.adminToken
-      if (typeof adminToken === 'string' && adminToken.length > 0) {
-        const identifier = hashToken(adminToken)
-        this.stmtInsertCredential.run(
-          newId(),
-          userId,
-          'admin_token',
-          identifier,
-          identifier,
-          'v3 admin token (migrated)',
-          now,
-        )
-        migrated = true
-      }
-
-      return {
-        bootstrapped: true,
-        ownerUserId: userId,
-        adminTokenMigrated: migrated,
-      }
+      return { bootstrapped: true, ownerUserId: userId }
     })
   }
 

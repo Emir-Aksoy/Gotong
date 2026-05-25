@@ -76,17 +76,6 @@ export interface CreateUserInput {
 }
 
 export interface BootstrapInput {
-  /**
-   * Existing v3 admin token (the hex string from the first-launch admin
-   * URL). When the store is empty:
-   *   - present → migrated into a real `admin_token` credential on the
-   *     new owner user (so the existing URL keeps working in v4).
-   *   - absent  → only the owner user is created, with no credentials;
-   *     caller is responsible for issuing some way to log in.
-   * When the store already has users, this field is ignored and no
-   * mutation happens (the function is idempotent).
-   */
-  adminToken?: string
   /** Defaults to 'admin@local'. */
   ownerEmail?: string
   /** Defaults to 'Admin'. */
@@ -98,12 +87,6 @@ export interface BootstrapResult {
   bootstrapped: boolean
   /** Set only when `bootstrapped` is true. */
   ownerUserId: string | null
-  /**
-   * true when an `adminToken` was provided AND the bootstrap actually
-   * ran AND the token was successfully stored. false in every other
-   * case (already bootstrapped, no token provided, etc).
-   */
-  adminTokenMigrated: boolean
 }
 
 export interface IssuedApiKey {
@@ -132,9 +115,16 @@ export interface IssuedAdminToken {
  * `@aipehub/core`'s `TaskOrigin`). The writer is expected to also
  * stash `task.origin` in `metadata.origin` so downstream readers can
  * trace back to the original org+user.
+ *
+ * A2.2 (v4 Phase 5) — `'v3-admin'` was removed. v4 IdentityStore is the
+ * single source of identity truth; the legacy v3 admin path (Space.admins
+ * cookie / `/admin?token=...` URL) is still served by the host for
+ * host-level admin routes (agents, secrets, workflows) but those paths
+ * never touch IdentityStore audit rows. Pre-A2.2 audit rows with
+ * `actor_source = 'v3-admin'` fall back to `'system'` via the corruption
+ * guard in `rowToAuditLog`.
  */
 export type AuditActorSource =
-  | 'v3-admin'
   | 'v4-session'
   | 'v4-bearer'
   | 'anonymous'
@@ -271,7 +261,7 @@ export interface Invitation {
   id: string
   email: string
   role: Role
-  /** v4 user id of the inviter. Null when minted by v3-admin (no v4 binding). */
+  /** v4 user id of the inviter. Null when minted by the system (no human actor). */
   invitedBy: string | null
   /** Pre-filled display name suggestion shown on the /invite landing page. */
   displayName: string | null
@@ -295,7 +285,7 @@ export interface CreateInvitationInput {
   role?: Role
   /** Pre-filled name on the landing page; user can override at accept time. */
   displayName?: string
-  /** v4 user id of the inviter; null for v3-admin callers. */
+  /** v4 user id of the inviter; null for system-initiated invites. */
   invitedBy?: string | null
   /** Time-to-live in ms. Defaults to 24h, clamped to [60_000, 30 days]. */
   ttlMs?: number

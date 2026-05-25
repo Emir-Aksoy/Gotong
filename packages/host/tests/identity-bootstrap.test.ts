@@ -3,10 +3,17 @@
  *
  * Doesn't boot the full host (no web / ws / hub) — that's covered by
  * the existing main.ts smoke tests. This file pins the contract
- * between `Space.openOrInit` (which mints the v3 admin token) and
- * `openIdentityStore().bootstrap()` (which migrates it). If a future
- * refactor breaks the handover, this suite catches it before the
- * admin token silently fails to migrate in real production startups.
+ * between `Space.openOrInit` (which mints the legacy v3 admin URL token
+ * for host-level admin routes) and `openIdentityStore().bootstrap()`
+ * (which creates the v4 owner user).
+ *
+ * A2.2 — bootstrap no longer migrates the v3 admin token into the v4
+ * surface. The two auth systems are deliberately decoupled: v3 admin
+ * cookie / `/admin?token=` keeps the host-level admin routes (agents,
+ * secrets, workflows) accessible; the v4 IdentityStore handles user
+ * management + invitations + audit log. Pre-A2.2 tests that asserted
+ * "the v3 admin token can authenticate against the v4 surface" were
+ * removed — that contract no longer exists.
  */
 
 import { afterEach, describe, expect, it } from 'vitest'
@@ -36,12 +43,15 @@ function mkTmp(): string {
 }
 
 describe('host startup × @aipehub/identity', () => {
-  it('first-init: v3 admin token is migrated into the IdentityStore', async () => {
+  it('first-init: bootstrap creates owner user with no credentials', async () => {
     const spaceDir = mkTmp()
     const { adminToken } = await Space.openOrInit(spaceDir, {
       name: 'test-workspace',
       adminDisplayName: 'Operator',
     })
+    // Space.openOrInit still mints a v3 admin token for the
+    // host-level `/admin?token=...` URL — but that token NEVER touches
+    // the IdentityStore. The two systems are independent post-A2.2.
     expect(typeof adminToken).toBe('string')
     expect(adminToken!.length).toBeGreaterThan(0)
 
@@ -50,39 +60,36 @@ describe('host startup × @aipehub/identity', () => {
     })
     try {
       const ib = identity.bootstrap({
-        adminToken: adminToken!,
         ownerEmail: 'admin@local',
         ownerDisplayName: 'Operator',
       })
       expect(ib.bootstrapped).toBe(true)
-      expect(ib.adminTokenMigrated).toBe(true)
       expect(typeof ib.ownerUserId).toBe('string')
 
-      // Side effects: db file on disk, owner user with role=owner.
+      // Side effects: db file on disk, owner user with role=owner,
+      // and crucially — NO credentials. The first operator picks a
+      // password via the C1 setup wizard (or via the emergency
+      // `mint-admin-token` host subcommand).
       expect(existsSync(join(spaceDir, 'identity.sqlite'))).toBe(true)
       expect(identity.countUsers()).toBe(1)
       const owner = identity.getUserById(ib.ownerUserId!)
       expect(owner?.email).toBe('admin@local')
       expect(identity.getMembership(ib.ownerUserId!)?.role).toBe('owner')
+      expect(identity.listCredentials(ib.ownerUserId!)).toEqual([])
 
-      // The v3 admin token now authenticates against the v4 surface
-      // — this is the load-bearing assertion. If it stops being true,
-      // upgrading from v3 → v4 would silently lock users out of the
-      // new admin paths.
-      const session = identity.authenticateToken({ token: adminToken! })
-      expect(session.userId).toBe(ib.ownerUserId)
-
-      const probe = identity.getSessionByToken(session.token)
-      expect(probe?.role).toBe('owner')
-      expect(probe?.user.email).toBe('admin@local')
+      // A2.2 — the v3 admin token CANNOT log into the v4 surface.
+      // authenticateToken throws because there's no matching credential.
+      expect(() =>
+        identity.authenticateToken({ token: adminToken! }),
+      ).toThrow(/authentication_failed|invalid/)
     } finally {
       identity.close()
     }
   })
 
-  it('second boot: bootstrap is idempotent — no users/credentials added', async () => {
+  it('second boot: bootstrap is idempotent — no mutation', async () => {
     const spaceDir = mkTmp()
-    const { adminToken } = await Space.openOrInit(spaceDir, {
+    await Space.openOrInit(spaceDir, {
       name: 'test-workspace',
       adminDisplayName: 'Operator',
     })
@@ -90,10 +97,7 @@ describe('host startup × @aipehub/identity', () => {
     const identityA = openIdentityStore({
       dbPath: join(spaceDir, 'identity.sqlite'),
     })
-    const ibA = identityA.bootstrap({
-      adminToken: adminToken!,
-      ownerEmail: 'admin@local',
-    })
+    const ibA = identityA.bootstrap({ ownerEmail: 'admin@local' })
     expect(ibA.bootstrapped).toBe(true)
     const usersAfterFirst = identityA.listUsers()
     const credsAfterFirst = identityA.listCredentials(ibA.ownerUserId!)
@@ -105,16 +109,10 @@ describe('host startup × @aipehub/identity', () => {
       dbPath: join(spaceDir, 'identity.sqlite'),
     })
     try {
-      const ibB = identityB.bootstrap({
-        adminToken: adminToken!, // even passing the token again must be safe
-        ownerEmail: 'admin@local',
-      })
+      const ibB = identityB.bootstrap({ ownerEmail: 'admin@local' })
       expect(ibB.bootstrapped).toBe(false)
       expect(ibB.ownerUserId).toBeNull()
-      expect(ibB.adminTokenMigrated).toBe(false)
       expect(identityB.listUsers()).toEqual(usersAfterFirst)
-      // Credential list is keyed by id, not by content, so equality is
-      // sufficient — bootstrap must not re-mint the credential row.
       expect(identityB.listCredentials(ibA.ownerUserId!)).toEqual(
         credsAfterFirst,
       )
@@ -123,13 +121,12 @@ describe('host startup × @aipehub/identity', () => {
     }
   })
 
-  it('non-first init (adminToken=null) still creates owner user but no credential', async () => {
+  it('non-first init (adminToken=null): bootstrap still creates owner user', async () => {
     // Simulates the upgrade path: an existing v3 workspace boots into a
     // v4 host for the first time. `openOrInit` returns adminToken=null
     // because the workspace was already initialised in v3. Bootstrap
-    // should still create the owner user — the operator will need to
-    // log in via the v3 path once, then issue a fresh credential via
-    // the UI (Phase 2.3).
+    // still creates the owner user — the operator picks a password via
+    // the setup wizard.
     const spaceDir = mkTmp()
     // First create the space in "v3 mode" (with admin).
     await Space.openOrInit(spaceDir, {
@@ -147,16 +144,11 @@ describe('host startup × @aipehub/identity', () => {
       dbPath: join(spaceDir, 'identity.sqlite'),
     })
     try {
-      // Mirror main.ts: pass `adminToken` field only when non-null.
-      const bootstrapInput: { ownerEmail: string; adminToken?: string } = {
-        ownerEmail: 'admin@local',
-      }
-      const ib = identity.bootstrap(bootstrapInput)
+      const ib = identity.bootstrap({ ownerEmail: 'admin@local' })
       expect(ib.bootstrapped).toBe(true)
-      expect(ib.adminTokenMigrated).toBe(false)
 
       // Owner user exists but has no credentials yet — operator will
-      // need to log in via v3 path and self-issue.
+      // need to set a password via the setup wizard.
       const creds = identity.listCredentials(ib.ownerUserId!)
       expect(creds).toEqual([])
     } finally {
@@ -164,13 +156,13 @@ describe('host startup × @aipehub/identity', () => {
     }
   })
 
-  it('post-bootstrap: owner can mint api keys and create member users via IdentityStore', async () => {
+  it('post-bootstrap: owner can set password, mint api keys and create members via IdentityStore', async () => {
     // End-to-end "what does v4 buy us" smoke. After bootstrap, the
-    // owner uses the new surface to create a second user (Alice) and
-    // give them a password. Alice can then log in and gets a session
-    // resolving to role=member. None of this was possible in v3.
+    // owner sets a password (the setup-wizard flow), then creates a
+    // second user (Alice) and issues themselves an api key. None of
+    // this was possible in v3.
     const spaceDir = mkTmp()
-    const { adminToken } = await Space.openOrInit(spaceDir, {
+    await Space.openOrInit(spaceDir, {
       name: 'test-workspace',
       adminDisplayName: 'Operator',
     })
@@ -178,11 +170,11 @@ describe('host startup × @aipehub/identity', () => {
       dbPath: join(spaceDir, 'identity.sqlite'),
     })
     try {
-      const ib = identity.bootstrap({
-        adminToken: adminToken!,
-        ownerEmail: 'admin@local',
-      })
+      const ib = identity.bootstrap({ ownerEmail: 'admin@local' })
       expect(ib.bootstrapped).toBe(true)
+
+      // Owner sets their own password (what the setup wizard does).
+      identity.setPassword(ib.ownerUserId!, 'owner-password-long-enough')
 
       // Owner spins up a second user with a password.
       const alice = identity.createUser({

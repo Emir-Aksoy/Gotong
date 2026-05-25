@@ -73,12 +73,14 @@ const MIGRATIONS: Migration[] = [
     // auth source are known — the store layer cannot infer those.
     //
     // Schema:
-    //   - `actor_user_id` is nullable because (a) v3-admin Bearer/cookie
-    //     hits the identity routes WITHOUT a v4 user binding, and
-    //     (b) `login_failure` records the attempt before any user has
-    //     been resolved (the failure metadata holds the attempted email).
-    //   - `actor_source` is the auth surface that produced the actor
-    //     ('v3-admin' | 'v4-session' | 'v4-bearer' | 'anonymous' | 'system').
+    //   - `actor_user_id` is nullable because `login_failure` records the
+    //     attempt before any user has been resolved (the failure metadata
+    //     holds the attempted email).
+    //   - `actor_source` is the auth surface that produced the actor.
+    //     Current vocabulary: 'v4-session' | 'v4-bearer' | 'anonymous' |
+    //     'system' | 'federated'. Pre-A2.2 rows may carry the now-removed
+    //     'v3-admin' value; `rowToAuditLog` clamps unknown values to
+    //     'system' on read.
     //   - `target_user_id` / `target_credential_id` reference the object
     //     of the action (also nullable — `login_failure` has neither).
     //     NO foreign keys — we want the audit row to survive even after
@@ -138,8 +140,8 @@ const MIGRATIONS: Migration[] = [
     //     COLLATE NOCASE so a re-invite of the same address (different
     //     case) collides on the index lookup.
     //   - `role` is the role the new user is assigned at accept time.
-    //   - `invited_by` is the inviting v4 user id, nullable for v3-admin
-    //     (which has no v4 user binding). NO FK — keeping the audit
+    //   - `invited_by` is the inviting v4 user id, nullable for system-
+    //     initiated invites (no human actor). NO FK — keeping the audit
     //     trail intact if the inviter is later deleted.
     //   - `status` transitions: pending → accepted | revoked. Expiry
     //     is computed on read (`expires_at < now`) so a row never sits

@@ -10,13 +10,13 @@
  * # Auth gates
  *
  * Every route requires **owner** role on the host's organisation.
- * Owner is established by either:
- *   (a) a valid v3 admin (Bearer hex token / `aipehub_admin` cookie) —
- *       v3 admin == v4 owner because Phase 2 bootstrap migrated the
- *       v3 admin token into the IdentityStore as an `admin_token`
- *       credential bound to the owner user; OR
- *   (b) a v4 IdentityStore session cookie (`aipehub_identity`) whose
- *       resolved role is `owner`.
+ * Owner is established by a v4 IdentityStore session cookie
+ * (`aipehub_identity`) OR a v4 Bearer api_key / admin_token whose
+ * resolved role is `owner`. The legacy v3 admin path (Space.admins
+ * cookie / `/admin?token=...` URL) was removed in A2.2 — host-level
+ * admin routes (agents, secrets, workflows) still accept v3 admin
+ * because they predate IdentityStore, but the v4 identity surface
+ * does not.
  *
  * Non-owner roles can authenticate (POST /login) but cannot manage
  * other users. The intent is that Phase 3+ will add lower-privilege
@@ -85,8 +85,10 @@ export interface IdentityCredentialDTO {
 // AuditLogEntry / AuditActorSource. Kept here so web stays decoupled.
 // FED-M4: `'federated'` added for actions triggered by federated tasks
 // (Task.origin set); writer is expected to stash origin in metadata.
+// A2.2: 'v3-admin' removed from writable vocabulary — v4 IdentityStore
+// is the only auth surface this route consumes. Old rows persisted
+// with 'v3-admin' are clamped to 'system' by the store on read.
 export type IdentityAuditActorSource =
-  | 'v3-admin'
   | 'v4-session'
   | 'v4-bearer'
   | 'anonymous'
@@ -347,7 +349,7 @@ function sendIdentityError(res: ServerResponse, err: unknown, fallbackStatus = 5
 
 export interface ResolvedAuth {
   /** Always present. */
-  source: 'v3-admin' | 'v4-session' | 'v4-bearer' | 'none'
+  source: 'v4-session' | 'v4-bearer' | 'none'
   user: IdentityUserDTO | null
   role: IdentityRole | null
   /**
@@ -359,9 +361,9 @@ export interface ResolvedAuth {
 }
 
 /**
- * Resolve the v4 identity attached to a request. The caller layers
- * v3 admin auth on top (an admin without v4 identity still owns the
- * host because the v3 admin token is what bootstrap migrated).
+ * Resolve the v4 identity attached to a request. A2.2 — v4 IdentityStore
+ * is the sole source of identity; the legacy v3-admin layer no longer
+ * participates in `/api/admin/identity/*` auth.
  */
 export function resolveV4Auth(
   identity: IdentitySurface,
@@ -429,11 +431,6 @@ export interface LoginRateLimiterLike {
 export interface HandleIdentityRouteCtx {
   identity: IdentitySurface
   cookieSecure: boolean
-  /**
-   * true when the caller already proved v3-admin auth (Bearer hex or
-   * ADMIN_COOKIE). v3 admin == v4 owner for this host's organisation.
-   */
-  isV3Admin: boolean
   /** Per-IP rate limiter; required for V4-AUDIT-01 protection. */
   loginLimiter: LoginRateLimiterLike
   /**
@@ -463,18 +460,17 @@ function clampUserAgent(ua: string | undefined): string | null {
 }
 
 /**
- * Resolve the audit actor source from a `(isV3Admin, v4)` pair. Mirror
- * of `resolveV4Auth.source` but defaults to `anonymous` (login is the
- * only route reachable without auth, and login_failure must record
- * something there).
+ * Mirror `resolveV4Auth.source` into the audit-log vocabulary. Defaults
+ * to `anonymous` (login is the only route reachable without auth, and
+ * login_failure must record something there). A2.2 simplified this from
+ * a `(isV3Admin, v4)` pair to a single source argument once v3-admin
+ * left the vocabulary.
  */
 function actorSourceFor(
-  isV3Admin: boolean,
   v4Source: ResolvedAuth['source'],
 ): IdentityAuditActorSource {
   if (v4Source === 'v4-session') return 'v4-session'
   if (v4Source === 'v4-bearer') return 'v4-bearer'
-  if (isV3Admin) return 'v3-admin'
   return 'anonymous'
 }
 
@@ -502,10 +498,7 @@ function tryAudit(
   },
 ): void {
   if (typeof ctx.identity.writeAuditLog !== 'function') return
-  const actorSource = actorSourceFor(
-    ctx.isV3Admin,
-    v4?.source ?? 'none',
-  )
+  const actorSource = actorSourceFor(v4?.source ?? 'none')
   const actorUserId =
     input.actorUserId !== undefined
       ? input.actorUserId
@@ -550,18 +543,17 @@ export async function handleIdentityRoute(
 
   // GET /me sits BEFORE the owner gate — "tell me who I am" must be
   // reachable by every authenticated user (any role). The member-facing
-  // /me page needs this to bootstrap. handleMe distinguishes between
-  // v3-admin / v4-* / anonymous itself and reports the truth.
+  // /me page needs this to bootstrap. handleMe reports the v4 truth
+  // (or 401 when truly anonymous).
   if (method === 'GET' && path === '/api/admin/identity/me') {
     const v4Whoami = resolveV4Auth(ctx.identity, req)
-    handleMe(ctx, v4Whoami, res)
+    handleMe(v4Whoami, res)
     return
   }
 
   // -- owner gate for everything below ----------------------------------
   const v4 = resolveV4Auth(ctx.identity, req)
-  const isOwner =
-    ctx.isV3Admin || (v4.role !== null && roleAtLeast(v4.role, 'owner'))
+  const isOwner = v4.role !== null && roleAtLeast(v4.role, 'owner')
   if (!isOwner) {
     sendJson(res, { error: 'owner role required' }, 403)
     return
@@ -744,11 +736,7 @@ async function handleLogout(
   res.end(JSON.stringify({ ok: true }))
 }
 
-function handleMe(
-  ctx: HandleIdentityRouteCtx,
-  v4: ResolvedAuth,
-  res: ServerResponse,
-): void {
+function handleMe(v4: ResolvedAuth, res: ServerResponse): void {
   if (v4.user !== null && v4.role !== null) {
     sendJson(res, {
       authSource: v4.source,
@@ -757,26 +745,10 @@ function handleMe(
     })
     return
   }
-  // Caller is a v3 admin without a v4 session — report that fact.
-  // The v3 admin is the owner of the host's IdentityStore organisation,
-  // but isn't bound to a specific User row (the bootstrap-created
-  // `admin@local` user is the conceptual owner, but the v3 admin
-  // cookie principal isn't joined to it here). Phase 3.1+ can fold
-  // them together — for now we report the v3 view honestly.
-  if (ctx.isV3Admin) {
-    sendJson(res, {
-      authSource: 'v3-admin',
-      user: null,
-      role: 'owner' as IdentityRole,
-    })
-    return
-  }
-  // Truly anonymous (no v3 admin, no v4 session). Before the gate moved,
-  // the dispatcher's owner check filtered this case out. With /me now
-  // sitting BEFORE the gate (so members can call it too), we must
-  // explicitly refuse anonymous — otherwise the response above would
-  // hand an "owner" role to anyone who hit the route, a textbook
-  // privilege escalation.
+  // Truly anonymous (no v4 session, no v4 bearer). /me sits BEFORE the
+  // owner gate so members can call it — but we must explicitly refuse
+  // anonymous here, otherwise the route would respond 200 to anyone
+  // who hit it, a textbook privilege check escape.
   sendJson(res, { error: 'authentication required' }, 401)
 }
 
@@ -846,8 +818,8 @@ async function handleCreateUser(
   try {
     const u = ctx.identity.createUser(input)
     // V4-AUDIT-06: record who created the user with what role. The
-    // resolved auth here is the v4 view (cookie/Bearer); v3-admin is
-    // covered by `actorSource: 'v3-admin'` via tryAudit's fallback.
+    // resolved auth here is the v4 view (cookie/Bearer); anonymous is
+    // not possible at this point (owner gate already filtered it out).
     tryAudit(ctx, resolveV4Auth(ctx.identity, req), {
       action: 'create_user',
       targetUserId: u.id,
@@ -1040,13 +1012,13 @@ async function handleCreateInvite(
   }
   // AUDIT-P3-03: owner-mutation rate limit. Defense-in-depth against
   // a leaked owner credential being used to spam-fill the invitations
-  // table + audit log (every create writes both). The actor key prefers
-  // the v4 userId (stable across IP changes); for v3-admin callers
-  // (no v4 user binding) we fall back to IP. Default 60/min is plenty
-  // for human bulk-onboarding (a 50-person org is 50 calls in 1 min).
+  // table + audit log (every create writes both). The actor key is
+  // the v4 userId (always present here — the owner gate above already
+  // filtered out anonymous callers). Default 60/min is plenty for
+  // human bulk-onboarding (a 50-person org is 50 calls in 1 min).
   // `check()` because every create counts — this is action-volume cap.
   const v4ForRl = resolveV4Auth(ctx.identity, req)
-  const actorKey = v4ForRl.user?.id ?? `v3-admin:${ctx.clientIp}`
+  const actorKey = v4ForRl.user?.id ?? `anon:${ctx.clientIp}`
   if (!ctx.loginLimiter.check(`owner-mutation:${actorKey}`)) {
     res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
     res.end('too many owner mutations; try again in a minute')
@@ -1074,8 +1046,7 @@ async function handleCreateInvite(
     return
   }
   // We already resolved v4 above for the rate-limit key — reuse it.
-  // For v3-admin callers (no v4 user binding) we pass null — the store
-  // accepts it and the audit row still records actorSource='v3-admin'.
+  // The owner gate above guarantees v4.user is non-null here.
   const v4 = v4ForRl
   const invitedBy = v4.user?.id ?? null
 

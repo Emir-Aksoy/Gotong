@@ -4,7 +4,7 @@
  * Boots a real Space + Hub + IdentityStore + serveWeb and drives
  * `fetch` against it. We test:
  *   - 503 when serveWeb wasn't given an identity instance
- *   - owner gate (v3 admin OR v4 session unlocks; nothing else does)
+ *   - owner gate (v4 session / api_key unlock; v3 admin no longer does — A2.2)
  *   - login / logout / me round trips
  *   - users CRUD (list / create / patch role / patch password)
  *   - credentials (list / issue api key / revoke)
@@ -12,6 +12,14 @@
  *
  * Test isolation: each test gets a fresh tmpdir + fresh Space + fresh
  * IdentityStore at `:memory:` (well, on-disk inside the tmpdir).
+ *
+ * A2.2 — boot() mints a v4 session for the bootstrapped owner directly
+ * via IdentityStore (setPassword + authenticatePassword), exposed as
+ * `b.ownerCookie`. Tests use that cookie wherever they previously used
+ * `b.adminCookie` against identity routes. The `adminCookie` / `adminToken`
+ * fields are still set because a handful of cross-cutting tests (rate
+ * limiter behaviour shared with the host-level v3 admin path) still
+ * exercise the v3 surface — but they should NOT pass the owner gate.
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -35,6 +43,12 @@ interface BootResult {
   adminToken: string
   adminCookie: string
   ownerUserId: string | null
+  /**
+   * v4 session cookie value (`aipehub_identity=<token>`) for the owner
+   * minted in boot(). Empty when withIdentity is false. Use this on
+   * every fetch against `/api/admin/identity/*` to satisfy the owner gate.
+   */
+  ownerCookie: string
 }
 
 async function boot(
@@ -57,14 +71,26 @@ async function boot(
 
   let identity: IdentityStore | undefined
   let ownerUserId: string | null = null
+  let ownerCookie = ''
   if (withIdentity) {
     identity = openIdentityStore({ dbPath: join(tmp, 'identity.sqlite') })
     const ib = identity.bootstrap({
-      adminToken,
       ownerEmail: 'admin@local',
       ownerDisplayName: 'TestAdmin',
     })
     ownerUserId = ib.ownerUserId
+    // A2.2 — bootstrap no longer creates owner credentials, but the
+    // tests need an authenticated principal to drive the API. Mint a
+    // password + v4 session here, bypassing HTTP (the HTTP login route
+    // is itself one of the things we want to test independently).
+    if (ownerUserId) {
+      identity.setPassword(ownerUserId, 'test-owner-password')
+      const sess = identity.authenticatePassword({
+        email: 'admin@local',
+        password: 'test-owner-password',
+      })
+      ownerCookie = `aipehub_identity=${sess.token}`
+    }
   }
 
   const server = await serveWeb(hub, {
@@ -86,6 +112,7 @@ async function boot(
     adminToken,
     adminCookie,
     ownerUserId,
+    ownerCookie,
   }
 }
 
@@ -101,7 +128,7 @@ describe('/api/admin/identity/* — service availability', () => {
     const b = await boot({ withIdentity: false })
     try {
       const r = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
-        headers: { cookie: b.adminCookie },
+        headers: { cookie: b.ownerCookie },
       })
       expect(r.status).toBe(503)
     } finally {
@@ -124,9 +151,23 @@ describe('/api/admin/identity/* — owner gate', () => {
     expect(r.status).toBe(403)
   })
 
-  it('accepts v3 admin cookie (v3 admin == v4 owner)', async () => {
+  it('rejects v3 admin cookie (A2.2 — v3-admin no longer satisfies the owner gate)', async () => {
     const r = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
       headers: { cookie: b.adminCookie },
+    })
+    expect(r.status).toBe(403)
+  })
+
+  it('rejects v3 admin Bearer token (same A2.2 rationale)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
+      headers: { authorization: `Bearer ${b.adminToken}` },
+    })
+    expect(r.status).toBe(403)
+  })
+
+  it('accepts the v4 owner cookie minted by boot()', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
+      headers: { cookie: b.ownerCookie },
     })
     expect(r.status).toBe(200)
     const body = (await r.json()) as {
@@ -137,35 +178,14 @@ describe('/api/admin/identity/* — owner gate', () => {
     expect(body.users[0]!.user.id).toBeTypeOf('string')
   })
 
-  it('accepts v3 admin Bearer token (the same migrated token)', async () => {
-    const r = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
-      headers: { authorization: `Bearer ${b.adminToken}` },
-    })
-    expect(r.status).toBe(200)
-  })
-
-  it('accepts v4 session cookie after password login', async () => {
-    // Owner sets up their own password via the v3-admin path.
-    const pwRes = await fetch(
-      `${b.baseUrl}/api/admin/identity/users/${b.ownerUserId}`,
-      {
-        method: 'PATCH',
-        headers: {
-          'content-type': 'application/json',
-          cookie: b.adminCookie,
-        },
-        body: JSON.stringify({ password: 'long-enough-password' }),
-      },
-    )
-    expect(pwRes.status).toBe(200)
-
-    // Login via v4 surface.
+  it('accepts a v4 session cookie minted by the HTTP login route', async () => {
+    // Login via v4 surface using the password boot() set on the owner.
     const loginRes = await fetch(`${b.baseUrl}/api/admin/identity/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         email: 'admin@local',
-        password: 'long-enough-password',
+        password: 'test-owner-password',
       }),
     })
     expect(loginRes.status).toBe(200)
@@ -179,6 +199,16 @@ describe('/api/admin/identity/* — owner gate', () => {
     })
     expect(listRes.status).toBe(200)
   })
+
+  it('accepts a v4 owner api_key via Authorization: Bearer', async () => {
+    // Mint a fresh api_key for the owner directly via IdentityStore
+    // (the HTTP "issue api key" endpoint requires owner auth itself).
+    const issued = b.identity!.issueApiKey({ userId: b.ownerUserId! })
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
+      headers: { authorization: `Bearer ${issued.key}` },
+    })
+    expect(r.status).toBe(200)
+  })
 })
 
 describe('login / logout / me', () => {
@@ -191,16 +221,8 @@ describe('login / logout / me', () => {
   })
 
   it('login with wrong password returns 401 + IdentityError code', async () => {
-    // Set a password first.
-    await fetch(`${b.baseUrl}/api/admin/identity/users/${b.ownerUserId}`, {
-      method: 'PATCH',
-      headers: {
-        'content-type': 'application/json',
-        cookie: b.adminCookie,
-      },
-      body: JSON.stringify({ password: 'real-password-here' }),
-    })
-
+    // boot() already set the password to 'test-owner-password'; try
+    // logging in with the wrong one.
     const r = await fetch(`${b.baseUrl}/api/admin/identity/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -230,13 +252,20 @@ describe('login / logout / me', () => {
     expect(setCookie).toContain('Max-Age=0')
   })
 
-  it('me via v3 admin returns { authSource: "v3-admin", role: "owner" }', async () => {
+  it('me via v3 admin cookie returns 401 (A2.2 — v3-admin no longer recognised)', async () => {
     const r = await fetch(`${b.baseUrl}/api/admin/identity/me`, {
       headers: { cookie: b.adminCookie },
     })
+    expect(r.status).toBe(401)
+  })
+
+  it('me via v4 owner session returns { authSource: "v4-session", role: "owner" }', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/me`, {
+      headers: { cookie: b.ownerCookie },
+    })
     expect(r.status).toBe(200)
     const body = (await r.json()) as { authSource: string; role: string }
-    expect(body.authSource).toBe('v3-admin')
+    expect(body.authSource).toBe('v4-session')
     expect(body.role).toBe('owner')
   })
 })
@@ -252,7 +281,7 @@ describe('users CRUD', () => {
 
   it('GET /users returns the owner user', async () => {
     const r = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
-      headers: { cookie: b.adminCookie },
+      headers: { cookie: b.ownerCookie },
     })
     expect(r.status).toBe(200)
     const body = (await r.json()) as {
@@ -266,7 +295,7 @@ describe('users CRUD', () => {
   it('POST /users creates a new user; duplicate email returns 409', async () => {
     const create = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
       body: JSON.stringify({
         email: 'alice@team.test',
         displayName: 'Alice',
@@ -280,7 +309,7 @@ describe('users CRUD', () => {
 
     const dup = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
       body: JSON.stringify({ email: 'alice@team.test' }),
     })
     expect(dup.status).toBe(409)
@@ -291,7 +320,7 @@ describe('users CRUD', () => {
   it('POST /users rejects bad role with 400', async () => {
     const r = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
       body: JSON.stringify({ email: 'bob@x.test', role: 'godmode' }),
     })
     expect(r.status).toBe(400)
@@ -302,7 +331,7 @@ describe('users CRUD', () => {
   it('PATCH /users/:id changes role', async () => {
     const create = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
       body: JSON.stringify({ email: 'carol@x.test' }),
     })
     const { user } = (await create.json()) as { user: { id: string } }
@@ -311,7 +340,7 @@ describe('users CRUD', () => {
       `${b.baseUrl}/api/admin/identity/users/${user.id}`,
       {
         method: 'PATCH',
-        headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+        headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
         body: JSON.stringify({ role: 'admin' }),
       },
     )
@@ -335,7 +364,7 @@ describe('credentials', () => {
       `${b.baseUrl}/api/admin/identity/users/${b.ownerUserId}/api-key`,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+        headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
         body: JSON.stringify({ label: 'CI runner' }),
       },
     )
@@ -350,7 +379,7 @@ describe('credentials', () => {
     // List shows the new credential without leaking the hash identifier.
     const list = await fetch(
       `${b.baseUrl}/api/admin/identity/users/${b.ownerUserId}/credentials`,
-      { headers: { cookie: b.adminCookie } },
+      { headers: { cookie: b.ownerCookie } },
     )
     expect(list.status).toBe(200)
     const lb = (await list.json()) as {
@@ -363,7 +392,7 @@ describe('credentials', () => {
     // Revoke.
     const del = await fetch(
       `${b.baseUrl}/api/admin/identity/credentials/${issued.credentialId}`,
-      { method: 'DELETE', headers: { cookie: b.adminCookie } },
+      { method: 'DELETE', headers: { cookie: b.ownerCookie } },
     )
     expect(del.status).toBe(200)
   })
@@ -371,7 +400,7 @@ describe('credentials', () => {
   it('credentials list for unknown user returns []', async () => {
     const r = await fetch(
       `${b.baseUrl}/api/admin/identity/users/nonexistent/credentials`,
-      { headers: { cookie: b.adminCookie } },
+      { headers: { cookie: b.ownerCookie } },
     )
     expect(r.status).toBe(200)
     const body = (await r.json()) as { credentials: unknown[] }
@@ -383,7 +412,7 @@ describe('credentials', () => {
       `${b.baseUrl}/api/admin/identity/users/ghost-user/api-key`,
       {
         method: 'POST',
-        headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+        headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
       },
     )
     expect(r.status).toBe(404)
@@ -403,7 +432,7 @@ describe('unknown identity route returns 404', () => {
 
   it('GET /api/admin/identity/whatever returns 404', async () => {
     const r = await fetch(`${b.baseUrl}/api/admin/identity/whatever`, {
-      headers: { cookie: b.adminCookie },
+      headers: { cookie: b.ownerCookie },
     })
     expect(r.status).toBe(404)
   })
@@ -422,7 +451,7 @@ describe('login rate limit (V4-AUDIT-01)', () => {
       method: 'PATCH',
       headers: {
         'content-type': 'application/json',
-        cookie: b.adminCookie,
+        cookie: b.ownerCookie,
       },
       body: JSON.stringify({ password: 'real-correct-password' }),
     })
@@ -488,7 +517,7 @@ describe('audit log (V4-AUDIT-06)', () => {
 
   it('GET /audit returns the bootstrap-time empty log', async () => {
     const r = await fetch(`${b.baseUrl}/api/admin/identity/audit`, {
-      headers: { cookie: b.adminCookie },
+      headers: { cookie: b.ownerCookie },
     })
     expect(r.status).toBe(200)
     const body = (await r.json()) as { entries: unknown[] }
@@ -503,7 +532,7 @@ describe('audit log (V4-AUDIT-06)', () => {
       method: 'PATCH',
       headers: {
         'content-type': 'application/json',
-        cookie: b.adminCookie,
+        cookie: b.ownerCookie,
       },
       body: JSON.stringify({ password: 'audit-test-password' }),
     })
@@ -528,7 +557,7 @@ describe('audit log (V4-AUDIT-06)', () => {
     })
 
     const r = await fetch(`${b.baseUrl}/api/admin/identity/audit`, {
-      headers: { cookie: b.adminCookie },
+      headers: { cookie: b.ownerCookie },
     })
     const body = (await r.json()) as {
       entries: Array<{
@@ -552,17 +581,17 @@ describe('audit log (V4-AUDIT-06)', () => {
     // Create two users → two create_user rows
     await fetch(`${b.baseUrl}/api/admin/identity/users`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
       body: JSON.stringify({ email: 'a1@team.test' }),
     })
     await fetch(`${b.baseUrl}/api/admin/identity/users`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
       body: JSON.stringify({ email: 'a2@team.test' }),
     })
     const r = await fetch(
       `${b.baseUrl}/api/admin/identity/audit?action=create_user`,
-      { headers: { cookie: b.adminCookie } },
+      { headers: { cookie: b.ownerCookie } },
     )
     const body = (await r.json()) as {
       entries: Array<{ action: string; metadata: { email?: string } | null }>
@@ -578,18 +607,18 @@ describe('audit log (V4-AUDIT-06)', () => {
     // Create a user, then promote to admin.
     const created = await fetch(`${b.baseUrl}/api/admin/identity/users`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
       body: JSON.stringify({ email: 'promote-me@team.test' }),
     })
     const { user } = (await created.json()) as { user: { id: string } }
     await fetch(`${b.baseUrl}/api/admin/identity/users/${user.id}`, {
       method: 'PATCH',
-      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
       body: JSON.stringify({ role: 'admin' }),
     })
     const r = await fetch(
       `${b.baseUrl}/api/admin/identity/audit?action=set_role`,
-      { headers: { cookie: b.adminCookie } },
+      { headers: { cookie: b.ownerCookie } },
     )
     const body = (await r.json()) as {
       entries: Array<{
@@ -611,7 +640,7 @@ describe('audit log (V4-AUDIT-06)', () => {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          cookie: b.adminCookie,
+          cookie: b.ownerCookie,
         },
         body: JSON.stringify({ label: 'audit-ci' }),
       },
@@ -620,11 +649,11 @@ describe('audit log (V4-AUDIT-06)', () => {
     // Revoke
     await fetch(
       `${b.baseUrl}/api/admin/identity/credentials/${credentialId}`,
-      { method: 'DELETE', headers: { cookie: b.adminCookie } },
+      { method: 'DELETE', headers: { cookie: b.ownerCookie } },
     )
     // Read audit
     const r = await fetch(`${b.baseUrl}/api/admin/identity/audit`, {
-      headers: { cookie: b.adminCookie },
+      headers: { cookie: b.ownerCookie },
     })
     const body = (await r.json()) as {
       entries: Array<{
@@ -661,7 +690,7 @@ describe('bearer session TTL (V4-AUDIT-04)', () => {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          cookie: b.adminCookie,
+          cookie: b.ownerCookie,
         },
         body: JSON.stringify({ label: 'ttl-test' }),
       },
@@ -707,7 +736,7 @@ async function mintInvite(
   if (extras.ttlMs !== undefined) body.ttlMs = extras.ttlMs
   const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+    headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
     body: JSON.stringify(body),
   })
   if (!r.ok) {
@@ -726,7 +755,7 @@ describe('/api/admin/identity/invites — service availability + gate', () => {
     const b = await boot({ withIdentity: false })
     try {
       const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
-        headers: { cookie: b.adminCookie },
+        headers: { cookie: b.ownerCookie },
       })
       // No identity store at all → the top-level wiring in server.ts
       // refuses with 503 BEFORE reaching the route dispatcher.
@@ -763,7 +792,7 @@ describe('/api/admin/identity/invites — create / list / revoke', () => {
   it('POST creates an invite + returns token ONCE (prefixed inv_)', async () => {
     const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
       body: JSON.stringify({ email: 'newhire@team.test', role: 'member' }),
     })
     expect(r.status).toBe(201)
@@ -792,7 +821,7 @@ describe('/api/admin/identity/invites — create / list / revoke', () => {
   it('POST refuses role=owner with 400 invalid_role', async () => {
     const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
       body: JSON.stringify({ email: 'evilowner@team.test', role: 'owner' }),
     })
     expect(r.status).toBe(400)
@@ -804,7 +833,7 @@ describe('/api/admin/identity/invites — create / list / revoke', () => {
     // admin@local was bootstrapped at boot()
     const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
       body: JSON.stringify({ email: 'admin@local' }),
     })
     expect(r.status).toBe(409)
@@ -816,7 +845,7 @@ describe('/api/admin/identity/invites — create / list / revoke', () => {
     await mintInvite(b, 'twice@team.test')
     const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+      headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
       body: JSON.stringify({ email: 'twice@team.test' }),
     })
     expect(r.status).toBe(409)
@@ -829,7 +858,7 @@ describe('/api/admin/identity/invites — create / list / revoke', () => {
     await mintInvite(b, 'b@team.test')
     await mintInvite(b, 'c@team.test')
     const r = await fetch(`${b.baseUrl}/api/admin/identity/invites`, {
-      headers: { cookie: b.adminCookie },
+      headers: { cookie: b.ownerCookie },
     })
     expect(r.status).toBe(200)
     const body = (await r.json()) as {
@@ -855,13 +884,13 @@ describe('/api/admin/identity/invites — create / list / revoke', () => {
     const toRevoke = await mintInvite(b, 'will-revoke@team.test')
     const rev = await fetch(
       `${b.baseUrl}/api/admin/identity/invites/${toRevoke.id}`,
-      { method: 'DELETE', headers: { cookie: b.adminCookie } },
+      { method: 'DELETE', headers: { cookie: b.ownerCookie } },
     )
     expect(rev.status).toBe(200)
 
     const pending = await fetch(
       `${b.baseUrl}/api/admin/identity/invites?status=pending`,
-      { headers: { cookie: b.adminCookie } },
+      { headers: { cookie: b.ownerCookie } },
     )
     const pendingBody = (await pending.json()) as {
       invitations: Array<{ email: string }>
@@ -872,7 +901,7 @@ describe('/api/admin/identity/invites — create / list / revoke', () => {
 
     const revoked = await fetch(
       `${b.baseUrl}/api/admin/identity/invites?status=revoked`,
-      { headers: { cookie: b.adminCookie } },
+      { headers: { cookie: b.ownerCookie } },
     )
     const revokedBody = (await revoked.json()) as {
       invitations: Array<{ email: string }>
@@ -887,7 +916,7 @@ describe('/api/admin/identity/invites — create / list / revoke', () => {
     await mintInvite(b, 'carol@team.test')
     const r = await fetch(
       `${b.baseUrl}/api/admin/identity/invites?email=BOB@team.test`,
-      { headers: { cookie: b.adminCookie } },
+      { headers: { cookie: b.ownerCookie } },
     )
     const body = (await r.json()) as { invitations: Array<{ email: string }> }
     expect(body.invitations.length).toBe(1)
@@ -898,7 +927,7 @@ describe('/api/admin/identity/invites — create / list / revoke', () => {
   it('GET rejects invalid status filter with 400 invalid_input', async () => {
     const r = await fetch(
       `${b.baseUrl}/api/admin/identity/invites?status=bogus`,
-      { headers: { cookie: b.adminCookie } },
+      { headers: { cookie: b.ownerCookie } },
     )
     expect(r.status).toBe(400)
     const body = (await r.json()) as { code: string }
@@ -909,7 +938,7 @@ describe('/api/admin/identity/invites — create / list / revoke', () => {
     const created = await mintInvite(b, 'goodbye@team.test')
     const r = await fetch(
       `${b.baseUrl}/api/admin/identity/invites/${created.id}`,
-      { method: 'DELETE', headers: { cookie: b.adminCookie } },
+      { method: 'DELETE', headers: { cookie: b.ownerCookie } },
     )
     expect(r.status).toBe(200)
     const body = (await r.json()) as { invitation: { status: string } }
@@ -919,7 +948,7 @@ describe('/api/admin/identity/invites — create / list / revoke', () => {
   it('DELETE on unknown id → 404 invitation_not_found', async () => {
     const r = await fetch(
       `${b.baseUrl}/api/admin/identity/invites/does-not-exist`,
-      { method: 'DELETE', headers: { cookie: b.adminCookie } },
+      { method: 'DELETE', headers: { cookie: b.ownerCookie } },
     )
     expect(r.status).toBe(404)
     const body = (await r.json()) as { code: string }
@@ -930,10 +959,10 @@ describe('/api/admin/identity/invites — create / list / revoke', () => {
     const created = await mintInvite(b, 'audit-me@team.test')
     await fetch(`${b.baseUrl}/api/admin/identity/invites/${created.id}`, {
       method: 'DELETE',
-      headers: { cookie: b.adminCookie },
+      headers: { cookie: b.ownerCookie },
     })
     const r = await fetch(`${b.baseUrl}/api/admin/identity/audit`, {
-      headers: { cookie: b.adminCookie },
+      headers: { cookie: b.ownerCookie },
     })
     const body = (await r.json()) as {
       entries: Array<{
@@ -990,7 +1019,7 @@ describe('/api/invites/:token — anonymous lookup', () => {
     const minted = await mintInvite(b, 'will-be-revoked@team.test')
     await fetch(`${b.baseUrl}/api/admin/identity/invites/${minted.id}`, {
       method: 'DELETE',
-      headers: { cookie: b.adminCookie },
+      headers: { cookie: b.ownerCookie },
     })
     const r = await fetch(`${b.baseUrl}/api/invites/${minted.token}`)
     expect(r.status).toBe(200)
@@ -1085,7 +1114,7 @@ describe('/api/invites/:token/accept — anonymous accept', () => {
     const minted = await mintInvite(b, 'gone@team.test')
     await fetch(`${b.baseUrl}/api/admin/identity/invites/${minted.id}`, {
       method: 'DELETE',
-      headers: { cookie: b.adminCookie },
+      headers: { cookie: b.ownerCookie },
     })
     const acc = await fetch(`${b.baseUrl}/api/invites/${minted.token}/accept`, {
       method: 'POST',
@@ -1145,7 +1174,7 @@ describe('/api/invites/:token/accept — anonymous accept', () => {
 
     const audit = await fetch(
       `${b.baseUrl}/api/admin/identity/audit?action=accept_invitation`,
-      { headers: { cookie: b.adminCookie } },
+      { headers: { cookie: b.ownerCookie } },
     )
     const body = (await audit.json()) as {
       entries: Array<{
@@ -1272,7 +1301,7 @@ describe('/api/admin/identity/invites — owner-mutation rate limit (AUDIT-P3-03
     const post = (email: string) =>
       fetch(`${b.baseUrl}/api/admin/identity/invites`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', cookie: b.adminCookie },
+        headers: { 'content-type': 'application/json', cookie: b.ownerCookie },
         body: JSON.stringify({ email }),
       })
     expect((await post('rl1@team.test')).status).toBe(201)

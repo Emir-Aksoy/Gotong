@@ -44,7 +44,6 @@ describe('IdentityStore', () => {
     it('first call on empty db creates owner user with no credentials', () => {
       const r = store.bootstrap()
       expect(r.bootstrapped).toBe(true)
-      expect(r.adminTokenMigrated).toBe(false)
       expect(r.ownerUserId).toBeTypeOf('string')
 
       const u = store.getUserById(r.ownerUserId!)
@@ -54,31 +53,18 @@ describe('IdentityStore', () => {
       const m = store.getMembership(r.ownerUserId!)
       expect(m?.role).toBe('owner')
 
+      // A2.2 — owner is created with no credentials. The setup wizard
+      // (C1) is the documented path for the first operator to set a
+      // password; `mint-admin-token` is the emergency recovery option.
       expect(store.listCredentials(r.ownerUserId!).length).toBe(0)
     })
 
-    it('first call with adminToken migrates it as admin_token credential', () => {
-      const r = store.bootstrap({ adminToken: 'legacy-v3-admin-hex-token' })
-      expect(r.adminTokenMigrated).toBe(true)
-      const creds = store.listCredentials(r.ownerUserId!)
-      expect(creds.length).toBe(1)
-      expect(creds[0]!.kind).toBe('admin_token')
-      // identifier is sha256 of the raw token — opaque to user but we
-      // can verify by checking we can auth with the raw token.
-      const session = store.authenticateToken({
-        token: 'legacy-v3-admin-hex-token',
-      })
-      expect(session.userId).toBe(r.ownerUserId)
-    })
-
     it('second call is idempotent (returns bootstrapped=false, no mutation)', () => {
-      store.bootstrap({ adminToken: 'first-token' })
+      store.bootstrap()
       const before = store.listUsers()
-      const r2 = store.bootstrap({ adminToken: 'different-token' })
+      const r2 = store.bootstrap()
       expect(r2.bootstrapped).toBe(false)
       expect(r2.ownerUserId).toBeNull()
-      expect(r2.adminTokenMigrated).toBe(false)
-      // Total users unchanged; the "different-token" was NOT added.
       expect(store.listUsers()).toEqual(before)
     })
 
@@ -569,18 +555,18 @@ describe('IdentityStore', () => {
       // 3 rows: 2 set_role for u1 (one fail), 1 set_role for u2 (success)
       store.writeAuditLog({
         action: 'set_role',
-        actorSource: 'v3-admin',
+        actorSource: 'system',
         targetUserId: u1.id,
       })
       store.writeAuditLog({
         action: 'set_role',
-        actorSource: 'v3-admin',
+        actorSource: 'system',
         targetUserId: u1.id,
         success: false,
       })
       store.writeAuditLog({
         action: 'set_role',
-        actorSource: 'v3-admin',
+        actorSource: 'system',
         targetUserId: u2.id,
       })
       expect(store.listAuditLog({ action: 'set_role' }).length).toBe(3)

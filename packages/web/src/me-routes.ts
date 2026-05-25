@@ -158,8 +158,9 @@ export async function handleMeRoute(
   method: string,
   path: string,
 ): Promise<void> {
-  // Auth gate: every /me route needs a v4 user. v3-admin is not
-  // accepted because v3 admins don't have a v4 user id to scope by.
+  // Auth gate: every /me route needs a v4 user. A2.2 — v4 IdentityStore
+  // is the only auth surface here; the legacy v3-admin path was always
+  // refused (no v4 user id to scope by) and is now removed entirely.
   const v4 = resolveV4Auth(ctx.identity, req)
   if (v4.user === null || v4.role === null) {
     sendJson(
