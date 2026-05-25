@@ -986,14 +986,15 @@ async function handle(
     return
   }
 
-  // --- /me page (member-facing UI) ---------------------------------------
-  // Serves the static SPA at GET /me — distinct from /admin so the
-  // member experience doesn't accidentally inherit owner-only UI.
-  // Anonymous access is fine (the page itself shows a login form;
-  // the JS calls /api/admin/identity/login → /api/admin/identity/me
-  // to decide what to render). No cookie / session required here.
+  // --- /me redirect (legacy URL, removed in C1c) -------------------------
+  // The /me static page was folded into the unified SPA's `home` tab
+  // (served under /). A 301 redirect keeps any bookmarks / invitation
+  // emails still pointing at /me working — the browser follows the
+  // redirect, hits /, and the cookie check there serves the unified
+  // SPA with role=member. /api/me/* routes are unchanged.
   if (method === 'GET' && (path === '/me' || path === '/me/')) {
-    await serveStatic(res, 'me.html')
+    res.writeHead(301, { location: '/' })
+    res.end()
     return
   }
 

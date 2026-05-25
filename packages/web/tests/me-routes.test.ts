@@ -15,7 +15,7 @@
  *   - /api/me/growth-reports filters to caseId === userId
  *   - /api/me/growth-reports/download blocks cross-user paths
  *   - host without growthReports surface → 503 on /growth-reports*
- *   - GET /me serves the static page
+ *   - GET /me → 301 redirect to / (legacy URL, folded into unified SPA in C1c)
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -166,18 +166,21 @@ async function teardown(b: BootResult): Promise<void> {
   await rm(b.tmp, { recursive: true, force: true })
 }
 
-describe('/me — page', () => {
+describe('/me — page (C1c — legacy URL, now 301 redirect)', () => {
   let b: BootResult
   beforeEach(async () => { b = await boot() })
   afterEach(async () => { await teardown(b) })
 
-  it('GET /me serves the static page (200 + HTML)', async () => {
-    const r = await fetch(`${b.baseUrl}/me`)
-    expect(r.status).toBe(200)
-    expect(r.headers.get('content-type')).toMatch(/text\/html/)
-    const body = await r.text()
-    expect(body).toContain('AipeHub')
-    expect(body).toContain('我的工作流')
+  it('GET /me → 301 redirect to / (unified SPA)', async () => {
+    const r = await fetch(`${b.baseUrl}/me`, { redirect: 'manual' })
+    expect(r.status).toBe(301)
+    expect(r.headers.get('location')).toBe('/')
+  })
+
+  it('GET /me/ (trailing slash) → 301 redirect to /', async () => {
+    const r = await fetch(`${b.baseUrl}/me/`, { redirect: 'manual' })
+    expect(r.status).toBe(301)
+    expect(r.headers.get('location')).toBe('/')
   })
 })
 

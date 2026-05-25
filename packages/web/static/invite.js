@@ -213,8 +213,10 @@
         await acceptInvite(token, pw, dn || undefined)
         setStatus('账号已激活,正在跳转…', 'ok')
         // Replace history entry so the browser back button doesn't land
-        // back on the now-consumed invite page.
-        window.location.replace('/me')
+        // back on the now-consumed invite page. C1c — /me was folded
+        // into the unified SPA at /; the new user lands on the `home`
+        // tab as their default.
+        window.location.replace('/')
       } catch (err) {
         if (btn) btn.disabled = false
         // 410-class failures (the link became unusable mid-flow — e.g.
