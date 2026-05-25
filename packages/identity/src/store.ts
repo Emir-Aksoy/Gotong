@@ -77,6 +77,7 @@ import {
   type Role,
   type Session,
   type SetQuotaInput,
+  type SweepUsageResult,
   type UsageCounter,
   type UsagePeriod,
   type User,
@@ -405,6 +406,11 @@ export class IdentityStore {
   private readonly stmtUsageListByUserMetric: SqliteStmt
   private readonly stmtUsageListByUserPeriod: SqliteStmt
   private readonly stmtUsageListByTriple: SqliteStmt
+  // B2.3 — background sweep prepared statement. One UPDATE covers
+  // every stale row of a given period (hourly / daily / monthly);
+  // 'total' rows are excluded entirely because their period_start is
+  // the sentinel 0 and they're lifetime counters.
+  private readonly stmtUsageSweep: SqliteStmt
 
   constructor(db: SqliteDb, defaultSessionTtlMs: number, masterKey?: Buffer) {
     this.db = db
@@ -561,6 +567,17 @@ export class IdentityStore {
     this.stmtUsageListByTriple = db.prepare(
       `SELECT * FROM usage_counters
         WHERE user_id = ? AND metric = ? AND period = ?`,
+    )
+    // B2.3 — sweep stale rows of a single `period` forward to a fresh
+    // boundary. `period_start < ?` (strict <) is deliberate: an admin
+    // who manually edits a row to a *future* periodStart, or a host
+    // whose wall-clock briefly jumps backwards (NTP correction), must
+    // not see its counter erased. The sweep only ever moves time
+    // forward.
+    this.stmtUsageSweep = db.prepare(
+      `UPDATE usage_counters
+         SET used = 0, period_start = ?, updated_at = ?
+       WHERE period = ? AND period_start < ?`,
     )
   }
 
@@ -2231,6 +2248,46 @@ export class IdentityStore {
       input.period,
     ) as UsageCounterRow
     return rowToUsageCounter(row)
+  }
+
+  /**
+   * B2.3 — background hygiene sweep. For every `hourly` / `daily` /
+   * `monthly` row whose stored `period_start` lies in a *prior* period
+   * relative to `now`, advance `period_start` to the current boundary
+   * and reset `used = 0`. `'total'` rows are never swept (lifetime
+   * counters; sentinel `period_start = 0`).
+   *
+   * Why we still need this when `checkAndIncrement` already auto-rolls
+   * on every call:
+   *
+   *   - `listUsage` does NOT roll (it's read-only by contract). Without
+   *     the sweep, an admin opening the usage dashboard at 09:00 for a
+   *     user who burned 100/100 yesterday and hasn't dispatched since
+   *     would see `used=100, periodStart=<yesterday>` — confusing.
+   *     Post-sweep they see `used=0, periodStart=<today>`.
+   *   - Metrics that go inactive (a user stopped using a feature) would
+   *     otherwise drift indefinitely with stale `period_start`. This
+   *     also matters for E1 (per-org aggregation) — sum across
+   *     `used` makes sense only if every row's period_start is current.
+   *
+   * Runs the three period UPDATEs in a single transaction. Each
+   * statement is constrained by `period_start < ?` (strict) so a
+   * clock skew that briefly pulls `now` backwards never rewrites a
+   * row to an earlier boundary. Returns counts for diagnostics.
+   */
+  sweepUsageCounters(now: number = Date.now()): SweepUsageResult {
+    return transaction(this.db, () => {
+      const byPeriod = { hourly: 0, daily: 0, monthly: 0 }
+      for (const period of ['hourly', 'daily', 'monthly'] as const) {
+        const boundary = periodStartFor(period, now)
+        const r = this.stmtUsageSweep.run(boundary, now, period, boundary)
+        byPeriod[period] = Number(r.changes)
+      }
+      return {
+        rolled: byPeriod.hourly + byPeriod.daily + byPeriod.monthly,
+        byPeriod,
+      }
+    })
   }
 
   // =====================================================================

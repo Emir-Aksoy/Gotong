@@ -539,3 +539,26 @@ export interface ResetUsageInput {
   /** Override `Date.now()` for deterministic period-start computation. */
   now?: number
 }
+
+/**
+ * Result of {@link IdentityStore.sweepUsageCounters}. The sweep is a
+ * background hygiene pass — `checkAndIncrement` already auto-rolls
+ * on call, so the sweep only matters for `listUsage` freshness on
+ * counters nobody touched this period (e.g. an admin opens the usage
+ * dashboard at 09:00 for a user who last consumed their quota
+ * yesterday — without the sweep, `used` would still show yesterday's
+ * value with the prior `periodStart`).
+ *
+ * `'total'` rows never roll (lifetime counters); they're not counted
+ * here.
+ */
+export interface SweepUsageResult {
+  /** Total rows whose period boundary was rolled forward. */
+  rolled: number
+  /** Per-period breakdown — useful for admin diagnostics and tests. */
+  byPeriod: {
+    hourly: number
+    daily: number
+    monthly: number
+  }
+}

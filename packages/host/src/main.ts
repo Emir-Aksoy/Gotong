@@ -413,6 +413,7 @@ async function main(): Promise<void> {
   // between "DB doesn't bloat" and "sweep doesn't churn IO". `unref()`
   // so the timer never holds the event loop open after a graceful stop.
   let identityCleanupTimer: NodeJS.Timeout | undefined
+  let usageSweepTimer: NodeJS.Timeout | undefined
   if (identity) {
     const sweep = (): void => {
       try {
@@ -426,6 +427,28 @@ async function main(): Promise<void> {
     }
     identityCleanupTimer = setInterval(sweep, 60 * 60 * 1000)
     identityCleanupTimer.unref?.()
+
+    // B2.3 — periodic usage-counter sweep. checkAndIncrement auto-rolls
+    // on call, so this only matters for listUsage freshness on counters
+    // nobody touched this period (admin dashboards, future E1 per-org
+    // aggregation). 1h cadence matches the hourly-boundary granularity:
+    // any longer and a counter could appear "stuck on yesterday" for
+    // hours after midnight in admin UI.
+    const sweepUsage = (): void => {
+      try {
+        const r = identity!.sweepUsageCounters()
+        if (r.rolled > 0) {
+          log.info('identity: usage counters rolled', {
+            rolled: r.rolled,
+            ...r.byPeriod,
+          })
+        }
+      } catch (err) {
+        log.error('identity: usage sweep failed', { err })
+      }
+    }
+    usageSweepTimer = setInterval(sweepUsage, 60 * 60 * 1000)
+    usageSweepTimer.unref?.()
   }
 
   const hub = new Hub({ space })
@@ -659,6 +682,10 @@ async function main(): Promise<void> {
     if (identityCleanupTimer) {
       clearInterval(identityCleanupTimer)
       identityCleanupTimer = undefined
+    }
+    if (usageSweepTimer) {
+      clearInterval(usageSweepTimer)
+      usageSweepTimer = undefined
     }
     if (identity) {
       try { identity.close() } catch (err) { log.error('identity close error', { err }) }

@@ -438,6 +438,190 @@ describe('IdentityStore — usage counters (B2.1)', () => {
     })
   })
 
+  // ---------- sweepUsageCounters (B2.3) ----------
+
+  describe('sweepUsageCounters', () => {
+    // Stale anchors — each lies strictly inside the prior period
+    // boundary so the sweep should advance them. Using fixed UTC dates
+    // keeps the assertions readable and avoids "what hour is it right
+    // now" flakiness.
+    const PREV_HOUR = Date.UTC(2026, 3, 15, 9, 30, 0) //   < HOUR_START
+    const PREV_DAY = Date.UTC(2026, 3, 14, 10, 30, 0) //  < DAY_START
+    const PREV_MONTH = Date.UTC(2026, 2, 15, 10, 30, 0) // < MONTH_START
+
+    it('rolls a stale daily row forward (used=0, periodStart=current, quota preserved)', () => {
+      store.setQuota(
+        { userId, metric: 'llm_requests', period: 'daily', quota: 100 },
+        PREV_DAY,
+      )
+      store.checkAndIncrement({
+        userId,
+        metric: 'llm_requests',
+        period: 'daily',
+        amount: 40,
+        now: PREV_DAY,
+      })
+      const res = store.sweepUsageCounters(NOW)
+      expect(res.rolled).toBe(1)
+      expect(res.byPeriod).toEqual({ hourly: 0, daily: 1, monthly: 0 })
+      const [row] = store.listUsage({
+        userId,
+        metric: 'llm_requests',
+        period: 'daily',
+      })
+      expect(row?.used).toBe(0)
+      expect(row?.periodStart).toBe(DAY_START)
+      expect(row?.quota).toBe(100) // quota survives sweep — sweep only touches used+period_start+updated_at
+      expect(row?.updatedAt).toBe(NOW)
+    })
+
+    it('sweeps hourly + daily + monthly together in one pass with correct byPeriod counts', () => {
+      // One stale row of each kind. Distinct metrics so the (user,
+      // metric, period) PK doesn't collide.
+      store.checkAndIncrement({
+        userId,
+        metric: 'm_hourly',
+        period: 'hourly',
+        now: PREV_HOUR,
+      })
+      store.checkAndIncrement({
+        userId,
+        metric: 'm_daily',
+        period: 'daily',
+        now: PREV_DAY,
+      })
+      store.checkAndIncrement({
+        userId,
+        metric: 'm_monthly',
+        period: 'monthly',
+        now: PREV_MONTH,
+      })
+      const res = store.sweepUsageCounters(NOW)
+      expect(res).toEqual({
+        rolled: 3,
+        byPeriod: { hourly: 1, daily: 1, monthly: 1 },
+      })
+      // Verify each row landed on the correct *current* boundary.
+      expect(
+        store.listUsage({ userId, metric: 'm_hourly', period: 'hourly' })[0]?.periodStart,
+      ).toBe(HOUR_START)
+      expect(
+        store.listUsage({ userId, metric: 'm_daily', period: 'daily' })[0]?.periodStart,
+      ).toBe(DAY_START)
+      expect(
+        store.listUsage({ userId, metric: 'm_monthly', period: 'monthly' })[0]?.periodStart,
+      ).toBe(MONTH_START)
+    })
+
+    it('fresh rows (already on current periodStart) are NOT touched', () => {
+      store.checkAndIncrement({
+        userId,
+        metric: 'llm_requests',
+        period: 'daily',
+        amount: 5,
+        now: NOW,
+      })
+      const before = store.listUsage({
+        userId,
+        metric: 'llm_requests',
+        period: 'daily',
+      })
+      const res = store.sweepUsageCounters(NOW)
+      expect(res.rolled).toBe(0)
+      // used + updated_at + period_start all preserved exactly.
+      const after = store.listUsage({
+        userId,
+        metric: 'llm_requests',
+        period: 'daily',
+      })
+      expect(after).toEqual(before)
+    })
+
+    it("'total' period NEVER rolls (lifetime counter, sentinel periodStart=0)", () => {
+      store.checkAndIncrement({
+        userId,
+        metric: 'lifetime',
+        period: 'total',
+        amount: 7,
+        now: PREV_MONTH,
+      })
+      const YEAR_LATER = NOW + 365 * 86_400_000
+      const res = store.sweepUsageCounters(YEAR_LATER)
+      expect(res.byPeriod).toEqual({ hourly: 0, daily: 0, monthly: 0 })
+      const [row] = store.listUsage({
+        userId,
+        metric: 'lifetime',
+        period: 'total',
+      })
+      expect(row?.used).toBe(7) // unchanged
+      expect(row?.periodStart).toBe(0) // sentinel preserved
+    })
+
+    it('returns rolled=0 on an empty / all-fresh table', () => {
+      expect(store.sweepUsageCounters(NOW)).toEqual({
+        rolled: 0,
+        byPeriod: { hourly: 0, daily: 0, monthly: 0 },
+      })
+    })
+
+    it('sweeps across multiple users in a single pass (per-row, not per-user)', () => {
+      const u2 = store.createUser({
+        email: 'sweep-u2@test.local',
+        displayName: 'Sweep U2',
+        role: 'member',
+      })
+      store.checkAndIncrement({
+        userId,
+        metric: 'llm_requests',
+        period: 'daily',
+        now: PREV_DAY,
+      })
+      store.checkAndIncrement({
+        userId: u2.id,
+        metric: 'llm_requests',
+        period: 'daily',
+        now: PREV_DAY,
+      })
+      const res = store.sweepUsageCounters(NOW)
+      expect(res.byPeriod.daily).toBe(2)
+      expect(
+        store.listUsage({ userId, period: 'daily' })[0]?.periodStart,
+      ).toBe(DAY_START)
+      expect(
+        store.listUsage({ userId: u2.id, period: 'daily' })[0]?.periodStart,
+      ).toBe(DAY_START)
+    })
+
+    it('does NOT pull a row backwards when period_start is in the future (clock-skew safety)', () => {
+      // The sweep filter is `period_start < ?` (strict <). A row that
+      // somehow ended up with a future period_start — admin manual
+      // edit, NTP rollback after a brief clock jump forward — must be
+      // left alone. Otherwise the sweep would erase the user's
+      // legitimate accumulated counter.
+      const FUTURE = DAY_START + 86_400_000 // tomorrow's daily boundary
+      ;(
+        store as unknown as {
+          db: { prepare: (s: string) => { run: (...args: unknown[]) => void } }
+        }
+      ).db
+        .prepare(
+          `INSERT INTO usage_counters
+             (user_id, metric, period, period_start, used, quota, updated_at)
+             VALUES(?, 'odd', 'daily', ?, 9, NULL, ?)`,
+        )
+        .run(userId, FUTURE, FUTURE)
+      const res = store.sweepUsageCounters(NOW)
+      expect(res.byPeriod.daily).toBe(0)
+      const [row] = store.listUsage({
+        userId,
+        metric: 'odd',
+        period: 'daily',
+      })
+      expect(row?.periodStart).toBe(FUTURE) // unchanged
+      expect(row?.used).toBe(9) // unchanged
+    })
+  })
+
   // ---------- input validation ----------
 
   describe('input validation', () => {
