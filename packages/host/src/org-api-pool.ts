@@ -29,6 +29,7 @@
 
 import type {
   IdentityStore,
+  UsagePeriod,
   VaultEntry,
 } from '@aipehub/identity'
 
@@ -51,6 +52,55 @@ export interface ResolvedLlmKey {
 
 export interface OrgApiPoolOpts {
   identity: IdentityStore
+}
+
+/**
+ * B2.2 — minimal "who pays for this call" descriptor. Deliberately
+ * decoupled from `Task` / `TaskOrigin` so OrgApiPool stays free of
+ * @aipehub/core and @aipehub/llm imports. Host wiring code adapts the
+ * concrete shape (e.g. `task.origin`) to this contract at the seam.
+ */
+export interface QuotaSubject {
+  /** v4 user id to debit. Absent → the gate is a no-op (allow). */
+  userId?: string
+}
+
+/**
+ * The `preCallHook` shape that `OrgApiPool.makeLlmQuotaGate` returns.
+ * Throws when usage exceeds the cap; resolves silently otherwise.
+ */
+export type QuotaGate = (subject: QuotaSubject | undefined) => void
+
+export interface MakeLlmQuotaGateOpts {
+  /** Counter id, e.g. `'llm_requests'`. Required. */
+  metric: string
+  /** Rolling window. Required. */
+  period: UsagePeriod
+  /** Units to debit per call. Defaults to 1. */
+  amount?: number
+}
+
+/**
+ * Error thrown by a `QuotaGate` when a call would exceed the cap.
+ * Carries the counter snapshot so the caller can build a meaningful
+ * surface error (HTTP 429 body, task fail metadata, etc.) without
+ * re-reading the store.
+ */
+export class QuotaExceededError extends Error {
+  readonly code = 'quota_exceeded' as const
+  constructor(
+    public readonly userId: string,
+    public readonly metric: string,
+    public readonly period: UsagePeriod,
+    public readonly used: number,
+    public readonly quota: number,
+    public readonly exceededBy: number,
+  ) {
+    super(
+      `quota_exceeded: user=${userId} metric=${metric} period=${period} used=${used} quota=${quota} (over by ${exceededBy})`,
+    )
+    this.name = 'QuotaExceededError'
+  }
 }
 
 export class OrgApiPool {
@@ -140,6 +190,76 @@ export class OrgApiPool {
    */
   invalidate(): void {
     this.cache.clear()
+  }
+
+  /**
+   * B2.2 — build a `preCallHook`-compatible quota gate. Returns a
+   * function that:
+   *
+   *   - receives a {@link QuotaSubject} (or undefined);
+   *   - resolves silently when `subject?.userId` is absent (local
+   *     dispatches that didn't opt into attribution are free);
+   *   - otherwise calls `identity.checkAndIncrement` with the
+   *     configured metric / period / amount;
+   *   - throws {@link QuotaExceededError} when the call would breach
+   *     the cap (caller's task fails with that error).
+   *
+   * Wiring example (host LocalAgentPool):
+   *
+   *     const gate = orgApiPool.makeLlmQuotaGate({
+   *       metric: 'llm_requests', period: 'daily',
+   *     })
+   *     new LlmAgent({
+   *       ...,
+   *       preCallHook: (task) => gate(task.origin),
+   *     })
+   *
+   * The hook is sync (no await) — `checkAndIncrement` is a single
+   * transaction on a local sqlite, so blocking is fine.
+   */
+  makeLlmQuotaGate(opts: MakeLlmQuotaGateOpts): QuotaGate {
+    if (!opts || typeof opts !== 'object') {
+      throw new TypeError('makeLlmQuotaGate requires { metric, period }')
+    }
+    if (typeof opts.metric !== 'string' || opts.metric.length === 0) {
+      throw new TypeError(
+        'makeLlmQuotaGate: metric must be a non-empty string',
+      )
+    }
+    const { metric, period } = opts
+    const amount = opts.amount ?? 1
+    if (
+      typeof amount !== 'number' ||
+      !Number.isFinite(amount) ||
+      !Number.isInteger(amount) ||
+      amount < 0
+    ) {
+      throw new TypeError(
+        `makeLlmQuotaGate: amount must be a non-negative integer; got ${amount}`,
+      )
+    }
+    const identity = this.identity
+    return function quotaGate(subject: QuotaSubject | undefined): void {
+      const userId = subject?.userId
+      if (!userId) return // unattributed call → unconstrained (by design)
+      const result = identity.checkAndIncrement({
+        userId,
+        metric,
+        period,
+        amount,
+      })
+      if (!result.allowed) {
+        const quota = result.counter.quota ?? 0
+        throw new QuotaExceededError(
+          userId,
+          metric,
+          period,
+          result.counter.used,
+          quota,
+          result.exceededBy ?? 0,
+        )
+      }
+    }
   }
 }
 

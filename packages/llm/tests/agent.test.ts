@@ -784,3 +784,225 @@ describe('LlmAgent — tool-use loop (v0.3)', () => {
     expect(toolResult.content).toBe('part-1\npart-2')
   })
 })
+
+// =========================================================================
+// B2.2 — preCallHook: invoked before every provider.complete (including
+// each round of the tool-use loop). Used by host wiring (OrgApiPool's
+// makeLlmQuotaGate) to charge usage / enforce caps.
+// =========================================================================
+
+describe('LlmAgent — preCallHook (B2.2)', () => {
+  it('no hook → provider is invoked normally', async () => {
+    let providerCalled = 0
+    const provider = new MockLlmProvider({
+      reply: () => {
+        providerCalled++
+        return 'ok'
+      },
+    })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(
+      new LlmAgent({ id: 'a', capabilities: ['draft'], provider }),
+    )
+    const out = await hub.dispatch(makeTask('hi'))
+    await hub.stop()
+    expect(out.kind).toBe('ok')
+    expect(providerCalled).toBe(1)
+  })
+
+  it('sync hook is awaited before provider.complete; receives the task', async () => {
+    const order: string[] = []
+    let hookSawTask: unknown
+    const provider = new MockLlmProvider({
+      reply: () => {
+        order.push('provider')
+        return 'ok'
+      },
+    })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(
+      new LlmAgent({
+        id: 'a',
+        capabilities: ['draft'],
+        provider,
+        preCallHook: (task) => {
+          order.push('hook')
+          hookSawTask = task
+        },
+      }),
+    )
+    await hub.dispatch(makeTask('hi'))
+    await hub.stop()
+    expect(order).toEqual(['hook', 'provider'])
+    expect((hookSawTask as { payload: unknown }).payload).toBe('hi')
+  })
+
+  it('async hook is awaited (resolves before provider is called)', async () => {
+    const order: string[] = []
+    const provider = new MockLlmProvider({
+      reply: () => {
+        order.push('provider')
+        return 'ok'
+      },
+    })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(
+      new LlmAgent({
+        id: 'a',
+        capabilities: ['draft'],
+        provider,
+        preCallHook: async () => {
+          await new Promise((r) => setTimeout(r, 5))
+          order.push('hook')
+        },
+      }),
+    )
+    await hub.dispatch(makeTask('hi'))
+    await hub.stop()
+    expect(order).toEqual(['hook', 'provider'])
+  })
+
+  it('hook throwing fails the task; provider is never called', async () => {
+    let providerCalled = 0
+    const provider = new MockLlmProvider({
+      reply: () => {
+        providerCalled++
+        return 'ok'
+      },
+    })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(
+      new LlmAgent({
+        id: 'a',
+        capabilities: ['draft'],
+        provider,
+        preCallHook: () => {
+          throw new Error('quota_exceeded: simulated')
+        },
+      }),
+    )
+    const out = await hub.dispatch(makeTask('hi'))
+    await hub.stop()
+    expect(out.kind).toBe('failed')
+    if (out.kind !== 'failed') throw new Error('unreachable')
+    expect(out.error).toMatch(/quota_exceeded/)
+    expect(providerCalled).toBe(0)
+  })
+
+  it('async hook rejection fails the task too', async () => {
+    const provider = new MockLlmProvider({ reply: 'ok' })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(
+      new LlmAgent({
+        id: 'a',
+        capabilities: ['draft'],
+        provider,
+        preCallHook: async () => {
+          throw new Error('async_rejection')
+        },
+      }),
+    )
+    const out = await hub.dispatch(makeTask('hi'))
+    await hub.stop()
+    expect(out.kind).toBe('failed')
+    if (out.kind !== 'failed') throw new Error('unreachable')
+    expect(out.error).toMatch(/async_rejection/)
+  })
+
+  it('tool-use loop: hook invoked once per round (NOT just first call)', async () => {
+    // Critical for quota: a runaway tool-use loop must charge usage
+    // on every provider hop, not just the first. Mock script returns
+    // tool_use, tool_use, text — 3 rounds = 3 hook invocations.
+    let hookCount = 0
+    const provider = new MockLlmProvider({
+      reply: 'final',
+      script: [
+        {
+          kind: 'tool_use',
+          toolUses: [
+            { id: 't1', name: 'fs__read', input: { path: '/a' } },
+          ],
+        },
+        {
+          kind: 'tool_use',
+          toolUses: [
+            { id: 't2', name: 'fs__read', input: { path: '/b' } },
+          ],
+        },
+        { kind: 'text', text: 'done' },
+      ],
+    })
+    const fakeToolset = {
+      async listTools() {
+        return [{ name: 'fs__read', inputSchema: { type: 'object' } }]
+      },
+      async callTool() {
+        return { content: [{ type: 'text', text: 'tool-output' }] }
+      },
+    }
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(
+      new LlmAgent({
+        id: 'a',
+        capabilities: ['draft'],
+        provider,
+        tools: fakeToolset,
+        preCallHook: () => {
+          hookCount++
+        },
+      }),
+    )
+    await hub.dispatch(makeTask('go'))
+    await hub.stop()
+    expect(hookCount).toBe(3)
+  })
+
+  it('hook sees task.origin when dispatcher attached one', async () => {
+    let seenOrigin: unknown
+    const provider = new MockLlmProvider({ reply: 'ok' })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(
+      new LlmAgent({
+        id: 'a',
+        capabilities: ['draft'],
+        provider,
+        preCallHook: (task) => {
+          seenOrigin = task.origin
+        },
+      }),
+    )
+    await hub.dispatch({
+      ...makeTask('hi'),
+      origin: { orgId: 'self', userId: 'alice' },
+    })
+    await hub.stop()
+    expect(seenOrigin).toEqual({ orgId: 'self', userId: 'alice' })
+  })
+
+  it('hook tolerates absent task.origin (local dispatch without attribution)', async () => {
+    let seenOrigin: unknown = 'unset'
+    const provider = new MockLlmProvider({ reply: 'ok' })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(
+      new LlmAgent({
+        id: 'a',
+        capabilities: ['draft'],
+        provider,
+        preCallHook: (task) => {
+          seenOrigin = task.origin // expected undefined for plain hub.dispatch
+        },
+      }),
+    )
+    await hub.dispatch(makeTask('hi'))
+    await hub.stop()
+    expect(seenOrigin).toBeUndefined()
+  })
+})

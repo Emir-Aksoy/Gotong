@@ -90,6 +90,19 @@ export interface LlmAgentOptions extends AgentOptions {
    * iterative debugging). Decrease for tight per-task budgets.
    */
   maxToolRounds?: number
+  /**
+   * B2.2 — invoked once per `provider.complete(req)` (so EVERY round
+   * of the tool-use loop too, not just the first). Receives the
+   * current `Task` so the hook can read `task.origin?.userId` for
+   * quota attribution. Synchronous or async; throwing aborts the
+   * task with the thrown error.
+   *
+   * Typical wiring: host's `OrgApiPool.makeLlmQuotaGate({metric:
+   * 'llm_requests', period: 'daily'})` returns a function fit for
+   * this slot. Absent → no gating (the local-only / SDK / test
+   * default).
+   */
+  preCallHook?: (task: Task) => void | Promise<void>
 }
 
 /**
@@ -150,6 +163,13 @@ export class LlmAgent extends AgentParticipant {
    */
   protected readonly toolset: LlmAgentToolset | undefined
   protected readonly maxToolRounds: number
+  /**
+   * B2.2 — pre-call hook (typically a quota gate). Invoked before
+   * EVERY provider.complete, including each round of the tool-use
+   * loop. Throwing aborts the task with the thrown error — the host
+   * picks that up as the normal failure path.
+   */
+  protected readonly preCallHook?: (task: Task) => void | Promise<void>
 
   constructor(opts: LlmAgentOptions) {
     super({ id: opts.id, capabilities: opts.capabilities })
@@ -163,6 +183,7 @@ export class LlmAgent extends AgentParticipant {
     this.services = opts.services ?? EMPTY_SERVICE_CTX
     this.toolset = opts.tools
     this.maxToolRounds = opts.maxToolRounds ?? 8
+    this.preCallHook = opts.preCallHook
   }
 
   /**
@@ -275,6 +296,7 @@ export class LlmAgent extends AgentParticipant {
     if (!this.toolset) {
       // No toolset attached — same code path as v0.2.
       const req = this.buildRequest(task)
+      if (this.preCallHook) await this.preCallHook(task)
       const res = await this.provider.complete(req)
       return this.parseResponse(res, task, 0)
     }
@@ -310,6 +332,7 @@ export class LlmAgent extends AgentParticipant {
     let rounds = 0
 
     while (true) {
+      if (this.preCallHook) await this.preCallHook(task)
       const res = await this.provider.complete(req)
       const wantsTool =
         res.stopReason === 'tool_use' &&

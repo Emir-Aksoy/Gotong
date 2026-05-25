@@ -20,7 +20,7 @@ import {
   openIdentityStore,
 } from '@aipehub/identity'
 
-import { OrgApiPool } from '../src/org-api-pool.js'
+import { OrgApiPool, QuotaExceededError } from '../src/org-api-pool.js'
 
 describe('OrgApiPool', () => {
   let dir: string
@@ -255,5 +255,164 @@ describe('OrgApiPool', () => {
     expect(
       () => new OrgApiPool({} as unknown as { identity: IdentityStore }),
     ).toThrow(/identity/)
+  })
+})
+
+// =========================================================================
+// B2.2 — makeLlmQuotaGate factory: pre-call hook that debits a counter
+// from `subject.userId` and throws QuotaExceededError on overrun.
+// =========================================================================
+
+describe('OrgApiPool.makeLlmQuotaGate (B2.2)', () => {
+  let dir: string
+  let identity: IdentityStore
+  let pool: OrgApiPool
+  let userId: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'aipehub-orgpool-gate-'))
+    identity = openIdentityStore({
+      dbPath: join(dir, 'identity.sqlite'),
+      masterKey: randomBytes(MASTER_KEY_LEN_BYTES),
+    })
+    pool = new OrgApiPool({ identity })
+    const u = identity.createUser({
+      email: 'gate-target@test.local',
+      displayName: 'Gate Target',
+      role: 'member',
+    })
+    userId = u.id
+  })
+
+  afterEach(() => {
+    identity.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('returns a hook that no-ops when subject is undefined', () => {
+    const gate = pool.makeLlmQuotaGate({
+      metric: 'llm_requests',
+      period: 'daily',
+    })
+    expect(() => gate(undefined)).not.toThrow()
+    expect(identity.listUsage({ userId })).toEqual([]) // nothing debited
+  })
+
+  it('no-ops when subject.userId is absent', () => {
+    const gate = pool.makeLlmQuotaGate({
+      metric: 'llm_requests',
+      period: 'daily',
+    })
+    expect(() => gate({})).not.toThrow()
+    expect(identity.listUsage({ userId })).toEqual([])
+  })
+
+  it('debits 1 per call against the configured (metric, period) by default', () => {
+    const gate = pool.makeLlmQuotaGate({
+      metric: 'llm_requests',
+      period: 'daily',
+    })
+    gate({ userId })
+    gate({ userId })
+    gate({ userId })
+    const [row] = identity.listUsage({
+      userId,
+      metric: 'llm_requests',
+      period: 'daily',
+    })
+    expect(row?.used).toBe(3)
+  })
+
+  it('honours a custom `amount` (batched debit)', () => {
+    const gate = pool.makeLlmQuotaGate({
+      metric: 'llm_tokens_in',
+      period: 'monthly',
+      amount: 500,
+    })
+    gate({ userId })
+    gate({ userId })
+    const [row] = identity.listUsage({
+      userId,
+      metric: 'llm_tokens_in',
+      period: 'monthly',
+    })
+    expect(row?.used).toBe(1000)
+  })
+
+  it('throws QuotaExceededError when the cap is breached; does NOT commit', () => {
+    identity.setQuota({
+      userId,
+      metric: 'llm_requests',
+      period: 'daily',
+      quota: 3,
+    })
+    const gate = pool.makeLlmQuotaGate({
+      metric: 'llm_requests',
+      period: 'daily',
+    })
+    gate({ userId }) // used=1
+    gate({ userId }) // used=2
+    gate({ userId }) // used=3 (at cap)
+    let caught: unknown
+    try {
+      gate({ userId }) // would be 4
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(QuotaExceededError)
+    const e = caught as QuotaExceededError
+    expect(e.code).toBe('quota_exceeded')
+    expect(e.userId).toBe(userId)
+    expect(e.metric).toBe('llm_requests')
+    expect(e.period).toBe('daily')
+    expect(e.used).toBe(3) // un-committed
+    expect(e.quota).toBe(3)
+    expect(e.exceededBy).toBe(1)
+    // Counter on disk is unchanged.
+    const [row] = identity.listUsage({
+      userId,
+      metric: 'llm_requests',
+      period: 'daily',
+    })
+    expect(row?.used).toBe(3)
+  })
+
+  it('null quota = unlimited (no throw even after huge debits)', () => {
+    const gate = pool.makeLlmQuotaGate({
+      metric: 'llm_tokens_in',
+      period: 'monthly',
+      amount: 10_000,
+    })
+    for (let i = 0; i < 100; i++) gate({ userId })
+    const [row] = identity.listUsage({
+      userId,
+      metric: 'llm_tokens_in',
+      period: 'monthly',
+    })
+    expect(row?.used).toBe(1_000_000)
+    expect(row?.quota).toBeNull()
+  })
+
+  it('rejects bad opts at factory time (fail fast, not on first call)', () => {
+    expect(() =>
+      pool.makeLlmQuotaGate({} as unknown as { metric: string; period: 'daily' }),
+    ).toThrow(/metric/)
+    expect(() =>
+      pool.makeLlmQuotaGate({ metric: '', period: 'daily' }),
+    ).toThrow(/non-empty/)
+    expect(() =>
+      pool.makeLlmQuotaGate({
+        metric: 'm',
+        period: 'daily',
+        amount: -1,
+      }),
+    ).toThrow(/non-negative/)
+    expect(() =>
+      pool.makeLlmQuotaGate({
+        metric: 'm',
+        period: 'daily',
+        amount: 1.5,
+      }),
+    ).toThrow(/non-negative integer/)
   })
 })
