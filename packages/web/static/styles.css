@@ -1668,3 +1668,75 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   text-align: center;
   vertical-align: middle;
 }
+
+/* --- C1 — unified SPA shell (anonymous login + home + settings) ----------
+ *
+ * Kept self-contained at the bottom so an admin theme override above
+ * doesn't accidentally clobber the member-facing surface. The
+ * `data-roles` attribute is the structural visibility key; app.js
+ * computes "viewer's role" once on boot and adds the `tab-hidden`
+ * class to anything not in the role list. CSS just renders.
+ */
+
+/* Anonymous login card — shown when no v4 identity cookie is set. */
+#login-shell {
+  display: flex;
+  justify-content: center;
+  padding: 4rem 1rem;
+}
+.login-card {
+  max-width: 26rem;
+  width: 100%;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 1.5rem;
+  background: #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+.login-card h2 { margin: 0 0 1rem; font-size: 1.1rem; }
+.login-card label { display: block; font-size: 0.85rem; color: #555; margin: 0.5rem 0 0.15rem; }
+.login-card input { font: inherit; padding: 0.45rem; box-sizing: border-box; width: 100%; border: 1px solid #ccc; border-radius: 4px; }
+.login-row { display: flex; gap: 0.75rem; align-items: center; margin-top: 0.75rem; flex-wrap: wrap; }
+.login-row button { background: #1f6feb; color: #fff; border: none; cursor: pointer; padding: 0.5rem 0.95rem; border-radius: 4px; font: inherit; }
+.login-row button:hover { background: #1759c8; }
+.login-meta { font-size: 0.82rem; color: #666; flex: 1 1 14rem; }
+.login-meta code { background: #f4f4f4; padding: 0 0.25rem; border-radius: 3px; }
+.login-status { font-size: 0.88rem; min-height: 1.2em; margin-top: 0.5rem; }
+.login-status.error { color: #c0392b; }
+.login-status.ok { color: #27ae60; }
+
+/* Home + settings panels — visible to every signed-in role. */
+#home-panel, #settings-panel {
+  max-width: 48rem;
+  padding: 1rem 1.25rem 1.5rem;
+}
+.me-whoami, .me-dispatch, .me-reports, .settings-actions, .settings-form {
+  margin-bottom: 1.5rem;
+}
+#home-panel h2, #settings-panel h2 {
+  font-size: 1.05rem;
+  margin: 0 0 0.4rem;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 0.3rem;
+}
+.meta-line { color: #555; font-size: 0.9rem; line-height: 1.4; }
+.me-meta { color: #666; font-size: 0.82rem; margin: 0.3rem 0; }
+.me-meta code, .meta-line code { background: #f4f4f4; padding: 0 0.25rem; border-radius: 3px; }
+#home-panel label, #settings-panel label { display: block; font-size: 0.85rem; color: #555; margin: 0.6rem 0 0.15rem; }
+#home-panel input, #home-panel select, #home-panel textarea,
+#settings-panel input { font: inherit; padding: 0.45rem; box-sizing: border-box; width: 100%; border: 1px solid #ccc; border-radius: 4px; }
+#home-panel textarea { min-height: 4.5rem; resize: vertical; }
+.me-primary-btn, .me-secondary-btn {
+  font: inherit; border: none; cursor: pointer; padding: 0.45rem 0.9rem;
+  border-radius: 4px; margin-top: 0.6rem; width: auto;
+}
+.me-primary-btn { background: #1f6feb; color: #fff; }
+.me-primary-btn:hover { background: #1759c8; }
+.me-secondary-btn { background: #888; color: #fff; }
+.me-secondary-btn:hover { background: #666; }
+.me-status { font-size: 0.88rem; min-height: 1.2em; margin-top: 0.5rem; }
+.me-status.error { color: #c0392b; }
+.me-status.ok { color: #27ae60; }
+.me-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-top: 0.4rem; }
+.me-table th, .me-table td { text-align: left; border-bottom: 1px solid #eee; padding: 0.4rem 0.5rem; }
+.settings-form { display: block; max-width: 24rem; }

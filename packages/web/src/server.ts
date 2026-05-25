@@ -41,6 +41,7 @@ import { STATIC_ASSETS_BASE64 } from './static-assets.js'
 import {
   handleIdentityRoute,
   handlePublicInvitationRoute,
+  IDENTITY_COOKIE,
   type IdentitySurface,
 } from './identity-routes.js'
 import { handleMeRoute } from './me-routes.js'
@@ -956,12 +957,20 @@ async function handle(
       return
     }
     const sess = await ctx.space.findAdminSession(readCookie(req, ADMIN_COOKIE))
+    // C1 — even without a v3 admin session, fall through to the
+    // unified SPA if the visitor carries a v4 identity cookie. They'll
+    // see the role-aware shell (admin tabs for owner/admin, just
+    // home+settings for member/viewer). Pure-anonymous visitors get the
+    // legacy 401 prompt to nudge them toward the `?token=` flow.
     if (!sess) {
-      res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' })
-      res.end('<!doctype html><meta charset=utf-8><title>AipeHub admin</title><body style="font-family:sans-serif;max-width:30rem;margin:6rem auto;color:#333"><h1>401 — admin token required</h1><p>Open this page with <code>?token=YOUR_TOKEN</code> appended.</p></body>')
-      return
+      const v4Cookie = readCookie(req, IDENTITY_COOKIE)
+      if (!v4Cookie) {
+        res.writeHead(401, { 'content-type': 'text/html; charset=utf-8' })
+        res.end('<!doctype html><meta charset=utf-8><title>AipeHub admin</title><body style="font-family:sans-serif;max-width:30rem;margin:6rem auto;color:#333"><h1>401 — admin token required</h1><p>Open this page with <code>?token=YOUR_TOKEN</code> appended, or sign in at <a href="/">/</a>.</p></body>')
+        return
+      }
     }
-    await serveStatic(res, 'admin.html')
+    await serveAppHtml(ctx, req, res)
     return
   }
 
@@ -2311,7 +2320,21 @@ async function handle(
 
   // --- static files -------------------------------------------------------
   if (method === 'GET') {
-    const requested = path === '/' ? 'worker.html' : path.replace(/^\//, '')
+    // C1 — root path routing. Visitors with a v4 identity cookie OR a
+    // v3 admin cookie get the unified SPA (role meta injected). Pure
+    // anonymous visitors keep landing on the v3 worker join page so
+    // classroom / demo URLs continue working unchanged.
+    if (path === '/') {
+      const hasV4 = ctx.identity && readCookie(req, IDENTITY_COOKIE)
+      const hasV3 = readCookie(req, ADMIN_COOKIE)
+      if (hasV4 || hasV3) {
+        await serveAppHtml(ctx, req, res)
+        return
+      }
+      await serveStatic(res, 'worker.html')
+      return
+    }
+    const requested = path.replace(/^\//, '')
     await serveStatic(res, requested)
     return
   }
@@ -2637,6 +2660,98 @@ async function serveStatic(res: ServerResponse, requested: string): Promise<void
     }
     throw err
   }
+}
+
+/**
+ * C1 — serve `app.html` (the unified SPA shell) with the viewer's v4
+ * role injected into the `<meta name="x-aipehub-role">` tag.
+ *
+ * Role resolution order:
+ *   1. v4 identity cookie → `identity.getSessionByToken().role` —
+ *      authoritative for member / viewer / admin / owner.
+ *   2. v3 admin cookie (legacy `/admin?token=` flow, or admins migrated
+ *      forward from Phase 1) → treated as 'owner'-equivalent for SPA
+ *      rendering. v3 admin is unconditional access; the role-aware tab
+ *      filter would otherwise lock these accounts out of the new shell
+ *      until they re-login via v4.
+ *   3. Neither → empty string. app.js sees `''` and renders the
+ *      anonymous login form; server-side enforcement is unchanged
+ *      (every API route still runs its own auth gate).
+ *
+ * The injected meta is a RENDER HINT only — never a security boundary.
+ * A user who forges a v4 cookie that fails server validation will see
+ * the tab matching the forged role but every API call returns 401/403
+ * because they don't have a real session.
+ */
+async function serveAppHtml(
+  ctx: HandlerCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  let role = ''
+  // v4 cookie first.
+  if (ctx.identity) {
+    const tok = readCookie(req, IDENTITY_COOKIE)
+    if (tok) {
+      try {
+        const r = ctx.identity.getSessionByToken(tok)
+        if (r) role = r.role
+      } catch {
+        // bad/expired cookie — treat as anonymous; the SPA will show
+        // the login form. Don't leak the error to the client.
+      }
+    }
+  }
+  // v3 admin fallback.
+  if (!role) {
+    const sid = readCookie(req, ADMIN_COOKIE)
+    if (sid) {
+      const sess = await ctx.space.findAdminSession(sid)
+      if (sess) role = 'owner'
+    }
+  }
+
+  const securityHeaders = {
+    'content-type': 'text/html; charset=utf-8',
+    'cache-control': 'no-cache',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer',
+  }
+
+  // Same dual-source pattern as serveStatic — embedded base64 in prod,
+  // filesystem fallback in dev. The cache keeps app.html as a Buffer;
+  // we toString() per request because the role differs per call. The
+  // template body is small (~37 KB) so the per-request encode is cheap
+  // — well under a memory-cache cost for keying per role.
+  let raw: string | null = null
+  const embedded = getEmbeddedAsset('app.html')
+  if (embedded) {
+    raw = embedded.toString('utf8')
+  } else {
+    try {
+      raw = (await readFile(join(STATIC_DIR, 'app.html'))).toString('utf8')
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+        res.writeHead(500, { 'content-type': 'text/plain' })
+        res.end('app.html missing — run packages/web build:assets')
+        return
+      }
+      throw err
+    }
+  }
+
+  // Single, idempotent substitution. The placeholder is `<!--AIPE_ROLE-->`
+  // — anything else (legitimate user content, future translated strings)
+  // is left intact. Role values are validated against a small enum so
+  // an attacker who somehow stuffed garbage into the session can't break
+  // out of the meta attribute.
+  const ALLOWED_ROLES = new Set(['owner', 'admin', 'member', 'viewer'])
+  const safeRole = ALLOWED_ROLES.has(role) ? role : ''
+  const out = raw.replace('<!--AIPE_ROLE-->', safeRole)
+
+  res.writeHead(200, securityHeaders)
+  res.end(out)
 }
 
 function readJsonBody(req: IncomingMessage): Promise<unknown> {
