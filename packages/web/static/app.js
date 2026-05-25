@@ -66,6 +66,76 @@
     }
   }
 
+  // ---- A2.3 — first-time setup wizard ----------------------------------
+  //
+  // Detect whether we're in bootstrap mode (single user, no password yet).
+  // If yes, show the wizard instead of the login form. Resolves to true
+  // when the SPA continues with the wizard (caller should NOT also
+  // attach the login form).
+  async function maybeStartSetupWizard() {
+    try {
+      const r = await fetch('/api/setup/needs-bootstrap')
+      if (!r.ok) return false
+      const j = await r.json()
+      if (!j?.bootstrap) return false
+    } catch {
+      return false
+    }
+    // Bootstrap mode — hide login shell, show wizard.
+    const loginShell = document.getElementById('login-shell')
+    const wizard = document.getElementById('setup-wizard')
+    if (loginShell) loginShell.hidden = true
+    if (wizard) wizard.hidden = false
+    attachSetupForm()
+    return true
+  }
+
+  function attachSetupForm() {
+    const form = document.getElementById('setup-form')
+    if (!form) return
+    const status = document.getElementById('setup-status')
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      status.className = 'login-status'
+      status.textContent = '设置中…'
+      const fd = new FormData(form)
+      const password = String(fd.get('password') || '')
+      const confirm = String(fd.get('confirm') || '')
+      if (password !== confirm) {
+        status.className = 'login-status error'
+        status.textContent = '两次密码不一致'
+        return
+      }
+      if (password.length < 12) {
+        status.className = 'login-status error'
+        status.textContent = '密码至少 12 位'
+        return
+      }
+      try {
+        const r = await fetch('/api/setup/owner-password', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ password }),
+        })
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}))
+          status.className = 'login-status error'
+          status.textContent = j?.error || `设置失败 (HTTP ${r.status})`
+          return
+        }
+        status.className = 'login-status ok'
+        status.textContent = '密码已设,现在去登录…'
+        // Swap to the login form so the operator can sign in with the
+        // newly-set password. Reload picks up an empty cookie state (no
+        // session yet) and renders the login shell.
+        setTimeout(() => { window.location.reload() }, 700)
+      } catch (err) {
+        status.className = 'login-status error'
+        status.textContent = `设置失败: ${err?.message || err}`
+      }
+    })
+  }
+
   // ---- Anonymous login --------------------------------------------------
   function attachLoginForm() {
     const form = document.getElementById('login-form')
@@ -431,11 +501,17 @@
   }
 
   // ---- Boot ------------------------------------------------------------
-  document.addEventListener('DOMContentLoaded', () => {
+  document.addEventListener('DOMContentLoaded', async () => {
     renderRoleBadge()
     applyRoleVisibility()
     if (!SIGNED_IN) {
-      attachLoginForm()
+      // Bootstrap mode takes precedence — when the host is freshly
+      // booted and the owner has no password, we skip the login form
+      // (it would 401 the operator anyway) and walk them through the
+      // setup wizard. If maybeStartSetupWizard returns false we're in
+      // the normal anonymous case → attach the login form.
+      const wizardStarted = await maybeStartSetupWizard()
+      if (!wizardStarted) attachLoginForm()
       return
     }
     // Signed in — reveal tabbar and wire everything.

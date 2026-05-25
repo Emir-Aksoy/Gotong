@@ -37,6 +37,36 @@
       <button id="lang-toggle" class="lang-toggle" type="button" title="切换语言 / Switch language">EN</button>
     </header>
 
+    <!-- A2.3 — first-time setup wizard. Shown only when the SPA boots,
+         finds no v4 cookie, and GET /api/setup/needs-bootstrap returns
+         `{bootstrap: true}` (single user exists, no password set). app.js
+         hides the login shell, shows this card. Loopback-only on the
+         backend; non-loopback visitors see a 403 with a clear pointer
+         to the CLI fallback. -->
+    <section id="setup-wizard" hidden>
+      <div class="login-card">
+        <h2>首次设置 — 给 owner 设密码</h2>
+        <p class="login-meta">
+          host 已启动,但 owner 账号还没设密码。在<strong>本机</strong>(<code>127.0.0.1</code>)
+          上设置一次,以后用 Email + 密码登录。<br>
+          反向代理后的部署请改用 CLI: <code>aipehub-host mint-admin-token</code>。
+        </p>
+        <form id="setup-form">
+          <label>新密码 (至少 12 位)
+            <input name="password" type="password" required minlength="12" autocomplete="new-password" />
+          </label>
+          <label>再输一次
+            <input name="confirm" type="password" required minlength="12" autocomplete="new-password" />
+          </label>
+          <div class="login-row">
+            <button type="submit">设置密码</button>
+            <span class="login-meta">完成后页面自动跳到登录。</span>
+          </div>
+          <div id="setup-status" class="login-status"></div>
+        </form>
+      </div>
+    </section>
+
     <!-- Anonymous login shell. Visible only when no role meta is set
          (i.e. visitor has no v4 identity cookie). app.js toggles it on
          boot; on successful login the page reloads so the server can
