@@ -78,6 +78,7 @@ import { BAKED_VERSION } from './version.js'
 
 const log = createLogger('host')
 import { serveWebSocket } from '@aipehub/transport-ws'
+import { PeerRegistry } from './peer-registry.js'
 import { serveWeb } from '@aipehub/web'
 
 import { LocalAgentPool } from './local-agent-pool.js'
@@ -561,6 +562,34 @@ async function main(): Promise<void> {
     // tolerated under structural typing).
     ...(services ? { services } : {}),
   })
+
+  // D1 — Peer Registry. Polls identity.peers every AIPE_PEER_POLL_MS
+  // (default 5s) and reconciles outbound HubLinks; shares ws.server
+  // for inbound peer HELLO acceptance. Disabled when identity is
+  // unwired (federation requires v4 identity) OR when the operator
+  // explicitly skipped it via AIPE_PEERS_DISABLED=1.
+  let peerRegistry: PeerRegistry | undefined
+  if (identity && process.env.AIPE_PEERS_DISABLED !== '1') {
+    const spaceMeta = await space.meta()
+    const selfHubId = spaceMeta.hubId ?? 'self'
+    const pollMs = envInt('AIPE_PEER_POLL_MS', 5_000)
+    const inboundToken = process.env.AIPE_PEER_INBOUND_TOKEN
+    peerRegistry = new PeerRegistry({
+      hub,
+      identity,
+      selfHubId,
+      wss: ws.wss,
+      ...(inboundToken ? { sharedInboundPeerToken: inboundToken } : {}),
+      pollIntervalMs: pollMs,
+      logger: log,
+    })
+    peerRegistry.start()
+    log.info('peer registry started', {
+      selfHubId,
+      pollIntervalMs: pollMs,
+      inboundAuth: inboundToken ? 'shared-token' : 'none',
+    })
+  }
   // Readiness flag — flips to true after workflow resume finishes (see
   // the setTimeout block below). `/readyz` reads this; `/healthz` is
   // always 200. Splitting liveness from readiness lets k8s-style probes
@@ -583,6 +612,9 @@ async function main(): Promise<void> {
     // v4 identity surface. When absent (identity bootstrap failed
     // above), /api/admin/identity/* returns 503.
     ...(identity ? { identity } : {}),
+    // D1 — pass the peer registry through so admin /peers handlers
+    // can invalidate the polling tick on every mutation.
+    ...(peerRegistry ? { peerRegistry } : {}),
   })
 
   // P6: recover from crashes — any run still marked 'running' on disk
@@ -670,6 +702,12 @@ async function main(): Promise<void> {
     if (shuttingDown) return
     shuttingDown = true
     log.info('shutdown signal received — draining', { signal: sig })
+    // Stop the peer registry FIRST — it owns outbound HubLinks that
+    // need a clean close handshake before we yank the underlying ws
+    // server out from under them.
+    if (peerRegistry) {
+      try { await peerRegistry.stop() } catch (err) { log.error('peer registry stop error', { err }) }
+    }
     try { await ws.close() } catch (err) { log.error('ws close error', { err }) }
     try { await web.close() } catch (err) { log.error('web close error', { err }) }
     try { await localAgents.stopAll() } catch (err) { log.error('local agents stop error', { err }) }

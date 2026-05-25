@@ -411,6 +411,10 @@ export class Space {
       description: opts.description ?? '',
       createdAt: now,
       version: SPACE_FILE_VERSION,
+      // D1 — federation identity stamped at init. Format `hub_<8 hex>`
+      // matches the peer-id grammar HubLink HELLO expects and is short
+      // enough to read in logs at a glance.
+      hubId: `hub_${randomBytes(4).toString('hex')}`,
     } satisfies SpaceMeta)
     writeJsonAtomicSync(s.paths.config, { ...DEFAULT_CONFIG, ...opts.config })
     writeJsonAtomicSync(s.paths.admins, { admins: [] }, SECURE_FILE_MODE)
@@ -451,7 +455,23 @@ export class Space {
   // --- meta + config --------------------------------------------------------
 
   async meta(): Promise<SpaceMeta> {
-    return readJson<SpaceMeta>(this.paths.space)
+    const m = await readJson<SpaceMeta>(this.paths.space)
+    // D1 — lazy back-fill for pre-D1 spaces. If hubId is missing,
+    // generate one and persist it under the file lock so concurrent
+    // readers can't race two different ids onto disk.
+    if (m.hubId === undefined) {
+      return await this.withFileLock(this.paths.space, async () => {
+        const cur = await readJson<SpaceMeta>(this.paths.space)
+        if (cur.hubId !== undefined) return cur
+        const filled: SpaceMeta = {
+          ...cur,
+          hubId: `hub_${randomBytes(4).toString('hex')}`,
+        }
+        await writeJsonAtomic(this.paths.space, filled)
+        return filled
+      })
+    }
+    return m
   }
   async config(): Promise<SpaceConfig> {
     const c = await readJson<Partial<SpaceConfig>>(this.paths.config)
@@ -872,6 +892,20 @@ export interface SpaceMeta {
   description: string
   createdAt: string
   version: number
+  /**
+   * D1 (v4 Phase 5) — this host's federation identity. Stamped on
+   * `Space.init` as `hub_<8-hex>`; remote peers see this value as the
+   * other side of their `acceptHubLinks` HELLO. Persistent across
+   * restarts; an admin who needs to rename the hub edits space.json
+   * directly (no API surface — renaming is a federation-breaking
+   * change peers would need to be re-registered through anyway).
+   *
+   * Optional in the type so legacy spaces (pre-D1) still load; the
+   * Space.meta accessor lazily fills in a generated value the first
+   * time it's read on an upgraded space, then writes back so the next
+   * call is cheap.
+   */
+  hubId?: string
 }
 
 export interface SpaceConfig {

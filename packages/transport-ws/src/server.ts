@@ -159,6 +159,14 @@ export interface WebSocketTransportHandle {
   readonly host: string
   readonly port: number
   readonly url: string
+  /**
+   * D1 — federation reuses the same ws.Server for inbound peer HELLO
+   * via `acceptHubLinks({wss: handle.wss, ...})`. Exposed read-only so
+   * the host's PeerRegistry can attach a 'connection'-listener sibling
+   * to the agent-session handler without spinning up a second listener
+   * on a different port.
+   */
+  readonly wss: WebSocketServer
   sessions(): SessionInfo[]
   close(): Promise<void>
 }
@@ -263,6 +271,7 @@ export function serveWebSocket(
         host,
         port: actualPort,
         url,
+        wss,
         sessions: () => [...sessions].map((s) => s.info()),
         close: () =>
           new Promise<void>((res, rej) => {

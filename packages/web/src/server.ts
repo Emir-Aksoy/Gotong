@@ -255,6 +255,25 @@ export interface WebServerOptions {
    * surface reach v3 admin endpoints with the same browser session.
    */
   identity?: IdentitySurface
+  /**
+   * D1 — host's live peer registry. Plumbed into HandleIdentityRouteCtx
+   * so /api/admin/identity/peers/* handlers can call invalidate() after
+   * each mutation (forces an immediate reconciliation tick instead of
+   * waiting for the 5s poll) and read connection status for GET.
+   * Optional — when omitted, the routes still work; the response just
+   * lacks live `connected` / `backoffAttempts` columns.
+   */
+  peerRegistry?: {
+    invalidate(): void
+    status(): Array<{
+      peerRowId: string
+      peerId: string
+      label: string | null
+      endpointUrl: string
+      connected: boolean
+      backoffAttempts: number
+    }>
+  }
 }
 
 /**
@@ -398,6 +417,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     growthReports: opts.growthReports,
     readinessGate: opts.readinessGate,
     identity: opts.identity,
+    peerRegistry: opts.peerRegistry,
     httpStats: new HttpStats(),
   }
 
@@ -513,6 +533,8 @@ interface HandlerCtx {
   growthReports: GrowthReportsAdminSurface | undefined
   readinessGate: { isReady: () => boolean } | undefined
   identity: IdentitySurface | undefined
+  /** D1 — see WebServerOptions.peerRegistry doc above. */
+  peerRegistry: WebServerOptions['peerRegistry'] | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -1223,6 +1245,7 @@ async function handle(
         loginLimiter: ctx.adminLoginLimiter,
         clientIp: clientIp(ctx, req),
         ...(userAgent ? { userAgent } : {}),
+        ...(ctx.peerRegistry ? { peerRegistry: ctx.peerRegistry } : {}),
       },
       req,
       res,

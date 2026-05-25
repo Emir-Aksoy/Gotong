@@ -117,6 +117,22 @@ export type IdentityInvitationStatus =
   | 'revoked'
   | 'expired'
 
+/**
+ * D1 — peer registry DTO. Mirrors `PeerRegistration` from
+ * `@aipehub/identity` structurally; web never imports the package
+ * directly, so we declare the shape here.
+ */
+export interface IdentityPeerDTO {
+  id: string
+  peerId: string
+  endpointUrl: string
+  label: string | null
+  enabled: boolean
+  vaultEntryId: string
+  createdAt: number
+  updatedAt: number
+}
+
 export interface IdentityInvitationDTO {
   id: string
   email: string
@@ -162,6 +178,27 @@ export interface IdentitySurface {
   }
   listCredentials(userId: string): IdentityCredentialDTO[]
   revokeCredential(credentialId: string): void
+  // D1 — Peer registry. All four optional so older identity surfaces
+  // (and tests that stub the interface) continue to typecheck; the
+  // route handlers do `typeof identity.addPeer === 'function'` checks
+  // before invoking and return 503 when the surface predates D1.
+  addPeer?(input: {
+    peerId: string
+    endpointUrl: string
+    label?: string | null
+    peerToken: string
+  }): IdentityPeerDTO
+  listPeers?(): IdentityPeerDTO[]
+  updatePeer?(
+    id: string,
+    input: {
+      label?: string | null
+      enabled?: boolean
+      peerToken?: string
+      endpointUrl?: string
+    },
+  ): IdentityPeerDTO
+  removePeer?(id: string): boolean
   // V4-AUDIT-06 — audit log surface. Both methods are optional on the
   // structural type so older host wirings (an IdentityStore that
   // predates the migration) still typecheck. In practice the host
@@ -446,6 +483,24 @@ export interface HandleIdentityRouteCtx {
    * before persisting to keep the row size bounded.
    */
   userAgent?: string
+  /**
+   * D1 — host's live peer registry. When set, peer write handlers
+   * call `invalidate()` after each mutation to force an immediate
+   * reconciliation tick (skipping the 5s poll). `status()` augments
+   * the GET response with per-row connection state. Optional — web
+   * works without it; admin UI just sees `connected: undefined`.
+   */
+  peerRegistry?: {
+    invalidate(): void
+    status(): Array<{
+      peerRowId: string
+      peerId: string
+      label: string | null
+      endpointUrl: string
+      connected: boolean
+      backoffAttempts: number
+    }>
+  }
 }
 
 // V4-AUDIT-06: User-Agent is attacker-controlled; cap it before persisting
@@ -617,6 +672,29 @@ export async function handleIdentityRoute(
   m = /^\/api\/admin\/identity\/invites\/([^/]+)$/.exec(path)
   if (m && method === 'DELETE') {
     handleRevokeInvite(ctx, req, res, m[1]!)
+    return
+  }
+
+  // D1 — Peer registry CRUD (owner-only). The host's PeerRegistry
+  // polls the underlying peers table every 5s; ctx.peerRegistry?.invalidate()
+  // here forces an immediate reconciliation so the operator's edit is
+  // reflected in the live link set within milliseconds rather than
+  // seconds.
+  if (method === 'GET' && path === '/api/admin/identity/peers') {
+    handleListPeers(ctx, res)
+    return
+  }
+  if (method === 'POST' && path === '/api/admin/identity/peers') {
+    await handleAddPeer(ctx, req, res)
+    return
+  }
+  m = /^\/api\/admin\/identity\/peers\/([^/]+)$/.exec(path)
+  if (m && method === 'PATCH') {
+    await handlePatchPeer(ctx, req, res, m[1]!)
+    return
+  }
+  if (m && method === 'DELETE') {
+    handleRemovePeer(ctx, req, res, m[1]!)
     return
   }
 
@@ -1402,6 +1480,160 @@ function handleListAuditLog(
   try {
     const entries = ctx.identity.listAuditLog(q)
     sendJson(res, { entries })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// D1 — Peer registry handlers
+// ---------------------------------------------------------------------------
+
+function ensurePeersSupported(
+  ctx: HandleIdentityRouteCtx,
+  res: ServerResponse,
+): boolean {
+  if (typeof ctx.identity.addPeer !== 'function') {
+    sendJson(res, { error: 'peers surface not supported by this host' }, 503)
+    return false
+  }
+  return true
+}
+
+function handleListPeers(ctx: HandleIdentityRouteCtx, res: ServerResponse): void {
+  if (!ensurePeersSupported(ctx, res)) return
+  try {
+    const peers = ctx.identity.listPeers!()
+    const statusByRow = new Map(
+      (ctx.peerRegistry?.status() ?? []).map((s) => [s.peerRowId, s]),
+    )
+    const out = peers.map((p) => ({
+      ...p,
+      connected: statusByRow.get(p.id)?.connected ?? false,
+      backoffAttempts: statusByRow.get(p.id)?.backoffAttempts ?? 0,
+    }))
+    sendJson(res, { peers: out })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+async function handleAddPeer(
+  ctx: HandleIdentityRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  if (!ensurePeersSupported(ctx, res)) return
+  const v4 = resolveV4Auth(ctx.identity, req)
+  let body: unknown
+  try { body = await readJsonBody(req) }
+  catch { sendJson(res, { error: 'invalid JSON body' }, 400); return }
+  const b = (body ?? {}) as {
+    peerId?: unknown
+    endpointUrl?: unknown
+    label?: unknown
+    peerToken?: unknown
+  }
+  if (typeof b.peerId !== 'string' || b.peerId.length === 0) {
+    sendJson(res, { error: 'peerId required (non-empty string)' }, 400)
+    return
+  }
+  if (typeof b.endpointUrl !== 'string' || b.endpointUrl.length === 0) {
+    sendJson(res, { error: 'endpointUrl required (non-empty string)' }, 400)
+    return
+  }
+  if (typeof b.peerToken !== 'string' || b.peerToken.length === 0) {
+    sendJson(res, { error: 'peerToken required (non-empty string)' }, 400)
+    return
+  }
+  try {
+    const added = ctx.identity.addPeer!({
+      peerId: b.peerId,
+      endpointUrl: b.endpointUrl,
+      ...(typeof b.label === 'string' ? { label: b.label } : {}),
+      peerToken: b.peerToken,
+    })
+    ctx.peerRegistry?.invalidate()
+    tryAudit(ctx, v4, {
+      action: 'peer_add',
+      targetUserId: null,
+      metadata: { peerId: added.peerId, endpointUrl: added.endpointUrl },
+      success: true,
+    })
+    sendJson(res, { peer: added })
+  } catch (err) {
+    tryAudit(ctx, v4, {
+      action: 'peer_add',
+      targetUserId: null,
+      metadata: { peerId: b.peerId, error: err instanceof Error ? err.message : String(err) },
+      success: false,
+    })
+    sendIdentityError(res, err)
+  }
+}
+
+async function handlePatchPeer(
+  ctx: HandleIdentityRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  id: string,
+): Promise<void> {
+  if (!ensurePeersSupported(ctx, res)) return
+  let body: unknown
+  try { body = await readJsonBody(req) }
+  catch { sendJson(res, { error: 'invalid JSON body' }, 400); return }
+  const b = (body ?? {}) as {
+    label?: unknown
+    enabled?: unknown
+    peerToken?: unknown
+    endpointUrl?: unknown
+  }
+  const input: {
+    label?: string | null
+    enabled?: boolean
+    peerToken?: string
+    endpointUrl?: string
+  } = {}
+  if (b.label === null) input.label = null
+  else if (typeof b.label === 'string') input.label = b.label
+  if (typeof b.enabled === 'boolean') input.enabled = b.enabled
+  if (typeof b.peerToken === 'string' && b.peerToken.length > 0) {
+    input.peerToken = b.peerToken
+  }
+  if (typeof b.endpointUrl === 'string' && b.endpointUrl.length > 0) {
+    input.endpointUrl = b.endpointUrl
+  }
+  try {
+    const updated = ctx.identity.updatePeer!(id, input)
+    ctx.peerRegistry?.invalidate()
+    sendJson(res, { peer: updated })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+function handleRemovePeer(
+  ctx: HandleIdentityRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  id: string,
+): void {
+  if (!ensurePeersSupported(ctx, res)) return
+  const v4 = resolveV4Auth(ctx.identity, req)
+  try {
+    const removed = ctx.identity.removePeer!(id)
+    if (!removed) {
+      sendJson(res, { error: 'peer not found' }, 404)
+      return
+    }
+    ctx.peerRegistry?.invalidate()
+    tryAudit(ctx, v4, {
+      action: 'peer_remove',
+      targetUserId: null,
+      metadata: { peerRowId: id },
+      success: true,
+    })
+    sendJson(res, { ok: true })
   } catch (err) {
     sendIdentityError(res, err)
   }
