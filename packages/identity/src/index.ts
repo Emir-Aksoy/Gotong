@@ -41,8 +41,23 @@ export type {
   VaultEntry,
   CreateVaultEntryInput,
   ListVaultEntriesQuery,
+  // Usage counters (B2.1 — Phase 5)
+  UsagePeriod,
+  UsageCounter,
+  SetQuotaInput,
+  GetUsageQuery,
+  CheckAndIncrementInput,
+  CheckAndIncrementResult,
+  ResetUsageInput,
 } from './types.js'
-export { AUDIT_ACTIONS, ROLES, VAULT_KINDS, OWNER_KINDS } from './types.js'
+export {
+  AUDIT_ACTIONS,
+  ROLES,
+  VAULT_KINDS,
+  OWNER_KINDS,
+  USAGE_PERIODS,
+  USAGE_METRIC_MAX_LEN,
+} from './types.js'
 // A1 — exported so hosts can wire the workspace .key file into
 // openIdentityStore. crypto primitives (encryptSecret / decryptSecret)
 // are NOT re-exported: callers should only ever touch plaintext via

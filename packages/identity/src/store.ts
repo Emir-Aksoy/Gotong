@@ -46,6 +46,8 @@ import {
   AUDIT_ACTIONS,
   OWNER_KINDS,
   ROLES,
+  USAGE_METRIC_MAX_LEN,
+  USAGE_PERIODS,
   VAULT_KINDS,
   type AcceptInvitationInput,
   type AuditAction,
@@ -53,11 +55,14 @@ import {
   type AuditLogEntry,
   type BootstrapInput,
   type BootstrapResult,
+  type CheckAndIncrementInput,
+  type CheckAndIncrementResult,
   type CreateInvitationInput,
   type CreateUserInput,
   type CreateVaultEntryInput,
   type Credential,
   type CredentialKind,
+  type GetUsageQuery,
   type Invitation,
   type InvitationStatus,
   type IssuedAdminToken,
@@ -68,8 +73,12 @@ import {
   type ListVaultEntriesQuery,
   type Membership,
   type OwnerKind,
+  type ResetUsageInput,
   type Role,
   type Session,
+  type SetQuotaInput,
+  type UsageCounter,
+  type UsagePeriod,
   type User,
   type VaultEntry,
   type VaultKind,
@@ -387,6 +396,16 @@ export class IdentityStore {
   private readonly stmtMarkInvitationAccepted: SqliteStmt
   private readonly stmtMarkInvitationRevoked: SqliteStmt
 
+  // B2.1 — usage counters. Eagerly prepared (not lazy like vault) since
+  // checkAndIncrement is the agent-spawn hot path once B2.2 lands.
+  private readonly stmtUsageGet: SqliteStmt
+  private readonly stmtUsageUpsert: SqliteStmt
+  private readonly stmtUsageUpdate: SqliteStmt
+  private readonly stmtUsageListByUser: SqliteStmt
+  private readonly stmtUsageListByUserMetric: SqliteStmt
+  private readonly stmtUsageListByUserPeriod: SqliteStmt
+  private readonly stmtUsageListByTriple: SqliteStmt
+
   constructor(db: SqliteDb, defaultSessionTtlMs: number, masterKey?: Buffer) {
     this.db = db
     this.defaultSessionTtlMs = defaultSessionTtlMs
@@ -500,6 +519,48 @@ export class IdentityStore {
     )
     this.stmtMarkInvitationRevoked = db.prepare(
       `UPDATE invitations SET status = 'revoked' WHERE id = ? AND status = 'pending'`,
+    )
+
+    // B2.1 — usage counters.
+    this.stmtUsageGet = db.prepare(
+      `SELECT * FROM usage_counters
+        WHERE user_id = ? AND metric = ? AND period = ?`,
+    )
+    // ON CONFLICT DO UPDATE lets setQuota be a single statement whether
+    // the row exists or not. We update `quota` + `updated_at`; `used`
+    // and `period_start` stay at their current values (don't reset
+    // usage when only the cap changes).
+    this.stmtUsageUpsert = db.prepare(
+      `INSERT INTO usage_counters
+         (user_id, metric, period, period_start, used, quota, updated_at)
+         VALUES(?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(user_id, metric, period) DO UPDATE SET
+         quota = excluded.quota,
+         updated_at = excluded.updated_at`,
+    )
+    // checkAndIncrement uses this for "row exists, advance it": writes
+    // used + period_start + updated_at (quota stays put — set via
+    // setQuota only).
+    this.stmtUsageUpdate = db.prepare(
+      `UPDATE usage_counters
+         SET used = ?, period_start = ?, updated_at = ?
+       WHERE user_id = ? AND metric = ? AND period = ?`,
+    )
+    this.stmtUsageListByUser = db.prepare(
+      `SELECT * FROM usage_counters WHERE user_id = ?
+        ORDER BY metric, period`,
+    )
+    this.stmtUsageListByUserMetric = db.prepare(
+      `SELECT * FROM usage_counters WHERE user_id = ? AND metric = ?
+        ORDER BY period`,
+    )
+    this.stmtUsageListByUserPeriod = db.prepare(
+      `SELECT * FROM usage_counters WHERE user_id = ? AND period = ?
+        ORDER BY metric`,
+    )
+    this.stmtUsageListByTriple = db.prepare(
+      `SELECT * FROM usage_counters
+        WHERE user_id = ? AND metric = ? AND period = ?`,
     )
   }
 
@@ -1948,6 +2009,231 @@ export class IdentityStore {
   }
 
   // =====================================================================
+  // B2.1 — Usage counters (per-user quota tracking)
+  // =====================================================================
+
+  /**
+   * Set, update, or clear the quota cap for a (user, metric, period)
+   * tuple. The row is created if absent (with `used=0`,
+   * `periodStart=periodStartFor(period, now)`). Existing rows keep
+   * their current `used` / `periodStart` — changing the cap MUST NOT
+   * silently reset accumulated usage (an admin who raises someone's
+   * daily limit doesn't want to give them a fresh day).
+   *
+   * Pass `quota=null` to remove the cap (counter still ticks for
+   * visibility / future re-enablement).
+   */
+  setQuota(input: SetQuotaInput, now: number = Date.now()): UsageCounter {
+    assertUsageMetric(input?.metric)
+    assertUsagePeriod(input?.period)
+    assertNonEmptyId(input?.userId, 'userId')
+    if (input.quota !== null) {
+      if (
+        typeof input.quota !== 'number' ||
+        !Number.isFinite(input.quota) ||
+        !Number.isInteger(input.quota) ||
+        input.quota < 0
+      ) {
+        throw new IdentityError({
+          code: 'invalid_input',
+          message: `setQuota: quota must be null or a non-negative integer; got ${input.quota}`,
+        })
+      }
+    }
+    const periodStart = periodStartFor(input.period, now)
+    this.stmtUsageUpsert.run(
+      input.userId,
+      input.metric,
+      input.period,
+      periodStart,
+      0,           // used — only honoured when INSERT (UPSERT updates only quota+updated_at)
+      input.quota,
+      now,
+    )
+    const row = this.stmtUsageGet.get(
+      input.userId,
+      input.metric,
+      input.period,
+    ) as UsageCounterRow | undefined
+    if (!row) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `setQuota: upsert succeeded but read-back returned nothing for ${input.userId}/${input.metric}/${input.period}`,
+      })
+    }
+    return rowToUsageCounter(row)
+  }
+
+  /**
+   * Read counters. Filter by `metric` and / or `period`; omit either
+   * to broaden the result. Does NOT auto-roll stale period rows —
+   * read-only. Callers wanting the post-roll value for a single
+   * counter should use {@link checkAndIncrement} with `amount=0` (an
+   * idempotent peek that does trigger the roll).
+   */
+  listUsage(query: GetUsageQuery): UsageCounter[] {
+    assertNonEmptyId(query?.userId, 'userId')
+    let rows: UsageCounterRow[]
+    if (query.metric !== undefined && query.period !== undefined) {
+      assertUsageMetric(query.metric)
+      assertUsagePeriod(query.period)
+      rows = this.stmtUsageListByTriple.all(
+        query.userId,
+        query.metric,
+        query.period,
+      ) as UsageCounterRow[]
+    } else if (query.metric !== undefined) {
+      assertUsageMetric(query.metric)
+      rows = this.stmtUsageListByUserMetric.all(
+        query.userId,
+        query.metric,
+      ) as UsageCounterRow[]
+    } else if (query.period !== undefined) {
+      assertUsagePeriod(query.period)
+      rows = this.stmtUsageListByUserPeriod.all(
+        query.userId,
+        query.period,
+      ) as UsageCounterRow[]
+    } else {
+      rows = this.stmtUsageListByUser.all(query.userId) as UsageCounterRow[]
+    }
+    return rows.map(rowToUsageCounter)
+  }
+
+  /**
+   * Atomic peek-roll-check-increment, inside a single transaction.
+   *
+   *   1. Read the (user, metric, period) row. Missing → treat as
+   *      `used=0, quota=null, periodStart=periodStartFor(period, now)`.
+   *   2. If the row's `periodStart` doesn't match the current
+   *      period's boundary, ROLL: `used=0`, `periodStart=current`.
+   *   3. If `quota !== null` and `used + amount > quota`, return
+   *      `{allowed: false, counter, exceededBy}`. The row is still
+   *      written (the roll, if any) but `used` is NOT incremented.
+   *   4. Otherwise increment `used += amount`, write, return
+   *      `{allowed: true, counter}`.
+   *
+   * `amount=0` is a "peek-and-roll" — won't trip a quota check, but
+   * will still roll an expired period so the returned counter is
+   * current.
+   */
+  checkAndIncrement(input: CheckAndIncrementInput): CheckAndIncrementResult {
+    assertNonEmptyId(input?.userId, 'userId')
+    assertUsageMetric(input?.metric)
+    assertUsagePeriod(input?.period)
+    const amount = input.amount ?? 1
+    if (
+      typeof amount !== 'number' ||
+      !Number.isFinite(amount) ||
+      !Number.isInteger(amount) ||
+      amount < 0
+    ) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `checkAndIncrement: amount must be a non-negative integer; got ${amount}`,
+      })
+    }
+    const now = input.now ?? Date.now()
+    const expectedStart = periodStartFor(input.period, now)
+
+    return transaction(this.db, () => {
+      const existing = this.stmtUsageGet.get(
+        input.userId,
+        input.metric,
+        input.period,
+      ) as UsageCounterRow | undefined
+
+      // Row state going into the check. We compute what the row WILL
+      // look like before deciding allow/deny.
+      const currentUsed =
+        existing && existing.period_start === expectedStart
+          ? existing.used
+          : 0 // missing row OR period rolled → effective used=0
+      const quota = existing ? existing.quota : null
+
+      // Quota check first — we still write the roll if the period
+      // expired, but we DON'T commit the increment.
+      const wouldBe = currentUsed + amount
+      const allowed = quota === null || wouldBe <= quota
+      const finalUsed = allowed ? wouldBe : currentUsed
+
+      if (!existing) {
+        // Fresh row. Quota stays null (set via setQuota). period_start
+        // is the current boundary.
+        this.stmtUsageUpsert.run(
+          input.userId,
+          input.metric,
+          input.period,
+          expectedStart,
+          finalUsed,
+          null,
+          now,
+        )
+      } else {
+        // Existing row — UPDATE used + period_start + updated_at.
+        // Quota is preserved (we never touch it from this method).
+        this.stmtUsageUpdate.run(
+          finalUsed,
+          expectedStart,
+          now,
+          input.userId,
+          input.metric,
+          input.period,
+        )
+      }
+
+      const row = this.stmtUsageGet.get(
+        input.userId,
+        input.metric,
+        input.period,
+      ) as UsageCounterRow
+      const counter = rowToUsageCounter(row)
+      if (!allowed) {
+        return {
+          allowed: false,
+          counter,
+          exceededBy: wouldBe - (quota as number),
+        }
+      }
+      return { allowed: true, counter }
+    })
+  }
+
+  /**
+   * Manually zero the counter and start a fresh period. Useful for
+   * admin "give this user their day back" / "they got hit by a runaway
+   * loop, refund the usage" actions. Returns `null` when no row
+   * existed (admins shouldn't get a false "reset" confirmation for a
+   * counter that was never touched).
+   */
+  resetUsage(input: ResetUsageInput): UsageCounter | null {
+    assertNonEmptyId(input?.userId, 'userId')
+    assertUsageMetric(input?.metric)
+    assertUsagePeriod(input?.period)
+    const now = input.now ?? Date.now()
+    const existing = this.stmtUsageGet.get(
+      input.userId,
+      input.metric,
+      input.period,
+    ) as UsageCounterRow | undefined
+    if (!existing) return null
+    this.stmtUsageUpdate.run(
+      0,
+      periodStartFor(input.period, now),
+      now,
+      input.userId,
+      input.metric,
+      input.period,
+    )
+    const row = this.stmtUsageGet.get(
+      input.userId,
+      input.metric,
+      input.period,
+    ) as UsageCounterRow
+    return rowToUsageCounter(row)
+  }
+
+  // =====================================================================
   // Lifecycle
   // =====================================================================
 
@@ -1963,6 +2249,92 @@ function isVaultKind(s: unknown): s is VaultKind {
 }
 function isOwnerKind(s: unknown): s is OwnerKind {
   return typeof s === 'string' && (OWNER_KINDS as readonly string[]).includes(s)
+}
+
+// ---- B2.1 — usage-counter helpers ----
+
+/** Sqlite row shape — snake_case columns mirror the schema verbatim. */
+interface UsageCounterRow {
+  user_id: string
+  metric: string
+  period: string
+  period_start: number
+  used: number
+  quota: number | null
+  updated_at: number
+}
+
+const HOUR_MS = 3_600_000
+const DAY_MS = 86_400_000
+
+/**
+ * UTC-aligned period boundary for `now`. Returns the *start* of the
+ * current period — checkAndIncrement compares this to the row's stored
+ * `period_start` to decide whether to roll.
+ *
+ * `'total'` returns 0 as a sentinel (any `now` produces the same value,
+ * so a row created with periodStart=0 never appears stale).
+ */
+function periodStartFor(period: UsagePeriod, now: number): number {
+  if (period === 'total') return 0
+  if (period === 'hourly') return Math.floor(now / HOUR_MS) * HOUR_MS
+  if (period === 'daily') return Math.floor(now / DAY_MS) * DAY_MS
+  // monthly — Date.UTC handles month rollover (Feb / leap years etc.)
+  const d = new Date(now)
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1)
+}
+
+function isUsagePeriod(s: unknown): s is UsagePeriod {
+  return typeof s === 'string' && (USAGE_PERIODS as readonly string[]).includes(s)
+}
+
+function assertUsagePeriod(p: unknown): asserts p is UsagePeriod {
+  if (!isUsagePeriod(p)) {
+    throw new IdentityError({
+      code: 'invalid_input',
+      message: `usage period must be one of ${USAGE_PERIODS.join(', ')}; got ${JSON.stringify(p)}`,
+    })
+  }
+}
+
+function assertUsageMetric(m: unknown): asserts m is string {
+  if (typeof m !== 'string' || m.length === 0) {
+    throw new IdentityError({
+      code: 'invalid_input',
+      message: 'usage metric must be a non-empty string',
+    })
+  }
+  if (m.length > USAGE_METRIC_MAX_LEN) {
+    throw new IdentityError({
+      code: 'invalid_input',
+      message: `usage metric too long (max ${USAGE_METRIC_MAX_LEN} chars); got ${m.length}`,
+    })
+  }
+}
+
+function assertNonEmptyId(id: unknown, label: string): asserts id is string {
+  if (typeof id !== 'string' || id.length === 0) {
+    throw new IdentityError({
+      code: 'invalid_input',
+      message: `${label} must be a non-empty string`,
+    })
+  }
+}
+
+function rowToUsageCounter(r: UsageCounterRow): UsageCounter {
+  // Defensive: tolerate an unrecognised period string (manual db edit /
+  // pre-migration row). Fall back to 'total' — the row stays visible
+  // in admin UI rather than crashing the list endpoint.
+  const period: UsagePeriod = isUsagePeriod(r.period) ? r.period : 'total'
+  return {
+    userId: r.user_id,
+    metric: r.metric,
+    period,
+    periodStart: r.period_start,
+    used: r.used,
+    quota: r.quota,
+    updatedAt: r.updated_at,
+  }
 }
 function rowToVaultEntry(r: VaultRow): VaultEntry {
   let metadata: Record<string, unknown> | null = null

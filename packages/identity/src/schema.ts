@@ -234,6 +234,48 @@ const MIGRATIONS: Migration[] = [
         ON vault(revoked_at) WHERE revoked_at IS NULL;
     `,
   },
+  {
+    // B2.1 (v4 Phase 5) — per-user usage counters for quota enforcement.
+    //
+    // One row per (user_id, metric, period). Holds the CURRENT period's
+    // cumulative `used` plus the configured `quota` cap. When the
+    // period boundary passes, the next checkAndIncrement resets
+    // `used=0` and advances `period_start`. Older period values are
+    // not retained here — audit_log carries the event-level trail.
+    //
+    // Why composite PK (no surrogate id): every read / write is by
+    // exactly the (user_id, metric, period) tuple. A surrogate id
+    // would force a secondary unique index + JOIN — net loss for a
+    // hot-path table.
+    //
+    // `quota` is nullable: NULL means "unlimited" (counter still ticks
+    // for visibility). `used` defaults to 0 so a fresh INSERT reads
+    // correctly without a coalesce.
+    //
+    // `metric` is free-form TEXT (≤64 chars at write time) so future
+    // subsystems can add new counters without a migration. `period`
+    // is constrained to the UsagePeriod enum at the application
+    // layer — no SQL CHECK so we can extend it without a migration
+    // either.
+    //
+    // FK ON DELETE CASCADE: a deleted user's quota rows vanish too —
+    // keeps the table tied to its principal lifecycle.
+    version: 5,
+    name: 'usage-counters',
+    sql: `
+      CREATE TABLE IF NOT EXISTS usage_counters (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        metric TEXT NOT NULL,
+        period TEXT NOT NULL,
+        period_start INTEGER NOT NULL,
+        used INTEGER NOT NULL DEFAULT 0,
+        quota INTEGER,
+        updated_at INTEGER NOT NULL,
+        PRIMARY KEY (user_id, metric, period)
+      );
+      CREATE INDEX IF NOT EXISTS idx_usage_user ON usage_counters(user_id);
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {

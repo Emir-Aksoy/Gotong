@@ -428,3 +428,114 @@ export interface ListVaultEntriesQuery {
   limit?: number
   offset?: number
 }
+
+// ---------------------------------------------------------------------------
+// B2.1 — usage counters (per-user quota tracking).
+//
+// Lightweight mutable counters keyed by (userId, metric, period). Each
+// row holds the cumulative `used` value for the CURRENT period only;
+// when the period boundary passes, the next `checkAndIncrement` rolls
+// `used` back to 0 and advances `periodStart`. Older period values are
+// not retained here — usage history that needs audit trail goes
+// through `writeAuditLog` instead.
+//
+// Why a separate table instead of derived-from-audit-log:
+//   - O(1) hot path: a single primary-key lookup + UPDATE per LLM call
+//     beats SUM-ing a growing audit table forever.
+//   - Quota is policy data (admin-controllable), separate from event
+//     data (immutable audit). Mixing them muddies both surfaces.
+//
+// Why mutable rows instead of an append-only counter log:
+//   - The audit log already records per-call events with full actor /
+//     timestamp / metadata context. Duplicating that here would just
+//     bloat the file.
+//
+// Period semantics (UTC-aligned):
+//   - 'hourly'  — boundary = floor(now / 3_600_000) * 3_600_000
+//   - 'daily'   — boundary = floor(now / 86_400_000) * 86_400_000
+//                  (UTC midnight; consumer in GMT+8 sees reset at 08:00
+//                  local — predictable trumps locally-intuitive here)
+//   - 'monthly' — boundary = first day 00:00 UTC of `now`'s month
+//   - 'total'   — periodStart=0, never rolls (lifetime counter)
+//
+// All times are ms since epoch. Test code should pass `now` explicitly
+// to `checkAndIncrement` / `resetUsage` to avoid wall-clock flakiness.
+// ---------------------------------------------------------------------------
+
+export type UsagePeriod = 'hourly' | 'daily' | 'monthly' | 'total'
+
+export const USAGE_PERIODS: readonly UsagePeriod[] = [
+  'hourly',
+  'daily',
+  'monthly',
+  'total',
+] as const
+
+/** Max length of the free-form `metric` string. Anything longer is rejected. */
+export const USAGE_METRIC_MAX_LEN = 64
+
+/**
+ * One counter row. `metric` is free-form so subsystems can name their
+ * own counters without a schema migration. Recommended values:
+ *   - 'llm_requests', 'llm_tokens_in', 'llm_tokens_out'    (B1 / B2)
+ *   - 'mcp_calls'                                          (future)
+ *   - 'knowledge_ingest_bytes', 'knowledge_query'          (B3 / B4)
+ */
+export interface UsageCounter {
+  userId: string
+  metric: string
+  period: UsagePeriod
+  /** UTC-aligned ms timestamp; 0 for `period='total'`. */
+  periodStart: number
+  used: number
+  /** `null` = unlimited (counter still ticks for visibility). */
+  quota: number | null
+  updatedAt: number
+}
+
+export interface SetQuotaInput {
+  userId: string
+  metric: string
+  period: UsagePeriod
+  /** `null` removes the cap; ≥0 integer otherwise. */
+  quota: number | null
+}
+
+export interface GetUsageQuery {
+  userId: string
+  /** Omit to fetch every metric for the user. */
+  metric?: string
+  /** Omit to fetch every period for the (user, metric). */
+  period?: UsagePeriod
+}
+
+export interface CheckAndIncrementInput {
+  userId: string
+  metric: string
+  period: UsagePeriod
+  /**
+   * How much to add. Defaults to 1. Must be a non-negative integer.
+   * `amount=0` is a "peek with roll" — useful for fetching the
+   * post-roll counter without committing usage.
+   */
+  amount?: number
+  /** Override `Date.now()` — required for deterministic testing. */
+  now?: number
+}
+
+export interface CheckAndIncrementResult {
+  /** True when the increment was committed. False when quota would be exceeded. */
+  allowed: boolean
+  /** Counter state AFTER the (possibly skipped) increment. */
+  counter: UsageCounter
+  /** When `allowed=false`: by how many units the call exceeded the cap. */
+  exceededBy?: number
+}
+
+export interface ResetUsageInput {
+  userId: string
+  metric: string
+  period: UsagePeriod
+  /** Override `Date.now()` for deterministic period-start computation. */
+  now?: number
+}
