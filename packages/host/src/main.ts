@@ -514,7 +514,28 @@ async function main(): Promise<void> {
     orgQuotaSweepTimer.unref?.()
   }
 
-  const hub = new Hub({ space })
+  // D2 — cross-hub HITL routing. PeerRegistry is constructed later
+  // (it needs the ws handle); we plumb it in via a mutable holder so
+  // the resolver closure can see the registry once it exists. Until
+  // then, the resolver returns null and the scheduler falls through
+  // to the normal "no such participant" path.
+  //
+  // The resolver only fires for explicit dispatches whose target is
+  // NOT locally registered AND whose task carries an origin (the
+  // sender's hub id). That matches the cross-hub HITL pattern: a
+  // federated task ran on this hub, the agent now needs to ask its
+  // originating user a question, and the dispatch target is a user
+  // id over on `task.origin.orgId`.
+  let peerRegistryRef: PeerRegistry | undefined
+  const hub = new Hub({
+    space,
+    crossHubResolver: (_to, task) => {
+      if (!peerRegistryRef || !task.origin) return null
+      const link = peerRegistryRef.linkForHub(task.origin.orgId)
+      if (!link) return null
+      return (t) => link.dispatch(t)
+    },
+  })
   await hub.start()
 
   hub.onEvent((e) => {
@@ -646,6 +667,11 @@ async function main(): Promise<void> {
       logger: log,
     })
     peerRegistry.start()
+    // D2 — make this registry visible to the Hub's cross-hub resolver
+    // closure declared above. From here on, any explicit dispatch whose
+    // target isn't local + whose task.origin points at a connected peer
+    // will be forwarded over the live HubLink.
+    peerRegistryRef = peerRegistry
     log.info('peer registry started', {
       selfHubId,
       pollIntervalMs: pollMs,

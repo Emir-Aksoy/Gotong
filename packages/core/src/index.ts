@@ -57,6 +57,8 @@ export type {
   TaskInvoker,
   CancelNotifier,
   ReputationLookup,
+  CrossHubExplicitResolver,
+  CrossHubDispatcher,
 } from './scheduler.js'
 
 export {

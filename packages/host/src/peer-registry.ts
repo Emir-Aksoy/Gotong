@@ -156,6 +156,22 @@ export class PeerRegistry {
   }
 
   /**
+   * D2 — look up a live HubLink by the remote hub's wire id. Returns
+   * null when the peer is configured-but-not-connected, the peer row
+   * has been disabled, or the id was never in our registry.
+   *
+   * Used by the host's `crossHubResolver` wiring (see main.ts) to
+   * route an outbound HITL question back to the originating user's
+   * hub: `task.origin.orgId` → `linkForHub(orgId)` → link.dispatch.
+   */
+  linkForHub(peerId: ParticipantId): HubLink | null {
+    for (const state of this.installed.values()) {
+      if (state.row.peerId === peerId) return state.link
+    }
+    return null
+  }
+
+  /**
    * Diagnostic snapshot for `GET /api/admin/identity/peers` to merge
    * with the row data — tells the admin UI which configured peers are
    * actually connected right now.

@@ -10,7 +10,13 @@ import {
 } from './feedback/index.js'
 import { createLogger } from './logger.js'
 import { Registry } from './registry.js'
-import { DefaultScheduler, type CancelNotifier, type Scheduler, type TaskInvoker } from './scheduler.js'
+import {
+  DefaultScheduler,
+  type CancelNotifier,
+  type CrossHubExplicitResolver,
+  type Scheduler,
+  type TaskInvoker,
+} from './scheduler.js'
 import { InMemoryStorage, type Storage } from './storage/index.js'
 import { Space } from './space.js'
 import { Transcript } from './transcript.js'
@@ -61,6 +67,22 @@ export interface HubConfig {
     invoke: TaskInvoker,
     notifyCancel: CancelNotifier,
   ) => Scheduler
+  /**
+   * D2 (v4 Phase 5) — cross-hub explicit-dispatch hook. When the local
+   * scheduler can't find an explicit dispatch target by id, this
+   * resolver is called. Returning a dispatcher closure forwards the
+   * task; returning null falls through to the usual no-such-participant
+   * error.
+   *
+   * Used for cross-hub HITL: a remote-origin task triggers a local
+   * agent which then needs to ask its originating user a question —
+   * the resolver maps `task.origin.orgId` to a live HubLink.
+   *
+   * Only consulted when the default scheduler is in use. Custom
+   * schedulers via `schedulerFactory` are responsible for honoring
+   * cross-hub routes themselves if they want them.
+   */
+  crossHubResolver?: CrossHubExplicitResolver
   idGenerator?: () => string
   now?: () => number
 }
@@ -198,10 +220,17 @@ export class Hub {
     // dispatch ranks peers by score (M5b). Custom schedulers passed via
     // `schedulerFactory` are responsible for using reputation
     // themselves if they want it.
+    const crossHubResolver = config.crossHubResolver
     const factory =
       config.schedulerFactory ??
       ((r, inv, can) =>
-        new DefaultScheduler(r, inv, can, (id) => this.reputation.scoreOf(id)))
+        new DefaultScheduler(
+          r,
+          inv,
+          can,
+          (id) => this.reputation.scoreOf(id),
+          crossHubResolver,
+        ))
     this.scheduler = factory(this.registry, invoke, notifyCancel)
   }
 

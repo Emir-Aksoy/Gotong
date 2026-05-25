@@ -50,6 +50,7 @@
 import { createLogger, type Task } from '@aipehub/core'
 import { LlmAgent } from '@aipehub/llm'
 import type { LlmAgentOptions } from '@aipehub/llm'
+import type { AgentDispatchResult } from '@aipehub/services-sdk'
 
 import {
   type GrowthBinding,
@@ -430,9 +431,18 @@ export class PersonalGrowthAgent extends LlmAgent {
     // Dispatch the human-question task. The shape carried in payload
     // is intentionally documented — packages/web/static/admin.js
     // detects `kind === 'agent-question'` to render the form.
+    //
+    // D2 (v4 Phase 5) — soft timeout. The dispatch may cross a peer
+    // hub link (when this run was federated from another org) and the
+    // remote admin may never respond; we Promise.race against a
+    // configurable budget so the workflow doesn't sit awaiting a
+    // human reply forever. The hub-side task is NOT cancelled — if
+    // the admin answers later, their result is just discarded by this
+    // already-resolved race. Default 5min; AIPE_HITL_TIMEOUT_MS env
+    // tunes per-host (admin tooling can use 0 to disable the cap).
     let result
     try {
-      result = await dispatch.dispatch({
+      const dispatchPromise = dispatch.dispatch({
         strategy: { kind: 'explicit', to: askingAdmin },
         title: need.title ?? '访谈师想再问你几个问题',
         payload: {
@@ -442,6 +452,25 @@ export class PersonalGrowthAgent extends LlmAgent {
           questions: need.questions,
         },
       })
+      const timeoutMs = hitlTimeoutMs()
+      if (timeoutMs > 0) {
+        result = await Promise.race([
+          dispatchPromise,
+          new Promise<AgentDispatchResult>((resolve) =>
+            setTimeout(
+              () => resolve({
+                kind: 'failed',
+                error: 'hitl_timeout',
+                by: 'system',
+                ts: Date.now(),
+              }),
+              timeoutMs,
+            ).unref?.(),
+          ),
+        ])
+      } else {
+        result = await dispatchPromise
+      }
     } catch (err) {
       log.error('NEED_INPUT dispatch threw — falling back to first-round output', {
         id: this.id,
@@ -939,4 +968,22 @@ function extractTextFromOutput(out: unknown): string {
     }
   }
   return String(out)
+}
+
+/**
+ * D2 — soft timeout for HITL dispatch (NEED_INPUT). Default 5min so a
+ * worker who walks away from their desk doesn't strand a workflow run
+ * indefinitely. `AIPE_HITL_TIMEOUT_MS=0` disables (useful for tests
+ * that drive the question loop deterministically). Clamps negatives /
+ * NaN to the default — opt-out is the explicit 0 path.
+ */
+const HITL_DEFAULT_TIMEOUT_MS = 5 * 60_000
+function hitlTimeoutMs(): number {
+  const raw = process.env.AIPE_HITL_TIMEOUT_MS
+  if (raw === undefined) return HITL_DEFAULT_TIMEOUT_MS
+  // Explicit '0' = opt-out (the only way to disable the cap).
+  if (raw === '0') return 0
+  const n = Number(raw)
+  if (!Number.isFinite(n) || n < 0) return HITL_DEFAULT_TIMEOUT_MS
+  return Math.floor(n)
 }

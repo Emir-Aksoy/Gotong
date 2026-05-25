@@ -36,12 +36,46 @@ export type CancelNotifier = (
  */
 export type ReputationLookup = (participantId: ParticipantId) => number
 
+/**
+ * D2 (v4 Phase 5) — cross-hub dispatch hook. When `dispatchExplicit` is
+ * asked to route to an id that isn't registered locally, the scheduler
+ * consults this resolver. A return value of `null` means "not a known
+ * cross-hub target — fall through to the usual not-found response."
+ * A returned dispatcher is called to forward the task; its result
+ * becomes the dispatch result.
+ *
+ * Why not just a "find link" surface: the scheduler doesn't want to know
+ * about HubLink (that would tangle core with transport concerns). The
+ * resolver is a thin functional bridge — the host decides how to find a
+ * route (PeerRegistry lookup keyed on task.origin.orgId) and returns an
+ * already-bound dispatcher closure.
+ *
+ * Cross-hub HITL is the principal use case: an agent on hub_A is
+ * dispatching an "agent-question" task to `asking_admin` (a user on
+ * hub_B, where the originating dispatch came from). The resolver maps
+ * `task.origin.orgId === 'hub_B'` to the live PeerRegistry link.
+ */
+export type CrossHubExplicitResolver = (
+  targetId: ParticipantId,
+  task: Task,
+) => CrossHubDispatcher | null
+
+/**
+ * Closure returned by {@link CrossHubExplicitResolver}. Receives the
+ * SAME task (untouched) and returns a TaskResult — the link is
+ * responsible for relabeling task ids on the return trip if its wire
+ * protocol allocates fresh ones (see `installPeerLink`'s
+ * `relabelTaskId` for the inbound symmetric).
+ */
+export type CrossHubDispatcher = (task: Task) => Promise<TaskResult>
+
 export class DefaultScheduler implements Scheduler {
   constructor(
     private readonly registry: Registry,
     private readonly invoke: TaskInvoker,
     private readonly notifyCancel: CancelNotifier,
     private readonly reputationOf?: ReputationLookup,
+    private readonly crossHubResolver?: CrossHubExplicitResolver,
   ) {}
 
   dispatch(task: Task): Promise<TaskResult> {
@@ -59,13 +93,35 @@ export class DefaultScheduler implements Scheduler {
 
   private async dispatchExplicit(task: Task, to: ParticipantId): Promise<TaskResult> {
     const p = this.registry.get(to)
-    if (!p) {
-      return notFound(task.id, `participant '${to}' is not registered`)
+    if (p) {
+      if (!p.onTask) {
+        return notFound(task.id, `participant '${to}' does not accept tasks`)
+      }
+      return runOne(task, p, this.registry, this.invoke)
     }
-    if (!p.onTask) {
-      return notFound(task.id, `participant '${to}' does not accept tasks`)
+    // D2 — local miss. If the host has wired a cross-hub resolver,
+    // ask it whether `to` is a known remote-hub target. The resolver
+    // returns either a dispatcher (use it) or null (truly unknown,
+    // fall through to no-such-participant).
+    if (this.crossHubResolver) {
+      const remote = this.crossHubResolver(to, task)
+      if (remote) {
+        try {
+          return await remote(task)
+        } catch (err) {
+          log.error('cross-hub explicit dispatch threw', {
+            taskId: task.id,
+            to,
+            err,
+          })
+          return notFound(
+            task.id,
+            `cross-hub dispatch to '${to}' threw: ${(err as Error)?.message ?? String(err)}`,
+          )
+        }
+      }
     }
-    return runOne(task, p, this.registry, this.invoke)
+    return notFound(task.id, `participant '${to}' is not registered`)
   }
 
   // --- capability matching --------------------------------------------------
