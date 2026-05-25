@@ -20,8 +20,99 @@
 
 import type { Hub } from './hub.js'
 import type { HubLink } from './hub-link.js'
-import { RemoteHubViaLink } from './participants/remote-hub.js'
-import type { ParticipantId, Task, TaskId, TaskResult } from './types.js'
+import { RemoteHubViaLink, type OriginResolver } from './participants/remote-hub.js'
+import type {
+  DispatchStrategy,
+  ParticipantId,
+  Task,
+  TaskId,
+  TaskResult,
+} from './types.js'
+
+/**
+ * FED-M3 — receiver-side ACL for federated tasks.
+ *
+ * Three independent gates; all configured ones must pass:
+ *
+ *   1. `requireOrigin` — refuse tasks without a federated origin
+ *      claim. Useful when the peer is expected to always stamp origin
+ *      (i.e. it has an `originResolver`); a missing origin then
+ *      signals a misconfigured or downgrade-attack peer.
+ *
+ *   2. `requireOriginRole` — restrict to specific roles on the
+ *      sending hub (e.g. `['owner', 'admin']`). Requires `origin` to
+ *      be present (so paired with `requireOrigin: true` in practice;
+ *      a task with no origin has no role to check and is denied by
+ *      this gate unless `requireOrigin` is false, in which case the
+ *      gate is effectively skipped for unidentified tasks).
+ *
+ *   3. `capabilities` — capability allowlist. The task's strategy
+ *      must declare capabilities (so `explicit` strategy is rejected;
+ *      cross-org dispatch by explicit participant id is rarely sane
+ *      anyway), AND every required capability must be in the list.
+ *      `broadcast` with no capabilities filter is denied too (full-
+ *      mesh broadcast across orgs is almost certainly a mistake).
+ *
+ * Absent fields mean "this gate skipped." A `PeerLinkAcl` with all
+ * three undefined is equivalent to "no ACL configured" and accepts
+ * everything (legacy behavior).
+ */
+export interface PeerLinkAcl {
+  /** Capability allowlist; undefined = no check. Empty array = deny all. */
+  capabilities?: readonly string[]
+  /** Refuse tasks without an `origin` claim. Default false (accept). */
+  requireOrigin?: boolean
+  /** Restrict to these `origin.userRole` values. Empty/undefined = no check. */
+  requireOriginRole?: readonly string[]
+}
+
+/** Internal — verdict on a single inbound task. */
+function evaluateAcl(
+  task: Task,
+  acl: PeerLinkAcl,
+): { ok: true } | { ok: false; reason: string } {
+  if (acl.requireOrigin && !task.origin) {
+    return { ok: false, reason: 'origin_required' }
+  }
+  if (acl.requireOriginRole && acl.requireOriginRole.length > 0) {
+    const role = task.origin?.userRole
+    if (!role || !acl.requireOriginRole.includes(role)) {
+      return { ok: false, reason: 'origin_role_denied' }
+    }
+  }
+  if (acl.capabilities !== undefined) {
+    const required = extractRequiredCapabilities(task.strategy)
+    if (required === null) {
+      return { ok: false, reason: 'strategy_not_allowlisted' }
+    }
+    const allowed = new Set(acl.capabilities)
+    for (const c of required) {
+      if (!allowed.has(c)) {
+        return { ok: false, reason: `capability_denied:${c}` }
+      }
+    }
+  }
+  return { ok: true }
+}
+
+function extractRequiredCapabilities(
+  strategy: DispatchStrategy,
+): readonly string[] | null {
+  switch (strategy.kind) {
+    case 'capability':
+      return strategy.capabilities
+    case 'broadcast':
+      // A broadcast with no capability filter is "everyone you've got."
+      // We treat that as un-allowlistable across orgs — peer must
+      // narrow the broadcast to specific capabilities to pass ACL.
+      return strategy.capabilities ?? null
+    case 'explicit':
+      // Cross-org dispatch to a specific local participant id requires
+      // the sender to know our internal naming, which leaks structure.
+      // Denied at the ACL level. (Callers wanting this can omit ACL.)
+      return null
+  }
+}
 
 export interface InstallPeerLinkOptions {
   /** Local hub that will host the wrapper + receive inbound dispatches. */
@@ -59,6 +150,29 @@ export interface InstallPeerLinkOptions {
    * controls the "mark as read" moment (e.g. user must click a button).
    */
   autoMarkRead?: boolean
+  /**
+   * FED-M2 — our hub id, stamped on outbound tasks as `origin.orgId`.
+   * Required if `originResolver` is set; otherwise unused. Convention:
+   * pass `link.selfId` (the id by which the peer addresses us).
+   */
+  selfHubId?: ParticipantId
+  /**
+   * FED-M2 — turn the LOCAL actor (`task.from`) into the user-level
+   * fields of `TaskOrigin` when forwarding outbound tasks. See
+   * `OriginResolver`. Without this, outbound tasks carry no `origin`
+   * and the receiving hub treats them as unidentified.
+   */
+  originResolver?: OriginResolver
+  /**
+   * FED-M3 — receiver-side ACL for inbound tasks. When set, every
+   * inbound task is checked against the policy BEFORE being dispatched
+   * into the local hub; refusals return `failed` with an error string
+   * `cross_org_acl_denied (<reason>)` and never reach a participant.
+   * When unset, all inbound tasks pass through (legacy behavior).
+   *
+   * See `PeerLinkAcl` for the policy fields.
+   */
+  acl?: PeerLinkAcl
 }
 
 export interface InstalledPeerLink {
@@ -99,7 +213,26 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
   const wrapperId = opts.localWrapperId ?? opts.link.peerId
 
   // ─── Inbound: peer's dispatch reaches us, we re-dispatch into local hub ──
+  // FED-M3 — receiver-side ACL gate. Checked BEFORE re-dispatch so a
+  // denied task never reaches a participant, never writes a transcript
+  // row in the local hub, and never spends scheduler time. `by` on the
+  // refusal result is our `selfHubId` if provided (== our orgId from
+  // the peer's POV) so the sender's logs identify the refuser cleanly;
+  // falls back to the wrapper id otherwise.
+  const aclRefusalBy: ParticipantId = opts.selfHubId ?? wrapperId
   opts.link.on('task', async (task: Task): Promise<TaskResult> => {
+    if (opts.acl) {
+      const verdict = evaluateAcl(task, opts.acl)
+      if (!verdict.ok) {
+        return {
+          kind: 'failed',
+          taskId: task.id,
+          by: aclRefusalBy,
+          error: `cross_org_acl_denied (${verdict.reason})`,
+          ts: Date.now(),
+        }
+      }
+    }
     const result = await opts.hub.dispatch({
       from: task.from,
       strategy: task.strategy,
@@ -109,6 +242,9 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
       priority: task.priority,
       weight: task.weight,
       countContribution: task.countContribution,
+      // FED-M2: preserve federated origin so receiver-side ACL +
+      // audit log can see who-from-which-org originated this task.
+      ...(task.origin ? { origin: task.origin } : {}),
     })
     // The local hub generated a fresh internal task.id; relabel back to
     // the peer's task.id so their pending-dispatch table can match.
@@ -128,6 +264,10 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
     id: wrapperId,
     link: opts.link,
     capabilities: opts.remoteCapabilities,
+    // FED-M2: pass through origin-stamping config so outbound tasks
+    // carry the actor's org+user when leaving this hub.
+    ...(opts.selfHubId !== undefined ? { selfHubId: opts.selfHubId } : {}),
+    ...(opts.originResolver !== undefined ? { originResolver: opts.originResolver } : {}),
   })
   opts.hub.register(remotePeer)
 

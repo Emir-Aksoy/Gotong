@@ -83,12 +83,15 @@ export interface IdentityCredentialDTO {
 
 // V4-AUDIT-06: structural projection of @aipehub/identity's
 // AuditLogEntry / AuditActorSource. Kept here so web stays decoupled.
+// FED-M4: `'federated'` added for actions triggered by federated tasks
+// (Task.origin set); writer is expected to stash origin in metadata.
 export type IdentityAuditActorSource =
   | 'v3-admin'
   | 'v4-session'
   | 'v4-bearer'
   | 'anonymous'
   | 'system'
+  | 'federated'
 
 export interface IdentityAuditLogEntryDTO {
   id: string

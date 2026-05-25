@@ -281,3 +281,399 @@ describe('installPeerLink — message bus bridge', () => {
     await hubB.stop()
   })
 })
+
+// ---------------------------------------------------------------------------
+// FED-M2 — Task.origin stamping across the link
+//
+// Receiver-side inspection technique: register a participant on hubB
+// whose `handleTask` records the incoming task, then dispatch from hubA
+// over the link and assert what the participant saw.
+// ---------------------------------------------------------------------------
+
+class RecordingAgent extends AgentParticipant {
+  // Captures every task the agent receives; tests pop from this.
+  readonly captured: Task[] = []
+  protected async handleTask(task: Task): Promise<unknown> {
+    this.captured.push(task)
+    return { seen: true }
+  }
+}
+
+describe('installPeerLink — FED-M2 origin stamping', () => {
+  async function makeLinkedPair(opts: {
+    aOriginResolver?: ConstructorParameters<typeof RemoteHubViaLink>[0]['originResolver']
+    aSelfHubId?: string
+  } = {}) {
+    const hubA = Hub.inMemory()
+    const hubB = Hub.inMemory()
+    await Promise.all([hubA.start(), hubB.start()])
+
+    const recorder = new RecordingAgent({
+      id: 'b-record',
+      capabilities: ['probe'],
+    })
+    hubB.register(recorder)
+
+    const { a, b } = createInprocHubLinkPair({
+      aPeerId: 'hubB',
+      bPeerId: 'hubA',
+    })
+    installPeerLink({
+      hub: hubA,
+      link: a,
+      remoteCapabilities: ['probe'],
+      ...(opts.aSelfHubId !== undefined ? { selfHubId: opts.aSelfHubId } : {}),
+      ...(opts.aOriginResolver !== undefined ? { originResolver: opts.aOriginResolver } : {}),
+    })
+    installPeerLink({ hub: hubB, link: b })
+
+    return {
+      hubA,
+      hubB,
+      recorder,
+      stop: async () => {
+        await hubA.stop()
+        await hubB.stop()
+      },
+    }
+  }
+
+  it('no resolver configured → forwarded task has NO origin field', async () => {
+    const { hubA, recorder, stop } = await makeLinkedPair()
+    await hubA.dispatch({
+      from: 'alice',
+      strategy: { kind: 'capability', capabilities: ['probe'] },
+      payload: {},
+    })
+    expect(recorder.captured).toHaveLength(1)
+    expect(recorder.captured[0]!.origin).toBeUndefined()
+    await stop()
+  })
+
+  it('resolver returning user info → origin stamped with {orgId, userId, userRole, userEmail}', async () => {
+    const { hubA, recorder, stop } = await makeLinkedPair({
+      aSelfHubId: 'orgA-hub',
+      aOriginResolver: (from) => {
+        if (from === 'alice')
+          return { userId: 'alice', userRole: 'member', userEmail: 'alice@orga.test' }
+        return null
+      },
+    })
+    await hubA.dispatch({
+      from: 'alice',
+      strategy: { kind: 'capability', capabilities: ['probe'] },
+      payload: { hello: 'world' },
+    })
+    expect(recorder.captured).toHaveLength(1)
+    const origin = recorder.captured[0]!.origin
+    expect(origin).toBeDefined()
+    expect(origin?.orgId).toBe('orgA-hub')
+    expect(origin?.userId).toBe('alice')
+    expect(origin?.userRole).toBe('member')
+    expect(origin?.userEmail).toBe('alice@orga.test')
+    await stop()
+  })
+
+  it('resolver returning null → forwarded task has NO origin (unidentified actor)', async () => {
+    const { hubA, recorder, stop } = await makeLinkedPair({
+      aSelfHubId: 'orgA-hub',
+      aOriginResolver: () => null,
+    })
+    await hubA.dispatch({
+      from: 'v3-admin',
+      strategy: { kind: 'capability', capabilities: ['probe'] },
+      payload: {},
+    })
+    expect(recorder.captured).toHaveLength(1)
+    expect(recorder.captured[0]!.origin).toBeUndefined()
+    await stop()
+  })
+
+  it('resolver throws → forwarded task has NO origin (resilient — never blocks the task)', async () => {
+    const { hubA, recorder, stop } = await makeLinkedPair({
+      aSelfHubId: 'orgA-hub',
+      aOriginResolver: () => {
+        throw new Error('identity store offline')
+      },
+    })
+    const result = await hubA.dispatch({
+      from: 'alice',
+      strategy: { kind: 'capability', capabilities: ['probe'] },
+      payload: {},
+    })
+    // Task still went through end-to-end — resolver fault is not fatal.
+    expect(result.kind).toBe('ok')
+    expect(recorder.captured).toHaveLength(1)
+    expect(recorder.captured[0]!.origin).toBeUndefined()
+    await stop()
+  })
+
+  it('resolver works asynchronously (e.g. an external IdP)', async () => {
+    const { hubA, recorder, stop } = await makeLinkedPair({
+      aSelfHubId: 'orgA-hub',
+      aOriginResolver: async (from) => {
+        await new Promise<void>((r) => setImmediate(r))
+        return { userId: from, userEmail: `${from}@async.test` }
+      },
+    })
+    await hubA.dispatch({
+      from: 'bob',
+      strategy: { kind: 'capability', capabilities: ['probe'] },
+      payload: {},
+    })
+    expect(recorder.captured[0]!.origin?.userId).toBe('bob')
+    expect(recorder.captured[0]!.origin?.userEmail).toBe('bob@async.test')
+    await stop()
+  })
+
+  it('local-only dispatch (no link traversal) leaves origin unset', async () => {
+    // Even when the hub HAS a wrapper with origin config, a task that
+    // matches a LOCAL participant goes straight to it without hitting
+    // RemoteHubViaLink.onTask — so no origin is stamped.
+    const { hubA, stop } = await makeLinkedPair({
+      aSelfHubId: 'orgA-hub',
+      aOriginResolver: (from) => ({ userId: from }),
+    })
+    const localCaptured: Task[] = []
+    class LocalAgent extends AgentParticipant {
+      protected async handleTask(task: Task): Promise<unknown> {
+        localCaptured.push(task)
+        return { ok: true }
+      }
+    }
+    hubA.register(new LocalAgent({ id: 'local', capabilities: ['local-only'] }))
+    await hubA.dispatch({
+      from: 'alice',
+      strategy: { kind: 'capability', capabilities: ['local-only'] },
+      payload: {},
+    })
+    expect(localCaptured).toHaveLength(1)
+    expect(localCaptured[0]!.origin).toBeUndefined()
+    await stop()
+  })
+})
+
+// RemoteHubViaLink direct import for the constructor-parameter type
+// reference in makeLinkedPair above. Kept at the bottom so the wiring-
+// flavored tests above stay close to their installPeerLink siblings.
+import { RemoteHubViaLink } from '../src/participants/remote-hub.js'
+import type { PeerLinkAcl } from '../src/peer-link-install.js'
+
+// ---------------------------------------------------------------------------
+// FED-M3 — receiver-side cross-org ACL
+// ---------------------------------------------------------------------------
+
+describe('installPeerLink — FED-M3 receiver ACL', () => {
+  /**
+   * Boot a pair where the receiver (hubB) configures `acl` and the
+   * sender (hubA) optionally stamps origin. Returns helpers so each
+   * test focuses on the verdict rather than the wiring.
+   */
+  async function makePair(opts: {
+    acl?: PeerLinkAcl
+    aOriginResolver?: ConstructorParameters<typeof RemoteHubViaLink>[0]['originResolver']
+  } = {}) {
+    const hubA = Hub.inMemory()
+    const hubB = Hub.inMemory()
+    await Promise.all([hubA.start(), hubB.start()])
+
+    const recorder = new RecordingAgent({
+      id: 'b-record',
+      capabilities: ['probe', 'sensitive-op'],
+    })
+    hubB.register(recorder)
+
+    const { a, b } = createInprocHubLinkPair({
+      aPeerId: 'hubB',
+      bPeerId: 'hubA',
+    })
+    installPeerLink({
+      hub: hubA,
+      link: a,
+      // Sender treats peer as covering both possible capabilities so
+      // dispatch reaches the link regardless of ACL on the other side.
+      remoteCapabilities: ['probe', 'sensitive-op'],
+      selfHubId: 'orgA-hub',
+      ...(opts.aOriginResolver !== undefined ? { originResolver: opts.aOriginResolver } : {}),
+    })
+    installPeerLink({
+      hub: hubB,
+      link: b,
+      selfHubId: 'orgB-hub',
+      ...(opts.acl !== undefined ? { acl: opts.acl } : {}),
+    })
+
+    return {
+      hubA,
+      recorder,
+      stop: async () => {
+        await hubA.stop()
+        await hubB.stop()
+      },
+    }
+  }
+
+  it('no ACL → legacy behavior, all tasks pass through', async () => {
+    const { hubA, recorder, stop } = await makePair({})
+    const result = await hubA.dispatch({
+      from: 'alice',
+      strategy: { kind: 'capability', capabilities: ['probe'] },
+      payload: {},
+    })
+    expect(result.kind).toBe('ok')
+    expect(recorder.captured).toHaveLength(1)
+    await stop()
+  })
+
+  it('capabilities allowlist matches → task accepted', async () => {
+    const { hubA, recorder, stop } = await makePair({
+      acl: { capabilities: ['probe'] },
+    })
+    const result = await hubA.dispatch({
+      from: 'alice',
+      strategy: { kind: 'capability', capabilities: ['probe'] },
+      payload: {},
+    })
+    expect(result.kind).toBe('ok')
+    expect(recorder.captured).toHaveLength(1)
+    await stop()
+  })
+
+  it('capability NOT in allowlist → denied with cross_org_acl_denied (capability_denied)', async () => {
+    const { hubA, recorder, stop } = await makePair({
+      acl: { capabilities: ['probe'] },
+    })
+    const result = await hubA.dispatch({
+      from: 'alice',
+      strategy: { kind: 'capability', capabilities: ['sensitive-op'] },
+      payload: {},
+    })
+    expect(result.kind).toBe('failed')
+    if (result.kind === 'failed') {
+      expect(result.error).toMatch(/cross_org_acl_denied/)
+      expect(result.error).toMatch(/capability_denied:sensitive-op/)
+    }
+    // Recorder MUST NOT have seen the denied task — gate kept it out
+    // of the local hub entirely.
+    expect(recorder.captured).toHaveLength(0)
+    await stop()
+  })
+
+  it('requireOrigin=true + no origin (no resolver on sender) → denied (origin_required)', async () => {
+    const { hubA, recorder, stop } = await makePair({
+      acl: { requireOrigin: true },
+      // No aOriginResolver → outbound has no origin
+    })
+    const result = await hubA.dispatch({
+      from: 'alice',
+      strategy: { kind: 'capability', capabilities: ['probe'] },
+      payload: {},
+    })
+    expect(result.kind).toBe('failed')
+    if (result.kind === 'failed') {
+      expect(result.error).toMatch(/origin_required/)
+    }
+    expect(recorder.captured).toHaveLength(0)
+    await stop()
+  })
+
+  it('requireOriginRole excludes member when only owner allowed → denied', async () => {
+    const { hubA, recorder, stop } = await makePair({
+      acl: { requireOrigin: true, requireOriginRole: ['owner'] },
+      aOriginResolver: () => ({ userId: 'alice', userRole: 'member' }),
+    })
+    const result = await hubA.dispatch({
+      from: 'alice',
+      strategy: { kind: 'capability', capabilities: ['probe'] },
+      payload: {},
+    })
+    expect(result.kind).toBe('failed')
+    if (result.kind === 'failed') {
+      expect(result.error).toMatch(/origin_role_denied/)
+    }
+    expect(recorder.captured).toHaveLength(0)
+    await stop()
+  })
+
+  it('requireOriginRole includes admin → admin-role task accepted', async () => {
+    const { hubA, recorder, stop } = await makePair({
+      acl: { requireOrigin: true, requireOriginRole: ['owner', 'admin'] },
+      aOriginResolver: () => ({ userId: 'alice', userRole: 'admin' }),
+    })
+    const result = await hubA.dispatch({
+      from: 'alice',
+      strategy: { kind: 'capability', capabilities: ['probe'] },
+      payload: {},
+    })
+    expect(result.kind).toBe('ok')
+    expect(recorder.captured).toHaveLength(1)
+    await stop()
+  })
+
+  it('explicit dispatch strategy is denied at the ACL when delivered directly to the link (anti enumeration)', async () => {
+    // Note: capability-routed dispatches never use the explicit strategy,
+    // so the realistic threat is a peer constructing an explicit-strategy
+    // frame and sending it over the link directly (bypassing their own
+    // scheduler). We simulate that by manually building a Task and
+    // calling link.dispatch — same code path inbound side would see.
+    const hubA = Hub.inMemory()
+    const hubB = Hub.inMemory()
+    await Promise.all([hubA.start(), hubB.start()])
+
+    const recorder = new RecordingAgent({
+      id: 'b-record',
+      capabilities: ['probe'],
+    })
+    hubB.register(recorder)
+
+    const { a, b } = createInprocHubLinkPair({ aPeerId: 'hubB', bPeerId: 'hubA' })
+    installPeerLink({ hub: hubA, link: a })
+    installPeerLink({
+      hub: hubB,
+      link: b,
+      selfHubId: 'orgB-hub',
+      acl: { capabilities: ['probe'] },
+    })
+
+    // Directly inject an explicit-strategy task onto the link.
+    const result = await a.dispatch({
+      id: 'manual-task-1',
+      from: 'attacker@orgA',
+      strategy: { kind: 'explicit', to: 'b-record' },
+      payload: {},
+      createdAt: Date.now(),
+    })
+    expect(result.kind).toBe('failed')
+    if (result.kind === 'failed') {
+      expect(result.error).toMatch(/cross_org_acl_denied/)
+      expect(result.error).toMatch(/strategy_not_allowlisted/)
+    }
+    // Recorder must NOT have seen the denied task.
+    expect(recorder.captured).toHaveLength(0)
+
+    await hubA.stop()
+    await hubB.stop()
+  })
+
+  it('refused tasks NEVER reach the local hub — recorder stays empty across denials', async () => {
+    const { hubA, recorder, stop } = await makePair({
+      acl: {
+        requireOrigin: true,
+        requireOriginRole: ['owner'],
+        capabilities: ['probe'],
+      },
+      aOriginResolver: () => ({ userId: 'alice', userRole: 'member' }),
+    })
+    // Multiple denied dispatches, all should fail-closed.
+    for (let i = 0; i < 3; i++) {
+      const result = await hubA.dispatch({
+        from: 'alice',
+        strategy: { kind: 'capability', capabilities: ['probe'] },
+        payload: {},
+      })
+      expect(result.kind).toBe('failed')
+    }
+    expect(recorder.captured).toHaveLength(0)
+    await stop()
+  })
+})

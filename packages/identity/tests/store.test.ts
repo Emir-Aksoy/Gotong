@@ -623,5 +623,42 @@ describe('IdentityStore', () => {
       // No throw on huge limit either.
       expect(store.listAuditLog({ limit: 999_999 })).toEqual([])
     })
+
+    // ---------------------------------------------------------------------
+    // FED-M4 — 'federated' actorSource accepts + records origin metadata
+    // ---------------------------------------------------------------------
+    it("accepts 'federated' actorSource and round-trips origin in metadata", () => {
+      const entry = store.writeAuditLog({
+        action: 'federated_action_demo',
+        actorSource: 'federated',
+        // A federated actor's userId is the SENDING hub's user id —
+        // we don't have a local user row to point actorUserId at,
+        // so leave it null and put the full origin in metadata.
+        actorUserId: null,
+        metadata: {
+          origin: {
+            orgId: 'orgA-hub',
+            userId: 'alice@orgA',
+            userRole: 'admin',
+            userEmail: 'alice@orga.test',
+          },
+          note: 'federated capability invocation',
+        },
+      })
+      expect(entry.actorSource).toBe('federated')
+      expect(entry.actorUserId).toBeNull()
+      expect(entry.metadata?.origin).toMatchObject({
+        orgId: 'orgA-hub',
+        userId: 'alice@orgA',
+        userRole: 'admin',
+      })
+
+      // Verify it round-trips through listAuditLog.
+      const rows = store.listAuditLog({ action: 'federated_action_demo' })
+      expect(rows.length).toBe(1)
+      expect(rows[0]!.actorSource).toBe('federated')
+      const meta = rows[0]!.metadata as { origin: { orgId: string } } | null
+      expect(meta?.origin.orgId).toBe('orgA-hub')
+    })
   })
 })

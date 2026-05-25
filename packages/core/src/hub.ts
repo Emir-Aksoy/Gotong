@@ -683,6 +683,16 @@ export class Hub {
      * tests or programmatic use can pass it directly.
      */
     countContribution?: boolean
+    /**
+     * FED-M2 — federated origin claim. Only set when the task arrived
+     * from a peer hub (i.e. `installPeerLink`'s inbound handler is
+     * forwarding `task.origin` from across the link). Local callers
+     * should NOT fabricate this — there's no plausible scenario where
+     * a local dispatch is genuinely "from another org" (if it were,
+     * it'd have come over a HubLink). The receiver-side ACL (FED-M3)
+     * treats `origin === undefined` as "local task; ACL does not apply."
+     */
+    origin?: import('./types.js').TaskOrigin
   }): Promise<TaskResult> {
     const task: Task = {
       id: this.idGen(),
@@ -694,6 +704,9 @@ export class Hub {
       priority: opts.priority,
       weight: sanitizeWeight(opts.weight),
       countContribution: opts.countContribution,
+      // FED-M2: only attach origin field when actually present, to
+      // keep the transcript shape stable for legacy / single-org runs.
+      ...(opts.origin ? { origin: opts.origin } : {}),
       createdAt: this.now(),
     }
     this.transcript.append({ ts: task.createdAt, kind: 'task', data: task })

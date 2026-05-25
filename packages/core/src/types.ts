@@ -26,9 +26,47 @@ export type DispatchStrategy =
   | { kind: 'capability'; capabilities: string[] }
   | { kind: 'broadcast'; capabilities?: string[] }
 
+/**
+ * FED-M2 — federated origin claim attached to tasks that crossed a
+ * peer-hub boundary. Filled in by the sending hub (`RemoteHubViaLink`)
+ * just before forwarding via `link.dispatch(task)`. The receiving hub
+ * trusts the field because the link itself was mutually authenticated
+ * at HELLO time (FED-M1) — i.e. "the peer wouldn't have made it past
+ * the handshake if we didn't trust it to honestly self-identify the
+ * actor on its side."
+ *
+ * Local-only tasks (originator is on the same hub as the dispatcher)
+ * leave `origin` unset; surfaces that need to distinguish "local"
+ * from "federated" use `origin === undefined` as the test.
+ *
+ * Receiver-side ACLs (FED-M3) match against fields of this object;
+ * audit log writes (FED-M4) lift these fields into `metadata.origin`
+ * for cross-hub traceability.
+ */
+export interface TaskOrigin {
+  /** Sending hub id (== the peer's `selfId` from the local link's POV). */
+  orgId: string
+  /** The acting user id on the sending hub. */
+  userId: string
+  /** Optional v4 role of the acting user on the sending hub. */
+  userRole?: string
+  /**
+   * Optional email of the acting user on the sending hub. Useful for
+   * audit-log readability; the receiving hub MUST NOT use this as an
+   * authoritative identifier (the sending hub's identity store may
+   * mutate emails; orgId+userId is the stable key).
+   */
+  userEmail?: string
+}
+
 export interface Task {
   id: TaskId
   from: ParticipantId
+  /**
+   * FED-M2 — federated origin claim. Present when the task crossed a
+   * peer-hub boundary; absent for local-only tasks. See `TaskOrigin`.
+   */
+  origin?: TaskOrigin
   strategy: DispatchStrategy
   payload: unknown
   title?: string

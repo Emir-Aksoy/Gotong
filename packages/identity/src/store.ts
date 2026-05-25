@@ -156,6 +156,7 @@ const AUDIT_ACTOR_SOURCES: readonly AuditActorSource[] = [
   'v4-bearer',
   'anonymous',
   'system',
+  'federated', // FED-M4
 ] as const
 
 function isAuditActorSource(s: string): s is AuditActorSource {

@@ -27,7 +27,7 @@
  *   MESH_GOODBYE   {reason?}                    cooperative close
  */
 
-import { randomUUID } from 'node:crypto'
+import { randomUUID, timingSafeEqual } from 'node:crypto'
 
 import { WebSocket, type WebSocketServer } from 'ws'
 
@@ -45,8 +45,23 @@ import type {
 export const MESH_PROTOCOL_VERSION = '1' as const
 
 export type MeshFrame =
-  | { type: 'MESH_HELLO'; peerId: ParticipantId; protocolVersion: typeof MESH_PROTOCOL_VERSION }
-  | { type: 'MESH_HELLO_ACK'; peerId: ParticipantId; protocolVersion: typeof MESH_PROTOCOL_VERSION }
+  // FED-M1: `peerToken` is OPTIONAL on the wire (kept optional so a
+  // legacy peer that doesn't know about tokens can still connect AS LONG
+  // AS the receiving side also has no peerToken configured). When the
+  // receiver has a peerToken configured, an absent or mismatched
+  // `peerToken` is a fatal handshake error.
+  | {
+      type: 'MESH_HELLO'
+      peerId: ParticipantId
+      protocolVersion: typeof MESH_PROTOCOL_VERSION
+      peerToken?: string
+    }
+  | {
+      type: 'MESH_HELLO_ACK'
+      peerId: ParticipantId
+      protocolVersion: typeof MESH_PROTOCOL_VERSION
+      peerToken?: string
+    }
   | { type: 'MESH_TASK'; task: Task }
   | { type: 'MESH_RESULT'; result: TaskResult }
   | { type: 'MESH_MESSAGE'; message: Message }
@@ -92,8 +107,45 @@ export interface WebSocketHubLinkOptions {
    * accepted.
    */
   expectedPeerId?: ParticipantId
+  /**
+   * FED-M1 — Pre-shared secret for mutual peer authentication. When
+   * set, this side will:
+   *   1. Present this exact value as `peerToken` in its HELLO /
+   *      HELLO_ACK frame, AND
+   *   2. Require the OTHER side to present the SAME value in its
+   *      HELLO / HELLO_ACK; mismatched or missing → fatal handshake
+   *      error, link closes.
+   *
+   * Typical deployment: one token per peer pair, configured the same
+   * on both sides. Compared with `timingSafeEqual` to avoid leaking
+   * token characters through response-time variation.
+   *
+   * When omitted, this side accepts ANY peerToken (or none) — keeps
+   * pre-FED-M1 deployments and inproc-only test code working.
+   *
+   * Empty string is rejected at construction time to prevent a config
+   * error from silently disabling auth.
+   */
+  peerToken?: string
   /** Per-dispatch timeout in ms. Default 30s. */
   dispatchTimeoutMs?: number
+}
+
+/**
+ * FED-M1 — constant-time string compare for peerToken verification.
+ * `timingSafeEqual` throws if buffer lengths differ, so we early-return
+ * `false` in that case (a length mismatch is itself unguessable by an
+ * attacker doing length-prefix-pinning, and is therefore safe to leak).
+ * Returns `false` on any malformed input — callers want a boolean.
+ */
+function constantTimeStringEquals(a: string, b: string): boolean {
+  if (typeof a !== 'string' || typeof b !== 'string') return false
+  if (a.length !== b.length) return false
+  if (a.length === 0) return false
+  const ab = Buffer.from(a, 'utf8')
+  const bb = Buffer.from(b, 'utf8')
+  if (ab.length !== bb.length) return false
+  return timingSafeEqual(ab, bb)
 }
 
 class WebSocketHubLinkImpl implements HubLink {
@@ -104,6 +156,8 @@ class WebSocketHubLinkImpl implements HubLink {
   private readonly ws: WebSocket
   readonly selfId: ParticipantId
   private readonly expectedPeerId?: ParticipantId
+  /** FED-M1 — shared secret for mutual peer auth. See option docs. */
+  private readonly peerToken?: string
   private readonly dispatchTimeoutMs: number
   private readonly pullTimeoutMs: number = DEFAULT_PULL_TIMEOUT_MS
 
@@ -132,6 +186,16 @@ class WebSocketHubLinkImpl implements HubLink {
     this.direction = direction
     this.selfId = opts.selfId
     this.expectedPeerId = opts.expectedPeerId
+    // FED-M1 — empty string is rejected at construction to catch the
+    // common config typo where the env var was defined but empty
+    // (silently disables auth otherwise).
+    if (opts.peerToken !== undefined && opts.peerToken.length === 0) {
+      throw new Error(
+        'WebSocketHubLink: peerToken must be a non-empty string when provided; ' +
+          'pass undefined to skip mutual auth explicitly',
+      )
+    }
+    this.peerToken = opts.peerToken
     this.dispatchTimeoutMs = opts.dispatchTimeoutMs ?? DEFAULT_DISPATCH_TIMEOUT_MS
     this._peerId = opts.expectedPeerId ?? '<pending>'
 
@@ -175,7 +239,38 @@ class WebSocketHubLinkImpl implements HubLink {
       type: 'MESH_HELLO',
       peerId: this.selfId,
       protocolVersion: MESH_PROTOCOL_VERSION,
+      // FED-M1 — present our shared peer secret if configured. The
+      // other side verifies via constantTimeStringEquals.
+      ...(this.peerToken !== undefined ? { peerToken: this.peerToken } : {}),
     })
+  }
+
+  /**
+   * FED-M1 — verify the `peerToken` from an incoming HELLO/HELLO_ACK
+   * frame against our locally-configured `peerToken`. Returns null on
+   * success, or an Error to attach to the handshake-reject path.
+   *
+   * Policy:
+   *   - We have no `peerToken` configured → accept anything (legacy
+   *     and inproc-only test code path).
+   *   - We have `peerToken` configured → peer MUST present matching
+   *     value. Missing or different → reject.
+   *
+   * A mixed deployment (one side configured, one side not) will see
+   * the configured side reject — which is the correct outcome (the
+   * unauthenticated side has no business connecting to an authenticated
+   * peer). The unconfigured side learns of the rejection via the close.
+   */
+  private verifyPeerToken(received: string | undefined): Error | null {
+    if (this.peerToken === undefined) return null
+    if (received === undefined) {
+      return new Error('peer did not present a peerToken; mutual auth required')
+    }
+    if (!constantTimeStringEquals(this.peerToken, received)) {
+      // Never log the actual tokens — just the failure shape.
+      return new Error('peer presented an invalid peerToken; mutual auth failed')
+    }
+    return null
   }
 
   private sendFrame(frame: MeshFrame): void {
@@ -220,11 +315,23 @@ class WebSocketHubLinkImpl implements HubLink {
           this.transitionToClosed('peer_id_mismatch')
           return
         }
+        // FED-M1 — verify the peer's token BEFORE accepting the HELLO.
+        // We reject before sending HELLO_ACK so a wrong-token peer
+        // never sees our selfId / our own token.
+        {
+          const tokErr = this.verifyPeerToken(frame.peerToken)
+          if (tokErr) {
+            this.rejectHandshake(tokErr)
+            this.transitionToClosed('peer_token_invalid')
+            return
+          }
+        }
         this._peerId = frame.peerId
         this.sendFrame({
           type: 'MESH_HELLO_ACK',
           peerId: this.selfId,
           protocolVersion: MESH_PROTOCOL_VERSION,
+          ...(this.peerToken !== undefined ? { peerToken: this.peerToken } : {}),
         })
         this._status = 'open'
         this.resolveHandshake()
@@ -249,6 +356,18 @@ class WebSocketHubLinkImpl implements HubLink {
           )
           this.transitionToClosed('peer_id_mismatch')
           return
+        }
+        // FED-M1 — verify the peer's token on the ACK. We've already
+        // sent our own token in HELLO (which the peer accepted, else
+        // they wouldn't be ACKing); now we close the mutual loop by
+        // verifying their token before declaring the link open.
+        {
+          const tokErr = this.verifyPeerToken(frame.peerToken)
+          if (tokErr) {
+            this.rejectHandshake(tokErr)
+            this.transitionToClosed('peer_token_invalid')
+            return
+          }
         }
         this._peerId = frame.peerId
         this._status = 'open'
@@ -453,7 +572,17 @@ class WebSocketHubLinkImpl implements HubLink {
 
   private transitionToClosed(reason: string): void {
     if (this._status === 'closed') return
+    const wasConnecting = this._status === 'connecting'
     this._status = 'closed'
+
+    // FED-M1: if the close happens DURING handshake (e.g. the IN side
+    // rejected our bad peerToken and closed the socket), reject the
+    // handshake promise so callers see the close immediately instead of
+    // having to wait for their timeout. The reason string surfaces the
+    // shape of the close (peer_disconnected / ws_error / peer_token_*).
+    if (wasConnecting) {
+      this.rejectHandshake(new Error(`hub-link closed during handshake (${reason})`))
+    }
 
     // Fail any pending dispatches so callers don't hang forever.
     for (const [taskId, pending] of this.pendingDispatches) {
@@ -557,6 +686,16 @@ export interface ConnectHubLinkOptions extends WebSocketHubLinkOptions {
  * handshaken HubLink. Throws if the handshake fails or times out.
  */
 export async function connectHubLink(opts: ConnectHubLinkOptions): Promise<HubLink> {
+  // FED-M1 — validate the option BEFORE opening the WebSocket so a
+  // bad config (empty peerToken from an undefined env var) surfaces
+  // as an immediate throw rather than racing with the connection
+  // attempt and leaking a half-open ws.
+  if (opts.peerToken !== undefined && opts.peerToken.length === 0) {
+    throw new Error(
+      'connectHubLink: peerToken must be a non-empty string when provided; ' +
+        'pass undefined to skip mutual auth explicitly',
+    )
+  }
   const ws = new WebSocket(opts.url)
   const link = new WebSocketHubLinkImpl(ws, 'out', opts)
   const timeoutMs = opts.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS
@@ -580,6 +719,13 @@ export interface AcceptHubLinksOptions {
   /** Called once per peer that completes the handshake successfully. */
   onLink: (link: HubLink) => void
   handshakeTimeoutMs?: number
+  /**
+   * FED-M1 — shared peer auth secret. When set, every incoming
+   * connection MUST present this same value in its HELLO frame, else
+   * the handshake rejects and the socket closes silently. When omitted,
+   * accepts unauthenticated peers (legacy behavior).
+   */
+  peerToken?: string
 }
 
 /**
@@ -596,7 +742,10 @@ export function acceptHubLinks(opts: AcceptHubLinksOptions): () => void {
   const handshakeTimeoutMs = opts.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS
 
   const handler = (ws: WebSocket) => {
-    const link = new WebSocketHubLinkImpl(ws, 'in', { selfId: opts.selfId })
+    const link = new WebSocketHubLinkImpl(ws, 'in', {
+      selfId: opts.selfId,
+      ...(opts.peerToken !== undefined ? { peerToken: opts.peerToken } : {}),
+    })
     Promise.race([
       link.waitForHandshake(),
       new Promise<never>((_, rej) =>

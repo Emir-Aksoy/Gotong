@@ -89,12 +89,16 @@ export type {
 } from './hub-link.js'
 
 export { RemoteHubViaLink } from './participants/remote-hub.js'
-export type { RemoteHubViaLinkOptions } from './participants/remote-hub.js'
+export type {
+  RemoteHubViaLinkOptions,
+  OriginResolver,
+} from './participants/remote-hub.js'
 
 export { installPeerLink } from './peer-link-install.js'
 export type {
   InstallPeerLinkOptions,
   InstalledPeerLink,
+  PeerLinkAcl,
 } from './peer-link-install.js'
 
 export {
@@ -125,6 +129,7 @@ export type {
   // tasks
   Task,
   TaskResult,
+  TaskOrigin,
   DispatchStrategy,
   // participants
   Participant,

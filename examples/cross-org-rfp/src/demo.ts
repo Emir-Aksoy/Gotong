@@ -15,6 +15,7 @@ import {
   Hub,
   createInprocHubLinkPair,
   installPeerLink,
+  type ParticipantId,
   type Task,
 } from '@aipehub/core'
 
@@ -43,6 +44,40 @@ interface QuoteResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 4 — toy "identity" for Org A. In production this would be a
+// real `@aipehub/identity` IdentityStore (sqlite-backed); here we keep
+// the example zero-dep by hardcoding a tiny user table. The shape of
+// the `OriginResolver` is identical either way — the resolver function
+// just needs to turn the LOCAL actor id (`task.from`) into the
+// user-level fields of `TaskOrigin`.
+// ---------------------------------------------------------------------------
+
+interface ToyUser {
+  userId: string
+  userRole: 'owner' | 'admin' | 'member' | 'viewer'
+  userEmail: string
+}
+
+const ORG_A_USERS: Record<ParticipantId, ToyUser> = {
+  'acme-procurement': {
+    userId: 'acme-procurement',
+    userRole: 'admin',
+    userEmail: 'procurement@acme.example',
+  },
+  'acme-intern': {
+    userId: 'acme-intern',
+    userRole: 'viewer', // intentionally below the ACL bar set on Org B
+    userEmail: 'intern@acme.example',
+  },
+}
+
+function resolveOrgAUser(from: ParticipantId) {
+  const u = ORG_A_USERS[from]
+  if (!u) return null
+  return { userId: u.userId, userRole: u.userRole, userEmail: u.userEmail }
+}
+
+// ---------------------------------------------------------------------------
 // Org B's vendor-quote agent. Drafts a quote then simulates a HITL
 // reviewer signing off. In production the HITL step would block on
 // `AgentDispatchSurface.requestHumanInput()` and a real human in the
@@ -64,8 +99,22 @@ class VendorQuoteAgent extends AgentParticipant {
 
   protected async handleTask(task: Task): Promise<unknown> {
     const payload = task.payload as RfpPayload
+    // FED-M2 demo — task.origin tells us WHO from Org A asked for this.
+    // We could use it to log, to choose pricing tiers, or to require
+    // additional approvals for high-stakes buyers.
+    if (task.origin) {
+      console.log(
+        `[org-b/vendor-quote] received RFP from ${payload.buyerOrg} ` +
+          `(actor: ${task.origin.userEmail ?? task.origin.userId} ` +
+          `role=${task.origin.userRole ?? '?'} org=${task.origin.orgId})`,
+      )
+    } else {
+      console.log(
+        `[org-b/vendor-quote] received RFP from ${payload.buyerOrg} (UNAUTHENTICATED federated actor)`,
+      )
+    }
     console.log(
-      `[org-b/vendor-quote] received RFP from ${payload.buyerOrg}: ${payload.itemDescription} ×${payload.quantity}, budget $${payload.budgetUsd.toLocaleString()}`,
+      `[org-b/vendor-quote] item: ${payload.itemDescription} ×${payload.quantity}, budget $${payload.budgetUsd.toLocaleString()}`,
     )
 
     // Step 1: draft a quote (deterministic mock — pretends to "win" the bid
@@ -131,6 +180,12 @@ async function main(): Promise<void> {
     link: aLink,
     remoteCapabilities: ['vendor-quote'],
     localWrapperId: 'org-b-bridge',
+    // FED-M2 — stamp `origin` on outbound tasks so Org B knows who
+    // from Org A is asking. In production `originResolver` would call
+    // into a real IdentityStore (see @aipehub/identity); here it's a
+    // hardcoded lookup table for example simplicity.
+    selfHubId: 'acme-hub',
+    originResolver: resolveOrgAUser,
   })
   installPeerLink({
     hub: orgBHub,
@@ -139,6 +194,18 @@ async function main(): Promise<void> {
     // the symmetric wiring is free.
     remoteCapabilities: [],
     localWrapperId: 'org-a-bridge',
+    selfHubId: 'widgets-hub',
+    // FED-M3 — Org B's policy on incoming federated tasks:
+    //   * must carry an origin (no anonymous federated dispatches)
+    //   * the actor's role must be admin or owner (no junior interns
+    //     casually shopping H100 GPUs across the federation)
+    //   * only the 'vendor-quote' capability is reachable from outside
+    //     (any other call surface stays internal to Org B)
+    acl: {
+      requireOrigin: true,
+      requireOriginRole: ['owner', 'admin'],
+      capabilities: ['vendor-quote'],
+    },
   })
   console.log('                    ↔ federation link established\n')
 
@@ -199,6 +266,34 @@ async function main(): Promise<void> {
     await orgAHub.stop()
     await orgBHub.stop()
     process.exit(1)
+  }
+
+  // -------------------------------------------------------------------
+  // FED-M3 demo — the same RFP dispatched by a VIEWER-role user gets
+  // rejected by Org B's ACL before it ever reaches the vendor agent.
+  // -------------------------------------------------------------------
+  console.log('')
+  banner('Counter-example: intern attempts the same RFP')
+  console.log(
+    '[org-a]             dispatching as acme-intern (role=viewer)\n',
+  )
+  const internResult = await orgAHub.dispatch({
+    from: 'acme-intern',
+    strategy: { kind: 'capability', capabilities: ['vendor-quote'] },
+    payload: rfp,
+    title: 'RFP: GPU servers (intern attempt)',
+  })
+  if (internResult.kind === 'failed') {
+    console.log(`  ACL refused — error: ${internResult.error}`)
+    console.log(`  refused by:   ${internResult.by}`)
+    console.log(
+      '  → vendor agent NEVER saw the task; no log line from org-b/vendor-quote above.',
+    )
+  } else {
+    console.error('  EXPECTED FAILURE; got:', JSON.stringify(internResult))
+    await orgAHub.stop()
+    await orgBHub.stop()
+    process.exit(2)
   }
 
   console.log('')

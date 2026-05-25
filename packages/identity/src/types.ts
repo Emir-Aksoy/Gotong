@@ -126,6 +126,12 @@ export interface IssuedAdminToken {
  * Where the actor came from. `anonymous` is the pre-login attempt
  * (e.g. a `login_failure` row); `system` is used by host-internal
  * jobs (cleanupExpiredSessions, bootstrap) that have no human actor.
+ *
+ * FED-M4 — `'federated'` covers actions triggered by a task that
+ * crossed a peer-hub boundary (i.e. `Task.origin` is set; see
+ * `@aipehub/core`'s `TaskOrigin`). The writer is expected to also
+ * stash `task.origin` in `metadata.origin` so downstream readers can
+ * trace back to the original org+user.
  */
 export type AuditActorSource =
   | 'v3-admin'
@@ -133,6 +139,7 @@ export type AuditActorSource =
   | 'v4-bearer'
   | 'anonymous'
   | 'system'
+  | 'federated'
 
 export interface AuditLogEntry {
   id: string

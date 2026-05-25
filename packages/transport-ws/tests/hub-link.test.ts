@@ -28,7 +28,10 @@ interface Bench {
   stop: () => Promise<void>
 }
 
-async function startBench(selfId: string): Promise<Bench> {
+async function startBench(
+  selfId: string,
+  opts: { peerToken?: string } = {},
+): Promise<Bench> {
   const wss = new WebSocketServer({ port: 0 })
   await new Promise<void>((resolve) => wss.once('listening', () => resolve()))
   const addr = wss.address()
@@ -40,6 +43,7 @@ async function startBench(selfId: string): Promise<Bench> {
   acceptHubLinks({
     server: wss,
     selfId,
+    ...(opts.peerToken !== undefined ? { peerToken: opts.peerToken } : {}),
     onLink: (link) => {
       const w = waiters.shift()
       if (w) w(link)
@@ -320,5 +324,132 @@ describe('WebSocketHubLink (symmetric ws)', () => {
         handshakeTimeoutMs: 300,
       }),
     ).rejects.toThrow(/handshake|ECONNREFUSED|connect/i)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// FED-M1 — peer mutual authentication via shared peerToken
+// ---------------------------------------------------------------------------
+
+describe('WebSocketHubLink — FED-M1 mutual peer auth', () => {
+  it('matching peerTokens on both sides → handshake succeeds + can dispatch', async () => {
+    const bench = await startBench('hubB', { peerToken: 'shared-AB-secret' })
+    try {
+      const aLink = await connectHubLink({
+        url: bench.url,
+        selfId: 'hubA',
+        peerToken: 'shared-AB-secret',
+      })
+      const bLink = await bench.nextLink()
+      // Wire a task handler on B and dispatch from A — proves the link
+      // is genuinely usable, not just past the handshake.
+      bLink.on('task', async (task: Task): Promise<TaskResult> => ({
+        kind: 'completed',
+        taskId: task.id,
+        by: 'hubB-agent',
+        result: { ok: true },
+        ts: Date.now(),
+      }))
+      const result = await aLink.dispatch(makeTask('t-auth-ok'))
+      expect(result.kind).toBe('completed')
+      await aLink.close()
+    } finally {
+      await bench.stop()
+    }
+  })
+
+  it('mismatched peerTokens → handshake rejects (OUT sees opaque close, IN saw precise reason)', async () => {
+    // Deliberate: the IN side rejects the bad-token HELLO and closes
+    // the socket WITHOUT sending any failure frame back. The OUT side
+    // only observes the close — not why. This is anti-enumeration
+    // (attacker can't probe valid-token-format vs invalid-token-value
+    // by inspecting error text). The IN side records the precise
+    // reason internally for ops/logging but doesn't put it on the wire.
+    const bench = await startBench('hubB', { peerToken: 'server-secret' })
+    try {
+      await expect(
+        connectHubLink({
+          url: bench.url,
+          selfId: 'hubA',
+          peerToken: 'client-different-secret',
+          handshakeTimeoutMs: 1000,
+        }),
+      ).rejects.toThrow(/closed during handshake|peer_disconnected|handshake/i)
+    } finally {
+      await bench.stop()
+    }
+  })
+
+  it('server requires token, client omits → server rejects (no leak of self info)', async () => {
+    const bench = await startBench('hubB', { peerToken: 'server-secret' })
+    try {
+      // Client doesn't set peerToken — server requires one. Server side
+      // rejects in handshake → client sees handshake failure (the
+      // underlying ws closes; connectHubLink resolves to the timeout or
+      // a generic handshake error depending on race).
+      await expect(
+        connectHubLink({
+          url: bench.url,
+          selfId: 'hubA',
+          handshakeTimeoutMs: 1000,
+        }),
+      ).rejects.toThrow(/handshake|peerToken|closed/i)
+    } finally {
+      await bench.stop()
+    }
+  })
+
+  it('client requires token, server has none → client rejects HELLO_ACK', async () => {
+    // Server has NO peerToken configured → it sends HELLO_ACK without
+    // peerToken. Client requires one → client rejects.
+    const bench = await startBench('hubB')
+    try {
+      await expect(
+        connectHubLink({
+          url: bench.url,
+          selfId: 'hubA',
+          peerToken: 'client-secret',
+          handshakeTimeoutMs: 1000,
+        }),
+      ).rejects.toThrow(/peerToken|mutual auth/i)
+    } finally {
+      await bench.stop()
+    }
+  })
+
+  it('neither side configures peerToken → handshake still succeeds (legacy / inproc-compatible)', async () => {
+    const bench = await startBench('hubB')
+    try {
+      const aLink = await connectHubLink({
+        url: bench.url,
+        selfId: 'hubA',
+      })
+      const bLink = await bench.nextLink()
+      expect(aLink.status).toBe('open')
+      expect(bLink.status).toBe('open')
+      await aLink.close()
+    } finally {
+      await bench.stop()
+    }
+  })
+
+  it('empty-string peerToken is rejected before opening the WebSocket (typo defense)', async () => {
+    // Catches the "MY_TOKEN env var was defined but empty" misconfig
+    // that would otherwise silently disable auth on the side that set
+    // peerToken: process.env.MY_TOKEN. The rejection happens BEFORE
+    // any socket is opened (the URL below is intentionally invalid;
+    // if the check ran after `new WebSocket()`, we'd see ECONNREFUSED
+    // as an unhandled error rather than our own throw).
+    //
+    // `connectHubLink` is an async function, so its synchronous throw
+    // surfaces as a rejected Promise — assert via `.rejects.toThrow`.
+    await expect(
+      connectHubLink({
+        url: 'ws://127.0.0.1:1',
+        selfId: 'hubA',
+        peerToken: '',
+        handshakeTimeoutMs: 100,
+      }),
+    ).rejects.toThrow(/peerToken must be a non-empty string/)
   })
 })
