@@ -45,6 +45,14 @@ export interface ResolutionContext {
    */
   triggerFrom?: string
   /**
+   * B2.2.2 — `task.origin` from the triggering dispatch, if any.
+   * Not exposed via `$ref` syntax (no workflow yaml needs it) — the
+   * runner reads it directly in `dispatchOne` and re-stamps every
+   * inner dispatch so org-level quota gates see the original
+   * dispatcher's `userId`, not the synthetic workflow runner id.
+   */
+  triggerOrigin?: { orgId: string; userId: string; userRole?: string; userEmail?: string }
+  /**
    * Map from step id to the *resolved output* of that step.
    * For simple steps, the value is whatever the step returned.
    * For parallel steps, the value is `{ branchId → branchOutput }`.

@@ -920,3 +920,168 @@ workflow:
     expect(() => parseWorkflow(yaml)).toThrow(/branches\[0\]\.when is not a valid predicate/)
   })
 })
+
+// =========================================================================
+// B2.2.2 — `task.origin` transit through the runner. The runner must
+// re-stamp the triggering task's origin on every inner dispatch so the
+// org-level quota gate inside `LlmAgent.preCallHook` sees the original
+// dispatcher's userId, not the runner's synthetic id.
+// =========================================================================
+
+describe('WorkflowRunner — origin transit (B2.2.2)', () => {
+  function makeTaskWithOrigin(
+    payload: unknown,
+    origin: { orgId: string; userId: string },
+  ): Task {
+    return {
+      id: 'trigger-task-with-origin',
+      from: 'admin',
+      origin,
+      strategy: { kind: 'capability', capabilities: ['run-editorial'] },
+      payload,
+      createdAt: 1700000000000,
+    }
+  }
+
+  function makeOriginStubHub(): {
+    hub: HubLike
+    calls: Array<{ origin?: { orgId: string; userId: string } }>
+  } {
+    const calls: Array<{ origin?: { orgId: string; userId: string } }> = []
+    const hub: HubLike = {
+      async dispatch(opts) {
+        calls.push(opts.origin ? { origin: opts.origin } : {})
+        return ok(nextTaskId(), 'done', 'mock-agent')
+      },
+    }
+    return { hub, calls }
+  }
+
+  it('stamps origin on every inner dispatch when the triggering task carries one', async () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: editorial
+  trigger: { capability: run-editorial }
+  steps:
+    - id: draft
+      dispatch:
+        strategy: { kind: capability, capabilities: [draft] }
+        payload: { topic: $trigger.payload.topic }
+    - id: review
+      dispatch:
+        strategy: { kind: capability, capabilities: [review] }
+        payload: { draft: $draft.output }
+`
+    const def = parseWorkflow(yaml)
+    const { hub, calls } = makeOriginStubHub()
+    const runner = new WorkflowRunner({ definition: def, hub })
+
+    const task = makeTaskWithOrigin(
+      { topic: 'tea' },
+      { orgId: 'local', userId: 'user-7' },
+    )
+    await runner.handleTask(task)
+
+    expect(calls).toHaveLength(2)
+    expect(calls[0]?.origin).toEqual({ orgId: 'local', userId: 'user-7' })
+    expect(calls[1]?.origin).toEqual({ orgId: 'local', userId: 'user-7' })
+  })
+
+  it('omits origin on inner dispatches when the triggering task has none', async () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: editorial
+  trigger: { capability: run-editorial }
+  steps:
+    - id: draft
+      dispatch:
+        strategy: { kind: capability, capabilities: [draft] }
+        payload: { topic: $trigger.payload.topic }
+`
+    const def = parseWorkflow(yaml)
+    const { hub, calls } = makeOriginStubHub()
+    const runner = new WorkflowRunner({ definition: def, hub })
+
+    const task = makeTask({ topic: 'tea' }) // no origin — admin-style trigger
+    await runner.handleTask(task)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]?.origin).toBeUndefined()
+  })
+
+  it('persists origin into RunState; resume re-uses it on remaining steps', async () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: editorial
+  trigger: { capability: run-editorial }
+  steps:
+    - id: draft
+      dispatch:
+        strategy: { kind: capability, capabilities: [draft] }
+        payload: { topic: $trigger.payload.topic }
+    - id: review
+      dispatch:
+        strategy: { kind: capability, capabilities: [review] }
+        payload: { draft: $draft.output }
+`
+    const def = parseWorkflow(yaml)
+    const dir = mkdtempSync(join(tmpdir(), 'aipehub-wf-origin-resume-'))
+    try {
+      const runStore = new RunStore(dir)
+
+      // First run: fail after step 1 so we get a partial RunState on disk.
+      let attemptOne = true
+      const hub1: HubLike = {
+        async dispatch(opts) {
+          if (attemptOne && opts.payload && typeof opts.payload === 'object' && 'draft' in (opts.payload as object)) {
+            return fail(nextTaskId(), 'boom', 'mock-agent')
+          }
+          return ok(nextTaskId(), opts.payload ?? null, 'mock-agent')
+        },
+      }
+      const runner1 = new WorkflowRunner({ definition: def, hub: hub1, runStore })
+      const task = makeTaskWithOrigin(
+        { topic: 'tea' },
+        { orgId: 'local', userId: 'user-9' },
+      )
+      try {
+        await runner1.handleTask(task)
+      } catch {
+        /* expected: halt failure throws */
+      }
+
+      // Read the persisted RunState — origin must be there.
+      const allIds = await runStore.listRunIds()
+      expect(allIds).toHaveLength(1)
+      const state = (await runStore.read(allIds[0]!)) as RunState
+      expect(state.triggeredByOrigin).toEqual({
+        orgId: 'local',
+        userId: 'user-9',
+      })
+
+      // Reset its status so resumeRun accepts it, and resume with a healthy
+      // hub; the re-dispatch of step 2 should still carry the origin.
+      state.status = 'running'
+      attemptOne = false
+      const originSeenOnResume: Array<{ orgId: string; userId: string } | undefined> = []
+      const hub2: HubLike = {
+        async dispatch(opts) {
+          originSeenOnResume.push(opts.origin)
+          return ok(nextTaskId(), opts.payload ?? null, 'mock-agent')
+        },
+      }
+      const runner2 = new WorkflowRunner({ definition: def, hub: hub2, runStore })
+      await runner2.resumeRun(state)
+      // step 1 was already 'done' on disk so it isn't re-dispatched; only
+      // step 2 (review) fires — and it carries the persisted origin.
+      expect(originSeenOnResume).toEqual([
+        { orgId: 'local', userId: 'user-9' },
+      ])
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})

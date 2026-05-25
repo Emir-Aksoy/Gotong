@@ -8,6 +8,7 @@ import {
   type ParticipantId,
   type ServiceUseSpec,
   type Space,
+  type Task,
 } from '@aipehub/core'
 import { LlmAgent, MockLlmProvider, type LlmProvider } from '@aipehub/llm'
 import { PersonalGrowthAgent } from './agents/personal-growth-agent.js'
@@ -28,7 +29,7 @@ import {
 } from '@aipehub/services-sdk'
 
 import type { HubServices, ServiceUseSpec as AttachSpec } from './services/index.js'
-import type { OrgApiPool } from './org-api-pool.js'
+import type { OrgApiPool, QuotaGate } from './org-api-pool.js'
 
 const log = createLogger('local-agents')
 
@@ -60,6 +61,13 @@ const log = createLogger('local-agents')
  * them; the Space encrypts v3 keys at rest with AES-256-GCM (key in
  * `runtime/secret.key`, 0600) and the v4 identity vault uses its own
  * master key (`identity-master.key`, 0600).
+ *
+ * B2.2.2 — when `orgApiPool` is wired, every non-mock LlmAgent is
+ * spawned with `preCallHook = (task) => gate(task.origin)`. The gate
+ * (built once via `orgApiPool.makeLlmQuotaGate(...)`) debits a per-day
+ * counter on the dispatching user; admin-triggered tasks (no `origin`)
+ * pass through free. Quota exceeded → preCallHook throws → LlmAgent
+ * fails the task with `quota_exceeded`.
  */
 export class LocalAgentPool implements ManagedAgentLifecycle {
   private readonly hub: Hub
@@ -109,6 +117,19 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * failure) — the chain transparently skips the pool.
    */
   private readonly orgApiPool?: OrgApiPool
+  /**
+   * B2.2.2 — per-call quota gate, built once from `orgApiPool` at
+   * construction. Every spawned non-mock LlmAgent is given a
+   * `preCallHook` that calls this gate; the gate no-ops for tasks
+   * with no `origin.userId` (admin / system-triggered) and otherwise
+   * debits `metric='llm_requests' period='daily'` from the user.
+   * Throws `QuotaExceededError` on cap breach — the LlmAgent
+   * surfaces that as a normal task failure.
+   *
+   * Absent when `orgApiPool` is absent (identity bootstrap failed,
+   * or running with the v3-only fallback path).
+   */
+  private readonly llmQuotaGate?: QuotaGate
 
   constructor(opts: {
     hub: Hub
@@ -120,6 +141,15 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     this.space = opts.space
     this.services = opts.services
     this.orgApiPool = opts.orgApiPool
+    // Built once: the gate is a stateless closure over `identity`,
+    // shared by every managed LlmAgent. Settings (metric/period) are
+    // hardcoded here in B2.2.2; C2 will surface them in admin UI.
+    if (this.orgApiPool) {
+      this.llmQuotaGate = this.orgApiPool.makeLlmQuotaGate({
+        metric: 'llm_requests',
+        period: 'daily',
+      })
+    }
   }
 
   /**
@@ -360,6 +390,21 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     }
     const ctxWithDispatch: ServiceCtx = { ...ctx, dispatch: dispatchSurface }
 
+    // B2.2.2 — wire the per-call quota gate. Only when:
+    //   - we have a gate (orgApiPool present at host boot), AND
+    //   - this isn't the mock provider (mock calls don't cost money;
+    //     debiting them would surprise demo / test users who don't
+    //     think of `mock` as a real LLM call).
+    // The gate closes over `task.origin` — tasks dispatched by /me
+    // or by the workflow runner (which re-stamps origin) get debited;
+    // admin-triggered tasks (no origin) free-ride. That asymmetry is
+    // by design: admins are the operators, not the consumers.
+    const gate = this.llmQuotaGate
+    const preCallHook =
+      gate && record.managed.provider !== 'mock'
+        ? (task: Task): void => gate(task.origin)
+        : undefined
+
     // Pick the agent class by `managed.kind`. v2.4 added
     // `'personal-growth'` as the first non-base kind; the switch is
     // structured so a future `'custom'` kind that names a package
@@ -373,6 +418,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       model: record.managed.model,
       services: ctxWithDispatch,
       ...(toolset ? { tools: toolset } : {}),
+      ...(preCallHook ? { preCallHook } : {}),
     }
     let agent: LlmAgent
     switch (record.managed.kind) {

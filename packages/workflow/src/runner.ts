@@ -45,6 +45,11 @@ import {
  * The minimal Hub surface the runner needs. Defined locally so the
  * `@aipehub/workflow` package doesn't import the full Hub class type
  * (and so tests can pass a stub).
+ *
+ * `origin` (B2.2.2) is the same shape as `core/types.ts` `TaskOrigin`
+ * but typed structurally here to avoid pulling in the full Hub type;
+ * the live `Hub.dispatch` accepts our shape because TS uses structural
+ * compat on this field.
  */
 export interface HubLike {
   dispatch(opts: {
@@ -54,6 +59,12 @@ export interface HubLike {
     title?: string
     weight?: number
     priority?: number
+    origin?: {
+      orgId: string
+      userId: string
+      userRole?: string
+      userEmail?: string
+    }
   }): Promise<TaskResult>
 }
 
@@ -136,6 +147,10 @@ export class WorkflowRunner extends AgentParticipant {
       // can ask follow-up questions of that admin via `$trigger.from`.
       // Persisted into RunState so resume reconstructs the same value.
       triggeredByFrom: task.from,
+      // B2.2.2 — capture origin so every inner dispatch re-stamps it.
+      // The LlmAgent's preCallHook (org quota gate) reads
+      // `task.origin.userId` to debit the right user.
+      ...(task.origin ? { triggeredByOrigin: task.origin } : {}),
       triggerPayload: task.payload,
       steps: [],
       startedAt: this.now(),
@@ -146,6 +161,7 @@ export class WorkflowRunner extends AgentParticipant {
     const ctx: ResolutionContext = {
       triggerPayload: task.payload,
       triggerFrom: task.from,
+      ...(task.origin ? { triggerOrigin: task.origin } : {}),
       stepOutputs: new Map<string, unknown>(),
     }
     return this.executeStartingAt(state, ctx, 0, undefined, { throwOnHaltFailure: true })
@@ -194,6 +210,11 @@ export class WorkflowRunner extends AgentParticipant {
       // — resolver throws a helpful error if a workflow yaml uses
       // `$trigger.from` and the run state predates the field.
       triggerFrom: state.triggeredByFrom,
+      // B2.2.2 — pre-v4-phase5 run files won't have triggeredByOrigin;
+      // we simply pass undefined and the inner dispatches skip origin
+      // (the org quota gate then treats them as unattributed → no
+      // debit; the resumed run completes without quota enforcement).
+      ...(state.triggeredByOrigin ? { triggerOrigin: state.triggeredByOrigin } : {}),
       stepOutputs: new Map<string, unknown>(),
     }
     const workflowFailureMode: 'halt' | 'continue' = this.definition.onFailure ?? 'halt'
@@ -519,6 +540,12 @@ export class WorkflowRunner extends AgentParticipant {
     if (spec.title !== undefined) opts.title = spec.title
     if (spec.weight !== undefined) opts.weight = spec.weight
     if (spec.priority !== undefined) opts.priority = spec.priority
+    // B2.2.2 — re-stamp the original dispatcher's origin on every
+    // inner dispatch. Without this the LlmAgent's preCallHook would
+    // see `task.origin === undefined` (because the runner's id is
+    // the only thing on `from`) and the quota gate would treat the
+    // call as unattributed → no per-user debit.
+    if (ctx.triggerOrigin) opts.origin = ctx.triggerOrigin
     return this.hub.dispatch(opts)
   }
 

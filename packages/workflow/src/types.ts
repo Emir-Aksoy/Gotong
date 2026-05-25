@@ -219,6 +219,19 @@ export interface RunState {
    * follow-up questions of the originator via `$trigger.from` refs.
    */
   triggeredByFrom?: string
+  /**
+   * B2.2.2 — `task.origin` from the triggering dispatch, if any.
+   * Persisted so resume reconstructs the same value, and so every
+   * inner `hub.dispatch()` the runner fires can re-stamp the same
+   * origin (lets the org quota gate inside `LlmAgent` debit the
+   * actual user, not the runner's synthetic id).
+   *
+   * Untyped here (`Record<string, unknown>`) deliberately — pulling
+   * `TaskOrigin` from `@aipehub/core` would invert the dependency
+   * direction; the runner type-checks it structurally via the
+   * `HubLike.dispatch` opts.
+   */
+  triggeredByOrigin?: { orgId: string; userId: string; userRole?: string; userEmail?: string }
   /** Initial payload received from the triggering task. */
   triggerPayload: unknown
   /** Per-step records, in execution order. */

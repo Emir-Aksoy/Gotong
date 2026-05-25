@@ -684,13 +684,21 @@ export class Hub {
      */
     countContribution?: boolean
     /**
-     * FED-M2 — federated origin claim. Only set when the task arrived
-     * from a peer hub (i.e. `installPeerLink`'s inbound handler is
-     * forwarding `task.origin` from across the link). Local callers
-     * should NOT fabricate this — there's no plausible scenario where
-     * a local dispatch is genuinely "from another org" (if it were,
-     * it'd have come over a HubLink). The receiver-side ACL (FED-M3)
-     * treats `origin === undefined` as "local task; ACL does not apply."
+     * Attribution claim for the task. Two legitimate sources:
+     *
+     *   - **FED-M2** — `installPeerLink`'s inbound handler forwards
+     *     `task.origin` from across a HubLink. `orgId` is the peer's
+     *     `selfId`; the receiver-side ACL (FED-M3) inspects this.
+     *   - **B2.2.2** — local dispatchers (`/me`, workflow runner)
+     *     stamp `{orgId: 'local', userId}` so the per-call quota gate
+     *     in `LlmAgent.preCallHook` can debit the right user. The
+     *     `'local'` sentinel makes "this is a same-hub task" obvious
+     *     to anyone reading the transcript or audit log.
+     *
+     * The receiver-side ACL is *only* evaluated on the inbound path
+     * of `installPeerLink` — local `hub.dispatch` never runs the
+     * FED-M3 check, so a local `origin` claim can't accidentally
+     * trip a cross-org policy.
      */
     origin?: import('./types.js').TaskOrigin
   }): Promise<TaskResult> {

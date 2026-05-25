@@ -285,6 +285,13 @@ async function handleMeDispatch(
     void ctx.hub
       .dispatch({
         from: userId,
+        // B2.2.2 — stamp the dispatcher so `LlmAgent.preCallHook`
+        // (the org quota gate) can debit per-user. `orgId: 'local'`
+        // is a sentinel that distinguishes same-hub attribution from
+        // a FED-M2 cross-hub origin (where orgId is the peer's id).
+        // The quota gate only reads `userId`; orgId here is for
+        // audit-log readability + future per-org aggregation.
+        origin: { orgId: 'local', userId },
         strategy: { kind: 'capability', capabilities: [wf.capability] },
         payload,
         title: `${wf.label} — ${userId}`,
