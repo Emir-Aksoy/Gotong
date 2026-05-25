@@ -28,6 +28,7 @@ export type {
   AuditActorSource,
   WriteAuditLogInput,
   ListAuditLogQuery,
+  AuditAction,
   Invitation,
   InvitationStatus,
   CreateInvitationInput,
@@ -41,7 +42,7 @@ export type {
   CreateVaultEntryInput,
   ListVaultEntriesQuery,
 } from './types.js'
-export { ROLES, VAULT_KINDS, OWNER_KINDS } from './types.js'
+export { AUDIT_ACTIONS, ROLES, VAULT_KINDS, OWNER_KINDS } from './types.js'
 // A1 — exported so hosts can wire the workspace .key file into
 // openIdentityStore. crypto primitives (encryptSecret / decryptSecret)
 // are NOT re-exported: callers should only ever touch plaintext via

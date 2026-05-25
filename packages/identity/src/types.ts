@@ -197,6 +197,60 @@ export interface ListAuditLogQuery {
   success?: boolean
 }
 
+/**
+ * A2 (Phase 5) — recommended action vocabulary. Hosts MAY pass any
+ * string to `writeAuditLog.action` (the column is free-form text), but
+ * the values below cover every action emitted by aipehub itself. Using
+ * the typed constants instead of literals catches typos at compile time
+ * and keeps downstream analytics (rollup queries, admin UI filters)
+ * stable.
+ *
+ * Convention: `<surface>_<verb>` snake_case. `<surface>` is the
+ * subsystem (auth/api/knowledge/vault/org/peer); `<verb>` is what
+ * happened. New subsystems extend this enum; new verbs within an
+ * existing subsystem may be added without touching consumers.
+ */
+export const AUDIT_ACTIONS = {
+  // Phase 1-3 — auth / identity / credentials (already used by web layer).
+  LOGIN_SUCCESS: 'login_success',
+  LOGIN_FAILURE: 'login_failure',
+  LOGOUT: 'logout',
+  CREATE_USER: 'create_user',
+  SET_ROLE: 'set_role',
+  SET_PASSWORD: 'set_password',
+  ISSUE_API_KEY: 'issue_api_key',
+  ISSUE_ADMIN_TOKEN: 'issue_admin_token',
+  REVOKE_CREDENTIAL: 'revoke_credential',
+  REVOKE_SESSION: 'revoke_session',
+  CLEANUP_SESSIONS: 'cleanup_sessions',
+  INVITE_CREATE: 'invite_create',
+  INVITE_ACCEPT: 'invite_accept',
+  INVITE_REVOKE: 'invite_revoke',
+  // Phase 5 — setup wizard.
+  SETUP_OWNER_CREATED: 'setup_owner_created',
+  // Phase 5 — vault (A1).
+  VAULT_CREATE: 'vault_create',
+  VAULT_READ: 'vault_read',
+  VAULT_REVOKE: 'vault_revoke',
+  // Phase 5 — API pool (B1+).
+  API_CALL: 'api_call',
+  API_QUOTA_DENIED: 'api_quota_denied',
+  // Phase 5 — knowledge (B3+).
+  KNOWLEDGE_INGEST: 'knowledge_ingest',
+  KNOWLEDGE_SEARCH: 'knowledge_search',
+  KNOWLEDGE_GRANT: 'knowledge_grant',
+  KNOWLEDGE_REVOKE: 'knowledge_revoke',
+  // Phase 5 — peer registry (D1+).
+  PEER_ADD: 'peer_add',
+  PEER_REMOVE: 'peer_remove',
+  PEER_CONNECT: 'peer_connect',
+  PEER_DISCONNECT: 'peer_disconnect',
+  // Phase 5 — org-wide settings (C1+).
+  ORG_SET_QUOTA: 'org_set_quota',
+} as const
+
+export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS]
+
 // ---------------------------------------------------------------------------
 // Invitations (Phase 3 — user invitation flow)
 // ---------------------------------------------------------------------------

@@ -43,10 +43,12 @@ import {
 import { IdentityError } from './errors.js'
 import { decryptSecret, encryptSecret } from './crypto.js'
 import {
+  AUDIT_ACTIONS,
   OWNER_KINDS,
   ROLES,
   VAULT_KINDS,
   type AcceptInvitationInput,
+  type AuditAction,
   type AuditActorSource,
   type AuditLogEntry,
   type BootstrapInput,
@@ -1063,6 +1065,132 @@ export class IdentityStore {
           : null,
       success: success === 1,
     }
+  }
+
+  // ---- A2 (Phase 5) — typed audit helpers ----
+  //
+  // Convenience wrappers around writeAuditLog that fix the `action`
+  // verb to a value from `AUDIT_ACTIONS` and shape the `metadata` blob
+  // into a stable schema the admin UI / rollup queries can rely on.
+  // The caller still passes actor / target context (the store can't
+  // infer those). All helpers delegate to writeAuditLog so the audit
+  // contract (capping metadata at 8KB, validating actorSource, etc) is
+  // enforced uniformly.
+
+  /**
+   * Audit an LLM / external API call. Convention: `metadata.provider`
+   * is the canonical key the admin "API usage" view reads to group by
+   * upstream service.
+   */
+  writeApiCall(input: {
+    actorSource: AuditActorSource
+    actorUserId?: string | null
+    /** Upstream service id: 'anthropic' / 'openai' / 'deepseek' / 'brave-search' / ... */
+    provider: string
+    /** Optional model identifier when relevant (LLM calls). */
+    model?: string
+    tokensIn?: number
+    tokensOut?: number
+    costUsd?: number
+    durationMs?: number
+    ip?: string | null
+    userAgent?: string | null
+    success?: boolean
+  }): AuditLogEntry {
+    const md: Record<string, unknown> = { provider: input.provider }
+    if (input.model !== undefined) md.model = input.model
+    if (input.tokensIn !== undefined) md.tokensIn = input.tokensIn
+    if (input.tokensOut !== undefined) md.tokensOut = input.tokensOut
+    if (input.costUsd !== undefined) md.costUsd = input.costUsd
+    if (input.durationMs !== undefined) md.durationMs = input.durationMs
+    return this.writeAuditLog({
+      action: AUDIT_ACTIONS.API_CALL,
+      actorSource: input.actorSource,
+      actorUserId: input.actorUserId ?? null,
+      ip: input.ip ?? null,
+      userAgent: input.userAgent ?? null,
+      metadata: md,
+      success: input.success,
+    })
+  }
+
+  /**
+   * Audit a vault entry mutation or secret read. The vault entry id
+   * goes in `targetCredentialId` so the existing per-credential audit
+   * index lights it up; `metadata.vaultKind` + owner go into the JSON
+   * blob.
+   */
+  writeVaultAccess(input: {
+    actorSource: AuditActorSource
+    actorUserId?: string | null
+    /** What happened to the entry. */
+    action: 'create' | 'read' | 'revoke'
+    vaultEntryId: string
+    vaultKind: VaultKind
+    ownerKind: OwnerKind
+    ownerId?: string | null
+    ip?: string | null
+    userAgent?: string | null
+    success?: boolean
+  }): AuditLogEntry {
+    const actionMap: Record<'create' | 'read' | 'revoke', AuditAction> = {
+      create: AUDIT_ACTIONS.VAULT_CREATE,
+      read: AUDIT_ACTIONS.VAULT_READ,
+      revoke: AUDIT_ACTIONS.VAULT_REVOKE,
+    }
+    return this.writeAuditLog({
+      action: actionMap[input.action],
+      actorSource: input.actorSource,
+      actorUserId: input.actorUserId ?? null,
+      targetCredentialId: input.vaultEntryId,
+      ip: input.ip ?? null,
+      userAgent: input.userAgent ?? null,
+      metadata: {
+        vaultKind: input.vaultKind,
+        ownerKind: input.ownerKind,
+        ownerId: input.ownerId ?? null,
+      },
+      success: input.success,
+    })
+  }
+
+  /**
+   * Audit a knowledge-set access. `setName` + `(ownerKind, ownerId)`
+   * tuple uniquely identifies the set in the global namespace; extra
+   * detail (chunks returned, query text excerpt) goes in `extra`.
+   */
+  writeKnowledgeAccess(input: {
+    actorSource: AuditActorSource
+    actorUserId?: string | null
+    action: 'ingest' | 'search' | 'grant' | 'revoke'
+    setName: string
+    ownerKind: OwnerKind
+    ownerId?: string | null
+    extra?: Record<string, unknown>
+    ip?: string | null
+    userAgent?: string | null
+    success?: boolean
+  }): AuditLogEntry {
+    const actionMap: Record<'ingest' | 'search' | 'grant' | 'revoke', AuditAction> = {
+      ingest: AUDIT_ACTIONS.KNOWLEDGE_INGEST,
+      search: AUDIT_ACTIONS.KNOWLEDGE_SEARCH,
+      grant: AUDIT_ACTIONS.KNOWLEDGE_GRANT,
+      revoke: AUDIT_ACTIONS.KNOWLEDGE_REVOKE,
+    }
+    return this.writeAuditLog({
+      action: actionMap[input.action],
+      actorSource: input.actorSource,
+      actorUserId: input.actorUserId ?? null,
+      ip: input.ip ?? null,
+      userAgent: input.userAgent ?? null,
+      metadata: {
+        setName: input.setName,
+        ownerKind: input.ownerKind,
+        ownerId: input.ownerId ?? null,
+        ...(input.extra ?? {}),
+      },
+      success: input.success,
+    })
   }
 
   listAuditLog(query: ListAuditLogQuery = {}): AuditLogEntry[] {
