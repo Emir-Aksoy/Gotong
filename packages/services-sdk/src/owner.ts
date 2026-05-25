@@ -3,20 +3,51 @@
  *
  * A plugin never sees the yaml-level `scope:` string. It sees an Owner
  * with a `(kind, id)` pair and files data by that key. The
- * {@link ServiceRegistry} translates `scope: private | workflow | shared:<g>`
- * into an Owner before calling `plugin.attach()`.
+ * {@link ServiceRegistry} translates the yaml scope into an Owner
+ * before calling `plugin.attach()`.
  *
  * Default per RFC §4 is `'private'` (Q1 = A): an agent's data is
  * invisible to every other agent unless the yaml explicitly opts into
- * a `workflow` or `shared:<group>` scope.
+ * a `workflow`, `shared:<group>`, `user:<userId>`, `org`, or
+ * `peer:<peerId>` scope.
  *
  * Reasoning: a plugin that accidentally derives data location from
  * scope text (rather than Owner) is a bug waiting to happen — leak
  * "shared" data into a "private" path on a typo. By collapsing scope
  * into Owner at registry time, plugins literally cannot make that
  * mistake.
+ *
+ * A3 (v4 Phase 5) — `'user' | 'org' | 'peer'` were added to align with
+ * `@aipehub/identity`'s vault `OwnerKind`. The three new kinds enable
+ * higher-level services (B1 OrgApiPool, B3 Knowledge, D1 Peer Registry)
+ * to file data by identity-rooted ownership without re-inventing the
+ * vocabulary. The original three kinds remain valid — they answer
+ * "which runtime entity holds this row" rather than "which principal
+ * owns it"; both axes are needed.
  */
-export type OwnerKind = 'agent' | 'workflow-run' | 'shared'
+export type OwnerKind =
+  | 'agent'
+  | 'workflow-run'
+  | 'shared'
+  // A3 (v4 Phase 5) — identity-rooted owners. Values mirror
+  // `@aipehub/identity`'s `OwnerKind` so the two packages can pass
+  // (kind, id) tuples to each other without translation.
+  | 'user'
+  | 'org'
+  | 'peer'
+
+/**
+ * Sentinel id for the `'org'` kind. The host IS the implicit org owner
+ * (a single AipeHub install == one organisation), so there's no real
+ * org id to scope by. We use `'self'` as the path segment so the
+ * filesystem layout (`<rootDir>/org/self/...`) stays readable instead
+ * of producing an awkward bare `<rootDir>/org/` directory.
+ *
+ * Mirrors how `@aipehub/identity`'s vault stores ownerKind='org' rows
+ * with `owner_id IS NULL`: the absence is real in the data model, but
+ * the filesystem path needs *something*.
+ */
+export const ORG_SELF_ID = 'self'
 
 export interface Owner {
   /** What kind of entity this Owner represents. */
@@ -26,6 +57,9 @@ export interface Owner {
    *   - kind='agent'        → agentId
    *   - kind='workflow-run' → workflow runId
    *   - kind='shared'       → groupId (whatever the yaml authored)
+   *   - kind='user'         → v4 user id
+   *   - kind='org'          → always `ORG_SELF_ID` ('self')
+   *   - kind='peer'         → peer hub id
    */
   readonly id: string
 }
@@ -37,8 +71,17 @@ export interface Owner {
  *   'private'                   → (agent, <agentId>)
  *   'workflow'                  → (workflow-run, <runId>)
  *   'shared:industry-coaches'   → (shared, 'industry-coaches')
+ *   'user:<userId>'             → (user, <userId>)        — A3
+ *   'org'                       → (org, 'self')           — A3
+ *   'peer:<peerId>'             → (peer, <peerId>)        — A3
  */
-export type Scope = 'private' | 'workflow' | `shared:${string}`
+export type Scope =
+  | 'private'
+  | 'workflow'
+  | 'org'
+  | `shared:${string}`
+  | `user:${string}`
+  | `peer:${string}`
 
 /**
  * Context required to translate a Scope to an Owner. Only the fields
@@ -50,6 +93,10 @@ export interface ScopeContext {
   runId?: string
   /** Already-parsed group id when scope starts with `shared:`. */
   groupId?: string
+  /** A3 — already-parsed user id when scope starts with `user:`. */
+  userId?: string
+  /** A3 — already-parsed peer id when scope starts with `peer:`. */
+  peerId?: string
 }
 
 /**
@@ -57,12 +104,16 @@ export interface ScopeContext {
  * receives. Throws when the scope can't be satisfied (e.g. asked for
  * `workflow` scope but no `runId` provided).
  *
- *   resolveOwner('private', { agentId: 'a1' })   → { kind:'agent', id:'a1' }
- *   resolveOwner('workflow', { runId: 'r1' })    → { kind:'workflow-run', id:'r1' }
- *   resolveOwner('shared:g', { groupId: 'g' })   → { kind:'shared', id:'g' }
+ *   resolveOwner('private', { agentId: 'a1' })       → { kind:'agent', id:'a1' }
+ *   resolveOwner('workflow', { runId: 'r1' })        → { kind:'workflow-run', id:'r1' }
+ *   resolveOwner('shared:g', { groupId: 'g' })       → { kind:'shared', id:'g' }
+ *   resolveOwner('user:alice', { userId: 'alice' })  → { kind:'user', id:'alice' }
+ *   resolveOwner('org', {})                          → { kind:'org', id:'self' }
+ *   resolveOwner('peer:hub-x', { peerId: 'hub-x' })  → { kind:'peer', id:'hub-x' }
  *
- * `groupId` may be omitted by the caller; this function parses it out
- * of the scope string when the caller didn't bother.
+ * For prefixed scopes (`shared:` / `user:` / `peer:`), the id may be
+ * supplied either via the prefix OR via ScopeContext; the context
+ * takes precedence so a yaml typo can be corrected at runtime.
  */
 export function resolveOwner(scope: Scope, ctx: ScopeContext): Owner {
   if (scope === 'private') {
@@ -75,11 +126,29 @@ export function resolveOwner(scope: Scope, ctx: ScopeContext): Owner {
     assertSafeOwnerId(ctx.runId)
     return { kind: 'workflow-run', id: ctx.runId }
   }
+  if (scope === 'org') {
+    // 'org' takes no id — the host is the implicit org. We still emit
+    // a path-safe sentinel ('self') so plugins can build a directory
+    // path without special-casing the empty-id case.
+    return { kind: 'org', id: ORG_SELF_ID }
+  }
   if (scope.startsWith('shared:')) {
     const groupId = ctx.groupId ?? scope.slice('shared:'.length)
     if (!groupId) throw new Error(`scope 'shared:<group>' requires a non-empty group id`)
     assertSafeOwnerId(groupId)
     return { kind: 'shared', id: groupId }
+  }
+  if (scope.startsWith('user:')) {
+    const userId = ctx.userId ?? scope.slice('user:'.length)
+    if (!userId) throw new Error(`scope 'user:<userId>' requires a non-empty user id`)
+    assertSafeOwnerId(userId)
+    return { kind: 'user', id: userId }
+  }
+  if (scope.startsWith('peer:')) {
+    const peerId = ctx.peerId ?? scope.slice('peer:'.length)
+    if (!peerId) throw new Error(`scope 'peer:<peerId>' requires a non-empty peer id`)
+    assertSafeOwnerId(peerId)
+    return { kind: 'peer', id: peerId }
   }
   throw new Error(`unknown scope: ${scope}`)
 }
@@ -107,7 +176,14 @@ export function parseOwnerKey(key: string): Owner {
   if (slash < 0) throw new Error(`malformed owner key: ${key}`)
   const kind = key.slice(0, slash) as OwnerKind
   const id = key.slice(slash + 1)
-  if (kind !== 'agent' && kind !== 'workflow-run' && kind !== 'shared') {
+  if (
+    kind !== 'agent' &&
+    kind !== 'workflow-run' &&
+    kind !== 'shared' &&
+    kind !== 'user' &&
+    kind !== 'org' &&
+    kind !== 'peer'
+  ) {
     throw new Error(`unknown owner kind in key: ${kind}`)
   }
   if (!id) throw new Error(`empty id in owner key: ${key}`)

@@ -348,16 +348,25 @@ export const VAULT_KINDS: readonly VaultKind[] = [
 ] as const
 
 /**
- * Unified ownership taxonomy. Used by vault here (A1) and — once A3
- * lands — extended across memory / artifact / knowledge stores. Keeps
- * "who owns this resource" expressible without parsing string
- * conventions.
+ * Unified ownership taxonomy. Used by vault here (A1) and aligned in A3
+ * with `@aipehub/services-sdk`'s `OwnerKind` — the string values
+ * ('user' | 'org' | 'peer') are an EXACT subset of the SDK's wider enum
+ * (also including 'agent' | 'workflow-run' | 'shared'). This lets a
+ * `(kind, id)` tuple round-trip between a vault row and a service
+ * attach call without translation.
  *
  *   user  — bound to a specific v4 user id (personal scope)
  *   org   — owned by the host itself (organisation-wide scope; ownerId
- *           is null because the host IS the implicit org)
+ *           is null in the vault row because the host IS the implicit
+ *           org. The SDK uses the sentinel id `ORG_SELF_ID` ('self')
+ *           when it needs a path-safe string)
  *   peer  — owned by a remote peer hub (federation scope; ownerId is
  *           the peer's hub id)
+ *
+ * The SDK's 'agent' / 'workflow-run' / 'shared' kinds are intentionally
+ * NOT mirrored here — vault rows are managed at the principal level
+ * (who controls / pays for the secret), not the runtime level (which
+ * agent happens to read it for a given task).
  */
 export type OwnerKind = 'user' | 'org' | 'peer'
 

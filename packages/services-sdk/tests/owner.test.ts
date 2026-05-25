@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ORG_SELF_ID,
   assertSafeOwnerId,
   ownerKey,
   ownersEqual,
@@ -54,6 +55,64 @@ describe('resolveOwner', () => {
     // @ts-expect-error: deliberate bad input
     expect(() => resolveOwner('public', {})).toThrow(/unknown scope/)
   })
+
+  // ========================================================================
+  // A3 (v4 Phase 5) — identity-rooted kinds aligned with @aipehub/identity.
+  // user / org / peer values must mirror identity's vault `OwnerKind` so a
+  // single (kind, id) tuple round-trips between vault rows and service
+  // attach calls.
+  // ========================================================================
+
+  it("user:<id> → ('user', userId) — explicit suffix", () => {
+    expect(resolveOwner('user:alice', { userId: 'alice' })).toEqual({
+      kind: 'user',
+      id: 'alice',
+    })
+  })
+
+  it('user scope honors an explicit userId override (typo correction)', () => {
+    expect(resolveOwner('user:typo', { userId: 'alice-id' })).toEqual({
+      kind: 'user',
+      id: 'alice-id',
+    })
+  })
+
+  it("user:<empty> throws", () => {
+    // Cast bypasses literal-type check; runtime guard catches the empty id.
+    expect(() => resolveOwner('user:' as 'user:x', {})).toThrow(/non-empty/)
+  })
+
+  it("org → ('org', ORG_SELF_ID) — no context required", () => {
+    expect(resolveOwner('org', {})).toEqual({ kind: 'org', id: ORG_SELF_ID })
+    expect(ORG_SELF_ID).toBe('self')
+  })
+
+  it("peer:<id> → ('peer', peerId)", () => {
+    expect(resolveOwner('peer:widgets-hub', { peerId: 'widgets-hub' })).toEqual({
+      kind: 'peer',
+      id: 'widgets-hub',
+    })
+  })
+
+  it('peer scope honors an explicit peerId override', () => {
+    expect(resolveOwner('peer:typo', { peerId: 'real-peer' })).toEqual({
+      kind: 'peer',
+      id: 'real-peer',
+    })
+  })
+
+  it("peer:<empty> throws", () => {
+    expect(() => resolveOwner('peer:' as 'peer:x', {})).toThrow(/non-empty/)
+  })
+
+  it('A3 path-traversal hardening: every new kind rejects unsafe ids', () => {
+    // Same defense-in-depth applies to the new kinds — a yaml typo or
+    // a hostile peer-registry entry must not slip a `../` past us.
+    expect(() => resolveOwner('user:../escape', {})).toThrow(/path separators/)
+    expect(() => resolveOwner('peer:..', {})).toThrow(/relative-path segment/)
+    // 'org' takes no input id (constant 'self'); just pin that it's safe.
+    expect(() => assertSafeOwnerId(ORG_SELF_ID)).not.toThrow()
+  })
 })
 
 describe('ownerKey / parseOwnerKey', () => {
@@ -84,6 +143,23 @@ describe('ownerKey / parseOwnerKey', () => {
 
   it('rejects empty id', () => {
     expect(() => parseOwnerKey('agent/')).toThrow(/empty id/)
+  })
+
+  // A3 — new kinds round-trip through (parse|owner)Key just like the old ones.
+  it('round-trips user owner', () => {
+    const o = { kind: 'user', id: 'alice-id' } as const
+    expect(parseOwnerKey(ownerKey(o))).toEqual(o)
+  })
+
+  it('round-trips org owner with ORG_SELF_ID', () => {
+    const o = { kind: 'org', id: ORG_SELF_ID } as const
+    expect(parseOwnerKey(ownerKey(o))).toEqual(o)
+    expect(ownerKey(o)).toBe('org/self')
+  })
+
+  it('round-trips peer owner', () => {
+    const o = { kind: 'peer', id: 'widgets-hub' } as const
+    expect(parseOwnerKey(ownerKey(o))).toEqual(o)
   })
 })
 

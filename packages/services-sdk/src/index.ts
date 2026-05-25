@@ -16,6 +16,7 @@ export {
   parseOwnerKey,
   ownersEqual,
   assertSafeOwnerId,
+  ORG_SELF_ID,
 } from './owner.js'
 export type { Owner, OwnerKind, Scope, ScopeContext } from './owner.js'
 
