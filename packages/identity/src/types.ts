@@ -478,8 +478,13 @@ export const USAGE_METRIC_MAX_LEN = 64
  * One counter row. `metric` is free-form so subsystems can name their
  * own counters without a schema migration. Recommended values:
  *   - 'llm_requests', 'llm_tokens_in', 'llm_tokens_out'    (B1 / B2)
- *   - 'mcp_calls'                                          (future)
- *   - 'knowledge_ingest_bytes', 'knowledge_query'          (B3 / B4)
+ *   - 'mcp_calls'                                          (B3 / B4 —
+ *     covers RAG too, since the v4 Phase 5 decision was to do RAG via
+ *     MCP rather than build a knowledge subsystem; see
+ *     docs/zh/RAG-VIA-MCP.md)
+ *   - 'knowledge_ingest_bytes', 'knowledge_query'          (reserved —
+ *     future per-RAG-server self-reported telemetry. MCP spec has no
+ *     telemetry channel today, so nothing debits these yet.)
  */
 export interface UsageCounter {
   userId: string

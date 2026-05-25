@@ -280,3 +280,16 @@ AIPE_HUB_URL=http://127.0.0.1:3000 AIPE_ADMIN_TOKEN=<token> aipehub-mcp
 
 然后手敲 JSON-RPC 消息（`{"jsonrpc":"2.0","id":1,"method":"tools/list"}` + 回车）。
 stderr 显示实际发生了什么。
+
+---
+
+## 6. 反向 —— Agent 作为 MCP **客户端**（RAG / 外部工具）
+
+本文讲的是 "Claude Desktop 调进 Hub"。**反方向** —— Hub 里的 agent
+拉起外部 MCP server 调用它的工具（典型场景:RAG 向量检索、Brave Search、
+GitHub MCP）—— 是另一条独立路径,见 [`RAG-VIA-MCP.md`](./RAG-VIA-MCP.md)。
+
+简言之:agent record 里加 `mcpServers: [{name, command, args, env}]`,
+`LocalAgentPool.spawn` 会拉起子进程并把它的工具暴露给 agent 的
+tool-use loop。`scripts/personal-growth-prompts.mjs` 里的 5 个 coach
+agent 已经用这条路接 Brave Search 做实时搜索。
