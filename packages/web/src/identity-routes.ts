@@ -133,6 +133,17 @@ export interface IdentityPeerDTO {
   updatedAt: number
 }
 
+export interface IdentityOrgQuotaDTO {
+  metric: string
+  period: 'hourly' | 'daily' | 'monthly' | 'total'
+  quota: number
+  warnPct: number
+  lastState: 'ok' | 'warn' | 'over'
+  lastChecked: number | null
+  createdAt: number
+  updatedAt: number
+}
+
 export interface IdentityInvitationDTO {
   id: string
   email: string
@@ -199,6 +210,29 @@ export interface IdentitySurface {
     },
   ): IdentityPeerDTO
   removePeer?(id: string): boolean
+  // E1 — Org soft quotas. All optional for the same reason as the D1
+  // methods above; route handlers check `typeof identity.listOrgQuotas
+  // === 'function'` and 503 when missing.
+  listOrgQuotas?(): IdentityOrgQuotaDTO[]
+  setOrgQuota?(input: {
+    metric: string
+    period: 'hourly' | 'daily' | 'monthly' | 'total'
+    quota: number
+    warnPct?: number
+  }): IdentityOrgQuotaDTO
+  getOrgQuota?(
+    metric: string,
+    period: 'hourly' | 'daily' | 'monthly' | 'total',
+  ): IdentityOrgQuotaDTO | null
+  deleteOrgQuota?(
+    metric: string,
+    period: 'hourly' | 'daily' | 'monthly' | 'total',
+  ): boolean
+  sumUsage?(
+    metric: string,
+    period: 'hourly' | 'daily' | 'monthly' | 'total',
+    now?: number,
+  ): number
   // V4-AUDIT-06 — audit log surface. Both methods are optional on the
   // structural type so older host wirings (an IdentityStore that
   // predates the migration) still typecheck. In practice the host
@@ -695,6 +729,25 @@ export async function handleIdentityRoute(
   }
   if (m && method === 'DELETE') {
     handleRemovePeer(ctx, req, res, m[1]!)
+    return
+  }
+
+  // E1 / C2 — Org soft-quota CRUD (owner-only).
+  //
+  // List + summary always available; sumUsage is exposed via the same
+  // list endpoint as a {usage, pct, state} sidecar so the UI doesn't
+  // make N additional round-trips. Set / delete are upsert + cap-remove.
+  if (method === 'GET' && path === '/api/admin/identity/org-quotas') {
+    handleListOrgQuotas(ctx, res)
+    return
+  }
+  if (method === 'POST' && path === '/api/admin/identity/org-quotas') {
+    await handleSetOrgQuota(ctx, req, res)
+    return
+  }
+  m = /^\/api\/admin\/identity\/org-quotas\/([^/]+)\/([^/]+)$/.exec(path)
+  if (m && method === 'DELETE') {
+    handleDeleteOrgQuota(ctx, req, res, m[1]!, m[2]!)
     return
   }
 
@@ -1631,6 +1684,159 @@ function handleRemovePeer(
       action: 'peer_remove',
       targetUserId: null,
       metadata: { peerRowId: id },
+      success: true,
+    })
+    sendJson(res, { ok: true })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// E1 / C2 — Org soft-quota handlers
+// ---------------------------------------------------------------------------
+
+function ensureOrgQuotasSupported(
+  ctx: HandleIdentityRouteCtx,
+  res: ServerResponse,
+): boolean {
+  if (typeof ctx.identity.listOrgQuotas !== 'function') {
+    sendJson(res, { error: 'org-quotas surface not supported by this host' }, 503)
+    return false
+  }
+  return true
+}
+
+const VALID_PERIODS = new Set(['hourly', 'daily', 'monthly', 'total'] as const)
+type PeriodValue = 'hourly' | 'daily' | 'monthly' | 'total'
+
+/**
+ * List + decorate with live usage / pct / state so the UI's quota cards
+ * can render the progress bar without a second round-trip per row. We
+ * compute pct ourselves rather than calling checkOrgQuotaThreshold
+ * (which would also mutate lastState) — admin UI views are READS, the
+ * state machine should only advance from the host sweep timer.
+ */
+function handleListOrgQuotas(
+  ctx: HandleIdentityRouteCtx,
+  res: ServerResponse,
+): void {
+  if (!ensureOrgQuotasSupported(ctx, res)) return
+  try {
+    const quotas = ctx.identity.listOrgQuotas!()
+    const out = quotas.map((q) => {
+      let usage = 0
+      try {
+        usage = ctx.identity.sumUsage?.(q.metric, q.period) ?? 0
+      } catch { /* stay at 0 — usage is informational here */ }
+      let pct: number
+      let derivedState: 'ok' | 'warn' | 'over'
+      if (q.quota === 0) {
+        pct = usage === 0 ? 0 : 999
+        derivedState = usage === 0 ? 'ok' : 'over'
+      } else {
+        pct = Math.min(999, Math.floor((usage / q.quota) * 100))
+        if (pct >= 100) derivedState = 'over'
+        else if (pct >= q.warnPct) derivedState = 'warn'
+        else derivedState = 'ok'
+      }
+      return {
+        ...q,
+        usage,
+        pct,
+        // `state` is the live derived state (read-only); `lastState` is
+        // the snapshot from the most recent host sweep. UI shows both
+        // when they disagree, so operator knows a tick is overdue.
+        state: derivedState,
+      }
+    })
+    sendJson(res, { quotas: out })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+async function handleSetOrgQuota(
+  ctx: HandleIdentityRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  if (!ensureOrgQuotasSupported(ctx, res)) return
+  const v4 = resolveV4Auth(ctx.identity, req)
+  let body: { metric?: string; period?: string; quota?: number; warnPct?: number }
+  try {
+    body = (await readJsonBody(req)) as typeof body
+  } catch (err) {
+    sendJson(res, { error: 'invalid json body' }, 400)
+    return
+  }
+  if (!body || typeof body.metric !== 'string' || !body.metric.trim()) {
+    sendJson(res, { error: 'metric required' }, 400)
+    return
+  }
+  if (typeof body.period !== 'string' || !VALID_PERIODS.has(body.period as PeriodValue)) {
+    sendJson(res, { error: `period must be one of ${[...VALID_PERIODS].join(', ')}` }, 400)
+    return
+  }
+  if (
+    typeof body.quota !== 'number' ||
+    !Number.isFinite(body.quota) ||
+    !Number.isInteger(body.quota) ||
+    body.quota < 0
+  ) {
+    sendJson(res, { error: 'quota must be a non-negative integer' }, 400)
+    return
+  }
+  try {
+    const saved = ctx.identity.setOrgQuota!({
+      metric: body.metric.trim(),
+      period: body.period as PeriodValue,
+      quota: body.quota,
+      ...(body.warnPct !== undefined ? { warnPct: body.warnPct } : {}),
+    })
+    tryAudit(ctx, v4, {
+      action: 'org_set_quota',
+      targetUserId: null,
+      metadata: {
+        metric: saved.metric,
+        period: saved.period,
+        quota: saved.quota,
+        warnPct: saved.warnPct,
+      },
+      success: true,
+    })
+    sendJson(res, { quota: saved })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+function handleDeleteOrgQuota(
+  ctx: HandleIdentityRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  metric: string,
+  period: string,
+): void {
+  if (!ensureOrgQuotasSupported(ctx, res)) return
+  if (!VALID_PERIODS.has(period as PeriodValue)) {
+    sendJson(res, { error: 'invalid period segment' }, 400)
+    return
+  }
+  const v4 = resolveV4Auth(ctx.identity, req)
+  try {
+    const removed = ctx.identity.deleteOrgQuota!(
+      decodeURIComponent(metric),
+      period as PeriodValue,
+    )
+    if (!removed) {
+      sendJson(res, { error: 'quota not found' }, 404)
+      return
+    }
+    tryAudit(ctx, v4, {
+      action: 'org_set_quota',
+      targetUserId: null,
+      metadata: { metric: decodeURIComponent(metric), period, deleted: true },
       success: true,
     })
     sendJson(res, { ok: true })

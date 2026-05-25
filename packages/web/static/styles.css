@@ -1740,3 +1740,35 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .me-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-top: 0.4rem; }
 .me-table th, .me-table td { text-align: left; border-bottom: 1px solid #eee; padding: 0.4rem 0.5rem; }
 .settings-form { display: block; max-width: 24rem; }
+
+/* C2 — org quota management panel */
+.quotas-panel { padding: 1rem; }
+.quotas-panel .q-header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+.quotas-panel .q-header h2 { margin: 0; flex: 1 0 100%; }
+.quotas-panel .q-meta { flex: 1 0 100%; color: #666; font-size: 0.85rem; margin: 0; }
+.quotas-panel .q-status { font-size: 0.85rem; min-height: 1em; }
+.quotas-panel .q-status-loading { color: #888; }
+.quotas-panel .q-status-ok { color: #27ae60; }
+.quotas-panel .q-status-error { color: #c0392b; }
+.quotas-panel .q-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-bottom: 1.5rem; }
+.quotas-panel .q-table th, .quotas-panel .q-table td { text-align: left; border-bottom: 1px solid #eee; padding: 0.4rem 0.5rem; vertical-align: middle; }
+.quotas-panel .q-table th { background: #fafafa; font-weight: 600; color: #555; }
+.quotas-panel .q-empty { color: #888; text-align: center; padding: 1.5rem; }
+.quotas-panel .q-time { font-size: 0.78rem; color: #888; }
+.quotas-panel .q-bar { position: relative; background: #eee; border-radius: 4px; height: 1.2rem; width: 9rem; overflow: hidden; }
+.quotas-panel .q-bar-fill { height: 100%; background: #2ecc71; transition: width 0.2s; }
+.quotas-panel .q-bar-warn .q-bar-fill { background: #f39c12; }
+.quotas-panel .q-bar-over .q-bar-fill { background: #e74c3c; }
+.quotas-panel .q-bar-stale { outline: 1px dashed #999; }
+.quotas-panel .q-bar-label { position: absolute; top: 0; left: 0; right: 0; text-align: center; font-size: 0.78rem; line-height: 1.2rem; color: #222; pointer-events: none; }
+.quotas-panel .q-state { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px; font-size: 0.78rem; font-weight: 600; }
+.quotas-panel .q-state-ok { background: #d4edda; color: #155724; }
+.quotas-panel .q-state-warn { background: #fff3cd; color: #856404; }
+.quotas-panel .q-state-over { background: #f8d7da; color: #721c24; }
+.quotas-panel .q-state-stale { color: #888; font-size: 0.72rem; margin-left: 0.3rem; }
+.quotas-panel .q-form-wrap h3 { font-size: 0.95rem; margin: 0 0 0.4rem; }
+.quotas-panel .q-form { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: flex-end; }
+.quotas-panel .q-form label { display: flex; flex-direction: column; font-size: 0.78rem; color: #555; }
+.quotas-panel .q-form input, .quotas-panel .q-form select { font: inherit; padding: 0.35rem 0.45rem; border: 1px solid #ccc; border-radius: 4px; min-width: 8rem; }
+.quotas-panel .q-primary { font: inherit; padding: 0.4rem 0.9rem; background: #1f6feb; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+.quotas-panel .q-primary:hover { background: #1759c8; }

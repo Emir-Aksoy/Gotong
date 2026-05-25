@@ -474,6 +474,7 @@
     // declares. We just chain.
     inject('/admin.js')
       .then(() => inject('/identity-ui.js'))
+      .then(() => inject('/quotas-ui.js'))
       .catch((err) => {
         console.error('[app] failed to load admin bundles', err)
       })

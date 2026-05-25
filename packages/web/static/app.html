@@ -108,6 +108,7 @@
       <button class="tabbar-btn" type="button" data-tab="activity"  data-roles="owner,admin" data-i18n="tabActivity">活动</button>
       <button class="tabbar-btn" type="button" data-tab="services"  data-roles="owner,admin" data-i18n="tabServices">服务</button>
       <button class="tabbar-btn" type="button" data-tab="users"     data-roles="owner" data-i18n="tabUsers">用户</button>
+      <button class="tabbar-btn" type="button" data-tab="quotas"    data-roles="owner" data-i18n="tabQuotas">配额</button>
       <button class="tabbar-btn" type="button" data-tab="settings"  data-roles="owner,admin,member,viewer" data-i18n="tabSettings">设置</button>
     </nav>
 
@@ -750,6 +751,10 @@
       <!-- v4 identity / user management. Content rendered entirely by
            /identity-ui.js (self-contained, no admin.js coupling). -->
       <section id="users-panel" class="users-panel" data-tab="users"></section>
+
+      <!-- E1 / C2 — org-level soft quota management. Rendered by
+           /quotas-ui.js. Same self-contained pattern as identity-ui. -->
+      <section id="quotas-panel" class="quotas-panel" data-tab="quotas"></section>
     </main>
   </body>
 </html>
