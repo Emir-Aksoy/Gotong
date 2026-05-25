@@ -203,6 +203,66 @@ RAG-specific 代码。
 跨 agent 共享检索结果? 就是 step output 串到下一步:`$research.output`
 里带回索引结果摘要,后续 step 不再重复 query。
 
+## 六-bis、跨 hub 知识共享(D3 决议)
+
+原 v4 Phase 5 计划里的 **D3** 是 "shared_with + 跨 hub query" ——
+让 A 用户的 knowledge collection 能授权给 B hub 的 agent 检索。
+
+**结论:不在 aipehub 层实现,走共享 MCP server。**
+
+原因和 B3 决议一致:knowledge 本质是个存储/检索后端,标准 MCP 协议
+(chroma-mcp / qdrant-mcp / pinecone-mcp / weaviate-mcp 等)已经
+原生支持远程客户端 + 服务端访问控制。在 aipehub 上再加一层
+"shared_with"模型,只会和 MCP server 自身的 ACL 重叠/冲突。
+
+### 推荐部署模式
+
+**模式 A —— 公共只读 corpus**
+
+```jsonc
+// 共享 chroma 实例(远程 HTTP 模式)开在 chroma.shared-org.local:8000
+// hub_A 和 hub_B 的 agent 都用同一份 mcpServers 配置:
+{
+  "mcpServers": [{
+    "name": "public-corpus",
+    "command": "uvx",
+    "args": [
+      "chroma-mcp",
+      "--client-type", "http",
+      "--host", "chroma.shared-org.local",
+      "--port", "8000",
+      "--read-only"
+    ]
+  }]
+}
+```
+
+server 侧加 IP allowlist / token 验证;每个 hub 用同一份只读 token。
+谁能查就在 MCP server 侧管,跟 aipehub 解耦。
+
+**模式 B —— 跨 org 写共享**
+
+走 Postgres-backed chroma / 商业 Pinecone / Weaviate Cloud
+—— 写权限和分区由后端自己管(per-collection API key / row-level
+security)。aipehub 只负责给 agent 注入对应的 API key 凭据
+(vault),不掺合"哪个 hub 能写哪个 collection"。
+
+**模式 C —— federated MCP 网关**
+
+如果真的想做 hub-to-hub 转发(罕见场景),写一个轻量 MCP-proxy server
+跑在 hub_A 上,它 forward 到自己内部的 chroma + 检查请求源是不是
+hub_B 的 agent 凭据。这是个独立项目,**不在 aipehub 主仓**。
+
+### 跟 D2 (跨 hub HITL) 的区别
+
+**HITL 走 aipehub**(D2 已实现):因为 HITL 涉及 task 跨 hub 路由 +
+admin 决策 + 审计,这些都是 aipehub 已有的核心抽象(hub.dispatch /
+task.origin / audit_log)。让 aipehub 在外面绕一圈反而复杂。
+
+**knowledge 不走 aipehub**(D3 跳过):因为 knowledge 检索是个纯数据
+平面操作,跟 task scheduling / approval / audit 无关。MCP 协议天然
+处理客户端-服务端拓扑,aipehub 再封一层只是冗余。
+
 ## 七、限制 + 故障排查
 
 | 症状 | 原因 / 解法 |
