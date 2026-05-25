@@ -15,6 +15,6 @@
     "@aipehub/llm-openai": "workspace:*",
     "@aipehub/services-sdk": "workspace:*",
     "@aipehub/workflow": "workspace:*",
-    "openai": "^6.38.0"
+    "openai": "^6.39.0"
   }
 }
