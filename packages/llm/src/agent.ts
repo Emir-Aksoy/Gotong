@@ -10,9 +10,12 @@ import type {
   LlmProvider,
   LlmRequest,
   LlmResponse,
+  LlmStopReason,
+  LlmStreamChunk,
   LlmToolDefinition,
   LlmToolResultBlock,
   LlmToolUseBlock,
+  LlmUsage,
 } from './types.js'
 
 /**
@@ -104,7 +107,7 @@ export interface LlmAgentOptions extends AgentOptions {
    */
   preCallHook?: (task: Task) => void | Promise<void>
   /**
-   * Phase 6 #2 — auth-failure hook. Invoked when `provider.complete`
+   * Phase 6 #2 — auth-failure hook. Invoked when `provider.stream`
    * throws an error whose shape suggests the credential is invalid
    * (currently: `.status === 401` or the SDK exception class name
    * matches `/AuthenticationError/`). Best-effort: errors thrown by
@@ -121,6 +124,28 @@ export interface LlmAgentOptions extends AgentOptions {
    * the agent just re-throws the 401 like any other provider error).
    */
   onAuthFailure?: (err: unknown, task: Task) => void | Promise<void>
+  /**
+   * Phase 8 M5 — per-chunk hook fired once per `LlmStreamChunk` the
+   * provider yields, BEFORE the chunk is folded into the accumulated
+   * `LlmResponse`. Used by the workflow runner to write per-chunk
+   * transcript events (Phase 8 M6) which the web layer then forwards
+   * over SSE to the admin UI (Phase 8 M7).
+   *
+   * Best-effort: errors thrown by the hook are caught + logged but
+   * do NOT abort the stream. Treating chunk emission as load-bearing
+   * for task success would couple the LLM agent to the transcript
+   * service in a way that breaks SDK-only / test usage; the agent
+   * still returns a complete `LlmResponse` even if every hook call
+   * fails.
+   *
+   * Fires for EVERY provider call within a task — both the first
+   * round and each subsequent tool-use round. Hooks that want to
+   * scope per-round work should track that themselves.
+   *
+   * Absent → no per-chunk emission. The agent still consumes the
+   * stream and returns an aggregated `LlmResponse` exactly as before.
+   */
+  onStreamChunk?: (chunk: LlmStreamChunk, task: Task) => void | Promise<void>
 }
 
 /**
@@ -197,6 +222,16 @@ export class LlmAgent extends AgentParticipant {
     err: unknown,
     task: Task,
   ) => void | Promise<void>
+  /**
+   * Phase 8 M5 — see LlmAgentOptions.onStreamChunk doc. Captured on
+   * spawn; called best-effort from the stream-consumer inside the
+   * call wrapper. Errors are caught and logged; the stream keeps
+   * going.
+   */
+  protected readonly onStreamChunk?: (
+    chunk: LlmStreamChunk,
+    task: Task,
+  ) => void | Promise<void>
 
   constructor(opts: LlmAgentOptions) {
     super({ id: opts.id, capabilities: opts.capabilities })
@@ -212,6 +247,7 @@ export class LlmAgent extends AgentParticipant {
     this.maxToolRounds = opts.maxToolRounds ?? 8
     this.preCallHook = opts.preCallHook
     this.onAuthFailure = opts.onAuthFailure
+    this.onStreamChunk = opts.onStreamChunk
   }
 
   /**
@@ -236,32 +272,124 @@ export class LlmAgent extends AgentParticipant {
   }
 
   /**
-   * Phase 6 #2 — wrap `provider.complete` so all call sites (the
+   * Phase 8 M5 — wrap `provider.stream` so all call sites (the
    * single-shot path and the multi-round tool-use loop) get auth
-   * detection identically. The hook is best-effort: a throwing /
-   * rejecting hook is logged but does NOT mask the original provider
+   * detection + per-chunk emission identically.
+   *
+   * Auth detection: a synchronous throw from `provider.stream(req)`
+   * (or from the first `.next()` of the iterator) typically means
+   * auth / transport failure. The onAuthFailure hook is best-effort:
+   * a throwing hook is logged but does NOT mask the original provider
    * error — operators need the 401 surfaced clearly to debug.
+   *
+   * Per-chunk emission: every chunk yielded by the stream fires
+   * `onStreamChunk(chunk, task)` BEFORE being folded into the
+   * accumulated response. Hook errors are caught + logged, never
+   * abort the stream. See `onStreamChunk` doc for rationale.
+   *
+   * The aggregated `LlmResponse` returned matches what the legacy
+   * `provider.complete()` would have returned: concatenated text,
+   * collected tool_uses, first usage observed, terminal stopReason.
    */
-  protected async completeWithAuthHook(
+  protected async streamWithAuthHook(
     req: LlmRequest,
     task: Task,
   ): Promise<LlmResponse> {
+    let stream: AsyncIterable<LlmStreamChunk>
     try {
-      return await this.provider.complete(req)
+      // Fallback for SDK consumers / tests still on the legacy
+      // `{name, complete}` provider shape (M8 deletes both fallback
+      // and complete itself). Detect by checking the type of `stream`
+      // — TypeScript's structural typing lets a complete-only object
+      // satisfy the interface via `as any` casts, which is exactly
+      // what most existing fake providers do.
+      const provider = this.provider as {
+        stream?: (req: LlmRequest) => AsyncIterable<LlmStreamChunk>
+        complete?: (req: LlmRequest) => Promise<LlmResponse>
+      }
+      if (typeof provider.stream === 'function') {
+        stream = provider.stream(req)
+      } else if (typeof provider.complete === 'function') {
+        stream = legacyCompleteAsStream(() => provider.complete!(req))
+      } else {
+        throw new Error(
+          `LlmProvider '${this.provider.name}' has neither stream() nor complete() — at least one is required`,
+        )
+      }
     } catch (err) {
-      if (this.onAuthFailure && this.isAuthFailure(err)) {
-        try {
-          await this.onAuthFailure(err, task)
-        } catch (hookErr) {
-          // Best-effort: never let the auth-revoke hook mask the
-          // original error. Operators need the 401 in the task result
-          // to debug; hook failure goes to stderr where the host log
-          // pipeline (pino) picks it up.
-          // eslint-disable-next-line no-console
-          console.error('[llm-agent] onAuthFailure hook threw', hookErr)
+      await this.runAuthFailureHook(err, task)
+      throw err
+    }
+
+    const textParts: string[] = []
+    const toolUses: LlmToolUseBlock[] = []
+    let usage: LlmUsage | undefined
+    let stopReason: LlmStopReason = 'end_turn'
+    let errorAppend: string | undefined
+
+    try {
+      for await (const chunk of stream) {
+        // Per-chunk hook fires BEFORE accumulation so transcript
+        // events arrive in true wire order. Best-effort.
+        if (this.onStreamChunk) {
+          try {
+            await this.onStreamChunk(chunk, task)
+          } catch (hookErr) {
+            // eslint-disable-next-line no-console
+            console.error('[llm-agent] onStreamChunk hook threw', hookErr)
+          }
+        }
+        switch (chunk.type) {
+          case 'text':
+            if (chunk.text.length > 0) textParts.push(chunk.text)
+            break
+          case 'tool_use':
+            toolUses.push(chunk.toolUse)
+            break
+          case 'usage':
+            if (!usage) usage = chunk.usage
+            break
+          case 'end':
+            stopReason = chunk.stopReason
+            break
+          case 'error':
+            stopReason = 'error'
+            errorAppend = `[${chunk.code}] ${chunk.message}`
+            break
         }
       }
+    } catch (err) {
+      // Auth / transport errors that surface on iteration (e.g.
+      // SDK threw between create() and first chunk) get the same
+      // hook treatment as sync throws above.
+      await this.runAuthFailureHook(err, task)
       throw err
+    }
+
+    let text = textParts.join('')
+    if (errorAppend) text = text ? `${text}\n\n${errorAppend}` : errorAppend
+    const out: LlmResponse = { text, stopReason }
+    if (toolUses.length > 0) out.toolUses = toolUses
+    if (usage) out.usage = usage
+    return out
+  }
+
+  /**
+   * Internal — invoke onAuthFailure best-effort when an error looks
+   * like a credential rejection. Extracted so the sync-throw path and
+   * the mid-iteration throw path share the same logic.
+   */
+  private async runAuthFailureHook(err: unknown, task: Task): Promise<void> {
+    if (!this.onAuthFailure || !this.isAuthFailure(err)) return
+    try {
+      await this.onAuthFailure(err, task)
+    } catch (hookErr) {
+      // Best-effort: never let the auth-revoke hook mask the
+      // original error. Operators need the 401 in the task result
+      // to debug; hook failure goes to stderr where the host log
+      // pipeline (pino) picks it up.
+      // eslint-disable-next-line no-console
+      console.error('[llm-agent] onAuthFailure hook threw', hookErr)
     }
   }
 
@@ -376,7 +504,7 @@ export class LlmAgent extends AgentParticipant {
       // No toolset attached — same code path as v0.2.
       const req = this.buildRequest(task)
       if (this.preCallHook) await this.preCallHook(task)
-      const res = await this.completeWithAuthHook(req, task)
+      const res = await this.streamWithAuthHook(req, task)
       return this.parseResponse(res, task, 0)
     }
     return this.handleTaskWithTools(task)
@@ -412,7 +540,7 @@ export class LlmAgent extends AgentParticipant {
 
     while (true) {
       if (this.preCallHook) await this.preCallHook(task)
-      const res = await this.completeWithAuthHook(req, task)
+      const res = await this.streamWithAuthHook(req, task)
       const wantsTool =
         res.stopReason === 'tool_use' &&
         res.toolUses !== undefined &&
@@ -502,4 +630,30 @@ export class LlmAgent extends AgentParticipant {
       inputSchema: t.inputSchema,
     }))
   }
+}
+
+/**
+ * Phase 8 M5 — internal transition shim. Wraps a complete()-only
+ * provider into a single-pass stream that yields text → tool_use → usage
+ * → end. Used by `streamWithAuthHook` ONLY for providers that don't
+ * implement `stream()` yet (typically test fakes that pre-date Phase 8).
+ *
+ * To be removed in Phase 8 M8 along with `LlmProvider.complete()`.
+ */
+async function* legacyCompleteAsStream(
+  complete: () => Promise<LlmResponse>,
+): AsyncIterable<LlmStreamChunk> {
+  const res = await complete()
+  if (res.text && res.text.length > 0) {
+    yield { type: 'text', text: res.text }
+  }
+  if (res.toolUses) {
+    for (const tu of res.toolUses) {
+      yield { type: 'tool_use', toolUse: tu }
+    }
+  }
+  if (res.usage) {
+    yield { type: 'usage', usage: res.usage }
+  }
+  yield { type: 'end', stopReason: res.stopReason }
 }

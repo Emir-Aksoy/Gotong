@@ -194,10 +194,10 @@ describe('LlmAgent — onAuthFailure hook', () => {
   })
 
   it('fires once even with multi-round tool-use loop (first round 401)', async () => {
-    // The 401 happens on the first provider.complete inside the
+    // The 401 happens on the first provider call inside the
     // tool-use loop too. We verify the hook still gets called exactly
-    // once — wrapping is centralized in completeWithAuthHook so all
-    // call sites converge.
+    // once — wrapping is centralized in streamWithAuthHook (Phase 8 M5)
+    // so all call sites converge.
     let calls = 0
     const provider = throwingProvider(() =>
       Object.assign(new Error('Unauthorized'), { status: 401 }),
