@@ -938,3 +938,470 @@ describe('OpenAIProvider — native streaming (Phase 8 M3)', () => {
     expect((create as unknown as { _lastSignal?: unknown })._lastSignal).toBe(ac.signal)
   })
 })
+
+/**
+ * Phase 9 M3 — multimodal content block translation for OpenAI's
+ * chat.completions API. Covers image_url shape (base64 / url /
+ * artifact_ref), input_audio shape with model gating, file_ref mime
+ * routing, the inline cap, and parallel artifact resolution.
+ */
+describe('OpenAIProvider — multimodal translation (Phase 9 M3)', () => {
+  const SAMPLE_PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xab, 0xcd])
+  const SAMPLE_PNG_B64 = Buffer.from(SAMPLE_PNG_BYTES).toString('base64')
+  const SAMPLE_WAV_BYTES = new Uint8Array([0x52, 0x49, 0x46, 0x46])
+  const SAMPLE_WAV_B64 = Buffer.from(SAMPLE_WAV_BYTES).toString('base64')
+
+  it('translates LlmImageBlock(base64) to image_url with data: URL', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'describe' },
+          { type: 'image', source: { kind: 'base64', data: SAMPLE_PNG_B64, mime: 'image/png' } },
+        ],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as any[]
+    expect(msgs[0].role).toBe('user')
+    expect(msgs[0].content).toEqual([
+      { type: 'text', text: 'describe' },
+      { type: 'image_url', image_url: { url: `data:image/png;base64,${SAMPLE_PNG_B64}` } },
+    ])
+  })
+
+  it('translates LlmImageBlock(url) to image_url passing the URL through', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'image',
+          source: { kind: 'url', url: 'https://example.com/cat.png' },
+        }],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as any[]
+    expect(msgs[0].content).toEqual([
+      { type: 'image_url', image_url: { url: 'https://example.com/cat.png' } },
+    ])
+  })
+
+  it('resolves artifact_ref image source via the configured artifactResolver', async () => {
+    const resolver = vi.fn(async () => ({ bytes: SAMPLE_PNG_BYTES, mime: 'image/png' }))
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      artifactResolver: resolver,
+    })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'image',
+          source: { kind: 'artifact_ref', artifactId: 'photos/me.png', mime: 'image/png' },
+        }],
+      }],
+    }))
+    expect(resolver).toHaveBeenCalledWith('photos/me.png')
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as any[]
+    expect(msgs[0].content[0]).toEqual({
+      type: 'image_url',
+      image_url: { url: `data:image/png;base64,${SAMPLE_PNG_B64}` },
+    })
+  })
+
+  it('artifact_ref image source without resolver throws', async () => {
+    const { client } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'never' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+    await expect(drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'image',
+          source: { kind: 'artifact_ref', artifactId: 'x', mime: 'image/png' },
+        }],
+      }],
+    }))).rejects.toMatchObject({
+      code: 'MULTIMODAL_NOT_SUPPORTED',
+      providerName: 'openai',
+      blockType: 'image',
+    })
+  })
+
+  it('keeps pure-text user message as legacy string content (no array wrap)', async () => {
+    // OpenAI-compat backends sometimes refuse the array form for plain
+    // text. Verify we don't accidentally regress that.
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+    await drainStream(provider.stream({
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as any[]
+    expect(msgs[0].content).toBe('hi') // string, not array
+  })
+
+  it('audio block on non-audio model throws MultimodalNotSupportedError', async () => {
+    const { client } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'never' }, finish_reason: 'stop' }],
+    }))
+    // defaultModel is 'gpt-4o-mini' — no 'audio' in the name.
+    const provider = new OpenAIProvider({ client: client as any })
+    await expect(drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'audio',
+          source: { kind: 'base64', data: SAMPLE_WAV_B64, mime: 'audio/wav' },
+          format: 'wav',
+        }],
+      }],
+    }))).rejects.toMatchObject({
+      code: 'MULTIMODAL_NOT_SUPPORTED',
+      blockType: 'audio',
+    })
+  })
+
+  it('audio block on audio-capable model translates to input_audio', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      defaultModel: 'gpt-4o-audio-preview',
+    })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'audio',
+          source: { kind: 'base64', data: SAMPLE_WAV_B64, mime: 'audio/wav' },
+          format: 'wav',
+        }],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as any[]
+    expect(msgs[0].content[0]).toEqual({
+      type: 'input_audio',
+      input_audio: { data: SAMPLE_WAV_B64, format: 'wav' },
+    })
+  })
+
+  it('audio with unsupported format (webm) throws even on audio-capable model', async () => {
+    const { client } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'never' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      defaultModel: 'gpt-4o-audio-preview',
+    })
+    await expect(drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'audio',
+          source: { kind: 'base64', data: 'AAAA', mime: 'audio/webm' },
+          format: 'webm',
+        }],
+      }],
+    }))).rejects.toMatchObject({
+      code: 'MULTIMODAL_NOT_SUPPORTED',
+      blockType: 'audio',
+    })
+  })
+
+  it('audio with url source throws (input_audio is base64-only)', async () => {
+    const { client } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'never' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      defaultModel: 'gpt-4o-audio-preview',
+    })
+    await expect(drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'audio',
+          source: { kind: 'url', url: 'https://example.com/clip.wav' },
+          format: 'wav',
+        }],
+      }],
+    }))).rejects.toMatchObject({
+      code: 'MULTIMODAL_NOT_SUPPORTED',
+    })
+  })
+
+  it('file_ref with image/* mime routes to image_url', async () => {
+    const resolver = vi.fn(async () => ({ bytes: SAMPLE_PNG_BYTES, mime: 'image/png' }))
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      artifactResolver: resolver,
+    })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{ type: 'file_ref', artifactId: 'uploads/x.png', mime: 'image/png' }],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as any[]
+    expect(msgs[0].content[0]).toEqual({
+      type: 'image_url',
+      image_url: { url: `data:image/png;base64,${SAMPLE_PNG_B64}` },
+    })
+  })
+
+  it('file_ref with audio/* mime routes to input_audio (audio model)', async () => {
+    const resolver = vi.fn(async () => ({ bytes: SAMPLE_WAV_BYTES, mime: 'audio/wav' }))
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      defaultModel: 'gpt-4o-audio-preview',
+      artifactResolver: resolver,
+    })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{ type: 'file_ref', artifactId: 'clips/a.wav', mime: 'audio/wav' }],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as any[]
+    expect(msgs[0].content[0]).toEqual({
+      type: 'input_audio',
+      input_audio: { data: SAMPLE_WAV_B64, format: 'wav' },
+    })
+  })
+
+  it('file_ref with text/* mime routes to text part (single-block collapse → string)', async () => {
+    // Single-text-block user messages collapse to legacy string content
+    // for compat with older OpenAI-compatible backends (DeepSeek, Qwen,
+    // Ollama) that refuse the array form for pure text.
+    const resolver = vi.fn(async () => ({
+      bytes: new TextEncoder().encode('hello\n你好'),
+      mime: 'text/plain',
+    }))
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      artifactResolver: resolver,
+    })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{ type: 'file_ref', artifactId: 'notes/x.txt', mime: 'text/plain' }],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as any[]
+    expect(msgs[0].content).toBe('hello\n你好')
+  })
+
+  it('file_ref text/* alongside another image block keeps array shape (no collapse)', async () => {
+    // When the user message has > 1 content part, we keep the array
+    // form even if one of them happens to be text — only the
+    // single-block case collapses.
+    const resolver = vi.fn(async (id: string) => {
+      if (id === 'notes/x.txt') {
+        return { bytes: new TextEncoder().encode('inline doc'), mime: 'text/plain' }
+      }
+      return { bytes: SAMPLE_PNG_BYTES, mime: 'image/png' }
+    })
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      artifactResolver: resolver,
+    })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'file_ref', artifactId: 'notes/x.txt', mime: 'text/plain' },
+          { type: 'file_ref', artifactId: 'photos/x.png', mime: 'image/png' },
+        ],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const parts = (body.messages as any[])[0].content
+    expect(Array.isArray(parts)).toBe(true)
+    expect(parts).toHaveLength(2)
+    expect(parts[0]).toEqual({ type: 'text', text: 'inline doc' })
+    expect(parts[1].type).toBe('image_url')
+  })
+
+  it('file_ref with application/pdf mime throws', async () => {
+    const resolver = vi.fn(async () => ({
+      bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+      mime: 'application/pdf',
+    }))
+    const { client } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'never' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      artifactResolver: resolver,
+    })
+    await expect(drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{ type: 'file_ref', artifactId: 'docs/x.pdf', mime: 'application/pdf' }],
+      }],
+    }))).rejects.toMatchObject({
+      code: 'MULTIMODAL_NOT_SUPPORTED',
+      blockType: 'file_ref',
+    })
+  })
+
+  it('inline base64 image exceeding maxInlineBytes throws MultimodalInlineSizeError', async () => {
+    const { client } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'never' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      maxInlineBytes: 4,
+    })
+    await expect(drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'image',
+          source: { kind: 'base64', data: SAMPLE_PNG_B64, mime: 'image/png' }, // 6 bytes
+        }],
+      }],
+    }))).rejects.toMatchObject({
+      code: 'MULTIMODAL_NOT_SUPPORTED',
+      inlineByteSize: 6,
+      capBytes: 4,
+    })
+  })
+
+  it('image / audio / file_ref blocks on assistant turn throw (OpenAI restriction)', async () => {
+    const { client } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'never' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+    await expect(drainStream(provider.stream({
+      messages: [{
+        role: 'assistant',
+        content: [{
+          type: 'image',
+          source: { kind: 'url', url: 'https://example.com/a.png' },
+        }],
+      }],
+    }))).rejects.toMatchObject({
+      code: 'MULTIMODAL_NOT_SUPPORTED',
+      blockType: 'image',
+    })
+  })
+
+  it('mixed text + image preserves order within the content array', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'before' },
+          { type: 'image', source: { kind: 'url', url: 'https://example.com/a.png' } },
+          { type: 'text', text: 'after' },
+        ],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const parts = (body.messages as any[])[0].content
+    expect(parts.map((p: any) => p.type)).toEqual(['text', 'image_url', 'text'])
+    expect(parts[0].text).toBe('before')
+    expect(parts[2].text).toBe('after')
+  })
+
+  it('parallel artifact_ref resolution within one user message', async () => {
+    const finishOrder: string[] = []
+    const resolver = vi.fn(async (artifactId: string) => {
+      const delay = artifactId === 'a' ? 15 : 1
+      await new Promise((r) => setTimeout(r, delay))
+      finishOrder.push(artifactId)
+      return { bytes: SAMPLE_PNG_BYTES, mime: 'image/png' }
+    })
+    const { client } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({
+      client: client as any,
+      artifactResolver: resolver,
+    })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { kind: 'artifact_ref', artifactId: 'a', mime: 'image/png' } },
+          { type: 'image', source: { kind: 'artifact_ref', artifactId: 'b', mime: 'image/png' } },
+        ],
+      }],
+    }))
+    // b finished first despite a being scheduled first — only possible
+    // if both ran concurrently.
+    expect(finishOrder).toEqual(['b', 'a'])
+  })
+
+  it('tool_result blocks still fan out as separate {role:tool} messages', async () => {
+    // Regression: make sure multimodal refactor didn't break the
+    // tool-use loop flow. A user turn with tool_result + image should
+    // produce a `{role:'tool', ...}` standalone message + a `{role:'user', ...}`
+    // message with just the image.
+    const { client, create } = makeFakeClient(async () => ({
+      choices: [{ message: { content: 'ok' }, finish_reason: 'stop' }],
+    }))
+    const provider = new OpenAIProvider({ client: client as any })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'tool_result', toolUseId: 't1', content: 'tool ran' },
+          { type: 'image', source: { kind: 'url', url: 'https://example.com/x.png' } },
+        ],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as any[]
+    // Expect 2 messages: one user (with image), one tool (with tool_result).
+    // Order is user-first (we unshift the user message) and tool follows.
+    const roles = msgs.map((m: any) => m.role)
+    expect(roles).toContain('user')
+    expect(roles).toContain('tool')
+    const userMsg = msgs.find((m: any) => m.role === 'user')!
+    expect(Array.isArray(userMsg.content)).toBe(true)
+    expect((userMsg.content as any[])[0].type).toBe('image_url')
+    const toolMsg = msgs.find((m: any) => m.role === 'tool')!
+    expect(toolMsg.tool_call_id).toBe('t1')
+    expect(toolMsg.content).toBe('tool ran')
+  })
+})
