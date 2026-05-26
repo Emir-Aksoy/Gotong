@@ -94,8 +94,16 @@ export interface PayloadFieldSpec {
    *   - 'textarea': multi-line input (use `rows` to size)
    *   - 'number': numeric input (sent as number, not string)
    *   - 'select': dropdown; requires `options`
+   *   - 'file': file upload (Phase 9 multimodal). The UI uploads the
+   *     file to the host's `uploads` surface and substitutes a
+   *     `LlmFileRefBlock`-shaped object into the payload at this id:
+   *     `{ type: 'file_ref', artifactId: string, mime: string }`. The
+   *     workflow then refs the file via `$trigger.payload.<id>` (the
+   *     same `$ref` syntax — what changes is the value's shape, not
+   *     how steps see it). Suitable for handing image / audio / pdf
+   *     to an LlmAgent step downstream.
    */
-  type: 'text' | 'textarea' | 'number' | 'select'
+  type: 'text' | 'textarea' | 'number' | 'select' | 'file'
   /** Tooltip / hint string displayed under the label. */
   hint?: string
   /** Placeholder text inside the empty input. */
@@ -108,6 +116,22 @@ export interface PayloadFieldSpec {
   rows?: number
   /** For type='select': option list. */
   options?: { value: string; label: string }[]
+  /**
+   * For type='file': accepted mime prefixes (e.g. `['image/']`,
+   * `['image/png', 'image/jpeg']`, `['audio/']`). Pure UI hint — used
+   * for the `<input accept="...">` attribute and pre-submit guard.
+   * Upload endpoint enforces its own server-side allow-list (from
+   * the artifact plugin's `allowedMimePrefixes`), so this is
+   * advisory: a stricter accept here just narrows the picker.
+   */
+  accept?: string[]
+  /**
+   * For type='file': per-file size cap (MB) shown to the user and
+   * checked pre-upload. The upload endpoint also enforces its own
+   * cap via the artifact plugin's `maxBytesPerFile`. Default UI
+   * limit (when omitted) is 10MB to mirror the plugin default.
+   */
+  maxSizeMb?: number
 }
 
 // --- Steps -----------------------------------------------------------------

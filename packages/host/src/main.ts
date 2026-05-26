@@ -91,6 +91,7 @@ import {
   LifecycleSweeper,
   type HubServices,
 } from './services/index.js'
+import { createUploadSurface } from './uploads.js'
 import { createWorkflowController } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 
@@ -638,6 +639,22 @@ async function main(): Promise<void> {
     },
   })
 
+  // Phase 9 M4 — admin file uploads. Wires the artifact plugin's
+  // 'file' impl to a system-shared 'uploads' namespace so /api/admin/uploads
+  // can persist a multimodal payload before it lands on a workflow.
+  // The plugin must be loaded (it's in the default seed); attach
+  // failure is non-fatal — `uploads` stays undefined and Web responds
+  // 503 cleanly. Same posture as `services` / `identity` / `peerRegistry`.
+  let uploads: Awaited<ReturnType<typeof createUploadSurface>> | undefined
+  if (services) {
+    try {
+      uploads = await createUploadSurface({ services, logger: log })
+      log.info('uploads: shared/uploads handle attached')
+    } catch (err) {
+      log.warn('uploads: attach failed — /api/admin/uploads will be 503', { err })
+    }
+  }
+
   // Workflow runners. Optional — the loader silently no-ops when the
   // directory doesn't exist, so users who aren't using workflows see no
   // extra log output. Errors are reported per-file; one bad workflow
@@ -745,6 +762,9 @@ async function main(): Promise<void> {
     // services may be undefined if bootstrap failed; serveWeb handles
     // that by responding 503 on the /api/admin/services/* routes.
     ...(services ? { services: services.asAdminSurface() } : {}),
+    // Phase 9 M4 — multimodal file upload backing. `undefined` is
+    // handled by /api/admin/uploads with a clean 503.
+    ...(uploads ? { uploads } : {}),
     growthReports,
     ...(allowedHosts ? { allowedHosts } : {}),
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },

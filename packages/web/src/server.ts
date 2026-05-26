@@ -286,6 +286,50 @@ export interface WebServerOptions {
   reputation?: {
     snapshot(): IdentityPeerReputationDTO[]
   }
+  /**
+   * Phase 9 M4 — host-managed file upload surface. Web takes
+   * `bytes + mime + filename + by` and writes them through the
+   * artifact plugin under a system-owned namespace, returning the
+   * artifactId that gets stamped into `LlmFileRefBlock.artifactId`
+   * downstream.
+   *
+   * Why a host injection rather than Web wiring the artifact plugin
+   * itself: Web has no dep on `@aipehub/services-sdk` or any plugin
+   * impl, by design (`@aipehub/web` is "the HTTP/SPA shell, no plugin
+   * surface"). The host owns the lifecycle of plugins, including the
+   * system-uploads handle, and surfaces a narrow `put(...)` to Web.
+   *
+   * When omitted, `/api/admin/uploads` and `/api/me/uploads` return
+   * 503. Workflow forms with `type: 'file'` will still render but
+   * the submit-time upload will surface a clear error.
+   */
+  uploads?: UploadSurface
+}
+
+/**
+ * Narrow host-injected surface for user file uploads. Implemented in
+ * `packages/host/src/main.ts` by wrapping the artifact plugin's
+ * system-owned handle.
+ */
+export interface UploadSurface {
+  /**
+   * Persist a file. The host's implementation:
+   *   1. enforces a hard byte ceiling (see plugin's maxBytesPerFile),
+   *   2. enforces the plugin's mime allow-list,
+   *   3. writes under `owner: { kind: 'system', id: 'uploads' }` so
+   *      uploads are scoped away from agent / user namespaces and
+   *      can be GC'd by a separate sweep,
+   *   4. returns `artifactId` — an opaque string that any
+   *      `LlmArtifactResolver` plumbed through the system-uploads
+   *      handle resolves to bytes.
+   */
+  put(params: {
+    bytes: Uint8Array
+    declaredMime: string
+    filename?: string
+    /** Who's uploading — used for audit + filename scoping. */
+    by: ParticipantId
+  }): Promise<{ artifactId: string; mime: string; size: number }>
 }
 
 /**
@@ -431,6 +475,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     identity: opts.identity,
     peerRegistry: opts.peerRegistry,
     reputation: opts.reputation,
+    uploads: opts.uploads,
     httpStats: new HttpStats(),
   }
 
@@ -550,6 +595,8 @@ interface HandlerCtx {
   peerRegistry: WebServerOptions['peerRegistry'] | undefined
   /** Phase 6 #1 — see WebServerOptions.reputation doc above. */
   reputation: WebServerOptions['reputation'] | undefined
+  /** Phase 9 M4 — see WebServerOptions.uploads doc above. */
+  uploads: UploadSurface | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -2242,6 +2289,98 @@ async function handle(
     return
   }
 
+  // --- admin: upload (Phase 9 M4 multimodal file) -----------------------
+  // Raw octet-stream upload. The admin SPA `fetch(url, { body: file })`
+  // posts the File object directly; no multipart parsing dep.
+  //
+  //   POST /api/admin/uploads?filename=cat.png&mime=image/png
+  //   <raw bytes in body>
+  //   ───────────────────────────────────────────────────────────────
+  //   200 { artifactId, mime, size }
+  //
+  // The artifactId is what the UI then stamps into a payload's
+  // `LlmFileRefBlock` (`{ type: 'file_ref', artifactId, mime }`). The
+  // host wires `ctx.uploads` to its system-owned artifact handle, so
+  // bytes land on disk under a single shared namespace that downstream
+  // multimodal providers can resolve via the artifactResolver path.
+  //
+  // 503 when `ctx.uploads` isn't wired (services bootstrap failed or
+  // host didn't expose the surface). 413 on body-too-large.
+  if (method === 'POST' && path === '/api/admin/uploads') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.uploads) {
+      sendJson(res, { error: 'uploads not enabled on this host' }, 503)
+      return
+    }
+    const u = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+    const filename = u.searchParams.get('filename') || undefined
+    const declaredMime =
+      u.searchParams.get('mime')
+      || (typeof req.headers['content-type'] === 'string'
+          ? req.headers['content-type']!.split(';')[0]!.trim()
+          : '')
+      || 'application/octet-stream'
+
+    // 50 MB hard ceiling at the HTTP layer — keeps a misbehaving client
+    // from buffering arbitrary memory before the plugin's own cap kicks
+    // in. The plugin still enforces its own per-file ceiling (default
+    // 10 MB); this just stops us from holding a 1 GB Buffer in RAM
+    // while we're about to reject it anyway.
+    //
+    // Check `Content-Length` first — well-behaved clients always send
+    // it for a known-size body, so we can return a clean 413 with the
+    // response actually reaching the client. The streaming check
+    // below covers chunked / mis-stated lengths; in that case we
+    // hard-close the socket (the client is misbehaving by definition).
+    const HARD_CEILING_BYTES = 50 * 1024 * 1024
+    const declaredLen = Number.parseInt(
+      typeof req.headers['content-length'] === 'string' ? req.headers['content-length'] : '',
+      10,
+    )
+    if (Number.isFinite(declaredLen) && declaredLen > HARD_CEILING_BYTES) {
+      sendJson(res, { error: `body too large (limit ${HARD_CEILING_BYTES} bytes)` }, 413)
+      // Drain the request stream so the client's socket doesn't sit
+      // half-closed — node would otherwise keep buffering until the
+      // client times out.
+      req.resume()
+      return
+    }
+    let bytes: Buffer
+    try {
+      bytes = await readRawBody(req, HARD_CEILING_BYTES)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      // "body too large" → 413; anything else (eg. socket error) → 400.
+      const code = msg.startsWith('body too large') ? 413 : 400
+      sendJson(res, { error: msg }, code)
+      return
+    }
+    if (bytes.length === 0) {
+      sendJson(res, { error: 'empty body (no file content)' }, 400)
+      return
+    }
+    try {
+      const put = await ctx.uploads.put({
+        bytes,
+        declaredMime,
+        ...(filename ? { filename } : {}),
+        by: admin.id,
+      })
+      sendJson(res, put)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log.warn('upload rejected', { by: admin.id, mime: declaredMime, size: bytes.length, err: msg })
+      // The plugin throws on mime-not-allowed and size-over-cap; both
+      // map naturally to 400 (the client supplied something the host
+      // doesn't accept). Anything that looks like our own plumbing
+      // breaking gets 500.
+      const isClientError = /mime|exceeds maxBytes|traversal|relative|null byte/.test(msg)
+      sendJson(res, { error: msg }, isClientError ? 400 : 500)
+    }
+    return
+  }
+
   // --- admin: dispatch ----------------------------------------------------
   if (method === 'POST' && path === '/api/admin/dispatch') {
     const admin = await requireAdmin(ctx, req, res)
@@ -2933,6 +3072,37 @@ function readTextBody(req: IncomingMessage): Promise<string> {
       }
     })
     req.on('end', () => resolve(buf))
+    req.on('error', reject)
+  })
+}
+
+/**
+ * Read the body as raw bytes with a configurable cap. Phase 9 M4
+ * upload endpoint. We accumulate Buffer chunks and concat once at
+ * end-of-stream — avoids the cost of utf-8 decoding (which would
+ * corrupt binary payloads anyway).
+ *
+ * The cap must be supplied (no implicit default) so each caller
+ * thinks about how big its payload can legitimately be. Cap is in
+ * bytes, applied to the running concatenation length; on overflow
+ * the request is destroyed and the promise rejects with a clear
+ * message that the upload route forwards to the client as 413.
+ */
+function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    let total = 0
+    req.on('data', (chunk: Buffer | string) => {
+      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+      total += buf.length
+      if (total > maxBytes) {
+        req.destroy()
+        reject(new Error(`body too large (limit ${maxBytes} bytes)`))
+        return
+      }
+      chunks.push(buf)
+    })
+    req.on('end', () => resolve(Buffer.concat(chunks, total)))
     req.on('error', reject)
   })
 }

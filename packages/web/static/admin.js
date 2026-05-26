@@ -1771,6 +1771,51 @@
       : String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&')
   }
 
+  // --- Phase 9 M4: file upload helpers ----------------------------------
+  // `uploadOneFile` POSTs to /api/admin/uploads with the raw bytes; the
+  // host returns { artifactId, mime, size } which the workflow-start
+  // submit handler stamps into a LlmFileRefBlock-shaped payload entry.
+  //
+  // We use the browser's native File object as the fetch body — undici /
+  // browser fetch streams it without buffering the whole file in JS heap,
+  // and the server's `readRawBody` accumulates Buffer chunks. The mime
+  // query param uses File.type (HTML5 file picker derives it from
+  // extension/sniffing); the server treats it as advisory.
+  async function uploadOneFile(file) {
+    const params = new URLSearchParams()
+    params.set('filename', file.name)
+    if (file.type) params.set('mime', file.type)
+    const url = `/api/admin/uploads?${params.toString()}`
+    const r = await fetch(url, {
+      method: 'POST',
+      // Don't set content-type explicitly — let the browser pick one
+      // up from File.type (or default to application/octet-stream).
+      // Setting it manually would override File.type and confuse the
+      // mime fallback chain.
+      credentials: 'same-origin',
+      body: file,
+    })
+    if (!r.ok) {
+      let msg = `HTTP ${r.status}`
+      try {
+        const j = await r.json()
+        if (j && j.error) msg = j.error
+      } catch { /* keep status as msg */ }
+      throw new Error(msg)
+    }
+    return await r.json()
+  }
+
+  // Compact byte-count formatter for upload status text.
+  // 1234 → "1.2 KB"; 1234567 → "1.2 MB". No internationalisation —
+  // these are operator-facing log-style strings.
+  function formatBytes(n) {
+    if (typeof n !== 'number' || !Number.isFinite(n) || n < 0) return '?'
+    if (n < 1024) return `${n} B`
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+    return `${(n / (1024 * 1024)).toFixed(1)} MB`
+  }
+
   function renderOneField(f) {
     const id = `wf-start-field-${escapeHtml(f.id)}`
     const required = f.required ? ' <span style="color:#c33">*</span>' : ''
@@ -1788,6 +1833,22 @@
       control = `<select id="${id}">${opts}</select>`
     } else if (f.type === 'number') {
       control = `<input type="number" id="${id}"${ph} value="${defaultV}" />`
+    } else if (f.type === 'file') {
+      // Phase 9 M4 — file upload. The `accept` attr is a UI hint
+      // only (the upload endpoint also enforces server-side caps).
+      // `data-aipe-file` lets the submit handler find file inputs
+      // without re-walking the schema. `aipe-file-status` shows
+      // "上传中…" / "已上传 (123 KB)" inline so the admin gets feedback
+      // before the workflow dispatch fires.
+      const accept = Array.isArray(f.accept) && f.accept.length > 0
+        ? ` accept="${escapeHtml(f.accept.join(','))}"`
+        : ''
+      const sizeHint = typeof f.maxSizeMb === 'number'
+        ? `<small class="hint">最大 ${f.maxSizeMb} MB</small>`
+        : ''
+      control = `<input type="file" id="${id}" data-aipe-file="1"${accept} />
+        <span class="aipe-file-status" data-aipe-file-status="${id}" style="font-size:0.85em;color:#666;margin-left:0.5em;"></span>
+        ${sizeHint}`
     } else {
       control = `<input type="text" id="${id}"${ph} value="${defaultV}" />`
     }
@@ -1812,6 +1873,49 @@
       for (const f of schema) {
         const el = document.getElementById(`wf-start-field-${f.id}`)
         if (!el) continue
+        // Phase 9 M4 — file field: upload first, inject file_ref block.
+        if (f.type === 'file') {
+          const files = el.files
+          if (!files || files.length === 0) {
+            if (f.required) {
+              dom.wfStartMsg.textContent = `${f.label} 必填`
+              dom.wfStartMsg.classList.add('err')
+              return
+            }
+            continue
+          }
+          const file = files[0]
+          // UI-side size check — server enforces its own ceiling
+          // but a clean inline error beats waiting for a 413.
+          const capMb = typeof f.maxSizeMb === 'number' ? f.maxSizeMb : 10
+          if (file.size > capMb * 1024 * 1024) {
+            dom.wfStartMsg.textContent = `${f.label} 文件超过 ${capMb} MB 上限`
+            dom.wfStartMsg.classList.add('err')
+            return
+          }
+          const statusEl = document.querySelector(
+            `[data-aipe-file-status="wf-start-field-${cssEscape(f.id)}"]`,
+          )
+          if (statusEl) statusEl.textContent = '上传中…'
+          try {
+            const ref = await uploadOneFile(file)
+            if (statusEl) {
+              statusEl.textContent = `已上传 (${formatBytes(ref.size)})`
+              statusEl.style.color = '#080'
+            }
+            payload[f.id] = { type: 'file_ref', artifactId: ref.artifactId, mime: ref.mime }
+          } catch (err) {
+            const msg = err && err.message ? err.message : String(err)
+            if (statusEl) {
+              statusEl.textContent = `上传失败: ${msg}`
+              statusEl.style.color = '#c33'
+            }
+            dom.wfStartMsg.textContent = `${f.label} 上传失败: ${msg}`
+            dom.wfStartMsg.classList.add('err')
+            return
+          }
+          continue
+        }
         let v = el.value
         if (f.required && (v == null || v.trim() === '')) {
           dom.wfStartMsg.textContent = `${f.label} 必填`

@@ -273,4 +273,231 @@ workflow:
 `
     expect(() => parseWorkflow(yaml)).toThrow(/positive integer/)
   })
+
+  // --- payload_schema (UI dispatch form descriptors) -----------------
+  // Phase 9 M4 adds the `file` type. The rest of this block tests the
+  // 4 pre-existing types alongside the new one so a future reorder
+  // doesn't silently drop a code path.
+
+  it('parses payload_schema with the four legacy field types', () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: form-demo
+  trigger:
+    capability: form
+    payload_schema:
+      - { id: name, label: 名字, type: text, required: true }
+      - { id: bio, label: 自我介绍, type: textarea, rows: 8, hint: 简短一段 }
+      - { id: age, label: 年龄, type: number, defaultValue: 30 }
+      - id: tier
+        label: 用户层级
+        type: select
+        options:
+          - { value: free, label: 免费 }
+          - { value: pro, label: 专业版 }
+  steps:
+    - id: s
+      dispatch:
+        strategy: { kind: capability, capabilities: [a] }
+        payload: $trigger.payload
+`
+    const wf = parseWorkflow(yaml)
+    expect(wf.trigger.payloadSchema).toHaveLength(4)
+    expect(wf.trigger.payloadSchema![0]).toMatchObject({
+      id: 'name', label: '名字', type: 'text', required: true,
+    })
+    expect(wf.trigger.payloadSchema![1]).toMatchObject({
+      id: 'bio', type: 'textarea', rows: 8, hint: '简短一段',
+    })
+    expect(wf.trigger.payloadSchema![2]).toMatchObject({
+      id: 'age', type: 'number', defaultValue: 30,
+    })
+    expect(wf.trigger.payloadSchema![3]).toMatchObject({
+      id: 'tier', type: 'select',
+      options: [
+        { value: 'free', label: '免费' },
+        { value: 'pro', label: '专业版' },
+      ],
+    })
+  })
+
+  it('parses a file field with accept + maxSizeMb', () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: upload-demo
+  trigger:
+    capability: describe-image
+    payload_schema:
+      - id: pic
+        label: 上传图片
+        type: file
+        required: true
+        accept: ['image/']
+        maxSizeMb: 5
+      - id: caption
+        label: 可选说明
+        type: text
+  steps:
+    - id: s
+      dispatch:
+        strategy: { kind: capability, capabilities: [vlm] }
+        payload:
+          image: $trigger.payload.pic
+          caption: $trigger.payload.caption
+`
+    const wf = parseWorkflow(yaml)
+    expect(wf.trigger.payloadSchema).toHaveLength(2)
+    expect(wf.trigger.payloadSchema![0]).toEqual({
+      id: 'pic',
+      label: '上传图片',
+      type: 'file',
+      required: true,
+      accept: ['image/'],
+      maxSizeMb: 5,
+    })
+    expect(wf.trigger.payloadSchema![1]).toMatchObject({
+      id: 'caption', type: 'text',
+    })
+  })
+
+  it('parses a file field without accept/maxSizeMb (host defaults apply)', () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: any-file
+  trigger:
+    capability: do-it
+    payload_schema:
+      - { id: doc, label: 文档, type: file }
+  steps:
+    - id: s
+      dispatch:
+        strategy: { kind: capability, capabilities: [a] }
+        payload: { f: $trigger.payload.doc }
+`
+    const wf = parseWorkflow(yaml)
+    expect(wf.trigger.payloadSchema![0]).toEqual({
+      id: 'doc', label: '文档', type: 'file',
+    })
+  })
+
+  it('drops defaultValue / placeholder / rows on a file field (canonical shape)', () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: ignore-noise
+  trigger:
+    capability: do-it
+    payload_schema:
+      - id: f
+        label: 文件
+        type: file
+        defaultValue: ignored
+        placeholder: ignored too
+        rows: 5
+  steps:
+    - id: s
+      dispatch:
+        strategy: { kind: capability, capabilities: [a] }
+        payload: $trigger.payload
+`
+    const wf = parseWorkflow(yaml)
+    const spec = wf.trigger.payloadSchema![0]!
+    expect(spec.type).toBe('file')
+    expect(spec.defaultValue).toBeUndefined()
+    expect(spec.placeholder).toBeUndefined()
+    expect(spec.rows).toBeUndefined()
+  })
+
+  it('rejects file.accept as empty array', () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: bad
+  trigger:
+    capability: do-it
+    payload_schema:
+      - { id: f, label: 文件, type: file, accept: [] }
+  steps:
+    - id: s
+      dispatch:
+        strategy: { kind: capability, capabilities: [a] }
+        payload: 1
+`
+    expect(() => parseWorkflow(yaml)).toThrow(/accept must be a non-empty array/)
+  })
+
+  it('rejects file.accept entry that is not a non-empty string', () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: bad
+  trigger:
+    capability: do-it
+    payload_schema:
+      - { id: f, label: 文件, type: file, accept: ['', 'image/'] }
+  steps:
+    - id: s
+      dispatch:
+        strategy: { kind: capability, capabilities: [a] }
+        payload: 1
+`
+    expect(() => parseWorkflow(yaml)).toThrow(/non-empty strings/)
+  })
+
+  it('rejects file.maxSizeMb > 100', () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: bad
+  trigger:
+    capability: do-it
+    payload_schema:
+      - { id: f, label: 文件, type: file, maxSizeMb: 200 }
+  steps:
+    - id: s
+      dispatch:
+        strategy: { kind: capability, capabilities: [a] }
+        payload: 1
+`
+    expect(() => parseWorkflow(yaml)).toThrow(/positive number ≤ 100/)
+  })
+
+  it('rejects file.maxSizeMb that is non-positive', () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: bad
+  trigger:
+    capability: do-it
+    payload_schema:
+      - { id: f, label: 文件, type: file, maxSizeMb: 0 }
+  steps:
+    - id: s
+      dispatch:
+        strategy: { kind: capability, capabilities: [a] }
+        payload: 1
+`
+    expect(() => parseWorkflow(yaml)).toThrow(/positive number ≤ 100/)
+  })
+
+  it('rejects an unknown payload_schema type', () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: bad
+  trigger:
+    capability: do-it
+    payload_schema:
+      - { id: f, label: 文件, type: blob }
+  steps:
+    - id: s
+      dispatch:
+        strategy: { kind: capability, capabilities: [a] }
+        payload: 1
+`
+    expect(() => parseWorkflow(yaml)).toThrow(/'text' \| 'textarea' \| 'number' \| 'select' \| 'file'/)
+  })
 })

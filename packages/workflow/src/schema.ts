@@ -384,9 +384,12 @@ function validatePayloadSchema(raw: unknown, path: string): PayloadFieldSpec[] {
       throw new WorkflowSchemaError(`${ep}.label is required (non-empty string)`)
     }
     const type = e.type
-    if (type !== 'text' && type !== 'textarea' && type !== 'number' && type !== 'select') {
+    if (
+      type !== 'text' && type !== 'textarea' && type !== 'number'
+      && type !== 'select' && type !== 'file'
+    ) {
       throw new WorkflowSchemaError(
-        `${ep}.type must be 'text' | 'textarea' | 'number' | 'select' — got '${String(type)}'`,
+        `${ep}.type must be 'text' | 'textarea' | 'number' | 'select' | 'file' — got '${String(type)}'`,
       )
     }
     const spec: PayloadFieldSpec = { id: e.id, label: e.label, type }
@@ -418,6 +421,47 @@ function validatePayloadSchema(raw: unknown, path: string): PayloadFieldSpec[] {
         opts.push({ value: oo.value, label: oo.label })
       }
       spec.options = opts
+    }
+    if (type === 'file') {
+      // accept — optional array of mime prefixes. Empty array is
+      // rejected (use omission to mean "no filter") so a typo'd
+      // `accept: []` doesn't silently widen the picker.
+      if (e.accept !== undefined) {
+        if (!Array.isArray(e.accept) || e.accept.length === 0) {
+          throw new WorkflowSchemaError(
+            `${ep}.accept must be a non-empty array of mime prefixes when set`,
+          )
+        }
+        const accept: string[] = []
+        for (const a of e.accept) {
+          if (typeof a !== 'string' || a.length === 0) {
+            throw new WorkflowSchemaError(
+              `${ep}.accept entries must be non-empty strings (mime prefix like 'image/' or 'image/png')`,
+            )
+          }
+          accept.push(a)
+        }
+        spec.accept = accept
+      }
+      // maxSizeMb — positive number, capped at 100 (the upload
+      // endpoint's hard ceiling). Default surfaces from the plugin's
+      // own cap so we don't need to repeat it here.
+      if (e.maxSizeMb !== undefined) {
+        if (typeof e.maxSizeMb !== 'number' || !Number.isFinite(e.maxSizeMb)
+            || e.maxSizeMb <= 0 || e.maxSizeMb > 100) {
+          throw new WorkflowSchemaError(
+            `${ep}.maxSizeMb must be a positive number ≤ 100 (got ${JSON.stringify(e.maxSizeMb)})`,
+          )
+        }
+        spec.maxSizeMb = e.maxSizeMb
+      }
+      // 'file' fields don't accept defaultValue / placeholder /
+      // options / rows — silently drop those (already collected
+      // above on the generic path) so the UI sees the canonical
+      // shape. The runner doesn't read these anyway.
+      if (spec.defaultValue !== undefined) delete spec.defaultValue
+      if (spec.placeholder !== undefined) delete spec.placeholder
+      if (spec.rows !== undefined) delete spec.rows
     }
     out.push(spec)
   }
