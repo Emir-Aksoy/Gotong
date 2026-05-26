@@ -944,6 +944,14 @@ function describe(e: TranscriptEntry): string {
       // service-calls` view. Either way the data lives in the
       // transcript.
       return `SVCCALL  ${e.data.from} ${e.data.type}:${e.data.impl}#${e.data.method} → ${e.data.outcome} (${e.data.durationMs}ms)`
+    case 'llm_stream_chunk':
+      // Phase 8 M6 — agent stream chunks. Don't print every chunk to
+      // stdout (would dominate the log); just summarize the chunk
+      // type. Operators wanting the actual text use the admin UI's
+      // SSE stream where chunks arrive in real time.
+      return `LLMCHUNK ${e.data.agentId} task=${e.data.taskId} kind=${
+        (e.data.chunk as { type?: string } | null)?.type ?? '?'
+      }`
   }
 }
 

@@ -369,6 +369,37 @@ export type TranscriptEntry =
         durationMs: number
       }
     }
+  /**
+   * LLM streaming chunk (Phase 8 M6). Appended by the host's
+   * LocalAgentPool whenever an LlmAgent's onStreamChunk hook fires —
+   * which is every provider-yielded chunk in real time. Carries
+   * task + agent attribution so a single SSE stream can multiplex
+   * many concurrent agents.
+   *
+   * `chunk` is the provider-neutral `LlmStreamChunk` payload (text /
+   * tool_use / usage / end / error). Declared as `unknown` here to
+   * avoid pulling @aipehub/llm into @aipehub/core as a hard dep —
+   * the shape contract lives in `@aipehub/llm`'s `LlmStreamChunk`
+   * type and the host translator + web SSE forwarder both honor it.
+   *
+   * Consumer guidance:
+   *   - SSE bridges should forward verbatim — no server-side buffering.
+   *   - Aggregators (e.g. "show the final text") can ignore everything
+   *     except `chunk.type === 'text'`, concatenate, and stop at `end`.
+   *   - A `chunk.type === 'end'` event with matching taskId + agentId
+   *     marks the LAST chunk for that task/agent pair. Use this for
+   *     UI typewriter shutdown.
+   */
+  | {
+      seq: number
+      ts: number
+      kind: 'llm_stream_chunk'
+      data: {
+        taskId: TaskId
+        agentId: ParticipantId
+        chunk: unknown
+      }
+    }
 
 // --- Event stream (for observers / web UI) ---------------------------------
 
