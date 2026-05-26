@@ -11,6 +11,9 @@
 
 export { openIdentityStore, IdentityStore } from './store.js'
 export type { VaultMutationReason } from './store.js'
+// Phase 7 M4 — org-mode + general org-meta surface for the SPA shell
+// switch (personal vs team) and any future org-wide scalar config.
+export type OrgMode = 'personal' | 'team'
 export { IdentityError } from './errors.js'
 export type { IdentityErrorCode, IdentityErrorOptions } from './errors.js'
 export type {

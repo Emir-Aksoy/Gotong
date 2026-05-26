@@ -359,6 +359,26 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // Phase 7 M4 — org-wide key/value config bag. First use:
+    // `org_mode` ∈ {'personal','team'} powers the SPA shell switch.
+    // Future keys live here too (eg. default LLM provider, brand
+    // name) so we don't need a new table per scalar.
+    //
+    // Why not stuff this into vault as a non-secret entry? vault
+    // rows are encrypted + audited per read; this is plain config
+    // that the UI hot-reloads. Different access pattern, different
+    // table. Cheap.
+    version: 8,
+    name: 'org-meta-kv',
+    sql: `
+      CREATE TABLE IF NOT EXISTS org_meta (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {

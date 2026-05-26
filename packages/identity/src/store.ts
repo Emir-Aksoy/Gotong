@@ -467,6 +467,9 @@ export class IdentityStore {
   private readonly stmtOrgQuotaList: SqliteStmt
   private readonly stmtOrgQuotaDelete: SqliteStmt
   private readonly stmtOrgQuotaTouchState: SqliteStmt
+  // Phase 7 M4 — org_meta kv (org_mode lives here).
+  private readonly stmtOrgMetaGet: SqliteStmt
+  private readonly stmtOrgMetaUpsert: SqliteStmt
 
   constructor(db: SqliteDb, defaultSessionTtlMs: number, masterKey?: Buffer) {
     this.db = db
@@ -687,6 +690,16 @@ export class IdentityStore {
          SET last_state = ?, last_checked = ?, updated_at = ?
        WHERE metric = ? AND period = ?`,
     )
+    // Phase 7 M4 — org_meta key/value bag.
+    this.stmtOrgMetaGet = db.prepare(
+      `SELECT value FROM org_meta WHERE key = ?`,
+    )
+    this.stmtOrgMetaUpsert = db.prepare(
+      `INSERT INTO org_meta(key, value, updated_at) VALUES(?, ?, ?)
+       ON CONFLICT(key) DO UPDATE SET
+         value = excluded.value,
+         updated_at = excluded.updated_at`,
+    )
   }
 
   // =====================================================================
@@ -719,8 +732,82 @@ export class IdentityStore {
       const now = Date.now()
       this.stmtInsertUser.run(userId, email, displayName, now)
       this.stmtInsertMembership.run(newId(), userId, 'owner', now)
+      // Phase 7 M4 — first-time bootstrap defaults to personal mode
+      // (single user, no peers, no invitations yet). The SPA shell
+      // reads `org_mode` on every page load; the inferred mode flips
+      // to 'team' the moment a second user / first invitation lands.
+      this.stmtOrgMetaUpsert.run('org_mode', 'personal', now)
       return { bootstrapped: true, ownerUserId: userId }
     })
+  }
+
+  // =====================================================================
+  // Phase 7 M4 — org_meta kv (mode + future org-wide scalars)
+  // =====================================================================
+
+  /**
+   * Read a single org_meta value. Returns null when the key has never
+   * been written. Callers wanting a typed value (eg. mode) should use
+   * the higher-level helpers below.
+   */
+  getOrgMeta(key: string): string | null {
+    if (typeof key !== 'string' || key.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'org_meta key must be a non-empty string',
+      })
+    }
+    const row = this.stmtOrgMetaGet.get(key) as { value: string } | undefined
+    return row?.value ?? null
+  }
+
+  /**
+   * Write or replace an org_meta value. Returns void; the operation is
+   * idempotent (same key + same value is a no-op write of updated_at).
+   */
+  setOrgMeta(key: string, value: string): void {
+    if (typeof key !== 'string' || key.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'org_meta key must be a non-empty string',
+      })
+    }
+    if (typeof value !== 'string') {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'org_meta value must be a string (stringify json yourself)',
+      })
+    }
+    this.stmtOrgMetaUpsert.run(key, value, Date.now())
+  }
+
+  /**
+   * Phase 7 M4 — high-level org mode read.
+   *
+   * Returns 'personal' when:
+   *   - org_meta.org_mode is explicitly 'personal', OR
+   *   - org_meta.org_mode is absent AND the org has a single user
+   *     (the auto-detect path; covers the very first bootstrap and any
+   *     pre-Phase-7 db that never wrote the row).
+   *
+   * Returns 'team' otherwise. Operators can pin either value via
+   * setOrgMode() (eg. AIPE_MODE env at host startup).
+   */
+  getOrgMode(): 'personal' | 'team' {
+    const stored = this.getOrgMeta('org_mode')
+    if (stored === 'personal' || stored === 'team') return stored
+    // Auto-detect: single-user → personal.
+    return this.countUsers() <= 1 ? 'personal' : 'team'
+  }
+
+  setOrgMode(mode: 'personal' | 'team'): void {
+    if (mode !== 'personal' && mode !== 'team') {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `org_mode must be 'personal' or 'team'; got ${JSON.stringify(mode)}`,
+      })
+    }
+    this.setOrgMeta('org_mode', mode)
   }
 
   // =====================================================================
@@ -772,6 +859,15 @@ export class IdentityStore {
         throw err
       }
       this.stmtInsertMembership.run(newId(), userId, role, now)
+
+      // Phase 7 M4 — adding a 2nd+ user (any path: invite-accept,
+      // admin createUser, peer-bootstrap) is the canonical "we became
+      // a team" moment. Flip mode now so the SPA shell switches on
+      // next page load. Idempotent: already-team stays team.
+      const userCount = (this.stmtCountUsers.get() as { c: number }).c
+      if (userCount > 1 && this.getOrgMeta('org_mode') !== 'team') {
+        this.stmtOrgMetaUpsert.run('org_mode', 'team', now)
+      }
 
       if (input.password !== undefined) {
         // hashPassword throws on too-short — let it propagate (caller
@@ -1555,6 +1651,13 @@ export class IdentityStore {
         expiresAt,
         now,
       )
+      // Phase 7 M4 — creating an invitation is the operator's intent
+      // signal "I'm growing this from solo to team". Flip the mode
+      // now so the next SPA load shows the team shell. Idempotent:
+      // already-team stays team.
+      if (this.getOrgMeta('org_mode') !== 'team') {
+        this.stmtOrgMetaUpsert.run('org_mode', 'team', now)
+      }
       const invitation: Invitation = {
         id,
         email,
@@ -1712,6 +1815,15 @@ export class IdentityStore {
         null,
         now,
       )
+
+      // Phase 7 M4 — accepting an invite is the terminal "we're a
+      // team now" event. createInvitation already flipped this when
+      // the invite was minted, but cover the case where an operator
+      // hand-pinned mode back to personal in between.
+      const userCount = (this.stmtCountUsers.get() as { c: number }).c
+      if (userCount > 1 && this.getOrgMeta('org_mode') !== 'team') {
+        this.stmtOrgMetaUpsert.run('org_mode', 'team', now)
+      }
 
       // Mark invite accepted. The WHERE clause includes status='pending'
       // so a concurrent accept (rare; we're already in a tx) gets

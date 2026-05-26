@@ -393,6 +393,24 @@ async function main(): Promise<void> {
         users: identity.countUsers(),
       })
     }
+    // Phase 7 M4 — env override for org mode. Without AIPE_MODE the
+    // store auto-detects (personal when single-user, team otherwise)
+    // and auto-promotes on 2nd user or first invitation. AIPE_MODE
+    // pins a specific value, useful for:
+    //   - team deployments that don't want the auto-detect ever firing
+    //   - personal hubs that want to stay personal even after testing
+    //     invitations
+    const modeOverride = process.env.AIPE_MODE
+    if (modeOverride === 'personal' || modeOverride === 'team') {
+      identity.setOrgMode(modeOverride)
+      log.info('identity: org_mode pinned from AIPE_MODE', { mode: modeOverride })
+    } else if (modeOverride !== undefined && modeOverride !== '') {
+      log.warn('identity: AIPE_MODE invalid, ignored', {
+        value: modeOverride,
+        expected: "'personal' | 'team'",
+      })
+    }
+    log.info('identity: org_mode', { mode: identity.getOrgMode() })
     // B1.2 — org-level LLM key pool wraps the vault. Created here so
     // both LocalAgentPool (key resolution chain) and any future B-tier
     // consumer (knowledge service, mcp pool) share the same memoised
