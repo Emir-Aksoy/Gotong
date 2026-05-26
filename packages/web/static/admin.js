@@ -666,10 +666,17 @@
       `</div>`
     )
 
-    // payload
+    // payload — Phase 9 M5: walk for multimodal blocks first, render
+    // them inline (img / audio / download link), then keep the raw
+    // JSON view below so an admin can still inspect the structure.
+    const mm = extractMultimodalBlocks(v.task.payload)
+    const mmHtml = mm.length > 0
+      ? `<div class="task-detail-multimodal">${mm.map(renderMultimodalBlock).join('')}</div>`
+      : ''
     sections.push(
       `<details class="task-detail-section" open>` +
         `<summary>${escapeHtml(t.detailPayload)}</summary>` +
+        mmHtml +
         `<pre class="task-detail-pre">${escapeHtml(formatJsonPretty(v.task.payload))}</pre>` +
       `</details>`
     )
@@ -1816,6 +1823,139 @@
     return `${(n / (1024 * 1024)).toFixed(1)} MB`
   }
 
+  // --- Phase 9 M5: multimodal block helpers -----------------------------
+  // Walk an arbitrary JSON tree and collect every LlmFileRefBlock /
+  // LlmImageBlock / LlmAudioBlock-shaped node. The shape check is
+  // structural (no schema dep on @aipehub/llm here) — we look for
+  // the `type` discriminator and the per-kind required fields. Same
+  // shapes the providers expect on the LlmRequest side, so any
+  // payload that's been authored via the workflow `type: 'file'` flow
+  // (or that an agent emitted into its task output) matches cleanly.
+  //
+  // Order: visits arrays before object values; preserves visit order
+  // in the returned list so the admin sees blocks in the same order
+  // they appeared in the payload tree (helps when a single payload
+  // carries multiple images / a mix of image+audio).
+  function extractMultimodalBlocks(node) {
+    const out = []
+    visit(node)
+    return out
+    function visit(v) {
+      if (!v) return
+      if (Array.isArray(v)) {
+        for (const item of v) visit(item)
+        return
+      }
+      if (typeof v !== 'object') return
+      // file_ref: { type:'file_ref', artifactId, mime }
+      if (v.type === 'file_ref'
+          && typeof v.artifactId === 'string' && v.artifactId.length > 0
+          && typeof v.mime === 'string') {
+        out.push(v)
+        return  // don't recurse into siblings of a block
+      }
+      // image: { type:'image', source:{kind,...} }
+      if (v.type === 'image' && v.source && typeof v.source === 'object') {
+        out.push(v)
+        return
+      }
+      // audio: { type:'audio', source:{kind,...}, format? }
+      if (v.type === 'audio' && v.source && typeof v.source === 'object') {
+        out.push(v)
+        return
+      }
+      // not a block — keep walking
+      for (const key of Object.keys(v)) visit(v[key])
+    }
+  }
+
+  // Render one multimodal block as HTML. Returns a small "card" with:
+  //   - file_ref + mime image/* → <img> preview + filename + size hint
+  //   - file_ref + mime audio/* → <audio controls> + filename
+  //   - file_ref + other mime  → download link + mime + filename
+  //   - image source=base64    → <img src="data:..."> inline
+  //   - image source=url       → <img src="..."> external
+  //   - image source=artifact_ref → <img> via /api/admin/uploads?id=...
+  //   - audio source=base64    → <audio src="data:..."> inline
+  //   - audio source=url       → <audio src="..."> external
+  //   - audio source=artifact_ref → <audio> via /api/admin/uploads
+  function renderMultimodalBlock(b) {
+    if (b.type === 'file_ref') {
+      const url = `/api/admin/uploads?id=${encodeURIComponent(b.artifactId)}`
+      const tail = b.artifactId.split('/').pop() || b.artifactId
+      const meta = `<div class="mm-meta"><code>${escapeHtml(b.mime)}</code> · ${escapeHtml(tail)}</div>`
+      if (b.mime.startsWith('image/')) {
+        return `<div class="mm-block mm-image">
+          <a href="${escapeHtml(url)}" target="_blank" rel="noopener">
+            <img src="${escapeHtml(url)}" alt="${escapeHtml(tail)}" loading="lazy" />
+          </a>
+          ${meta}
+        </div>`
+      }
+      if (b.mime.startsWith('audio/')) {
+        return `<div class="mm-block mm-audio">
+          <audio controls src="${escapeHtml(url)}"></audio>
+          ${meta}
+        </div>`
+      }
+      // Generic file — render as download link with mime tag.
+      return `<div class="mm-block mm-file">
+        <a href="${escapeHtml(url)}" download="${escapeHtml(tail)}">📎 ${escapeHtml(tail)}</a>
+        ${meta}
+      </div>`
+    }
+    if (b.type === 'image') {
+      const src = imageOrAudioSourceToSrc(b.source)
+      if (!src) return renderUnknownBlock(b)
+      return `<div class="mm-block mm-image">
+        <a href="${escapeHtml(src.url)}" target="_blank" rel="noopener">
+          <img src="${escapeHtml(src.url)}" alt="image" loading="lazy" />
+        </a>
+        <div class="mm-meta"><code>${escapeHtml(src.label)}</code></div>
+      </div>`
+    }
+    if (b.type === 'audio') {
+      const src = imageOrAudioSourceToSrc(b.source)
+      if (!src) return renderUnknownBlock(b)
+      const fmt = b.format ? ` · ${escapeHtml(b.format)}` : ''
+      return `<div class="mm-block mm-audio">
+        <audio controls src="${escapeHtml(src.url)}"></audio>
+        <div class="mm-meta"><code>${escapeHtml(src.label)}</code>${fmt}</div>
+      </div>`
+    }
+    return renderUnknownBlock(b)
+  }
+
+  function imageOrAudioSourceToSrc(source) {
+    if (!source || typeof source !== 'object') return null
+    if (source.kind === 'base64'
+        && typeof source.data === 'string'
+        && typeof source.mime === 'string') {
+      return {
+        url: `data:${source.mime};base64,${source.data}`,
+        label: `${source.mime} (inline base64)`,
+      }
+    }
+    if (source.kind === 'url' && typeof source.url === 'string') {
+      return { url: source.url, label: source.url }
+    }
+    if (source.kind === 'artifact_ref'
+        && typeof source.artifactId === 'string'
+        && typeof source.mime === 'string') {
+      return {
+        url: `/api/admin/uploads?id=${encodeURIComponent(source.artifactId)}`,
+        label: `${source.mime} · ${source.artifactId}`,
+      }
+    }
+    return null
+  }
+
+  function renderUnknownBlock(b) {
+    return `<div class="mm-block mm-unknown">
+      <small>未识别的 ${escapeHtml(String(b && b.type) || 'unknown')} 块</small>
+    </div>`
+  }
+
   function renderOneField(f) {
     const id = `wf-start-field-${escapeHtml(f.id)}`
     const required = f.required ? ' <span style="color:#c33">*</span>' : ''
@@ -1900,8 +2040,27 @@
           try {
             const ref = await uploadOneFile(file)
             if (statusEl) {
-              statusEl.textContent = `已上传 (${formatBytes(ref.size)})`
+              // For image uploads, show an inline thumbnail next to
+              // the size hint so the admin sees what they're about
+              // to dispatch. Audio gets a `<audio controls>` mini
+              // player. Other mimes stay text-only (a generic file
+              // icon would just be noise).
               statusEl.style.color = '#080'
+              if (ref.mime && ref.mime.startsWith('image/')) {
+                const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`
+                statusEl.innerHTML =
+                  `<span>已上传 (${escapeHtml(formatBytes(ref.size))})</span> ` +
+                  `<img src="${escapeHtml(url)}" alt="preview" ` +
+                  `style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`
+              } else if (ref.mime && ref.mime.startsWith('audio/')) {
+                const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`
+                statusEl.innerHTML =
+                  `<span>已上传 (${escapeHtml(formatBytes(ref.size))})</span> ` +
+                  `<audio controls src="${escapeHtml(url)}" ` +
+                  `style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`
+              } else {
+                statusEl.textContent = `已上传 (${formatBytes(ref.size)})`
+              }
             }
             payload[f.id] = { type: 'file_ref', artifactId: ref.artifactId, mime: ref.mime }
           } catch (err) {

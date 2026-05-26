@@ -180,6 +180,36 @@ describe('createUploadSurface (unit)', () => {
     const expected: Owner = { kind: 'shared', id: 'uploads' }
     expect(UPLOADS_OWNER_REF).toEqual(expected)
   })
+
+  it('get() proxies to handle.readBytes', async () => {
+    // The fake handle's readBytes was a stub; rewrite it inline to
+    // verify the upload surface's `get` delegates with the right
+    // artifactId.
+    const captured: { calls: string[] } = { calls: [] }
+    const handle = {
+      async write(path: string, _content: string | Uint8Array, opts?: { mime?: string }) {
+        return { ref: path, path, size: 0, ts: 0, mime: opts?.mime ?? 'application/octet-stream' }
+      },
+      async read() { throw new Error('unused') },
+      async readBytes(refOrPath: string) {
+        captured.calls.push(refOrPath)
+        return { bytes: new Uint8Array([7, 7, 7]), mime: 'image/png' }
+      },
+      async list() { return [] },
+      async exists() { return false },
+      async remove() { /* noop */ },
+    }
+    const fakeServices = {
+      attach: async () => ({
+        type: 'artifact', impl: 'file', owner: UPLOADS_OWNER_REF, handle,
+      }),
+    } as unknown as HubServices
+    const uploads = await createUploadSurface({ services: fakeServices, logger })
+    const out = await uploads.get('uploads/2026-05-26/abc.png')
+    expect(captured.calls).toEqual(['uploads/2026-05-26/abc.png'])
+    expect(Array.from(out.bytes)).toEqual([7, 7, 7])
+    expect(out.mime).toBe('image/png')
+  })
 })
 
 // ---------------------------------------------------------------------------
@@ -252,6 +282,13 @@ describe('createUploadSurface (e2e via real artifact-file plugin)', () => {
     const read = await handle.readBytes(out.artifactId)
     expect(Buffer.from(read.bytes).equals(original)).toBe(true)
     expect(read.mime).toBe('text/plain')
+
+    // Phase 9 M5 — same `uploads` surface can also GET via .get().
+    // This is the path /api/admin/uploads (GET) takes when rendering
+    // a file_ref in the admin UI.
+    const back = await uploads.get(out.artifactId)
+    expect(Buffer.from(back.bytes).equals(original)).toBe(true)
+    expect(back.mime).toBe('text/plain')
   })
 
   it('e2e: rejects an artifact larger than the plugin cap (50 MB) but accepts 1 MB', async () => {

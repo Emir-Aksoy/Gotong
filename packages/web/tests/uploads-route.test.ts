@@ -46,6 +46,9 @@ interface BootResult {
   }>
   uploadResponse: { artifactId: string; mime: string; size: number }
   uploadThrows: Error | null
+  /** Phase 9 M5 — entries the GET path resolves. */
+  storedArtifacts: Map<string, { bytes: Uint8Array; mime: string }>
+  getThrows: Error | null
 }
 
 async function boot(opts: { withUploads: boolean } = { withUploads: true }): Promise<BootResult> {
@@ -59,6 +62,7 @@ async function boot(opts: { withUploads: boolean } = { withUploads: true }): Pro
   void admin
 
   const uploadCalls: BootResult['uploadCalls'] = []
+  const storedArtifacts = new Map<string, { bytes: Uint8Array; mime: string }>()
   const out: BootResult = {
     tmp, hub, space,
     server: undefined as unknown as WebServerHandle,
@@ -67,6 +71,8 @@ async function boot(opts: { withUploads: boolean } = { withUploads: true }): Pro
     uploadCalls,
     uploadResponse: { artifactId: 'uploads/2026-05-26/abc.png', mime: 'image/png', size: 0 },
     uploadThrows: null,
+    storedArtifacts,
+    getThrows: null,
   }
 
   const uploadStub: UploadSurface = {
@@ -78,13 +84,27 @@ async function boot(opts: { withUploads: boolean } = { withUploads: true }): Pro
         by: params.by,
       })
       if (out.uploadThrows) throw out.uploadThrows
-      // Echo size from the actual incoming bytes so assertions can
-      // round-trip — keeps the stub honest.
-      return {
-        artifactId: out.uploadResponse.artifactId,
-        mime: out.uploadResponse.mime,
-        size: params.bytes.byteLength,
+      // Persist to the in-memory store so a later GET can read it
+      // back. Mirror the host implementation's contract.
+      const artifactId = out.uploadResponse.artifactId
+      const mime = out.uploadResponse.mime
+      storedArtifacts.set(artifactId, {
+        bytes: new Uint8Array(params.bytes),
+        mime,
+      })
+      return { artifactId, mime, size: params.bytes.byteLength }
+    },
+    async get(artifactId) {
+      if (out.getThrows) throw out.getThrows
+      const found = storedArtifacts.get(artifactId)
+      if (!found) {
+        // Mirror node's ENOENT shape so the route's translator
+        // produces 404.
+        const err = new Error(`ENOENT: no such file or directory, open '${artifactId}'`)
+        ;(err as NodeJS.ErrnoException).code = 'ENOENT'
+        throw err
       }
+      return found
     },
   }
 
@@ -253,6 +273,94 @@ describe('POST /api/admin/uploads', () => {
     })
     // Disk-full doesn't match any client-shape pattern → bubble as 500.
     expect(r.status).toBe(500)
+  })
+
+  // ----- GET /api/admin/uploads — Phase 9 M5 download path ----------
+
+  it('GET 503 when uploads not enabled', async () => {
+    b = await boot({ withUploads: false })
+    const r = await fetch(`${b.baseUrl}/api/admin/uploads?id=anything`, {
+      headers: { authorization: `Bearer ${b.adminToken}` },
+    })
+    expect(r.status).toBe(503)
+  })
+
+  it('GET 401 when unauthenticated', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}/api/admin/uploads?id=anything`)
+    expect(r.status).toBe(401)
+  })
+
+  it('GET 400 when ?id= is missing', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}/api/admin/uploads`, {
+      headers: { authorization: `Bearer ${b.adminToken}` },
+    })
+    expect(r.status).toBe(400)
+    const j = await r.json()
+    expect(j.error).toMatch(/missing \?id=/)
+  })
+
+  it('GET 200 round-trips POST: artifactId resolves back to original bytes + mime', async () => {
+    b = await boot()
+    // First POST to populate.
+    b.uploadResponse = { artifactId: 'uploads/2026-05-26/aaa.png', mime: 'image/png', size: 0 }
+    const original = Buffer.from([1, 2, 3, 4, 5, 6, 7, 8])
+    const post = await fetch(`${b.baseUrl}/api/admin/uploads?filename=cat.png&mime=image/png`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${b.adminToken}`, 'content-type': 'image/png' },
+      body: original,
+    })
+    expect(post.status).toBe(200)
+    const postBody = await post.json()
+    // Now GET it back.
+    const get = await fetch(
+      `${b.baseUrl}/api/admin/uploads?id=${encodeURIComponent(postBody.artifactId)}`,
+      { headers: { authorization: `Bearer ${b.adminToken}` } },
+    )
+    expect(get.status).toBe(200)
+    expect(get.headers.get('content-type')).toMatch(/^image\/png/)
+    expect(get.headers.get('content-length')).toBe(String(original.byteLength))
+    expect(get.headers.get('content-disposition')).toMatch(/inline; filename="aaa\.png"/)
+    expect(get.headers.get('cache-control')).toMatch(/private/)
+    const buf = Buffer.from(await get.arrayBuffer())
+    expect(buf.equals(original)).toBe(true)
+  })
+
+  it('GET 404 on unknown artifactId', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}/api/admin/uploads?id=does-not-exist`, {
+      headers: { authorization: `Bearer ${b.adminToken}` },
+    })
+    expect(r.status).toBe(404)
+  })
+
+  it('GET 400 on a traversal-shaped artifactId error', async () => {
+    b = await boot()
+    b.getThrows = new Error('path traversal denied: ../../etc/passwd')
+    const r = await fetch(`${b.baseUrl}/api/admin/uploads?id=anything`, {
+      headers: { authorization: `Bearer ${b.adminToken}` },
+    })
+    expect(r.status).toBe(400)
+  })
+
+  it('GET sanitises Content-Disposition filename to safe chars', async () => {
+    b = await boot()
+    b.uploadResponse = { artifactId: 'uploads/2026-05-26/weird name!.png', mime: 'image/png', size: 0 }
+    const original = Buffer.from([9])
+    await fetch(`${b.baseUrl}/api/admin/uploads?filename=cat.png&mime=image/png`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${b.adminToken}`, 'content-type': 'image/png' },
+      body: original,
+    })
+    const get = await fetch(
+      `${b.baseUrl}/api/admin/uploads?id=${encodeURIComponent(b.uploadResponse.artifactId)}`,
+      { headers: { authorization: `Bearer ${b.adminToken}` } },
+    )
+    expect(get.status).toBe(200)
+    const cd = get.headers.get('content-disposition')!
+    // 'weird name!.png' → 'weird_name_.png' (spaces + '!' → '_')
+    expect(cd).toMatch(/filename="weird_name_\.png"/)
   })
 
   it('413 when body exceeds the 50 MB HTTP-layer cap', async () => {

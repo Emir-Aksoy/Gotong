@@ -752,6 +752,59 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   padding: 0.45rem 0.65rem;
   color: #8a2828;
 }
+
+/* --- Phase 9 M5: multimodal preview blocks ------------------------- */
+.task-detail-multimodal {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.35rem 0;
+}
+.mm-block {
+  background: #f6f8fc;
+  border: 1px solid #d8e0ec;
+  border-radius: 5px;
+  padding: 0.4rem 0.5rem;
+  font-size: 0.74rem;
+  max-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.mm-block .mm-meta {
+  color: #555;
+  font-size: 0.7rem;
+  word-break: break-all;
+}
+.mm-block .mm-meta code {
+  background: #e7edf6;
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+}
+.mm-block.mm-image img {
+  max-width: 240px;
+  max-height: 200px;
+  width: auto;
+  height: auto;
+  border-radius: 3px;
+  display: block;
+  background: #fff;
+}
+.mm-block.mm-audio audio {
+  width: 240px;
+  max-width: 100%;
+}
+.mm-block.mm-file a {
+  font-weight: 600;
+  text-decoration: none;
+  color: #2a5a85;
+}
+.mm-block.mm-file a:hover { text-decoration: underline; }
+.mm-block.mm-unknown {
+  background: #fdf6e8;
+  border-color: #e9d9a9;
+  color: #8a6a18;
+}
 .task-detail-evals { list-style: none; padding: 0; margin: 0.3rem 0 0 0; }
 .task-detail-evals li {
   border-left: 3px solid #c89a30;

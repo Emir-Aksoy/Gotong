@@ -102,6 +102,14 @@ export async function createUploadSurface(
         size: ref.size,
       }
     },
+    async get(artifactId) {
+      // Pass through to the artifact handle's `readBytes`. It
+      // re-applies its own path sanitisation (sanitisePath) so a
+      // hostile artifactId can't traverse out of the owner dir; an
+      // unknown id surfaces as a node ENOENT, which the route
+      // translates to 404.
+      return handle.readBytes(artifactId)
+    },
   }
 }
 

@@ -330,6 +330,17 @@ export interface UploadSurface {
     /** Who's uploading — used for audit + filename scoping. */
     by: ParticipantId
   }): Promise<{ artifactId: string; mime: string; size: number }>
+  /**
+   * Phase 9 M5 — read back an uploaded artifact. Used by the admin
+   * UI's `<img>` / `<audio>` / download link tags rendering a payload
+   * that contains an `LlmFileRefBlock`. Throws when the artifact is
+   * missing (route translates to 404).
+   *
+   * Same artifact handle that `put` wrote through — no separate
+   * authentication: anyone reaching `/api/admin/uploads/:id` already
+   * passed admin auth.
+   */
+  get(artifactId: string): Promise<{ bytes: Uint8Array; mime: string }>
 }
 
 /**
@@ -2286,6 +2297,60 @@ async function handle(
       calls.push({ seq: e.seq, ts: e.ts, ...e.data })
     }
     sendJson(res, { calls })
+    return
+  }
+
+  // --- admin: download an uploaded artifact (Phase 9 M5) ----------------
+  // Pairs with POST /api/admin/uploads. Browser <img src="...">,
+  // <audio src="...">, and download anchor tags all hit this with
+  // `?id=<artifactId>`. The route streams bytes back with the
+  // recorded mime + a cache-control of `private,max-age=300` (5 min —
+  // the artifactId is content-addressed-ish but not immutable from
+  // the browser's POV).
+  //
+  // Why query string not path: artifactId looks like
+  // `uploads/2026-05-26/abcdef.png` — embedding the literal slashes
+  // in the URL path would require either heavy encoding or a
+  // wildcard route; query-stringifying it sidesteps both.
+  if (method === 'GET' && path === '/api/admin/uploads') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.uploads) {
+      sendJson(res, { error: 'uploads not enabled on this host' }, 503)
+      return
+    }
+    const u = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+    const id = u.searchParams.get('id')
+    if (!id) {
+      sendJson(res, { error: 'missing ?id=<artifactId>' }, 400)
+      return
+    }
+    try {
+      const { bytes, mime } = await ctx.uploads.get(id)
+      // Content-Disposition: inline is the right call — the admin UI
+      // wants `<img>` / `<audio>` previews to work. Operators can
+      // still trigger a download via the anchor's `download` attr.
+      // Filename hint is the last path segment, dropped if it would
+      // confuse the browser's save-as.
+      const filename = id.split('/').pop() ?? 'artifact'
+      const safeFilename = filename.replace(/[^A-Za-z0-9._-]/g, '_')
+      res.writeHead(200, {
+        'content-type': mime || 'application/octet-stream',
+        'content-length': String(bytes.byteLength),
+        'content-disposition': `inline; filename="${safeFilename}"`,
+        'cache-control': 'private, max-age=300',
+      })
+      res.end(Buffer.from(bytes))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      // ENOENT / "no such file" → 404; sanitisePath traversal-style
+      // errors → 400; other → 500. Same pattern as the upload route.
+      const lower = msg.toLowerCase()
+      const code = lower.includes('enoent') || lower.includes('no such file')
+        ? 404
+        : (/traversal|relative|null byte/.test(msg) ? 400 : 500)
+      sendJson(res, { error: msg }, code)
+    }
     return
   }
 
