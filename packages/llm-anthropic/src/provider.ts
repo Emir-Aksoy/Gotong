@@ -8,6 +8,7 @@ import type {
   LlmStreamChunk,
   LlmUsage,
 } from '@aipehub/llm'
+import { MultimodalNotSupportedError } from '@aipehub/llm'
 
 /**
  * Construction options for {@link AnthropicProvider}.
@@ -340,6 +341,18 @@ function translateBlock(block: LlmContentBlock): Record<string, unknown> {
       if (block.isError) out.is_error = true
       return out
     }
+    case 'image':
+    case 'audio':
+    case 'file_ref':
+      // Phase 9 M1 stub. The union widened to include multimodal block
+      // types but provider-specific translation lives in M2 — throwing
+      // here keeps the switch exhaustive without silently dropping a
+      // block the agent expected the LLM to see.
+      throw new MultimodalNotSupportedError(
+        'anthropic',
+        block.type,
+        'multimodal translation lands in Phase 9 M2',
+      )
   }
 }
 

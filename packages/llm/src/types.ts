@@ -79,13 +79,191 @@ export interface LlmToolResultBlock {
 }
 
 /**
- * Discriminated union of content block types. New block kinds (image,
- * resource, ...) get added here as we support them.
+ * Source for binary content (image / audio) referenced from an
+ * `LlmMessage`. Three first-class shapes (RFC §1):
+ *
+ * - `base64` — inline bytes. Capped at 1 MB by default (env
+ *   `AIPE_MULTIMODAL_MAX_INLINE_MB`); larger uploads SHOULD land
+ *   in an artifact and be referenced via `artifact_ref` instead.
+ *   `mime` is required so providers know which API endpoint to pick
+ *   without sniffing.
+ * - `url` — public URL the vendor SDK will fetch on its end. No bytes
+ *   cross the hub. Provider translators don't validate the URL.
+ * - `artifact_ref` — points at an `ArtifactHandle.read*()` ref in the
+ *   per-owner artifact store. Provider translators read the artifact
+ *   at request time, so a single artifact can be referenced by N
+ *   messages without N copies in the transcript. `mime` is required
+ *   here too because the artifact metadata may be lossy (file backend
+ *   guesses from extension; `image/png` vs `application/octet-stream`
+ *   matters to the LLM).
+ */
+export type LlmImageSource =
+  | { kind: 'base64'; data: string; mime: string }
+  | { kind: 'url'; url: string }
+  | { kind: 'artifact_ref'; artifactId: string; mime: string }
+
+/**
+ * Image input block. Sent to the LLM as part of a user turn (most
+ * commonly) or as part of a tool result. The provider translator
+ * resolves the source (decodes base64 / dereferences artifact / passes
+ * URL through) and shapes it into the vendor's vision API format.
+ *
+ * Phase 9 scope: input only. The LLM doesn't currently stream images
+ * back as part of its response — output remains text + tool_use.
+ */
+export interface LlmImageBlock {
+  type: 'image'
+  source: LlmImageSource
+}
+
+/**
+ * Audio input block. Same source shape as `LlmImageBlock` but routed
+ * through audio-capable APIs (Whisper / GPT-4o audio for OpenAI;
+ * Anthropic doesn't support audio input as of Phase 9 and will throw
+ * `MultimodalNotSupportedError`).
+ *
+ * `format` is an optional vendor hint — when omitted, the provider
+ * sniffs from `mime`. Some vendors require an explicit format param
+ * (Whisper API needs it for non-mp3 inputs).
+ */
+export interface LlmAudioBlock {
+  type: 'audio'
+  source: LlmImageSource
+  format?: 'wav' | 'mp3' | 'webm' | 'ogg' | 'm4a'
+}
+
+/**
+ * Generic file reference — the artifact's MIME determines how the
+ * provider translates it: `image/*` → vision API, `audio/*` → audio
+ * API, `text/*` and `application/json` → prepended as text. Anything
+ * else throws `MultimodalNotSupportedError`.
+ *
+ * Use this when the upload UX doesn't know up-front whether the file
+ * is image / audio / text (e.g. a generic "attach file" button). When
+ * the caller knows the type, prefer `LlmImageBlock` / `LlmAudioBlock`
+ * — they let provider translators skip the mime routing step.
+ *
+ * Per RFC §3, artifacts live in a per-owner namespace; the agent's
+ * `ServiceCtx.artifact` handle MUST own the referenced `artifactId`,
+ * or provider translation throws.
+ */
+export interface LlmFileRefBlock {
+  type: 'file_ref'
+  artifactId: string
+  /** MIME of the artifact. Required — provider routes on this. */
+  mime: string
+}
+
+/**
+ * Discriminated union of content block types. Phase 9 adds image /
+ * audio / file_ref; older callers using `text` / `tool_use` /
+ * `tool_result` keep working unchanged.
  */
 export type LlmContentBlock =
   | LlmTextBlock
   | LlmToolUseBlock
   | LlmToolResultBlock
+  | LlmImageBlock
+  | LlmAudioBlock
+  | LlmFileRefBlock
+
+/**
+ * Default cap on inline base64 payload size. Anything larger SHOULD
+ * be uploaded as an artifact and referenced via
+ * `{ kind: 'artifact_ref', artifactId, mime }` instead. The default
+ * is conservative on purpose — large inline base64 bloats the
+ * transcript jsonl and slows down replay / grep. Override at runtime
+ * with env `AIPE_MULTIMODAL_MAX_INLINE_MB`.
+ */
+export const DEFAULT_MULTIMODAL_INLINE_BYTE_CAP = 1024 * 1024 // 1 MB
+
+/**
+ * Error thrown by a provider when a content block can't be sent to the
+ * underlying LLM — either the vendor doesn't support that modality
+ * (e.g. Anthropic + audio) or the request shape would exceed limits
+ * (`MultimodalInlineSizeError` extends this).
+ *
+ * Callers should catch this in the LlmAgent loop and either downgrade
+ * (omit the block, ask the model to re-prompt) or surface it as a
+ * failed task. Never silently drop — RFC §6 explicitly forbids
+ * "treat as text" fallback so debugging is reliable.
+ */
+export class MultimodalNotSupportedError extends Error {
+  readonly code = 'MULTIMODAL_NOT_SUPPORTED'
+  constructor(
+    readonly providerName: string,
+    readonly blockType: LlmContentBlock['type'],
+    readonly detail?: string,
+  ) {
+    super(
+      `${providerName} doesn't support content block '${blockType}'`
+      + (detail ? `: ${detail}` : ''),
+    )
+    this.name = 'MultimodalNotSupportedError'
+  }
+}
+
+/**
+ * Specialisation of `MultimodalNotSupportedError` for the "request too
+ * large" case. Kept as a subclass (not a sibling) so callers that catch
+ * the parent automatically handle both.
+ */
+export class MultimodalInlineSizeError extends MultimodalNotSupportedError {
+  readonly inlineByteSize: number
+  readonly capBytes: number
+  constructor(providerName: string, inlineByteSize: number, capBytes: number) {
+    super(
+      providerName,
+      'image',
+      `inline base64 payload ${inlineByteSize} bytes exceeds cap ${capBytes} bytes`
+      + ` — upload as an artifact and reference via artifact_ref`,
+    )
+    this.name = 'MultimodalInlineSizeError'
+    this.inlineByteSize = inlineByteSize
+    this.capBytes = capBytes
+  }
+}
+
+/**
+ * Type guard — true iff the block is one of the Phase 9 modality
+ * blocks (image / audio / file_ref). Useful for provider translators
+ * that want a single branch for "needs binary resolution" before
+ * shaping to vendor API.
+ */
+export function isMultimodalBlock(
+  block: LlmContentBlock,
+): block is LlmImageBlock | LlmAudioBlock | LlmFileRefBlock {
+  return block.type === 'image'
+    || block.type === 'audio'
+    || block.type === 'file_ref'
+}
+
+/**
+ * Compute the byte size of an inline base64 payload on the block, if
+ * any. Returns 0 for non-multimodal blocks, `url` / `artifact_ref`
+ * sources, and missing/malformed base64. Provider translators use
+ * this to enforce the inline cap (RFC §4) before the request goes
+ * out to the vendor.
+ *
+ * Base64 → byte size is the standard formula:
+ *   bytes = floor(b64Len * 3 / 4) - (1 if 1 padding `=` else 0) - (2 if 2)
+ * We strip whitespace defensively because some clients ship soft-
+ * wrapped base64 (RFC 2045 76-col convention).
+ */
+export function extractInlineBase64Size(block: LlmContentBlock): number {
+  if (block.type !== 'image' && block.type !== 'audio') return 0
+  const src = block.source
+  if (src.kind !== 'base64') return 0
+  const cleaned = src.data.replace(/\s+/g, '')
+  if (!cleaned) return 0
+  // Validate base64 charset; bail on anything that isn't valid b64 so
+  // we don't return a misleading size for caller-corrupted data. The
+  // provider will reject the body anyway, but a 0 here avoids a false
+  // cap-exceeded error along the way.
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(cleaned)) return 0
+  const padding = cleaned.endsWith('==') ? 2 : cleaned.endsWith('=') ? 1 : 0
+  return Math.floor(cleaned.length * 3 / 4) - padding
+}
 
 /**
  * A tool the LLM may invoke. Field names mirror MCP SDK's `Tool` so

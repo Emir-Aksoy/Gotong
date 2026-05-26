@@ -101,6 +101,16 @@ export class ArtifactFileHandle implements ArtifactHandle {
     return { content, mime: guessMime(safe) }
   }
 
+  async readBytes(refOrPath: string): Promise<{ bytes: Uint8Array; mime: string }> {
+    const safe = sanitisePath(refOrPath)
+    const full = resolveOwnerPath(this.rootDir, this.owner, safe)
+    // No encoding arg → returns a Buffer (Uint8Array subclass) of raw bytes.
+    // Used by Phase 9 multimodal provider translators to feed binary
+    // artifacts (image/audio) into vendor APIs without utf-8 corruption.
+    const buf = await readFile(full)
+    return { bytes: buf, mime: guessMime(safe) }
+  }
+
   async list(opts: { prefix?: string } = {}): Promise<ArtifactRef[]> {
     const oDir = ownerDir(this.rootDir, this.owner)
     if (!await exists(oDir)) return []

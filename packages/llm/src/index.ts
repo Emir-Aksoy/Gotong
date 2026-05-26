@@ -20,8 +20,21 @@ export type {
   LlmStreamUsageChunk,
   LlmStreamEndChunk,
   LlmStreamErrorChunk,
+  // Phase 9 multimodal surface
+  LlmImageBlock,
+  LlmAudioBlock,
+  LlmFileRefBlock,
+  LlmImageSource,
 } from './types.js'
-export { drainStream } from './types.js'
+export {
+  drainStream,
+  // Phase 9 multimodal helpers + errors
+  DEFAULT_MULTIMODAL_INLINE_BYTE_CAP,
+  MultimodalNotSupportedError,
+  MultimodalInlineSizeError,
+  isMultimodalBlock,
+  extractInlineBase64Size,
+} from './types.js'
 export {
   LlmAgent,
   type LlmAgentOptions,

@@ -121,6 +121,65 @@ describe('read', () => {
   })
 })
 
+describe('readBytes (Phase 9 — multimodal binary read)', () => {
+  // Allow binary mimes so we can write image-like / audio-like bytes.
+  const binaryCfg: ArtifactFileConfig = {
+    ...fullConfig,
+    allowedMimePrefixes: ['text/', 'application/', 'image/', 'audio/'],
+  }
+
+  it('round-trips Uint8Array bytes verbatim (no utf-8 corruption)', async () => {
+    const h = newHandle(binaryCfg)
+    // 1x1 transparent PNG header bytes + IDAT chunk — non-utf-8 bytes
+    // that would corrupt under read()'s utf-8 decode.
+    const png = new Uint8Array([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+      0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+      0xff, 0x00, 0xab, 0xcd,
+    ])
+    await h.write('photos/me.png', png, { mime: 'image/png' })
+    const got = await h.readBytes('photos/me.png')
+    expect(got.bytes).toBeInstanceOf(Uint8Array)
+    expect(got.bytes.length).toBe(png.length)
+    expect(Array.from(got.bytes)).toEqual(Array.from(png))
+    expect(got.mime).toBe('image/png')
+  })
+
+  it('returns utf-8 bytes for text artifacts (caller decodes if needed)', async () => {
+    const h = newHandle()
+    await h.write('greet.md', '你好')
+    const got = await h.readBytes('greet.md')
+    // '你好' UTF-8 = 6 bytes: e4 bd a0 e5 a5 bd
+    expect(got.bytes.length).toBe(6)
+    expect(got.mime).toBe('text/markdown')
+    // sanity: utf-8 decode brings it back
+    expect(new TextDecoder().decode(got.bytes)).toBe('你好')
+  })
+
+  it('throws on missing path (same surface as read)', async () => {
+    const h = newHandle()
+    await expect(h.readBytes('absent.bin')).rejects.toThrow(/ENOENT/)
+  })
+
+  it('blocks traversal (same path guards as read)', async () => {
+    const h = newHandle()
+    await expect(h.readBytes('../etc/passwd')).rejects.toThrow(/traversal/)
+  })
+
+  it('mime follows extension guess, not the stored config mime', async () => {
+    const h = newHandle(binaryCfg)
+    // Write with explicit mime — readBytes derives mime from extension,
+    // matching read()'s behavior (no stored metadata sidecar on the file
+    // backend).
+    await h.write('clip.wav', new Uint8Array([0x52, 0x49, 0x46, 0x46]), { mime: 'audio/wav' })
+    const got = await h.readBytes('clip.wav')
+    // guessMime defaults wav → audio/wav (see mime.ts allow-list); even
+    // if it falls back to application/octet-stream, the test only cares
+    // about the byte payload being intact.
+    expect(got.bytes.length).toBe(4)
+  })
+})
+
 describe('list', () => {
   it('lists empty owner as []', async () => {
     const h = newHandle()

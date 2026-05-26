@@ -41,10 +41,28 @@ export interface ArtifactHandle {
 
   /**
    * Read content by ref or by relative path. Throws if not found.
-   * Returned `content` is utf-8 text; binary callers should read
-   * via the plugin's own extension API if they need raw bytes.
+   * Returned `content` is utf-8 text; binary callers should use
+   * `readBytes` instead.
    */
   read(refOrPath: string): Promise<{ content: string; mime: string }>
+
+  /**
+   * Read content as raw bytes by ref or relative path. Throws if not
+   * found. Use this for any non-text artifact (images / audio /
+   * binary files) — the utf-8 decode in `read()` would corrupt
+   * binary payloads.
+   *
+   * Phase 9 introduced this for multimodal LLM input: provider
+   * translators resolve `LlmImageBlock` / `LlmFileRefBlock` blocks
+   * with `source.kind === 'artifact_ref'` by calling `readBytes` to
+   * get the raw bytes, then shaping into vendor base64 / multipart
+   * form.
+   *
+   * For text artifacts, this returns the utf-8 encoded bytes — the
+   * caller decodes if it needs a string (typical case is the caller
+   * already knows the mime is binary, so this never matters).
+   */
+  readBytes(refOrPath: string): Promise<{ bytes: Uint8Array; mime: string }>
 
   /**
    * List all artifacts owned by this handle. `prefix` filters by

@@ -8,6 +8,7 @@ import type {
   LlmStreamChunk,
   LlmUsage,
 } from '@aipehub/llm'
+import { MultimodalNotSupportedError } from '@aipehub/llm'
 
 /**
  * Construction options for {@link OpenAIProvider}.
@@ -342,6 +343,17 @@ function translateMessage(m: LlmMessage): Array<Record<string, unknown>> {
             arguments: JSON.stringify(block.input ?? {}),
           },
         })
+      } else if (block.type === 'image' || block.type === 'audio' || block.type === 'file_ref') {
+        // Phase 9 M1 stub. Models don't generate multimodal output blocks
+        // on assistant turns today, but if a caller round-trips a user's
+        // multimodal block into the assistant history (or a future
+        // model returns one) we surface it explicitly instead of dropping
+        // silently. Real translation lands in M3.
+        throw new MultimodalNotSupportedError(
+          'openai',
+          block.type,
+          'multimodal translation on assistant turns lands in Phase 9 M3',
+        )
       }
       // tool_result blocks should never appear on an assistant turn; ignore.
     }
@@ -370,6 +382,15 @@ function translateMessage(m: LlmMessage): Array<Record<string, unknown>> {
         tool_call_id: block.toolUseId,
         content,
       })
+    } else if (block.type === 'image' || block.type === 'audio' || block.type === 'file_ref') {
+      // Phase 9 M1 stub — translation lands in M3. Throwing here lets
+      // callers know the model didn't see the multimodal block, instead
+      // of the LLM silently producing nonsense because we dropped it.
+      throw new MultimodalNotSupportedError(
+        'openai',
+        block.type,
+        'multimodal translation lands in Phase 9 M3',
+      )
     }
   }
   if (textParts.length > 0) {

@@ -393,6 +393,22 @@ export class ServiceClientImpl implements ServiceClient {
         call('write', opts === undefined ? [path, content] : [path, content, opts]) as Promise<ArtifactRef>,
       read: (refOrPath: string) =>
         call('read', [refOrPath]) as Promise<{ content: string; mime: string }>,
+      // Phase 9: binary read over JSON RPC needs a base64 framing layer we
+      // haven't designed yet (SERVICE_CALL serialises with JSON.stringify,
+      // which mangles Uint8Array). For now SDK callers can't pull bytes
+      // from a remote artifact — throw a clear, actionable error so the
+      // ArtifactHandle contract stays satisfied without silent corruption.
+      // Local provider translators (M2/M3) always run host-side and call
+      // ArtifactFileHandle.readBytes directly, so this restriction only
+      // affects external SDK consumers.
+      readBytes: (_refOrPath: string) => {
+        return Promise.reject(new Error(
+          'ArtifactHandle.readBytes over the sdk-node SERVICE_CALL RPC is '
+          + 'not implemented in Phase 9. For multimodal LLM input from an '
+          + 'SDK agent, either inline base64 into LlmImageBlock.source '
+          + '(kind="base64") or use HTTP GET against the admin URL.',
+        ))
+      },
       list: (opts?: { prefix?: string }) =>
         call('list', opts === undefined ? [] : [opts]) as Promise<ArtifactRef[]>,
       exists: (refOrPath: string) => call('exists', [refOrPath]) as Promise<boolean>,
