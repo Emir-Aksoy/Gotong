@@ -35,6 +35,14 @@ export type IdentityErrorCode =
    * revoke the older invite first, then create a fresh one.
    */
   | 'invitation_pending_exists'
+  /**
+   * Phase 6 #9: createInvitation refused because the org-wide active-
+   * pending invites count has reached `AIPE_MAX_PENDING_INVITES` (default
+   * 1000). The hard cap guards against table-blowup from an owner /
+   * script bug. Operator must revoke some pending invites (or wait for
+   * expiry) before creating new ones.
+   */
+  | 'invitations_limit_exceeded'
   // Vault (Phase 5 A1 — encrypted application-layer secret storage).
   /**
    * Vault row not found (or already hard-deleted — soft-delete rows

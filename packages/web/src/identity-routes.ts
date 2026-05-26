@@ -398,6 +398,7 @@ function sendIdentityError(res: ServerResponse, err: unknown, fallbackStatus = 5
     case 'duplicate_credential':
     case 'last_owner': // V4-AUDIT-03: refusing to demote the last owner is a 409 conflict
     case 'invitation_pending_exists': // same family — "you already have one of these"
+    case 'invitations_limit_exceeded': // Phase 6 #9 — hard cap; revoke or wait
       sendJson(res, { error: ec.message, code: ec.code }, 409)
       return
     case 'invalid_email':
@@ -1267,6 +1268,24 @@ async function handleCreateInvite(
       201,
     )
   } catch (err) {
+    // Phase 6 #9: audit cap-triggered blocks so operators can see "we
+    // hit the wall" before users complain. Other createInvitation
+    // errors (validation, duplicate_email, invitation_pending_exists)
+    // are not a DoS signal and stay unaudited to keep the log
+    // signal-to-noise high.
+    const ec = asErrorWithCode(err)
+    if (ec?.code === 'invitations_limit_exceeded') {
+      tryAudit(ctx, v4, {
+        action: 'invite_create_blocked',
+        targetUserId: null,
+        metadata: {
+          email: input.email,
+          role: input.role ?? 'member',
+          reason: ec.message,
+        },
+        success: false,
+      })
+    }
     sendIdentityError(res, err, 400)
   }
 }

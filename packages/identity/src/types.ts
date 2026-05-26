@@ -216,6 +216,13 @@ export const AUDIT_ACTIONS = {
   INVITE_CREATE: 'invite_create',
   INVITE_ACCEPT: 'invite_accept',
   INVITE_REVOKE: 'invite_revoke',
+  /**
+   * Phase 6 #9: createInvitation was blocked by the org-wide hard cap
+   * on active-pending invites (`AIPE_MAX_PENDING_INVITES`, default
+   * 1000). Logged so operators can see "the cap is firing in production"
+   * before they hit it themselves.
+   */
+  INVITE_CREATE_BLOCKED: 'invite_create_blocked',
   // Phase 5 — setup wizard.
   SETUP_OWNER_CREATED: 'setup_owner_created',
   // Phase 5 — vault (A1).

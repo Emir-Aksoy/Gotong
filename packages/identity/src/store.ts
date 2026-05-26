@@ -414,6 +414,11 @@ export class IdentityStore {
   private readonly stmtInvitationPendingByEmail: SqliteStmt
   private readonly stmtMarkInvitationAccepted: SqliteStmt
   private readonly stmtMarkInvitationRevoked: SqliteStmt
+  // Phase 6 #9 — count active-pending invites for the createInvitation
+  // hard cap. Uses the same predicate as the read-side computed status
+  // ("status='pending' AND not expired") so the cap matches what
+  // listInvitations reports as pending.
+  private readonly stmtInvitationCountActivePending: SqliteStmt
 
   // B2.1 — usage counters. Eagerly prepared (not lazy like vault) since
   // checkAndIncrement is the agent-spawn hot path once B2.2 lands.
@@ -544,6 +549,12 @@ export class IdentityStore {
       `SELECT * FROM invitations
         WHERE email = ? AND status = 'pending' AND expires_at >= ?
         LIMIT 1`,
+    )
+    // Phase 6 #9 — counter for the org-wide hard cap. Same predicate as
+    // listInvitations's computed pending status.
+    this.stmtInvitationCountActivePending = db.prepare(
+      `SELECT COUNT(*) AS c FROM invitations
+        WHERE status = 'pending' AND expires_at >= ?`,
     )
     // Guarded UPDATE — `status = 'pending'` in the WHERE clause means a
     // race between two accepts can never both succeed; the second one's
@@ -1445,6 +1456,32 @@ export class IdentityStore {
 
     const now = Date.now()
     return transaction(this.db, () => {
+      // Phase 6 #9 — global hard cap on active-pending invites. Run
+      // INSIDE the transaction so we can't TOCTOU past the limit.
+      // Default 1000; AIPE_MAX_PENDING_INVITES overrides. The cap
+      // guards against owner / script error blowing up the invites
+      // table (audit log gets one row per attempt; admin UI 'pending'
+      // tab becomes unusable; identity.sqlite grows). 1000 active
+      // pending is way more than any real org needs.
+      const maxPendingRaw = process.env.AIPE_MAX_PENDING_INVITES
+      const maxPending = (() => {
+        if (!maxPendingRaw) return 1000
+        const n = Number.parseInt(maxPendingRaw, 10)
+        return Number.isFinite(n) && n > 0 ? n : 1000
+      })()
+      const countRow = this.stmtInvitationCountActivePending.get(now) as
+        | { c: number }
+        | undefined
+      const pendingCount = countRow?.c ?? 0
+      if (pendingCount >= maxPending) {
+        throw new IdentityError({
+          code: 'invitations_limit_exceeded',
+          message:
+            `too many active-pending invitations (${pendingCount}/${maxPending}); ` +
+            `revoke or wait for expiry before inviting more`,
+        })
+      }
+
       // Pending-by-email check INSIDE the transaction so a concurrent
       // create can't slip past. SQLite's default serializable isolation
       // for write transactions means the second one re-reads after the
@@ -1748,6 +1785,19 @@ export class IdentityStore {
     params.push(limit, offset)
     const rows = this.db.prepare(sql).all(...params) as InvitationRow[]
     return rows.map((r) => rowToInvitation(r, now))
+  }
+
+  /**
+   * Phase 6 #9 — count active-pending invites (status='pending' AND
+   * expires_at >= now). Same predicate as the createInvitation cap
+   * check; exposed publicly for admin UI / dashboards / tests so
+   * operators can see "we're at 950/1000" before the cap fires.
+   */
+  countActivePendingInvitations(now: number = Date.now()): number {
+    const row = this.stmtInvitationCountActivePending.get(now) as
+      | { c: number }
+      | undefined
+    return row?.c ?? 0
   }
 
   /**
