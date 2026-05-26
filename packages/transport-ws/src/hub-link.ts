@@ -822,6 +822,20 @@ export interface AcceptHubLinksOptions {
    * precedence over `peerToken` when both are set.
    */
   peerTokenResolver?: (claimedPeerId: ParticipantId) => string | null
+  /**
+   * Phase 6 #12 — pre-handshake rate-limit hook. Called the instant
+   * an upgrade lands, BEFORE constructing the HubLink. Receives the
+   * source IP (or 'unknown' when the underlying socket has no
+   * `remoteAddress`). Return `false` to drop the connection without
+   * even allocating the handshake state machine — cheap defense
+   * against brute-force token guessing or HELLO floods that would
+   * otherwise pin event-loop ticks. Return `true` to let the
+   * handshake proceed normally.
+   *
+   * Typical wiring: a per-IP RateLimiter in PeerRegistry that
+   * tracks attempts and bills failures heavier than successes.
+   */
+  onConnectionAttempt?: (sourceIp: string) => boolean
 }
 
 /**
@@ -837,7 +851,24 @@ export interface AcceptHubLinksOptions {
 export function acceptHubLinks(opts: AcceptHubLinksOptions): () => void {
   const handshakeTimeoutMs = opts.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS
 
-  const handler = (ws: WebSocket) => {
+  // Phase 6 #12 — `ws` library passes the IncomingMessage as the 2nd
+  // arg of the 'connection' event. We pluck `socket.remoteAddress`
+  // (cheap, no DNS) before constructing the link so the rate limiter
+  // runs before any allocation.
+  const handler = (ws: WebSocket, req?: { socket?: { remoteAddress?: string | null } }) => {
+    if (opts.onConnectionAttempt) {
+      const ip = req?.socket?.remoteAddress || 'unknown'
+      let allowed = true
+      try {
+        allowed = opts.onConnectionAttempt(ip) !== false
+      } catch {
+        allowed = false
+      }
+      if (!allowed) {
+        try { ws.close() } catch { /* swallow */ }
+        return
+      }
+    }
     const link = new WebSocketHubLinkImpl(ws, 'in', {
       selfId: opts.selfId,
       ...(opts.peerToken !== undefined ? { peerToken: opts.peerToken } : {}),

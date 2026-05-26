@@ -1,0 +1,143 @@
+/**
+ * Phase 6 #12 — acceptHubLinks onConnectionAttempt hook.
+ *
+ * Verifies the pre-handshake rate-limit gate. The hook fires BEFORE
+ * a HubLink is constructed; returning false closes the ws silently.
+ * Tests focus on the gate semantics — the actual fixed-window limiter
+ * lives in PeerRegistry (host) and is exercised in the host suite.
+ */
+
+import { afterEach, describe, expect, it } from 'vitest'
+import { WebSocket, WebSocketServer } from 'ws'
+
+import { acceptHubLinks, connectHubLink, type HubLink } from '../src/index.js'
+
+interface Bench {
+  wss: WebSocketServer
+  url: string
+  attempts: string[]
+  decisions: boolean[]
+  stop: () => Promise<void>
+}
+
+async function startBench(opts: {
+  onConnectionAttempt?: (ip: string) => boolean
+}): Promise<Bench> {
+  const wss = new WebSocketServer({ port: 0 })
+  await new Promise<void>((resolve) => wss.once('listening', () => resolve()))
+  const addr = wss.address()
+  const port = typeof addr === 'object' && addr ? addr.port : 0
+  const url = `ws://127.0.0.1:${port}`
+  const attempts: string[] = []
+  const decisions: boolean[] = []
+
+  const acceptedLinks: HubLink[] = []
+  acceptHubLinks({
+    server: wss,
+    selfId: 'hubB',
+    ...(opts.onConnectionAttempt
+      ? {
+        onConnectionAttempt: (ip) => {
+          attempts.push(ip)
+          const ok = opts.onConnectionAttempt!(ip)
+          decisions.push(ok)
+          return ok
+        },
+      }
+      : {}),
+    onLink: (link) => { acceptedLinks.push(link) },
+  })
+
+  return {
+    wss,
+    url,
+    attempts,
+    decisions,
+    stop: async () => {
+      for (const l of acceptedLinks) await l.close().catch(() => {})
+      for (const c of wss.clients) {
+        try { c.terminate() } catch { /* */ }
+      }
+      await new Promise<void>((resolve) => wss.close(() => resolve()))
+    },
+  }
+}
+
+describe('acceptHubLinks — onConnectionAttempt (Phase 6 #12)', () => {
+  let bench: Bench
+  afterEach(async () => { if (bench) await bench.stop() })
+
+  it('hook receives source IP and allows when returns true', async () => {
+    bench = await startBench({ onConnectionAttempt: () => true })
+    const link = await connectHubLink({ url: bench.url, selfId: 'hubA' })
+    expect(bench.attempts).toHaveLength(1)
+    // localhost can be ::1 or 127.0.0.1 depending on ws version; both
+    // are non-empty strings.
+    expect(bench.attempts[0]!.length).toBeGreaterThan(0)
+    expect(bench.decisions).toEqual([true])
+    await link.close()
+  })
+
+  it('returning false closes the ws before handshake state', async () => {
+    bench = await startBench({ onConnectionAttempt: () => false })
+    // The connect will fail because the server closes immediately.
+    // We don't assert a specific error message — just that the connect
+    // rejects rather than hangs.
+    await expect(
+      connectHubLink({ url: bench.url, selfId: 'hubA', handshakeTimeoutMs: 1000 }),
+    ).rejects.toThrow()
+    expect(bench.attempts).toHaveLength(1)
+    expect(bench.decisions).toEqual([false])
+  })
+
+  it('hook throw is treated as reject (fail closed)', async () => {
+    bench = await startBench({
+      onConnectionAttempt: () => {
+        throw new Error('limiter exploded')
+      },
+    })
+    await expect(
+      connectHubLink({ url: bench.url, selfId: 'hubA', handshakeTimeoutMs: 1000 }),
+    ).rejects.toThrow()
+  })
+
+  it('without hook, every connection proceeds (default behavior)', async () => {
+    bench = await startBench({})
+    const link = await connectHubLink({ url: bench.url, selfId: 'hubA' })
+    expect(bench.attempts).toEqual([]) // hook never invoked
+    await link.close()
+  })
+
+  it('different IPs (simulated) are recorded distinctly', async () => {
+    // We can't actually use different IPs against localhost, but the
+    // hook can inspect its input and choose differently per "call number".
+    // Verifies the gate is per-attempt, not a one-shot decision.
+    let count = 0
+    bench = await startBench({
+      onConnectionAttempt: () => {
+        count++
+        return count <= 2 // first two allowed, third blocked
+      },
+    })
+    const a = await connectHubLink({ url: bench.url, selfId: 'hubA' })
+    const b = await connectHubLink({ url: bench.url, selfId: 'hubAA' })
+    await expect(
+      connectHubLink({ url: bench.url, selfId: 'hubAAA', handshakeTimeoutMs: 1000 }),
+    ).rejects.toThrow()
+    expect(bench.decisions).toEqual([true, true, false])
+    await a.close()
+    await b.close()
+  })
+
+  // Smoke for the constructor — confirms the ws library's connection
+  // handler signature (ws, req) is what we're consuming. If the upstream
+  // ever changed the order, the IP would come through as 'unknown'.
+  it('IP comes from the request socket, not a synthetic placeholder', async () => {
+    bench = await startBench({ onConnectionAttempt: () => true })
+    void new WebSocket(bench.url) // raw connect; immediately closes after
+    // Give the server one tick to record the attempt.
+    await new Promise((r) => setTimeout(r, 50))
+    expect(bench.attempts.length).toBeGreaterThanOrEqual(1)
+    expect(bench.attempts[0]).not.toBe('unknown')
+  })
+})

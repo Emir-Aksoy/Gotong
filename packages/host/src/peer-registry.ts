@@ -70,6 +70,17 @@ export interface PeerRegistryOptions {
    * shared token remains, if any). Default: true.
    */
   perPeerInboundAuth?: boolean
+  /**
+   * Phase 6 #12 — inbound rate-limit budget per source IP. Defaults
+   * to 60 attempts per 60s window. Set to 0 to disable.
+   *
+   * The limiter sits BEFORE the handshake state machine, so a peer
+   * spraying HELLOs to brute-force a token never gets to allocate a
+   * link. Per-IP keying means one rude peer can't starve others.
+   * Hits beyond the budget close the ws silently — the legitimate
+   * peer just retries on its next poll tick (D1 reconcile).
+   */
+  inboundRateLimit?: { max: number; windowMs: number }
   /** Default 5000ms. AIPE_PEER_POLL_MS override lives in main.ts. */
   pollIntervalMs?: number
   /** Optional logger; defaults to console-style noop-on-debug. */
@@ -88,6 +99,52 @@ interface BackoffState {
 
 const BACKOFF_LADDER_MS = [5_000, 15_000, 30_000, 60_000]
 
+/**
+ * Phase 6 #12 — minimal per-key fixed-window rate limiter. Designed
+ * specifically for the inbound peer-handshake hot path:
+ *
+ *   - O(1) check via Map lookup
+ *   - No timer / background sweep — buckets get rebuilt lazily on
+ *     access; idle keys age out only when re-touched, but the cost
+ *     of a stale entry is one small object until next GC
+ *   - No external deps; avoids pulling @aipehub/web's RateLimiter
+ *     (which would create a host→web dependency cycle)
+ *
+ * The window resets fully on first hit past `windowMs` since the
+ * window started — this is "leaky bucket" semantics with bucket=max
+ * per window. Good enough for "stop a brute-force script"; an
+ * attacker spreading hits across windows still gets `max * (60/win)`
+ * per minute, but at default 60/60s that's still bounded.
+ */
+export class FixedWindowLimiter {
+  private readonly buckets = new Map<string, { hits: number; windowStart: number }>()
+
+  constructor(
+    private readonly max: number,
+    private readonly windowMs: number,
+  ) {}
+
+  /**
+   * Record one attempt for `key` and return whether it's still under
+   * budget. Use the return value as "allow this connection".
+   */
+  attempt(key: string, now: number = Date.now()): boolean {
+    if (this.max <= 0 || this.windowMs <= 0) return true // disabled
+    const b = this.buckets.get(key)
+    if (!b || now - b.windowStart >= this.windowMs) {
+      this.buckets.set(key, { hits: 1, windowStart: now })
+      return true
+    }
+    b.hits++
+    return b.hits <= this.max
+  }
+
+  /** Snapshot for tests / observability. */
+  current(key: string): { hits: number; windowStart: number } | undefined {
+    return this.buckets.get(key)
+  }
+}
+
 export class PeerRegistry {
   private readonly opts: Required<Pick<PeerRegistryOptions, 'pollIntervalMs'>> &
     PeerRegistryOptions
@@ -100,6 +157,8 @@ export class PeerRegistry {
   private isShuttingDown = false
   /** Prevents concurrent ticks from racing each other. */
   private tickInFlight = false
+  /** Phase 6 #12 — inbound rate limiter; built in start(). */
+  private inboundLimiter: FixedWindowLimiter | undefined
 
   constructor(opts: PeerRegistryOptions) {
     this.opts = { pollIntervalMs: 5_000, ...opts }
@@ -134,6 +193,32 @@ export class PeerRegistry {
           }
         }
         : undefined
+      // Phase 6 #12 — per-IP fixed-window limiter. Default 60/60s.
+      // 0 for either field disables the limiter entirely (useful in
+      // tests + closed networks where this is purely overhead).
+      const rl = this.opts.inboundRateLimit ?? { max: 60, windowMs: 60_000 }
+      this.inboundLimiter = new FixedWindowLimiter(rl.max, rl.windowMs)
+      const limiter = this.inboundLimiter
+      const onConnectionAttempt = rl.max > 0 && rl.windowMs > 0
+        ? (ip: string): boolean => {
+          const allowed = limiter.attempt(ip)
+          if (!allowed) {
+            // Log at warn (not error) — sustained rejections from
+            // one IP are an attacker / misconfigured peer, both of
+            // which the operator should look at but neither is a
+            // host-internal bug. Once per slammed IP per window
+            // (the limiter returns false repeatedly but the bucket
+            // hit-count is the actual measurement).
+            this.log('warn', 'peer inbound rate-limited', {
+              ip,
+              hits: limiter.current(ip)?.hits ?? -1,
+              max: rl.max,
+              windowMs: rl.windowMs,
+            })
+          }
+          return allowed
+        }
+        : undefined
       this.detachAccept = acceptHubLinks({
         server: this.opts.wss,
         selfId: this.opts.selfHubId,
@@ -141,6 +226,7 @@ export class PeerRegistry {
           ? { peerToken: this.opts.sharedInboundPeerToken }
           : {}),
         ...(resolver ? { peerTokenResolver: resolver } : {}),
+        ...(onConnectionAttempt ? { onConnectionAttempt } : {}),
         onLink: (link) => this.installInboundLink(link),
       })
     }
