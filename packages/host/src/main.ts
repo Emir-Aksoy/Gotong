@@ -668,9 +668,17 @@ async function main(): Promise<void> {
     const pollMs = envInt('AIPE_PEER_POLL_MS', 5_000)
     const inboundToken = process.env.AIPE_PEER_INBOUND_TOKEN
     // Audit #142 — single source of truth for "is this host behind a
-    // reverse proxy". Same flag will be threaded into serveWeb when
-    // P2-9 lands (env wiring for inboundRateLimit budget).
+    // reverse proxy".
     const trustProxy = envBool('AIPE_TRUST_PROXY', false)
+    // Audit #149 — env wiring for the inbound rate limit. Default
+    // 60/60s mirrors PeerRegistry's own default (set to 0 either side
+    // to disable; useful in closed networks / tests). Operators
+    // raise these when running a peer farm where 60 hellos / 60s is
+    // genuinely too tight, or drop them when under sustained attack
+    // and a tighter floor is preferable to letting one IP saturate.
+    const rateLimitMax = envInt('AIPE_PEER_INBOUND_RATE_MAX', 60)
+    const rateLimitWindowMs = envInt('AIPE_PEER_INBOUND_RATE_WINDOW_MS', 60_000)
+    const inboundRateLimit = { max: rateLimitMax, windowMs: rateLimitWindowMs }
     peerRegistry = new PeerRegistry({
       hub,
       identity,
@@ -678,6 +686,7 @@ async function main(): Promise<void> {
       wss: ws.wss,
       ...(inboundToken ? { sharedInboundPeerToken: inboundToken } : {}),
       pollIntervalMs: pollMs,
+      inboundRateLimit,
       ...(trustProxy ? { trustProxy: true } : {}),
       logger: log,
     })
@@ -698,6 +707,9 @@ async function main(): Promise<void> {
       pollIntervalMs: pollMs,
       inboundAuth: inboundToken ? 'per-peer+shared-fallback' : 'per-peer',
       trustProxy,
+      inboundRateLimit: rateLimitMax > 0 && rateLimitWindowMs > 0
+        ? `${rateLimitMax}/${rateLimitWindowMs}ms`
+        : 'disabled',
     })
   }
   // Readiness flag — flips to true after workflow resume finishes (see

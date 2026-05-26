@@ -316,6 +316,7 @@ export class OrgApiPool {
       )
     }
     const identity = this.identity
+    const orgIdForAudit = this.orgId
     return function quotaGate(subject: QuotaSubject | undefined): void {
       const userId = subject?.userId
       if (!userId) return // unattributed call → unconstrained (by design)
@@ -327,6 +328,38 @@ export class OrgApiPool {
       })
       if (!result.allowed) {
         const quota = result.counter.quota ?? 0
+        // Audit #151 — the API_QUOTA_DENIED vocabulary is defined in
+        // AUDIT_ACTIONS but until now nothing wrote it. Operators
+        // could see per-user counters at the cap but not the "this
+        // many calls were rejected in the last hour" series they need
+        // to size a quota raise. Write best-effort: if the audit row
+        // fails (DB busy, etc.) we still throw QuotaExceededError so
+        // the caller knows the request was denied — never let an
+        // audit-side fault swallow the gate decision.
+        try {
+          identity.writeAuditLog({
+            action: 'api_quota_denied',
+            actorSource: 'system',
+            actorUserId: userId,
+            targetUserId: userId,
+            targetCredentialId: null,
+            ip: null,
+            userAgent: null,
+            metadata: {
+              metric,
+              period,
+              amount,
+              used: result.counter.used,
+              quota,
+              exceededBy: result.exceededBy ?? 0,
+              orgId: orgIdForAudit,
+            },
+            success: false,
+          })
+        } catch {
+          // Best effort — see comment above. The gate decision is
+          // already committed (checkAndIncrement is atomic).
+        }
         throw new QuotaExceededError(
           userId,
           metric,

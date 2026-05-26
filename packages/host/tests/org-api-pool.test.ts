@@ -604,6 +604,42 @@ describe('OrgApiPool.makeLlmQuotaGate (B2.2)', () => {
     expect(row?.used).toBe(3)
   })
 
+  it('writes api_quota_denied audit row on cap breach (Audit #151)', () => {
+    // Operators need a time-series of denied calls (sized per user /
+    // per period) to know when to raise a quota. Until #151, the
+    // QuotaExceededError throw was silent — only the counter on disk
+    // changed (it didn't even increment in the breach case). Now the
+    // gate writes an audit row alongside the throw, so the standard
+    // audit-log query surface picks it up without any new wiring.
+    identity.setQuota({
+      userId,
+      metric: 'llm_requests',
+      period: 'daily',
+      quota: 2,
+    })
+    const gate = pool.makeLlmQuotaGate({
+      metric: 'llm_requests',
+      period: 'daily',
+    })
+    gate({ userId }) // used=1
+    gate({ userId }) // used=2 (at cap)
+    expect(() => gate({ userId })).toThrow(QuotaExceededError)
+    const rows = identity.listAuditLog({ targetUserId: userId, limit: 50 })
+    const denied = rows.filter((r) => r.action === 'api_quota_denied')
+    expect(denied).toHaveLength(1)
+    const row = denied[0]!
+    expect(row.success).toBe(false)
+    expect(row.actorSource).toBe('system')
+    expect(row.actorUserId).toBe(userId)
+    expect(row.targetUserId).toBe(userId)
+    const meta = row.metadata as Record<string, unknown>
+    expect(meta.metric).toBe('llm_requests')
+    expect(meta.period).toBe('daily')
+    expect(meta.used).toBe(2)
+    expect(meta.quota).toBe(2)
+    expect(meta.exceededBy).toBe(1)
+  })
+
   it('null quota = unlimited (no throw even after huge debits)', () => {
     const gate = pool.makeLlmQuotaGate({
       metric: 'llm_tokens_in',

@@ -1302,7 +1302,13 @@ async function handleCreateInvite(
     const ec = asErrorWithCode(err)
     if (ec?.code === 'invitations_limit_exceeded') {
       tryAudit(ctx, v4, {
-        action: 'invite_create_blocked',
+        // Audit #148: use the named constant (mirrored from
+        // `@aipehub/identity` AUDIT_ACTIONS.INVITE_CREATE_BLOCKED)
+        // instead of a magic string. Web doesn't import the identity
+        // package at runtime (structural projection only — see top of
+        // file), so the constant lives here and drift is caught by
+        // tests/identity-routes-audit-vocab.test.ts.
+        action: AUDIT_ACTION_INVITE_CREATE_BLOCKED,
         targetUserId: null,
         metadata: {
           email: input.email,
@@ -1315,6 +1321,22 @@ async function handleCreateInvite(
     sendIdentityError(res, err, 400)
   }
 }
+
+/**
+ * Audit #148 — mirrored from `@aipehub/identity` AUDIT_ACTIONS.
+ *
+ * Web is structurally decoupled from `@aipehub/identity` (it's a
+ * devDependency only, used in tests). Constants we need at runtime get
+ * mirrored here as `as const` literals. Drift between this file and
+ * the source-of-truth in `packages/identity/src/types.ts` is caught
+ * by `tests/identity-routes-audit-vocab.test.ts` which DOES import
+ * `AUDIT_ACTIONS` (devDep is allowed in test code) and asserts
+ * exact equality.
+ *
+ * If you add more audit-action mirrors here, add them to the test
+ * too — the test is small on purpose so missed entries are obvious.
+ */
+const AUDIT_ACTION_INVITE_CREATE_BLOCKED = 'invite_create_blocked' as const
 
 function handleListInvites(
   ctx: HandleIdentityRouteCtx,
@@ -1946,8 +1968,20 @@ function handleListReputation(
     // Sort by score desc then by sampleCount desc — admins read the
     // table top-to-bottom and care about "who's most trusted" first.
     // Tie-break on peerHubId for stable rendering across refreshes.
+    //
+    // Audit #152 — non-finite scores (NaN / undefined; happens when
+    // sampleCount=0 and the EWMA hasn't seen any data) sort *last* in
+    // a stable position so they don't shuffle around between refreshes.
+    // Without this guard, V8/JSC sort behaviour on NaN comparators is
+    // implementation-defined ("the table jumps").
     const sorted = [...snapshot].sort((a, b) => {
-      if (Math.abs(a.score - b.score) > 1e-9) return b.score - a.score
+      const aFinite = Number.isFinite(a.score)
+      const bFinite = Number.isFinite(b.score)
+      if (aFinite && !bFinite) return -1
+      if (!aFinite && bFinite) return 1
+      if (aFinite && bFinite && Math.abs(a.score - b.score) > 1e-9) {
+        return b.score - a.score
+      }
       if (a.sampleCount !== b.sampleCount) return b.sampleCount - a.sampleCount
       return a.peerHubId.localeCompare(b.peerHubId)
     })

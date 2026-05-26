@@ -64,9 +64,22 @@
   //   - exactly zero shows a thin neutral marker
   // Width is |score| * 50% of the bar (since center = 50%).
   function scoreClass(score) {
+    if (!Number.isFinite(score)) return 'rep-bar-neutral'
     if (score > 0.05) return 'rep-bar-pos'
     if (score < -0.05) return 'rep-bar-neg'
     return 'rep-bar-neutral'
+  }
+
+  // Audit #150 — defensive: snapshot rows occasionally show up with
+  // undefined / NaN score (sampleCount=0 division corner cases, or
+  // a stale snapshot from a peer that never reported). Don't let
+  // those crash the row render (`.toFixed` on undefined throws) or
+  // produce a broken CSS width (`NaN%`).
+  function safeScore(raw) {
+    return Number.isFinite(raw) ? raw : null
+  }
+  function fmtScore(raw) {
+    return raw === null ? '—' : raw.toFixed(3)
   }
 
   function buildUi(root) {
@@ -123,11 +136,13 @@
       const peerCell = r.label
         ? escHtml(r.label) + ' <code class="rep-id">' + escHtml(r.peerHubId) + '</code>'
         : '<code class="rep-id">' + escHtml(r.peerHubId) + '</code>'
-      const scoreFixed = r.score.toFixed(3)
-      const barCls = scoreClass(r.score)
-      // half-width of bar fill = |score| * 50%
-      const fillPct = Math.min(50, Math.abs(r.score) * 50)
-      const fillOffset = r.score < 0 ? (50 - fillPct) : 50
+      // Audit #150 — guard non-finite score (sampleCount=0 corner case).
+      const score = safeScore(r && r.score)
+      const scoreFixed = fmtScore(score)
+      const barCls = scoreClass(score)
+      // half-width of bar fill = |score| * 50%; null score → 0 bar.
+      const fillPct = score === null ? 0 : Math.min(50, Math.abs(score) * 50)
+      const fillOffset = score !== null && score < 0 ? (50 - fillPct) : 50
       return (
         '<tr>' +
         '<td class="rep-peer">' + peerCell + '</td>' +

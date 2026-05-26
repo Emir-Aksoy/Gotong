@@ -182,6 +182,35 @@ describe('GET /api/admin/identity/reputation', () => {
     ])
   })
 
+  it('non-finite scores sort to the end stably (Audit #152)', async () => {
+    // Defensive: snapshot rows with NaN / Infinity score (sampleCount=0
+    // EWMA corner) used to shuffle around because the comparator's
+    // (a.score - b.score) is NaN, making sort order implementation-
+    // defined. Pin them to the end with a stable peerHubId tie-break.
+    b.snapshotData.push(
+      { peerHubId: 'hub_nan_a', score: Number.NaN,     sampleCount: 0, lastUpdatedAt: 1, label: null },
+      { peerHubId: 'hub_inf',   score: Number.POSITIVE_INFINITY, sampleCount: 0, lastUpdatedAt: 2, label: null },
+      { peerHubId: 'hub_real',  score: 0.4, sampleCount: 5, lastUpdatedAt: 3, label: null },
+      { peerHubId: 'hub_nan_b', score: Number.NaN,     sampleCount: 0, lastUpdatedAt: 4, label: null },
+    )
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/reputation`, {
+      headers: { cookie: b.ownerCookie },
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as { reputation: IdentityPeerReputationDTO[] }
+    // Real finite score first; then non-finite block, alphabetical.
+    // Note: JSON.stringify(NaN) → "null", so when the row crosses the
+    // wire the score becomes null on the client. The sort still must
+    // happen server-side BEFORE serialization, which is what this test
+    // pins.
+    expect(j.reputation.map((p) => p.peerHubId)).toEqual([
+      'hub_real',
+      'hub_inf',     // Infinity is also non-finite per Number.isFinite
+      'hub_nan_a',
+      'hub_nan_b',
+    ])
+  })
+
   it('preserves label join from snapshot adapter', async () => {
     b.snapshotData.push(
       { peerHubId: 'hub_with_label', score: 0.7, sampleCount: 3, lastUpdatedAt: 100, label: 'Supplier' },
