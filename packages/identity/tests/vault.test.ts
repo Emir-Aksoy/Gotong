@@ -200,15 +200,32 @@ describe('IdentityStore.vault', () => {
       ).toThrow(IdentityError)
     })
 
-    it('rejects org-owned entry with non-null ownerId (misclassification guard)', () => {
+    it('accepts org-owned entry with a non-null ownerId (Phase 6 #3 multi-org)', () => {
+      // Pre-Phase-6 this threw with /ownerKind=org must have null ownerId/.
+      // Now multi-org deployments tag org-scoped rows with the peer
+      // orgId so a single host can host multiple orgs' vaults.
+      const entry = store.createVaultEntry({
+        kind: 'llm_provider',
+        ownerKind: 'org',
+        ownerId: 'hub_specific_peer',
+        secret: 'sk-peer-org',
+      })
+      expect(entry.ownerKind).toBe('org')
+      expect(entry.ownerId).toBe('hub_specific_peer')
+    })
+
+    it('rejects org-owned entry with empty-string ownerId (catches "" footgun)', () => {
+      // The relaxation allows null OR a non-empty string. '' is neither
+      // and most likely a caller bug — surface it explicitly so it
+      // doesn't silently land in a random bucket.
       expect(() =>
         store.createVaultEntry({
           kind: 'llm_provider',
           ownerKind: 'org',
-          ownerId: 'should-not-be-here',
+          ownerId: '',
           secret: 'x',
         }),
-      ).toThrow(/ownerKind=org must have null ownerId/)
+      ).toThrow(/non-empty orgId/)
     })
 
     it('rejects user-owned entry without ownerId', () => {

@@ -1856,13 +1856,22 @@ export class IdentityStore {
       })
     }
     // Owner-id shape gate, per the documented contract.
+    //
+    // Phase 6 #3 (multi-org): ownerKind='org' now accepts either:
+    //   - ownerId === null — primary / implicit-host org (legacy).
+    //     Single-tenant deployments stay here; nothing changed.
+    //   - ownerId === '<orgId>' — specific peer / sub-org. Lets one
+    //     host serve multiple orgs by scoping vault rows per orgId.
+    //     OrgApiPool instances are constructed with the matching
+    //     orgId and only see rows for that scope.
+    // ownerKind='user'/'peer' still require non-empty ownerId.
     const ownerId = input.ownerId ?? null
     if (input.ownerKind === 'org') {
-      if (ownerId !== null) {
+      if (ownerId !== null && (typeof ownerId !== 'string' || ownerId.length === 0)) {
         throw new IdentityError({
           code: 'invalid_input',
           message:
-            'vault ownerKind=org must have null ownerId (the host is the implicit org owner)',
+            'vault ownerKind=org requires either null ownerId (primary org) or a non-empty orgId string',
         })
       }
     } else {

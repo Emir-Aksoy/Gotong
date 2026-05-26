@@ -259,6 +259,163 @@ describe('OrgApiPool', () => {
 })
 
 // =========================================================================
+// Phase 6 #3 — per-org pool scoping. The default pool (no orgId) sees
+// vault rows with ownerId IS NULL (primary org). A pool constructed
+// with an orgId sees ONLY rows tagged with that orgId. Cross-org
+// isolation is the whole point — orgA's pool must never leak into
+// orgB's resolve path.
+// =========================================================================
+
+describe('OrgApiPool — multi-org scoping (Phase 6 #3)', () => {
+  let dir: string
+  let identity: IdentityStore
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'aipehub-orgpool-multiorg-'))
+    identity = openIdentityStore({
+      dbPath: join(dir, 'id.sqlite'),
+      masterKey: randomBytes(MASTER_KEY_LEN_BYTES),
+    })
+  })
+  afterEach(() => {
+    identity.close()
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('constructor accepts orgId; scopedOrgId reflects it', () => {
+    const primary = new OrgApiPool({ identity })
+    expect(primary.scopedOrgId).toBeNull()
+
+    const primaryExplicit = new OrgApiPool({ identity, orgId: null })
+    expect(primaryExplicit.scopedOrgId).toBeNull()
+
+    const orgA = new OrgApiPool({ identity, orgId: 'hub_a' })
+    expect(orgA.scopedOrgId).toBe('hub_a')
+  })
+
+  it('rejects empty-string orgId at construction', () => {
+    expect(() => new OrgApiPool({ identity, orgId: '' })).toThrow(/non-empty/)
+  })
+
+  it('primary pool (no orgId) only sees rows with ownerId IS NULL', () => {
+    // One row in the primary org bucket, one in a peer org bucket.
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      ownerId: null,
+      secret: 'sk-primary',
+      metadata: { provider: 'anthropic' },
+    })
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      ownerId: 'hub_peer',
+      secret: 'sk-peer',
+      metadata: { provider: 'anthropic' },
+    })
+
+    const primary = new OrgApiPool({ identity })
+    const resolved = primary.resolveLlmKey('anthropic')
+    expect(resolved?.apiKey).toBe('sk-primary')
+  })
+
+  it('orgId-scoped pool only sees rows tagged with that orgId', () => {
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      ownerId: null,
+      secret: 'sk-primary',
+      metadata: { provider: 'anthropic' },
+    })
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      ownerId: 'hub_peer_a',
+      secret: 'sk-a',
+      metadata: { provider: 'anthropic' },
+    })
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      ownerId: 'hub_peer_b',
+      secret: 'sk-b',
+      metadata: { provider: 'anthropic' },
+    })
+
+    const a = new OrgApiPool({ identity, orgId: 'hub_peer_a' })
+    const b = new OrgApiPool({ identity, orgId: 'hub_peer_b' })
+    expect(a.resolveLlmKey('anthropic')?.apiKey).toBe('sk-a')
+    expect(b.resolveLlmKey('anthropic')?.apiKey).toBe('sk-b')
+  })
+
+  it('orgId-scoped pool returns null when no row exists for that org', () => {
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      ownerId: null, // primary only
+      secret: 'sk-primary',
+      metadata: { provider: 'anthropic' },
+    })
+    const orgX = new OrgApiPool({ identity, orgId: 'hub_x_no_rows' })
+    expect(orgX.resolveLlmKey('anthropic')).toBeNull()
+    expect(orgX.listProviders()).toEqual([])
+  })
+
+  it('per-pool cache: invalidating one does not flush the other', () => {
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      ownerId: 'hub_a',
+      secret: 'sk-a-v1',
+      metadata: { provider: 'anthropic' },
+    })
+    const a = new OrgApiPool({ identity, orgId: 'hub_a' })
+    const b = new OrgApiPool({ identity, orgId: 'hub_b' })
+    // Prime a's cache.
+    expect(a.resolveLlmKey('anthropic')?.apiKey).toBe('sk-a-v1')
+    // b's miss is also cached.
+    expect(b.resolveLlmKey('anthropic')).toBeNull()
+    // Mutate underlying vault: revoke a's key.
+    identity.revokeVaultEntry(a.resolveLlmKey('anthropic')!.entryId)
+    // a's cache still holds the stale hit until invalidate.
+    expect(a.resolveLlmKey('anthropic')?.apiKey).toBe('sk-a-v1')
+    a.invalidate()
+    expect(a.resolveLlmKey('anthropic')).toBeNull()
+    // b's cache untouched (it was always null for anthropic; that's
+    // the contract — caches are per-instance).
+    expect(b.resolveLlmKey('anthropic')).toBeNull()
+  })
+
+  it('cross-org isolation: user-scoped row in one org does not leak to another', () => {
+    // Defense in depth: even non-org rows with the same provider tag
+    // must not cross the org-scoped pool boundary.
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'user',
+      ownerId: 'user-in-a',
+      secret: 'sk-user-leak',
+      metadata: { provider: 'anthropic' },
+    })
+    const a = new OrgApiPool({ identity, orgId: 'hub_a' })
+    expect(a.resolveLlmKey('anthropic')).toBeNull()
+  })
+
+  it('vault createVaultEntry accepts ownerKind=org + non-null ownerId now', () => {
+    // The validation relaxation is the schema-level enabler. Make sure
+    // the underlying store no longer rejects it.
+    const entry = identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      ownerId: 'hub_specific',
+      secret: 'sk-x',
+      metadata: { provider: 'openai' },
+    })
+    expect(entry.ownerKind).toBe('org')
+    expect(entry.ownerId).toBe('hub_specific')
+  })
+})
+
+// =========================================================================
 // B2.2 — makeLlmQuotaGate factory: pre-call hook that debits a counter
 // from `subject.userId` and throws QuotaExceededError on overrun.
 // =========================================================================

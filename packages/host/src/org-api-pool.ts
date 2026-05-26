@@ -52,6 +52,19 @@ export interface ResolvedLlmKey {
 
 export interface OrgApiPoolOpts {
   identity: IdentityStore
+  /**
+   * Phase 6 #3 — org scoping. When omitted (or null), the pool resolves
+   * vault rows with `ownerKind='org' AND ownerId IS NULL` — the host's
+   * primary / implicit org. Set to a non-empty string when this host
+   * is multi-tenant and you want this pool to see only rows tagged
+   * with that orgId.
+   *
+   * The default is intentionally unset so single-org hosts (the common
+   * case today) get the historical behavior with zero config change.
+   * Multi-org deployments build one pool per org and route by
+   * `task.origin.orgId` at dispatch time.
+   */
+  orgId?: string | null
 }
 
 /**
@@ -106,9 +119,16 @@ export class QuotaExceededError extends Error {
 export class OrgApiPool {
   private readonly identity: IdentityStore
   /**
+   * Phase 6 #3 — null = primary host org (vault rows with
+   * ownerId IS NULL); non-null string = a specific peer/sub-org.
+   * Captured once at construction and used in every vault filter.
+   */
+  private readonly orgId: string | null
+  /**
    * provider → resolved key. Misses are cached as `null` so a "we know
    * there's no key" answer is also free on the hot path; `invalidate()`
-   * clears both hits and misses.
+   * clears both hits and misses. Cache is per-pool-instance, so two
+   * pools with different orgIds maintain isolated caches.
    */
   private cache = new Map<string, ResolvedLlmKey | null>()
 
@@ -117,6 +137,25 @@ export class OrgApiPool {
       throw new TypeError('OrgApiPool requires { identity }')
     }
     this.identity = opts.identity
+    // Normalise undefined → null so the rest of the class has one shape
+    // and tests / callers can pass either {orgId: null} or {} for the
+    // primary org. Reject empty string to catch accidental "".
+    if (opts.orgId !== undefined && opts.orgId !== null) {
+      if (typeof opts.orgId !== 'string' || opts.orgId.length === 0) {
+        throw new TypeError(
+          'OrgApiPool: orgId must be a non-empty string when provided (or null/omitted for primary)',
+        )
+      }
+    }
+    this.orgId = opts.orgId ?? null
+  }
+
+  /**
+   * The org scope this pool serves. Exposed so tests + multi-org
+   * dispatch code can branch on "which pool am I about to call".
+   */
+  get scopedOrgId(): string | null {
+    return this.orgId
   }
 
   /**
@@ -178,7 +217,7 @@ export class OrgApiPool {
     return this.identity.listVaultEntries({
       kind: 'llm_provider',
       ownerKind: 'org',
-      ownerId: null,
+      ownerId: this.orgId,
       activeOnly: true,
     })
   }
