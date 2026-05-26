@@ -95,3 +95,37 @@ export function transaction<T>(db: SqliteDb, cb: () => T): T {
     throw err
   }
 }
+
+/**
+ * Audit #153 — same shape as `transaction()` but uses `BEGIN IMMEDIATE`
+ * instead of `BEGIN` (which is DEFERRED in SQLite). IMMEDIATE acquires
+ * a RESERVED lock at the BEGIN itself, blocking other writers until
+ * commit/rollback.
+ *
+ * Use this when:
+ *   - the transaction does a count-then-insert against the same table
+ *     (TOCTOU window: two concurrent DEFERRED tx can both read count=N,
+ *     both insert, both commit → cap of N+1 ends up at N+2)
+ *   - the read must see a snapshot consistent with later writes within
+ *     the same tx (WAL's snapshot-at-first-read can stale-read).
+ *
+ * The trade-off is throughput: IMMEDIATE serialises createInvitation
+ * calls org-wide. That's fine because (a) invites are admin actions
+ * not user-traffic, (b) the txn is ~3ms even with hash work outside,
+ * (c) the hard-cap correctness matters more than parallel creates.
+ */
+export function transactionImmediate<T>(db: SqliteDb, cb: () => T): T {
+  db.exec('BEGIN IMMEDIATE')
+  try {
+    const out = cb()
+    db.exec('COMMIT')
+    return out
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK')
+    } catch {
+      // ignore — rollback failure shouldn't mask the real error
+    }
+    throw err
+  }
+}

@@ -236,20 +236,9 @@ export class PeerRegistry {
       // throws) return null so transport-ws closes the connection.
       const perPeerEnabled = this.opts.perPeerInboundAuth !== false
       const resolver = perPeerEnabled
-        ? (claimedPeerId: string): string | null => {
-          try {
-            const row = this.opts.identity.getPeerByPeerId(claimedPeerId)
-            if (!row) return null
-            if (row.enabled === false) return null
-            return this.opts.identity.getPeerToken(row.id) ?? null
-          } catch (err) {
-            this.log('warn', 'peer-registry resolver failure', {
-              claimedPeerId,
-              err: this.errMsg(err),
-            })
-            return null
-          }
-        }
+        ? buildPeerTokenResolver(this.opts.identity, (lv, msg, ctx) =>
+            this.log(lv, msg, ctx),
+          )
         : undefined
       // Phase 6 #12 — per-IP fixed-window limiter. Default 60/60s.
       // 0 for either field disables the limiter entirely (useful in
@@ -558,7 +547,11 @@ export class PeerRegistry {
     } catch { /* audit is non-fatal */ }
   }
 
-  private log(level: 'info' | 'warn' | 'error', msg: string, ctx?: unknown): void {
+  private log(
+    level: 'debug' | 'info' | 'warn' | 'error',
+    msg: string,
+    ctx?: unknown,
+  ): void {
     if (!this.opts.logger) return
     const fn = (this.opts.logger as unknown as Record<string, (m: string, c?: unknown) => void>)[level]
     if (typeof fn === 'function') fn.call(this.opts.logger, msg, ctx)
@@ -566,5 +559,68 @@ export class PeerRegistry {
 
   private errMsg(err: unknown): string {
     return err instanceof Error ? err.message : String(err)
+  }
+}
+
+/**
+ * Audit #154 — extracted for unit testability. The per-peer token
+ * resolver runs on every inbound HELLO; rejection paths must leave
+ * an operator-readable breadcrumb because the transport-ws close is
+ * silent by design (anti-enumeration).
+ *
+ * Log levels:
+ *   - debug: expected reject (peer not enrolled / peer disabled).
+ *     Routine; only noisy if someone is iterating known IDs.
+ *   - warn:  abnormal reject (peer enrolled but no token vaulted /
+ *     identity throws). Indicates operator action needed.
+ *
+ * The function takes a minimal identity shape, not the full
+ * IdentityStore, so tests can stub one method at a time.
+ */
+export type PeerTokenResolverIdentity = Pick<
+  import('@aipehub/identity').IdentityStore,
+  'getPeerByPeerId' | 'getPeerToken'
+>
+
+export type PeerTokenResolverLogFn = (
+  level: 'debug' | 'warn',
+  msg: string,
+  ctx?: unknown,
+) => void
+
+export function buildPeerTokenResolver(
+  identity: PeerTokenResolverIdentity,
+  log: PeerTokenResolverLogFn,
+): (claimedPeerId: string) => string | null {
+  return (claimedPeerId: string): string | null => {
+    try {
+      const row = identity.getPeerByPeerId(claimedPeerId)
+      if (!row) {
+        log('debug', 'peer-registry resolver: unknown peer', { claimedPeerId })
+        return null
+      }
+      if (row.enabled === false) {
+        log('debug', 'peer-registry resolver: peer disabled', {
+          claimedPeerId,
+          rowId: row.id,
+        })
+        return null
+      }
+      const token = identity.getPeerToken(row.id)
+      if (!token) {
+        log('warn', 'peer-registry resolver: no token vaulted', {
+          claimedPeerId,
+          rowId: row.id,
+        })
+        return null
+      }
+      return token
+    } catch (err) {
+      log('warn', 'peer-registry resolver failure', {
+        claimedPeerId,
+        err: err instanceof Error ? err.message : String(err),
+      })
+      return null
+    }
   }
 }

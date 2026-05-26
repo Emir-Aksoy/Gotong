@@ -218,18 +218,39 @@ describe('LocalAgentPool.buildAuthFailureHook — side effects', () => {
     expect(md.errorMessage).toBeUndefined()
   })
 
-  it('hook is idempotent (calling twice doesn\'t double-revoke or crash)', () => {
+  it('hook is idempotent + dedups audit on concurrent 401s (Audit #157)', () => {
+    // Audit #157 — N concurrent in-flight LLM calls can all 401 on
+    // the same dead vault entry, firing the hook N times. The revoke
+    // itself is idempotent; the AUDIT must be too. Previously each
+    // call wrote a separate VAULT_REVOKE row → log noise + misleading
+    // counters ("10 keys revoked!" when really 1 key got 10 401s).
+    //
+    // After #157, revokeVaultEntry returns a boolean and the hook
+    // only writes audit when revoke actually flipped revoked_at.
     const hook = f.pool.buildAuthFailureHook(rec('anthropic'), {
       apiKey: 'sk-ant-fake-test-key',
       source: { kind: 'org-pool', vaultEntryId: f.entryId },
     })!
     const err = Object.assign(new Error('401'), { status: 401 })
-    expect(() => hook(err, { from: 'sys', strategy: { kind: 'capability', capabilities: [] }, payload: null } as never)).not.toThrow()
-    // Second invocation: revoke is a soft-delete idempotent op; audit
-    // row count grows by another 1 (each call is its own event).
-    expect(() => hook(err, { from: 'sys', strategy: { kind: 'capability', capabilities: [] }, payload: null } as never)).not.toThrow()
-    const audits = f.identity.listAuditLog!({ action: 'vault_revoke' })
-    expect(audits.length).toBeGreaterThanOrEqual(2)
+    const auditsBefore = f.identity.listAuditLog!({ action: 'vault_revoke' }).length
+
+    // Fire 5 in quick succession — simulates 5 concurrent in-flight
+    // workflow calls all hitting 401 before the first revoke fully
+    // propagates to the cache.
+    for (let i = 0; i < 5; i++) {
+      expect(() =>
+        hook(err, {
+          from: 'sys',
+          strategy: { kind: 'capability', capabilities: [] },
+          payload: null,
+        } as never),
+      ).not.toThrow()
+    }
+    const auditsAfter = f.identity.listAuditLog!({ action: 'vault_revoke' })
+    // Exactly ONE new audit row (the first call's revoke flipped
+    // revoked_at; calls 2-5 saw the row already revoked and skipped
+    // the audit).
+    expect(auditsAfter.length - auditsBefore).toBe(1)
   })
 
   // Audit #147 — provider SDKs leak credentials in err.message
@@ -268,10 +289,10 @@ describe('LocalAgentPool.buildAuthFailureHook — side effects', () => {
     // Wrap identity.revokeVaultEntry to throw once.
     const realRevoke = f.identity.revokeVaultEntry.bind(f.identity)
     let calls = 0
-    ;(f.identity as unknown as { revokeVaultEntry: (id: string) => void }).revokeVaultEntry = (id: string) => {
+    ;(f.identity as unknown as { revokeVaultEntry: (id: string) => boolean }).revokeVaultEntry = (id: string) => {
       calls++
       if (calls === 1) throw new Error('SQLITE_BUSY: simulated')
-      realRevoke(id)
+      return realRevoke(id)
     }
 
     const hook = f.pool.buildAuthFailureHook(rec('anthropic'), {

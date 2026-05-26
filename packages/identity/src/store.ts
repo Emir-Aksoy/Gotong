@@ -26,7 +26,13 @@
  *    populated store never duplicates the owner or re-mints anything.
  */
 
-import { openDb, transaction, type SqliteDb, type SqliteStmt } from './db.js'
+import {
+  openDb,
+  transaction,
+  transactionImmediate,
+  type SqliteDb,
+  type SqliteStmt,
+} from './db.js'
 import { applyMigrations } from './schema.js'
 import {
   hashPassword,
@@ -1470,7 +1476,16 @@ export class IdentityStore {
     const ttl = Math.max(MIN_INVITATION_TTL_MS, Math.min(MAX_INVITATION_TTL_MS, ttlRaw))
 
     const now = Date.now()
-    return transaction(this.db, () => {
+    // Audit #153 — IMMEDIATE, not DEFERRED (the default). The count
+    // check below is a SELECT that needs to see a consistent snapshot
+    // with the INSERT three blocks down. In WAL + DEFERRED, two
+    // concurrent createInvitation transactions can both START at the
+    // same wal-frame, both SELECT count=999, both INSERT, both COMMIT
+    // — the cap of 1000 ends up at 1001. IMMEDIATE acquires a
+    // RESERVED lock right at BEGIN, serialising the count+insert pair.
+    // Throughput penalty is negligible: invites are admin actions,
+    // not user traffic, and the txn body is ~3ms.
+    return transactionImmediate(this.db, () => {
       // Phase 6 #9 — global hard cap on active-pending invites. Run
       // INSIDE the transaction so we can't TOCTOU past the limit.
       // Default 1000; AIPE_MAX_PENDING_INVITES overrides. The cap
@@ -2065,7 +2080,17 @@ export class IdentityStore {
    * NULL`). Missing ids throw `vault_entry_not_found` so a confused
    * caller doesn't believe a non-existent row was revoked.
    */
-  revokeVaultEntry(id: string): void {
+  /**
+   * Soft-delete a vault entry (sets `revoked_at`). Idempotent: a
+   * second call on an already-revoked id is a no-op.
+   *
+   * Returns `true` when this call performed the revoke (the row was
+   * active going in), `false` when it was already revoked (idempotent
+   * no-op). Audit #157 — callers that emit a side-effect audit row
+   * use the return value to dedup so N concurrent calls produce 1
+   * audit row, not N.
+   */
+  revokeVaultEntry(id: string): boolean {
     if (typeof id !== 'string' || id.length === 0) {
       throw new IdentityError({
         code: 'vault_entry_not_found',
@@ -2079,10 +2104,11 @@ export class IdentityStore {
         message: `vault entry not found: ${id}`,
       })
     }
-    if (existing.revoked_at !== null) return // already revoked, no-op
+    if (existing.revoked_at !== null) return false // already revoked
     this.stmtVaultRevoke.run(Date.now(), id)
     // Audit #145 — flush cached resolves of this entry.
     this.emitVaultMutation('revoke')
+    return true
   }
 
   /**

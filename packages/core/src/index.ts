@@ -117,6 +117,10 @@ export type {
   FeedbackStorage,
   FeedbackQuery,
   LedgerLine,
+  // Audit #155 — exposed so consumers (web) can extend instead of
+  // re-defining a parallel shape that's prone to drift.
+  PeerReputation,
+  ReputationStoreOptions,
 } from './feedback/index.js'
 
 export type {

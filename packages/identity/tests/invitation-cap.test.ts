@@ -130,6 +130,39 @@ describe('IdentityStore.createInvitation — hard cap (Phase 6 #9)', () => {
     }
   })
 
+  it('createInvitation uses BEGIN IMMEDIATE, not DEFERRED (Audit #153)', () => {
+    // White-box guard for the TOCTOU fix. With DEFERRED (the SQLite
+    // default), two concurrent createInvitation tx in WAL mode can
+    // both SELECT count=999, both INSERT, both COMMIT → cap of 1000
+    // ends up at 1001 because each TX's snapshot was taken at first
+    // read (before the other's commit). IMMEDIATE acquires a
+    // RESERVED lock at BEGIN, serialising the read-then-write pair.
+    //
+    // We can't truly multi-thread better-sqlite3 in a single test
+    // process, so the assertion is structural: monkey-patch
+    // db.exec to record the BEGIN command and verify it's IMMEDIATE.
+    const execCalls: string[] = []
+    // @ts-expect-error reach for private .db to wrap exec
+    const dbAny = (store as IdentityStore & {
+      db: { exec: (s: string) => void }
+    }).db
+    const origExec = dbAny.exec.bind(dbAny)
+    dbAny.exec = (sql: string) => {
+      execCalls.push(sql)
+      return origExec(sql)
+    }
+    try {
+      store.createInvitation({ email: 'imm@t.test' })
+    } finally {
+      dbAny.exec = origExec
+    }
+    // The first BEGIN inside createInvitation must be IMMEDIATE.
+    // Other call sites (eg. createUser inside the same test session)
+    // would still use plain BEGIN, but they're not what we're testing.
+    const begin = execCalls.find((s) => /^BEGIN/i.test(s))
+    expect(begin).toBe('BEGIN IMMEDIATE')
+  })
+
   it('expired-but-not-revoked invites do NOT count toward the cap', () => {
     process.env.AIPE_MAX_PENDING_INVITES = '2'
     // Mint with a 1ms TTL; after a tick, the row is computed-expired

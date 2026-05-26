@@ -38,6 +38,11 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
+// Audit #155 — the reputation snapshot row shape is owned by
+// @aipehub/core (where the EWMA store lives). Web extends rather than
+// re-declares so a new field in core flows through automatically.
+import type { PeerReputation } from '@aipehub/core'
+
 // ---------------------------------------------------------------------------
 // Structural projection of @aipehub/identity. Web depends on these
 // types, NOT on the package. The host passes its real IdentityStore;
@@ -151,12 +156,14 @@ export interface IdentityOrgQuotaDTO {
 // with an optional `label` joined from the identity peers table when
 // available; pure feedback-driven peers (no peers-row) just show the
 // peerHubId.
-export interface IdentityPeerReputationDTO {
-  peerHubId: string
-  /** EWMA score in [-1, +1]. Unknown peers report 0. */
-  score: number
-  sampleCount: number
-  lastUpdatedAt: number
+/**
+ * Audit #155 — the snapshot shape comes from `@aipehub/core`'s
+ * `PeerReputation`; we only ADD `label` (joined from identity.peers
+ * for display). Extending instead of re-declaring means future core
+ * additions (eg. trend, variance) appear here automatically with
+ * no code change.
+ */
+export interface IdentityPeerReputationDTO extends PeerReputation {
   /** Display label from `peers` table; null if the peer is unknown. */
   label: string | null
 }
@@ -302,6 +309,12 @@ export interface IdentitySurface {
     offset?: number
   }): IdentityInvitationDTO[]
   revokeInvitation?(id: string): IdentityInvitationDTO
+  // Audit #156 — count of active+pending invites. Powers the admin UI
+  // "X / 1000 invites used" sidebar so operators see the cap pressure
+  // before hitting `invitations_limit_exceeded`. Optional for the same
+  // reason as the methods above: a pre-Phase-6 host's IdentityStore
+  // would lack it, route 503s in that case.
+  countActivePendingInvitations?(now?: number): number
 }
 
 // ---------------------------------------------------------------------------
@@ -754,6 +767,13 @@ export async function handleIdentityRoute(
       `http://${req.headers.host ?? 'localhost'}`,
     )
     handleListInvites(ctx, url, res)
+    return
+  }
+  // Audit #156 — separate count endpoint. We keep it distinct from
+  // the list endpoint so the sidebar widget can poll cheaply (one
+  // integer in / out) without re-paginating the whole table.
+  if (method === 'GET' && path === '/api/admin/identity/invites/count') {
+    handleCountInvites(ctx, res)
     return
   }
   m = /^\/api\/admin\/identity\/invites\/([^/]+)$/.exec(path)
@@ -1376,6 +1396,32 @@ function handleListInvites(
   try {
     const invitations = ctx.identity.listInvitations(q)
     sendJson(res, { invitations })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+/**
+ * Audit #156 — quick count for the admin UI's "X / 1000 invites used"
+ * sidebar. Returns the same number IdentityStore uses internally to
+ * enforce the cap, so the badge in the UI matches the cap-trip
+ * threshold byte-for-byte.
+ */
+function handleCountInvites(
+  ctx: HandleIdentityRouteCtx,
+  res: ServerResponse,
+): void {
+  if (typeof ctx.identity.countActivePendingInvitations !== 'function') {
+    sendJson(
+      res,
+      { count: null, note: 'invitation count API unavailable on this host' },
+      200,
+    )
+    return
+  }
+  try {
+    const count = ctx.identity.countActivePendingInvitations()
+    sendJson(res, { count })
   } catch (err) {
     sendIdentityError(res, err)
   }

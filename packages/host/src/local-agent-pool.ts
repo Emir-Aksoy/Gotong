@@ -639,10 +639,17 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       // Now: revoke success is required before we touch the cache or
       // write audit. On failure we log + bail; the next 401 will retry,
       // and the audit log honestly reflects only successful revokes.
-      let revokeOk = false
+      // Audit #157 — N concurrent in-flight LLM calls can all 401 on
+      // the same dead key, firing the hook N times. The revoke itself
+      // is idempotent (returns `false` on the 2nd+ call), and we use
+      // that return to dedup the AUDIT write: only the call that
+      // actually flipped revoked_at writes the row. The cache
+      // invalidate is also idempotent (the row is gone from the next
+      // resolve regardless) and cheap, so we still call it for every
+      // 401 to guarantee no stale cache entry survives.
+      let revokedThisCall = false
       try {
-        identityRef.revokeVaultEntry(vaultEntryId)
-        revokeOk = true
+        revokedThisCall = identityRef.revokeVaultEntry(vaultEntryId) === true
       } catch (e) {
         log.error('auth-failure revoke failed; will retry on next 401', {
           vaultEntryId,
@@ -650,8 +657,12 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
         })
         return
       }
-      if (!revokeOk) return
       orgPoolRef.invalidate()
+      if (!revokedThisCall) {
+        // Already-revoked path: revoke + invalidate are idempotent
+        // no-ops; skip audit to avoid N rows for a single revocation.
+        return
+      }
       if (typeof identityRef.writeAuditLog === 'function') {
         try {
           identityRef.writeAuditLog({

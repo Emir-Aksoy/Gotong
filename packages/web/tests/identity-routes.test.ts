@@ -911,6 +911,38 @@ describe('/api/admin/identity/invites — create / list / revoke', () => {
     ])
   })
 
+  it('GET /count returns active-pending tally (Audit #156)', async () => {
+    // Start: bootstrap leaves 0 invites.
+    let r = await fetch(`${b.baseUrl}/api/admin/identity/invites/count`, {
+      headers: { cookie: b.ownerCookie },
+    })
+    expect(r.status).toBe(200)
+    let body = (await r.json()) as { count: number }
+    expect(body.count).toBe(0)
+
+    // Create 2 invites → count goes to 2.
+    await mintInvite(b, 'count-a@team.test')
+    const second = await mintInvite(b, 'count-b@team.test')
+    r = await fetch(`${b.baseUrl}/api/admin/identity/invites/count`, {
+      headers: { cookie: b.ownerCookie },
+    })
+    body = (await r.json()) as { count: number }
+    expect(body.count).toBe(2)
+
+    // Revoke one → count drops to 1 (cap predicate is active+pending,
+    // revoked rows don't count).
+    const rev = await fetch(
+      `${b.baseUrl}/api/admin/identity/invites/${second.id}`,
+      { method: 'DELETE', headers: { cookie: b.ownerCookie } },
+    )
+    expect(rev.status).toBe(200)
+    r = await fetch(`${b.baseUrl}/api/admin/identity/invites/count`, {
+      headers: { cookie: b.ownerCookie },
+    })
+    body = (await r.json()) as { count: number }
+    expect(body.count).toBe(1)
+  })
+
   it('GET filters by email (exact, case-insensitive)', async () => {
     await mintInvite(b, 'Bob@team.test')
     await mintInvite(b, 'carol@team.test')
