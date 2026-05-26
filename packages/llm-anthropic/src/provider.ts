@@ -1,5 +1,4 @@
 import Anthropic from '@anthropic-ai/sdk'
-import { completeAsStream } from '@aipehub/llm'
 import type {
   LlmContentBlock,
   LlmMessage,
@@ -9,6 +8,7 @@ import type {
   LlmStopReason,
   LlmStreamChunk,
   LlmToolUseBlock,
+  LlmUsage,
 } from '@aipehub/llm'
 
 /**
@@ -82,18 +82,203 @@ export class AnthropicProvider implements LlmProvider {
   }
 
   /**
-   * Phase 8 M1 — stream interface satisfied via the `completeAsStream`
-   * transition shim. M2 replaces this with native Anthropic SSE driven
-   * by `client.messages.stream()`. Throwing is preserved: the shim
-   * awaits the underlying `complete()` synchronously on first
-   * iteration, so auth / transport errors still surface on the LlmAgent
-   * `onAuthFailure` path.
+   * Phase 8 M2 — native streaming. Anthropic's SSE event vocabulary is:
+   *
+   *   message_start         — opens the message, carries initial usage
+   *                           (input_tokens; output_tokens starts at 0)
+   *   content_block_start   — opens a content block; type is either
+   *                           'text' (will get text_delta events) or
+   *                           'tool_use' (will get input_json_delta events
+   *                           that accumulate to a JSON args string)
+   *   content_block_delta   — delta into the open block:
+   *                             { type: 'text_delta', text: '...' }
+   *                           OR
+   *                             { type: 'input_json_delta', partial_json: '...' }
+   *   content_block_stop    — closes the current block. For tool_use we
+   *                           parse the accumulated args JSON here and
+   *                           emit our `tool_use` chunk.
+   *   message_delta         — carries the final stop_reason + a partial
+   *                           usage update (output_tokens fills in here)
+   *   message_stop          — terminal event; we emit usage + end here.
+   *
+   * Translation contract (LlmStreamChunk):
+   *   - text_delta → `{ type: 'text', text }` (empty strings filtered)
+   *   - tool_use   → emitted exactly once per tool block on its
+   *                  content_block_stop, with parsed input.
+   *   - usage      → emitted once near the end. We coalesce
+   *                  input_tokens (from message_start) + output_tokens
+   *                  (from message_delta.usage) + cache_* if present.
+   *   - end        → terminal; stopReason taken from message_delta.
+   *
+   * Errors:
+   *   - SDK throws synchronously from `messages.create({stream:true})`
+   *     (auth, rate-limit, transport) — propagate so LlmAgent's
+   *     onAuthFailure path fires. We do NOT swallow into an 'error' chunk
+   *     for these; that's the LlmStreamChunk contract.
+   *   - Mid-stream malformed JSON in a tool_use input → emit an `error`
+   *     chunk with code 'malformed_tool_args' and stop. Hard fail would
+   *     lose the partial text the model already produced.
    */
-  stream(req: LlmRequest, _signal?: AbortSignal): AsyncIterable<LlmStreamChunk> {
-    return completeAsStream(() => this.complete(req))
+  stream(req: LlmRequest, signal?: AbortSignal): AsyncIterable<LlmStreamChunk> {
+    const body = this.buildBody(req)
+    body.stream = true
+    return this.streamImpl(body, signal)
   }
 
-  async complete(req: LlmRequest): Promise<LlmResponse> {
+  private async *streamImpl(
+    body: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): AsyncIterable<LlmStreamChunk> {
+    // The SDK's stream() returns an async iterable of SSE events. We
+    // type-check duck-style — the test fake mirrors the same shape.
+    const sdkStream = await (
+      this.client.messages.create as unknown as (
+        b: Record<string, unknown>,
+        opts?: { signal?: AbortSignal },
+      ) => Promise<AsyncIterable<AnthropicStreamEvent>>
+    )(body, signal ? { signal } : undefined)
+
+    // Per-block scratch state. Anthropic SSE always opens exactly one
+    // block at a time (we never see overlapping content_block_start
+    // events), so a single slot is enough.
+    let openBlock:
+      | { kind: 'text' }
+      | { kind: 'tool_use'; id: string; name: string; argsJson: string }
+      | null = null
+
+    let inputTokens = 0
+    let cacheCreationTokens = 0
+    let cacheReadTokens = 0
+    let outputTokens = 0
+    let stopReason: LlmStopReason = 'end_turn'
+
+    for await (const ev of sdkStream) {
+      switch (ev.type) {
+        case 'message_start': {
+          const u = ev.message?.usage
+          if (u) {
+            inputTokens = u.input_tokens ?? 0
+            cacheCreationTokens = u.cache_creation_input_tokens ?? 0
+            cacheReadTokens = u.cache_read_input_tokens ?? 0
+            // output_tokens at message_start is typically 0 (will fill
+            // in via message_delta); we still capture it defensively in
+            // case Anthropic ever pre-fills it.
+            outputTokens = u.output_tokens ?? 0
+          }
+          break
+        }
+        case 'content_block_start': {
+          const b = ev.content_block
+          if (b?.type === 'text') {
+            openBlock = { kind: 'text' }
+          } else if (b?.type === 'tool_use') {
+            openBlock = {
+              kind: 'tool_use',
+              id: typeof b.id === 'string' ? b.id : '',
+              name: typeof b.name === 'string' ? b.name : '',
+              argsJson: '',
+            }
+          }
+          break
+        }
+        case 'content_block_delta': {
+          const d = ev.delta
+          if (!d || !openBlock) break
+          if (d.type === 'text_delta' && openBlock.kind === 'text') {
+            const t = typeof d.text === 'string' ? d.text : ''
+            if (t.length > 0) yield { type: 'text', text: t }
+          } else if (
+            d.type === 'input_json_delta' &&
+            openBlock.kind === 'tool_use'
+          ) {
+            if (typeof d.partial_json === 'string') {
+              openBlock.argsJson += d.partial_json
+            }
+          }
+          break
+        }
+        case 'content_block_stop': {
+          if (openBlock?.kind === 'tool_use') {
+            // Parse the accumulated args JSON. The model emits a
+            // well-formed JSON object; an empty string means {} (the
+            // model called the tool with no args).
+            let input: Record<string, unknown> = {}
+            const raw = openBlock.argsJson.trim()
+            if (raw.length > 0) {
+              try {
+                const parsed = JSON.parse(raw)
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                  input = parsed as Record<string, unknown>
+                }
+              } catch {
+                // The model produced invalid JSON for the tool args.
+                // Surface as a soft-fail error chunk + stop the stream
+                // — there's nothing useful we can do with broken args,
+                // and continuing risks the agent calling the tool with
+                // partial garbage.
+                yield {
+                  type: 'error',
+                  code: 'malformed_tool_args',
+                  message: `tool '${openBlock.name}' args JSON failed to parse: ${raw.slice(0, 200)}`,
+                }
+                return
+              }
+            }
+            yield {
+              type: 'tool_use',
+              toolUse: {
+                type: 'tool_use',
+                id: openBlock.id,
+                name: openBlock.name,
+                input,
+              },
+            }
+          }
+          openBlock = null
+          break
+        }
+        case 'message_delta': {
+          if (ev.delta?.stop_reason !== undefined) {
+            stopReason = mapStopReason(ev.delta.stop_reason)
+          }
+          // The output_tokens count arrives here (sometimes); the
+          // SDK also folds the cumulative usage onto ev.usage.
+          if (ev.usage?.output_tokens !== undefined) {
+            outputTokens = ev.usage.output_tokens
+          }
+          break
+        }
+        case 'message_stop': {
+          // Emit usage + end as the terminal pair.
+          const usage: LlmUsage = {
+            inputTokens,
+            outputTokens,
+          }
+          if (cacheCreationTokens > 0) usage.cacheCreationTokens = cacheCreationTokens
+          if (cacheReadTokens > 0) usage.cacheReadTokens = cacheReadTokens
+          yield { type: 'usage', usage }
+          yield { type: 'end', stopReason }
+          return
+        }
+      }
+    }
+    // Defensive: if the SDK closes the iterator without an explicit
+    // message_stop (would be an SDK bug), still emit a terminal `end`
+    // so consumers' iterators don't dangle.
+    yield {
+      type: 'usage',
+      usage: { inputTokens, outputTokens },
+    }
+    yield { type: 'end', stopReason }
+  }
+
+  /**
+   * Phase 8 — request body assembly shared between `complete()` (non-stream)
+   * and `stream()` (sets `stream:true`). Pulled out so the two paths can
+   * never diverge on translation rules (tool snake_case, opus thinking-
+   * model temperature drop, etc.).
+   */
+  private buildBody(req: LlmRequest): Record<string, unknown> {
     const model = req.model ?? this.defaultModel
     const body: Record<string, unknown> = {
       model,
@@ -101,18 +286,10 @@ export class AnthropicProvider implements LlmProvider {
       messages: req.messages.map(translateMessage),
     }
     if (req.system !== undefined) body.system = req.system
-    // Opus 4.x ("thinking" models) reject `temperature` outright — the
-    // API returns 400 even on values it would accept for other models.
-    // Drop the param rather than forward and fail; callers that
-    // really need a non-default temperature should pick a non-thinking
-    // model. See README §"Claude Opus 4.7" for the full picture.
     if (req.temperature !== undefined && !isThinkingModel(model)) {
       body.temperature = req.temperature
     }
     if (req.tools && req.tools.length > 0) {
-      // Anthropic expects `input_schema`; our neutral type uses
-      // `inputSchema`. Re-key here so providers/tests don't have to
-      // think about which casing they're holding.
       body.tools = req.tools.map((t) => {
         const out: Record<string, unknown> = {
           name: t.name,
@@ -122,6 +299,15 @@ export class AnthropicProvider implements LlmProvider {
         return out
       })
     }
+    return body
+  }
+
+  async complete(req: LlmRequest): Promise<LlmResponse> {
+    // Note: Phase 8 — body assembly lives in `buildBody()` so the
+    // streaming path (`stream()`) shares translation rules with this
+    // legacy non-stream path. Don't inline anything here that doesn't
+    // also belong in stream().
+    const body = this.buildBody(req)
 
     // We use the SDK's loosely-typed call signature so the same code path
     // works whether `client` is the real SDK or a test fake. SDK errors
@@ -253,6 +439,41 @@ interface AnthropicContentBlock {
   id?: string
   name?: string
   input?: unknown
+}
+
+/**
+ * Phase 8 — structural shape of one Anthropic SSE event. The vendor SDK
+ * exposes a discriminated union with much richer typing; we narrow to
+ * just the fields the stream translator reads. Discriminator is `type`.
+ */
+interface AnthropicStreamEvent {
+  type: string
+  // message_start
+  message?: {
+    usage?: {
+      input_tokens?: number
+      output_tokens?: number
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?: number
+    }
+  }
+  // content_block_start / content_block_stop
+  content_block?: {
+    type?: string
+    id?: string
+    name?: string
+  }
+  // content_block_delta / message_delta
+  delta?: {
+    type?: string
+    text?: string
+    partial_json?: string
+    stop_reason?: string | null
+  }
+  // message_delta — final usage update
+  usage?: {
+    output_tokens?: number
+  }
 }
 
 /**

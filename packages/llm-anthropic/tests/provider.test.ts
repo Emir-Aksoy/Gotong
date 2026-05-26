@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { LlmRequest } from '@aipehub/llm'
+import type { LlmRequest, LlmStreamChunk } from '@aipehub/llm'
 
 import { AnthropicProvider } from '../src/index.js'
 
@@ -270,6 +270,274 @@ describe('AnthropicProvider — temperature handling for thinking models', () =>
     })
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.temperature).toBe(0.3)
+  })
+})
+
+// Phase 8 M2 — native streaming. The provider speaks the SDK's
+// SSE event vocabulary (message_start / content_block_start /
+// content_block_delta / content_block_stop / message_delta /
+// message_stop) and translates it into LlmStreamChunk. These
+// tests fake the SDK's async-iterable so we can assert the
+// translation deterministically without a live network.
+
+/**
+ * Build a fake Anthropic SDK client that, on stream=true, returns the
+ * given pre-recorded SSE events; on stream=false, falls back to the
+ * non-stream `impl`. Mirrors the dual call shape AnthropicProvider
+ * uses internally.
+ */
+function makeFakeStreamingClient(
+  events: ReadonlyArray<unknown>,
+  impl?: (body: Record<string, unknown>) => Promise<unknown> | unknown,
+) {
+  const create = vi.fn(async (body: Record<string, unknown>) => {
+    if (body.stream === true) {
+      async function* gen() {
+        for (const ev of events) yield ev
+      }
+      return gen()
+    }
+    if (impl) return impl(body)
+    throw new Error('non-stream call not configured on this fake')
+  })
+  return { client: { messages: { create } }, create }
+}
+
+async function collect(
+  stream: AsyncIterable<LlmStreamChunk>,
+): Promise<LlmStreamChunk[]> {
+  const out: LlmStreamChunk[] = []
+  for await (const c of stream) out.push(c)
+  return out
+}
+
+describe('AnthropicProvider — native streaming (Phase 8 M2)', () => {
+  it('translates text-only SSE sequence to text → usage → end', async () => {
+    const { client } = makeFakeStreamingClient([
+      { type: 'message_start', message: { usage: { input_tokens: 5, output_tokens: 0 } } },
+      { type: 'content_block_start', content_block: { type: 'text' } },
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'hello ' } },
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'world' } },
+      { type: 'content_block_stop' },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 8 } },
+      { type: 'message_stop' },
+    ])
+    const provider = new AnthropicProvider({ client: client as any })
+    const chunks = await collect(
+      provider.stream({ messages: [{ role: 'user', content: 'hi' }] }),
+    )
+    // Type sequence
+    expect(chunks.map((c) => c.type)).toEqual(['text', 'text', 'usage', 'end'])
+    // Concatenated text reproduces the response
+    const text = chunks
+      .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+      .map((c) => c.text)
+      .join('')
+    expect(text).toBe('hello world')
+    // Usage carries both halves (input from message_start, output from message_delta)
+    const usage = chunks[2]!
+    expect(usage.type).toBe('usage')
+    if (usage.type === 'usage') {
+      expect(usage.usage.inputTokens).toBe(5)
+      expect(usage.usage.outputTokens).toBe(8)
+    }
+    // Terminal end carries the mapped stopReason
+    const end = chunks.at(-1)!
+    if (end.type === 'end') expect(end.stopReason).toBe('end_turn')
+  })
+
+  it('filters empty text_delta strings (LlmStreamTextChunk contract)', async () => {
+    const { client } = makeFakeStreamingClient([
+      { type: 'message_start', message: { usage: { input_tokens: 1 } } },
+      { type: 'content_block_start', content_block: { type: 'text' } },
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: '' } },
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'real' } },
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: '' } },
+      { type: 'content_block_stop' },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+      { type: 'message_stop' },
+    ])
+    const provider = new AnthropicProvider({ client: client as any })
+    const chunks = await collect(provider.stream({ messages: [] }))
+    const texts = chunks.filter((c) => c.type === 'text')
+    expect(texts.length).toBe(1)
+    if (texts[0]?.type === 'text') expect(texts[0].text).toBe('real')
+  })
+
+  it('passes prompt-cache usage fields through (creation + read)', async () => {
+    const { client } = makeFakeStreamingClient([
+      {
+        type: 'message_start',
+        message: {
+          usage: {
+            input_tokens: 20,
+            output_tokens: 0,
+            cache_creation_input_tokens: 1500,
+            cache_read_input_tokens: 8000,
+          },
+        },
+      },
+      { type: 'content_block_start', content_block: { type: 'text' } },
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'ok' } },
+      { type: 'content_block_stop' },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 5 } },
+      { type: 'message_stop' },
+    ])
+    const provider = new AnthropicProvider({ client: client as any })
+    const chunks = await collect(provider.stream({ messages: [] }))
+    const usage = chunks.find((c) => c.type === 'usage')!
+    if (usage.type === 'usage') {
+      expect(usage.usage).toEqual({
+        inputTokens: 20,
+        outputTokens: 5,
+        cacheCreationTokens: 1500,
+        cacheReadTokens: 8000,
+      })
+    }
+  })
+
+  it('accumulates input_json_delta into a single tool_use chunk with parsed input', async () => {
+    const { client } = makeFakeStreamingClient([
+      { type: 'message_start', message: { usage: { input_tokens: 30 } } },
+      // Anthropic streams: optional assistant text BEFORE the tool block.
+      { type: 'content_block_start', content_block: { type: 'text' } },
+      { type: 'content_block_delta', delta: { type: 'text_delta', text: 'let me check' } },
+      { type: 'content_block_stop' },
+      // Then a tool_use block, with its args JSON arriving in fragments.
+      {
+        type: 'content_block_start',
+        content_block: { type: 'tool_use', id: 'toolu_x', name: 'fs__read' },
+      },
+      {
+        type: 'content_block_delta',
+        delta: { type: 'input_json_delta', partial_json: '{"path":' },
+      },
+      {
+        type: 'content_block_delta',
+        delta: { type: 'input_json_delta', partial_json: '"README.md"}' },
+      },
+      { type: 'content_block_stop' },
+      { type: 'message_delta', delta: { stop_reason: 'tool_use' }, usage: { output_tokens: 12 } },
+      { type: 'message_stop' },
+    ])
+    const provider = new AnthropicProvider({ client: client as any })
+    const chunks = await collect(provider.stream({ messages: [] }))
+    // Sequence: text → tool_use → usage → end
+    expect(chunks.map((c) => c.type)).toEqual(['text', 'tool_use', 'usage', 'end'])
+    const tu = chunks[1]!
+    if (tu.type === 'tool_use') {
+      expect(tu.toolUse.id).toBe('toolu_x')
+      expect(tu.toolUse.name).toBe('fs__read')
+      expect(tu.toolUse.input).toEqual({ path: 'README.md' })
+    }
+    const end = chunks.at(-1)!
+    if (end.type === 'end') expect(end.stopReason).toBe('tool_use')
+  })
+
+  it('emits an error chunk and stops on malformed tool args JSON', async () => {
+    const { client } = makeFakeStreamingClient([
+      { type: 'message_start', message: { usage: { input_tokens: 10 } } },
+      {
+        type: 'content_block_start',
+        content_block: { type: 'tool_use', id: 'toolu_y', name: 'broken' },
+      },
+      {
+        type: 'content_block_delta',
+        delta: { type: 'input_json_delta', partial_json: '{not json' },
+      },
+      { type: 'content_block_stop' },
+      // The provider must stop BEFORE seeing message_delta.
+      { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
+      { type: 'message_stop' },
+    ])
+    const provider = new AnthropicProvider({ client: client as any })
+    const chunks = await collect(provider.stream({ messages: [] }))
+    const last = chunks.at(-1)!
+    expect(last.type).toBe('error')
+    if (last.type === 'error') {
+      expect(last.code).toBe('malformed_tool_args')
+      expect(last.message).toMatch(/broken/)
+    }
+    // And no `end` after the error — the iterator returned early.
+    expect(chunks.find((c) => c.type === 'end')).toBeUndefined()
+  })
+
+  it('handles tool_use with empty input (model called the tool with no args)', async () => {
+    const { client } = makeFakeStreamingClient([
+      { type: 'message_start', message: { usage: { input_tokens: 5 } } },
+      {
+        type: 'content_block_start',
+        content_block: { type: 'tool_use', id: 't1', name: 'noop' },
+      },
+      // No input_json_delta events at all.
+      { type: 'content_block_stop' },
+      { type: 'message_delta', delta: { stop_reason: 'tool_use' } },
+      { type: 'message_stop' },
+    ])
+    const provider = new AnthropicProvider({ client: client as any })
+    const chunks = await collect(provider.stream({ messages: [] }))
+    const tu = chunks.find((c) => c.type === 'tool_use')!
+    if (tu.type === 'tool_use') expect(tu.toolUse.input).toEqual({})
+  })
+
+  it('rethrows SDK errors synchronously (auth → onAuthFailure path)', async () => {
+    const create = vi.fn(async () => {
+      throw new Error('auth_denied')
+    })
+    const provider = new AnthropicProvider({
+      client: { messages: { create } } as any,
+    })
+    // First `.next()` (or first await) on the iterator must surface
+    // the SDK throw — mirrors how a real Anthropic 401 would behave.
+    await expect(
+      (async () => {
+        for await (const _c of provider.stream({ messages: [] })) {
+          /* unreachable */
+        }
+      })(),
+    ).rejects.toThrow(/auth_denied/)
+  })
+
+  it('forwards stream:true and the tools translation on the body', async () => {
+    const { client, create } = makeFakeStreamingClient([
+      { type: 'message_start', message: { usage: { input_tokens: 1 } } },
+      { type: 'message_delta', delta: { stop_reason: 'end_turn' } },
+      { type: 'message_stop' },
+    ])
+    const provider = new AnthropicProvider({ client: client as any })
+    await collect(
+      provider.stream({
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [
+          {
+            name: 'lookup',
+            inputSchema: { type: 'object' },
+          },
+        ],
+      }),
+    )
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.stream).toBe(true)
+    expect(body.tools).toEqual([
+      { name: 'lookup', input_schema: { type: 'object' } },
+    ])
+  })
+
+  it('forwards AbortSignal to the SDK', async () => {
+    const create = vi.fn(async (_body: Record<string, unknown>, opts?: { signal?: AbortSignal }) => {
+      // Echo back so we can assert. Yield nothing → defensive end is emitted.
+      async function* gen() {
+        // attach an assertion hook
+        ;(create as unknown as { _lastSignal?: unknown })._lastSignal = opts?.signal
+      }
+      return gen()
+    })
+    const provider = new AnthropicProvider({
+      client: { messages: { create } } as any,
+    })
+    const ac = new AbortController()
+    await collect(provider.stream({ messages: [] }, ac.signal))
+    expect((create as unknown as { _lastSignal?: unknown })._lastSignal).toBe(ac.signal)
   })
 })
 
