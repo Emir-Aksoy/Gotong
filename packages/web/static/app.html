@@ -171,6 +171,16 @@
         <button type="submit" class="me-primary-btn">提交</button>
         <div id="settings-password-status" class="me-status"></div>
       </form>
+
+      <!-- Phase 7 M5 — owner-only "升级到团队模式" 注入点. app.js
+           reads /api/me/mode + populates this slot conditionally. The
+           wrapping section is hidden unless body.mode-personal is set
+           (CSS rule in styles.css). -->
+      <section class="settings-upgrade" data-mode-personal-only>
+        <h2 style="margin-top:1.5rem;">个人模式</h2>
+        <p class="hint">当前是个人模式 (1 用户, 简化界面)。升级后开放完整 admin 控件 — 用户管理 / 邀请 / peer / 配额。</p>
+        <div id="settings-upgrade-slot"></div>
+      </section>
     </section>
 
     <!-- All sections inside <main> are admin/owner only. The home and

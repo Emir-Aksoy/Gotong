@@ -520,8 +520,84 @@
     show($('#admin-tabbar'))
     wireTabs()
     attachLogout()
+    // Phase 7 M5 — fetch org mode and apply body class. Drives CSS
+    // overrides (personal mode hides role badge + tweaks subtitle copy)
+    // and decides whether to render the "升级到团队" button.
+    applyOrgMode().catch((err) => console.warn('[app] applyOrgMode failed', err))
     renderHome().catch((err) => console.error('[app] renderHome failed', err))
     renderSettings().catch((err) => console.error('[app] renderSettings failed', err))
     loadAdminBundles()
   })
+
+  // Phase 7 M5 — org mode body-class + upgrade-button wiring.
+  // Calls GET /api/me/mode (signed-in only), sets body.mode-personal or
+  // body.mode-team, and injects an "升级到团队" button when the caller
+  // is owner AND mode is personal.
+  async function applyOrgMode() {
+    let info = { mode: 'team', canUpgrade: false }
+    try {
+      const r = await fetch('/api/me/mode')
+      if (r.ok) info = await r.json()
+    } catch (err) {
+      console.warn('[app] /api/me/mode failed', err)
+    }
+    const body = document.body
+    body.classList.remove('mode-personal', 'mode-team')
+    body.classList.add(`mode-${info.mode}`)
+    // Subtitle copy: personal mode users shouldn't see "管理员控制台"
+    // even when they're owner — that's a team concept.
+    const subtitle = $('#role-subtitle')
+    if (subtitle && info.mode === 'personal') {
+      subtitle.textContent = '我的 AI 桌面'
+    }
+    // Upgrade button — injected into settings tab when applicable.
+    if (info.canUpgrade) {
+      wireUpgradeButton()
+    }
+  }
+
+  function wireUpgradeButton() {
+    // Find a stable injection point in settings; if the settings tab
+    // hasn't rendered yet, retry on next tick.
+    const slot = $('#settings-upgrade-slot')
+    if (!slot) {
+      setTimeout(wireUpgradeButton, 100)
+      return
+    }
+    if (slot.dataset.wired === '1') return
+    slot.dataset.wired = '1'
+    slot.innerHTML =
+      '<button id="upgrade-team-btn" type="button" class="btn-primary">升级到团队模式</button>' +
+      '<p class="hint">升级后 admin 控制台显示完整管理 tab。' +
+      '可以邀请其他用户/接入跨 hub peer/配额管理。不可一键回退。</p>' +
+      '<span id="upgrade-status" class="login-status"></span>'
+    const btn = $('#upgrade-team-btn')
+    const status = $('#upgrade-status')
+    btn?.addEventListener('click', async () => {
+      if (!window.confirm('确定升级到团队模式? 升级后部分 admin 控件会显示出来。')) return
+      btn.disabled = true
+      status.textContent = '升级中…'
+      try {
+        const r = await fetch('/api/admin/identity/org-mode', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ mode: 'team' }),
+        })
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}))
+          status.textContent = `失败: ${j?.error || r.status}`
+          status.className = 'login-status error'
+          btn.disabled = false
+          return
+        }
+        status.textContent = '升级成功,正在刷新…'
+        status.className = 'login-status ok'
+        setTimeout(() => window.location.reload(), 600)
+      } catch (err) {
+        status.textContent = `失败: ${err?.message || err}`
+        status.className = 'login-status error'
+        btn.disabled = false
+      }
+    })
+  }
 })()

@@ -250,6 +250,16 @@ section h2 {
 }
 .role-admin { background: #d57c5b; color: #fff; }
 .role-worker { background: #5b9bd5; color: #fff; }
+
+/* Phase 7 M5 — personal-mode shell overrides.
+   The `data-modes` / body-class switch lets a single SPA serve both
+   solo-user and team experiences without two separate bundles.
+   Personal mode hides the role chip (single-user installations don't
+   need "owner" labelling), and the upgrade section is only visible
+   when we're actually in personal mode. */
+body.mode-personal #role-badge { display: none; }
+.settings-upgrade { display: none; }
+body.mode-personal .settings-upgrade { display: block; }
 .me-label {
   font-size: 0.72rem;
   opacity: 0.7;

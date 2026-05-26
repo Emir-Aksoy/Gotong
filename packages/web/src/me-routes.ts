@@ -180,6 +180,23 @@ export async function handleMeRoute(
     sendJson(res, { workflows: listAllowedWorkflowsForMe() })
     return
   }
+  // Phase 7 M5 — org mode for the SPA shell. Every signed-in user can
+  // read this (it drives body-class CSS); only owner can flip it via
+  // POST /api/admin/identity/org-mode below.
+  //
+  // `canUpgrade` is a derived hint for the UI: true when mode is
+  // personal AND the caller is owner (so we know whether to render
+  // the "升级到团队" button).
+  if (method === 'GET' && path === '/api/me/mode') {
+    const mode = typeof ctx.identity.getOrgMode === 'function'
+      ? ctx.identity.getOrgMode()
+      : 'team'
+    sendJson(res, {
+      mode,
+      canUpgrade: mode === 'personal' && v4.role === 'owner',
+    })
+    return
+  }
   if (method === 'POST' && path === '/api/me/dispatch') {
     await handleMeDispatch(ctx, req, res, userId)
     return

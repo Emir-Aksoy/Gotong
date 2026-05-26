@@ -315,6 +315,12 @@ export interface IdentitySurface {
   // reason as the methods above: a pre-Phase-6 host's IdentityStore
   // would lack it, route 503s in that case.
   countActivePendingInvitations?(now?: number): number
+  // Phase 7 M4 — org mode (personal | team). Drives the SPA shell
+  // (body class) + UI hints (role badge visibility, upgrade button).
+  // Optional for pre-Phase-7 hosts; SPA defaults to 'team' when
+  // missing so legacy behaviour is preserved.
+  getOrgMode?(): 'personal' | 'team'
+  setOrgMode?(mode: 'personal' | 'team'): void
 }
 
 // ---------------------------------------------------------------------------
@@ -779,6 +785,14 @@ export async function handleIdentityRoute(
   m = /^\/api\/admin\/identity\/invites\/([^/]+)$/.exec(path)
   if (m && method === 'DELETE') {
     handleRevokeInvite(ctx, req, res, m[1]!)
+    return
+  }
+
+  // Phase 7 M5 — owner-only mode flip. The auto-promote path
+  // (createInvitation / 2nd user) covers most cases; this endpoint is
+  // for the explicit "升级到团队" button in the settings tab.
+  if (method === 'POST' && path === '/api/admin/identity/org-mode') {
+    await handleSetOrgMode(ctx, req, res)
     return
   }
 
@@ -1422,6 +1436,51 @@ function handleCountInvites(
   try {
     const count = ctx.identity.countActivePendingInvitations()
     sendJson(res, { count })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+/**
+ * Phase 7 M5 — explicit "升级到团队" button handler. The auto-promote
+ * paths in IdentityStore.createInvitation / createUser cover the
+ * typical "operator created an invite" → flip-to-team flow; this
+ * endpoint exists for the explicit toggle in the settings tab.
+ *
+ * Owner-gated (same as other admin/identity routes). Writes an audit
+ * row so the timeline of "we became a team / went back to personal"
+ * is queryable.
+ */
+async function handleSetOrgMode(
+  ctx: HandleIdentityRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  if (typeof ctx.identity.setOrgMode !== 'function') {
+    sendJson(res, { error: 'org mode API unavailable on this host' }, 503)
+    return
+  }
+  const body = await readJsonBody(req)
+  const mode = (body as { mode?: unknown })?.mode
+  if (mode !== 'personal' && mode !== 'team') {
+    sendJson(
+      res,
+      { error: "mode must be 'personal' or 'team'", code: 'invalid_input' },
+      400,
+    )
+    return
+  }
+  try {
+    const before = typeof ctx.identity.getOrgMode === 'function'
+      ? ctx.identity.getOrgMode()
+      : null
+    ctx.identity.setOrgMode(mode)
+    tryAudit(ctx, resolveV4Auth(ctx.identity, req), {
+      action: 'org_set_mode',
+      targetUserId: null,
+      metadata: { from: before, to: mode },
+    })
+    sendJson(res, { mode })
   } catch (err) {
     sendIdentityError(res, err)
   }
