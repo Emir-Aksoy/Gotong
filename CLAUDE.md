@@ -55,7 +55,8 @@ AipeHub 要做的是 **AI 时代「人-智能体-机构」三层链接的工作�
 | v4 Phase 5 | 完 | vault / 配额 / OrgApiPool / peer registry / 跨 hub HITL / SPA + setup wizard |
 | v4 Phase 6 | 完 | 6 项 feature + 17 项 audit (P0+P1+P2+P3 全清) |
 | v4 Phase 7 | 完 | 个人模式 first-class (org_mode auto-detect + SPA 分流 + 升级流) |
-| **v4 Phase 8** | **下一步** | LLM streaming 全链路 (破坏性, 删 LlmProvider.complete) |
+| v4 Phase 8 | 完 | LLM streaming 全链路 (LlmProvider.stream, transcript chunk, admin UI 实时打字, 删 complete) |
+| **v4 Phase 9** | **下一步** | 多模态 content blocks (image / audio / file_ref) |
 
 **Phase 6 已落地**:
 1. Peer reputation 只读 dashboard
