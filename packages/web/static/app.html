@@ -109,6 +109,7 @@
       <button class="tabbar-btn" type="button" data-tab="services"  data-roles="owner,admin" data-i18n="tabServices">服务</button>
       <button class="tabbar-btn" type="button" data-tab="users"     data-roles="owner" data-i18n="tabUsers">用户</button>
       <button class="tabbar-btn" type="button" data-tab="quotas"    data-roles="owner" data-i18n="tabQuotas">配额</button>
+      <button class="tabbar-btn" type="button" data-tab="reputation" data-roles="owner" data-i18n="tabReputation">信誉</button>
       <button class="tabbar-btn" type="button" data-tab="settings"  data-roles="owner,admin,member,viewer" data-i18n="tabSettings">设置</button>
     </nav>
 
@@ -755,6 +756,11 @@
       <!-- E1 / C2 — org-level soft quota management. Rendered by
            /quotas-ui.js. Same self-contained pattern as identity-ui. -->
       <section id="quotas-panel" class="quotas-panel" data-tab="quotas"></section>
+
+      <!-- Phase 6 #1 — peer reputation read-only dashboard. Rendered by
+           /reputation-ui.js. Owner-only; hidden tab when host has no
+           reputation snapshot adapter wired (UI surfaces 503 inline). -->
+      <section id="reputation-panel" class="reputation-panel" data-tab="reputation"></section>
     </main>
   </body>
 </html>

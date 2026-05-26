@@ -703,6 +703,33 @@ async function main(): Promise<void> {
     // D1 — pass the peer registry through so admin /peers handlers
     // can invalidate the polling tick on every mutation.
     ...(peerRegistry ? { peerRegistry } : {}),
+    // Phase 6 #1 — expose reputation snapshot to the admin UI.
+    // Joins `hub.reputation.all()` with the peers table for labels
+    // so the dashboard shows "Supplier (hub_xxx) — 0.72" instead of
+    // bare hub IDs. Identity may be absent (bootstrap failure), in
+    // which case we still expose reputation with label=null.
+    reputation: {
+      snapshot: () => {
+        const reputations = hub.reputation.all()
+        const labelsByPeer = new Map<string, string | null>()
+        if (identity && typeof identity.listPeers === 'function') {
+          try {
+            for (const p of identity.listPeers()) {
+              labelsByPeer.set(p.peerId, p.label)
+            }
+          } catch {
+            // best-effort label join — empty labels are harmless
+          }
+        }
+        return reputations.map((r) => ({
+          peerHubId: r.peerHubId,
+          score: r.score,
+          sampleCount: r.sampleCount,
+          lastUpdatedAt: r.lastUpdatedAt,
+          label: labelsByPeer.get(r.peerHubId) ?? null,
+        }))
+      },
+    },
   })
 
   // P6: recover from crashes — any run still marked 'running' on disk

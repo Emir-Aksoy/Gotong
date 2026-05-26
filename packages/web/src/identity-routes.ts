@@ -144,6 +144,23 @@ export interface IdentityOrgQuotaDTO {
   updatedAt: number
 }
 
+// Phase 6 #1 — peer reputation read-only dashboard projection. The
+// reputation store lives in `@aipehub/core` (hub.reputation) and is NOT
+// part of IdentitySurface — it's injected via `HandleIdentityRouteCtx`
+// from the host, same pattern as `peerRegistry`. The DTO is enriched
+// with an optional `label` joined from the identity peers table when
+// available; pure feedback-driven peers (no peers-row) just show the
+// peerHubId.
+export interface IdentityPeerReputationDTO {
+  peerHubId: string
+  /** EWMA score in [-1, +1]. Unknown peers report 0. */
+  score: number
+  sampleCount: number
+  lastUpdatedAt: number
+  /** Display label from `peers` table; null if the peer is unknown. */
+  label: string | null
+}
+
 export interface IdentityInvitationDTO {
   id: string
   email: string
@@ -535,6 +552,15 @@ export interface HandleIdentityRouteCtx {
       backoffAttempts: number
     }>
   }
+  /**
+   * Phase 6 #1 — reputation snapshot read-only hook. Host wires
+   * `hub.reputation.all()` + `identity.listPeers()` label join here.
+   * When omitted, GET /api/admin/identity/reputation returns 503
+   * (admin UI hides the tab in that case).
+   */
+  reputation?: {
+    snapshot(): IdentityPeerReputationDTO[]
+  }
 }
 
 // V4-AUDIT-06: User-Agent is attacker-controlled; cap it before persisting
@@ -748,6 +774,15 @@ export async function handleIdentityRoute(
   m = /^\/api\/admin\/identity\/org-quotas\/([^/]+)\/([^/]+)$/.exec(path)
   if (m && method === 'DELETE') {
     handleDeleteOrgQuota(ctx, req, res, m[1]!, m[2]!)
+    return
+  }
+
+  // Phase 6 #1 — peer reputation read-only dashboard. Owner-gated
+  // (gate above). No POST/DELETE — reputation is derived from feedback
+  // ledger, not directly mutable from this surface. Returns 503 when
+  // the host did not wire `ctx.reputation` (older host or env opt-out).
+  if (method === 'GET' && path === '/api/admin/identity/reputation') {
+    handleListReputation(ctx, res)
     return
   }
 
@@ -1840,6 +1875,38 @@ function handleDeleteOrgQuota(
       success: true,
     })
     sendJson(res, { ok: true })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 #1 — Peer reputation read-only dashboard
+// ---------------------------------------------------------------------------
+
+function handleListReputation(
+  ctx: HandleIdentityRouteCtx,
+  res: ServerResponse,
+): void {
+  if (!ctx.reputation) {
+    sendJson(
+      res,
+      { error: 'reputation snapshot not supported by this host' },
+      503,
+    )
+    return
+  }
+  try {
+    const snapshot = ctx.reputation.snapshot()
+    // Sort by score desc then by sampleCount desc — admins read the
+    // table top-to-bottom and care about "who's most trusted" first.
+    // Tie-break on peerHubId for stable rendering across refreshes.
+    const sorted = [...snapshot].sort((a, b) => {
+      if (Math.abs(a.score - b.score) > 1e-9) return b.score - a.score
+      if (a.sampleCount !== b.sampleCount) return b.sampleCount - a.sampleCount
+      return a.peerHubId.localeCompare(b.peerHubId)
+    })
+    sendJson(res, { reputation: sorted })
   } catch (err) {
     sendIdentityError(res, err)
   }

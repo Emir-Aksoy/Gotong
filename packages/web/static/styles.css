@@ -1772,3 +1772,30 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .quotas-panel .q-form input, .quotas-panel .q-form select { font: inherit; padding: 0.35rem 0.45rem; border: 1px solid #ccc; border-radius: 4px; min-width: 8rem; }
 .quotas-panel .q-primary { font: inherit; padding: 0.4rem 0.9rem; background: #1f6feb; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
 .quotas-panel .q-primary:hover { background: #1759c8; }
+
+/* Phase 6 #1 — peer reputation read-only dashboard. Mirrors quotas-panel
+ * structure to feel familiar; the score bar is centered (negative goes
+ * left, positive goes right) rather than the quotas left-anchored fill. */
+.reputation-panel { padding: 1rem; }
+.reputation-panel .rep-header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+.reputation-panel .rep-header h2 { margin: 0; flex: 1 0 100%; }
+.reputation-panel .rep-meta { flex: 1 0 100%; color: #666; font-size: 0.85rem; margin: 0; }
+.reputation-panel .rep-status { font-size: 0.85rem; min-height: 1em; }
+.reputation-panel .rep-status-loading { color: #888; }
+.reputation-panel .rep-status-ok { color: #27ae60; }
+.reputation-panel .rep-status-error { color: #c0392b; }
+.reputation-panel .rep-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-bottom: 1.5rem; }
+.reputation-panel .rep-table th, .reputation-panel .rep-table td { text-align: left; border-bottom: 1px solid #eee; padding: 0.4rem 0.5rem; vertical-align: middle; }
+.reputation-panel .rep-table th { background: #fafafa; font-weight: 600; color: #555; }
+.reputation-panel .rep-empty { color: #888; text-align: center; padding: 1.5rem; }
+.reputation-panel .rep-time { font-size: 0.78rem; color: #888; }
+.reputation-panel .rep-id { font-size: 0.78rem; color: #888; }
+.reputation-panel .rep-peer code { background: transparent; }
+.reputation-panel .rep-bar { position: relative; background: #f3f3f3; border-radius: 4px; height: 1.2rem; width: 12rem; overflow: hidden; }
+/* Center marker — a thin vertical line at 50% so eye locates "neutral" instantly. */
+.reputation-panel .rep-bar-center { position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background: #bbb; }
+.reputation-panel .rep-bar-fill { position: absolute; top: 0; bottom: 0; transition: width 0.2s, left 0.2s; }
+.reputation-panel .rep-bar-pos { background: #2ecc71; }
+.reputation-panel .rep-bar-neg { background: #e74c3c; }
+.reputation-panel .rep-bar-neutral { background: #bbb; }
+.reputation-panel .rep-bar-label { position: absolute; top: 0; left: 0; right: 0; text-align: center; font-size: 0.78rem; line-height: 1.2rem; color: #222; pointer-events: none; }

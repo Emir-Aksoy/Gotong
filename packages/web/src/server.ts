@@ -43,6 +43,7 @@ import {
   handlePublicInvitationRoute,
   IDENTITY_COOKIE,
   type IdentitySurface,
+  type IdentityPeerReputationDTO,
 } from './identity-routes.js'
 import { handleMeRoute } from './me-routes.js'
 
@@ -57,6 +58,7 @@ export type {
   IdentityAuditLogEntryDTO,
   IdentityInvitationStatus,
   IdentityInvitationDTO,
+  IdentityPeerReputationDTO,
 } from './identity-routes.js'
 
 /**
@@ -274,6 +276,16 @@ export interface WebServerOptions {
       backoffAttempts: number
     }>
   }
+  /**
+   * Phase 6 #1 — peer reputation snapshot adapter. Host builds a
+   * closure that reads `hub.reputation.all()` and joins with
+   * `identity.listPeers()` for labels. Optional — when omitted, the
+   * `/api/admin/identity/reputation` endpoint returns 503 and the
+   * admin UI hides the dashboard tab gracefully.
+   */
+  reputation?: {
+    snapshot(): IdentityPeerReputationDTO[]
+  }
 }
 
 /**
@@ -418,6 +430,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     readinessGate: opts.readinessGate,
     identity: opts.identity,
     peerRegistry: opts.peerRegistry,
+    reputation: opts.reputation,
     httpStats: new HttpStats(),
   }
 
@@ -535,6 +548,8 @@ interface HandlerCtx {
   identity: IdentitySurface | undefined
   /** D1 — see WebServerOptions.peerRegistry doc above. */
   peerRegistry: WebServerOptions['peerRegistry'] | undefined
+  /** Phase 6 #1 — see WebServerOptions.reputation doc above. */
+  reputation: WebServerOptions['reputation'] | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -1246,6 +1261,7 @@ async function handle(
         clientIp: clientIp(ctx, req),
         ...(userAgent ? { userAgent } : {}),
         ...(ctx.peerRegistry ? { peerRegistry: ctx.peerRegistry } : {}),
+        ...(ctx.reputation ? { reputation: ctx.reputation } : {}),
       },
       req,
       res,
