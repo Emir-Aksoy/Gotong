@@ -22,6 +22,7 @@ interface Bench {
 
 async function startBench(opts: {
   onConnectionAttempt?: (ip: string) => boolean
+  trustProxy?: boolean
 }): Promise<Bench> {
   const wss = new WebSocketServer({ port: 0 })
   await new Promise<void>((resolve) => wss.once('listening', () => resolve()))
@@ -35,6 +36,7 @@ async function startBench(opts: {
   acceptHubLinks({
     server: wss,
     selfId: 'hubB',
+    ...(opts.trustProxy ? { trustProxy: true } : {}),
     ...(opts.onConnectionAttempt
       ? {
         onConnectionAttempt: (ip) => {
@@ -139,5 +141,97 @@ describe('acceptHubLinks — onConnectionAttempt (Phase 6 #12)', () => {
     await new Promise((r) => setTimeout(r, 50))
     expect(bench.attempts.length).toBeGreaterThanOrEqual(1)
     expect(bench.attempts[0]).not.toBe('unknown')
+  })
+})
+
+// Audit #142 — when this server sits behind a reverse proxy, the
+// raw `req.socket.remoteAddress` is the proxy's loopback, NOT the
+// real client. Without trustProxy=true, every peer buckets under
+// the same loopback IP — one rude peer starves all others (or
+// every peer shares the 60/60s budget). The fix mirrors
+// @aipehub/web's clientIp helper: trustProxy → use first XFF entry.
+describe('acceptHubLinks — trustProxy + X-Forwarded-For (Audit #142)', () => {
+  let bench: Bench
+  afterEach(async () => { if (bench) await bench.stop() })
+
+  it('default (trustProxy off): XFF header is ignored, IP is socket remoteAddress', async () => {
+    bench = await startBench({ onConnectionAttempt: () => true })
+    void new WebSocket(bench.url, {
+      headers: { 'x-forwarded-for': '203.0.113.42' },
+    })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(bench.attempts.length).toBeGreaterThanOrEqual(1)
+    // The header is present but trustProxy is off — must NOT honour it.
+    expect(bench.attempts[0]).not.toBe('203.0.113.42')
+    expect(bench.attempts[0]!.length).toBeGreaterThan(0) // is some real IP
+  })
+
+  it('trustProxy on: first XFF entry becomes the rate-limit key', async () => {
+    bench = await startBench({
+      onConnectionAttempt: () => true,
+      trustProxy: true,
+    })
+    void new WebSocket(bench.url, {
+      headers: { 'x-forwarded-for': '203.0.113.42' },
+    })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(bench.attempts[0]).toBe('203.0.113.42')
+  })
+
+  it('trustProxy on + chained XFF: picks the first (leftmost) entry', async () => {
+    bench = await startBench({
+      onConnectionAttempt: () => true,
+      trustProxy: true,
+    })
+    void new WebSocket(bench.url, {
+      headers: { 'x-forwarded-for': '203.0.113.42, 10.0.0.1, 192.168.1.7' },
+    })
+    await new Promise((r) => setTimeout(r, 50))
+    // Leftmost = the original client per RFC 7239 convention.
+    expect(bench.attempts[0]).toBe('203.0.113.42')
+  })
+
+  it('trustProxy on but no XFF header: falls back to socket remoteAddress', async () => {
+    bench = await startBench({
+      onConnectionAttempt: () => true,
+      trustProxy: true,
+    })
+    void new WebSocket(bench.url) // no XFF
+    await new Promise((r) => setTimeout(r, 50))
+    expect(bench.attempts[0]!.length).toBeGreaterThan(0)
+    // The actual socket peer is some loopback variant; the assertion
+    // is just "didn't crash and didn't return 'unknown'".
+    expect(bench.attempts[0]).not.toBe('unknown')
+  })
+
+  it('trustProxy on + empty XFF: falls back to socket remoteAddress', async () => {
+    bench = await startBench({
+      onConnectionAttempt: () => true,
+      trustProxy: true,
+    })
+    void new WebSocket(bench.url, { headers: { 'x-forwarded-for': '' } })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(bench.attempts[0]!.length).toBeGreaterThan(0)
+    expect(bench.attempts[0]).not.toBe('')
+  })
+
+  it('per-IP isolation via XFF: two different XFF values get different rate buckets', async () => {
+    // Critical scenario: behind a proxy, two real client IPs come
+    // through the same socket (the proxy's). Without trustProxy, the
+    // limiter would treat them as one bucket; with trustProxy, each
+    // gets its own.
+    const calls: string[] = []
+    bench = await startBench({
+      trustProxy: true,
+      onConnectionAttempt: (ip) => {
+        calls.push(ip)
+        return true
+      },
+    })
+    void new WebSocket(bench.url, { headers: { 'x-forwarded-for': '198.51.100.1' } })
+    await new Promise((r) => setTimeout(r, 30))
+    void new WebSocket(bench.url, { headers: { 'x-forwarded-for': '198.51.100.2' } })
+    await new Promise((r) => setTimeout(r, 30))
+    expect(calls).toEqual(['198.51.100.1', '198.51.100.2'])
   })
 })

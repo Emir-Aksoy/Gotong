@@ -81,4 +81,60 @@ describe('FixedWindowLimiter (Phase 6 #12)', () => {
     expect(allowed.slice(0, 5).every((v) => v === true)).toBe(true)
     expect(allowed.slice(5).every((v) => v === false)).toBe(true)
   })
+
+  // Audit #141 — buckets Map MUST not grow unbounded. Without sweep,
+  // a flood of unique source IPs (botnet / IPv6 spray) accumulates
+  // entries forever; one day of attack ≈ 100MB permanent heap. The
+  // fix samples every N attempts + exposes sweepExpired() for tests
+  // and observability.
+  describe('sweep (Audit #141)', () => {
+    it('sweepExpired drops only buckets past 2× windowMs', () => {
+      const lim = new FixedWindowLimiter(10, 1_000)
+      lim.attempt('fresh', 10_000)
+      lim.attempt('borderline', 9_000) // age = 1× window at t=10_000
+      lim.attempt('stale', 7_000) // age = 3× window at t=10_000
+      expect(lim.size()).toBe(3)
+      const dropped = lim.sweepExpired(10_000)
+      expect(dropped).toBe(1)
+      expect(lim.current('stale')).toBeUndefined()
+      expect(lim.current('fresh')).toBeDefined()
+      expect(lim.current('borderline')).toBeDefined()
+      expect(lim.size()).toBe(2)
+    })
+
+    it('auto-sweep fires after SWEEP_EVERY_N attempts', () => {
+      const lim = new FixedWindowLimiter(1, 100)
+      // Seed one stale entry at t=0.
+      lim.attempt('stale', 0)
+      expect(lim.size()).toBe(1)
+      // 256 attempts at t=1000 (well past 2× windowMs=200). The 256th
+      // trips the sample counter and runs sweep, evicting 'stale'.
+      for (let i = 0; i < 256; i++) {
+        lim.attempt(`flood-${i}`, 1_000)
+      }
+      expect(lim.current('stale')).toBeUndefined()
+    })
+
+    it('disabled limiter (max=0) does not grow buckets', () => {
+      const lim = new FixedWindowLimiter(0, 60_000)
+      for (let i = 0; i < 1000; i++) lim.attempt(`k${i}`)
+      // Disabled path short-circuits before .set() — Map stays at 0.
+      expect(lim.size()).toBe(0)
+    })
+
+    it('sweepExpired is a no-op with empty map or disabled window', () => {
+      const lim = new FixedWindowLimiter(10, 0)
+      expect(lim.sweepExpired()).toBe(0)
+      expect(lim.size()).toBe(0)
+    })
+
+    it('flood of unique keys eventually collapses under sweep', () => {
+      const lim = new FixedWindowLimiter(5, 100)
+      for (let i = 0; i < 2560; i++) lim.attempt(`ip-${i}`, 0)
+      // Force a sweep with a clock well past 2× window.
+      lim.sweepExpired(300)
+      // All t=0 entries are stale (age=300 ≥ 200), so size collapses.
+      expect(lim.size()).toBe(0)
+    })
+  })
 })

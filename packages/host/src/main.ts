@@ -667,6 +667,10 @@ async function main(): Promise<void> {
     const selfHubId = spaceMeta.hubId ?? 'self'
     const pollMs = envInt('AIPE_PEER_POLL_MS', 5_000)
     const inboundToken = process.env.AIPE_PEER_INBOUND_TOKEN
+    // Audit #142 — single source of truth for "is this host behind a
+    // reverse proxy". Same flag will be threaded into serveWeb when
+    // P2-9 lands (env wiring for inboundRateLimit budget).
+    const trustProxy = envBool('AIPE_TRUST_PROXY', false)
     peerRegistry = new PeerRegistry({
       hub,
       identity,
@@ -674,6 +678,7 @@ async function main(): Promise<void> {
       wss: ws.wss,
       ...(inboundToken ? { sharedInboundPeerToken: inboundToken } : {}),
       pollIntervalMs: pollMs,
+      ...(trustProxy ? { trustProxy: true } : {}),
       logger: log,
     })
     peerRegistry.start()
@@ -692,6 +697,7 @@ async function main(): Promise<void> {
       selfHubId,
       pollIntervalMs: pollMs,
       inboundAuth: inboundToken ? 'per-peer+shared-fallback' : 'per-peer',
+      trustProxy,
     })
   }
   // Readiness flag — flips to true after workflow resume finishes (see

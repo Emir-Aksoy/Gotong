@@ -10,6 +10,7 @@
  */
 
 export { openIdentityStore, IdentityStore } from './store.js'
+export type { VaultMutationReason } from './store.js'
 export { IdentityError } from './errors.js'
 export type { IdentityErrorCode, IdentityErrorOptions } from './errors.js'
 export type {

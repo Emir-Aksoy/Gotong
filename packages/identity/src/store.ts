@@ -350,6 +350,14 @@ function isUniqueViolation(err: unknown): boolean {
   return /UNIQUE constraint failed/.test(err.message)
 }
 
+/**
+ * Audit #145 — values fired through `onVaultMutation`. Lets consumers
+ * (OrgApiPool, future caches) tell apart "a row appeared" vs "a row
+ * was retired" if they want different invalidation strategies. The
+ * default consumer just flushes its cache regardless.
+ */
+export type VaultMutationReason = 'create' | 'revoke'
+
 export class IdentityStore {
   private readonly db: SqliteDb
   private readonly defaultSessionTtlMs: number
@@ -368,6 +376,13 @@ export class IdentityStore {
   private _stmtVaultById?: SqliteStmt
   private _stmtVaultTouch?: SqliteStmt
   private _stmtVaultRevoke?: SqliteStmt
+
+  // Audit #145 — vault-mutation subscribers. OrgApiPool / future cache
+  // layers subscribe here; the store fires after every successful
+  // createVaultEntry / revokeVaultEntry / update so consumers can flush
+  // their memoised secrets without polling. Stored as a Set so an
+  // unsubscribe call can remove without an index search.
+  private readonly vaultMutationListeners = new Set<(reason: VaultMutationReason) => void>()
 
   // D1 — peer registry prepared statements. Lazy for the same reason
   // as vault (hosts without federation don't allocate).
@@ -1985,6 +2000,8 @@ export class IdentityStore {
       metadataJson,
       now,
     )
+    // Audit #145 — let cache layers (OrgApiPool) invalidate.
+    this.emitVaultMutation('create')
     return {
       id,
       kind: input.kind,
@@ -2064,6 +2081,8 @@ export class IdentityStore {
     }
     if (existing.revoked_at !== null) return // already revoked, no-op
     this.stmtVaultRevoke.run(Date.now(), id)
+    // Audit #145 — flush cached resolves of this entry.
+    this.emitVaultMutation('revoke')
   }
 
   /**
@@ -2121,6 +2140,44 @@ export class IdentityStore {
     params.push(limit, offset)
     const rows = this.db.prepare(sql).all(...params) as VaultRow[]
     return rows.map(rowToVaultEntry)
+  }
+
+  /**
+   * Audit #145 — subscribe to vault mutations. Returns an unsubscribe
+   * function. Fired AFTER a successful create / revoke commits, so
+   * subscribers may read fresh state.
+   *
+   * Use case: OrgApiPool subscribes here to flush its memoised
+   * resolveLlmKey cache the instant an admin rotates a key in vault.
+   * Before this hook the cache stayed stale until the next 401 (or
+   * never, if the rotated key never produced a 401).
+   *
+   * Listeners run synchronously; throwing from a listener is caught
+   * and silenced (their bugs shouldn't break the vault write that
+   * just happened). For ordered side effects, sequence them inside
+   * one listener instead of subscribing twice.
+   */
+  onVaultMutation(fn: (reason: VaultMutationReason) => void): () => void {
+    if (typeof fn !== 'function') {
+      throw new TypeError('onVaultMutation requires a function')
+    }
+    this.vaultMutationListeners.add(fn)
+    return () => {
+      this.vaultMutationListeners.delete(fn)
+    }
+  }
+
+  private emitVaultMutation(reason: VaultMutationReason): void {
+    for (const fn of this.vaultMutationListeners) {
+      try {
+        fn(reason)
+      } catch {
+        // Audit #145 — listener bugs are non-fatal. The vault write
+        // already committed; one consumer's cache being stale is far
+        // less bad than throwing back to the caller and leaving them
+        // thinking the vault write failed when it didn't.
+      }
+    }
   }
 
   // ---- Vault internal helpers ----

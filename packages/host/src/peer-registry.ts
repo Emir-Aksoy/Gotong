@@ -81,6 +81,14 @@ export interface PeerRegistryOptions {
    * peer just retries on its next poll tick (D1 reconcile).
    */
   inboundRateLimit?: { max: number; windowMs: number }
+  /**
+   * Audit #142 — pass through to `acceptHubLinks` so the rate-limit
+   * IP key respects `X-Forwarded-For` when this host runs behind a
+   * reverse proxy. Default false. ON without a proxy lets a remote
+   * attacker spoof the header; OFF behind a proxy buckets every
+   * peer under the proxy's loopback IP. Pick to match the topology.
+   */
+  trustProxy?: boolean
   /** Default 5000ms. AIPE_PEER_POLL_MS override lives in main.ts. */
   pollIntervalMs?: number
   /** Optional logger; defaults to console-style noop-on-debug. */
@@ -118,6 +126,26 @@ const BACKOFF_LADDER_MS = [5_000, 15_000, 30_000, 60_000]
  */
 export class FixedWindowLimiter {
   private readonly buckets = new Map<string, { hits: number; windowStart: number }>()
+  /**
+   * Audit #141 — sample-based sweep counter. Every `SWEEP_EVERY_N`
+   * attempts we walk the Map once and drop entries whose window has
+   * fully expired. This is intentionally NOT a setInterval timer:
+   *
+   *   - no extra fd / timer cleanup to coordinate with `stop()`;
+   *   - sweep cost is amortised across attempts, so an idle host pays
+   *     nothing while a flooded host pays O(buckets) once per N attempts;
+   *   - on a flood, N attempts will themselves keep evicting the oldest
+   *     bucket on .set(), so the Map size is bounded even before sweep.
+   *
+   * Without this, an attacker spraying unique source IPs (IPv6 /64 ≈
+   * 2^64 addressable; even modest botnets give 10⁵-10⁶ unique IPs/day)
+   * would grow `buckets` unbounded until OOM. With a 60s window and
+   * default sweep, a 1M-IP/day attack settles at ~1M*100B = 100MB at
+   * peak then collapses on the next sweep tick — still bad, but the
+   * sweep keeps it from being permanent.
+   */
+  private attemptsSinceSweep = 0
+  private static readonly SWEEP_EVERY_N = 256
 
   constructor(
     private readonly max: number,
@@ -130,6 +158,10 @@ export class FixedWindowLimiter {
    */
   attempt(key: string, now: number = Date.now()): boolean {
     if (this.max <= 0 || this.windowMs <= 0) return true // disabled
+    if (++this.attemptsSinceSweep >= FixedWindowLimiter.SWEEP_EVERY_N) {
+      this.attemptsSinceSweep = 0
+      this.sweepExpired(now)
+    }
     const b = this.buckets.get(key)
     if (!b || now - b.windowStart >= this.windowMs) {
       this.buckets.set(key, { hits: 1, windowStart: now })
@@ -142,6 +174,32 @@ export class FixedWindowLimiter {
   /** Snapshot for tests / observability. */
   current(key: string): { hits: number; windowStart: number } | undefined {
     return this.buckets.get(key)
+  }
+
+  /**
+   * Audit #141 — drop buckets whose window has expired. Public so the
+   * test suite + long-running monitoring can poke it without waiting
+   * for the lazy-sample interval. Cheap walk (Map iteration); safe to
+   * call while attempts are in flight (single-threaded JS).
+   */
+  sweepExpired(now: number = Date.now()): number {
+    if (this.windowMs <= 0) return 0
+    let dropped = 0
+    for (const [key, b] of this.buckets) {
+      // Use 2× window as the grace threshold so we don't yank a bucket
+      // a peer is still building hits against. An entry is "stale" only
+      // when even a re-attempt would have rolled it anyway.
+      if (now - b.windowStart >= this.windowMs * 2) {
+        this.buckets.delete(key)
+        dropped++
+      }
+    }
+    return dropped
+  }
+
+  /** Diagnostic: total tracked keys. Stable for monitoring / tests. */
+  size(): number {
+    return this.buckets.size
   }
 }
 
@@ -227,6 +285,9 @@ export class PeerRegistry {
           : {}),
         ...(resolver ? { peerTokenResolver: resolver } : {}),
         ...(onConnectionAttempt ? { onConnectionAttempt } : {}),
+        // Audit #142 — without this, rate-limiter buckets are keyed
+        // on the proxy's loopback IP in proxied deployments.
+        ...(this.opts.trustProxy === true ? { trustProxy: true } : {}),
         onLink: (link) => this.installInboundLink(link),
       })
     }

@@ -629,13 +629,28 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     const providerName = record.managed.provider
     const agentId = record.id
     return (err) => {
+      // Audit #146 — previously we always fell through to invalidate +
+      // audit success:true regardless of whether revoke worked. If the
+      // SQLite write threw (BUSY, schema mismatch, transient lock) the
+      // entry stayed alive but audit recorded "revoked" — a perfect
+      // recipe for a death-loop where the next dispatch hits the same
+      // bad key, 401s again, and writes another bogus success row.
+      //
+      // Now: revoke success is required before we touch the cache or
+      // write audit. On failure we log + bail; the next 401 will retry,
+      // and the audit log honestly reflects only successful revokes.
+      let revokeOk = false
       try {
         identityRef.revokeVaultEntry(vaultEntryId)
+        revokeOk = true
       } catch (e) {
-        log.error('auth-failure revoke failed', { vaultEntryId, err: e })
-        // Continue with cache + audit anyway — revoke may have already
-        // happened on a previous request that raced us.
+        log.error('auth-failure revoke failed; will retry on next 401', {
+          vaultEntryId,
+          err: e,
+        })
+        return
       }
+      if (!revokeOk) return
       orgPoolRef.invalidate()
       if (typeof identityRef.writeAuditLog === 'function') {
         try {
@@ -647,10 +662,19 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
               provider: providerName,
               agent: agentId,
               vaultEntryId,
-              errorMessage:
-                err instanceof Error
-                  ? err.message.slice(0, 200)
-                  : String(err).slice(0, 200),
+              // Audit #147 — never write raw err.message: provider SDKs
+              // routinely interpolate `Authorization: Bearer sk-...`,
+              // proxy URLs with `user:pass`, request body fragments, or
+              // upstream debug strings into the message. Owners with
+              // audit-read can see this row; treating it as untrusted
+              // protects the very secret we're trying to revoke.
+              //
+              // What we keep: a class/name fingerprint (enough to spot
+              // "always AuthenticationError vs sometimes RateLimitError"
+              // patterns) and the numeric status when present. Both are
+              // structural — no caller-supplied strings.
+              errorClass: classifyAuthError(err),
+              errorStatus: extractStatus(err),
             },
             success: true,
           })
@@ -665,6 +689,31 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       })
     }
   }
+}
+
+/**
+ * Audit #147 — extract a non-sensitive class fingerprint from an LLM
+ * provider error. Returns the constructor name + the `name` property
+ * when distinct; never the message.
+ */
+function classifyAuthError(err: unknown): string {
+  if (!err || typeof err !== 'object') return typeof err
+  const e = err as { name?: unknown; constructor?: { name?: unknown } }
+  const ctor = typeof e.constructor?.name === 'string' ? e.constructor.name : ''
+  const nm = typeof e.name === 'string' ? e.name : ''
+  if (ctor && nm && ctor !== nm) return `${ctor}:${nm}`
+  return ctor || nm || 'unknown'
+}
+
+/**
+ * Audit #147 — pull the HTTP status off the provider error when present.
+ * OpenAI / Anthropic SDKs expose this as `err.status: number`. Returns
+ * undefined when not present (e.g. transport-level errors).
+ */
+function extractStatus(err: unknown): number | undefined {
+  if (!err || typeof err !== 'object') return undefined
+  const s = (err as { status?: unknown }).status
+  return typeof s === 'number' ? s : undefined
 }
 
 /**

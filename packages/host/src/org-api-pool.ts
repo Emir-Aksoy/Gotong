@@ -131,6 +131,13 @@ export class OrgApiPool {
    * pools with different orgIds maintain isolated caches.
    */
   private cache = new Map<string, ResolvedLlmKey | null>()
+  /**
+   * Audit #145 — unsubscribe handle for the vault-mutation listener
+   * we installed at construction. Cleared in `dispose()`. Tests +
+   * long-running hosts that recreate the pool need this to avoid
+   * leaking listener refs on the IdentityStore.
+   */
+  private vaultMutationUnsubscribe: (() => void) | undefined
 
   constructor(opts: OrgApiPoolOpts) {
     if (!opts || !opts.identity) {
@@ -148,6 +155,21 @@ export class OrgApiPool {
       }
     }
     this.orgId = opts.orgId ?? null
+    // Audit #145 — auto-flush cache when vault mutates. Before this,
+    // an admin rotating a key via createVaultEntry + revokeVaultEntry
+    // left the OLD plaintext in this.cache until something else
+    // happened to call invalidate() (a 401 fires it; nothing else
+    // did). Subscribing here closes that loop unconditionally.
+    //
+    // The store provides onVaultMutation as of Audit #145; old
+    // identity stores without it just keep the previous behavior
+    // (cache stale until 401 / manual invalidate). Defensive typeof
+    // check lets us drop in against older fixtures without crashing.
+    if (typeof (this.identity as { onVaultMutation?: unknown }).onVaultMutation === 'function') {
+      this.vaultMutationUnsubscribe = this.identity.onVaultMutation(() => {
+        this.cache.clear()
+      })
+    }
   }
 
   /**
@@ -223,11 +245,27 @@ export class OrgApiPool {
   }
 
   /**
-   * Drop the resolved-key cache. Call after creating / revoking /
-   * editing a vault entry; otherwise the previous answer (including a
-   * `null` miss) stays cached for the lifetime of this pool instance.
+   * Drop the resolved-key cache. Audit #145 — also called automatically
+   * by the IdentityStore vault-mutation subscriber installed at
+   * construction, so manual calls are now only needed for non-vault
+   * cache invalidation (e.g. when an external system changes the
+   * provider tag mapping without touching the vault itself).
    */
   invalidate(): void {
+    this.cache.clear()
+  }
+
+  /**
+   * Audit #145 — detach the vault-mutation subscriber. Call when this
+   * pool will no longer be used (host shutdown, test teardown, or
+   * replacing a pool instance for a new orgId). Safe to call multiple
+   * times; subsequent calls are no-ops.
+   */
+  dispose(): void {
+    if (this.vaultMutationUnsubscribe) {
+      this.vaultMutationUnsubscribe()
+      this.vaultMutationUnsubscribe = undefined
+    }
     this.cache.clear()
   }
 

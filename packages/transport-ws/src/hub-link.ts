@@ -371,6 +371,13 @@ class WebSocketHubLinkImpl implements HubLink {
       case 'MESH_HELLO':
         // Only the IN side legitimately receives HELLO.
         if (this.direction !== 'in') return
+        // Audit #143 — once the handshake is open, a second HELLO is
+        // either a buggy peer or an attempt by an attacker to mutate
+        // `_peerId` (every HELLO path below overwrites it). Drop
+        // silently; the legitimate handshake already resolved. We
+        // also bail in 'closed' so a late-arriving stale frame on a
+        // teardown ws doesn't trip side effects.
+        if (this._status !== 'connecting') return
         if (frame.protocolVersion !== MESH_PROTOCOL_VERSION) {
           this.rejectHandshake(
             new Error(
@@ -421,6 +428,12 @@ class WebSocketHubLinkImpl implements HubLink {
 
       case 'MESH_HELLO_ACK':
         if (this.direction !== 'out') return
+        // Audit #143 — symmetric guard with HELLO: only honour an ACK
+        // while we're still in the connecting state. A second ACK on an
+        // open link would re-call resolveHandshake() (no-op, already
+        // settled) but more importantly would rewrite `_peerId` to
+        // whatever the attacker put in frame.peerId.
+        if (this._status !== 'connecting') return
         if (frame.protocolVersion !== MESH_PROTOCOL_VERSION) {
           this.rejectHandshake(
             new Error(
@@ -836,6 +849,41 @@ export interface AcceptHubLinksOptions {
    * tracks attempts and bills failures heavier than successes.
    */
   onConnectionAttempt?: (sourceIp: string) => boolean
+  /**
+   * Audit #142 — when true, prefer the first `X-Forwarded-For` entry
+   * as the source IP for `onConnectionAttempt`. Default false: read
+   * `req.socket.remoteAddress` directly.
+   *
+   * Set to true when this server sits behind a reverse proxy (Caddy,
+   * nginx, ALB) that overwrites XFF with the actual client IP. Leaving
+   * it false in a proxied deployment makes the rate-limiter bucket
+   * every peer under the proxy's loopback IP — a single bad peer
+   * starves all others, and the limiter is effectively useless.
+   *
+   * Leaving it ON when not behind a proxy lets a remote attacker spoof
+   * the header to dodge limits. Match this to your network topology.
+   */
+  trustProxy?: boolean
+}
+
+/**
+ * Audit #142 — derive the rate-limit IP from the upgrade request.
+ * Mirrors the semantics of @aipehub/web's clientIp helper so a host
+ * running both surfaces gets consistent bucketing per real client.
+ */
+function extractClientIp(
+  req: { socket?: { remoteAddress?: string | null }; headers?: Record<string, string | string[] | undefined> } | undefined,
+  trustProxy: boolean,
+): string {
+  if (trustProxy && req?.headers) {
+    const fwd = req.headers['x-forwarded-for']
+    const raw = Array.isArray(fwd) ? fwd[0] : fwd
+    if (typeof raw === 'string' && raw.length > 0) {
+      const first = raw.split(',')[0]?.trim()
+      if (first) return first
+    }
+  }
+  return req?.socket?.remoteAddress || 'unknown'
 }
 
 /**
@@ -855,9 +903,16 @@ export function acceptHubLinks(opts: AcceptHubLinksOptions): () => void {
   // arg of the 'connection' event. We pluck `socket.remoteAddress`
   // (cheap, no DNS) before constructing the link so the rate limiter
   // runs before any allocation.
-  const handler = (ws: WebSocket, req?: { socket?: { remoteAddress?: string | null } }) => {
+  //
+  // Audit #142 — `extractClientIp` honours `opts.trustProxy`. Without
+  // it, hosts behind a reverse proxy bucket every peer under loopback.
+  const trustProxy = opts.trustProxy === true
+  const handler = (
+    ws: WebSocket,
+    req?: { socket?: { remoteAddress?: string | null }; headers?: Record<string, string | string[] | undefined> },
+  ) => {
     if (opts.onConnectionAttempt) {
-      const ip = req?.socket?.remoteAddress || 'unknown'
+      const ip = extractClientIp(req, trustProxy)
       let allowed = true
       try {
         allowed = opts.onConnectionAttempt(ip) !== false

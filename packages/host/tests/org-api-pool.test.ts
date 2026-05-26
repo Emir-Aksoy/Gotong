@@ -103,7 +103,13 @@ describe('OrgApiPool', () => {
     expect(pool.resolveLlmKey('anthropic')?.apiKey).toBe('sk-new')
   })
 
-  it('caches resolved keys until invalidate() — revoke alone is not enough', () => {
+  // Audit #145 — vault mutations now auto-invalidate the cache via
+  // the IdentityStore.onVaultMutation hook. The OLD contract said
+  // "admin UI MUST call pool.invalidate() after vault edits"; that
+  // contract was easy to forget and the 401 auto-revoke path was the
+  // only thing keeping the cache honest in practice. Now revoke +
+  // createVaultEntry both fire the subscriber automatically.
+  it('vault revoke auto-invalidates cache (Audit #145)', () => {
     const e1 = identity.createVaultEntry({
       kind: 'llm_provider',
       ownerKind: 'org',
@@ -112,9 +118,6 @@ describe('OrgApiPool', () => {
     })
     expect(pool.resolveLlmKey('anthropic')?.entryId).toBe(e1.id)
 
-    // Revoke the cached entry + add a replacement. Without invalidate,
-    // the pool keeps handing out the cached `e1` row. This is the
-    // documented contract — admin UI MUST call invalidate after edits.
     identity.revokeVaultEntry(e1.id)
     const e2 = identity.createVaultEntry({
       kind: 'llm_provider',
@@ -122,14 +125,15 @@ describe('OrgApiPool', () => {
       secret: 'sk-two',
       metadata: { provider: 'anthropic' },
     })
-    expect(pool.resolveLlmKey('anthropic')?.entryId).toBe(e1.id)
-
-    pool.invalidate()
+    // Cache was flushed by revoke (and again by the create) — pool
+    // now sees the fresh row without anyone calling invalidate().
     expect(pool.resolveLlmKey('anthropic')?.entryId).toBe(e2.id)
     expect(pool.resolveLlmKey('anthropic')?.apiKey).toBe('sk-two')
   })
 
-  it('caches misses too — invalidate clears the negative cache', () => {
+  // Audit #145 — negative cache (we resolved + got null) used to stay
+  // sticky until invalidate() — now the create event flips it.
+  it('vault create auto-invalidates the negative cache (Audit #145)', () => {
     expect(pool.resolveLlmKey('anthropic')).toBeNull()
     identity.createVaultEntry({
       kind: 'llm_provider',
@@ -137,11 +141,63 @@ describe('OrgApiPool', () => {
       secret: 'sk-late',
       metadata: { provider: 'anthropic' },
     })
-    // The miss is sticky until we invalidate. Important so a hot-path
-    // "is there a key" check stays free even when the answer is "no".
-    expect(pool.resolveLlmKey('anthropic')).toBeNull()
-    pool.invalidate()
+    // No manual pool.invalidate() — the create event auto-fired it.
     expect(pool.resolveLlmKey('anthropic')?.apiKey).toBe('sk-late')
+  })
+
+  // Audit #145 — defensive: the cache is still flushable explicitly,
+  // even though autop-invalidate covers the common path. Some tests
+  // / future hot-path consumers may want to flush without writing.
+  it('manual invalidate() still works (orthogonal to auto-invalidate)', () => {
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      secret: 'sk-manual',
+      metadata: { provider: 'anthropic' },
+    })
+    expect(pool.resolveLlmKey('anthropic')?.apiKey).toBe('sk-manual')
+    pool.invalidate()
+    // A re-resolve hits sqlite again; result is the same active row.
+    expect(pool.resolveLlmKey('anthropic')?.apiKey).toBe('sk-manual')
+  })
+
+  // Audit #145 — dispose() detaches the subscriber so the pool stops
+  // reacting to vault writes (important for tests that recreate pools
+  // and for hosts that swap orgId-scoped pools at runtime).
+  it('dispose() detaches the vault-mutation subscriber', () => {
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      secret: 'sk-pre',
+      metadata: { provider: 'anthropic' },
+    })
+    expect(pool.resolveLlmKey('anthropic')?.apiKey).toBe('sk-pre')
+    pool.dispose()
+    // After dispose, vault writes no longer auto-invalidate. To prove
+    // it: revoke + create should leave the old apiKey cached. But
+    // dispose ALSO clears the cache once on its way out, so re-resolve
+    // returns the NEW key — proving sqlite was hit, not the cache.
+    identity.revokeVaultEntry(identity.listVaultEntries({ kind: 'llm_provider', activeOnly: true })[0]!.id)
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      secret: 'sk-post-dispose',
+      metadata: { provider: 'anthropic' },
+    })
+    // The post-dispose write does NOT trigger our (now-detached) sub,
+    // but the cache was cleared by dispose, so the next resolve hits
+    // sqlite and sees the new row. Re-cache the new row, then verify
+    // a SECOND post-dispose mutation does NOT flip the cache.
+    expect(pool.resolveLlmKey('anthropic')?.apiKey).toBe('sk-post-dispose')
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      secret: 'sk-after-cache',
+      metadata: { provider: 'anthropic' },
+    })
+    // Subscriber detached — second mutation does NOT flush. Cache still
+    // serves the earlier row.
+    expect(pool.resolveLlmKey('anthropic')?.apiKey).toBe('sk-post-dispose')
   })
 
   it('listProviders returns unique sorted provider tags', () => {
@@ -361,8 +417,15 @@ describe('OrgApiPool — multi-org scoping (Phase 6 #3)', () => {
     expect(orgX.listProviders()).toEqual([])
   })
 
-  it('per-pool cache: invalidating one does not flush the other', () => {
-    identity.createVaultEntry({
+  // Audit #145 — both pools now subscribe to the same IdentityStore's
+  // vault-mutation events, so every revoke / create flushes every
+  // pool's cache. The org-scoping contract still holds: each pool
+  // sees only its own scope when it re-resolves. The OLD assertion
+  // "b's cache untouched while a's was stale" no longer makes sense
+  // because they're flushed together — but the SCOPING isolation
+  // (the actual safety property) remains and is what we test here.
+  it('per-pool scoping persists across cross-pool vault rotations (Audit #145)', () => {
+    const e1 = identity.createVaultEntry({
       kind: 'llm_provider',
       ownerKind: 'org',
       ownerId: 'hub_a',
@@ -371,19 +434,26 @@ describe('OrgApiPool — multi-org scoping (Phase 6 #3)', () => {
     })
     const a = new OrgApiPool({ identity, orgId: 'hub_a' })
     const b = new OrgApiPool({ identity, orgId: 'hub_b' })
-    // Prime a's cache.
     expect(a.resolveLlmKey('anthropic')?.apiKey).toBe('sk-a-v1')
-    // b's miss is also cached.
     expect(b.resolveLlmKey('anthropic')).toBeNull()
-    // Mutate underlying vault: revoke a's key.
-    identity.revokeVaultEntry(a.resolveLlmKey('anthropic')!.entryId)
-    // a's cache still holds the stale hit until invalidate.
-    expect(a.resolveLlmKey('anthropic')?.apiKey).toBe('sk-a-v1')
-    a.invalidate()
+    // Mutate underlying vault: revoke a's key. Now BOTH pools' caches
+    // are flushed by the vault-mutation hook.
+    identity.revokeVaultEntry(e1.id)
+    // Re-resolve: a no longer has any active anthropic row.
     expect(a.resolveLlmKey('anthropic')).toBeNull()
-    // b's cache untouched (it was always null for anthropic; that's
-    // the contract — caches are per-instance).
+    // b still has no rows scoped to hub_b — scoping protected b from
+    // accidentally seeing hub_a's revoked-then-replaced rows.
     expect(b.resolveLlmKey('anthropic')).toBeNull()
+    // Adding a new row to hub_b: only b sees it. a stays null.
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      ownerId: 'hub_b',
+      secret: 'sk-b-v1',
+      metadata: { provider: 'anthropic' },
+    })
+    expect(b.resolveLlmKey('anthropic')?.apiKey).toBe('sk-b-v1')
+    expect(a.resolveLlmKey('anthropic')).toBeNull()
   })
 
   it('cross-org isolation: user-scoped row in one org does not leak to another', () => {

@@ -415,6 +415,11 @@ function sendIdentityError(res: ServerResponse, err: unknown, fallbackStatus = 5
     case 'user_not_found':
     case 'credential_not_found':
     case 'invitation_not_found':
+    // Audit #144 — these were falling through to 500. 404 is the
+    // semantic status for "row doesn't exist by that id".
+    case 'peer_not_found':
+    case 'org_quota_not_found':
+    case 'vault_entry_not_found':
       sendJson(res, { error: ec.message, code: ec.code }, 404)
       return
     // 410 Gone: the invitation existed but is no longer valid. Distinct
@@ -424,6 +429,27 @@ function sendIdentityError(res: ServerResponse, err: unknown, fallbackStatus = 5
     case 'invitation_already_used':
     case 'invitation_revoked':
       sendJson(res, { error: ec.message, code: ec.code }, 410)
+      return
+    // Audit #144 — `peer_id_taken` is a UNIQUE-constraint conflict on
+    // peers.peer_id during addPeer; it's a 409 just like duplicate_email.
+    case 'peer_id_taken':
+      sendJson(res, { error: ec.message, code: ec.code }, 409)
+      return
+    // Audit #144 — vault not configured = the IdentityStore was opened
+    // without a masterKey, so vault APIs refuse. 503 (service unavailable)
+    // signals "this functionality is dependent on a configured component
+    // that isn't there", which an operator's monitoring will surface
+    // distinctly from "server error".
+    case 'vault_not_configured':
+      sendJson(res, { error: ec.message, code: ec.code }, 503)
+      return
+    // Audit #144 — vault_decrypt_failed is a true server-side error
+    // (master key wrong, or row tampered). Map to 500 explicitly so the
+    // intent is visible at the route layer instead of "happens to be 500
+    // because the switch fell through". Code is intentionally opaque to
+    // the client (see errors.ts) — body just carries the static message.
+    case 'vault_decrypt_failed':
+      sendJson(res, { error: ec.message, code: ec.code }, 500)
       return
     default:
       sendJson(res, { error: ec.message, code: ec.code }, fallbackStatus)

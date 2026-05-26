@@ -283,6 +283,24 @@ describe('PATCH /api/admin/identity/peers/:id', () => {
     expect(r.status).toBe(200)
     expect(b.identity.getPeerToken(peerId)).toBe('tok-rotated-7890')
   })
+
+  // Audit #144 — PATCH on a missing peer used to fall through the
+  // sendIdentityError switch to the default 500 branch. The store
+  // throws IdentityError({code: 'peer_not_found'}); web now maps it
+  // explicitly to 404 so the UI can render "row gone" vs "server bug".
+  it('unknown id → 404 (was 500 before audit #144)', async () => {
+    const r = await fetch(
+      `${b.baseUrl}/api/admin/identity/peers/missing_row`,
+      {
+        method: 'PATCH',
+        headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ label: 'whatever' }),
+      },
+    )
+    expect(r.status).toBe(404)
+    const j = (await r.json()) as { code?: string }
+    expect(j.code).toBe('peer_not_found')
+  })
 })
 
 describe('DELETE /api/admin/identity/peers/:id', () => {
