@@ -596,7 +596,17 @@ async function main(): Promise<void> {
   // get their handles attached at spawn time (PR-8). When services
   // failed to bootstrap, agents without `uses:` still spawn normally;
   // agents with `uses:` fail loudly with a clear log line.
-  const localAgents = new LocalAgentPool({ hub, space, services, orgApiPool })
+  const localAgents = new LocalAgentPool({
+    hub,
+    space,
+    services,
+    orgApiPool,
+    // Phase 6 #2 — when present, LocalAgentPool wires an onAuthFailure
+    // hook for LLM agents whose key came from the vault. A 401 from
+    // the provider revokes that vault entry + writes audit + flushes
+    // the OrgApiPool cache so next call doesn't reuse the dead key.
+    ...(identity ? { identity } : {}),
+  })
   await localAgents.start()
 
   // Growth-reports admin surface — only meaningful if the

@@ -103,6 +103,24 @@ export interface LlmAgentOptions extends AgentOptions {
    * default).
    */
   preCallHook?: (task: Task) => void | Promise<void>
+  /**
+   * Phase 6 #2 — auth-failure hook. Invoked when `provider.complete`
+   * throws an error whose shape suggests the credential is invalid
+   * (currently: `.status === 401` or the SDK exception class name
+   * matches `/AuthenticationError/`). Best-effort: errors thrown by
+   * the hook itself are swallowed (logged via `console.error`) so the
+   * original LLM error reaches the task result intact.
+   *
+   * Typical wiring: host's LocalAgentPool builds a closure that
+   * revokes the vault entry the resolved key came from, writes an
+   * audit row, and invalidates the OrgApiPool cache — turning the
+   * 401 into a one-time event rather than a tight error loop on
+   * every subsequent task.
+   *
+   * Absent → no auto-revoke (the local-only / SDK / test default;
+   * the agent just re-throws the 401 like any other provider error).
+   */
+  onAuthFailure?: (err: unknown, task: Task) => void | Promise<void>
 }
 
 /**
@@ -170,6 +188,15 @@ export class LlmAgent extends AgentParticipant {
    * picks that up as the normal failure path.
    */
   protected readonly preCallHook?: (task: Task) => void | Promise<void>
+  /**
+   * Phase 6 #2 — see LlmAgentOptions.onAuthFailure doc. Captured on
+   * spawn; called best-effort from the centralized call wrapper
+   * inside handleTask / handleTaskWithTools.
+   */
+  protected readonly onAuthFailure?: (
+    err: unknown,
+    task: Task,
+  ) => void | Promise<void>
 
   constructor(opts: LlmAgentOptions) {
     super({ id: opts.id, capabilities: opts.capabilities })
@@ -184,6 +211,58 @@ export class LlmAgent extends AgentParticipant {
     this.toolset = opts.tools
     this.maxToolRounds = opts.maxToolRounds ?? 8
     this.preCallHook = opts.preCallHook
+    this.onAuthFailure = opts.onAuthFailure
+  }
+
+  /**
+   * Phase 6 #2 — detect "the provider rejected our credential" from a
+   * thrown error. Heuristic by design: SDKs differ in how they expose
+   * this, but `.status === 401` is universal for HTTP-based providers
+   * (OpenAI/Anthropic/Mistral SDKs all attach it), and an error class
+   * named `AuthenticationError` is the de-facto convention. The
+   * narrowness is intentional — we'd rather miss a credential failure
+   * (next call also fails → operator sees 2x logs) than nuke a key
+   * because of a transient 503 the provider sent with a misleading
+   * error message.
+   */
+  protected isAuthFailure(err: unknown): boolean {
+    if (!err || typeof err !== 'object') return false
+    const e = err as { status?: unknown; name?: unknown; constructor?: { name?: unknown } }
+    if (typeof e.status === 'number' && e.status === 401) return true
+    if (typeof e.name === 'string' && /AuthenticationError/i.test(e.name)) return true
+    const cn = e.constructor?.name
+    if (typeof cn === 'string' && /AuthenticationError/i.test(cn)) return true
+    return false
+  }
+
+  /**
+   * Phase 6 #2 — wrap `provider.complete` so all call sites (the
+   * single-shot path and the multi-round tool-use loop) get auth
+   * detection identically. The hook is best-effort: a throwing /
+   * rejecting hook is logged but does NOT mask the original provider
+   * error — operators need the 401 surfaced clearly to debug.
+   */
+  protected async completeWithAuthHook(
+    req: LlmRequest,
+    task: Task,
+  ): Promise<LlmResponse> {
+    try {
+      return await this.provider.complete(req)
+    } catch (err) {
+      if (this.onAuthFailure && this.isAuthFailure(err)) {
+        try {
+          await this.onAuthFailure(err, task)
+        } catch (hookErr) {
+          // Best-effort: never let the auth-revoke hook mask the
+          // original error. Operators need the 401 in the task result
+          // to debug; hook failure goes to stderr where the host log
+          // pipeline (pino) picks it up.
+          // eslint-disable-next-line no-console
+          console.error('[llm-agent] onAuthFailure hook threw', hookErr)
+        }
+      }
+      throw err
+    }
   }
 
   /**
@@ -297,7 +376,7 @@ export class LlmAgent extends AgentParticipant {
       // No toolset attached — same code path as v0.2.
       const req = this.buildRequest(task)
       if (this.preCallHook) await this.preCallHook(task)
-      const res = await this.provider.complete(req)
+      const res = await this.completeWithAuthHook(req, task)
       return this.parseResponse(res, task, 0)
     }
     return this.handleTaskWithTools(task)
@@ -333,7 +412,7 @@ export class LlmAgent extends AgentParticipant {
 
     while (true) {
       if (this.preCallHook) await this.preCallHook(task)
-      const res = await this.provider.complete(req)
+      const res = await this.completeWithAuthHook(req, task)
       const wantsTool =
         res.stopReason === 'tool_use' &&
         res.toolUses !== undefined &&

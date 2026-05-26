@@ -8,6 +8,10 @@
  * `resolveLlmKey(provider) → ResolvedLlmKey | null`. The real
  * `OrgApiPool` × identity vault round-trip is covered by
  * `org-api-pool.test.ts` (B1.1).
+ *
+ * Phase 6 #2: return shape carries `{apiKey, source}`. We assert both
+ * the key (priority chain) AND the source kind (so the spawn-site
+ * knows whether to wire onAuthFailure).
  */
 
 import { describe, expect, it } from 'vitest'
@@ -41,51 +45,52 @@ describe('selectLlmApiKey — priority chain', () => {
   })
 
   it('per-agent wins when present (highest priority)', () => {
-    expect(
-      selectLlmApiKey({
-        provider: 'anthropic',
-        perAgent: 'sk-per-agent',
-        orgPool: fakeOrgPool({ anthropic: 'sk-org' }),
-        workspace: 'sk-workspace',
-        env: 'sk-env',
-      }),
-    ).toBe('sk-per-agent')
+    const r = selectLlmApiKey({
+      provider: 'anthropic',
+      perAgent: 'sk-per-agent',
+      orgPool: fakeOrgPool({ anthropic: 'sk-org' }),
+      workspace: 'sk-workspace',
+      env: 'sk-env',
+    })
+    expect(r?.apiKey).toBe('sk-per-agent')
+    expect(r?.source).toEqual({ kind: 'per-agent' })
   })
 
   it('org pool wins over workspace + env when per-agent is absent', () => {
-    expect(
-      selectLlmApiKey({
-        provider: 'anthropic',
-        perAgent: null,
-        orgPool: fakeOrgPool({ anthropic: 'sk-org' }),
-        workspace: 'sk-workspace',
-        env: 'sk-env',
-      }),
-    ).toBe('sk-org')
+    const r = selectLlmApiKey({
+      provider: 'anthropic',
+      perAgent: null,
+      orgPool: fakeOrgPool({ anthropic: 'sk-org' }),
+      workspace: 'sk-workspace',
+      env: 'sk-env',
+    })
+    expect(r?.apiKey).toBe('sk-org')
+    // Phase 6 #2 — source carries vaultEntryId so onAuthFailure can revoke.
+    expect(r?.source).toEqual({ kind: 'org-pool', vaultEntryId: 'entry-anthropic' })
   })
 
   it('workspace is consulted only when per-agent + org pool are empty', () => {
-    expect(
-      selectLlmApiKey({
-        provider: 'openai',
-        perAgent: null,
-        orgPool: fakeOrgPool({ anthropic: 'sk-org-anthropic' }), // wrong provider
-        workspace: 'sk-workspace',
-        env: 'sk-env',
-      }),
-    ).toBe('sk-workspace')
+    const r = selectLlmApiKey({
+      provider: 'openai',
+      perAgent: null,
+      orgPool: fakeOrgPool({ anthropic: 'sk-org-anthropic' }), // wrong provider
+      workspace: 'sk-workspace',
+      env: 'sk-env',
+    })
+    expect(r?.apiKey).toBe('sk-workspace')
+    expect(r?.source).toEqual({ kind: 'workspace' })
   })
 
   it('env is the last-resort fallback', () => {
-    expect(
-      selectLlmApiKey({
-        provider: 'anthropic',
-        perAgent: null,
-        orgPool: fakeOrgPool({}),
-        workspace: null,
-        env: 'sk-env',
-      }),
-    ).toBe('sk-env')
+    const r = selectLlmApiKey({
+      provider: 'anthropic',
+      perAgent: null,
+      orgPool: fakeOrgPool({}),
+      workspace: null,
+      env: 'sk-env',
+    })
+    expect(r?.apiKey).toBe('sk-env')
+    expect(r?.source).toEqual({ kind: 'env' })
   })
 
   it('returns undefined when every source is empty', () => {
@@ -103,15 +108,15 @@ describe('selectLlmApiKey — priority chain', () => {
   it('tolerates a null org pool (host without identity)', () => {
     // Degrade path: IdentityStore failed to open at boot → orgApiPool
     // is undefined → caller passes null here. Chain still works.
-    expect(
-      selectLlmApiKey({
-        provider: 'anthropic',
-        perAgent: null,
-        orgPool: null,
-        workspace: 'sk-workspace',
-        env: 'sk-env',
-      }),
-    ).toBe('sk-workspace')
+    const r = selectLlmApiKey({
+      provider: 'anthropic',
+      perAgent: null,
+      orgPool: null,
+      workspace: 'sk-workspace',
+      env: 'sk-env',
+    })
+    expect(r?.apiKey).toBe('sk-workspace')
+    expect(r?.source).toEqual({ kind: 'workspace' })
   })
 
   it("openai-compatible still honours org pool (vendor key may live there)", () => {
@@ -119,15 +124,18 @@ describe('selectLlmApiKey — priority chain', () => {
     // (vendor ambiguity), but a vault row with metadata.provider set
     // to 'openai-compatible' is a legitimate way to scope a specific
     // vendor's key org-wide. Pool tier remains active.
-    expect(
-      selectLlmApiKey({
-        provider: 'openai-compatible',
-        perAgent: null,
-        orgPool: fakeOrgPool({ 'openai-compatible': 'sk-deepseek-org' }),
-        workspace: null,
-        env: null,
-      }),
-    ).toBe('sk-deepseek-org')
+    const r = selectLlmApiKey({
+      provider: 'openai-compatible',
+      perAgent: null,
+      orgPool: fakeOrgPool({ 'openai-compatible': 'sk-deepseek-org' }),
+      workspace: null,
+      env: null,
+    })
+    expect(r?.apiKey).toBe('sk-deepseek-org')
+    expect(r?.source).toEqual({
+      kind: 'org-pool',
+      vaultEntryId: 'entry-openai-compatible',
+    })
   })
 
   it("openai-compatible without per-agent and without org pool yields undefined", () => {
@@ -148,28 +156,28 @@ describe('selectLlmApiKey — priority chain', () => {
     // Important: per-agent is an explicit admin choice ("this agent
     // uses its own key"). Org-wide rotation MUST NOT silently
     // override a per-agent assignment.
-    expect(
-      selectLlmApiKey({
-        provider: 'anthropic',
-        perAgent: 'sk-agent-explicit',
-        orgPool: fakeOrgPool({ anthropic: 'sk-org' }),
-        workspace: null,
-        env: null,
-      }),
-    ).toBe('sk-agent-explicit')
+    const r = selectLlmApiKey({
+      provider: 'anthropic',
+      perAgent: 'sk-agent-explicit',
+      orgPool: fakeOrgPool({ anthropic: 'sk-org' }),
+      workspace: null,
+      env: null,
+    })
+    expect(r?.apiKey).toBe('sk-agent-explicit')
+    expect(r?.source).toEqual({ kind: 'per-agent' })
   })
 
   it('empty-string sources are treated as absent', () => {
     // Defense in depth: a bug elsewhere passing '' instead of null
     // shouldn't shadow a real downstream key.
-    expect(
-      selectLlmApiKey({
-        provider: 'anthropic',
-        perAgent: '',
-        orgPool: fakeOrgPool({}),
-        workspace: '',
-        env: 'sk-env',
-      }),
-    ).toBe('sk-env')
+    const r = selectLlmApiKey({
+      provider: 'anthropic',
+      perAgent: '',
+      orgPool: fakeOrgPool({}),
+      workspace: '',
+      env: 'sk-env',
+    })
+    expect(r?.apiKey).toBe('sk-env')
+    expect(r?.source).toEqual({ kind: 'env' })
   })
 })

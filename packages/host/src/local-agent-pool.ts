@@ -30,8 +30,44 @@ import {
 
 import type { HubServices, ServiceUseSpec as AttachSpec } from './services/index.js'
 import type { OrgApiPool, QuotaGate } from './org-api-pool.js'
+import {
+  AUDIT_ACTIONS,
+  type IdentityStore,
+} from '@aipehub/identity'
 
 const log = createLogger('local-agents')
+
+/**
+ * Phase 6 #2 — discriminates which tier of the priority chain
+ * delivered the resolved LLM key. The host wires different recovery
+ * behaviour per tier:
+ *
+ *   - `'org-pool'` carries `vaultEntryId` — a 401 from the provider
+ *     triggers `identity.revokeVaultEntry(vaultEntryId)` + audit +
+ *     `OrgApiPool.invalidate()`. Owner sees the revocation in the
+ *     audit log; next call re-resolves and either picks another
+ *     active entry or fails clearly with "no key configured".
+ *   - `'per-agent'` / `'workspace'` / `'env'` — host has no automatic
+ *     remediation; the operator owns these. 401 just surfaces as a
+ *     task failure (no key rotation; the next call uses the same bad
+ *     key and fails again — the audit log of repeated failures is the
+ *     signal there).
+ */
+export type LlmApiKeySource =
+  | { kind: 'per-agent' }
+  | { kind: 'org-pool'; vaultEntryId: string }
+  | { kind: 'workspace' }
+  | { kind: 'env' }
+
+/**
+ * Phase 6 #2 — `selectLlmApiKey` / `resolveApiKey` return shape.
+ * Carries the plaintext key alongside its origin so the spawn site
+ * can wire tier-specific behaviour (e.g. revoke-on-401 for org-pool).
+ */
+export interface LlmApiKeyResolution {
+  readonly apiKey: string
+  readonly source: LlmApiKeySource
+}
 
 /**
  * `LocalAgentPool` is **not** a separate component — it is a small piece
@@ -130,17 +166,33 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * or running with the v3-only fallback path).
    */
   private readonly llmQuotaGate?: QuotaGate
+  /**
+   * Phase 6 #2 — IdentityStore reference for vault revoke + audit on
+   * 401. Independent of orgApiPool because audit / revoke is a write
+   * surface; orgApiPool only handles the read + cache. When absent
+   * (orgApiPool may still be present in some test wirings) the
+   * `onAuthFailure` closure simply isn't constructed and 401s
+   * surface as plain task failures.
+   */
+  private readonly identity?: IdentityStore
 
   constructor(opts: {
     hub: Hub
     space: Space
     services?: HubServices
     orgApiPool?: OrgApiPool
+    /**
+     * Phase 6 #2 — pass-through so a 401 from a provider whose key
+     * came from the vault triggers `revokeVaultEntry` + audit. Wire
+     * the same `IdentityStore` you passed to `OrgApiPool`.
+     */
+    identity?: IdentityStore
   }) {
     this.hub = opts.hub
     this.space = opts.space
     this.services = opts.services
     this.orgApiPool = opts.orgApiPool
+    this.identity = opts.identity
     // Built once: the gate is a stateless closure over `identity`,
     // shared by every managed LlmAgent. Settings (metric/period) are
     // hardcoded here in B2.2.2; C2 will surface them in admin UI.
@@ -322,7 +374,8 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     // doesn't actually have.
     const { ctx, owner } = await this.attachServicesIfDeclared(record)
 
-    const apiKey = await this.resolveApiKey(record.id, record.managed.provider)
+    const resolution = await this.resolveApiKey(record.id, record.managed.provider)
+    const apiKey = resolution?.apiKey
     const provider = buildProvider(record.managed, apiKey)
 
     // If the manifest declared `mcpServers:`, spawn the toolset NOW
@@ -405,6 +458,12 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
         ? (task: Task): void => gate(task.origin)
         : undefined
 
+    // Phase 6 #2 — wire an auth-failure hook when the resolved key
+    // came from the vault. Extracted into a method so tests can
+    // exercise the closure independently of the spawn pipeline (the
+    // real provider HTTP path is hard to drive from a unit test).
+    const onAuthFailure = this.buildAuthFailureHook(record, resolution)
+
     // Pick the agent class by `managed.kind`. v2.4 added
     // `'personal-growth'` as the first non-base kind; the switch is
     // structured so a future `'custom'` kind that names a package
@@ -419,6 +478,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       services: ctxWithDispatch,
       ...(toolset ? { tools: toolset } : {}),
       ...(preCallHook ? { preCallHook } : {}),
+      ...(onAuthFailure ? { onAuthFailure } : {}),
     }
     let agent: LlmAgent
     switch (record.managed.kind) {
@@ -505,7 +565,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   private async resolveApiKey(
     agentId: ParticipantId,
     provider: ManagedAgentSpec['provider'],
-  ): Promise<string | undefined> {
+  ): Promise<LlmApiKeyResolution | undefined> {
     if (provider === 'mock') return undefined
     const perAgent = await this.space.getAgentApiKey(agentId).catch(() => null)
     // openai-compatible: skip workspace + env sources outright (vendor
@@ -527,6 +587,83 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       workspace,
       env,
     })
+  }
+
+  /**
+   * Phase 6 #2 — build the onAuthFailure closure used by the spawn
+   * pipeline. Returns `undefined` when no remediation is possible (key
+   * didn't come from the vault, identity isn't wired, or provider is
+   * mock). The closure performs three side-effects, ordered so
+   * partial failure is recoverable:
+   *
+   *   1. revokeVaultEntry — soft-delete (sets revoked_at). Idempotent:
+   *      a second 401 from the same dead key just no-ops.
+   *   2. invalidate the OrgApiPool cache — next resolveLlmKey call
+   *      re-reads from vault, sees activeOnly filter skipping the
+   *      revoked row, picks another active entry or returns null.
+   *   3. writeAuditLog — owner sees the revocation event in the audit
+   *      tab. Failure here is non-fatal; the revoke + cache flush are
+   *      the substantive changes.
+   *
+   * Tied to source.kind === 'org-pool' on purpose: per-agent /
+   * workspace / env keys are operator-managed; auto-revoking them
+   * would silently hide config drift. The audit log of repeated task
+   * failures is the right signal for those tiers (operator rotates
+   * the key by hand once they look at it).
+   *
+   * Exported visibility is package-internal (no JS module export);
+   * tests reach in via the class instance — see
+   * `local-agent-pool-auth-failure.test.ts`.
+   */
+  buildAuthFailureHook(
+    record: AgentRecord,
+    resolution: LlmApiKeyResolution | undefined,
+  ): ((err: unknown, _task: Task) => void) | undefined {
+    if (!record.managed) return undefined
+    if (record.managed.provider === 'mock') return undefined
+    if (!resolution || resolution.source.kind !== 'org-pool') return undefined
+    if (!this.identity || !this.orgApiPool) return undefined
+    const vaultEntryId = resolution.source.vaultEntryId
+    const identityRef = this.identity
+    const orgPoolRef = this.orgApiPool
+    const providerName = record.managed.provider
+    const agentId = record.id
+    return (err) => {
+      try {
+        identityRef.revokeVaultEntry(vaultEntryId)
+      } catch (e) {
+        log.error('auth-failure revoke failed', { vaultEntryId, err: e })
+        // Continue with cache + audit anyway — revoke may have already
+        // happened on a previous request that raced us.
+      }
+      orgPoolRef.invalidate()
+      if (typeof identityRef.writeAuditLog === 'function') {
+        try {
+          identityRef.writeAuditLog({
+            action: AUDIT_ACTIONS.VAULT_REVOKE,
+            actorSource: 'system',
+            metadata: {
+              reason: 'llm_auth_failure',
+              provider: providerName,
+              agent: agentId,
+              vaultEntryId,
+              errorMessage:
+                err instanceof Error
+                  ? err.message.slice(0, 200)
+                  : String(err).slice(0, 200),
+            },
+            success: true,
+          })
+        } catch (e) {
+          log.error('auth-failure audit write failed', { vaultEntryId, err: e })
+        }
+      }
+      log.warn('llm auth failure — vault entry revoked', {
+        agent: agentId,
+        provider: providerName,
+        vaultEntryId,
+      })
+    }
   }
 }
 
@@ -559,15 +696,26 @@ export function selectLlmApiKey(args: {
   orgPool: OrgApiPool | null
   workspace: string | null
   env: string | null
-}): string | undefined {
+}): LlmApiKeyResolution | undefined {
   if (args.provider === 'mock') return undefined
-  if (args.perAgent) return args.perAgent
+  if (args.perAgent) {
+    return { apiKey: args.perAgent, source: { kind: 'per-agent' } }
+  }
   if (args.orgPool) {
     const hit = args.orgPool.resolveLlmKey(args.provider)
-    if (hit) return hit.apiKey
+    if (hit) {
+      return {
+        apiKey: hit.apiKey,
+        source: { kind: 'org-pool', vaultEntryId: hit.entryId },
+      }
+    }
   }
-  if (args.workspace) return args.workspace
-  if (args.env) return args.env
+  if (args.workspace) {
+    return { apiKey: args.workspace, source: { kind: 'workspace' } }
+  }
+  if (args.env) {
+    return { apiKey: args.env, source: { kind: 'env' } }
+  }
   return undefined
 }
 
