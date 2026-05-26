@@ -47,6 +47,20 @@
     // Plain `Set<TaskId>` — wiped on reload (no localStorage), restored by
     // clicking transcript rows or the card head again. Memory-only.
     expandedTasks: new Set(),
+    // Phase 8 M7 — per-task accumulator for in-flight LLM stream output.
+    // Keyed by taskId. Wiped when the matching task_result arrives.
+    // Memory-only (deliberately not persisted) — operators wanting the
+    // final text use task_result.output; this is just for "watching the
+    // model type" in the admin UI.
+    //
+    //   Map<taskId, {
+    //     agentId: ParticipantId,
+    //     text: string,         // concatenated text chunks
+    //     toolUses: number,     // count of tool_use chunks observed
+    //     isDone: boolean,      // an `end` or `error` chunk arrived
+    //     lastTs: number,
+    //   }>
+    liveStreams: new Map(),
   }
 
   // Per-tab filter on the task panel; cleared on reload (no browser storage)
@@ -196,7 +210,78 @@
     renderAll()
   }
 
+  /**
+   * Phase 8 M7 — fold a single llm_stream_chunk transcript event into
+   * state.liveStreams. Idempotent in the sense that out-of-order
+   * chunks (very rare under SSE in-order delivery, but possible
+   * during reconnect) won't break invariants — the accumulator just
+   * stops being meaningful until task_result clears it.
+   */
+  function handleStreamChunk(ev) {
+    const { taskId, agentId, chunk } = ev.data || {}
+    if (!taskId || !chunk || typeof chunk !== 'object') return
+    let live = state.liveStreams.get(taskId)
+    if (!live) {
+      live = { agentId, text: '', toolUses: 0, isDone: false, lastTs: ev.ts || Date.now() }
+      state.liveStreams.set(taskId, live)
+    }
+    live.lastTs = ev.ts || Date.now()
+    switch (chunk.type) {
+      case 'text':
+        if (typeof chunk.text === 'string') live.text += chunk.text
+        break
+      case 'tool_use':
+        live.toolUses += 1
+        break
+      case 'end':
+      case 'error':
+        live.isDone = true
+        break
+    }
+  }
+
+  /**
+   * Phase 8 M7 — render a compact live-stream indicator for a single
+   * task. Returns the HTML string (caller injects). Empty string when
+   * the task has no in-flight stream.
+   *
+   * The text preview is truncated to keep the task card row from
+   * jumping around as chunks arrive. Done streams collapse to a
+   * checkmark — the final text lives in task_result.output.
+   */
+  function renderLiveStreamIndicator(taskId) {
+    const live = state.liveStreams.get(taskId)
+    if (!live) return ''
+    const PREVIEW_MAX = 120
+    const truncated = live.text.length > PREVIEW_MAX
+      ? live.text.slice(0, PREVIEW_MAX) + '…'
+      : live.text
+    const escaped = escapeHtml(truncated || '(no text yet)')
+    const tools = live.toolUses > 0
+      ? `<span class="live-stream-tools" title="tool_use chunks">🔧 ${live.toolUses}</span>`
+      : ''
+    if (live.isDone) {
+      return `<div class="live-stream-indicator live-stream-done" title="stream ended">✓ ${tools}</div>`
+    }
+    return `<div class="live-stream-indicator live-stream-active">
+      <span class="live-stream-dot">●</span>
+      <span class="live-stream-by">${escapeHtml(live.agentId)}</span>
+      ${tools}
+      <span class="live-stream-text">${escaped}</span>
+    </div>`
+  }
+
   function applyEvent(ev) {
+    // Phase 8 M7 — LLM stream chunks DON'T get pushed to state.transcript.
+    // A typical task emits ~30+ chunks; pushing each would bloat the
+    // transcript view by 30x and overwhelm renderAll. Instead, accumulate
+    // into state.liveStreams and let renderTasks() show a live indicator.
+    if (ev.kind === 'llm_stream_chunk') {
+      handleStreamChunk(ev)
+      // Re-render tasks only — the rest of the UI hasn't changed.
+      renderTasks()
+      return
+    }
     state.transcript.push(ev)
     switch (ev.kind) {
       case 'participant_joined':
@@ -235,6 +320,12 @@
       case 'task':
       case 'task_result':
       case 'evaluation':
+        // Phase 8 M7 — task_result terminates any in-flight live stream
+        // for this task. Clean up the accumulator so the indicator
+        // disappears as soon as the final answer is known.
+        if (ev.kind === 'task_result' && ev.data?.taskId) {
+          state.liveStreams.delete(ev.data.taskId)
+        }
         // Tasks are derived from the transcript; rather than reimplement
         // the merge here, just re-pull state. Small, fine for v2.
         refresh().catch((err) => console.error('task refresh failed:', err))
@@ -518,8 +609,13 @@
       const retryHtml = canRetry
         ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml(v.id)}">${escapeHtml(t.retry)}</button></div>`
         : ''
+      // Phase 8 M7 — live LLM stream indicator (empty string when no
+      // in-flight stream for this task). Rendered between meta and
+      // retry so an active task draws the eye but completed tasks
+      // collapse cleanly back to the normal layout.
+      const liveHtml = renderLiveStreamIndicator(v.id)
       const detailHtml = isOpen ? renderTaskDetail(v) : ''
-      div.innerHTML = headHtml + metaHtml + retryHtml + detailHtml
+      div.innerHTML = headHtml + metaHtml + liveHtml + retryHtml + detailHtml
       root.appendChild(div)
     }
   }

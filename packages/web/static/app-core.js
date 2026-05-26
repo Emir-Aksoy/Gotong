@@ -720,15 +720,44 @@
     return r.json()
   }
 
+  // SSE event types the server may emit. The server uses named SSE
+  // events (`event: ${kind}\ndata: ...`) which the EventSource API
+  // routes ONLY to per-name listeners — the default 'message' handler
+  // never sees them. Pre-Phase-8 only the polling-based refresh path
+  // kept the UI in sync; named-event handling was a silent miss. We
+  // register a listener per known kind so every transcript event the
+  // server forwards reaches applyEvent in real time.
+  //
+  // Add new TranscriptEntry kinds here when @aipehub/core grows one;
+  // unknown server events fall through to the generic 'message'
+  // listener so future kinds don't go silent until this list is
+  // updated.
+  const SSE_EVENT_KINDS = [
+    'participant_joined',
+    'participant_left',
+    'message',
+    'task',
+    'task_result',
+    'agent_pending',
+    'agent_approved',
+    'agent_rejected',
+    'evaluation',
+    'service_trashed',
+    'service_purged',
+    'service_call',
+    'llm_stream_chunk', // Phase 8 M6 — real-time LLM agent output
+  ]
+
   function connectStream(onEvent) {
     setConn('pending', t.connecting)
     const es = new EventSource('/api/stream')
     es.addEventListener('open', () => setConn('open', t.connected))
     es.addEventListener('error', () => setConn('error', t.reconnecting))
-    es.addEventListener('message', (e) => {
+    const handler = (e) => {
       try { onEvent(JSON.parse(e.data)) }
       catch (err) { console.error('SSE parse failed:', err) }
-    })
+    }
+    for (const kind of SSE_EVENT_KINDS) es.addEventListener(kind, handler)
     return () => es.close()
   }
 

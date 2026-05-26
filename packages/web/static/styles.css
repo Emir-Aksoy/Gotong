@@ -627,6 +627,58 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   flex-shrink: 0;
 }
 .task-card.expanded { box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05); }
+
+/* Phase 8 M7 — live LLM stream indicator on a task card. */
+.live-stream-indicator {
+  margin-top: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: baseline;
+}
+.live-stream-active {
+  background: linear-gradient(to right, #fff3e0, #fff8ee);
+  border-left: 3px solid #ff7043;
+  color: #5d2c10;
+}
+.live-stream-done {
+  background: #f1f5f0;
+  border-left: 3px solid #b0c4a4;
+  color: #5a6856;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.72rem;
+}
+.live-stream-dot {
+  color: #ff5722;
+  animation: liveStreamBlink 1.2s infinite ease-in-out;
+}
+@keyframes liveStreamBlink {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.3; }
+}
+.live-stream-by {
+  font-weight: 600;
+  color: #c2410c;
+}
+.live-stream-tools {
+  font-size: 0.7rem;
+  background: #fff;
+  border: 1px solid #f0c8a0;
+  border-radius: 3px;
+  padding: 0 0.3rem;
+}
+.live-stream-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  color: #4a2912;
+}
 .task-detail {
   margin-top: 0.7rem;
   padding-top: 0.7rem;
