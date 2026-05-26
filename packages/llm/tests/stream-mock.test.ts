@@ -143,6 +143,79 @@ describe('MockLlmProvider — script tool_use entries', () => {
   })
 })
 
+describe('MockLlmProvider — chunks option (M4 raw stream control)', () => {
+  it('emits a fixed chunk list verbatim on every call', async () => {
+    const fixed: LlmStreamChunk[] = [
+      { type: 'text', text: 'a' },
+      { type: 'text', text: 'b' },
+      { type: 'end', stopReason: 'end_turn' },
+    ]
+    const p = new MockLlmProvider({ reply: 'IGNORED', chunks: fixed })
+    const r1 = await collect(p.stream({ messages: [] }))
+    const r2 = await collect(p.stream({ messages: [] }))
+    expect(r1).toEqual(fixed)
+    expect(r2).toEqual(fixed)
+  })
+
+  it('per-call matrix advances cursor each call, then falls back to reply', async () => {
+    const matrix: LlmStreamChunk[][] = [
+      [
+        { type: 'text', text: 'first' },
+        { type: 'end', stopReason: 'end_turn' },
+      ],
+      [
+        { type: 'text', text: 'second' },
+        { type: 'end', stopReason: 'end_turn' },
+      ],
+    ]
+    const p = new MockLlmProvider({ reply: 'fallback', chunks: matrix })
+    const c1 = await collect(p.stream({ messages: [] }))
+    const c2 = await collect(p.stream({ messages: [] }))
+    const c3 = await collect(p.stream({ messages: [] }))
+    expect(c1[0]).toEqual({ type: 'text', text: 'first' })
+    expect(c2[0]).toEqual({ type: 'text', text: 'second' })
+    // 3rd call falls back to reply.
+    const c3Texts = c3.filter(
+      (c): c is { type: 'text'; text: string } => c.type === 'text',
+    )
+    expect(c3Texts.map((c) => c.text).join('')).toBe('fallback')
+  })
+
+  it('chunks containing an error chunk surface via drainStream stopReason=error', async () => {
+    const p = new MockLlmProvider({
+      reply: '',
+      chunks: [
+        { type: 'text', text: 'partial' },
+        { type: 'error', code: 'mock_simulated', message: 'boom' },
+      ],
+    })
+    const res = await p.complete({ messages: [] })
+    expect(res.stopReason).toBe('error')
+    expect(res.text).toContain('partial')
+    expect(res.text).toContain('mock_simulated')
+  })
+
+  it('throwError still wins over chunks (sync throw before generator)', () => {
+    const p = new MockLlmProvider({
+      reply: '',
+      chunks: [{ type: 'end', stopReason: 'end_turn' }],
+      throwError: 'mock_blocked',
+    })
+    expect(() => p.stream({ messages: [] })).toThrow(/mock_blocked/)
+  })
+
+  it('supports a stream with NO terminal end chunk (provider-bug simulation)', async () => {
+    const p = new MockLlmProvider({
+      reply: '',
+      chunks: [{ type: 'text', text: 'no end' }],
+    })
+    const res = await p.complete({ messages: [] })
+    // drainStream's provider-bug fallback fills end_turn.
+    expect(res.text).toBe('no end')
+    expect(res.stopReason).toBe('end_turn')
+  })
+})
+
 describe('drainStream — generic chunk → LlmResponse', () => {
   async function* gen(
     chunks: LlmStreamChunk[],

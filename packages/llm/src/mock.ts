@@ -42,6 +42,30 @@ export interface MockProviderOptions {
    * `tool_use` chunk since the tool-use loop needs the complete block).
    */
   textChunkCount?: number
+  /**
+   * Phase 8 M4 — full control over the stream's chunk sequence. When
+   * set, OVERRIDES `reply` / `script` / `textChunkCount` / `stopReason`
+   * for the stream entirely: each call to `stream()` yields exactly
+   * the chunks in this array in order. `complete()` still works (it
+   * drains the same chunks via drainStream).
+   *
+   * Two forms:
+   *   - A single chunk list (used on every call): `chunks: LlmStreamChunk[]`
+   *   - A per-call list (cursor advances each call, like `script`):
+   *     `chunks: LlmStreamChunk[][]`. Once exhausted falls back to
+   *     `reply` (so a default behavior is always available).
+   *
+   * This is the escape hatch tests use when they need to assert e.g.
+   *   - error chunks mid-stream
+   *   - mixed text + tool_use + text + tool_use interleavings
+   *   - multi-fragment text arrival with specific byte boundaries
+   *   - missing terminal `end` chunk (provider-bug simulation)
+   *
+   * `throwError` still wins (the mock throws synchronously from
+   * `stream()` before consulting `chunks`), so auth-failure tests can
+   * stay where they are.
+   */
+  chunks?: ReadonlyArray<LlmStreamChunk> | ReadonlyArray<ReadonlyArray<LlmStreamChunk>>
 }
 
 export type MockScriptEntry =
@@ -101,6 +125,30 @@ export class MockLlmProvider implements LlmProvider {
   private async *makeStream(req: LlmRequest): AsyncIterable<LlmStreamChunk> {
     if (this.opts.delayMs) {
       await new Promise((r) => setTimeout(r, this.opts.delayMs))
+    }
+    // Phase 8 M4 — raw chunks override. Detect "list of chunks" vs
+    // "list of (list of chunks)" by inspecting the first entry: a
+    // chunk is an object with a `type` discriminator; a per-call list
+    // is itself an array.
+    const rawChunks = this.opts.chunks
+    if (rawChunks && rawChunks.length > 0) {
+      const isPerCallMatrix = Array.isArray(rawChunks[0])
+      let chosen: ReadonlyArray<LlmStreamChunk> | undefined
+      if (isPerCallMatrix) {
+        const matrix = rawChunks as ReadonlyArray<ReadonlyArray<LlmStreamChunk>>
+        chosen = matrix[this.scriptCursor]
+        // Advance the cursor so the next call gets the next entry. We
+        // intentionally share the cursor with `script`; mixing both
+        // options in one provider is unsupported by design.
+        if (chosen) this.scriptCursor++
+      } else {
+        chosen = rawChunks as ReadonlyArray<LlmStreamChunk>
+      }
+      if (chosen) {
+        for (const c of chosen) yield c
+        return
+      }
+      // Exhausted matrix — fall through to reply/script below.
     }
     // Scripted entry, if any remain.
     const entry = this.opts.script?.[this.scriptCursor]
