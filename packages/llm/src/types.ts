@@ -314,38 +314,6 @@ export interface LlmProvider {
 }
 
 /**
- * Phase 8 transition helper: wrap a one-shot `complete()` call as a
- * single-pass stream. Yields `text` (if any) → `tool_use` chunks (if any)
- * → `usage` (if any) → `end`. Used by provider packages that haven't
- * implemented native streaming yet (Phase 8 M2/M3 replace these with
- * real SSE-driven streams).
- *
- * @deprecated Transition shim. Will be removed in Phase 8 M8 along with
- *             `LlmProvider.complete()`.
- */
-export async function* completeAsStream(
-  complete: () => Promise<LlmResponse>,
-): AsyncIterable<LlmStreamChunk> {
-  // Throw synchronously-ish: an awaited promise rejection at the top of
-  // a generator surfaces on the first `for await` iteration, which
-  // matches how a real native-streaming provider would throw on auth /
-  // transport before yielding any chunks.
-  const res = await complete()
-  if (res.text && res.text.length > 0) {
-    yield { type: 'text', text: res.text }
-  }
-  if (res.toolUses) {
-    for (const tu of res.toolUses) {
-      yield { type: 'tool_use', toolUse: tu }
-    }
-  }
-  if (res.usage) {
-    yield { type: 'usage', usage: res.usage }
-  }
-  yield { type: 'end', stopReason: res.stopReason }
-}
-
-/**
  * Drain an async-iterable stream of chunks into a single `LlmResponse`.
  * Useful for provider `complete()` implementations during the Phase 8
  * transition AND for callers (tests, simple SDK users) that don't need

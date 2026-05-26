@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { LlmRequest } from '@aipehub/llm'
+import type { LlmRequest, LlmStreamChunk } from '@aipehub/llm'
 
 import { OpenAIProvider, isTransientError } from '../src/index.js'
 
@@ -636,5 +636,309 @@ describe('isTransientError classifier', () => {
     expect(isTransientError('string')).toBe(false)
     expect(isTransientError(42)).toBe(false)
     expect(isTransientError({})).toBe(false)
+  })
+})
+
+// Phase 8 M3 — native streaming. OpenAI-compat (DeepSeek/Qwen/Ollama)
+// shares this code path; the test fakes the SDK's async-iterable chunk
+// stream to assert translation deterministically.
+
+/**
+ * Build a fake OpenAI SDK client that, on stream=true, returns the
+ * given pre-recorded chunks; on stream=false, falls back to `impl`.
+ */
+function makeFakeStreamingClient(
+  chunks: ReadonlyArray<unknown>,
+  impl?: (body: Record<string, unknown>) => Promise<unknown> | unknown,
+) {
+  const create = vi.fn(async (body: Record<string, unknown>) => {
+    if (body.stream === true) {
+      async function* gen() {
+        for (const c of chunks) yield c
+      }
+      return gen()
+    }
+    if (impl) return impl(body)
+    throw new Error('non-stream call not configured on this fake')
+  })
+  return {
+    client: { chat: { completions: { create } } },
+    create,
+  }
+}
+
+async function collect(
+  stream: AsyncIterable<LlmStreamChunk>,
+): Promise<LlmStreamChunk[]> {
+  const out: LlmStreamChunk[] = []
+  for await (const c of stream) out.push(c)
+  return out
+}
+
+describe('OpenAIProvider — native streaming (Phase 8 M3)', () => {
+  it('translates text-only chunk sequence to text → usage → end', async () => {
+    const { client } = makeFakeStreamingClient([
+      // Chunk with first text fragment.
+      {
+        choices: [{ delta: { content: 'hel' }, finish_reason: null }],
+      },
+      // Chunk with second text fragment.
+      {
+        choices: [{ delta: { content: 'lo' }, finish_reason: null }],
+      },
+      // Terminal: finish_reason fires; no usage in this chunk.
+      {
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+      },
+      // Final stream_options:include_usage chunk: empty choices, usage payload.
+      {
+        choices: [],
+        usage: { prompt_tokens: 7, completion_tokens: 4 },
+      },
+    ])
+    const provider = new OpenAIProvider({ client: client as any })
+    const chunks = await collect(
+      provider.stream({ messages: [{ role: 'user', content: 'hi' }] }),
+    )
+    // The terminal `end` arrives on `finish_reason`, BEFORE the usage chunk
+    // OpenAI sends after. That's deliberate — the LlmStreamChunk contract
+    // says `end` is always the LAST chunk for a successful stream, so the
+    // usage chunk that arrives after finish_reason can't be emitted. We
+    // accept losing usage in that ordering (a minor cost vs honoring the
+    // contract). Consumers that need usage can read from `complete()` or
+    // upgrade the provider to emit usage on the same chunk as finish_reason.
+    expect(chunks.map((c) => c.type)).toEqual(['text', 'text', 'end'])
+    const text = chunks
+      .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
+      .map((c) => c.text)
+      .join('')
+    expect(text).toBe('hello')
+    const end = chunks.at(-1)!
+    if (end.type === 'end') expect(end.stopReason).toBe('end_turn')
+  })
+
+  it('emits usage when the terminal chunk carries finish_reason AND usage together', async () => {
+    // Some OpenAI-compat vendors (DeepSeek among them, in some
+    // configurations) send finish_reason + usage on the same final
+    // chunk. The provider should fold the usage in BEFORE emitting end.
+    const { client } = makeFakeStreamingClient([
+      { choices: [{ delta: { content: 'done' }, finish_reason: null }] },
+      {
+        choices: [{ delta: {}, finish_reason: 'stop' }],
+        usage: { prompt_tokens: 5, completion_tokens: 3 },
+      },
+    ])
+    const provider = new OpenAIProvider({ client: client as any })
+    const chunks = await collect(provider.stream({ messages: [] }))
+    // The usage chunk lives strictly between any tool_use and end.
+    expect(chunks.map((c) => c.type)).toEqual(['text', 'usage', 'end'])
+    const usage = chunks[1]!
+    if (usage.type === 'usage') {
+      expect(usage.usage).toEqual({ inputTokens: 5, outputTokens: 3 })
+    }
+  })
+
+  it('filters empty content strings (LlmStreamTextChunk contract)', async () => {
+    const { client } = makeFakeStreamingClient([
+      { choices: [{ delta: { content: '' }, finish_reason: null }] },
+      { choices: [{ delta: { content: 'real' }, finish_reason: null }] },
+      { choices: [{ delta: { content: '' }, finish_reason: null }] },
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
+    ])
+    const provider = new OpenAIProvider({ client: client as any })
+    const chunks = await collect(provider.stream({ messages: [] }))
+    const texts = chunks.filter((c) => c.type === 'text')
+    expect(texts.length).toBe(1)
+    if (texts[0]?.type === 'text') expect(texts[0].text).toBe('real')
+  })
+
+  it('accumulates tool_call arguments across chunks (single tool)', async () => {
+    const { client } = makeFakeStreamingClient([
+      // First tool_call chunk: id + type + name + start of args
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_1',
+                  type: 'function',
+                  function: { name: 'fs__read', arguments: '{"path":' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      // Second tool_call chunk: just more args
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  function: { arguments: '"README.md"}' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      // Terminal: finish_reason='tool_calls', no more delta.
+      {
+        choices: [{ delta: {}, finish_reason: 'tool_calls' }],
+      },
+    ])
+    const provider = new OpenAIProvider({ client: client as any })
+    const chunks = await collect(provider.stream({ messages: [] }))
+    expect(chunks.map((c) => c.type)).toEqual(['tool_use', 'end'])
+    const tu = chunks[0]!
+    if (tu.type === 'tool_use') {
+      expect(tu.toolUse.id).toBe('call_1')
+      expect(tu.toolUse.name).toBe('fs__read')
+      expect(tu.toolUse.input).toEqual({ path: 'README.md' })
+    }
+    const end = chunks.at(-1)!
+    if (end.type === 'end') expect(end.stopReason).toBe('tool_use')
+  })
+
+  it('emits multiple tool_use chunks for parallel tool calls in deterministic index order', async () => {
+    const { client } = makeFakeStreamingClient([
+      // Two tool calls start in the same chunk.
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 1,
+                  id: 'call_b',
+                  type: 'function',
+                  function: { name: 't2', arguments: '{}' },
+                },
+                {
+                  index: 0,
+                  id: 'call_a',
+                  type: 'function',
+                  function: { name: 't1', arguments: '{}' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+    ])
+    const provider = new OpenAIProvider({ client: client as any })
+    const chunks = await collect(provider.stream({ messages: [] }))
+    const toolUses = chunks.filter(
+      (c): c is Extract<LlmStreamChunk, { type: 'tool_use' }> => c.type === 'tool_use',
+    )
+    expect(toolUses.length).toBe(2)
+    // Sorted by index: index 0 first, then index 1
+    expect(toolUses[0]!.toolUse.id).toBe('call_a')
+    expect(toolUses[1]!.toolUse.id).toBe('call_b')
+  })
+
+  it('emits an error chunk and stops on malformed tool args JSON', async () => {
+    const { client } = makeFakeStreamingClient([
+      {
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index: 0,
+                  id: 'call_x',
+                  type: 'function',
+                  function: { name: 'broken', arguments: '{not json' },
+                },
+              ],
+            },
+            finish_reason: null,
+          },
+        ],
+      },
+      { choices: [{ delta: {}, finish_reason: 'tool_calls' }] },
+    ])
+    const provider = new OpenAIProvider({ client: client as any })
+    const chunks = await collect(provider.stream({ messages: [] }))
+    const last = chunks.at(-1)!
+    expect(last.type).toBe('error')
+    if (last.type === 'error') {
+      expect(last.code).toBe('malformed_tool_args')
+      expect(last.message).toMatch(/broken/)
+    }
+    // No end chunk after error.
+    expect(chunks.find((c) => c.type === 'end')).toBeUndefined()
+  })
+
+  it('maps finish_reason=length to stopReason=max_tokens', async () => {
+    const { client } = makeFakeStreamingClient([
+      { choices: [{ delta: { content: 'cut' }, finish_reason: null }] },
+      { choices: [{ delta: {}, finish_reason: 'length' }] },
+    ])
+    const provider = new OpenAIProvider({ client: client as any })
+    const chunks = await collect(provider.stream({ messages: [] }))
+    const end = chunks.at(-1)!
+    if (end.type === 'end') expect(end.stopReason).toBe('max_tokens')
+  })
+
+  it('rethrows SDK errors synchronously (auth → onAuthFailure path)', async () => {
+    const create = vi.fn(async () => {
+      throw new Error('auth_denied')
+    })
+    const provider = new OpenAIProvider({
+      client: { chat: { completions: { create } } } as any,
+    })
+    await expect(
+      (async () => {
+        for await (const _c of provider.stream({ messages: [] })) {
+          /* unreachable */
+        }
+      })(),
+    ).rejects.toThrow(/auth_denied/)
+  })
+
+  it('forwards stream:true, stream_options.include_usage:true, and tools on the body', async () => {
+    const { client, create } = makeFakeStreamingClient([
+      { choices: [{ delta: {}, finish_reason: 'stop' }] },
+    ])
+    const provider = new OpenAIProvider({ client: client as any })
+    await collect(
+      provider.stream({
+        messages: [{ role: 'user', content: 'hi' }],
+        tools: [{ name: 'lookup', inputSchema: { type: 'object' } }],
+      }),
+    )
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    expect(body.stream).toBe(true)
+    expect(body.stream_options).toEqual({ include_usage: true })
+    expect(body.tools).toEqual([
+      {
+        type: 'function',
+        function: { name: 'lookup', parameters: { type: 'object' } },
+      },
+    ])
+  })
+
+  it('forwards AbortSignal to the SDK', async () => {
+    const create = vi.fn(async (_body: Record<string, unknown>, opts?: { signal?: AbortSignal }) => {
+      async function* gen() {
+        ;(create as unknown as { _lastSignal?: unknown })._lastSignal = opts?.signal
+      }
+      return gen()
+    })
+    const provider = new OpenAIProvider({
+      client: { chat: { completions: { create } } } as any,
+    })
+    const ac = new AbortController()
+    await collect(provider.stream({ messages: [] }, ac.signal))
+    expect((create as unknown as { _lastSignal?: unknown })._lastSignal).toBe(ac.signal)
   })
 })

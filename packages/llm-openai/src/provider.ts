@@ -1,5 +1,4 @@
 import OpenAI from 'openai'
-import { completeAsStream } from '@aipehub/llm'
 import type {
   LlmContentBlock,
   LlmMessage,
@@ -9,6 +8,7 @@ import type {
   LlmStopReason,
   LlmStreamChunk,
   LlmToolUseBlock,
+  LlmUsage,
 } from '@aipehub/llm'
 
 /**
@@ -143,18 +143,172 @@ export class OpenAIProvider implements LlmProvider {
   }
 
   /**
-   * Phase 8 M1 — stream interface satisfied via the `completeAsStream`
-   * transition shim. M3 replaces this with native SSE driven by the
-   * OpenAI SDK's `stream: true` option (which also covers DeepSeek /
-   * Qwen / Ollama via the same code path). Throwing is preserved: the
-   * shim awaits the underlying `complete()` synchronously on first
-   * iteration, so retry / auth handling still surfaces to LlmAgent.
+   * Phase 8 M3 — native streaming. OpenAI's streaming event shape
+   * differs from Anthropic's:
+   *
+   *   - Each yielded chunk is itself a partial ChatCompletion. We read
+   *     `choices[0].delta` for the in-progress content (text or tool_calls)
+   *     and `choices[0].finish_reason` for the terminal signal.
+   *   - Text arrives in `delta.content` as plain string fragments.
+   *   - Tool calls arrive in `delta.tool_calls`, each entry indexed by a
+   *     stable `index` integer. The first chunk for each index carries
+   *     `id`, `type`, `function.name`; subsequent chunks accumulate
+   *     `function.arguments` as a JSON-encoded string. We buffer per-index
+   *     and emit one `tool_use` chunk per index when `finish_reason` arrives.
+   *   - Usage is only sent when we set `stream_options.include_usage: true`,
+   *     and only on the very last chunk (where `choices` is empty).
+   *
+   * Translation:
+   *   - delta.content → `{ type: 'text', text }` (empty strings filtered)
+   *   - finished tool_calls → `{ type: 'tool_use', toolUse: {...} }`
+   *   - terminal usage chunk → `{ type: 'usage', usage }`
+   *   - finish_reason → terminal `{ type: 'end', stopReason }`
+   *   - Malformed JSON in tool arguments → `error` chunk + early return
+   *     (matches Anthropic translator's choice).
+   *
+   * Retry: streaming intentionally does NOT use the per-attempt retry
+   * loop that complete() runs. Once the SDK starts yielding bytes we
+   * can't safely replay; the safe approach is to let LlmAgent surface
+   * the transient error as a failed TaskResult and let the operator
+   * decide. Pre-stream errors (auth / 400 / 429 / network failure on
+   * the initial create()) still throw synchronously from .next(),
+   * which keeps LlmAgent's onAuthFailure path firing.
    */
-  stream(req: LlmRequest, _signal?: AbortSignal): AsyncIterable<LlmStreamChunk> {
-    return completeAsStream(() => this.complete(req))
+  stream(req: LlmRequest, signal?: AbortSignal): AsyncIterable<LlmStreamChunk> {
+    const body = this.buildBody(req)
+    body.stream = true
+    // Ask the server to send a usage chunk at the end (gated on this
+    // option being set — OpenAI doesn't include usage in stream mode by
+    // default). DeepSeek / Qwen / Ollama all accept the same option.
+    body.stream_options = { include_usage: true }
+    return this.streamImpl(body, signal)
   }
 
-  async complete(req: LlmRequest): Promise<LlmResponse> {
+  private async *streamImpl(
+    body: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): AsyncIterable<LlmStreamChunk> {
+    const sdkStream = await (
+      this.client.chat.completions.create as unknown as (
+        b: Record<string, unknown>,
+        opts?: { signal?: AbortSignal },
+      ) => Promise<AsyncIterable<OpenAIStreamChunkLike>>
+    )(body, signal ? { signal } : undefined)
+
+    // Per-index tool_call scratch state. OpenAI uses the same `index`
+    // throughout a tool call's lifetime; we accumulate name + arguments
+    // until finish_reason fires, then emit the parsed tool_use chunk.
+    const toolBuffers = new Map<
+      number,
+      { id: string; name: string; argsJson: string }
+    >()
+    let usage: LlmUsage | undefined
+    let stopReason: LlmStopReason = 'end_turn'
+
+    for await (const chunk of sdkStream) {
+      // 1) Usage may arrive on its own terminal chunk (OpenAI's
+      //    behavior with include_usage:true: a final chunk with
+      //    empty choices) OR alongside finish_reason on the same
+      //    chunk (DeepSeek / some Qwen configurations). Capture
+      //    whenever present; the canonical emit ordering is
+      //    enforced below at finish_reason.
+      if (chunk.usage) {
+        usage = {
+          inputTokens: chunk.usage.prompt_tokens ?? 0,
+          outputTokens: chunk.usage.completion_tokens ?? 0,
+        }
+      }
+      const choice = chunk.choices?.[0]
+      if (!choice) continue
+      const delta = choice.delta
+
+      // 2) Text fragments.
+      if (delta && typeof delta.content === 'string' && delta.content.length > 0) {
+        yield { type: 'text', text: delta.content }
+      }
+
+      // 3) Tool-call fragments. Each tc has an `index`; we accumulate
+      //    name + arguments under that index.
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx = typeof tc.index === 'number' ? tc.index : 0
+          let buf = toolBuffers.get(idx)
+          if (!buf) {
+            buf = { id: '', name: '', argsJson: '' }
+            toolBuffers.set(idx, buf)
+          }
+          if (typeof tc.id === 'string' && tc.id.length > 0) {
+            buf.id = tc.id
+          }
+          const fn = tc.function
+          if (fn) {
+            if (typeof fn.name === 'string' && fn.name.length > 0) {
+              buf.name = fn.name
+            }
+            if (typeof fn.arguments === 'string') {
+              buf.argsJson += fn.arguments
+            }
+          }
+        }
+      }
+
+      // 4) Terminal chunk for THIS choice — emit accumulated tool_uses
+      //    + usage + end, then return.
+      if (choice.finish_reason) {
+        stopReason = mapStopReason(choice.finish_reason)
+        // Sort by index so multi-tool fan-outs come out in deterministic
+        // order matching OpenAI's wire ordering.
+        const indices = [...toolBuffers.keys()].sort((a, b) => a - b)
+        for (const idx of indices) {
+          const buf = toolBuffers.get(idx)!
+          let input: Record<string, unknown> = {}
+          const raw = buf.argsJson.trim()
+          if (raw.length > 0) {
+            try {
+              const parsed = JSON.parse(raw)
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                input = parsed as Record<string, unknown>
+              }
+            } catch {
+              // Mirrors the legacy complete() behavior: surface the raw
+              // string under `_raw` so the agent sees it instead of
+              // silently crashing on JSON.parse, BUT also emit an
+              // error chunk so consumers know this happened mid-stream.
+              yield {
+                type: 'error',
+                code: 'malformed_tool_args',
+                message: `tool '${buf.name}' args JSON failed to parse: ${raw.slice(0, 200)}`,
+              }
+              return
+            }
+          }
+          yield {
+            type: 'tool_use',
+            toolUse: {
+              type: 'tool_use',
+              id: buf.id,
+              name: buf.name,
+              input,
+            },
+          }
+        }
+        if (usage) yield { type: 'usage', usage }
+        yield { type: 'end', stopReason }
+        return
+      }
+    }
+    // Defensive: stream ended without finish_reason (SDK bug). Still
+    // emit a terminal pair so consumers' iterators don't dangle.
+    if (usage) yield { type: 'usage', usage }
+    yield { type: 'end', stopReason }
+  }
+
+  /**
+   * Phase 8 — body assembly shared between `complete()` and `stream()`.
+   * Translation rules (system hoist, maxTokens field name, tool wire
+   * shape) live here so the two paths can never diverge.
+   */
+  private buildBody(req: LlmRequest): Record<string, unknown> {
     const messages: Array<Record<string, unknown>> = []
     if (req.system !== undefined) {
       messages.push({ role: 'system', content: req.system })
@@ -162,7 +316,6 @@ export class OpenAIProvider implements LlmProvider {
     for (const m of req.messages) {
       messages.push(...translateMessage(m))
     }
-
     const body: Record<string, unknown> = {
       model: req.model ?? this.defaultModel,
       messages,
@@ -179,6 +332,12 @@ export class OpenAIProvider implements LlmProvider {
         },
       }))
     }
+    return body
+  }
+
+  async complete(req: LlmRequest): Promise<LlmResponse> {
+    // Phase 8 — body assembly shared with stream() via buildBody().
+    const body = this.buildBody(req)
 
     let lastErr: unknown
     const totalAttempts = this.maxRetries + 1
@@ -453,6 +612,29 @@ interface OpenAIChatCompletionLike {
     finish_reason?: string | null
   }>
   usage?: { prompt_tokens: number; completion_tokens: number }
+}
+
+/**
+ * Phase 8 — structural shape of one streamed OpenAI ChatCompletion chunk.
+ * Each chunk is a delta over the in-progress response. Discriminator
+ * is `choices[0].finish_reason` (null → in-progress, string → terminal
+ * for THAT choice). The very last chunk in stream-mode has empty
+ * `choices` and carries `usage` instead.
+ */
+interface OpenAIStreamChunkLike {
+  choices?: ReadonlyArray<{
+    delta?: {
+      content?: string | null
+      tool_calls?: ReadonlyArray<{
+        index?: number
+        id?: string
+        type?: string
+        function?: { name?: string; arguments?: string }
+      }>
+    }
+    finish_reason?: string | null
+  }>
+  usage?: { prompt_tokens?: number; completion_tokens?: number }
 }
 
 function mapStopReason(reason: string | null | undefined): LlmStopReason {

@@ -21,7 +21,7 @@ export type {
   LlmStreamEndChunk,
   LlmStreamErrorChunk,
 } from './types.js'
-export { drainStream, completeAsStream } from './types.js'
+export { drainStream } from './types.js'
 export {
   LlmAgent,
   type LlmAgentOptions,
