@@ -162,6 +162,27 @@ importers:
         specifier: ^4.7.0
         version: 4.22.0
 
+  examples/multimodal-vision:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@aipehub/llm-anthropic':
+        specifier: workspace:*
+        version: link:../../packages/llm-anthropic
+      '@aipehub/llm-openai':
+        specifier: workspace:*
+        version: link:../../packages/llm-openai
+      '@anthropic-ai/sdk':
+        specifier: ^0.96.0
+        version: 0.96.0(zod@4.4.3)
+      openai:
+        specifier: ^6.38.0
+        version: 6.38.0(ws@8.20.1)(zod@4.4.3)
+
   examples/open-space:
     dependencies:
       '@aipehub/core':

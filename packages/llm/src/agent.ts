@@ -7,6 +7,7 @@ import { EMPTY_SERVICE_CTX, type ServiceCtx } from '@aipehub/services-sdk'
 import type {
   LlmAgentToolset,
   LlmContentBlock,
+  LlmMessage,
   LlmProvider,
   LlmRequest,
   LlmResponse,
@@ -38,6 +39,23 @@ export type LlmTaskPayload =
       model?: string
       /** If present, used as the prior conversation turns (e.g. multi-turn). */
       history?: { role: 'user' | 'assistant'; content: string }[]
+      /**
+       * Phase 9 — direct `LlmMessage` list, replacing the
+       * `prompt` + `history` + auto-string-wrap path. Set this when
+       * the payload carries multimodal blocks (image / audio /
+       * file_ref) — the `prompt: string` path only handles text.
+       *
+       * Precedence: when present, `messages` wins; `prompt`, `topic`,
+       * `history` are ignored. `system` / `maxTokens` / `temperature`
+       * / `model` still apply.
+       *
+       * Use case: a workflow form with `type: 'file'` produces a
+       * payload like `{ pic: { type: 'file_ref', ... } }` — the
+       * workflow runner or a wrapper agent reshapes that into
+       * `{ messages: [{ role:'user', content:[fileRef, textBlock] }] }`
+       * before dispatching to the LlmAgent.
+       */
+      messages?: LlmMessage[]
     }
 
 export interface LlmAgentOptions extends AgentOptions {
@@ -383,36 +401,43 @@ export class LlmAgent extends AgentParticipant {
   protected buildRequest(task: Task): LlmRequest {
     const payload = task.payload as LlmTaskPayload | undefined
 
-    let userContent: string
+    let messages: LlmRequest['messages']
     let perTaskSystem: string | undefined
     let perTaskMaxTokens: number | undefined
     let perTaskTemperature: number | undefined
     let perTaskModel: string | undefined
-    let history: { role: 'user' | 'assistant'; content: string }[] | undefined
 
     if (typeof payload === 'string') {
-      userContent = payload
+      messages = [{ role: 'user', content: payload }]
     } else if (payload && typeof payload === 'object') {
-      if (typeof payload.prompt === 'string') {
-        userContent = payload.prompt
-      } else if (typeof payload.topic === 'string') {
-        userContent = `Please write about: ${payload.topic}`
+      // Phase 9 — `messages` takes precedence. This is the multimodal
+      // entry point: any payload carrying image / audio / file_ref
+      // blocks rides here as an explicit `LlmMessage[]`. We trust the
+      // caller's shape — providers (M2/M3) own the per-block
+      // validation + translation.
+      if (Array.isArray(payload.messages) && payload.messages.length > 0) {
+        messages = payload.messages
       } else {
-        // Unrecognized shape — stringify it so the model still sees something.
-        userContent = JSON.stringify(payload)
+        let userContent: string
+        if (typeof payload.prompt === 'string') {
+          userContent = payload.prompt
+        } else if (typeof payload.topic === 'string') {
+          userContent = `Please write about: ${payload.topic}`
+        } else {
+          // Unrecognized shape — stringify so the model still sees something.
+          userContent = JSON.stringify(payload)
+        }
+        messages = []
+        if (payload.history) messages.push(...payload.history)
+        messages.push({ role: 'user', content: userContent })
       }
       perTaskSystem = payload.system
       perTaskMaxTokens = payload.maxTokens
       perTaskTemperature = payload.temperature
       perTaskModel = payload.model
-      history = payload.history
     } else {
-      userContent = task.title ?? ''
+      messages = [{ role: 'user', content: task.title ?? '' }]
     }
-
-    const messages: LlmRequest['messages'] = []
-    if (history) messages.push(...history)
-    messages.push({ role: 'user', content: userContent })
 
     const system = perTaskSystem ?? this.defaults.system
     const maxTokens = perTaskMaxTokens ?? this.defaults.maxTokens

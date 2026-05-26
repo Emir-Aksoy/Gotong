@@ -103,6 +103,119 @@ describe('LlmAgent — payload handling', () => {
       { role: 'user', content: 'and now what?' },
     ])
   })
+
+  // --- Phase 9: payload.messages (multimodal entry point) -----------------
+
+  it('payload.messages takes precedence over prompt/topic/history', async () => {
+    let captured: LlmRequest | undefined
+    const provider = new MockLlmProvider({
+      reply: (req) => { captured = req; return 'ok' },
+    })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new LlmAgent({ id: 'a', capabilities: ['draft'], provider }))
+
+    await hub.dispatch(
+      makeTask({
+        prompt: 'should be ignored',
+        topic: 'also ignored',
+        history: [{ role: 'user', content: 'and so is this' }],
+        messages: [
+          { role: 'user', content: 'hello' },
+          { role: 'assistant', content: 'hi there' },
+          { role: 'user', content: 'and now?' },
+        ],
+      }),
+    )
+    await hub.stop()
+
+    // Exactly what was passed — no auto-string-wrap, no history prepend.
+    expect(captured?.messages).toEqual([
+      { role: 'user', content: 'hello' },
+      { role: 'assistant', content: 'hi there' },
+      { role: 'user', content: 'and now?' },
+    ])
+  })
+
+  it('payload.messages carries multimodal blocks through to the provider', async () => {
+    let captured: LlmRequest | undefined
+    const provider = new MockLlmProvider({
+      reply: (req) => { captured = req; return 'a cat' },
+    })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new LlmAgent({ id: 'a', capabilities: ['draft'], provider }))
+
+    const imgBlock = {
+      type: 'image' as const,
+      source: { kind: 'base64' as const, data: 'aGVsbG8=', mime: 'image/png' },
+    }
+    const textBlock = { type: 'text' as const, text: 'describe it' }
+    await hub.dispatch(
+      makeTask({
+        messages: [{ role: 'user', content: [imgBlock, textBlock] }],
+      }),
+    )
+    await hub.stop()
+
+    expect(captured?.messages).toHaveLength(1)
+    expect(captured?.messages[0]).toEqual({
+      role: 'user',
+      content: [imgBlock, textBlock],
+    })
+  })
+
+  it('payload.messages: system / maxTokens / model overrides still apply', async () => {
+    let captured: LlmRequest | undefined
+    const provider = new MockLlmProvider({
+      reply: (req) => { captured = req; return 'ok' },
+    })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(
+      new LlmAgent({
+        id: 'a', capabilities: ['draft'], provider,
+        system: 'default system',
+        maxTokens: 100,
+        model: 'default-model',
+      }),
+    )
+
+    await hub.dispatch(
+      makeTask({
+        messages: [{ role: 'user', content: 'hi' }],
+        system: 'override system',
+        maxTokens: 256,
+        model: 'override-model',
+        temperature: 0.5,
+      }),
+    )
+    await hub.stop()
+
+    expect(captured?.system).toBe('override system')
+    expect(captured?.maxTokens).toBe(256)
+    expect(captured?.model).toBe('override-model')
+    expect(captured?.temperature).toBe(0.5)
+  })
+
+  it('payload.messages empty array falls back to prompt path', async () => {
+    let captured: LlmRequest | undefined
+    const provider = new MockLlmProvider({
+      reply: (req) => { captured = req; return 'ok' },
+    })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new LlmAgent({ id: 'a', capabilities: ['draft'], provider }))
+
+    await hub.dispatch(
+      makeTask({ messages: [], prompt: 'fallback prompt' }),
+    )
+    await hub.stop()
+
+    expect(captured?.messages).toEqual([
+      { role: 'user', content: 'fallback prompt' },
+    ])
+  })
 })
 
 describe('LlmAgent — system and parameter resolution', () => {

@@ -1,0 +1,19 @@
+{
+  "name": "@aipehub/example-multimodal-vision",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Phase 9 demo — LlmAgent reads an image via LlmImageBlock and describes it. Showcases the multimodal content-block surface end-to-end.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/llm": "workspace:*",
+    "@aipehub/llm-anthropic": "workspace:*",
+    "@aipehub/llm-openai": "workspace:*",
+    "@anthropic-ai/sdk": "^0.96.0",
+    "openai": "^6.38.0"
+  }
+}

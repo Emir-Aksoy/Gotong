@@ -23,6 +23,7 @@
     "demo:remote:python": "pnpm --filter @aipehub/example-remote-python start",
     "demo:llm": "pnpm --filter @aipehub/example-llm-mock start",
     "demo:llm:real": "pnpm --filter @aipehub/example-llm-real start",
+    "demo:multimodal": "pnpm --filter @aipehub/example-multimodal-vision start",
     "demo:cli-human": "pnpm --filter @aipehub/example-cli-human start",
     "demo:open-space": "pnpm --filter @aipehub/example-open-space start",
     "demo:federated-team": "pnpm --filter @aipehub/example-federated-team start",
