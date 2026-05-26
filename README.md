@@ -90,6 +90,34 @@ pnpm exec aipehub-host --version    # current host version
 
 After it boots, follow [`docs/OVERVIEW.md`](docs/OVERVIEW.md) for the "what now" walkthrough.
 
+### 个人模式 (新, v4 Phase 7) — 一个人用 AI 干活, 0 配置
+
+如果你就一个人, 想把 AipeHub 当成"我的 AI 桌面"用 (不是给团队开 hub),
+直接 `docker compose up` 就行 — host 第一次启动检测到只有你一个用户,
+**自动进入个人模式**:
+
+```bash
+docker compose up
+# → http://127.0.0.1:3000/admin?token=<打印出来>
+# → 首屏顶部不显示 "owner" 角色 chip (个人用户不需要看见组织角色)
+# → 副标题写"我的 AI 桌面"(不是"管理员控制台")
+# → 设置 tab 出现 [升级到团队模式] 按钮 — 哪天想拉人就点一下
+```
+
+个人模式与团队模式的差别就两点:
+- 主页副标题文案不同 / role chip 隐藏
+- 设置里多个升级按钮
+
+**所有 admin tab 都还在**(用户管理 / peer / 配额 / audit 全可见),
+但你不会被这些概念占满屏幕。需要时再用。
+
+`AIPE_MODE=team` 可以强制 pin 团队模式(即使只有一个用户);
+`AIPE_MODE=personal` 反过来——多用户时也强制 pin 个人模式(罕见,
+通常给 dev / 测试场景)。
+
+升级到团队后, 自动出现"邀请用户"流程, 跟着导出 admin URL 给团队成员;
+路径见下一节 5-min personal growth workflow 或 [`docs/zh/OVERVIEW.md`](docs/zh/OVERVIEW.md)。
+
 ### 5-minute personal growth workflow (新)
 
 The first ready-to-run shipped experience. 7 教练 (访谈 + 身体 / 心理 / 目标 / 资源 / 关系 + 综合规划师) 跑一遍 → 一份 markdown 12 周墙上计划落到磁盘。Default LLM 是 **DeepSeek**(国内可达、便宜)。
