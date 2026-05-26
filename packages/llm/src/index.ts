@@ -25,6 +25,7 @@ export type {
   LlmAudioBlock,
   LlmFileRefBlock,
   LlmImageSource,
+  LlmArtifactResolver,
 } from './types.js'
 export {
   drainStream,
@@ -34,6 +35,7 @@ export {
   MultimodalInlineSizeError,
   isMultimodalBlock,
   extractInlineBase64Size,
+  readMultimodalInlineCapFromEnv,
 } from './types.js'
 export {
   LlmAgent,

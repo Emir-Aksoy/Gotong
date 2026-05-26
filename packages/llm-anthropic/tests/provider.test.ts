@@ -871,3 +871,401 @@ describe('AnthropicProvider — tool-use translation', () => {
     expect(toolResultBlock.content).toBe('ENOENT')
   })
 })
+
+/**
+ * Phase 9 M2 — multimodal content block translation. Covers all three
+ * source kinds (base64 / url / artifact_ref) for LlmImageBlock, the
+ * audio rejection path, file_ref mime routing, the inline cap, and
+ * the parallel-resolution behavior.
+ */
+describe('AnthropicProvider — multimodal translation (Phase 9 M2)', () => {
+  // Helper: tiny inline PNG bytes for tests. We don't need a real PNG —
+  // just a couple of non-utf-8 bytes to prove the bytes survive a round
+  // trip through base64.
+  const SAMPLE_PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0xab, 0xcd])
+  // 'iVBORw==' is 'iVBORw' + '==' padding — corresponds to <0x89 0x50 0x46>
+  // Let me precompute the actual b64 for SAMPLE_PNG_BYTES:
+  //   bytes: 89 50 4E 47 AB CD = 6 bytes → exactly 8 b64 chars no padding
+  const SAMPLE_PNG_B64 = Buffer.from(SAMPLE_PNG_BYTES).toString('base64')
+
+  it('translates LlmImageBlock with base64 source to vision API shape', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'I see a tiny PNG' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'what is this?' },
+          {
+            type: 'image',
+            source: { kind: 'base64', data: SAMPLE_PNG_B64, mime: 'image/png' },
+          },
+        ],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as Array<Record<string, unknown>>
+    const blocks = msgs[0]!.content as Array<Record<string, unknown>>
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0]).toEqual({ type: 'text', text: 'what is this?' })
+    expect(blocks[1]).toEqual({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: SAMPLE_PNG_B64 },
+    })
+  })
+
+  it('translates LlmImageBlock with url source to url-shaped Anthropic image', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'image',
+          source: { kind: 'url', url: 'https://example.com/cat.png' },
+        }],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const msgs = body.messages as Array<Record<string, unknown>>
+    const blocks = msgs[0]!.content as Array<Record<string, unknown>>
+    expect(blocks[0]).toEqual({
+      type: 'image',
+      source: { type: 'url', url: 'https://example.com/cat.png' },
+    })
+  })
+
+  it('strips RFC 2045 soft-wrap whitespace before sending base64 to vendor', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+    const wrapped = SAMPLE_PNG_B64.split('').join('\n  ')
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'image',
+          source: { kind: 'base64', data: wrapped, mime: 'image/jpeg' },
+        }],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const blocks = (body.messages as any[])[0].content
+    expect(blocks[0].source.data).toBe(SAMPLE_PNG_B64) // wire bytes are clean
+    expect(blocks[0].source.media_type).toBe('image/jpeg')
+  })
+
+  it('resolves artifact_ref source via the configured artifactResolver and base64-encodes', async () => {
+    const resolver = vi.fn(async (artifactId: string) => {
+      expect(artifactId).toBe('photos/me.png')
+      return { bytes: SAMPLE_PNG_BYTES, mime: 'image/png' }
+    })
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({
+      client: client as any,
+      artifactResolver: resolver,
+    })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'image',
+          source: { kind: 'artifact_ref', artifactId: 'photos/me.png', mime: 'image/png' },
+        }],
+      }],
+    }))
+    expect(resolver).toHaveBeenCalledTimes(1)
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const blocks = (body.messages as any[])[0].content
+    expect(blocks[0]).toEqual({
+      type: 'image',
+      source: { type: 'base64', media_type: 'image/png', data: SAMPLE_PNG_B64 },
+    })
+  })
+
+  it('artifact_ref source without a resolver throws MultimodalNotSupportedError', async () => {
+    const { client } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({ client: client as any }) // no resolver
+    await expect(drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'image',
+          source: { kind: 'artifact_ref', artifactId: 'photos/me.png', mime: 'image/png' },
+        }],
+      }],
+    }))).rejects.toMatchObject({
+      code: 'MULTIMODAL_NOT_SUPPORTED',
+      providerName: 'anthropic',
+      blockType: 'image',
+    })
+  })
+
+  it('audio block throws MultimodalNotSupportedError (Anthropic has no audio API)', async () => {
+    const { client } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'never' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+    await expect(drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'audio',
+          source: { kind: 'base64', data: 'AAAA', mime: 'audio/wav' },
+        }],
+      }],
+    }))).rejects.toMatchObject({
+      code: 'MULTIMODAL_NOT_SUPPORTED',
+      providerName: 'anthropic',
+      blockType: 'audio',
+    })
+  })
+
+  it('file_ref with image/* mime routes through artifactResolver as an image block', async () => {
+    const resolver = vi.fn(async () => ({
+      bytes: SAMPLE_PNG_BYTES,
+      mime: 'image/png',
+    }))
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({
+      client: client as any,
+      artifactResolver: resolver,
+    })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'file_ref',
+          artifactId: 'uploads/x.png',
+          mime: 'image/png',
+        }],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const blocks = (body.messages as any[])[0].content
+    expect(blocks[0].type).toBe('image')
+    expect(blocks[0].source.media_type).toBe('image/png')
+    expect(blocks[0].source.data).toBe(SAMPLE_PNG_B64)
+  })
+
+  it('file_ref with text/* mime is rendered as a text block (utf-8 decoded)', async () => {
+    const resolver = vi.fn(async () => ({
+      bytes: new TextEncoder().encode('# notes\n你好'),
+      mime: 'text/markdown',
+    }))
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({
+      client: client as any,
+      artifactResolver: resolver,
+    })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'file_ref',
+          artifactId: 'notes/q1.md',
+          mime: 'text/markdown',
+        }],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const blocks = (body.messages as any[])[0].content
+    expect(blocks[0]).toEqual({ type: 'text', text: '# notes\n你好' })
+  })
+
+  it('file_ref with application/json mime is rendered as text', async () => {
+    const resolver = vi.fn(async () => ({
+      bytes: new TextEncoder().encode('{"a":1}'),
+      mime: 'application/json',
+    }))
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({
+      client: client as any,
+      artifactResolver: resolver,
+    })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'file_ref',
+          artifactId: 'data/x.json',
+          mime: 'application/json',
+        }],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const blocks = (body.messages as any[])[0].content
+    expect(blocks[0]).toEqual({ type: 'text', text: '{"a":1}' })
+  })
+
+  it('file_ref with unsupported mime (e.g. application/pdf) throws', async () => {
+    const resolver = vi.fn(async () => ({
+      bytes: new Uint8Array([0x25, 0x50, 0x44, 0x46]),
+      mime: 'application/pdf',
+    }))
+    const { client } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'never' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({
+      client: client as any,
+      artifactResolver: resolver,
+    })
+    await expect(drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'file_ref',
+          artifactId: 'docs/spec.pdf',
+          mime: 'application/pdf',
+        }],
+      }],
+    }))).rejects.toMatchObject({
+      code: 'MULTIMODAL_NOT_SUPPORTED',
+      blockType: 'file_ref',
+    })
+  })
+
+  it('throws MultimodalInlineSizeError when inline base64 exceeds maxInlineBytes', async () => {
+    const { client } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'never' }],
+      stop_reason: 'end_turn',
+    }))
+    // cap of 4 bytes — any non-empty payload will trip it.
+    const provider = new AnthropicProvider({
+      client: client as any,
+      maxInlineBytes: 4,
+    })
+    await expect(drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'image',
+          source: { kind: 'base64', data: SAMPLE_PNG_B64, mime: 'image/png' }, // 6 bytes
+        }],
+      }],
+    }))).rejects.toMatchObject({
+      code: 'MULTIMODAL_NOT_SUPPORTED',
+      blockType: 'image',
+      inlineByteSize: 6,
+      capBytes: 4,
+    })
+  })
+
+  it('artifact_ref resolver returning oversized bytes hits the cap too', async () => {
+    const resolver = vi.fn(async () => ({
+      bytes: new Uint8Array(100), // bigger than cap below
+      mime: 'image/png',
+    }))
+    const { client } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'never' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({
+      client: client as any,
+      artifactResolver: resolver,
+      maxInlineBytes: 50,
+    })
+    await expect(drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [{
+          type: 'image',
+          source: { kind: 'artifact_ref', artifactId: 'big.png', mime: 'image/png' },
+        }],
+      }],
+    }))).rejects.toMatchObject({
+      inlineByteSize: 100,
+      capBytes: 50,
+    })
+  })
+
+  it('parallelizes multiple artifact_ref resolutions in one message (race-style)', async () => {
+    const callOrder: string[] = []
+    const finishOrder: string[] = []
+    // Resolver A finishes after B even though it was called first — proves
+    // we awaited Promise.all rather than serializing.
+    const resolver = vi.fn(async (artifactId: string) => {
+      callOrder.push(artifactId)
+      const delay = artifactId === 'a' ? 20 : 1
+      await new Promise((r) => setTimeout(r, delay))
+      finishOrder.push(artifactId)
+      return { bytes: SAMPLE_PNG_BYTES, mime: 'image/png' }
+    })
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({
+      client: client as any,
+      artifactResolver: resolver,
+    })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { kind: 'artifact_ref', artifactId: 'a', mime: 'image/png' } },
+          { type: 'image', source: { kind: 'artifact_ref', artifactId: 'b', mime: 'image/png' } },
+        ],
+      }],
+    }))
+    expect(resolver).toHaveBeenCalledTimes(2)
+    expect(callOrder).toEqual(['a', 'b'])
+    // b finished first despite a being scheduled first — only possible if
+    // both ran concurrently rather than serially.
+    expect(finishOrder).toEqual(['b', 'a'])
+    // Output order in body still matches input order — Promise.all preserves index.
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const blocks = (body.messages as any[])[0].content
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0].source.data).toBe(SAMPLE_PNG_B64)
+    expect(blocks[1].source.data).toBe(SAMPLE_PNG_B64)
+  })
+
+  it('mixes text + image in a single user turn without re-ordering', async () => {
+    const { client, create } = makeFakeClient(async () => ({
+      content: [{ type: 'text', text: 'ok' }],
+      stop_reason: 'end_turn',
+    }))
+    const provider = new AnthropicProvider({ client: client as any })
+    await drainStream(provider.stream({
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'text', text: 'before' },
+          { type: 'image', source: { kind: 'url', url: 'https://example.com/a.png' } },
+          { type: 'text', text: 'after' },
+        ],
+      }],
+    }))
+    const body = create.mock.calls[0]![0] as Record<string, unknown>
+    const blocks = (body.messages as any[])[0].content
+    expect(blocks.map((b: any) => b.type)).toEqual(['text', 'image', 'text'])
+    expect(blocks[0].text).toBe('before')
+    expect(blocks[2].text).toBe('after')
+  })
+})

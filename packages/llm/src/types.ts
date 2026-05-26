@@ -178,6 +178,54 @@ export type LlmContentBlock =
 export const DEFAULT_MULTIMODAL_INLINE_BYTE_CAP = 1024 * 1024 // 1 MB
 
 /**
+ * Callback a provider invokes when it encounters an `artifact_ref`
+ * source on an `LlmImageBlock` / `LlmAudioBlock`, or any
+ * `LlmFileRefBlock`. The host wires this to a per-task / per-owner
+ * `ArtifactHandle.readBytes` so the provider can stay decoupled from
+ * `@aipehub/services-sdk`.
+ *
+ * Returning `bytes` + `mime`:
+ * - `bytes` is what the provider will base64-encode into the vendor
+ *   API call (Anthropic vision base64 source, OpenAI image_url
+ *   data URL, Whisper multipart, ...).
+ * - `mime` overrides the block's declared mime — file backends'
+ *   guessed mime tends to be more accurate than what the caller
+ *   typed by hand. Providers that strictly need the caller-declared
+ *   mime should preserve theirs at the call site.
+ *
+ * Errors thrown by the resolver propagate out of the provider's
+ * `stream()` iterator (mid-iteration, not synchronously) — the
+ * LlmAgent loop maps them to a failed TaskResult the same way it
+ * handles other mid-stream throws.
+ */
+export type LlmArtifactResolver = (
+  artifactId: string,
+) => Promise<{ bytes: Uint8Array; mime: string }>
+
+/**
+ * Parse the env override for the inline base64 cap. Returns the cap
+ * in bytes — either `floor(parseFloat(env) * 1024 * 1024)` when the
+ * env var is set to a positive finite number, or the default
+ * `DEFAULT_MULTIMODAL_INLINE_BYTE_CAP` otherwise.
+ *
+ * Lives here (not in the provider packages) so all providers parse
+ * the same env name consistently. Callers usually pass the result
+ * into provider options at construction time so tests can override
+ * deterministically without touching `process.env`.
+ */
+export function readMultimodalInlineCapFromEnv(
+  env: Record<string, string | undefined> = (typeof process !== 'undefined'
+    ? process.env
+    : {}) as Record<string, string | undefined>,
+): number {
+  const raw = env.AIPE_MULTIMODAL_MAX_INLINE_MB
+  if (!raw) return DEFAULT_MULTIMODAL_INLINE_BYTE_CAP
+  const mb = Number.parseFloat(raw)
+  if (!Number.isFinite(mb) || mb <= 0) return DEFAULT_MULTIMODAL_INLINE_BYTE_CAP
+  return Math.floor(mb * 1024 * 1024)
+}
+
+/**
  * Error thrown by a provider when a content block can't be sent to the
  * underlying LLM — either the vendor doesn't support that modality
  * (e.g. Anthropic + audio) or the request shape would exceed limits

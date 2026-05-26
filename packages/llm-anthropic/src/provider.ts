@@ -1,6 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk'
 import type {
+  LlmArtifactResolver,
   LlmContentBlock,
+  LlmImageSource,
   LlmMessage,
   LlmProvider,
   LlmRequest,
@@ -8,7 +10,12 @@ import type {
   LlmStreamChunk,
   LlmUsage,
 } from '@aipehub/llm'
-import { MultimodalNotSupportedError } from '@aipehub/llm'
+import {
+  DEFAULT_MULTIMODAL_INLINE_BYTE_CAP,
+  MultimodalInlineSizeError,
+  MultimodalNotSupportedError,
+  extractInlineBase64Size,
+} from '@aipehub/llm'
 
 /**
  * Construction options for {@link AnthropicProvider}.
@@ -34,6 +41,25 @@ export interface AnthropicProviderOptions {
    * callers will normally pass `apiKey` and let the provider build the client.
    */
   client?: Anthropic
+  /**
+   * Phase 9 — resolver for `artifact_ref` sources on multimodal blocks.
+   * When set, the provider calls this to fetch raw bytes for any
+   * `LlmImageBlock` / `LlmAudioBlock` with `source.kind === 'artifact_ref'`
+   * and for any `LlmFileRefBlock` it sees. Without it, those blocks throw
+   * `MultimodalNotSupportedError`. The host wires this to per-task
+   * `ArtifactHandle.readBytes` so the provider stays decoupled from
+   * services-sdk.
+   */
+  artifactResolver?: LlmArtifactResolver
+  /**
+   * Phase 9 — cap on inline base64 payload size accepted from a single
+   * block. Default: `DEFAULT_MULTIMODAL_INLINE_BYTE_CAP` (1 MB). Override
+   * via env `AIPE_MULTIMODAL_MAX_INLINE_MB` is parsed by the host and
+   * forwarded here at construction time — provider doesn't read env so
+   * tests stay deterministic. Throws `MultimodalInlineSizeError` when a
+   * single block exceeds the cap.
+   */
+  maxInlineBytes?: number
 }
 
 /**
@@ -66,12 +92,16 @@ export class AnthropicProvider implements LlmProvider {
   private readonly client: Anthropic
   private readonly defaultModel: string
   private readonly defaultMaxTokens: number
+  private readonly artifactResolver?: LlmArtifactResolver
+  private readonly maxInlineBytes: number
 
   constructor(opts: AnthropicProviderOptions = {}) {
     // Default to Claude's most capable model. Override via `defaultModel` for
     // a cheaper/faster pick (e.g. `claude-sonnet-4-6`, `claude-haiku-4-5`).
     this.defaultModel = opts.defaultModel ?? 'claude-opus-4-7'
     this.defaultMaxTokens = opts.defaultMaxTokens ?? 1024
+    this.artifactResolver = opts.artifactResolver
+    this.maxInlineBytes = opts.maxInlineBytes ?? DEFAULT_MULTIMODAL_INLINE_BYTE_CAP
     if (opts.client) {
       this.client = opts.client
     } else {
@@ -119,15 +149,22 @@ export class AnthropicProvider implements LlmProvider {
    *     lose the partial text the model already produced.
    */
   stream(req: LlmRequest, signal?: AbortSignal): AsyncIterable<LlmStreamChunk> {
-    const body = this.buildBody(req)
-    body.stream = true
-    return this.streamImpl(body, signal)
+    // The outer wrapper is sync so we keep the same shape contract LlmAgent
+    // depends on (sync `provider.stream(req)` throw → onAuthFailure path).
+    // The inner generator awaits `buildBody`, which is now async because
+    // Phase 9 multimodal resolution can fetch artifact bytes. Anything that
+    // throws inside buildBody surfaces on first iterator advance — same
+    // path mid-stream failures take, so the LlmAgent loop handles it
+    // uniformly.
+    return this.streamImpl(req, signal)
   }
 
   private async *streamImpl(
-    body: Record<string, unknown>,
+    req: LlmRequest,
     signal?: AbortSignal,
   ): AsyncIterable<LlmStreamChunk> {
+    const body = await this.buildBody(req)
+    body.stream = true
     // The SDK's stream() returns an async iterable of SSE events. We
     // type-check duck-style — the test fake mirrors the same shape.
     const sdkStream = await (
@@ -276,12 +313,21 @@ export class AnthropicProvider implements LlmProvider {
    * thinking-model temperature drop, etc.) regardless of stream mode —
    * `stream()` just appends `stream:true` to whatever this returns.
    */
-  private buildBody(req: LlmRequest): Record<string, unknown> {
+  private async buildBody(req: LlmRequest): Promise<Record<string, unknown>> {
     const model = req.model ?? this.defaultModel
+    // Phase 9: translateMessage is async (artifact resolution); fan out
+    // in parallel so a long-tail readBytes doesn't serialise the whole
+    // message list.
+    const translatedMessages = await Promise.all(
+      req.messages.map((m) => translateMessage(m, {
+        resolver: this.artifactResolver,
+        maxInlineBytes: this.maxInlineBytes,
+      })),
+    )
     const body: Record<string, unknown> = {
       model,
       max_tokens: req.maxTokens ?? this.defaultMaxTokens,
-      messages: req.messages.map(translateMessage),
+      messages: translatedMessages,
     }
     if (req.system !== undefined) body.system = req.system
     if (req.temperature !== undefined && !isThinkingModel(model)) {
@@ -303,21 +349,44 @@ export class AnthropicProvider implements LlmProvider {
 }
 
 /**
+ * Phase 9 — context object threaded through translation so artifact
+ * resolution + cap enforcement reach every block without each call site
+ * re-wiring it.
+ */
+interface TranslateCtx {
+  resolver?: LlmArtifactResolver
+  maxInlineBytes: number
+}
+
+/**
  * Translate a provider-neutral message to the Anthropic on-wire shape.
  * String content passes through; block-array content needs each block
  * re-keyed (`toolUseId` → `tool_use_id`, `isError` → `is_error`).
  */
-function translateMessage(m: LlmMessage): Record<string, unknown> {
+async function translateMessage(
+  m: LlmMessage,
+  ctx: TranslateCtx,
+): Promise<Record<string, unknown>> {
   if (typeof m.content === 'string') {
     return { role: m.role, content: m.content }
   }
+  // Each block resolves independently — fan out in parallel so artifact
+  // reads happen concurrently. Order in the resulting array still matches
+  // input order because Promise.all preserves index order.
+  const blocks = await Promise.all(m.content.map((b) => translateBlock(b, ctx)))
+  // file_ref + text/* mime resolution can produce a `null` (skip) when a
+  // future variant doesn't have a useful Anthropic representation; today
+  // every supported branch returns a value. Defensive filter doesn't hurt.
   return {
     role: m.role,
-    content: m.content.map(translateBlock),
+    content: blocks.filter((b): b is Record<string, unknown> => b !== null),
   }
 }
 
-function translateBlock(block: LlmContentBlock): Record<string, unknown> {
+async function translateBlock(
+  block: LlmContentBlock,
+  ctx: TranslateCtx,
+): Promise<Record<string, unknown>> {
   switch (block.type) {
     case 'text':
       return { type: 'text', text: block.text }
@@ -342,18 +411,160 @@ function translateBlock(block: LlmContentBlock): Record<string, unknown> {
       return out
     }
     case 'image':
+      return translateImageSource(block.source, ctx)
     case 'audio':
-    case 'file_ref':
-      // Phase 9 M1 stub. The union widened to include multimodal block
-      // types but provider-specific translation lives in M2 — throwing
-      // here keeps the switch exhaustive without silently dropping a
-      // block the agent expected the LLM to see.
+      // Anthropic doesn't accept audio input as of Phase 9 — surface as
+      // a typed error rather than silently dropping the block.
       throw new MultimodalNotSupportedError(
         'anthropic',
-        block.type,
-        'multimodal translation lands in Phase 9 M2',
+        'audio',
+        'Anthropic vision API only accepts image input; use OpenAI gpt-4o for audio',
       )
+    case 'file_ref':
+      return translateFileRef(block.artifactId, block.mime, ctx)
   }
+}
+
+/**
+ * Phase 9 — translate an `LlmImageSource` to Anthropic's image content
+ * block shape. Anthropic vision accepts two source flavors:
+ *
+ *   { type: 'image', source: { type: 'base64', media_type, data } }
+ *   { type: 'image', source: { type: 'url', url } }
+ *
+ * `artifact_ref` sources go through the resolver to fetch raw bytes,
+ * then base64-encode in process — the API treats inline bytes
+ * identically regardless of how the caller named them.
+ */
+async function translateImageSource(
+  source: LlmImageSource,
+  ctx: TranslateCtx,
+): Promise<Record<string, unknown>> {
+  if (source.kind === 'url') {
+    return {
+      type: 'image',
+      source: { type: 'url', url: source.url },
+    }
+  }
+  if (source.kind === 'base64') {
+    // Enforce inline cap before we hand the body to the SDK — Anthropic
+    // will reject oversize payloads anyway, but with a less-helpful
+    // error and after burning bandwidth.
+    const size = extractInlineBase64Size({ type: 'image', source })
+    if (size > ctx.maxInlineBytes) {
+      throw new MultimodalInlineSizeError('anthropic', size, ctx.maxInlineBytes)
+    }
+    return {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: source.mime,
+        // Strip whitespace defensively (RFC 2045 soft-wrap clients) so
+        // the wire bytes match exactly what was uploaded.
+        data: source.data.replace(/\s+/g, ''),
+      },
+    }
+  }
+  // artifact_ref: resolve, base64-encode, ship as inline.
+  if (!ctx.resolver) {
+    throw new MultimodalNotSupportedError(
+      'anthropic',
+      'image',
+      `artifact_ref source requires an artifactResolver in AnthropicProviderOptions; `
+      + `pass one when constructing the provider (host wires it automatically) `
+      + `or inline the image as { kind: 'base64', data, mime }`,
+    )
+  }
+  const { bytes, mime } = await ctx.resolver(source.artifactId)
+  if (bytes.byteLength > ctx.maxInlineBytes) {
+    throw new MultimodalInlineSizeError('anthropic', bytes.byteLength, ctx.maxInlineBytes)
+  }
+  return {
+    type: 'image',
+    source: {
+      type: 'base64',
+      // Trust the resolver's mime over the caller's declared mime —
+      // the file backend's sniff from extension is usually more
+      // accurate than what the human typed.
+      media_type: mime || source.mime,
+      data: bytesToBase64(bytes),
+    },
+  }
+}
+
+/**
+ * Phase 9 — file_ref translation. Routes by mime:
+ *
+ *   image/*                    → translateImageSource (base64 inline)
+ *   text/* or application/json → emit as a text block (prepended utf-8)
+ *   everything else            → MultimodalNotSupportedError
+ *
+ * The "text bundle" path means a workflow can attach a doc / JSON
+ * artifact and the model sees its content verbatim. Larger plain-text
+ * uploads still hit the inline cap; that's fine — over a megabyte of
+ * text belongs in a RAG flow, not the prompt.
+ */
+async function translateFileRef(
+  artifactId: string,
+  declaredMime: string,
+  ctx: TranslateCtx,
+): Promise<Record<string, unknown>> {
+  if (!ctx.resolver) {
+    throw new MultimodalNotSupportedError(
+      'anthropic',
+      'file_ref',
+      'file_ref blocks need an artifactResolver in AnthropicProviderOptions',
+    )
+  }
+  const { bytes, mime: resolvedMime } = await ctx.resolver(artifactId)
+  const mime = (resolvedMime || declaredMime || '').toLowerCase()
+  if (bytes.byteLength > ctx.maxInlineBytes) {
+    throw new MultimodalInlineSizeError('anthropic', bytes.byteLength, ctx.maxInlineBytes)
+  }
+  if (mime.startsWith('image/')) {
+    return {
+      type: 'image',
+      source: {
+        type: 'base64',
+        media_type: mime,
+        data: bytesToBase64(bytes),
+      },
+    }
+  }
+  if (mime.startsWith('text/') || mime === 'application/json') {
+    const text = bytesToUtf8(bytes)
+    return { type: 'text', text }
+  }
+  throw new MultimodalNotSupportedError(
+    'anthropic',
+    'file_ref',
+    `mime '${mime}' has no Anthropic representation (image/* or text/* / application/json only)`,
+  )
+}
+
+/**
+ * Phase 9 — node Buffer is the fast path for base64 (Buffer extends
+ * Uint8Array). When Uint8Array is something else (some bundled
+ * runtimes, the test stub), we fall back to a hand-roll via String
+ * concat — slower but correct.
+ */
+function bytesToBase64(bytes: Uint8Array): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const Buf: any = (globalThis as { Buffer?: typeof globalThis.Buffer }).Buffer
+  if (Buf && typeof Buf.from === 'function') {
+    return Buf.from(bytes).toString('base64')
+  }
+  // Browser / non-node fallback. We won't normally reach this branch
+  // because the provider runs on the host process, but it keeps the
+  // function portable.
+  let bin = ''
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]!)
+  // btoa exists in modern node and all browsers.
+  return (globalThis as { btoa?: (s: string) => string }).btoa!(bin)
+}
+
+function bytesToUtf8(bytes: Uint8Array): string {
+  return new TextDecoder('utf-8').decode(bytes)
 }
 
 /**
