@@ -127,6 +127,28 @@ export interface WebSocketHubLinkOptions {
    * error from silently disabling auth.
    */
   peerToken?: string
+  /**
+   * Phase 6 #4 — per-peer token resolver. When set, takes precedence
+   * over the shared `peerToken`: this side will call
+   * `peerTokenResolver(claimedPeerId)` to look up the expected token
+   * for the peer claiming that id in their HELLO. Returning `null`
+   * means "unknown peer / disabled" — handshake rejects. Returning a
+   * non-empty string is compared constant-time against the received
+   * token.
+   *
+   * Typical wiring: the host's PeerRegistry passes a closure that
+   * looks up the peer in the identity.peers table and reads the
+   * vault entry's plaintext. This makes inbound auth symmetric with
+   * outbound: each side stores the other's token in its own peers
+   * table; a rotated token on one end is honored on the other end
+   * without operator restart of the shared secret.
+   *
+   * Only meaningful on the IN side. OUT side: this option is
+   * ignored. To rotate the token used by the OUT side, edit the
+   * peers row via the admin API; PeerRegistry will pick it up at
+   * the next reconciliation tick.
+   */
+  peerTokenResolver?: (claimedPeerId: ParticipantId) => string | null
   /** Per-dispatch timeout in ms. Default 30s. */
   dispatchTimeoutMs?: number
 }
@@ -158,6 +180,10 @@ class WebSocketHubLinkImpl implements HubLink {
   private readonly expectedPeerId?: ParticipantId
   /** FED-M1 — shared secret for mutual peer auth. See option docs. */
   private readonly peerToken?: string
+  /** Phase 6 #4 — per-peer token resolver. See option docs. */
+  private readonly peerTokenResolver?: (
+    claimedPeerId: ParticipantId,
+  ) => string | null
   private readonly dispatchTimeoutMs: number
   private readonly pullTimeoutMs: number = DEFAULT_PULL_TIMEOUT_MS
 
@@ -196,6 +222,7 @@ class WebSocketHubLinkImpl implements HubLink {
       )
     }
     this.peerToken = opts.peerToken
+    this.peerTokenResolver = opts.peerTokenResolver
     this.dispatchTimeoutMs = opts.dispatchTimeoutMs ?? DEFAULT_DISPATCH_TIMEOUT_MS
     this._peerId = opts.expectedPeerId ?? '<pending>'
 
@@ -246,31 +273,78 @@ class WebSocketHubLinkImpl implements HubLink {
   }
 
   /**
-   * FED-M1 — verify the `peerToken` from an incoming HELLO/HELLO_ACK
-   * frame against our locally-configured `peerToken`. Returns null on
-   * success, or an Error to attach to the handshake-reject path.
+   * Verify the `peerToken` from an incoming HELLO/HELLO_ACK frame.
+   * Returns null on success, or an Error to attach to the
+   * handshake-reject path.
    *
-   * Policy:
-   *   - We have no `peerToken` configured → accept anything (legacy
-   *     and inproc-only test code path).
-   *   - We have `peerToken` configured → peer MUST present matching
-   *     value. Missing or different → reject.
+   * Resolution policy (highest priority first):
+   *   1. Phase 6 #4 — `peerTokenResolver` set: look up the expected
+   *      token by `claimedPeerId`. null → reject (unknown peer or
+   *      disabled). non-empty string → constant-time compare. Mismatch
+   *      → reject. The resolver path REQUIRES the peer to identify
+   *      itself via `frame.peerId`; an absent claimedPeerId is rejected.
+   *   2. FED-M1 — shared `peerToken` set: peer MUST present matching
+   *      value. Missing or different → reject.
+   *   3. Neither set → accept anything (legacy / inproc test path).
    *
-   * A mixed deployment (one side configured, one side not) will see
-   * the configured side reject — which is the correct outcome (the
-   * unauthenticated side has no business connecting to an authenticated
-   * peer). The unconfigured side learns of the rejection via the close.
+   * Mixed deployments (one side configured, one side not) fail closed
+   * on the configured side; the unconfigured side sees a silent close.
    */
-  private verifyPeerToken(received: string | undefined): Error | null {
-    if (this.peerToken === undefined) return null
+  private verifyPeerToken(
+    received: string | undefined,
+    claimedPeerId: ParticipantId | undefined,
+  ): { error: Error | null; tokenToReplyWith?: string } {
+    if (this.peerTokenResolver) {
+      if (!claimedPeerId || claimedPeerId.length === 0) {
+        return {
+          error: new Error('peer must present a peerId; per-peer auth requires it'),
+        }
+      }
+      let expected: string | null
+      try {
+        expected = this.peerTokenResolver(claimedPeerId)
+      } catch {
+        // Resolver throw is a server-side bug. Fail closed and let the
+        // operator see the upstream stack in their logs (we don't have
+        // a logger here; the caller's onLink path will surface the close).
+        return { error: new Error('peer token resolver threw; refusing connection') }
+      }
+      if (expected === null) {
+        return {
+          error: new Error(
+            `unknown peer '${claimedPeerId}'; not in this host's peer registry`,
+          ),
+        }
+      }
+      if (expected.length === 0) {
+        // Defensive: resolver returned '' instead of null. Treat as
+        // misconfiguration, fail closed.
+        return { error: new Error('peer token resolver returned empty string; refusing') }
+      }
+      if (received === undefined) {
+        return { error: new Error('peer did not present a peerToken; mutual auth required') }
+      }
+      if (!constantTimeStringEquals(expected, received)) {
+        return { error: new Error('peer presented an invalid peerToken; mutual auth failed') }
+      }
+      // Phase 6 #4: echo the per-peer token back in the reply so the
+      // OUT side can verify it against its own local copy (mutual
+      // auth). Both sides MUST have the same value stored — the IN
+      // side derived it via resolver; the OUT side configured it via
+      // its peers row.
+      return { error: null, tokenToReplyWith: expected }
+    }
+    if (this.peerToken === undefined) {
+      return { error: null }
+    }
     if (received === undefined) {
-      return new Error('peer did not present a peerToken; mutual auth required')
+      return { error: new Error('peer did not present a peerToken; mutual auth required') }
     }
     if (!constantTimeStringEquals(this.peerToken, received)) {
       // Never log the actual tokens — just the failure shape.
-      return new Error('peer presented an invalid peerToken; mutual auth failed')
+      return { error: new Error('peer presented an invalid peerToken; mutual auth failed') }
     }
-    return null
+    return { error: null, tokenToReplyWith: this.peerToken }
   }
 
   private sendFrame(frame: MeshFrame): void {
@@ -315,23 +389,31 @@ class WebSocketHubLinkImpl implements HubLink {
           this.transitionToClosed('peer_id_mismatch')
           return
         }
-        // FED-M1 — verify the peer's token BEFORE accepting the HELLO.
-        // We reject before sending HELLO_ACK so a wrong-token peer
-        // never sees our selfId / our own token.
+        // FED-M1 / Phase 6 #4 — verify the peer's token BEFORE
+        // accepting the HELLO. We reject before sending HELLO_ACK so a
+        // wrong-token peer never sees our selfId / our own token.
+        // Per-peer mode (resolver set) uses frame.peerId to look up
+        // the expected token; shared mode ignores claimedPeerId.
+        // The verify result also tells us what value to echo back in
+        // the ACK — under per-peer auth that's the per-pair secret
+        // resolved for this peer; under shared mode it's just our
+        // shared peerToken.
+        let ackToken: string | undefined
         {
-          const tokErr = this.verifyPeerToken(frame.peerToken)
-          if (tokErr) {
-            this.rejectHandshake(tokErr)
+          const v = this.verifyPeerToken(frame.peerToken, frame.peerId)
+          if (v.error) {
+            this.rejectHandshake(v.error)
             this.transitionToClosed('peer_token_invalid')
             return
           }
+          ackToken = v.tokenToReplyWith
         }
         this._peerId = frame.peerId
         this.sendFrame({
           type: 'MESH_HELLO_ACK',
           peerId: this.selfId,
           protocolVersion: MESH_PROTOCOL_VERSION,
-          ...(this.peerToken !== undefined ? { peerToken: this.peerToken } : {}),
+          ...(ackToken !== undefined ? { peerToken: ackToken } : {}),
         })
         this._status = 'open'
         this.resolveHandshake()
@@ -360,11 +442,13 @@ class WebSocketHubLinkImpl implements HubLink {
         // FED-M1 — verify the peer's token on the ACK. We've already
         // sent our own token in HELLO (which the peer accepted, else
         // they wouldn't be ACKing); now we close the mutual loop by
-        // verifying their token before declaring the link open.
+        // verifying their token before declaring the link open. The
+        // OUT side typically has no resolver wired (that's an inbound
+        // server concept); shared-token path handles ACK either way.
         {
-          const tokErr = this.verifyPeerToken(frame.peerToken)
-          if (tokErr) {
-            this.rejectHandshake(tokErr)
+          const v = this.verifyPeerToken(frame.peerToken, frame.peerId)
+          if (v.error) {
+            this.rejectHandshake(v.error)
             this.transitionToClosed('peer_token_invalid')
             return
           }
@@ -724,8 +808,20 @@ export interface AcceptHubLinksOptions {
    * connection MUST present this same value in its HELLO frame, else
    * the handshake rejects and the socket closes silently. When omitted,
    * accepts unauthenticated peers (legacy behavior).
+   *
+   * Phase 6 #4: prefer `peerTokenResolver` for new deployments — it
+   * scales to many peers without rotating one shared secret.
+   * `peerToken` remains supported for environments without identity.
    */
   peerToken?: string
+  /**
+   * Phase 6 #4 — per-peer token resolver. Receives the claimed
+   * `peerId` from the incoming HELLO and returns the expected token
+   * for that peer (typically from `identity.peers` + vault), or
+   * `null` to reject the connection as "unknown peer". Takes
+   * precedence over `peerToken` when both are set.
+   */
+  peerTokenResolver?: (claimedPeerId: ParticipantId) => string | null
 }
 
 /**
@@ -745,6 +841,9 @@ export function acceptHubLinks(opts: AcceptHubLinksOptions): () => void {
     const link = new WebSocketHubLinkImpl(ws, 'in', {
       selfId: opts.selfId,
       ...(opts.peerToken !== undefined ? { peerToken: opts.peerToken } : {}),
+      ...(opts.peerTokenResolver
+        ? { peerTokenResolver: opts.peerTokenResolver }
+        : {}),
     })
     Promise.race([
       link.waitForHandshake(),

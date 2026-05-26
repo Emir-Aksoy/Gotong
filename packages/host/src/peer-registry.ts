@@ -52,8 +52,24 @@ export interface PeerRegistryOptions {
    * Outbound dials are unaffected (those use per-peer vault tokens).
    * Omitting accepts unauthenticated inbound peers — only safe behind
    * a private network.
+   *
+   * Phase 6 #4: prefer the per-peer path (auto-enabled when this
+   * registry has an `identity` ref + at least one peers row). The
+   * shared token remains for environments without identity or as a
+   * blanket fallback during transition; when both per-peer and
+   * shared are available, per-peer takes precedence (transport-ws
+   * resolves expected token from the resolver first).
    */
   sharedInboundPeerToken?: string
+  /**
+   * Phase 6 #4 — when true (the default when `identity` is wired),
+   * pass a per-peer `peerTokenResolver` to `acceptHubLinks`. The
+   * resolver looks up `claimedPeerId` in the identity peers table
+   * and reads the vault entry's plaintext on each handshake. Setting
+   * this to `false` disables the resolver path entirely (only the
+   * shared token remains, if any). Default: true.
+   */
+  perPeerInboundAuth?: boolean
   /** Default 5000ms. AIPE_PEER_POLL_MS override lives in main.ts. */
   pollIntervalMs?: number
   /** Optional logger; defaults to console-style noop-on-debug. */
@@ -97,12 +113,34 @@ export class PeerRegistry {
   start(): void {
     if (this.intervalHandle) return
     if (this.opts.wss) {
+      // Phase 6 #4 — wire a per-peer token resolver when identity is
+      // present and the operator hasn't opted out. The resolver runs on
+      // each inbound HELLO; misses (unknown peer / disabled / vault read
+      // throws) return null so transport-ws closes the connection.
+      const perPeerEnabled = this.opts.perPeerInboundAuth !== false
+      const resolver = perPeerEnabled
+        ? (claimedPeerId: string): string | null => {
+          try {
+            const row = this.opts.identity.getPeerByPeerId(claimedPeerId)
+            if (!row) return null
+            if (row.enabled === false) return null
+            return this.opts.identity.getPeerToken(row.id) ?? null
+          } catch (err) {
+            this.log('warn', 'peer-registry resolver failure', {
+              claimedPeerId,
+              err: this.errMsg(err),
+            })
+            return null
+          }
+        }
+        : undefined
       this.detachAccept = acceptHubLinks({
         server: this.opts.wss,
         selfId: this.opts.selfHubId,
         ...(this.opts.sharedInboundPeerToken
           ? { peerToken: this.opts.sharedInboundPeerToken }
           : {}),
+        ...(resolver ? { peerTokenResolver: resolver } : {}),
         onLink: (link) => this.installInboundLink(link),
       })
     }

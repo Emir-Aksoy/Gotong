@@ -682,10 +682,16 @@ async function main(): Promise<void> {
     // target isn't local + whose task.origin points at a connected peer
     // will be forwarded over the live HubLink.
     peerRegistryRef = peerRegistry
+    // Phase 6 #4 — per-peer resolver is auto-wired by PeerRegistry
+    // when identity is present (it is here — we only enter this block
+    // when identity is wired). The shared token remains as fallback
+    // for peers not yet enrolled in the peers table; in practice the
+    // resolver path wins for any peer that IS enrolled because
+    // verifyPeerToken consults the resolver first.
     log.info('peer registry started', {
       selfHubId,
       pollIntervalMs: pollMs,
-      inboundAuth: inboundToken ? 'shared-token' : 'none',
+      inboundAuth: inboundToken ? 'per-peer+shared-fallback' : 'per-peer',
     })
   }
   // Readiness flag — flips to true after workflow resume finishes (see
