@@ -1,4 +1,5 @@
 import OpenAI from 'openai'
+import { completeAsStream } from '@aipehub/llm'
 import type {
   LlmContentBlock,
   LlmMessage,
@@ -6,6 +7,7 @@ import type {
   LlmRequest,
   LlmResponse,
   LlmStopReason,
+  LlmStreamChunk,
   LlmToolUseBlock,
 } from '@aipehub/llm'
 
@@ -138,6 +140,18 @@ export class OpenAIProvider implements LlmProvider {
       if (opts.baseURL) init.baseURL = opts.baseURL
       this.client = new OpenAI(init)
     }
+  }
+
+  /**
+   * Phase 8 M1 — stream interface satisfied via the `completeAsStream`
+   * transition shim. M3 replaces this with native SSE driven by the
+   * OpenAI SDK's `stream: true` option (which also covers DeepSeek /
+   * Qwen / Ollama via the same code path). Throwing is preserved: the
+   * shim awaits the underlying `complete()` synchronously on first
+   * iteration, so retry / auth handling still surfaces to LlmAgent.
+   */
+  stream(req: LlmRequest, _signal?: AbortSignal): AsyncIterable<LlmStreamChunk> {
+    return completeAsStream(() => this.complete(req))
   }
 
   async complete(req: LlmRequest): Promise<LlmResponse> {

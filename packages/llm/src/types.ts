@@ -177,17 +177,231 @@ export interface LlmResponse {
 }
 
 /**
+ * Provider-neutral streaming chunk. Discriminated on `type`.
+ *
+ * Design goals (Phase 8):
+ * - First-class streaming. The default path through `LlmProvider` is
+ *   `stream()`; `complete()` is convenience sugar that drains a stream
+ *   and returns the final `LlmResponse`.
+ * - Per-chunk semantics small enough that the SSE bridge to the admin UI
+ *   can forward verbatim without server-side state.
+ * - Tool-use is delivered as one fully-formed block per chunk (the provider
+ *   buffers the JSON args internally and emits the parsed input). Partial
+ *   tool-args streaming is intentionally NOT modeled in v0.4 — the LlmAgent
+ *   loop can't execute a tool until the args are complete anyway, so per-
+ *   chunk partials would only buy us "model is typing the JSON" animation
+ *   in the UI, which isn't worth the extra state machine.
+ * - `end` always arrives exactly once and is always the LAST chunk for a
+ *   successful stream. `error` short-circuits and is the last chunk for
+ *   a soft-fail stream. Hard-fail (auth, transport) throws synchronously
+ *   from the provider so LlmAgent's existing error path still fires.
+ * - `usage` is optional and typically arrives once near the end. Providers
+ *   that emit incremental usage updates MUST coalesce server-side and emit
+ *   at most one `usage` chunk per stream (we don't sum multiple).
+ */
+export type LlmStreamChunk =
+  | LlmStreamTextChunk
+  | LlmStreamToolUseChunk
+  | LlmStreamUsageChunk
+  | LlmStreamEndChunk
+  | LlmStreamErrorChunk
+
+/**
+ * Incremental text. Concatenating every `text` chunk in arrival order
+ * reproduces the final response text byte-for-byte. Provider translators
+ * MUST NOT emit empty `text: ''` chunks — they confuse SSE consumers and
+ * the typewriter render.
+ */
+export interface LlmStreamTextChunk {
+  type: 'text'
+  text: string
+}
+
+/**
+ * A fully-formed tool-use block the LLM wants the agent to execute. The
+ * provider has already parsed the model's args JSON; the agent runtime
+ * can `toolset.callTool(toolUse.name, toolUse.input)` immediately.
+ *
+ * Multiple `tool_use` chunks may arrive within one stream when the LLM
+ * fans out (e.g. read two files in parallel). They are emitted in the
+ * same order the model produced them.
+ */
+export interface LlmStreamToolUseChunk {
+  type: 'tool_use'
+  toolUse: LlmToolUseBlock
+}
+
+/**
+ * Token-usage report for the stream. Optional. Providers should emit this
+ * once near the end (typically just before `end`) so accounting code has
+ * a stable hook. Coalesce server-side if the vendor SDK reports usage
+ * incrementally — multiple `usage` chunks in one stream is undefined behavior.
+ */
+export interface LlmStreamUsageChunk {
+  type: 'usage'
+  usage: LlmUsage
+}
+
+/**
+ * Terminal chunk for a normal stream. ALWAYS the last chunk emitted by a
+ * successful stream. Consumers can use the iterator's natural completion
+ * OR this chunk to know the stream is done — the convention exists so
+ * SSE bridges can forward "stream ended" as an explicit event for clients
+ * that don't have native iterator semantics.
+ */
+export interface LlmStreamEndChunk {
+  type: 'end'
+  stopReason: LlmStopReason
+}
+
+/**
+ * Soft-fail terminal chunk. The provider returned a body but signalled
+ * something went sideways mid-generation (e.g. partial tool-use block
+ * the model didn't finish, vendor-specific "filtered" stop). After
+ * `error`, the iterator completes — no further chunks.
+ *
+ * Hard fails (auth, transport, vendor 5xx) are thrown synchronously by
+ * `stream()` BEFORE the iterator yields anything. That keeps the
+ * existing LlmAgent `onAuthFailure` / failed-TaskResult path working
+ * unchanged.
+ */
+export interface LlmStreamErrorChunk {
+  type: 'error'
+  /** Provider-mapped code (e.g. 'malformed_tool_args', 'content_filter'). */
+  code: string
+  message: string
+}
+
+/**
  * Vendor adapter. One per provider package (anthropic / openai / mock / ...).
  *
- * `complete()` MUST throw on transport or auth errors so the LlmAgent can
- * map them into a failed TaskResult. A response with `stopReason: 'error'`
- * is for soft-fail cases where the provider returned a body but indicated
- * something went wrong mid-generation.
+ * Phase 8: streaming is first-class. Implementations MUST provide
+ * `stream()`. `complete()` is kept as a convenience method that drains a
+ * stream into a single `LlmResponse`; the base helper `drainStream()`
+ * (exported below) does this generically so providers can delegate.
+ *
+ * `stream()` MUST throw synchronously on transport or auth errors so the
+ * LlmAgent can map them into a failed TaskResult (and trigger the
+ * `onAuthFailure` hook). Errors that surface mid-generation belong in an
+ * `'error'` chunk, NOT a thrown exception.
+ *
+ * NOTE: `complete()` is scheduled for removal in Phase 8 M8 once all
+ * call sites (LlmAgent + tests) are migrated to consume `stream()`
+ * directly. New code should prefer `stream()` already.
  */
 export interface LlmProvider {
   /** Human-readable identifier — used in logs and the `raw` envelope. */
   readonly name: string
+  /**
+   * Streaming chat completion. Yields chunks in arrival order, terminating
+   * with exactly one `'end'` or `'error'` chunk. Consumers should aggregate
+   * `text` chunks for the final transcript and accumulate `tool_use` chunks
+   * for the tool-use loop.
+   *
+   * Implementations SHOULD honor `signal` to abort the upstream HTTP call
+   * (Anthropic/OpenAI SDKs both accept AbortSignal). When omitted, the
+   * stream runs to natural completion.
+   */
+  stream(req: LlmRequest, signal?: AbortSignal): AsyncIterable<LlmStreamChunk>
+  /**
+   * Convenience: drain a `stream()` into a single `LlmResponse`. Provider
+   * packages can delegate to `drainStream(this.stream(req))` for the
+   * default implementation. To be removed in Phase 8 M8.
+   *
+   * @deprecated Use `stream()`. Scheduled for removal in Phase 8 M8.
+   */
   complete(req: LlmRequest): Promise<LlmResponse>
+}
+
+/**
+ * Phase 8 transition helper: wrap a one-shot `complete()` call as a
+ * single-pass stream. Yields `text` (if any) → `tool_use` chunks (if any)
+ * → `usage` (if any) → `end`. Used by provider packages that haven't
+ * implemented native streaming yet (Phase 8 M2/M3 replace these with
+ * real SSE-driven streams).
+ *
+ * @deprecated Transition shim. Will be removed in Phase 8 M8 along with
+ *             `LlmProvider.complete()`.
+ */
+export async function* completeAsStream(
+  complete: () => Promise<LlmResponse>,
+): AsyncIterable<LlmStreamChunk> {
+  // Throw synchronously-ish: an awaited promise rejection at the top of
+  // a generator surfaces on the first `for await` iteration, which
+  // matches how a real native-streaming provider would throw on auth /
+  // transport before yielding any chunks.
+  const res = await complete()
+  if (res.text && res.text.length > 0) {
+    yield { type: 'text', text: res.text }
+  }
+  if (res.toolUses) {
+    for (const tu of res.toolUses) {
+      yield { type: 'tool_use', toolUse: tu }
+    }
+  }
+  if (res.usage) {
+    yield { type: 'usage', usage: res.usage }
+  }
+  yield { type: 'end', stopReason: res.stopReason }
+}
+
+/**
+ * Drain an async-iterable stream of chunks into a single `LlmResponse`.
+ * Useful for provider `complete()` implementations during the Phase 8
+ * transition AND for callers (tests, simple SDK users) that don't need
+ * incremental output.
+ *
+ * Semantics:
+ * - Concatenates every `text` chunk in arrival order.
+ * - Collects every `tool_use` chunk into `response.toolUses`.
+ * - Captures the first `usage` chunk (subsequent ones are ignored — see
+ *   {@link LlmStreamUsageChunk}).
+ * - Maps the terminal chunk:
+ *     `'end'`   → `stopReason` from the chunk
+ *     `'error'` → `stopReason: 'error'`, appends error message to `text`
+ * - If the iterator ends without an explicit terminal chunk (provider
+ *   bug), returns `stopReason: 'end_turn'` on a best-effort basis.
+ */
+export async function drainStream(
+  stream: AsyncIterable<LlmStreamChunk>,
+): Promise<LlmResponse> {
+  const textParts: string[] = []
+  const toolUses: LlmToolUseBlock[] = []
+  let usage: LlmUsage | undefined
+  let stopReason: LlmStopReason = 'end_turn'
+  let errorAppend: string | undefined
+
+  for await (const chunk of stream) {
+    switch (chunk.type) {
+      case 'text':
+        if (chunk.text.length > 0) textParts.push(chunk.text)
+        break
+      case 'tool_use':
+        toolUses.push(chunk.toolUse)
+        break
+      case 'usage':
+        // First usage chunk wins. Per LlmStreamUsageChunk contract a
+        // well-behaved provider only emits one; defending against the
+        // misbehaving case so accounting code isn't double-counted.
+        if (!usage) usage = chunk.usage
+        break
+      case 'end':
+        stopReason = chunk.stopReason
+        break
+      case 'error':
+        stopReason = 'error'
+        errorAppend = `[${chunk.code}] ${chunk.message}`
+        break
+    }
+  }
+
+  let text = textParts.join('')
+  if (errorAppend) text = text ? `${text}\n\n${errorAppend}` : errorAppend
+
+  const out: LlmResponse = { text, stopReason }
+  if (toolUses.length > 0) out.toolUses = toolUses
+  if (usage) out.usage = usage
+  return out
 }
 
 /**

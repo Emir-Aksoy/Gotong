@@ -13,7 +13,15 @@ export type {
   LlmToolDefinition,
   LlmAgentToolset,
   LlmToolCallResult,
+  // Phase 8 streaming surface
+  LlmStreamChunk,
+  LlmStreamTextChunk,
+  LlmStreamToolUseChunk,
+  LlmStreamUsageChunk,
+  LlmStreamEndChunk,
+  LlmStreamErrorChunk,
 } from './types.js'
+export { drainStream, completeAsStream } from './types.js'
 export {
   LlmAgent,
   type LlmAgentOptions,

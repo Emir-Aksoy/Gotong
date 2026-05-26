@@ -1,7 +1,9 @@
+import { drainStream } from './types.js'
 import type {
   LlmProvider,
   LlmRequest,
   LlmResponse,
+  LlmStreamChunk,
   LlmToolUseBlock,
 } from './types.js'
 
@@ -33,6 +35,13 @@ export interface MockProviderOptions {
    * tool-use loop without spinning up a real provider.
    */
   script?: ReadonlyArray<MockScriptEntry>
+  /**
+   * Phase 8 — split a text reply into N stream chunks so tests can
+   * observe incremental delivery. Default: 1 (one chunk per text reply).
+   * Ignored for `tool_use` script entries (they always emit as a single
+   * `tool_use` chunk since the tool-use loop needs the complete block).
+   */
+  textChunkCount?: number
 }
 
 export type MockScriptEntry =
@@ -60,48 +69,100 @@ export class MockLlmProvider implements LlmProvider {
     this.name = opts.name ?? 'mock'
   }
 
-  async complete(req: LlmRequest): Promise<LlmResponse> {
-    if (this.opts.delayMs) {
-      await new Promise((r) => setTimeout(r, this.opts.delayMs))
-    }
+  /**
+   * Phase 8 — streaming entry point. All MockLlmProvider behavior is
+   * driven from here; `complete()` simply drains the same iterator so
+   * the two methods can never disagree (no double-bookkeeping).
+   *
+   * Throws synchronously when `throwError` is set so the LlmAgent's
+   * existing thrown-error path (failed TaskResult, onAuthFailure) still
+   * exercises in tests that exercise it.
+   */
+  stream(req: LlmRequest, _signal?: AbortSignal): AsyncIterable<LlmStreamChunk> {
+    // Mirror the legacy complete() error semantics — throw synchronously,
+    // BEFORE the iterator is constructed, so existing tests asserting
+    // `await expect(provider.complete(req)).rejects.toThrow(...)` continue
+    // to work after we route them through stream().
     if (this.opts.throwError) {
       throw new Error(this.opts.throwError)
+    }
+    return this.makeStream(req)
+  }
+
+  async complete(req: LlmRequest): Promise<LlmResponse> {
+    return drainStream(this.stream(req))
+  }
+
+  /**
+   * Internal: build the chunk iterator. Pulled out so `stream()` can
+   * throw synchronously on `throwError` while the actual generator
+   * runs lazily.
+   */
+  private async *makeStream(req: LlmRequest): AsyncIterable<LlmStreamChunk> {
+    if (this.opts.delayMs) {
+      await new Promise((r) => setTimeout(r, this.opts.delayMs))
     }
     // Scripted entry, if any remain.
     const entry = this.opts.script?.[this.scriptCursor]
     if (entry) {
       this.scriptCursor++
       if (entry.kind === 'tool_use') {
-        const res: LlmResponse = {
-          text: entry.text ?? '',
-          stopReason: 'tool_use',
-          toolUses: entry.toolUses,
+        if (entry.text) yield { type: 'text', text: entry.text }
+        for (const tu of entry.toolUses) {
+          yield { type: 'tool_use', toolUse: tu }
+        }
+        yield {
+          type: 'usage',
           usage: {
             inputTokens: estimateTokens(req),
-            outputTokens: 16, // arbitrary stand-in
+            outputTokens: 16, // arbitrary stand-in, matches legacy behavior
           },
         }
-        return res
+        yield { type: 'end', stopReason: 'tool_use' }
+        return
       }
       // entry.kind === 'text'
-      return {
-        text: entry.text,
-        stopReason: entry.stopReason ?? 'end_turn',
+      yield* this.streamText(entry.text)
+      yield {
+        type: 'usage',
         usage: {
           inputTokens: estimateTokens(req),
           outputTokens: Math.ceil(entry.text.length / 4),
         },
       }
+      yield { type: 'end', stopReason: entry.stopReason ?? 'end_turn' }
+      return
     }
+    // Fallback to the reply shortcut.
     const text =
       typeof this.opts.reply === 'function' ? this.opts.reply(req) : this.opts.reply
-    return {
-      text,
-      stopReason: this.opts.stopReason ?? 'end_turn',
+    yield* this.streamText(text)
+    yield {
+      type: 'usage',
       usage: {
         inputTokens: estimateTokens(req),
         outputTokens: Math.ceil(text.length / 4),
       },
+    }
+    yield { type: 'end', stopReason: this.opts.stopReason ?? 'end_turn' }
+  }
+
+  /**
+   * Split a string into `textChunkCount` roughly-equal `'text'` chunks so
+   * tests can observe incremental arrival. Empty `text` emits zero chunks
+   * (the contract in `LlmStreamTextChunk` forbids empty-string chunks).
+   */
+  private *streamText(text: string): Iterable<LlmStreamChunk> {
+    if (!text) return
+    const n = Math.max(1, this.opts.textChunkCount ?? 1)
+    if (n === 1) {
+      yield { type: 'text', text }
+      return
+    }
+    const size = Math.ceil(text.length / n)
+    for (let i = 0; i < text.length; i += size) {
+      const slice = text.slice(i, i + size)
+      if (slice.length > 0) yield { type: 'text', text: slice }
     }
   }
 }

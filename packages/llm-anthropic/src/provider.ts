@@ -1,4 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk'
+import { completeAsStream } from '@aipehub/llm'
 import type {
   LlmContentBlock,
   LlmMessage,
@@ -6,6 +7,7 @@ import type {
   LlmRequest,
   LlmResponse,
   LlmStopReason,
+  LlmStreamChunk,
   LlmToolUseBlock,
 } from '@aipehub/llm'
 
@@ -77,6 +79,18 @@ export class AnthropicProvider implements LlmProvider {
       const apiKey = opts.apiKey ?? process.env.ANTHROPIC_API_KEY
       this.client = new Anthropic(apiKey ? { apiKey } : {})
     }
+  }
+
+  /**
+   * Phase 8 M1 — stream interface satisfied via the `completeAsStream`
+   * transition shim. M2 replaces this with native Anthropic SSE driven
+   * by `client.messages.stream()`. Throwing is preserved: the shim
+   * awaits the underlying `complete()` synchronously on first
+   * iteration, so auth / transport errors still surface on the LlmAgent
+   * `onAuthFailure` path.
+   */
+  stream(req: LlmRequest, _signal?: AbortSignal): AsyncIterable<LlmStreamChunk> {
+    return completeAsStream(() => this.complete(req))
   }
 
   async complete(req: LlmRequest): Promise<LlmResponse> {
