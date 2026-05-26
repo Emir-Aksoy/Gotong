@@ -313,7 +313,7 @@ interface LlmResponse {
 | 加密 API key 存储 | ✅ 已出（v2.1） | `<space>/secrets.enc.json` 用 AES-256-GCM；master key 文件或 `AIPE_SECRET_KEY` env |
 | 贡献评分 + 榜单 | ✅ 已出（v2.1） | `Task.weight`、`Evaluation.rating`、`hub.leaderboard(...)`、按 publisher 退出 |
 | 模板库（内建 + 社区） | ✅ 已出（v2.1） | `templates/{,community}/{agents,teams}/`；`@aipehub/web` 里的清单解析 |
-| **LLM 流式** | ❌ 暂无 | `LlmResponse` 非流式。需要分块 RESULT frame + `LlmProvider.complete` 上的 async iterable。 |
+| LLM 流式 | ✅ 已出 (v3.8 / Phase 8) | `LlmProvider.stream(req)` 返回 `AsyncIterable<LlmStreamChunk>`。`LlmAgent` 按 chunk 消费;`LocalAgentPool` 把它们写入 transcript (`llm_stream_chunk`);`@aipehub/web` SSE 推到 admin UI 做打字机渲染。 |
 | **`LlmAgent` 内的 tool / function calling** | ❌ 暂无 | `LlmAgent` 透传 `task.payload`，返回 text。多轮工具循环今天还是 app code 的事。 |
 | **跨重启的 pending 任务持久化** | ❌ 暂无 | 只持久化 transcript。`SqliteStorage` 上的 pending-tasks 表草图有了，但 Hub 侧没接。见 §12。 |
 | **保留 in-flight 任务的重连** | ❌ 暂无 | 断连用 `remote_disconnect` 失败所有 outstanding 任务。wire 上保留了用之前 `sessionId` 的 `RESUME` frame，没实现。 |

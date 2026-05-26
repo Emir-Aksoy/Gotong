@@ -1,7 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import { Hub } from '@aipehub/core'
 import { EMPTY_SERVICE_CTX, type ServiceCtx } from '@aipehub/services-sdk'
-import { LlmAgent, MockLlmProvider, type LlmRequest } from '../src/index.js'
+import {
+  LlmAgent,
+  MockLlmProvider,
+  drainStream,
+  type LlmRequest,
+  type LlmStreamChunk,
+} from '../src/index.js'
 
 function makeTask(payload: unknown, capabilities = ['draft']) {
   return {
@@ -404,7 +410,7 @@ describe('LlmAgent — services ctx injection (PR-6)', () => {
         const items = (await this.services.memory?.recall({ query: '' })) ?? []
         const base = this.buildRequest(task)
         const sys = `prior memories: ${items.map((i) => i.text).join('; ')}`
-        const res = await this.provider.complete({ ...base, system: sys })
+        const res = await drainStream(this.provider.stream({ ...base, system: sys }))
         return this.parseResponse(res, task)
       }
     }
@@ -574,9 +580,9 @@ describe('LlmAgent — tool-use loop (v0.3)', () => {
     // Wrap so we can also capture the request seen on each round.
     const wrappedProvider = {
       name: provider.name,
-      complete: async (req: LlmRequest) => {
+      stream: (req: LlmRequest) => {
         capturedReqs.push(req)
-        return provider.complete(req)
+        return provider.stream(req)
       },
     }
 
@@ -655,9 +661,9 @@ describe('LlmAgent — tool-use loop (v0.3)', () => {
     })
     const wrapped = {
       name: provider.name,
-      complete: async (req: LlmRequest) => {
+      stream: (req: LlmRequest) => {
         capturedReqs.push(req)
-        return provider.complete(req)
+        return provider.stream(req)
       },
     }
 
@@ -692,20 +698,17 @@ describe('LlmAgent — tool-use loop (v0.3)', () => {
     })
 
     // Always returns tool_use → would loop forever absent the cap.
-    const provider: { name: string; complete: (r: LlmRequest) => Promise<any> } = {
+    const provider = {
       name: 'loop-forever',
-      complete: async () => ({
-        text: 'thinking',
-        stopReason: 'tool_use' as const,
-        toolUses: [
-          {
-            type: 'tool_use' as const,
-            id: 'tx',
-            name: 'fs__read',
-            input: {},
-          },
-        ],
-      }),
+      // eslint-disable-next-line require-yield -- async generator IS the contract
+      stream: async function* (): AsyncIterable<LlmStreamChunk> {
+        yield { type: 'text', text: 'thinking' }
+        yield {
+          type: 'tool_use',
+          toolUse: { type: 'tool_use', id: 'tx', name: 'fs__read', input: {} },
+        }
+        yield { type: 'end', stopReason: 'tool_use' }
+      },
     }
 
     const hub = Hub.inMemory()
@@ -760,9 +763,9 @@ describe('LlmAgent — tool-use loop (v0.3)', () => {
     })
     const wrapped = {
       name: provider.name,
-      complete: async (req: LlmRequest) => {
+      stream: (req: LlmRequest) => {
         capturedReqs.push(req)
-        return provider.complete(req)
+        return provider.stream(req)
       },
     }
 
@@ -786,7 +789,7 @@ describe('LlmAgent — tool-use loop (v0.3)', () => {
 })
 
 // =========================================================================
-// B2.2 — preCallHook: invoked before every provider.complete (including
+// B2.2 — preCallHook: invoked before every provider.stream (including
 // each round of the tool-use loop). Used by host wiring (OrgApiPool's
 // makeLlmQuotaGate) to charge usage / enforce caps.
 // =========================================================================
@@ -811,7 +814,7 @@ describe('LlmAgent — preCallHook (B2.2)', () => {
     expect(providerCalled).toBe(1)
   })
 
-  it('sync hook is awaited before provider.complete; receives the task', async () => {
+  it('sync hook is awaited before provider.stream; receives the task', async () => {
     const order: string[] = []
     let hookSawTask: unknown
     const provider = new MockLlmProvider({

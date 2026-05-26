@@ -24,8 +24,12 @@ describe('@aipehub/llm public surface', () => {
 
   it('MockLlmProvider satisfies the LlmProvider contract structurally', () => {
     const p = new llm.MockLlmProvider({ reply: '' })
-    // Provider contract: name + complete()
+    // Provider contract (Phase 8 M8): name + stream() — `complete` is gone.
     expect(typeof p.name).toBe('string')
-    expect(typeof p.complete).toBe('function')
+    expect(typeof p.stream).toBe('function')
+  })
+
+  it('exports drainStream helper (Phase 8 — replacement for complete())', () => {
+    expect(typeof llm.drainStream).toBe('function')
   })
 })

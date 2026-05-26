@@ -200,57 +200,6 @@ describe('LlmAgent — onStreamChunk hook (Phase 8 M5)', () => {
     }
   })
 
-  it('legacy complete-only provider (no stream method) still works via fallback', async () => {
-    // This is the Phase 8 M5 transition shim that covers fake test
-    // providers + SDK consumers that haven't upgraded. To be removed
-    // in M8 along with LlmProvider.complete.
-    const legacy = {
-      name: 'legacy',
-      complete: async () => ({
-        text: 'via-complete',
-        stopReason: 'end_turn' as const,
-        usage: { inputTokens: 1, outputTokens: 2 },
-      }),
-    }
-    const seenTypes: string[] = []
-    const hub = Hub.inMemory()
-    await hub.start()
-    hub.register(
-      new LlmAgent({
-        id: 'a',
-        capabilities: ['draft'],
-        provider: legacy as any,
-        onStreamChunk: (c) => {
-          seenTypes.push(c.type)
-        },
-      }),
-    )
-    const out = await hub.dispatch(makeTask('go'))
-    await hub.stop()
-    expect(out.kind).toBe('ok')
-    // Fallback yields text → usage → end synthesized from complete().
-    expect(seenTypes).toEqual(['text', 'usage', 'end'])
-  })
-
-  it('provider with neither stream nor complete fails with a clear error', async () => {
-    const empty = { name: 'empty' }
-    const hub = Hub.inMemory()
-    await hub.start()
-    hub.register(
-      new LlmAgent({
-        id: 'a',
-        capabilities: ['draft'],
-        provider: empty as any,
-      }),
-    )
-    const out = await hub.dispatch(makeTask('go'))
-    await hub.stop()
-    expect(out.kind).toBe('failed')
-    if (out.kind === 'failed') {
-      expect(out.error).toMatch(/neither stream\(\) nor complete\(\)/)
-    }
-  })
-
   it('hook is OPTIONAL — provider runs unchanged when not set', async () => {
     // Sanity check: nothing in the rest of LlmAgent depends on
     // onStreamChunk being defined.

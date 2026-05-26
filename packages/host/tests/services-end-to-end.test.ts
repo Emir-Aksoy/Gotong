@@ -27,7 +27,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { createLogger, Hub, Space, type Task } from '@aipehub/core'
-import { LlmAgent, MockLlmProvider } from '@aipehub/llm'
+import { LlmAgent, MockLlmProvider, drainStream } from '@aipehub/llm'
 import { ownerKey, type ServiceCtx } from '@aipehub/services-sdk'
 
 import { bootstrapServices, type HubServices } from '../src/services/index.js'
@@ -47,7 +47,7 @@ class CoachAgent extends LlmAgent {
     const past = memory ? await memory.recall({ query: '' }) : []
     const summary = `prior=${past.length}`
     const req = this.buildRequest(task)
-    const res = await this.provider.complete({ ...req, system: summary })
+    const res = await drainStream(this.provider.stream({ ...req, system: summary }))
     const out = this.parseResponse(res, task)
     // Remember the new exchange.
     const payload = task.payload as { topic?: string } | undefined

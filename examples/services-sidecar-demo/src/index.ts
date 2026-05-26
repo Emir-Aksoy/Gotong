@@ -38,7 +38,7 @@ import { join } from 'node:path'
 
 import { Hub, Space, type Task } from '@aipehub/core'
 import { bootstrapServices } from '@aipehub/host/services'
-import { MockLlmProvider } from '@aipehub/llm'
+import { MockLlmProvider, drainStream } from '@aipehub/llm'
 import { AgentParticipant, connect, type Session, type ServiceClient } from '@aipehub/sdk-node'
 import { serveWebSocket, type WebSocketTransportHandle } from '@aipehub/transport-ws'
 
@@ -71,9 +71,11 @@ class WriterAgent extends AgentParticipant {
     log(`[writer]   case memory has ${prior.length} prior entries`)
 
     // Pretend to write a draft via the mock provider.
-    const reply = await this.provider.complete({
-      messages: [{ role: 'user', content: payload.prompt }],
-    })
+    const reply = await drainStream(
+      this.provider.stream({
+        messages: [{ role: 'user', content: payload.prompt }],
+      }),
+    )
     const draft = reply.text
 
     // Remember the draft so the reviewer sees it.
@@ -105,14 +107,16 @@ class ReviewerAgent extends AgentParticipant {
     const seen = await caseMemory.recall({ k: 20 })
     log(`[reviewer]   case memory has ${seen.length} entries from writer`)
 
-    const reply = await this.provider.complete({
-      messages: [
-        {
-          role: 'user',
-          content: `Review ${seen.length} prior entries: ${seen.map((e) => e.text).join(' | ')}`,
-        },
-      ],
-    })
+    const reply = await drainStream(
+      this.provider.stream({
+        messages: [
+          {
+            role: 'user',
+            content: `Review ${seen.length} prior entries: ${seen.map((e) => e.text).join(' | ')}`,
+          },
+        ],
+      }),
+    )
 
     // Reviewer also writes back a note so a future call would see both.
     await caseMemory.remember({

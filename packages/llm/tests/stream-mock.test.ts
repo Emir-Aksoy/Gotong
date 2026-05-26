@@ -1,5 +1,5 @@
 /**
- * Phase 8 M1 — MockLlmProvider.stream() and the drainStream helper.
+ * Phase 8 — MockLlmProvider.stream() and the drainStream helper.
  *
  * Coverage focus:
  *   - stream emits text → usage → end in that order for simple replies
@@ -7,7 +7,8 @@
  *   - textChunkCount splits the reply into N text chunks
  *   - empty reply emits NO text chunks (per LlmStreamTextChunk contract)
  *   - throwError throws SYNCHRONOUSLY before the iterator yields
- *   - drainStream reproduces the legacy LlmResponse exactly
+ *   - drainStream folds chunks into an LlmResponse with the same field
+ *     semantics the legacy `complete()` API had (text/stopReason/usage)
  *   - drainStream maps an error chunk to stopReason='error' + appends message
  *   - drainStream takes the FIRST usage chunk (defensive vs misbehaving providers)
  *   - drainStream defaults stopReason='end_turn' when no terminal chunk
@@ -82,15 +83,21 @@ describe('MockLlmProvider — stream() basics', () => {
 describe('MockLlmProvider — stream() error semantics', () => {
   it('throwError throws SYNCHRONOUSLY (before iterator yields)', () => {
     const p = new MockLlmProvider({ reply: 'never', throwError: 'auth_failed' })
-    // Calling .stream() itself must throw — mirrors the legacy
-    // `await complete()` rejection so LlmAgent's existing error path
-    // and onAuthFailure hook keep firing in M5.
+    // Calling .stream() itself must throw so LlmAgent's existing error
+    // path and onAuthFailure hook (M5) fire on the synchronous throw
+    // rather than waiting for the iterator's first .next().
     expect(() => p.stream({ messages: [] })).toThrow(/auth_failed/)
   })
 
-  it('complete() still rejects (drainStream surfaces the sync throw)', async () => {
+  it('drainStream surfaces the sync throw from stream()', async () => {
     const p = new MockLlmProvider({ reply: '', throwError: 'oops' })
-    await expect(p.complete({ messages: [] })).rejects.toThrow(/oops/)
+    // The throw fires inside `p.stream(...)` synchronously, BEFORE
+    // drainStream sees the iterator. Wrap in an async IIFE so the
+    // throw lands as a rejected promise rather than escaping the
+    // expect() expression unmediated.
+    await expect(
+      (async () => drainStream(p.stream({ messages: [] })))(),
+    ).rejects.toThrow(/oops/)
   })
 })
 
@@ -189,7 +196,7 @@ describe('MockLlmProvider — chunks option (M4 raw stream control)', () => {
         { type: 'error', code: 'mock_simulated', message: 'boom' },
       ],
     })
-    const res = await p.complete({ messages: [] })
+    const res = await drainStream(p.stream({ messages: [] }))
     expect(res.stopReason).toBe('error')
     expect(res.text).toContain('partial')
     expect(res.text).toContain('mock_simulated')
@@ -209,7 +216,7 @@ describe('MockLlmProvider — chunks option (M4 raw stream control)', () => {
       reply: '',
       chunks: [{ type: 'text', text: 'no end' }],
     })
-    const res = await p.complete({ messages: [] })
+    const res = await drainStream(p.stream({ messages: [] }))
     // drainStream's provider-bug fallback fills end_turn.
     expect(res.text).toBe('no end')
     expect(res.stopReason).toBe('end_turn')
@@ -296,17 +303,18 @@ describe('drainStream — generic chunk → LlmResponse', () => {
     expect(r.toolUses).toBeUndefined()
   })
 
-  it('round-trips MockLlmProvider.stream() identically to legacy complete()', async () => {
+  it('reproduces the canonical LlmResponse shape (text/stopReason/usage)', async () => {
+    // Sanity check for the basic happy path. Phase 8 M8 removed the
+    // legacy `provider.complete()` method this test used to compare
+    // against — drainStream is now the single source of truth.
     const p = new MockLlmProvider({
       reply: 'roundtrip',
       stopReason: 'end_turn',
     })
-    const viaStream = await drainStream(p.stream({ messages: [] }))
-    const viaComplete = await p.complete({ messages: [] })
-    // text + stopReason + usage tokens must match exactly.
-    expect(viaStream.text).toBe(viaComplete.text)
-    expect(viaStream.stopReason).toBe(viaComplete.stopReason)
-    expect(viaStream.usage?.inputTokens).toBe(viaComplete.usage?.inputTokens)
-    expect(viaStream.usage?.outputTokens).toBe(viaComplete.usage?.outputTokens)
+    const res = await drainStream(p.stream({ messages: [] }))
+    expect(res.text).toBe('roundtrip')
+    expect(res.stopReason).toBe('end_turn')
+    expect(res.usage?.inputTokens).toBe(0)
+    expect(res.usage?.outputTokens).toBe(Math.ceil('roundtrip'.length / 4))
   })
 })

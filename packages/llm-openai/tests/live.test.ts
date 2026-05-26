@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { drainStream } from '@aipehub/llm'
 
 import { OpenAIProvider } from '../src/index.js'
 
@@ -11,10 +12,10 @@ describe.skipIf(!process.env.OPENAI_API_KEY)('OpenAIProvider — live API', () =
   it('returns non-empty text for a tiny prompt', async () => {
     const provider = new OpenAIProvider()
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'Say the single word: pong' }],
       maxTokens: 32,
-    })
+    }))
 
     expect(typeof res.text).toBe('string')
     expect(res.text.length).toBeGreaterThan(0)

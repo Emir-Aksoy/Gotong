@@ -275,19 +275,19 @@ export interface LlmStreamErrorChunk {
 /**
  * Vendor adapter. One per provider package (anthropic / openai / mock / ...).
  *
- * Phase 8: streaming is first-class. Implementations MUST provide
- * `stream()`. `complete()` is kept as a convenience method that drains a
- * stream into a single `LlmResponse`; the base helper `drainStream()`
- * (exported below) does this generically so providers can delegate.
+ * Phase 8 M8 — stream-only. `stream()` is the single LLM call surface;
+ * the legacy `complete()` was removed once the LlmAgent loop, all
+ * providers, and the test suite were migrated to consume streams
+ * directly. Callers who want a one-shot final-response shape should
+ * pipe through {@link drainStream} (exported below) — it folds any
+ * `LlmStreamChunk` iterable into an `LlmResponse` with the same
+ * semantics complete() had, minus the provider-specific `raw` escape
+ * hatch (which can't survive the stream contract).
  *
  * `stream()` MUST throw synchronously on transport or auth errors so the
  * LlmAgent can map them into a failed TaskResult (and trigger the
  * `onAuthFailure` hook). Errors that surface mid-generation belong in an
  * `'error'` chunk, NOT a thrown exception.
- *
- * NOTE: `complete()` is scheduled for removal in Phase 8 M8 once all
- * call sites (LlmAgent + tests) are migrated to consume `stream()`
- * directly. New code should prefer `stream()` already.
  */
 export interface LlmProvider {
   /** Human-readable identifier — used in logs and the `raw` envelope. */
@@ -303,14 +303,6 @@ export interface LlmProvider {
    * stream runs to natural completion.
    */
   stream(req: LlmRequest, signal?: AbortSignal): AsyncIterable<LlmStreamChunk>
-  /**
-   * Convenience: drain a `stream()` into a single `LlmResponse`. Provider
-   * packages can delegate to `drainStream(this.stream(req))` for the
-   * default implementation. To be removed in Phase 8 M8.
-   *
-   * @deprecated Use `stream()`. Scheduled for removal in Phase 8 M8.
-   */
-  complete(req: LlmRequest): Promise<LlmResponse>
 }
 
 /**

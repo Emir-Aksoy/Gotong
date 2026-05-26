@@ -1,9 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { LlmRequest, LlmStreamChunk } from '@aipehub/llm'
+import { drainStream, type LlmRequest, type LlmStreamChunk } from '@aipehub/llm'
 
 import { AnthropicProvider } from '../src/index.js'
 
 /**
+ * Phase 8 M8 — `LlmProvider.complete` is gone. Most of the tests below
+ * still describe themselves in terms of "translate this Anthropic
+ * response object" because that's the easiest way to specify wire
+ * behavior at a glance — even though under the hood the provider now
+ * only speaks streaming. We bridge by translating a non-stream-shaped
+ * `AnthropicMessageLike` into the SSE event sequence the real SDK
+ * would emit for the same final message, then letting `provider.stream`
+ * + `drainStream` reproduce the same `LlmResponse` the old `complete()`
+ * would have returned (minus the `raw` field, which can't survive
+ * the stream contract).
+ *
  * Build a fake Anthropic SDK client exposing only the methods the provider
  * actually calls. The shape is duck-typed to match the real SDK; we cast to
  * `any` at the constructor boundary so we don't need to pin to a specific
@@ -12,11 +23,103 @@ import { AnthropicProvider } from '../src/index.js'
 function makeFakeClient(
   impl: (body: Record<string, unknown>) => Promise<unknown> | unknown,
 ) {
-  const create = vi.fn(async (body: Record<string, unknown>) => impl(body))
+  const create = vi.fn(async (body: Record<string, unknown>) => {
+    const msg = (await impl(body)) as AnthropicMessageLike
+    // We always stream — the production code path doesn't have a non-stream
+    // mode any more, so if a test ever sends body.stream=false something
+    // is wrong elsewhere.
+    return synthesizeAnthropicStream(msg)
+  })
   return {
     client: { messages: { create } },
     create,
   }
+}
+
+interface AnthropicMessageLike {
+  content?: ReadonlyArray<{
+    type: string
+    text?: string
+    id?: string
+    name?: string
+    input?: unknown
+  }>
+  stop_reason?: string | null
+  usage?: {
+    input_tokens: number
+    output_tokens: number
+    cache_creation_input_tokens?: number
+    cache_read_input_tokens?: number
+  }
+}
+
+/**
+ * Convert a non-streaming Anthropic message shape into the SSE-event
+ * sequence the real SDK would emit. Used by `makeFakeClient` so tests
+ * can keep declaring "the model returned this message" instead of
+ * hand-rolling event sequences for every case.
+ *
+ * NOTE: this is a *test-only* helper. It deliberately does NOT cover
+ * malformed-JSON-args paths or other adversarial scenarios — those
+ * live in the dedicated streaming tests that build SSE event lists
+ * directly via `makeFakeStreamingClient`.
+ */
+async function* synthesizeAnthropicStream(
+  msg: AnthropicMessageLike,
+): AsyncIterable<unknown> {
+  const startUsage: Record<string, unknown> = {}
+  if (msg.usage) {
+    startUsage.input_tokens = msg.usage.input_tokens
+    startUsage.output_tokens = 0
+    if (msg.usage.cache_creation_input_tokens !== undefined) {
+      startUsage.cache_creation_input_tokens = msg.usage.cache_creation_input_tokens
+    }
+    if (msg.usage.cache_read_input_tokens !== undefined) {
+      startUsage.cache_read_input_tokens = msg.usage.cache_read_input_tokens
+    }
+  }
+  yield { type: 'message_start', message: { usage: startUsage } }
+  for (const block of msg.content ?? []) {
+    if (block.type === 'text') {
+      yield { type: 'content_block_start', content_block: { type: 'text' } }
+      if (typeof block.text === 'string' && block.text.length > 0) {
+        yield {
+          type: 'content_block_delta',
+          delta: { type: 'text_delta', text: block.text },
+        }
+      }
+      yield { type: 'content_block_stop' }
+    } else if (block.type === 'tool_use') {
+      yield {
+        type: 'content_block_start',
+        content_block: { type: 'tool_use', id: block.id, name: block.name },
+      }
+      // Anthropic's streamer emits input as input_json_delta fragments;
+      // we send the whole thing in one delta. The streamImpl in
+      // provider.ts re-parses it, so non-object inputs (arrays /
+      // strings) round-trip into `{}` via the same coercion path the
+      // production code uses.
+      if (block.input !== undefined && block.input !== null) {
+        const serialized = JSON.stringify(block.input)
+        if (serialized.length > 0 && serialized !== '{}') {
+          yield {
+            type: 'content_block_delta',
+            delta: { type: 'input_json_delta', partial_json: serialized },
+          }
+        }
+      }
+      yield { type: 'content_block_stop' }
+    }
+  }
+  const delta: Record<string, unknown> = {}
+  if (msg.stop_reason !== undefined && msg.stop_reason !== null) {
+    delta.stop_reason = msg.stop_reason
+  }
+  const finalUsage: Record<string, unknown> = msg.usage
+    ? { output_tokens: msg.usage.output_tokens }
+    : {}
+  yield { type: 'message_delta', delta, usage: finalUsage }
+  yield { type: 'message_stop' }
 }
 
 describe('AnthropicProvider — request translation', () => {
@@ -40,7 +143,7 @@ describe('AnthropicProvider — request translation', () => {
       model: 'claude-3-5-sonnet-latest',
     }
 
-    await provider.complete(req)
+    await drainStream(provider.stream(req))
 
     expect(create).toHaveBeenCalledTimes(1)
     const body = create.mock.calls[0]![0] as Record<string, unknown>
@@ -66,7 +169,7 @@ describe('AnthropicProvider — request translation', () => {
       defaultMaxTokens: 42,
     })
 
-    await provider.complete({ messages: [{ role: 'user', content: 'hi' }] })
+    await drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }] }))
 
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.model).toBe('claude-default')
@@ -82,7 +185,7 @@ describe('AnthropicProvider — request translation', () => {
     }))
     const provider = new AnthropicProvider({ client: client as any })
 
-    await provider.complete({ messages: [{ role: 'user', content: 'hi' }] })
+    await drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }] }))
 
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.model).toBe('claude-opus-4-7')
@@ -103,14 +206,15 @@ describe('AnthropicProvider — response translation', () => {
     }))
     const provider = new AnthropicProvider({ client: client as any })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
-    })
+    }))
 
     expect(res.text).toBe('hello world')
     expect(res.stopReason).toBe('end_turn')
     expect(res.usage).toEqual({ inputTokens: 5, outputTokens: 3 })
-    expect(res.raw).toBeDefined()
+    // Phase 8 M8: `raw` was the escape hatch on the old complete() path;
+    // the stream contract doesn't carry it, so we don't assert it any more.
   })
 
   it('maps stop_sequence to end_turn', async () => {
@@ -120,9 +224,9 @@ describe('AnthropicProvider — response translation', () => {
     }))
     const provider = new AnthropicProvider({ client: client as any })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
-    })
+    }))
     expect(res.stopReason).toBe('end_turn')
   })
 
@@ -133,9 +237,9 @@ describe('AnthropicProvider — response translation', () => {
     }))
     const provider = new AnthropicProvider({ client: client as any })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
-    })
+    }))
     expect(res.stopReason).toBe('max_tokens')
   })
 
@@ -149,9 +253,9 @@ describe('AnthropicProvider — response translation', () => {
     }))
     const provider = new AnthropicProvider({ client: client as any })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
-    })
+    }))
     expect(res.stopReason).toBe('error')
   })
 
@@ -173,9 +277,9 @@ describe('AnthropicProvider — response translation', () => {
       },
     }))
     const provider = new AnthropicProvider({ client: client as any })
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
-    })
+    }))
     expect(res.usage).toEqual({
       inputTokens: 20,
       outputTokens: 5,
@@ -196,23 +300,30 @@ describe('AnthropicProvider — response translation', () => {
       },
     }))
     const provider = new AnthropicProvider({ client: client as any })
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
-    })
+    }))
     expect(res.usage).toEqual({ inputTokens: 50, outputTokens: 10 })
   })
 
-  it('omits usage when the response has none', async () => {
+  it('still emits a usage chunk (zeroed) when the response carries no usage data', async () => {
+    // Phase 8 M8 — the streaming code path always coalesces a usage
+    // chunk on message_stop, even if every counter is zero. This is
+    // different from the old complete()'s behavior (which omitted
+    // .usage entirely when the SDK message had none) but it's the
+    // more honest shape for a stream: a usage chunk arrived, we
+    // forward it. Accounting code that wants to skip zero-token
+    // usage can do so at the consumer.
     const { client } = makeFakeClient(async () => ({
       content: [{ type: 'text', text: 'ok' }],
       stop_reason: 'end_turn',
     }))
     const provider = new AnthropicProvider({ client: client as any })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
-    })
-    expect(res.usage).toBeUndefined()
+    }))
+    expect(res.usage).toEqual({ inputTokens: 0, outputTokens: 0 })
   })
 
   it('exposes provider name', () => {
@@ -233,10 +344,10 @@ describe('AnthropicProvider — temperature handling for thinking models', () =>
       stop_reason: 'end_turn',
     }))
     const provider = new AnthropicProvider({ client: client as any })
-    await provider.complete({
+    await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
       temperature: 0.5,
-    })
+    }))
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.temperature).toBeUndefined()
     expect(body.model).toBe('claude-opus-4-7')
@@ -248,11 +359,11 @@ describe('AnthropicProvider — temperature handling for thinking models', () =>
       stop_reason: 'end_turn',
     }))
     const provider = new AnthropicProvider({ client: client as any })
-    await provider.complete({
+    await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
       model: 'claude-opus-4-9',
       temperature: 0.7,
-    })
+    }))
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.temperature).toBeUndefined()
   })
@@ -263,11 +374,11 @@ describe('AnthropicProvider — temperature handling for thinking models', () =>
       stop_reason: 'end_turn',
     }))
     const provider = new AnthropicProvider({ client: client as any })
-    await provider.complete({
+    await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
       model: 'claude-sonnet-4-6',
       temperature: 0.3,
-    })
+    }))
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.temperature).toBe(0.3)
   })
@@ -549,7 +660,7 @@ describe('AnthropicProvider — error propagation', () => {
     const provider = new AnthropicProvider({ client: client as any })
 
     await expect(
-      provider.complete({ messages: [{ role: 'user', content: 'hi' }] }),
+      drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }] })),
     ).rejects.toThrow('auth_denied')
   })
 })
@@ -564,7 +675,7 @@ describe('AnthropicProvider — tool-use translation', () => {
     }))
     const provider = new AnthropicProvider({ client: client as any })
 
-    await provider.complete({
+    await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'read README' }],
       tools: [
         {
@@ -573,7 +684,7 @@ describe('AnthropicProvider — tool-use translation', () => {
           inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
         },
       ],
-    })
+    }))
 
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.tools).toEqual([
@@ -595,11 +706,11 @@ describe('AnthropicProvider — tool-use translation', () => {
     }))
     const provider = new AnthropicProvider({ client: client as any })
 
-    await provider.complete({ messages: [{ role: 'user', content: 'hi' }] })
+    await drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }] }))
     const body1 = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body1).not.toHaveProperty('tools')
 
-    await provider.complete({ messages: [{ role: 'user', content: 'hi' }], tools: [] })
+    await drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }], tools: [] }))
     const body2 = create.mock.calls[1]![0] as Record<string, unknown>
     expect(body2).not.toHaveProperty('tools')
   })
@@ -620,7 +731,7 @@ describe('AnthropicProvider — tool-use translation', () => {
     }))
     const provider = new AnthropicProvider({ client: client as any })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'read README' }],
       tools: [
         {
@@ -628,7 +739,7 @@ describe('AnthropicProvider — tool-use translation', () => {
           inputSchema: { type: 'object' },
         },
       ],
-    })
+    }))
 
     expect(res.stopReason).toBe('tool_use')
     expect(res.text).toBe('let me check that file')
@@ -654,10 +765,10 @@ describe('AnthropicProvider — tool-use translation', () => {
     }))
     const provider = new AnthropicProvider({ client: client as any })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'list' }],
       tools: [{ name: 'fs__list', inputSchema: { type: 'object' } }],
-    })
+    }))
 
     expect(res.toolUses?.[0]!.input).toEqual({})
     expect(res.toolUses?.[1]!.input).toEqual({})
@@ -670,7 +781,7 @@ describe('AnthropicProvider — tool-use translation', () => {
     }))
     const provider = new AnthropicProvider({ client: client as any })
 
-    await provider.complete({
+    await drainStream(provider.stream({
       messages: [
         { role: 'user', content: 'read README' },
         {
@@ -697,7 +808,7 @@ describe('AnthropicProvider — tool-use translation', () => {
         },
       ],
       tools: [{ name: 'fs__read_file', inputSchema: { type: 'object' } }],
-    })
+    }))
 
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.messages).toEqual([
@@ -734,7 +845,7 @@ describe('AnthropicProvider — tool-use translation', () => {
     }))
     const provider = new AnthropicProvider({ client: client as any })
 
-    await provider.complete({
+    await drainStream(provider.stream({
       messages: [
         { role: 'user', content: 'do thing' },
         {
@@ -750,7 +861,7 @@ describe('AnthropicProvider — tool-use translation', () => {
         },
       ],
       tools: [{ name: 'fs__read', inputSchema: { type: 'object' } }],
-    })
+    }))
 
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     const msgs = body.messages as Array<Record<string, unknown>>

@@ -1,4 +1,3 @@
-import { drainStream } from './types.js'
 import type {
   LlmProvider,
   LlmRequest,
@@ -27,7 +26,7 @@ export interface MockProviderOptions {
   name?: string
   /**
    * Tool-use scripting. When set, the mock returns the next entry from the
-   * list each time `complete()` is called. Entry semantics:
+   * list each time `stream()` is called. Entry semantics:
    *   - `tool_use` entries: emit `toolUses` and set `stopReason: 'tool_use'`.
    *   - `text` entries: behave like the `reply` shortcut — text response,
    *     `stopReason: 'end_turn'` (or whatever the entry overrides).
@@ -46,8 +45,7 @@ export interface MockProviderOptions {
    * Phase 8 M4 — full control over the stream's chunk sequence. When
    * set, OVERRIDES `reply` / `script` / `textChunkCount` / `stopReason`
    * for the stream entirely: each call to `stream()` yields exactly
-   * the chunks in this array in order. `complete()` still works (it
-   * drains the same chunks via drainStream).
+   * the chunks in this array in order.
    *
    * Two forms:
    *   - A single chunk list (used on every call): `chunks: LlmStreamChunk[]`
@@ -94,27 +92,21 @@ export class MockLlmProvider implements LlmProvider {
   }
 
   /**
-   * Phase 8 — streaming entry point. All MockLlmProvider behavior is
-   * driven from here; `complete()` simply drains the same iterator so
-   * the two methods can never disagree (no double-bookkeeping).
+   * Phase 8 — streaming entry point. The single LLM call surface;
+   * tests that want a folded `LlmResponse` should pipe through
+   * `drainStream(provider.stream(req))`.
    *
    * Throws synchronously when `throwError` is set so the LlmAgent's
-   * existing thrown-error path (failed TaskResult, onAuthFailure) still
-   * exercises in tests that exercise it.
+   * thrown-error path (failed TaskResult, onAuthFailure) exercises in
+   * tests that need it (the throw fires BEFORE the iterator is
+   * constructed, so `await expect(...).rejects` still works on the
+   * outer awaited drain).
    */
   stream(req: LlmRequest, _signal?: AbortSignal): AsyncIterable<LlmStreamChunk> {
-    // Mirror the legacy complete() error semantics — throw synchronously,
-    // BEFORE the iterator is constructed, so existing tests asserting
-    // `await expect(provider.complete(req)).rejects.toThrow(...)` continue
-    // to work after we route them through stream().
     if (this.opts.throwError) {
       throw new Error(this.opts.throwError)
     }
     return this.makeStream(req)
-  }
-
-  async complete(req: LlmRequest): Promise<LlmResponse> {
-    return drainStream(this.stream(req))
   }
 
   /**

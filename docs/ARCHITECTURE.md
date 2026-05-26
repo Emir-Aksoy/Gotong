@@ -248,7 +248,7 @@ Since v0.2 the project has filled in a number of items that used to be on this "
 | Encrypted API-key storage | ✅ shipped (v2.1) | AES-256-GCM in `<space>/secrets.enc.json`; master key file or `AIPE_SECRET_KEY` env |
 | Contribution scoring + leaderboard | ✅ shipped (v2.1) | `Task.weight`, `Evaluation.rating`, `hub.leaderboard(...)`, per-publisher opt-out |
 | Template library (built-in + community) | ✅ shipped (v2.1) | `templates/{,community}/{agents,teams}/`; manifest parser in `@aipehub/web` |
-| **LLM streaming** | ❌ not yet | `LlmResponse` is non-streaming. Would require chunked RESULT frames + async iterable on `LlmProvider.complete`. |
+| LLM streaming | ✅ shipped (v3.8 / Phase 8) | `LlmProvider.stream(req)` returns `AsyncIterable<LlmStreamChunk>`. `LlmAgent` consumes chunks per round; `LocalAgentPool` forwards them as `llm_stream_chunk` transcript entries; `@aipehub/web` SSE re-streams them to the admin UI for typewriter-style render. |
 | **Tool / function calling inside `LlmAgent`** | ❌ not yet | `LlmAgent` passes `task.payload` through, returns text. Multi-turn tool loops are app code today. |
 | **Persistent pending tasks across restarts** | ❌ not yet | Only the transcript is persisted. A pending-tasks table on `SqliteStorage` is sketched but not wired. See §12. |
 | **Reconnect that preserves in-flight tasks** | ❌ not yet | Disconnect fails outstanding tasks as `remote_disconnect`. A `RESUME` frame with prior `sessionId` is reserved on the wire but not implemented. |

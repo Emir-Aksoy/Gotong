@@ -7,12 +7,23 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { MockLlmProvider, type LlmRequest } from '../src/index.js'
+import { MockLlmProvider, drainStream, type LlmRequest } from '../src/index.js'
+
+/**
+ * Phase 8 M8 — `LlmProvider.complete` is gone; tests that want a
+ * folded `LlmResponse` route through this helper. The `async` wrapper
+ * promotes any synchronous throw from `p.stream(req)` (e.g. throwError
+ * configured on the mock) into a rejected promise so existing
+ * `await expect(...).rejects` assertions keep working.
+ */
+async function drainOf(p: MockLlmProvider, req: LlmRequest) {
+  return drainStream(p.stream(req))
+}
 
 describe('MockLlmProvider — reply forms', () => {
   it('static string reply returns verbatim', async () => {
     const p = new MockLlmProvider({ reply: 'hello' })
-    const r = await p.complete({ messages: [{ role: 'user', content: 'x' }] })
+    const r = await drainOf(p,{ messages: [{ role: 'user', content: 'x' }] })
     expect(r.text).toBe('hello')
   })
 
@@ -24,7 +35,7 @@ describe('MockLlmProvider — reply forms', () => {
         return `echo:${req.messages[0]?.content ?? ''}`
       },
     })
-    const r = await p.complete({
+    const r = await drainOf(p,{
       system: 'sys',
       messages: [{ role: 'user', content: 'hi' }],
       maxTokens: 50,
@@ -52,13 +63,13 @@ describe('MockLlmProvider — name override', () => {
 describe('MockLlmProvider — stopReason override', () => {
   it("defaults to 'end_turn'", async () => {
     const p = new MockLlmProvider({ reply: '' })
-    const r = await p.complete({ messages: [] })
+    const r = await drainOf(p,{ messages: [] })
     expect(r.stopReason).toBe('end_turn')
   })
 
   it('passes through the explicit stopReason', async () => {
     const p = new MockLlmProvider({ reply: 'truncated', stopReason: 'max_tokens' })
-    const r = await p.complete({ messages: [{ role: 'user', content: 'long...' }] })
+    const r = await drainOf(p,{ messages: [{ role: 'user', content: 'long...' }] })
     expect(r.stopReason).toBe('max_tokens')
   })
 })
@@ -67,13 +78,13 @@ describe('MockLlmProvider — throwError', () => {
   it('rejects with an Error whose message matches', async () => {
     const p = new MockLlmProvider({ reply: 'never used', throwError: 'rate_limited' })
     await expect(
-      p.complete({ messages: [{ role: 'user', content: 'x' }] }),
+      drainOf(p,{ messages: [{ role: 'user', content: 'x' }] }),
     ).rejects.toThrow(/rate_limited/)
   })
 
   it('throws even when delayMs is also set', async () => {
     const p = new MockLlmProvider({ reply: '', throwError: 'oops', delayMs: 1 })
-    await expect(p.complete({ messages: [] })).rejects.toThrow(/oops/)
+    await expect(drainOf(p,{ messages: [] })).rejects.toThrow(/oops/)
   })
 })
 
@@ -81,7 +92,7 @@ describe('MockLlmProvider — delayMs', () => {
   it('waits at least the configured ms before resolving', async () => {
     const p = new MockLlmProvider({ reply: 'ok', delayMs: 20 })
     const t0 = Date.now()
-    await p.complete({ messages: [{ role: 'user', content: 'x' }] })
+    await drainOf(p,{ messages: [{ role: 'user', content: 'x' }] })
     const elapsed = Date.now() - t0
     // Allow scheduler jitter — but the resolver shouldn't fire before
     // the configured delay.
@@ -91,7 +102,7 @@ describe('MockLlmProvider — delayMs', () => {
   it('zero delay resolves on the same microtask boundary', async () => {
     const p = new MockLlmProvider({ reply: 'ok' })
     const t0 = Date.now()
-    await p.complete({ messages: [] })
+    await drainOf(p,{ messages: [] })
     expect(Date.now() - t0).toBeLessThan(20)
   })
 })
@@ -99,7 +110,7 @@ describe('MockLlmProvider — delayMs', () => {
 describe('MockLlmProvider — usage estimation', () => {
   it('reports both inputTokens and outputTokens', async () => {
     const p = new MockLlmProvider({ reply: 'a'.repeat(40) })
-    const r = await p.complete({
+    const r = await drainOf(p,{
       messages: [{ role: 'user', content: 'b'.repeat(80) }],
     })
     // ceil(80/4) = 20, ceil(40/4) = 10
@@ -109,10 +120,10 @@ describe('MockLlmProvider — usage estimation', () => {
 
   it('counts the system prompt toward inputTokens', async () => {
     const p = new MockLlmProvider({ reply: '' })
-    const noSys = await p.complete({
+    const noSys = await drainOf(p,{
       messages: [{ role: 'user', content: 'b'.repeat(40) }],
     })
-    const withSys = await p.complete({
+    const withSys = await drainOf(p,{
       system: 's'.repeat(40),
       messages: [{ role: 'user', content: 'b'.repeat(40) }],
     })
@@ -121,14 +132,14 @@ describe('MockLlmProvider — usage estimation', () => {
 
   it('does NOT populate cacheCreationTokens / cacheReadTokens (mock has no cache)', async () => {
     const p = new MockLlmProvider({ reply: 'hi' })
-    const r = await p.complete({ messages: [{ role: 'user', content: 'x' }] })
+    const r = await drainOf(p,{ messages: [{ role: 'user', content: 'x' }] })
     expect(r.usage?.cacheCreationTokens).toBeUndefined()
     expect(r.usage?.cacheReadTokens).toBeUndefined()
   })
 
   it('handles a request with neither system nor messages (length 0)', async () => {
     const p = new MockLlmProvider({ reply: '' })
-    const r = await p.complete({ messages: [] })
+    const r = await drainOf(p,{ messages: [] })
     expect(r.usage?.inputTokens).toBe(0)
     expect(r.usage?.outputTokens).toBe(0)
   })

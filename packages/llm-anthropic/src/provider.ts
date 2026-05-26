@@ -4,10 +4,8 @@ import type {
   LlmMessage,
   LlmProvider,
   LlmRequest,
-  LlmResponse,
   LlmStopReason,
   LlmStreamChunk,
-  LlmToolUseBlock,
   LlmUsage,
 } from '@aipehub/llm'
 
@@ -273,10 +271,9 @@ export class AnthropicProvider implements LlmProvider {
   }
 
   /**
-   * Phase 8 — request body assembly shared between `complete()` (non-stream)
-   * and `stream()` (sets `stream:true`). Pulled out so the two paths can
-   * never diverge on translation rules (tool snake_case, opus thinking-
-   * model temperature drop, etc.).
+   * Request body assembly. Same translation rules (tool snake_case, opus
+   * thinking-model temperature drop, etc.) regardless of stream mode —
+   * `stream()` just appends `stream:true` to whatever this returns.
    */
   private buildBody(req: LlmRequest): Record<string, unknown> {
     const model = req.model ?? this.defaultModel
@@ -302,71 +299,6 @@ export class AnthropicProvider implements LlmProvider {
     return body
   }
 
-  async complete(req: LlmRequest): Promise<LlmResponse> {
-    // Note: Phase 8 — body assembly lives in `buildBody()` so the
-    // streaming path (`stream()`) shares translation rules with this
-    // legacy non-stream path. Don't inline anything here that doesn't
-    // also belong in stream().
-    const body = this.buildBody(req)
-
-    // We use the SDK's loosely-typed call signature so the same code path
-    // works whether `client` is the real SDK or a test fake. SDK errors
-    // (auth, rate-limit, transport) propagate to the caller untouched.
-    const raw = (await (
-      this.client.messages.create as unknown as (
-        b: Record<string, unknown>,
-      ) => Promise<AnthropicMessageLike>
-    )(body)) as AnthropicMessageLike
-
-    const text = (raw.content ?? [])
-      .filter((b): b is { type: 'text'; text: string } => b.type === 'text' && typeof b.text === 'string')
-      .map((b) => b.text)
-      .join('')
-
-    const toolUses: LlmToolUseBlock[] = []
-    for (const b of raw.content ?? []) {
-      if (b.type === 'tool_use' && typeof b.id === 'string' && typeof b.name === 'string') {
-        toolUses.push({
-          type: 'tool_use',
-          id: b.id,
-          name: b.name,
-          // Anthropic guarantees `input` is a JSON object even when the
-          // model called the tool with no args (it'll be `{}`). Falling
-          // back to `{}` defensively so a malformed response doesn't
-          // produce a non-object input downstream.
-          input:
-            b.input && typeof b.input === 'object' && !Array.isArray(b.input)
-              ? (b.input as Record<string, unknown>)
-              : {},
-        })
-      }
-    }
-
-    const out: LlmResponse = {
-      text,
-      stopReason: mapStopReason(raw.stop_reason),
-      raw,
-    }
-    if (toolUses.length > 0) out.toolUses = toolUses
-    if (raw.usage) {
-      const usage: LlmResponse['usage'] = {
-        inputTokens: raw.usage.input_tokens,
-        outputTokens: raw.usage.output_tokens,
-      }
-      // Prompt caching: only emit cache-token fields when non-zero
-      // so accounting code doesn't have to special-case zero. Anthropic
-      // reports `cache_creation_input_tokens` + `cache_read_input_tokens`
-      // alongside `input_tokens`; the latter is *fresh* tokens only.
-      if (raw.usage.cache_creation_input_tokens) {
-        usage.cacheCreationTokens = raw.usage.cache_creation_input_tokens
-      }
-      if (raw.usage.cache_read_input_tokens) {
-        usage.cacheReadTokens = raw.usage.cache_read_input_tokens
-      }
-      out.usage = usage
-    }
-    return out
-  }
 }
 
 /**
@@ -409,36 +341,6 @@ function translateBlock(block: LlmContentBlock): Record<string, unknown> {
       return out
     }
   }
-}
-
-/**
- * Minimal structural shape of an Anthropic `Message` we touch. Declared
- * locally rather than imported from the SDK so v0.2 doesn't pin to a
- * particular minor version of the vendor types.
- */
-interface AnthropicMessageLike {
-  content?: ReadonlyArray<AnthropicContentBlock>
-  stop_reason?: string | null
-  usage?: {
-    input_tokens: number
-    output_tokens: number
-    /** Tokens written to the prompt cache on this call. Premium-priced. */
-    cache_creation_input_tokens?: number
-    /** Tokens served from the prompt cache. Heavily discounted. */
-    cache_read_input_tokens?: number
-  }
-}
-
-/**
- * Structural superset of every block shape Anthropic can emit; we
- * discriminate on `type` at the use site.
- */
-interface AnthropicContentBlock {
-  type: string
-  text?: string
-  id?: string
-  name?: string
-  input?: unknown
 }
 
 /**

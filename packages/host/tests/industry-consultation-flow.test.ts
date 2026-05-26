@@ -43,7 +43,7 @@ import {
   type Task,
   type TaskResult,
 } from '@aipehub/core'
-import { LlmAgent, MockLlmProvider, type LlmAgentOptions } from '@aipehub/llm'
+import { LlmAgent, MockLlmProvider, drainStream, type LlmAgentOptions } from '@aipehub/llm'
 import type {
   ArtifactHandle,
   DatastoreHandle,
@@ -177,7 +177,7 @@ class CoachAgent extends LlmAgent {
       ...task,
       payload: { prompt: actualPrompt },
     } as Task)
-    const res = await this.provider.complete(req)
+    const res = await drainStream(this.provider.stream(req))
     const out = this.parseResponse(res, task)
     const text = (out as { text: string }).text
 

@@ -1,9 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { LlmRequest, LlmStreamChunk } from '@aipehub/llm'
+import { drainStream, type LlmRequest, type LlmStreamChunk } from '@aipehub/llm'
 
 import { OpenAIProvider, isTransientError } from '../src/index.js'
 
 /**
+ * Phase 8 M8 — `LlmProvider.complete` is gone; this test file is now
+ * stream-only. Most tests below still declare "the SDK returned this
+ * ChatCompletion" in the non-stream shape — we bridge by translating
+ * the message into the SSE chunk sequence the real SDK would emit, then
+ * letting `drainStream(provider.stream(req))` reproduce the same
+ * `LlmResponse` the old `complete()` returned (minus `raw`, which the
+ * stream contract can't carry).
+ *
  * Build a fake OpenAI SDK client exposing only the methods the provider
  * actually calls. The shape is duck-typed to match the real SDK; we cast to
  * `any` at the constructor boundary so we don't need to pin to a specific
@@ -12,10 +20,80 @@ import { OpenAIProvider, isTransientError } from '../src/index.js'
 function makeFakeClient(
   impl: (body: Record<string, unknown>) => Promise<unknown> | unknown,
 ) {
-  const create = vi.fn(async (body: Record<string, unknown>) => impl(body))
+  const create = vi.fn(async (body: Record<string, unknown>) => {
+    const result = await impl(body)
+    // Sync-throw path (tests that have `impl` throw to simulate auth /
+    // transport failure) goes through `await` above and rejects the
+    // outer Promise — the provider's streamImpl awaits this same call.
+    return synthesizeOpenAIStream(result as OpenAIChatCompletionLike)
+  })
   return {
     client: { chat: { completions: { create } } },
     create,
+  }
+}
+
+interface OpenAIChatCompletionLike {
+  choices?: ReadonlyArray<{
+    message?: {
+      content?: string | null
+      tool_calls?: ReadonlyArray<{
+        id?: string
+        type?: string
+        function?: { name?: string; arguments?: string }
+      }>
+    }
+    finish_reason?: string | null
+  }>
+  usage?: { prompt_tokens?: number; completion_tokens?: number }
+}
+
+/**
+ * Convert a non-streaming ChatCompletion shape into the chunk sequence
+ * a streaming SDK call would yield: a sequence of delta chunks for each
+ * choice's `message.content` and `message.tool_calls`, ending with a
+ * finish_reason terminal chunk plus an optional usage chunk.
+ *
+ * Test-only — we cover only the success paths existing tests assume.
+ * Real streaming-specific behavior (per-fragment text deltas, usage on
+ * terminal chunk, DeepSeek's "usage + finish_reason same chunk" quirk)
+ * is verified separately by the dedicated stream-mode tests in this
+ * file (see `OpenAIProvider — native streaming` describe block).
+ */
+async function* synthesizeOpenAIStream(
+  msg: OpenAIChatCompletionLike,
+): AsyncIterable<unknown> {
+  const choice = msg.choices?.[0]
+  if (choice) {
+    const delta: Record<string, unknown> = {}
+    if (typeof choice.message?.content === 'string') {
+      delta.content = choice.message.content
+    }
+    if (choice.message?.tool_calls && choice.message.tool_calls.length > 0) {
+      delta.tool_calls = choice.message.tool_calls.map((tc, idx) => ({
+        index: idx,
+        id: tc.id,
+        type: tc.type,
+        function: tc.function
+          ? {
+              name: tc.function.name,
+              arguments: tc.function.arguments,
+            }
+          : undefined,
+      }))
+    }
+    if (Object.keys(delta).length > 0) {
+      yield { choices: [{ delta }] }
+    }
+    // Usage MUST land before the finish_reason chunk — the provider's
+    // streamImpl returns immediately after seeing finish_reason, so any
+    // later chunk is dropped on the floor.
+    if (msg.usage) {
+      yield { choices: [], usage: msg.usage }
+    }
+    yield {
+      choices: [{ delta: {}, finish_reason: choice.finish_reason ?? 'stop' }],
+    }
   }
 }
 
@@ -44,7 +122,7 @@ describe('OpenAIProvider — request translation', () => {
       model: 'gpt-4o',
     }
 
-    await provider.complete(req)
+    await drainStream(provider.stream(req))
 
     expect(create).toHaveBeenCalledTimes(1)
     const body = create.mock.calls[0]![0] as Record<string, unknown>
@@ -67,7 +145,7 @@ describe('OpenAIProvider — request translation', () => {
     }))
     const provider = new OpenAIProvider({ client: client as any })
 
-    await provider.complete({ messages: [{ role: 'user', content: 'hi' }] })
+    await drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }] }))
 
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.messages).toEqual([{ role: 'user', content: 'hi' }])
@@ -82,7 +160,7 @@ describe('OpenAIProvider — request translation', () => {
       defaultModel: 'gpt-default',
     })
 
-    await provider.complete({ messages: [{ role: 'user', content: 'hi' }] })
+    await drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }] }))
 
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.model).toBe('gpt-default')
@@ -97,7 +175,7 @@ describe('OpenAIProvider — request translation', () => {
     }))
     const provider = new OpenAIProvider({ client: client as any })
 
-    await provider.complete({ messages: [{ role: 'user', content: 'hi' }] })
+    await drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }] }))
 
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.model).toBe('gpt-4o-mini')
@@ -117,14 +195,15 @@ describe('OpenAIProvider — response translation', () => {
     }))
     const provider = new OpenAIProvider({ client: client as any })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
-    })
+    }))
 
     expect(res.text).toBe('hello world')
     expect(res.stopReason).toBe('end_turn')
     expect(res.usage).toEqual({ inputTokens: 5, outputTokens: 3 })
-    expect(res.raw).toBeDefined()
+    // Phase 8 M8: the `raw` escape hatch lived on the old complete()
+    // path; the stream contract doesn't carry it, so it's not asserted.
   })
 
   it('handles null message content by returning empty string', async () => {
@@ -133,9 +212,9 @@ describe('OpenAIProvider — response translation', () => {
     }))
     const provider = new OpenAIProvider({ client: client as any })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
-    })
+    }))
     expect(res.text).toBe('')
   })
 
@@ -147,9 +226,9 @@ describe('OpenAIProvider — response translation', () => {
     }))
     const provider = new OpenAIProvider({ client: client as any })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
-    })
+    }))
     expect(res.stopReason).toBe('max_tokens')
   })
 
@@ -161,9 +240,9 @@ describe('OpenAIProvider — response translation', () => {
     }))
     const provider = new OpenAIProvider({ client: client as any })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
-    })
+    }))
     expect(res.stopReason).toBe('error')
   })
 
@@ -173,9 +252,9 @@ describe('OpenAIProvider — response translation', () => {
     }))
     const provider = new OpenAIProvider({ client: client as any })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
-    })
+    }))
     expect(res.usage).toBeUndefined()
   })
 
@@ -193,7 +272,7 @@ describe('OpenAIProvider — error propagation', () => {
     const provider = new OpenAIProvider({ client: client as any })
 
     await expect(
-      provider.complete({ messages: [{ role: 'user', content: 'hi' }] }),
+      drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }] })),
     ).rejects.toThrow('auth_denied')
   })
 })
@@ -223,10 +302,10 @@ describe('OpenAIProvider — openai-compatible extensions', () => {
       maxTokensField: 'max_tokens',
     })
 
-    await provider.complete({
+    await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
       maxTokens: 512,
-    })
+    }))
 
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.max_tokens).toBe(512)
@@ -241,86 +320,22 @@ describe('OpenAIProvider — openai-compatible extensions', () => {
     }))
     const provider = new OpenAIProvider({ client: client as any })
 
-    await provider.complete({
+    await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'hi' }],
       maxTokens: 100,
-    })
+    }))
 
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.max_completion_tokens).toBe(100)
     expect(body.max_tokens).toBeUndefined()
   })
 
-  it('retries on Premature close and eventually succeeds', async () => {
-    let calls = 0
-    const { client, create } = makeFakeClient(async () => {
-      calls += 1
-      if (calls < 3) {
-        // Mimic the exact undici / fetch surface DeepSeek produces.
-        const err = new Error(
-          'Invalid response body while trying to fetch https://api.deepseek.com/v1/chat/completions: Premature close',
-        )
-        throw err
-      }
-      return {
-        choices: [{ message: { content: 'done' }, finish_reason: 'stop' }],
-        usage: { prompt_tokens: 1, completion_tokens: 1 },
-      }
-    })
-    const provider = new OpenAIProvider({
-      client: client as any,
-      maxRetries: 3,
-      retryBackoffMs: () => 1, // 1ms — keep test fast
-    })
-    const res = await provider.complete({ messages: [{ role: 'user', content: 'hi' }] })
-    expect(res.text).toBe('done')
-    expect(create).toHaveBeenCalledTimes(3)
-  })
-
-  it('does NOT retry on a permanent error (401 auth)', async () => {
-    const { client, create } = makeFakeClient(async () => {
-      const err: Error & { status?: number } = new Error('Unauthorized')
-      err.status = 401
-      throw err
-    })
-    const provider = new OpenAIProvider({
-      client: client as any,
-      maxRetries: 3,
-      retryBackoffMs: () => 1,
-    })
-    await expect(
-      provider.complete({ messages: [{ role: 'user', content: 'hi' }] }),
-    ).rejects.toThrow(/Unauthorized/)
-    expect(create).toHaveBeenCalledTimes(1) // no retries
-  })
-
-  it('gives up after maxRetries+1 attempts and rethrows the last error', async () => {
-    const { client, create } = makeFakeClient(async () => {
-      const err = new Error('Premature close') as Error & { code?: string }
-      err.code = 'ECONNRESET'
-      throw err
-    })
-    const provider = new OpenAIProvider({
-      client: client as any,
-      maxRetries: 2,
-      retryBackoffMs: () => 1,
-    })
-    await expect(
-      provider.complete({ messages: [{ role: 'user', content: 'hi' }] }),
-    ).rejects.toThrow(/Premature close/)
-    expect(create).toHaveBeenCalledTimes(3) // 1 initial + 2 retries
-  })
-
-  it('with maxRetries=0 makes exactly one attempt (default behaviour)', async () => {
-    const { client, create } = makeFakeClient(async () => {
-      throw new Error('Premature close')
-    })
-    const provider = new OpenAIProvider({ client: client as any })
-    await expect(
-      provider.complete({ messages: [{ role: 'user', content: 'hi' }] }),
-    ).rejects.toThrow(/Premature close/)
-    expect(create).toHaveBeenCalledTimes(1)
-  })
+  // Phase 8 M8 — `complete()`'s retry loop is gone (streaming can't be
+  // safely replayed mid-bytes). The retry-behavior tests that lived
+  // here were deleted along with `maxRetries` / `retryBackoffMs`
+  // options. Transient-error CLASSIFICATION is still tested via
+  // `isTransientError` directly — callers who want their own retry
+  // harness around `provider.stream(req)` keep using it.
 
   it('passes baseURL to the OpenAI SDK when constructing its own client', () => {
     // No `client` injected → provider builds its own. The OpenAI SDK
@@ -347,7 +362,7 @@ describe('OpenAIProvider — tool-use translation', () => {
     }))
     const provider = new OpenAIProvider({ client: client as any })
 
-    await provider.complete({
+    await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'list files' }],
       tools: [
         {
@@ -359,7 +374,7 @@ describe('OpenAIProvider — tool-use translation', () => {
           },
         },
       ],
-    })
+    }))
 
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.tools).toEqual([
@@ -400,10 +415,10 @@ describe('OpenAIProvider — tool-use translation', () => {
     }))
     const provider = new OpenAIProvider({ client: client as any })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'read README' }],
       tools: [{ name: 'fs__read', inputSchema: { type: 'object' } }],
-    })
+    }))
 
     expect(res.stopReason).toBe('tool_use')
     expect(res.text).toBe('')
@@ -417,33 +432,14 @@ describe('OpenAIProvider — tool-use translation', () => {
     ])
   })
 
-  it('survives malformed JSON in tool_calls.function.arguments by surfacing _raw', async () => {
-    const { client } = makeFakeClient(async () => ({
-      choices: [
-        {
-          message: {
-            content: null,
-            tool_calls: [
-              {
-                id: 'call_bad',
-                type: 'function',
-                function: { name: 'fs__list', arguments: 'not-json-at-all' },
-              },
-            ],
-          },
-          finish_reason: 'tool_calls',
-        },
-      ],
-    }))
-    const provider = new OpenAIProvider({ client: client as any })
-
-    const res = await provider.complete({
-      messages: [{ role: 'user', content: 'x' }],
-      tools: [{ name: 'fs__list', inputSchema: { type: 'object' } }],
-    })
-
-    expect(res.toolUses?.[0]!.input).toEqual({ _raw: 'not-json-at-all' })
-  })
+  // Phase 8 M8 — the legacy complete() path coerced unparseable tool
+  // arguments into `{_raw: '<original-string>'}` so the agent could at
+  // least see something. The stream path takes the safer route: emit
+  // an error chunk + stop, which drainStream surfaces as
+  // `stopReason: 'error'` and rolls the error message into `.text`.
+  // That behavior is covered in detail by the dedicated stream test
+  // `emits an error chunk and stops on malformed tool args JSON` —
+  // duplicating it here would just re-spell the same setup.
 
   it('translates assistant tool_use blocks to {role:assistant, tool_calls:[…]}', async () => {
     const { client, create } = makeFakeClient(async () => ({
@@ -451,7 +447,7 @@ describe('OpenAIProvider — tool-use translation', () => {
     }))
     const provider = new OpenAIProvider({ client: client as any })
 
-    await provider.complete({
+    await drainStream(provider.stream({
       messages: [
         { role: 'user', content: 'read it' },
         {
@@ -474,7 +470,7 @@ describe('OpenAIProvider — tool-use translation', () => {
         },
       ],
       tools: [{ name: 'fs__read', inputSchema: { type: 'object' } }],
-    })
+    }))
 
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     expect(body.messages).toEqual([
@@ -506,7 +502,7 @@ describe('OpenAIProvider — tool-use translation', () => {
     }))
     const provider = new OpenAIProvider({ client: client as any })
 
-    await provider.complete({
+    await drainStream(provider.stream({
       messages: [
         { role: 'user', content: 'go' },
         {
@@ -526,7 +522,7 @@ describe('OpenAIProvider — tool-use translation', () => {
         },
       ],
       tools: [{ name: 'fs__read', inputSchema: { type: 'object' } }],
-    })
+    }))
 
     const body = create.mock.calls[0]![0] as Record<string, unknown>
     const msgs = body.messages as Array<Record<string, unknown>>
@@ -539,10 +535,10 @@ describe('OpenAIProvider — tool-use translation', () => {
     }))
     const provider = new OpenAIProvider({ client: client as any })
 
-    await provider.complete({ messages: [{ role: 'user', content: 'hi' }] })
+    await drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }] }))
     expect(create.mock.calls[0]![0]).not.toHaveProperty('tools')
 
-    await provider.complete({ messages: [{ role: 'user', content: 'hi' }], tools: [] })
+    await drainStream(provider.stream({ messages: [{ role: 'user', content: 'hi' }], tools: [] }))
     expect(create.mock.calls[1]![0]).not.toHaveProperty('tools')
   })
 })

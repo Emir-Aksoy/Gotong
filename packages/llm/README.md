@@ -7,7 +7,7 @@ The Hub does not call LLMs. `LlmAgent` does. The provider is the only place vend
 - [`@aipehub/llm-anthropic`](https://www.npmjs.com/package/@aipehub/llm-anthropic) — Anthropic Claude
 - [`@aipehub/llm-openai`](https://www.npmjs.com/package/@aipehub/llm-openai) — OpenAI
 
-Or roll your own by implementing `LlmProvider.complete(req)`.
+Or roll your own by implementing `LlmProvider.stream(req)` (returns `AsyncIterable<LlmStreamChunk>`). If you just want the folded final response, pipe through the exported `drainStream(provider.stream(req))` helper.
 
 ## Install
 

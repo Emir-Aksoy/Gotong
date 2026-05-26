@@ -84,9 +84,9 @@ export interface LlmAgentOptions extends AgentOptions {
   tools?: LlmAgentToolset
   /**
    * Safety cap on the number of tool-use rounds within a single
-   * `handleTask` invocation. Each round = one provider.complete() that
-   * returned `tool_use`. After this many rounds the agent aborts the
-   * task with an error rather than risk an infinite loop (e.g. a
+   * `handleTask` invocation. Each round = one provider.stream() call
+   * that returned `tool_use`. After this many rounds the agent aborts
+   * the task with an error rather than risk an infinite loop (e.g. a
    * model that calls the same broken tool forever). Default: 8.
    *
    * Increase for legitimately deep workflows (multi-file refactors,
@@ -94,7 +94,7 @@ export interface LlmAgentOptions extends AgentOptions {
    */
   maxToolRounds?: number
   /**
-   * B2.2 — invoked once per `provider.complete(req)` (so EVERY round
+   * B2.2 — invoked once per `provider.stream(req)` (so EVERY round
    * of the tool-use loop too, not just the first). Receives the
    * current `Task` so the hook can read `task.origin?.userId` for
    * quota attribution. Synchronous or async; throwing aborts the
@@ -208,7 +208,7 @@ export class LlmAgent extends AgentParticipant {
   protected readonly maxToolRounds: number
   /**
    * B2.2 — pre-call hook (typically a quota gate). Invoked before
-   * EVERY provider.complete, including each round of the tool-use
+   * EVERY provider.stream, including each round of the tool-use
    * loop. Throwing aborts the task with the thrown error — the host
    * picks that up as the normal failure path.
    */
@@ -287,9 +287,10 @@ export class LlmAgent extends AgentParticipant {
    * accumulated response. Hook errors are caught + logged, never
    * abort the stream. See `onStreamChunk` doc for rationale.
    *
-   * The aggregated `LlmResponse` returned matches what the legacy
-   * `provider.complete()` would have returned: concatenated text,
-   * collected tool_uses, first usage observed, terminal stopReason.
+   * The aggregated `LlmResponse` returned is the result of folding the
+   * stream via the same rules as the standalone `drainStream` helper:
+   * concatenated text, collected tool_uses, first usage observed,
+   * terminal stopReason.
    */
   protected async streamWithAuthHook(
     req: LlmRequest,
@@ -297,25 +298,7 @@ export class LlmAgent extends AgentParticipant {
   ): Promise<LlmResponse> {
     let stream: AsyncIterable<LlmStreamChunk>
     try {
-      // Fallback for SDK consumers / tests still on the legacy
-      // `{name, complete}` provider shape (M8 deletes both fallback
-      // and complete itself). Detect by checking the type of `stream`
-      // — TypeScript's structural typing lets a complete-only object
-      // satisfy the interface via `as any` casts, which is exactly
-      // what most existing fake providers do.
-      const provider = this.provider as {
-        stream?: (req: LlmRequest) => AsyncIterable<LlmStreamChunk>
-        complete?: (req: LlmRequest) => Promise<LlmResponse>
-      }
-      if (typeof provider.stream === 'function') {
-        stream = provider.stream(req)
-      } else if (typeof provider.complete === 'function') {
-        stream = legacyCompleteAsStream(() => provider.complete!(req))
-      } else {
-        throw new Error(
-          `LlmProvider '${this.provider.name}' has neither stream() nor complete() — at least one is required`,
-        )
-      }
+      stream = this.provider.stream(req)
     } catch (err) {
       await this.runAuthFailureHook(err, task)
       throw err
@@ -515,7 +498,7 @@ export class LlmAgent extends AgentParticipant {
    * stop reason or after `maxToolRounds` rounds, whichever comes first.
    *
    * Loop body per round:
-   *   1. Call `provider.complete(req)`.
+   *   1. Call `streamWithAuthHook(req, task)` which drives `provider.stream`.
    *   2. If stopReason !== 'tool_use' (or no tool_use blocks present),
    *      we're done — flatten via `parseResponse`.
    *   3. Otherwise, execute each tool_use via `toolset.callTool`.
@@ -632,28 +615,3 @@ export class LlmAgent extends AgentParticipant {
   }
 }
 
-/**
- * Phase 8 M5 — internal transition shim. Wraps a complete()-only
- * provider into a single-pass stream that yields text → tool_use → usage
- * → end. Used by `streamWithAuthHook` ONLY for providers that don't
- * implement `stream()` yet (typically test fakes that pre-date Phase 8).
- *
- * To be removed in Phase 8 M8 along with `LlmProvider.complete()`.
- */
-async function* legacyCompleteAsStream(
-  complete: () => Promise<LlmResponse>,
-): AsyncIterable<LlmStreamChunk> {
-  const res = await complete()
-  if (res.text && res.text.length > 0) {
-    yield { type: 'text', text: res.text }
-  }
-  if (res.toolUses) {
-    for (const tu of res.toolUses) {
-      yield { type: 'tool_use', toolUse: tu }
-    }
-  }
-  if (res.usage) {
-    yield { type: 'usage', usage: res.usage }
-  }
-  yield { type: 'end', stopReason: res.stopReason }
-}

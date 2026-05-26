@@ -27,7 +27,7 @@
  * pattern: prepend context, call LLM, append output. AipeLAgent base
  * exposes `handleTask` as the override point for exactly this kind
  * of customization. We override it once, call back into the base's
- * `buildRequest` / `provider.complete` / `parseResponse` so we get
+ * `buildRequest` / `provider.stream` / `parseResponse` so we get
  * all the base-class behaviours (tool-use loop, parser, etc.) for
  * free — we just bracket them with the memory operations.
  *
@@ -48,7 +48,7 @@
  */
 
 import { createLogger, type Task } from '@aipehub/core'
-import { LlmAgent } from '@aipehub/llm'
+import { LlmAgent, drainStream } from '@aipehub/llm'
 import type { LlmAgentOptions } from '@aipehub/llm'
 import type { AgentDispatchResult } from '@aipehub/services-sdk'
 
@@ -133,12 +133,18 @@ export class PersonalGrowthAgent extends LlmAgent {
     // ────────────────────────────────────────────────────────────────
     try {
       const compacted = await maybeCompactMemory(binding, async ({ system, user }) => {
-        const res = await this.provider.complete({
-          system,
-          messages: [{ role: 'user', content: user }],
-          maxTokens: 800,
-          temperature: 0.3,
-        })
+        // Phase 8 M8 — provider.complete is gone; drain the stream
+        // into a single response. The compactor only needs the final
+        // .text, so streaming doesn't buy us anything here other than
+        // matching the new provider contract.
+        const res = await drainStream(
+          this.provider.stream({
+            system,
+            messages: [{ role: 'user', content: user }],
+            maxTokens: 800,
+            temperature: 0.3,
+          }),
+        )
         return res.text
       })
       if (compacted) {

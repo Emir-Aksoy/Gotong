@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { drainStream } from '@aipehub/llm'
 
 import { AnthropicProvider } from '../src/index.js'
 
@@ -11,9 +12,9 @@ describe.skipIf(!process.env.ANTHROPIC_API_KEY)('AnthropicProvider — live API'
   it('returns non-empty text for a tiny prompt', async () => {
     const provider = new AnthropicProvider({ defaultMaxTokens: 32 })
 
-    const res = await provider.complete({
+    const res = await drainStream(provider.stream({
       messages: [{ role: 'user', content: 'Say the single word: pong' }],
-    })
+    }))
 
     expect(typeof res.text).toBe('string')
     expect(res.text.length).toBeGreaterThan(0)

@@ -49,7 +49,7 @@ import {
   formatCaseContextBlock,
   type CaseContextBinding,
 } from '@aipehub/host/services'
-import { LlmAgent, type LlmAgentOptions } from '@aipehub/llm'
+import { LlmAgent, drainStream, type LlmAgentOptions } from '@aipehub/llm'
 import { OpenAIProvider } from '@aipehub/llm-openai'
 import type {
   ArtifactHandle,
@@ -325,7 +325,7 @@ class CoachAgent extends LlmAgent {
         log(fullPrompt.slice(0, 600) + (fullPrompt.length > 600 ? '\n  ...[truncated]' : ''))
         const t0 = Date.now()
         const req = this.buildRequest({ ...task, payload: { prompt: fullPrompt } } as Task)
-        const res = await this.provider.complete(req)
+        const res = await drainStream(this.provider.stream(req))
         const elapsed = Date.now() - t0
         const out = this.parseResponse(res, task)
         const t = (out as { text: string }).text
@@ -394,7 +394,7 @@ class ResearchAgent extends LlmAgent {
         log(fullPrompt.slice(0, 500) + (fullPrompt.length > 500 ? '\n  ...[truncated]' : ''))
         const t0 = Date.now()
         const req = this.buildRequest({ ...task, payload: { prompt: fullPrompt } } as Task)
-        const res = await this.provider.complete(req)
+        const res = await drainStream(this.provider.stream(req))
         const elapsed = Date.now() - t0
         const out = this.parseResponse(res, task)
         const t = (out as { text: string }).text
@@ -443,7 +443,7 @@ class CaseManagerAgent extends LlmAgent {
         log(fullPrompt.slice(0, 800) + (fullPrompt.length > 800 ? '\n  ...[truncated]' : ''))
         const t0 = Date.now()
         const req = this.buildRequest({ ...task, payload: { prompt: fullPrompt } } as Task)
-        const res = await this.provider.complete(req)
+        const res = await drainStream(this.provider.stream(req))
         const elapsed = Date.now() - t0
         const out = this.parseResponse(res, task)
         const t = (out as { text: string }).text

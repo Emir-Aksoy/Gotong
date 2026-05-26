@@ -4,10 +4,8 @@ import type {
   LlmMessage,
   LlmProvider,
   LlmRequest,
-  LlmResponse,
   LlmStopReason,
   LlmStreamChunk,
-  LlmToolUseBlock,
   LlmUsage,
 } from '@aipehub/llm'
 
@@ -63,24 +61,6 @@ export interface OpenAIProviderOptions {
    * users (the original behavior) keep working unchanged.
    */
   maxTokensField?: 'max_completion_tokens' | 'max_tokens'
-  /**
-   * Number of **additional** attempts to make on transient transport-layer
-   * errors (Premature close / socket hang up / ECONNRESET / 5xx / 429).
-   * The first attempt is always made; this controls retries on top of it.
-   * Total attempts = `maxRetries + 1`. Default `0` (no retries) so existing
-   * callers see no behavior change. Suggested for OpenAI-compatible vendors
-   * with flaky upstreams: `2` or `3`. Auth errors (401/403) and 4xx (other
-   * than 429) never retry — they're not transient. Backoff is 500ms × 2ⁿ
-   * with full jitter, capped at 5s per wait.
-   */
-  maxRetries?: number
-  /**
-   * Override the default backoff schedule. Useful in tests where you want
-   * instant retries. Receives the 1-indexed attempt number (1 = before
-   * first retry, 2 = before second, …) and returns ms to wait. Default
-   * is `500 * 2^(n-1)` with up to 200ms jitter.
-   */
-  retryBackoffMs?: (attempt: number) => number
 }
 
 /**
@@ -118,15 +98,11 @@ export class OpenAIProvider implements LlmProvider {
   private readonly client: OpenAI
   private readonly defaultModel: string
   private readonly maxTokensField: 'max_completion_tokens' | 'max_tokens'
-  private readonly maxRetries: number
-  private readonly retryBackoffMs: (attempt: number) => number
 
   constructor(opts: OpenAIProviderOptions = {}) {
     this.name = opts.name ?? 'openai'
     this.defaultModel = opts.defaultModel ?? 'gpt-4o-mini'
     this.maxTokensField = opts.maxTokensField ?? 'max_completion_tokens'
-    this.maxRetries = Math.max(0, opts.maxRetries ?? 0)
-    this.retryBackoffMs = opts.retryBackoffMs ?? defaultBackoff
     if (opts.client) {
       this.client = opts.client
     } else {
@@ -166,13 +142,14 @@ export class OpenAIProvider implements LlmProvider {
    *   - Malformed JSON in tool arguments → `error` chunk + early return
    *     (matches Anthropic translator's choice).
    *
-   * Retry: streaming intentionally does NOT use the per-attempt retry
-   * loop that complete() runs. Once the SDK starts yielding bytes we
-   * can't safely replay; the safe approach is to let LlmAgent surface
-   * the transient error as a failed TaskResult and let the operator
-   * decide. Pre-stream errors (auth / 400 / 429 / network failure on
-   * the initial create()) still throw synchronously from .next(),
-   * which keeps LlmAgent's onAuthFailure path firing.
+   * Retry: streaming does NOT retry on transient errors. Once the SDK
+   * starts yielding bytes we can't safely replay; the safe approach is
+   * to let LlmAgent surface the transient error as a failed TaskResult
+   * and let the operator decide. Pre-stream errors (auth / 400 / 429 /
+   * network failure on the initial create()) still throw synchronously
+   * from .next(), which keeps LlmAgent's onAuthFailure path firing.
+   * (`isTransientError` is still exported for callers writing their own
+   * retry harness around the agent.)
    */
   stream(req: LlmRequest, signal?: AbortSignal): AsyncIterable<LlmStreamChunk> {
     const body = this.buildBody(req)
@@ -304,9 +281,9 @@ export class OpenAIProvider implements LlmProvider {
   }
 
   /**
-   * Phase 8 — body assembly shared between `complete()` and `stream()`.
-   * Translation rules (system hoist, maxTokens field name, tool wire
-   * shape) live here so the two paths can never diverge.
+   * Body assembly. Translation rules (system hoist, maxTokens field name,
+   * tool wire shape) live here so `stream()` stays a thin wrapper that
+   * just sets `stream: true` + `stream_options`.
    */
   private buildBody(req: LlmRequest): Record<string, unknown> {
     const messages: Array<Record<string, unknown>> = []
@@ -335,55 +312,6 @@ export class OpenAIProvider implements LlmProvider {
     return body
   }
 
-  async complete(req: LlmRequest): Promise<LlmResponse> {
-    // Phase 8 — body assembly shared with stream() via buildBody().
-    const body = this.buildBody(req)
-
-    let lastErr: unknown
-    const totalAttempts = this.maxRetries + 1
-    for (let attempt = 1; attempt <= totalAttempts; attempt++) {
-      try {
-        // We use the SDK's loosely-typed call signature so the same code path
-        // works whether `client` is the real SDK or a test fake.
-        const raw = (await (
-          this.client.chat.completions.create as unknown as (
-            b: Record<string, unknown>,
-          ) => Promise<OpenAIChatCompletionLike>
-        )(body)) as OpenAIChatCompletionLike
-
-        const firstChoice = raw.choices?.[0]
-        const text = firstChoice?.message?.content ?? ''
-        const toolUses = extractToolUses(firstChoice?.message?.tool_calls)
-        const out: LlmResponse = {
-          text,
-          stopReason: mapStopReason(firstChoice?.finish_reason),
-          raw,
-        }
-        if (toolUses.length > 0) out.toolUses = toolUses
-        if (raw.usage) {
-          out.usage = {
-            inputTokens: raw.usage.prompt_tokens,
-            outputTokens: raw.usage.completion_tokens,
-          }
-        }
-        return out
-      } catch (err) {
-        lastErr = err
-        // Don't retry on permanent errors (auth, model-not-found, etc.) or
-        // when we've exhausted the budget. Any 4xx except 429 is permanent;
-        // network-layer + 5xx + 429 are transient.
-        if (attempt >= totalAttempts || !isTransientError(err)) {
-          throw err
-        }
-        const waitMs = this.retryBackoffMs(attempt)
-        await sleep(waitMs)
-        // Loop and retry with the same body.
-      }
-    }
-    // Defensive: the loop either returns or throws on every iteration; this
-    // line keeps TypeScript happy if it can't prove the loop always exits.
-    throw lastErr instanceof Error ? lastErr : new Error('OpenAIProvider: retry loop exited without result')
-  }
 }
 
 /**
@@ -452,56 +380,6 @@ function translateMessage(m: LlmMessage): Array<Record<string, unknown>> {
     userMessages.push({ role: 'user', content: '' })
   }
   return userMessages
-}
-
-/**
- * Pull `tool_use` blocks out of an OpenAI `tool_calls` array. Returns
- * `[]` when the field is absent — the caller branches on
- * `LlmResponse.toolUses` being present + non-empty.
- */
-function extractToolUses(
-  toolCalls:
-    | ReadonlyArray<{
-        id?: string
-        type?: string
-        function?: { name?: string; arguments?: string }
-      }>
-    | undefined,
-): LlmToolUseBlock[] {
-  if (!toolCalls || toolCalls.length === 0) return []
-  const out: LlmToolUseBlock[] = []
-  for (const tc of toolCalls) {
-    if (
-      tc.type !== 'function' ||
-      typeof tc.id !== 'string' ||
-      !tc.function ||
-      typeof tc.function.name !== 'string'
-    ) {
-      continue
-    }
-    let input: Record<string, unknown> = {}
-    if (typeof tc.function.arguments === 'string' && tc.function.arguments.length > 0) {
-      try {
-        const parsed = JSON.parse(tc.function.arguments)
-        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          input = parsed as Record<string, unknown>
-        }
-      } catch {
-        // OpenAI occasionally emits non-JSON in `arguments` when the
-        // model errors mid-stream. Surface the raw string under a
-        // conventional `_raw` key so the agent can see what happened
-        // without crashing on JSON.parse.
-        input = { _raw: tc.function.arguments }
-      }
-    }
-    out.push({
-      type: 'tool_use',
-      id: tc.id,
-      name: tc.function.name,
-      input,
-    })
-  }
-  return out
 }
 
 // --- transient-error detection -----------------------------------------
@@ -582,36 +460,6 @@ export function isTransientError(err: unknown): boolean {
   const status = typeof e.status === 'number' ? e.status : 0
   if (status === 429 || (status >= 500 && status <= 599)) return true
   return false
-}
-
-function defaultBackoff(attempt: number): number {
-  // 500ms × 2^(n-1) capped at 5s, plus up to 200ms jitter.
-  const base = Math.min(500 * Math.pow(2, attempt - 1), 5000)
-  return base + Math.floor(Math.random() * 200)
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-/**
- * Minimal structural shape of an OpenAI `ChatCompletion` we touch. Declared
- * locally rather than imported from the SDK so v0.2 doesn't pin to a
- * particular minor version of the vendor types.
- */
-interface OpenAIChatCompletionLike {
-  choices?: ReadonlyArray<{
-    message?: {
-      content?: string | null
-      tool_calls?: ReadonlyArray<{
-        id?: string
-        type?: string
-        function?: { name?: string; arguments?: string }
-      }>
-    }
-    finish_reason?: string | null
-  }>
-  usage?: { prompt_tokens: number; completion_tokens: number }
 }
 
 /**

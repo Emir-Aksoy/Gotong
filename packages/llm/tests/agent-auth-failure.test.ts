@@ -19,7 +19,7 @@ import {
   LlmAgent,
   type LlmProvider,
   type LlmRequest,
-  type LlmResponse,
+  type LlmStreamChunk,
 } from '../src/index.js'
 
 function makeTask(payload: unknown, capabilities = ['draft']) {
@@ -30,11 +30,16 @@ function makeTask(payload: unknown, capabilities = ['draft']) {
   }
 }
 
-/** Provider that throws an error with the given shape on every call. */
+/**
+ * Provider that throws an error with the given shape on every call.
+ * Phase 8: `stream()` throws SYNCHRONOUSLY (before iterator construction)
+ * so LlmAgent.streamWithAuthHook catches it in the same sync-catch arm
+ * that triggers the onAuthFailure hook.
+ */
 function throwingProvider(buildError: () => Error): LlmProvider {
   return {
     name: 'stub',
-    async complete(_req: LlmRequest): Promise<LlmResponse> {
+    stream(_req: LlmRequest): AsyncIterable<LlmStreamChunk> {
       throw buildError()
     },
   }
