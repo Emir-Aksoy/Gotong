@@ -1,0 +1,14 @@
+{
+  "name": "@aipehub/example-long-running-agent",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Phase 11 demo — an agent suspends mid-task, the resume sweep wakes it later, and it picks up where it left off via persisted working memory.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*"
+  }
+}
