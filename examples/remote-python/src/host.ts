@@ -98,6 +98,8 @@ function describe(e: TranscriptEntry): string {
     case 'llm_stream_chunk':
       // Phase 8 — too noisy to print per chunk, just acknowledge.
       return `STREAM   ${e.data.agentId} task=${e.data.taskId.slice(0, 8)}…`
+    case 'task_resumed':
+      return `RESUME   task=${e.data.taskId.slice(0, 8)}… by ${e.data.by}`
   }
 }
 

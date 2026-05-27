@@ -470,6 +470,27 @@ export type TranscriptEntry =
         chunk: unknown
       }
     }
+  /**
+   * Phase 11 M3 — emitted by `Hub.resumeTask` just before invoking
+   * the participant's `onResume`/`onTask` handler. Paired with a
+   * subsequent `task_result` entry. Lets the admin UI / transcript
+   * readers distinguish "fresh task started" (no resumed event, just
+   * `task` then `task_result`) from "previously parked task woken up"
+   * (`task_resumed` then `task_result`).
+   *
+   * The originating `task` entry (and any prior `task_result` with
+   * kind 'suspended') lives earlier in the transcript at the same
+   * task id — there's no duplicate task entry on resume.
+   */
+  | {
+      seq: number
+      ts: number
+      kind: 'task_resumed'
+      data: {
+        taskId: TaskId
+        by: ParticipantId
+      }
+    }
 
 // --- Event stream (for observers / web UI) ---------------------------------
 

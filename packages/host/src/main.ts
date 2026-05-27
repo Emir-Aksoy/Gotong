@@ -65,7 +65,7 @@ import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-import { Hub, Space, createLogger, type SpaceConfig, type TranscriptEntry } from '@aipehub/core'
+import { Hub, Space, createLogger, type SpaceConfig, type Task, type TranscriptEntry } from '@aipehub/core'
 import {
   AUDIT_ACTIONS,
   loadOrCreateMasterKey,
@@ -436,6 +436,10 @@ async function main(): Promise<void> {
   let identityCleanupTimer: NodeJS.Timeout | undefined
   let usageSweepTimer: NodeJS.Timeout | undefined
   let orgQuotaSweepTimer: NodeJS.Timeout | undefined
+  // Phase 11 M3 — resume sweep. Fires every AIPE_RESUME_SWEEP_MS
+  // (default 30 s); each tick reads due rows from suspended_tasks
+  // and re-dispatches them via Hub.resumeTask.
+  let resumeSweepTimer: NodeJS.Timeout | undefined
   if (identity) {
     const sweep = (): void => {
       try {
@@ -587,6 +591,78 @@ async function main(): Promise<void> {
   hub.onEvent((e) => {
     process.stdout.write(`[hub][seq=${String(e.seq).padStart(2, '0')}] ${describe(e)}\n`)
   })
+
+  // Phase 11 M3 — resume sweep. Every AIPE_RESUME_SWEEP_MS (default
+  // 30_000 ms; clamped to [1_000, 600_000]) scan suspended_tasks
+  // for rows where resume_at <= now, re-enter each via
+  // `hub.resumeTask`, then conditionally remove the row (kept on
+  // suspend-again — INSERT OR REPLACE already refreshed it).
+  //
+  // A reentrancy guard prevents two ticks from racing if a slow
+  // sweep (lots of due rows + slow agents) crosses the next
+  // interval. We don't queue — the next tick will pick up whatever
+  // remained.
+  if (identity) {
+    const swept = identity
+    const rawInterval = Number(process.env.AIPE_RESUME_SWEEP_MS ?? '30000')
+    const sweepIntervalMs = Number.isFinite(rawInterval) && rawInterval >= 1_000
+      ? Math.min(rawInterval, 600_000)
+      : 30_000
+    let sweepInflight = false
+    const sweepResume = async (): Promise<void> => {
+      if (sweepInflight) return
+      sweepInflight = true
+      try {
+        const due = swept.listDueSuspendedTasks({ now: Date.now(), limit: 100 })
+        for (const row of due) {
+          let task: Task
+          try {
+            task = JSON.parse(row.taskJson) as Task
+          } catch (err) {
+            // Corrupt task_json — drop the row so the sweep doesn't
+            // loop on it forever. Operator gets a log entry.
+            log.error('resume sweep: corrupt task_json — dropping row', {
+              taskId: row.taskId,
+              err,
+            })
+            try { swept.removeSuspendedTask(row.taskId) } catch { /* noop */ }
+            continue
+          }
+          try {
+            const result = await hub.resumeTask(row.agentId, task, row.state)
+            // Only remove the row when the participant produced a
+            // terminal outcome (ok / failed / cancelled / no_participant).
+            // A suspend-again already wrote a fresh row via the
+            // notifier's INSERT OR REPLACE — removing here would
+            // delete the just-renewed entry.
+            if (result.kind !== 'suspended') {
+              try { swept.removeSuspendedTask(row.taskId) } catch (err) {
+                log.error('resume sweep: removeSuspendedTask failed', {
+                  taskId: row.taskId,
+                  err,
+                })
+              }
+            }
+          } catch (err) {
+            // Shouldn't happen — hub.resumeTask catches all in-handler
+            // errors and returns a TaskResult. Log defensively in case
+            // a future refactor regresses.
+            log.error('resume sweep: hub.resumeTask threw unexpectedly', {
+              taskId: row.taskId,
+              err,
+            })
+          }
+        }
+      } catch (err) {
+        log.error('resume sweep: listDueSuspendedTasks failed', { err })
+      } finally {
+        sweepInflight = false
+      }
+    }
+    resumeSweepTimer = setInterval(() => { void sweepResume() }, sweepIntervalMs)
+    resumeSweepTimer.unref?.()
+    log.info('resume sweep started', { intervalMs: sweepIntervalMs })
+  }
 
   // Hub Services (memory / artifact / datastore plugins). Plugin load
   // failures are non-fatal: a bad plugin shows up in the boot log but
@@ -943,6 +1019,10 @@ async function main(): Promise<void> {
       clearInterval(orgQuotaSweepTimer)
       orgQuotaSweepTimer = undefined
     }
+    if (resumeSweepTimer) {
+      clearInterval(resumeSweepTimer)
+      resumeSweepTimer = undefined
+    }
     if (identity) {
       try { identity.close() } catch (err) { log.error('identity close error', { err }) }
     }
@@ -1005,6 +1085,11 @@ function describe(e: TranscriptEntry): string {
       return `LLMCHUNK ${e.data.agentId} task=${e.data.taskId} kind=${
         (e.data.chunk as { type?: string } | null)?.type ?? '?'
       }`
+    case 'task_resumed':
+      // Phase 11 M3 — resume sweep signal. Paired with a subsequent
+      // task_result line; together they trace "task X woken on agent
+      // Y, then produced result Z" in the host stdout.
+      return `RESUME   task=${e.data.taskId} by ${e.data.by}`
   }
 }
 

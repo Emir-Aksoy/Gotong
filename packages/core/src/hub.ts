@@ -20,6 +20,7 @@ import {
 } from './scheduler.js'
 import { InMemoryStorage, type Storage } from './storage/index.js'
 import { Space } from './space.js'
+import { isSuspendTaskError } from './suspend.js'
 import { Transcript } from './transcript.js'
 
 const log = createLogger('hub')
@@ -172,6 +173,13 @@ export class Hub {
   private started = false
   private stopped = false
   private readonly pending = new Map<string, PendingEntry>()
+  /**
+   * Phase 11 M3 — stored separately so `resumeTask` can call it on
+   * suspend-again without going back through the scheduler's
+   * runOne. The scheduler also has its own reference (handed at
+   * construction); both point at the same hook.
+   */
+  private readonly suspendNotifier?: SuspendNotifier
 
   constructor(config: HubConfig = {}) {
     this.space = config.space
@@ -258,6 +266,7 @@ export class Hub {
     // themselves if they want it.
     const crossHubResolver = config.crossHubResolver
     const suspendNotifier = config.suspendNotifier
+    if (suspendNotifier) this.suspendNotifier = suspendNotifier
     const factory =
       config.schedulerFactory ??
       ((r, inv, can, sn) =>
@@ -632,6 +641,127 @@ export class Hub {
     })
 
     return { from, to, rows, unratedTaskCount, totalTaskCount }
+  }
+
+  /**
+   * Phase 11 M3 — re-enter a previously suspended task on its
+   * original participant. Called by the host's resume sweep (M3)
+   * when an entry in `suspended_tasks` is past its `resume_at`.
+   *
+   * Differs from `dispatch` in three ways:
+   *   - The task object is reused verbatim (same id, same payload)
+   *     instead of allocating a fresh one — the suspended row
+   *     stored the full task envelope in `task_json`.
+   *   - The participant is identified by id directly (the row
+   *     captured `agent_id` at suspend time); dispatch's strategy
+   *     matching / depth + cycle gates do NOT re-fire.
+   *   - The participant is invoked via `onResume(task, state)` when
+   *     it implemented one, falling back to `onTask(task)` otherwise.
+   *
+   * Behaviour on the resume side mirrors `scheduler.runOne`'s
+   * suspend handling: a SuspendTaskError thrown from `onResume`
+   * (suspend-again) is caught, persisted via `suspendNotifier`, and
+   * surfaced as a fresh `{ kind: 'suspended', ... }` result. The
+   * row gets overwritten via INSERT OR REPLACE; the sweep caller
+   * checks `result.kind` before calling `removeSuspendedTask`.
+   *
+   * Returns the participant's result envelope. The transcript gets
+   * a `task_resumed` entry (signalling re-entry) followed by the
+   * usual `task_result`. There is no fresh `task` entry — the
+   * original lives earlier in the same transcript at the same
+   * taskId.
+   */
+  async resumeTask(
+    agentId: ParticipantId,
+    task: Task,
+    state: unknown,
+  ): Promise<TaskResult> {
+    this.transcript.append({
+      ts: this.now(),
+      kind: 'task_resumed',
+      data: { taskId: task.id, by: agentId },
+    })
+    const result = await this.runResume(agentId, task, state)
+    this.transcript.append({ ts: this.now(), kind: 'task_result', data: result })
+    return result
+  }
+
+  private async runResume(
+    agentId: ParticipantId,
+    task: Task,
+    state: unknown,
+  ): Promise<TaskResult> {
+    const p = this.registry.get(agentId)
+    if (!p) {
+      return {
+        kind: 'no_participant',
+        taskId: task.id,
+        reason: `resume target '${agentId}' is not registered`,
+        ts: this.now(),
+      }
+    }
+    // Resume routes through `onResume(task, state)` when the
+    // participant implements one; otherwise we fall back to
+    // `onTask(task)` so plain agents (no resume awareness) still
+    // get re-run from the top. Working-memory-aware agents (Phase 11
+    // M4) implement `onResume` to splice state back in.
+    if (!p.onResume && !p.onTask) {
+      return {
+        kind: 'no_participant',
+        taskId: task.id,
+        reason: `participant '${agentId}' has neither onResume nor onTask`,
+        ts: this.now(),
+      }
+    }
+    this.registry.incLoad(agentId)
+    try {
+      const r = p.onResume
+        ? await p.onResume(task, state)
+        : await p.onTask!(task)
+      return r
+    } catch (err) {
+      if (isSuspendTaskError(err)) {
+        const resumeAt = err.resumeAt
+        try {
+          await this.suspendNotifier?.(task, agentId, {
+            resumeAt,
+            state: err.state,
+          })
+        } catch (persistErr) {
+          log.error('resume → suspend-again persist threw', {
+            taskId: task.id,
+            by: agentId,
+            resumeAt,
+            err: persistErr,
+          })
+          return {
+            kind: 'failed',
+            taskId: task.id,
+            by: agentId,
+            error: `suspend persist failed: ${
+              persistErr instanceof Error ? persistErr.message : String(persistErr)
+            }`,
+            ts: this.now(),
+          }
+        }
+        return {
+          kind: 'suspended',
+          taskId: task.id,
+          by: agentId,
+          resumeAt,
+          ts: this.now(),
+        }
+      }
+      return {
+        kind: 'failed',
+        taskId: task.id,
+        by: agentId,
+        error: err instanceof Error ? err.message : String(err),
+        ts: this.now(),
+      }
+    } finally {
+      this.registry.decLoad(agentId)
+    }
   }
 
   /**
