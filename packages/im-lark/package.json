@@ -1,0 +1,33 @@
+{
+  "name": "@aipehub/im-lark",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AipeHub IM bridge for Lark / Feishu — implements ImBridge against the Open Platform Bot API. Webhook event-subscription mode; no @larksuiteoapi SDK dep (uses fetch).",
+  "license": "MIT",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aipehub/im-adapter": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}
