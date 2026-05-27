@@ -666,6 +666,29 @@
       `</div>`
     )
 
+    // Phase 10 M4 — dispatch ancestry chain. Only rendered when the
+    // task has a non-empty `ancestry[]` (root tasks omit). Each entry
+    // shows the executor agent (`by`) of an ancestor and a truncated
+    // task id so admins can trace A → B → C → this-task. Click-to-
+    // copy the full id stays out of scope for M4; admin can read it
+    // from the raw payload section if they need it.
+    if (Array.isArray(v.task.ancestry) && v.task.ancestry.length > 0) {
+      const chain = v.task.ancestry
+        .map((node) => {
+          const id = String(node.taskId || '')
+          const idShort = id ? id.slice(0, 8) + '…' : '?'
+          const by = escapeHtml(String(node.by || '?'))
+          return `<li><code>${by}</code> <span class="anc-tid" title="${escapeHtml(id)}">${escapeHtml(idShort)}</span></li>`
+        })
+        .join(' <span class="anc-arrow">→</span> ')
+      sections.push(
+        `<div class="task-detail-section task-detail-ancestry">` +
+          `<strong>↰ dispatch chain (${v.task.ancestry.length}):</strong> ` +
+          `<ol class="anc-chain">${chain}</ol>` +
+        `</div>`
+      )
+    }
+
     // payload — Phase 9 M5: walk for multimodal blocks first, render
     // them inline (img / audio / download link), then keep the raw
     // JSON view below so an admin can still inspect the structure.

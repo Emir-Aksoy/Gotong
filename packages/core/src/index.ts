@@ -21,6 +21,8 @@ export type {
   WorkerRecord,
   SessionRecord,
   PersistedPendingApp,
+  // Phase 10 M4 — DispatchToolset allow-list declared on the agent spec
+  DispatchAllowList,
 } from './space.js'
 
 export type {

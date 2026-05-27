@@ -754,6 +754,31 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 }
 
 /* --- Phase 9 M5: multimodal preview blocks ------------------------- */
+/* Phase 10 M4 — dispatch ancestry chain row. Visual goal: a short
+   admin-readable trace, not a fancy tree. Keep it compact so it
+   doesn't push payload + result below the fold. */
+.task-detail-ancestry {
+  color: #444;
+  font-size: 0.78rem;
+}
+.task-detail-ancestry .anc-chain {
+  display: inline;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.task-detail-ancestry .anc-chain li {
+  display: inline;
+}
+.task-detail-ancestry .anc-tid {
+  color: #888;
+  font-size: 0.72rem;
+}
+.task-detail-ancestry .anc-arrow {
+  color: #aaa;
+  margin: 0 0.15rem;
+}
+
 .task-detail-multimodal {
   display: flex;
   flex-wrap: wrap;

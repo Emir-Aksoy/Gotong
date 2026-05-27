@@ -10,7 +10,14 @@ import {
   type Space,
   type Task,
 } from '@aipehub/core'
-import { LlmAgent, MockLlmProvider, type LlmProvider } from '@aipehub/llm'
+import {
+  ComposedToolset,
+  DispatchToolset,
+  LlmAgent,
+  MockLlmProvider,
+  type LlmAgentToolset,
+  type LlmProvider,
+} from '@aipehub/llm'
 import { PersonalGrowthAgent } from './agents/personal-growth-agent.js'
 import { AnthropicProvider } from '@aipehub/llm-anthropic'
 import { OpenAIProvider } from '@aipehub/llm-openai'
@@ -384,11 +391,11 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     // manifesting on the very first hub.dispatch into this agent.
     // A failed-to-spawn server still leaves its peers usable — see
     // McpToolset's "one server crashed, others stay live" contract.
-    let toolset: McpToolset | undefined
+    let mcpToolset: McpToolset | undefined
     if (record.managed.mcpServers && record.managed.mcpServers.length > 0) {
-      toolset = buildToolset(record.id, record.managed.mcpServers)
+      mcpToolset = buildToolset(record.id, record.managed.mcpServers)
       try {
-        await toolset.connect()
+        await mcpToolset.connect()
       } catch (err) {
         // Don't let a transient `npx -y` network hiccup tank the spawn.
         // Mark the toolset as failed-to-connect by leaving its dead
@@ -400,6 +407,40 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
           err,
         })
       }
+    }
+
+    // Phase 10 M4 — wire DispatchToolset when the manifest declared
+    // `dispatch:`. Allow-list with no entries at all (both arrays
+    // empty / absent) collapses to "no toolset" so the LLM doesn't
+    // get a `dispatch_task` tool that always fails. When both an MCP
+    // toolset and a dispatch toolset are present, the agent gets a
+    // `ComposedToolset` that exposes both. Order matters for
+    // `runForTask` nesting: DispatchToolset goes FIRST so its ALS
+    // frame is the outermost (ancestry needs to be live when any
+    // tool — including an MCP tool that itself triggers a dispatch
+    // somehow — fires).
+    let dispatchToolset: DispatchToolset | undefined
+    if (record.managed.dispatch) {
+      const allow = record.managed.dispatch
+      const hasAgents = allow.agents && allow.agents.length > 0
+      const hasCaps = allow.capabilities && allow.capabilities.length > 0
+      if (hasAgents || hasCaps) {
+        dispatchToolset = DispatchToolset.create({
+          hub: this.hub,
+          selfId: record.id,
+          ...(allow.agents ? { allowedAgents: allow.agents } : {}),
+          ...(allow.capabilities
+            ? { allowedCapabilities: allow.capabilities }
+            : {}),
+        })
+      }
+    }
+
+    let toolset: LlmAgentToolset | undefined
+    if (mcpToolset && dispatchToolset) {
+      toolset = ComposedToolset.of(dispatchToolset, mcpToolset)
+    } else {
+      toolset = dispatchToolset ?? mcpToolset
     }
 
     // v2.5: inject a reverse-dispatch surface so agents can ask
@@ -516,7 +557,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     this.running.set(record.id, agent)
     if (owner) this.serviceOwnerForAgent.set(record.id, owner)
     if (ctx) this.serviceCtxForAgent.set(record.id, ctx)
-    if (toolset) this.mcpToolsetForAgent.set(record.id, toolset)
+    if (mcpToolset) this.mcpToolsetForAgent.set(record.id, mcpToolset)
     log.info('spawned', {
       id: record.id,
       provider: record.managed.provider,
@@ -526,6 +567,15 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       mcpServers: record.managed.mcpServers
         ? record.managed.mcpServers.map((m) => m.name)
         : [],
+      // Phase 10 M4: log dispatch allow-list summary for spawn auditing.
+      ...(dispatchToolset
+        ? {
+            dispatchAllow: {
+              agents: record.managed.dispatch?.agents ?? [],
+              capabilities: record.managed.dispatch?.capabilities ?? [],
+            },
+          }
+        : {}),
     })
   }
 

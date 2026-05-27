@@ -1079,6 +1079,38 @@ export interface ManagedAgentSpec {
    * agent (its tools just won't appear in the LLM-facing list).
    */
   mcpServers?: McpServerSpec[]
+  /**
+   * Phase 10 M4 — allow-list for agent-to-agent dispatch via the
+   * `DispatchToolset` (the Phase 10 tool-use path). When present,
+   * `LocalAgentPool` attaches a `DispatchToolset` to the agent
+   * (composed with the MCP toolset if `mcpServers:` is also set)
+   * and the LLM's `dispatch_task` tool will only succeed for ids
+   * / capabilities listed here.
+   *
+   * Omit entirely (the default) → the agent has no `dispatch_task`
+   * tool and cannot spawn sub-tasks. Empty arrays inside (`agents:
+   * []`, `capabilities: []`) are tolerated and mean "explicitly
+   * none of that flavour" rather than "all".
+   *
+   * Cross-hub dispatch is automatic via capability: list a peer's
+   * advertised capability and the scheduler routes through the
+   * cross-hub resolver. No `crossHub` knob needed.
+   */
+  dispatch?: DispatchAllowList
+}
+
+/**
+ * Phase 10 M4 — allow-list payload nested under
+ * `ManagedAgentSpec.dispatch`. At spawn time `LocalAgentPool`
+ * converts these arrays into a `DispatchToolset` configured with
+ * the same allow-lists; the LLM's view of which ids / capabilities
+ * are valid is purely yaml-driven.
+ */
+export interface DispatchAllowList {
+  /** Explicit-strategy targets the agent may dispatch to by id. */
+  agents?: string[]
+  /** Capability names the agent may dispatch to (via capability strategy). */
+  capabilities?: string[]
 }
 
 /**
