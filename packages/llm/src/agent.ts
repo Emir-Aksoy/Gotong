@@ -508,14 +508,28 @@ export class LlmAgent extends AgentParticipant {
   }
 
   protected async handleTask(task: Task): Promise<unknown> {
-    if (!this.toolset) {
-      // No toolset attached — same code path as v0.2.
-      const req = this.buildRequest(task)
-      if (this.preCallHook) await this.preCallHook(task)
-      const res = await this.streamWithAuthHook(req, task)
-      return this.parseResponse(res, task, 0)
+    // Phase 10 M2 — wrap the task body in the toolset's per-task
+    // scope so DispatchToolset (and other ancestry/state-aware
+    // toolsets) can inject AsyncLocalStorage context for the
+    // duration of this task only. Legacy toolsets without
+    // `runForTask` get the unwrapped path.
+    const work = async (): Promise<unknown> => {
+      if (!this.toolset) {
+        // No toolset attached — same code path as v0.2.
+        const req = this.buildRequest(task)
+        if (this.preCallHook) await this.preCallHook(task)
+        const res = await this.streamWithAuthHook(req, task)
+        return this.parseResponse(res, task, 0)
+      }
+      return this.handleTaskWithTools(task)
     }
-    return this.handleTaskWithTools(task)
+    if (this.toolset?.runForTask) {
+      return this.toolset.runForTask(
+        { id: task.id, from: task.from, ancestry: task.ancestry },
+        work,
+      )
+    }
+    return work()
   }
 
   /**

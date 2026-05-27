@@ -610,6 +610,33 @@ export interface LlmAgentToolset {
     name: string,
     args: Record<string, unknown>,
   ): Promise<LlmToolCallResult>
+  /**
+   * Phase 10 M2 — optional per-task scope. `LlmAgent.handleTask` calls
+   * this with a `fn` callback that does the actual LLM work. Toolsets
+   * that need per-task state (`DispatchToolset` uses it to track
+   * dispatch ancestry; `McpToolset` and most others ignore it)
+   * implement this; the toolset wraps `fn` in its own scope
+   * (typically `AsyncLocalStorage.run`) so concurrent tasks stay
+   * isolated.
+   *
+   * Why `run(fn)` rather than `onTaskStart()`: `AsyncLocalStorage.
+   * enterWith` is not safe under concurrent sibling chains — it
+   * mutates the ALS frame in the calling sync stack and bleeds into
+   * peers. `run(store, fn)` push/pops a scoped frame and is the only
+   * race-free option for "set context for this task only".
+   *
+   * The task shape is kept permissive to avoid pulling
+   * `@aipehub/core` into this contract; concrete consumers cast /
+   * pick fields they need.
+   */
+  runForTask?<T>(
+    task: {
+      readonly id: string
+      readonly from: string
+      readonly ancestry?: ReadonlyArray<{ taskId: string; by: string }>
+    },
+    fn: () => Promise<T>,
+  ): Promise<T>
 }
 
 /**

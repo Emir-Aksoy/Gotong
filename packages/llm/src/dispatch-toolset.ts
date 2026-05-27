@@ -26,7 +26,10 @@
  * agent has no business claiming them.
  */
 
+import { AsyncLocalStorage } from 'node:async_hooks'
+
 import type {
+  AncestryNode,
   DispatchStrategy,
   ParticipantId,
   TaskResult,
@@ -43,6 +46,9 @@ import type {
  * (`weight`, `countContribution`, `origin`) are policy fields the
  * toolset deliberately does not expose to the LLM.
  *
+ * `ancestry` is Phase 10 M2 — `DispatchToolset` appends a parent entry
+ * onto the chain it inherited from its current task before forwarding.
+ *
  * Defining a narrow surface (rather than depending on the concrete
  * `Hub`) keeps the toolset testable with a one-line vi.fn() mock.
  */
@@ -54,7 +60,18 @@ export interface DispatchSurface {
     title?: string
     deadlineMs?: number
     priority?: number
+    ancestry?: readonly AncestryNode[]
   }): Promise<TaskResult>
+}
+
+/**
+ * Per-task context the toolset reads when forwarding a dispatch. Set
+ * via `onTaskStart` and accessed via `AsyncLocalStorage` so concurrent
+ * tasks on the same toolset see their own values.
+ */
+interface CurrentTaskContext {
+  taskId: string
+  ancestry: readonly AncestryNode[]
 }
 
 export interface DispatchToolsetOptions {
@@ -98,6 +115,10 @@ export class DispatchToolset implements LlmAgentToolset {
   private readonly allowedAgents: ReadonlySet<ParticipantId>
   private readonly allowedCapabilities: ReadonlySet<string>
   private readonly toolName: string
+  // ALS — one frame per concurrent task. enterWith is set when
+  // LlmAgent calls onTaskStart at the head of a task's async chain;
+  // every awaited callTool inside that chain sees the right frame.
+  private readonly taskAls = new AsyncLocalStorage<CurrentTaskContext>()
 
   private constructor(opts: DispatchToolsetOptions) {
     this.hub = opts.hub
@@ -105,6 +126,30 @@ export class DispatchToolset implements LlmAgentToolset {
     this.allowedAgents = new Set(opts.allowedAgents ?? [])
     this.allowedCapabilities = new Set(opts.allowedCapabilities ?? [])
     this.toolName = opts.toolName ?? 'dispatch_task'
+  }
+
+  /**
+   * Phase 10 M2 — invoked by `LlmAgent.handleTask` to scope task
+   * context for the duration of `fn`. ALS.run push/pops a frame so
+   * concurrent tasks on the same toolset instance stay isolated —
+   * unlike `enterWith`, which would race because it mutates the
+   * shared ALS binding in the calling sync stack.
+   */
+  runForTask<T>(
+    task: {
+      readonly id: string
+      readonly from: string
+      readonly ancestry?: ReadonlyArray<{ taskId: string; by: string }>
+    },
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    return this.taskAls.run(
+      {
+        taskId: task.id,
+        ancestry: (task.ancestry ?? []) as readonly AncestryNode[],
+      },
+      fn,
+    )
   }
 
   listTools(): LlmToolDefinition[] {
@@ -193,6 +238,17 @@ export class DispatchToolset implements LlmAgentToolset {
       strategy = { kind: 'capability', capabilities: [capability!] }
     }
 
+    // Phase 10 M2 — build the child's ancestry chain by appending
+    // the current task's frame (taskId + self as `by`) onto the
+    // ancestry the current task inherited. When no current-task
+    // context exists (toolset used outside an LlmAgent.onTask call,
+    // e.g. unit tests or scripts), the chain stays empty — equivalent
+    // to a root dispatch.
+    const ctx = this.taskAls.getStore()
+    const childAncestry: readonly AncestryNode[] = ctx
+      ? [...ctx.ancestry, { taskId: ctx.taskId, by: this.selfId }]
+      : []
+
     try {
       const result = await this.hub.dispatch({
         from: this.selfId,
@@ -203,6 +259,7 @@ export class DispatchToolset implements LlmAgentToolset {
           typeof args.deadlineMs === 'number' ? args.deadlineMs : undefined,
         priority:
           typeof args.priority === 'number' ? args.priority : undefined,
+        ...(childAncestry.length > 0 ? { ancestry: childAncestry } : {}),
       })
       return mapResultToToolResult(result)
     } catch (err) {

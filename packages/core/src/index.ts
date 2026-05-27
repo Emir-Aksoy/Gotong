@@ -1,5 +1,6 @@
 export { Hub, newId } from './hub.js'
 export type { HubConfig, TaskStatus, TaskView } from './hub.js'
+export { readMaxDispatchDepth } from './hub.js'
 
 export {
   Space,
@@ -137,6 +138,8 @@ export type {
   TaskResult,
   TaskOrigin,
   DispatchStrategy,
+  // Phase 10 M2 — dispatch ancestry record
+  AncestryNode,
   // participants
   Participant,
   // transcript / events

@@ -59,6 +59,42 @@ export interface TaskOrigin {
   userEmail?: string
 }
 
+/**
+ * Phase 10 M2 — one entry per ancestor in a dispatch chain.
+ *
+ * When an agent's tool-use loop calls `Hub.dispatch` (the Phase 10
+ * `DispatchToolset` path), the new task carries an `ancestry` array
+ * whose last element is the immediate parent task and whose first
+ * element is the root dispatch. Tasks dispatched directly by a user /
+ * admin / script (i.e. the root) leave `ancestry` unset (empty arrays
+ * are normalised away to keep the transcript shape stable for legacy
+ * single-dispatch runs).
+ *
+ * The hub uses the chain for two gates:
+ *   1. **Depth** — `ancestry.length >= MAX_DISPATCH_DEPTH` → reject
+ *      with `error: 'dispatch_depth_exceeded'` before the scheduler
+ *      ever sees the task.
+ *   2. **Cycle** — an `explicit` strategy whose target already appears
+ *      as some ancestor's `by` field is rejected with
+ *      `error: 'dispatch_cycle'`. Catches A → B → A patterns.
+ *
+ * `by` (not `from`) is what cycle detection compares because `by` is
+ * the agent that actually *executed* that ancestor's work — that's
+ * the loop participant. `from` is just the dispatcher (the one who
+ * issued `hub.dispatch`), and a recursing agent calling itself via
+ * tool-use is allowed (it'll terminate via the depth gate).
+ *
+ * Capability strategies are not pre-checked because the matcher
+ * hasn't picked a participant yet; in practice a capability cycle
+ * still terminates because each round eats one ancestry slot.
+ */
+export interface AncestryNode {
+  /** The ancestor task's id. */
+  taskId: TaskId
+  /** The participant that **executed** the ancestor task (== that task's TaskResult.by). */
+  by: ParticipantId
+}
+
 export interface Task {
   id: TaskId
   from: ParticipantId
@@ -67,6 +103,13 @@ export interface Task {
    * peer-hub boundary; absent for local-only tasks. See `TaskOrigin`.
    */
   origin?: TaskOrigin
+  /**
+   * Phase 10 M2 — dispatch ancestry chain (root → immediate parent).
+   * Present only for tasks dispatched by another agent's tool-use loop
+   * (i.e. via `DispatchToolset` → `Hub.dispatch({ ..., ancestry: [...] })`).
+   * Absent for root tasks dispatched directly by a user/admin/script.
+   */
+  ancestry?: readonly AncestryNode[]
   strategy: DispatchStrategy
   payload: unknown
   title?: string

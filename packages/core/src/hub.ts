@@ -24,6 +24,7 @@ import { Transcript } from './transcript.js'
 const log = createLogger('hub')
 import type {
   AdmissionDecision,
+  AncestryNode,
   ChannelId,
   ContributionRow,
   DispatchStrategy,
@@ -38,6 +39,26 @@ import type {
   TaskId,
   TaskResult,
 } from './types.js'
+
+/**
+ * Phase 10 M2 — hard cap on dispatch chain depth. A new dispatch whose
+ * incoming `ancestry` array already has this many entries is rejected
+ * before it reaches the scheduler. Default is intentionally low (5) —
+ * the architect-team workflow needs maybe 2 hops in practice; anything
+ * past that is almost certainly a runaway loop or a mis-instrumented
+ * agent. Override via `AIPE_MAX_DISPATCH_DEPTH=N` (clamped to [1, 50]).
+ */
+const DEFAULT_MAX_DISPATCH_DEPTH = 5
+
+export function readMaxDispatchDepth(): number {
+  const raw = process.env.AIPE_MAX_DISPATCH_DEPTH
+  if (!raw) return DEFAULT_MAX_DISPATCH_DEPTH
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 1 || n > 50) {
+    return DEFAULT_MAX_DISPATCH_DEPTH
+  }
+  return n
+}
 
 interface PendingEntry {
   application: PendingApplication
@@ -730,7 +751,34 @@ export class Hub {
      * trip a cross-org policy.
      */
     origin?: import('./types.js').TaskOrigin
+    /**
+     * Phase 10 M2 — dispatch ancestry chain. Set by `DispatchToolset`
+     * (the agent-to-agent path) to the parent task's `[...ancestry,
+     * {taskId: parent.id, from: parent.from}]`. Root dispatches
+     * (user / admin / script → hub) omit this and become an empty
+     * chain on the new task.
+     *
+     * The hub rejects the dispatch up-front when:
+     *   - chain length is already at `MAX_DISPATCH_DEPTH` (depth gate)
+     *   - the new task's `from` already appears on the chain (cycle:
+     *     A is dispatching while still on the call stack from a
+     *     previous task A dispatched)
+     *   - an `explicit` strategy targets an id already on the chain
+     *     (cycle: A → B → A pattern)
+     *
+     * Rejected dispatches still create a task entry in the transcript
+     * (so audit shows what was attempted) plus an immediate failed
+     * task_result with a structured error code.
+     */
+    ancestry?: readonly AncestryNode[]
   }): Promise<TaskResult> {
+    // Phase 10 M2 gate. Evaluated BEFORE id allocation so the task id
+    // sequence isn't burned by rejected attempts — but we still write
+    // a transcript pair (task + failed result) under a synthetic id
+    // so audit captures what was tried + why.
+    const ancestry = opts.ancestry ?? []
+    const gateError = checkDispatchGates(ancestry, opts.from, opts.strategy)
+
     const task: Task = {
       id: this.idGen(),
       from: opts.from,
@@ -744,9 +792,25 @@ export class Hub {
       // FED-M2: only attach origin field when actually present, to
       // keep the transcript shape stable for legacy / single-org runs.
       ...(opts.origin ? { origin: opts.origin } : {}),
+      // Phase 10 M2: only attach ancestry when non-empty for the same
+      // reason — root dispatches (the common case) stay byte-identical.
+      ...(ancestry.length > 0 ? { ancestry } : {}),
       createdAt: this.now(),
     }
     this.transcript.append({ ts: task.createdAt, kind: 'task', data: task })
+
+    if (gateError) {
+      const result: TaskResult = {
+        kind: 'failed',
+        taskId: task.id,
+        by: 'scheduler' as ParticipantId,
+        error: gateError,
+        ts: this.now(),
+      }
+      this.transcript.append({ ts: result.ts, kind: 'task_result', data: result })
+      return result
+    }
+
     const result = await this.scheduler.dispatch(task)
     this.transcript.append({ ts: this.now(), kind: 'task_result', data: result })
     return result
@@ -820,6 +884,38 @@ function sanitizeRating(r?: number): number | undefined {
   if (v < 0) return 0
   if (v > 5) return 5
   return v
+}
+
+/**
+ * Phase 10 M2 — evaluate depth + cycle gates on a dispatch. Returns
+ * an error code string when the dispatch must be rejected, or `null`
+ * when it's allowed through.
+ *
+ * Cycle gate fires when an `explicit` strategy targets a participant
+ * that already appears as some ancestor's `by` (the one that executed
+ * that ancestor task). That is the A → B → A pattern. Recursive self-
+ * dispatch (A → A → A …) is *not* gated here — it bottoms out at the
+ * depth gate, and a self-recursive agent is a valid design.
+ *
+ * Capability strategies skip the cycle check because the matcher
+ * hasn't picked the executor yet; the depth gate provides the bound.
+ */
+function checkDispatchGates(
+  ancestry: readonly AncestryNode[],
+  _from: ParticipantId,
+  strategy: DispatchStrategy,
+): string | null {
+  if (ancestry.length >= readMaxDispatchDepth()) {
+    return 'dispatch_depth_exceeded'
+  }
+  if (strategy.kind === 'explicit') {
+    for (const node of ancestry) {
+      if (node.by === strategy.to) {
+        return 'dispatch_cycle'
+      }
+    }
+  }
+  return null
 }
 
 /**
