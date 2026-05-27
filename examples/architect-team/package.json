@@ -1,0 +1,15 @@
+{
+  "name": "@aipehub/example-architect-team",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Phase 10 demo — an architect LlmAgent dispatches sub-tasks to writer/reviewer/tester sub-agents via its tool-use loop.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/llm": "workspace:*"
+  }
+}
