@@ -58,6 +58,9 @@ function describe(e: TranscriptEntry): string {
     case 'service_call':
       // v1.2 audit entry — one line per resolved SERVICE_CALL.
       return `SVCCALL  ${e.data.from} ${e.data.type}:${e.data.impl}#${e.data.method} → ${e.data.outcome} (${e.data.durationMs}ms)`
+    case 'llm_stream_chunk':
+      // Phase 8 — too noisy to print per chunk, just acknowledge.
+      return `STREAM   ${e.data.agentId} task=${e.data.taskId.slice(0, 8)}…`
   }
 }
 
