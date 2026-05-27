@@ -10,6 +10,7 @@ Commands:
   new agent <name>            Scaffold a TypeScript sidecar agent project
   new python-agent <name>     Scaffold a Python sidecar agent project
   ping <ws-url>               Verify a Hub is reachable (HELLO/WELCOME handshake)
+  repl                        Start an interactive shell against an in-memory hub
   help [command]              Show usage for a specific command
   --version                   Print the CLI version
 
@@ -17,6 +18,7 @@ Examples:
   aipehub new agent greeter
   aipehub new python-agent classifier --capabilities=triage,classify
   aipehub ping ws://127.0.0.1:4000
+  aipehub repl
 `
 
 const PER_COMMAND: Readonly<Record<string, string>> = {
@@ -34,6 +36,33 @@ Options:
 Examples:
   aipehub new agent coach --capabilities=draft,review
   aipehub new python-agent triage --id=triage-py
+`,
+  repl: `aipehub repl [options]
+
+Starts an interactive shell against an in-memory hub bootstrapped with
+a default echo agent (capability 'chat'). Each line you type is
+either:
+
+  - A meta command if it starts with \`:\`:
+      :help, :h, :?            command list
+      :agents, :who, :ls       list registered participants
+      :transcript [n], :t [n]  show last n transcript entries (default 5)
+      :dispatch <id> <text>    explicit dispatch to a specific agent
+      :quit, :q, :exit         exit
+
+  - Otherwise, free text — dispatched to capability 'chat'.
+
+No persistent state: REPL transcript dies with the process.
+
+Options:
+  --prompt=<str>     Override the prompt (default \`> \`)
+  --from=<id>        Override participant id used as Task.from
+                     (default \`repl-user\`)
+  --no-banner        Suppress the startup banner
+
+Examples:
+  aipehub repl
+  aipehub repl --no-banner --prompt='aipe> '
 `,
   ping: `aipehub ping <ws-url> [options]
 

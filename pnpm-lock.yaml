@@ -281,6 +281,9 @@ importers:
 
   packages/cli:
     dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../core
       '@aipehub/protocol':
         specifier: workspace:*
         version: link:../protocol

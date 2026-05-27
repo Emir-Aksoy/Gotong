@@ -38,6 +38,7 @@
     "prepack": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@aipehub/core": "workspace:*",
     "@aipehub/protocol": "workspace:*"
   },
   "devDependencies": {
