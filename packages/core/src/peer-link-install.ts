@@ -245,6 +245,15 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
       // FED-M2: preserve federated origin so receiver-side ACL +
       // audit log can see who-from-which-org originated this task.
       ...(task.origin ? { origin: task.origin } : {}),
+      // Phase 10 M3: preserve dispatch ancestry across the hub
+      // boundary so depth + cycle gates still bound the chain. A
+      // task that's already 4 hops deep on the sender's side stays
+      // 4 hops deep on ours — the receiver's MAX_DISPATCH_DEPTH gate
+      // can then refuse a 5th hop locally instead of letting the
+      // counter reset at each boundary.
+      ...(task.ancestry && task.ancestry.length > 0
+        ? { ancestry: task.ancestry }
+        : {}),
     })
     // The local hub generated a fresh internal task.id; relabel back to
     // the peer's task.id so their pending-dispatch table can match.
