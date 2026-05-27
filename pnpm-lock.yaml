@@ -73,6 +73,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
+  examples/im-bridge-host:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/identity':
+        specifier: workspace:*
+        version: link:../../packages/identity
+      '@aipehub/im-adapter':
+        specifier: workspace:*
+        version: link:../../packages/im-adapter
+
   examples/industry-consultation-deepseek:
     dependencies:
       '@aipehub/core':
