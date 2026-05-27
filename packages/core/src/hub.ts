@@ -15,6 +15,7 @@ import {
   type CancelNotifier,
   type CrossHubExplicitResolver,
   type Scheduler,
+  type SuspendNotifier,
   type TaskInvoker,
 } from './scheduler.js'
 import { InMemoryStorage, type Storage } from './storage/index.js'
@@ -87,7 +88,21 @@ export interface HubConfig {
     registry: Registry,
     invoke: TaskInvoker,
     notifyCancel: CancelNotifier,
+    /**
+     * Phase 11 M2 — handed through from `HubConfig.suspendNotifier`.
+     * Custom schedulers should pass it to whichever inner scheduler
+     * ultimately calls `runOne` if they want suspend persistence.
+     */
+    suspendNotifier?: SuspendNotifier,
   ) => Scheduler
+  /**
+   * Phase 11 M2 — host-supplied persistence hook for participants
+   * that throw `SuspendTaskError`. The hub itself doesn't open the
+   * SQLite — the host wires this to `IdentityStore.persistSuspendedTask`.
+   * Unset → suspends still resolve to `{ kind: 'suspended', ... }`
+   * but won't survive a process restart.
+   */
+  suspendNotifier?: SuspendNotifier
   /**
    * D2 (v4 Phase 5) — cross-hub explicit-dispatch hook. When the local
    * scheduler can't find an explicit dispatch target by id, this
@@ -242,17 +257,19 @@ export class Hub {
     // `schedulerFactory` are responsible for using reputation
     // themselves if they want it.
     const crossHubResolver = config.crossHubResolver
+    const suspendNotifier = config.suspendNotifier
     const factory =
       config.schedulerFactory ??
-      ((r, inv, can) =>
+      ((r, inv, can, sn) =>
         new DefaultScheduler(
           r,
           inv,
           can,
           (id) => this.reputation.scoreOf(id),
           crossHubResolver,
+          sn,
         ))
-    this.scheduler = factory(this.registry, invoke, notifyCancel)
+    this.scheduler = factory(this.registry, invoke, notifyCancel, suspendNotifier)
   }
 
   /**

@@ -130,5 +130,13 @@ function relabel(r: TaskResult, taskId: TaskId, wrapperId: ParticipantId): TaskR
       return { ...r, taskId }
     case 'no_participant':
       return { ...r, taskId }
+    // Phase 11 M2 — a suspended inner task surfaces to the outer
+    // dispatcher as suspended too, with the wrapper's id as `by` so
+    // the outer transcript records the right responder. The inner
+    // participant's identity is preserved in the suspended_tasks
+    // row (by inner-by, see scheduler.runOne) — the outer view just
+    // needs to know "the work is parked."
+    case 'suspended':
+      return { ...r, taskId, by: wrapperId }
   }
 }

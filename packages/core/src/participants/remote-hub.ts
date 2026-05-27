@@ -193,5 +193,12 @@ function relabel(
       return { ...r, taskId }
     case 'no_participant':
       return { ...r, taskId }
+    // Phase 11 M2 — a remote-hub task that came back parked: the
+    // peer hub persisted the suspend in *its* identity store, and
+    // when its sweep fires, the resume re-enters here as a separate
+    // task lifecycle. From the local view this is a single
+    // "suspended" terminal; resume produces a fresh result later.
+    case 'suspended':
+      return { ...r, taskId, by: wrapperId }
   }
 }

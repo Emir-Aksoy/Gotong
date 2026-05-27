@@ -379,6 +379,45 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // Phase 11 M2 — suspended tasks. When a participant throws
+    // `SuspendTaskError`, the scheduler persists a row here keyed by
+    // task_id. The resume sweep (M3) selects rows where
+    // resume_at <= now() and re-dispatches the same task back to the
+    // same agent via `Participant.onResume(task, state)`. Rows are
+    // deleted on successful resume.
+    //
+    // Why not in core/storage? Single-host runs already have one
+    // SQLite open (identity.sqlite); adding a table here avoids a
+    // second db connection / a parallel migration story. The
+    // contents are operational state, not user identity — same
+    // pragmatic logic as `usage_counters` and `peer_registry`.
+    //
+    // Indexes:
+    //   - resume_at: the sweep query (`WHERE resume_at <= ?`) needs
+    //     to scan only due rows. Most rows are NOT due at any given
+    //     moment.
+    //   - agent_id: future admin UI "what's parked on this agent"
+    //     queries — cheap to add now while the table is new.
+    version: 9,
+    name: 'suspended-tasks',
+    sql: `
+      CREATE TABLE IF NOT EXISTS suspended_tasks (
+        task_id         TEXT PRIMARY KEY,
+        agent_id        TEXT NOT NULL,
+        hub_id          TEXT,
+        origin_user_id  TEXT,
+        resume_at       INTEGER NOT NULL,
+        state           TEXT,
+        task_json       TEXT NOT NULL,
+        created_at      INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_suspended_resume_at
+        ON suspended_tasks(resume_at);
+      CREATE INDEX IF NOT EXISTS idx_suspended_agent
+        ON suspended_tasks(agent_id);
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {

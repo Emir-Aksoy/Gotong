@@ -1,5 +1,6 @@
 import { createLogger } from './logger.js'
 import type { Registry } from './registry.js'
+import { isSuspendTaskError } from './suspend.js'
 import type { Participant, ParticipantId, Task, TaskId, TaskResult } from './types.js'
 
 const log = createLogger('scheduler')
@@ -69,6 +70,29 @@ export type CrossHubExplicitResolver = (
  */
 export type CrossHubDispatcher = (task: Task) => Promise<TaskResult>
 
+/**
+ * Phase 11 M2 — Called when a participant throws `SuspendTaskError`
+ * from `onTask` / `onResume`. The scheduler hands off the carried
+ * `(resumeAt, state)` plus the task / executor identity so the host
+ * can persist a suspended-task row (in `@aipehub/identity` SQLite).
+ *
+ * Return shape:
+ *   - resolves → scheduler returns `{ kind: 'suspended', ... }`
+ *   - rejects/throws → scheduler degrades to `{ kind: 'failed', ... }`
+ *     so a persistence outage doesn't silently lose the task. The
+ *     caller still sees a non-`ok` terminal result they can react to.
+ *
+ * Only consulted for `explicit` and `capability` dispatch. The
+ * `broadcast` path treats a SuspendTaskError as a single-candidate
+ * failure and lets other candidates race — broadcast semantics are
+ * "first ok wins," and a parked candidate isn't a winner.
+ */
+export type SuspendNotifier = (
+  task: Task,
+  by: ParticipantId,
+  suspend: { resumeAt: number; state: unknown },
+) => Promise<void> | void
+
 export class DefaultScheduler implements Scheduler {
   constructor(
     private readonly registry: Registry,
@@ -76,6 +100,16 @@ export class DefaultScheduler implements Scheduler {
     private readonly notifyCancel: CancelNotifier,
     private readonly reputationOf?: ReputationLookup,
     private readonly crossHubResolver?: CrossHubExplicitResolver,
+    /**
+     * Phase 11 M2 — optional persistence hook. When a participant
+     * throws `SuspendTaskError`, the scheduler awaits this callback
+     * to persist `(taskId, agentId, resumeAt, state, taskJson)` before
+     * returning `{ kind: 'suspended', ... }`. Wired by the host from
+     * `IdentityStore.persistSuspendedTask`. Unset → suspends still
+     * "work" but aren't durable; the resume sweep (M3) won't find
+     * them after a restart.
+     */
+    private readonly notifySuspend?: SuspendNotifier,
   ) {}
 
   dispatch(task: Task): Promise<TaskResult> {
@@ -97,7 +131,7 @@ export class DefaultScheduler implements Scheduler {
       if (!p.onTask) {
         return notFound(task.id, `participant '${to}' does not accept tasks`)
       }
-      return runOne(task, p, this.registry, this.invoke)
+      return runOne(task, p, this.registry, this.invoke, this.notifySuspend)
     }
     // D2 — local miss. If the host has wired a cross-hub resolver,
     // ask it whether `to` is a known remote-hub target. The resolver
@@ -154,7 +188,7 @@ export class DefaultScheduler implements Scheduler {
       return this.registry.loadOf(a.id) - this.registry.loadOf(b.id)
     })
     const chosen = candidates[0]!
-    return runOne(task, chosen, this.registry, this.invoke)
+    return runOne(task, chosen, this.registry, this.invoke, this.notifySuspend)
   }
 
   // --- broadcast claim ------------------------------------------------------
@@ -224,11 +258,24 @@ export class DefaultScheduler implements Scheduler {
           .catch((err) => {
             this.registry.decLoad(p.id)
             if (settled) return
+            // Phase 11 M2 — broadcast semantics: an `ok` from any
+            // candidate wins, anything else (failure or suspend) just
+            // disqualifies that candidate. We deliberately do *not*
+            // persist a suspended-task row here — if we did, the same
+            // task could end up both "parked" and "ok" from another
+            // candidate, and the resume sweep would re-dispatch a task
+            // that already terminated. Caller sees the broadcast as
+            // failed only when *every* candidate misses.
+            const errMsg = isSuspendTaskError(err)
+              ? `participant suspended during broadcast (resumeAt=${err.resumeAt})`
+              : err instanceof Error
+                ? err.message
+                : String(err)
             lastFailure = {
               kind: 'failed',
               taskId: task.id,
               by: p.id,
-              error: err instanceof Error ? err.message : String(err),
+              error: errMsg,
               ts: Date.now(),
             }
             remaining--
@@ -249,11 +296,50 @@ async function runOne(
   p: Participant,
   registry: Registry,
   invoke: TaskInvoker,
+  notifySuspend?: SuspendNotifier,
 ): Promise<TaskResult> {
   registry.incLoad(p.id)
   try {
     return await invoke(p, task)
   } catch (err) {
+    // Phase 11 M2 — SuspendTaskError is the suspend signal. Persist
+    // the parking record (if a notifier is wired) and return a
+    // `suspended` TaskResult so the caller (Hub.dispatch) and
+    // transcript can show "waiting" rather than "failed."
+    if (isSuspendTaskError(err)) {
+      const resumeAt = err.resumeAt
+      try {
+        await notifySuspend?.(task, p.id, { resumeAt, state: err.state })
+      } catch (persistErr) {
+        // Persistence failure is non-recoverable from scheduler's POV
+        // — degrading to `failed` keeps the worker slot accounted for
+        // and lets the caller see something terminal instead of a
+        // ghost task. The host should be logging the SQLite write
+        // failure separately in the notifier.
+        log.error('suspend persist threw — degrading to failed', {
+          taskId: task.id,
+          by: p.id,
+          resumeAt,
+          err: persistErr,
+        })
+        return {
+          kind: 'failed',
+          taskId: task.id,
+          by: p.id,
+          error: `suspend persist failed: ${
+            persistErr instanceof Error ? persistErr.message : String(persistErr)
+          }`,
+          ts: Date.now(),
+        }
+      }
+      return {
+        kind: 'suspended',
+        taskId: task.id,
+        by: p.id,
+        resumeAt,
+        ts: Date.now(),
+      }
+    }
     return {
       kind: 'failed',
       taskId: task.id,

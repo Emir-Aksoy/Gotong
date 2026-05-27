@@ -546,6 +546,14 @@ async function main(): Promise<void> {
   // originating user a question, and the dispatch target is a user
   // id over on `task.origin.orgId`.
   let peerRegistryRef: PeerRegistry | undefined
+  // Phase 11 M2 — when an agent throws SuspendTaskError the scheduler
+  // calls this notifier to persist the parked task. Wired only when
+  // identity opened successfully (rare boot-time failures fall back
+  // to non-durable suspend; agents still get the 'suspended' result
+  // shape but won't survive a process restart). `hubId` is a fixed
+  // sentinel for now — multi-hub-per-process is on the roadmap but
+  // not a current shape; the row is keyed by task_id alone.
+  const identityForSuspend = identity
   const hub = new Hub({
     space,
     crossHubResolver: (_to, task) => {
@@ -554,6 +562,25 @@ async function main(): Promise<void> {
       if (!link) return null
       return (t) => link.dispatch(t)
     },
+    ...(identityForSuspend
+      ? {
+          suspendNotifier: (task, by, suspend) => {
+            // JSON.stringify of `task` may throw on circular payloads;
+            // we let it propagate so the scheduler's catch turns the
+            // whole suspend into a `failed` result rather than
+            // silently writing a broken row.
+            identityForSuspend.persistSuspendedTask({
+              taskId: task.id,
+              agentId: by,
+              hubId: 'local',
+              originUserId: task.origin?.userId ?? null,
+              resumeAt: suspend.resumeAt,
+              state: suspend.state,
+              taskJson: JSON.stringify(task),
+            })
+          },
+        }
+      : {}),
   })
   await hub.start()
 
@@ -944,6 +971,12 @@ function describe(e: TranscriptEntry): string {
       if (e.data.kind === 'ok') return `RESULT   ok by ${e.data.by}`
       if (e.data.kind === 'failed') return `RESULT   failed by ${e.data.by}: ${e.data.error}`
       if (e.data.kind === 'cancelled') return `RESULT   cancelled: ${e.data.reason}`
+      // Phase 11 M2 — suspended kind in TaskResult union. Show the
+      // wake-up time in the host log so operators tailing the
+      // stdout can see "task X is parked until 12:34" without
+      // opening the SQLite row directly.
+      if (e.data.kind === 'suspended')
+        return `RESULT   suspended by ${e.data.by} until ${new Date(e.data.resumeAt).toISOString()}`
       return `RESULT   no_participant: ${e.data.reason}`
     case 'agent_pending':
       return `PENDING  app=${e.data.id} agents=[${e.data.agents.map((a) => a.id).join(',')}]`

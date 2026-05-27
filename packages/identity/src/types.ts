@@ -724,3 +724,57 @@ export interface CheckOrgQuotaResult {
   /** state !== previousState — host sweep gates audit emission on this. */
   transitioned: boolean
 }
+
+// ===========================================================================
+// Phase 11 M2 — Suspended tasks (long-running agent resume).
+// ===========================================================================
+
+/**
+ * One persisted record of "this task was parked at this time; resume
+ * the same task with the same agent after `resumeAt`."
+ *
+ * `state` is opaque to the framework — JSON.stringify-able and given
+ * back to the participant verbatim on resume. `taskJson` carries the
+ * full task envelope (payload, strategy, ancestry, etc.) so the resume
+ * sweep can hand a faithful `Task` object back to the scheduler
+ * without re-fetching from a transcript.
+ *
+ * `hubId` is reserved for future multi-hub-per-process deployments
+ * (currently one hub per host); rows have a single nullable string.
+ */
+export interface SuspendedTask {
+  taskId: string
+  agentId: string
+  /** Optional hub label; useful when several hubs share an identity store. */
+  hubId: string | null
+  /** Forwarded `task.origin?.userId` so admin UIs can show "who started it." */
+  originUserId: string | null
+  /** Unix epoch ms. The sweep selects rows where `resumeAt <= now`. */
+  resumeAt: number
+  /**
+   * Agent-supplied state, opaque to the framework. Stored as JSON; the
+   * `null` sentinel means "no state — agent will rebuild from working
+   * memory / other side channels."
+   */
+  state: unknown
+  /** Stringified `Task` (JSON.stringify). Resume sweep re-hydrates this. */
+  taskJson: string
+  createdAt: number
+}
+
+export interface PersistSuspendedTaskInput {
+  taskId: string
+  agentId: string
+  hubId?: string | null
+  originUserId?: string | null
+  resumeAt: number
+  state: unknown
+  taskJson: string
+}
+
+export interface ListDueSuspendedTasksQuery {
+  /** Defaults to `Date.now()`. */
+  now?: number
+  /** Cap on returned rows; defaults to 100. Useful for sweep batching. */
+  limit?: number
+}

@@ -64,6 +64,10 @@ export type {
   OrgQuotaState,
   SetOrgQuotaInput,
   CheckOrgQuotaResult,
+  // Phase 11 M2 — Suspended tasks (long-running agent park/resume)
+  SuspendedTask,
+  PersistSuspendedTaskInput,
+  ListDueSuspendedTasksQuery,
 } from './types.js'
 export {
   AUDIT_ACTIONS,

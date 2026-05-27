@@ -267,5 +267,18 @@ function reframe(
         reason: `local team has no matching participant: ${local.reason}`,
         ts: Date.now(),
       }
+    // Phase 11 M2 — bridged team participant got suspended on its
+    // local hub. Surface the same shape upstream; the upstream hub
+    // sees a suspended kind, can record it in its own transcript /
+    // resume sweep. The local hub's own suspended_tasks row keys
+    // the actual park — upstream just observes.
+    case 'suspended':
+      return {
+        kind: 'suspended',
+        taskId: upstreamTaskId,
+        by: bridgeId,
+        resumeAt: local.resumeAt,
+        ts: Date.now(),
+      }
   }
 }

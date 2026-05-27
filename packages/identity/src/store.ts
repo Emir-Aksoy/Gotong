@@ -98,6 +98,10 @@ import {
   type VaultEntry,
   type VaultKind,
   type WriteAuditLogInput,
+  // Phase 11 M2 — Suspended tasks (long-running agent park/resume)
+  type SuspendedTask,
+  type PersistSuspendedTaskInput,
+  type ListDueSuspendedTasksQuery,
 } from './types.js'
 
 const DEFAULT_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
@@ -470,6 +474,16 @@ export class IdentityStore {
   // Phase 7 M4 — org_meta kv (org_mode lives here).
   private readonly stmtOrgMetaGet: SqliteStmt
   private readonly stmtOrgMetaUpsert: SqliteStmt
+  // Phase 11 M2 — suspended_tasks CRUD. Eagerly prepared since the
+  // resume sweep (M3) and the scheduler's notifySuspend hook are both
+  // potentially hot paths. INSERT is `OR REPLACE` so a participant
+  // that throws SuspendTaskError from `onResume` (suspend again) just
+  // overwrites the existing row instead of erroring on PK collision.
+  private readonly stmtSuspendInsert: SqliteStmt
+  private readonly stmtSuspendDelete: SqliteStmt
+  private readonly stmtSuspendGetById: SqliteStmt
+  private readonly stmtSuspendListDue: SqliteStmt
+  private readonly stmtSuspendListByAgent: SqliteStmt
 
   constructor(db: SqliteDb, defaultSessionTtlMs: number, masterKey?: Buffer) {
     this.db = db
@@ -699,6 +713,34 @@ export class IdentityStore {
        ON CONFLICT(key) DO UPDATE SET
          value = excluded.value,
          updated_at = excluded.updated_at`,
+    )
+    // Phase 11 M2 — suspended_tasks. `INSERT OR REPLACE` covers the
+    // suspend-again case (a participant throws SuspendTaskError from
+    // its `onResume` hook) without us having to branch in the public
+    // API. Listing-by-due is the sweep query (M3); listing-by-agent
+    // is exposed for future admin-UI inspection of parked tasks.
+    this.stmtSuspendInsert = db.prepare(
+      `INSERT OR REPLACE INTO suspended_tasks(
+         task_id, agent_id, hub_id, origin_user_id,
+         resume_at, state, task_json, created_at
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+    this.stmtSuspendDelete = db.prepare(
+      `DELETE FROM suspended_tasks WHERE task_id = ?`,
+    )
+    this.stmtSuspendGetById = db.prepare(
+      `SELECT * FROM suspended_tasks WHERE task_id = ?`,
+    )
+    this.stmtSuspendListDue = db.prepare(
+      `SELECT * FROM suspended_tasks
+         WHERE resume_at <= ?
+       ORDER BY resume_at ASC
+       LIMIT ?`,
+    )
+    this.stmtSuspendListByAgent = db.prepare(
+      `SELECT * FROM suspended_tasks
+         WHERE agent_id = ?
+       ORDER BY resume_at ASC`,
     )
   }
 
@@ -3030,6 +3072,124 @@ export class IdentityStore {
   }
 
   // =====================================================================
+  // Phase 11 M2 — Suspended tasks (long-running agent park/resume).
+  // =====================================================================
+
+  /**
+   * Persist a suspended-task row. Called by the scheduler's
+   * `notifySuspend` callback when a participant throws
+   * `SuspendTaskError`. `INSERT OR REPLACE` semantics: if the same
+   * `taskId` is already parked (e.g. a `handleResume` re-suspended),
+   * the row is overwritten with the new state and resumeAt.
+   *
+   * `state` is `JSON.stringify`d. `taskJson` is stored verbatim — the
+   * caller (host wiring) is responsible for producing it.
+   */
+  persistSuspendedTask(input: PersistSuspendedTaskInput): void {
+    if (!input || typeof input.taskId !== 'string' || input.taskId.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'persistSuspendedTask: taskId is required',
+      })
+    }
+    if (typeof input.agentId !== 'string' || input.agentId.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'persistSuspendedTask: agentId is required',
+      })
+    }
+    if (typeof input.resumeAt !== 'number' || !Number.isFinite(input.resumeAt)) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `persistSuspendedTask: resumeAt must be a finite number; got ${input.resumeAt}`,
+      })
+    }
+    if (typeof input.taskJson !== 'string') {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'persistSuspendedTask: taskJson must be a JSON string',
+      })
+    }
+    // state can be undefined / null / any JSON-serialisable value.
+    // We persist `null` for "absent" so the read side has a single
+    // sentinel, and JSON-stringify everything else. A circular ref
+    // here is a programmer error; let JSON.stringify throw and the
+    // scheduler's catch will turn it into a `failed` result.
+    const stateJson =
+      input.state === undefined ? null : JSON.stringify(input.state)
+    this.stmtSuspendInsert.run(
+      input.taskId,
+      input.agentId,
+      input.hubId ?? null,
+      input.originUserId ?? null,
+      input.resumeAt,
+      stateJson,
+      input.taskJson,
+      Date.now(),
+    )
+  }
+
+  /**
+   * Remove a parked row. Called by the resume sweep (M3) once the
+   * task has been successfully re-dispatched and either resolved or
+   * re-suspended (which itself wrote a fresh row via INSERT OR
+   * REPLACE — so the delete is harmless in that case too, just races
+   * the upsert).
+   *
+   * Returns the number of rows removed (0 or 1) so callers can
+   * detect "already gone" races.
+   */
+  removeSuspendedTask(taskId: string): number {
+    if (typeof taskId !== 'string' || taskId.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'removeSuspendedTask: taskId is required',
+      })
+    }
+    const info = this.stmtSuspendDelete.run(taskId)
+    return Number(info.changes)
+  }
+
+  /** Read a single suspended-task row by taskId. Returns null when absent. */
+  getSuspendedTask(taskId: string): SuspendedTask | null {
+    if (typeof taskId !== 'string' || taskId.length === 0) return null
+    const row = this.stmtSuspendGetById.get(taskId) as
+      | SuspendedTaskRow
+      | undefined
+    return row ? rowToSuspendedTask(row) : null
+  }
+
+  /**
+   * List rows whose `resume_at <= now`, ordered by `resume_at ASC`
+   * (oldest-due first). The resume sweep iterates this list and
+   * re-dispatches each task. `limit` (default 100) bounds the batch
+   * so a long sleep period doesn't return thousands of rows at once.
+   */
+  listDueSuspendedTasks(query: ListDueSuspendedTasksQuery = {}): SuspendedTask[] {
+    const now = query.now ?? Date.now()
+    const limit = query.limit ?? 100
+    if (!Number.isFinite(now) || !Number.isFinite(limit) || limit < 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `listDueSuspendedTasks: invalid now=${now} or limit=${limit}`,
+      })
+    }
+    const rows = this.stmtSuspendListDue.all(now, limit) as SuspendedTaskRow[]
+    return rows.map(rowToSuspendedTask)
+  }
+
+  /**
+   * Diagnostic: list all parked tasks for a single agent, oldest-due
+   * first. Not used by the runtime path; exposed for admin UI
+   * surfaces ("what's this agent waiting on?") and tests.
+   */
+  listSuspendedTasksByAgent(agentId: string): SuspendedTask[] {
+    if (typeof agentId !== 'string' || agentId.length === 0) return []
+    const rows = this.stmtSuspendListByAgent.all(agentId) as SuspendedTaskRow[]
+    return rows.map(rowToSuspendedTask)
+  }
+
+  // =====================================================================
   // Lifecycle
   // =====================================================================
 
@@ -3219,6 +3379,39 @@ function rowToPeerRegistration(r: PeerRow): PeerRegistration {
     vaultEntryId: r.vault_entry_id,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+  }
+}
+
+// ---- Phase 11 M2 — suspended_tasks helpers ----
+
+interface SuspendedTaskRow {
+  task_id: string
+  agent_id: string
+  hub_id: string | null
+  origin_user_id: string | null
+  resume_at: number
+  state: string | null
+  task_json: string
+  created_at: number
+}
+
+function rowToSuspendedTask(r: SuspendedTaskRow): SuspendedTask {
+  // Parse `state` from JSON. The persist side stores `null` for
+  // "absent"; everything else round-trips through JSON.stringify /
+  // JSON.parse. A corrupt blob (e.g. truncated write) throws here
+  // — the resume sweep treats that as an unrecoverable row and the
+  // operator gets to investigate. We don't try to silently recover,
+  // since a corrupted state would resume the agent into a broken
+  // half-state.
+  return {
+    taskId: r.task_id,
+    agentId: r.agent_id,
+    hubId: r.hub_id,
+    originUserId: r.origin_user_id,
+    resumeAt: r.resume_at,
+    state: r.state === null ? null : JSON.parse(r.state),
+    taskJson: r.task_json,
+    createdAt: r.created_at,
   }
 }
 

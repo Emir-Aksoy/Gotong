@@ -479,6 +479,22 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
             return { kind: 'cancelled', reason: r.reason, ts: r.ts }
           case 'no_participant':
             return { kind: 'no_participant', reason: r.reason, ts: r.ts }
+          // Phase 11 M2 — services-sdk plugin agents (the HITL bridge
+          // and friends) use AgentDispatchSurface, a deliberately
+          // narrower mirror of TaskResult. They don't model resume
+          // semantics — long-running suspend/resume is a Hub-level
+          // pattern via `Participant.onResume`, not something a
+          // service plugin's nested dispatch can usefully chain into.
+          // Surface a suspended child as a transient `failed` so the
+          // plugin agent reports cleanly and can re-dispatch later if
+          // it really wants to.
+          case 'suspended':
+            return {
+              kind: 'failed',
+              error: `child task suspended (resumeAt=${r.resumeAt}); plugin agents don't observe resume`,
+              by: r.by,
+              ts: r.ts,
+            }
         }
       },
     }

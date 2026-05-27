@@ -409,5 +409,12 @@ function relabelTaskId(r: TaskResult, taskId: TaskId): TaskResult {
       return { ...r, taskId }
     case 'no_participant':
       return { ...r, taskId }
+    // Phase 11 M2 — a peer-link inbound that came back suspended
+    // is relayed with the same kind. The remote side persisted the
+    // park in *its* identity store; this side just surfaces the
+    // status to the caller. The eventual resume produces a fresh
+    // task_result frame on the wire.
+    case 'suspended':
+      return { ...r, taskId }
   }
 }

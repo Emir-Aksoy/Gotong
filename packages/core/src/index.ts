@@ -62,6 +62,8 @@ export type {
   ReputationLookup,
   CrossHubExplicitResolver,
   CrossHubDispatcher,
+  // Phase 11 M2 — suspend persistence callback shape
+  SuspendNotifier,
 } from './scheduler.js'
 
 export {

@@ -316,6 +316,17 @@ function mapResultToToolResult(result: TaskResult): LlmToolCallResult {
     case 'no_participant':
       reason = result.reason
       break
+    // Phase 11 M2 — a child task that the agent dispatched got
+    // suspended. From the parent LLM's POV that's "the work isn't
+    // done and won't be by the time I finish this turn." We surface
+    // it as isError:true so the model treats it like any other
+    // non-ok outcome — no in-loop wait for resume (the parent task
+    // has its own deadline). The eventual resume produces a separate
+    // task_result downstream; the parent can observe it via a
+    // workflow read or by being explicitly re-dispatched.
+    case 'suspended':
+      reason = `parked until ${new Date(result.resumeAt).toISOString()} on ${result.by}`
+      break
   }
   return {
     content: [

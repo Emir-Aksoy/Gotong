@@ -101,6 +101,8 @@ function describe(e: TranscriptEntry): string {
       if (r.kind === 'ok') return `RESULT   ok by ${r.by}`
       if (r.kind === 'failed') return `RESULT   failed by ${r.by}: ${r.error}`
       if (r.kind === 'cancelled') return `RESULT   cancelled: ${r.reason}`
+      if (r.kind === 'suspended')
+        return `RESULT   suspended by ${r.by} until ${new Date(r.resumeAt).toISOString()}`
       return `RESULT   no_participant: ${r.reason}`
     }
     case 'agent_pending':

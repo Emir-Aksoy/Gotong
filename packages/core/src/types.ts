@@ -165,6 +165,15 @@ export type TaskResult =
   | { kind: 'failed'; taskId: TaskId; by: ParticipantId; error: string; ts: number }
   | { kind: 'cancelled'; taskId: TaskId; reason: string; ts: number }
   | { kind: 'no_participant'; taskId: TaskId; reason: string; ts: number }
+  /**
+   * Phase 11 M2 — participant threw `SuspendTaskError`. The scheduler
+   * persisted (`resumeAt`, `state`) via its `notifySuspend` callback and
+   * is parking the task; the resume sweep (M3) will re-dispatch the same
+   * task to the same participant via `onResume(task, state)` after
+   * `resumeAt`. Distinct from `failed` so callers/transcript can show a
+   * waiting state and the task isn't counted as terminated.
+   */
+  | { kind: 'suspended'; taskId: TaskId; by: ParticipantId; resumeAt: number; ts: number }
 
 // --- Participant -----------------------------------------------------------
 
