@@ -48,3 +48,9 @@ export {
   type MockProviderOptions,
   type MockScriptEntry,
 } from './mock.js'
+// Phase 10 M1 — Agent → 子 agent dispatch toolset
+export {
+  DispatchToolset,
+  type DispatchSurface,
+  type DispatchToolsetOptions,
+} from './dispatch-toolset.js'
