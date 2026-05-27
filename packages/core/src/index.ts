@@ -80,6 +80,11 @@ export type { Storage, SqliteStorageOptions } from './storage/index.js'
 export { AgentParticipant } from './participants/agent.js'
 export type { AgentOptions } from './participants/agent.js'
 
+// Phase 11 M1 — Suspend/Resume control-flow primitive. Throw the
+// error from `onTask`/`onResume` to park the task; the scheduler
+// (Phase 11 M2/M3) re-dispatches via `Participant.onResume`.
+export { SuspendTaskError, isSuspendTaskError } from './suspend.js'
+
 export { HumanParticipant } from './participants/human.js'
 export type { HumanOptions } from './participants/human.js'
 

@@ -175,6 +175,24 @@ export interface Participant {
 
   onMessage?(msg: Message): void | Promise<void>
   onTask?(task: Task): Promise<TaskResult>
+  /**
+   * Phase 11 M1 — Long-running agent resume hook.
+   *
+   * After a participant threw `SuspendTaskError` from `onTask` (or a
+   * previous `onResume`), the scheduler persists the carried `state`,
+   * releases the worker slot, and waits until the requested resumeAt.
+   * On resume the *same* task is re-dispatched to the *same*
+   * participant, but routed through `onResume(task, state)` so the
+   * agent can distinguish "first run" from "I'm being woken up — pick
+   * up from `state`".
+   *
+   * Participants that don't implement this hook still benefit from the
+   * suspend path's parking behaviour: the scheduler falls back to
+   * `onTask(task)` with the same task instance, and the agent can
+   * reconstruct its state from working memory (Phase 11 M4) or by
+   * other side channels.
+   */
+  onResume?(task: Task, state: unknown): Promise<TaskResult>
   onTaskCancelled?(taskId: TaskId, reason: string): void | Promise<void>
   onShutdown?(): void | Promise<void>
 }

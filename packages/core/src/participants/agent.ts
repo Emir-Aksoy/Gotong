@@ -1,3 +1,4 @@
+import { SuspendTaskError } from '../suspend.js'
 import type {
   Message,
   Participant,
@@ -39,6 +40,32 @@ export abstract class AgentParticipant implements Participant {
       const output = await this.handleTask(task)
       return this.ok(task.id, output)
     } catch (err) {
+      // Phase 11 M1 — SuspendTaskError is control flow, not a failure.
+      // Re-throw so the scheduler frame above can park the task and
+      // release the worker slot. Catching it here would silently turn
+      // every suspend into a `failed` result.
+      if (err instanceof SuspendTaskError) throw err
+      return this.fail(task.id, err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  /**
+   * Phase 11 M1 — Resume entry. Called by the scheduler after a
+   * previous run threw `SuspendTaskError`. Default behaviour: delegate
+   * to `handleResume(task, state)`, which itself defaults to
+   * `handleTask(task)` — i.e. agents that don't override get a fresh
+   * run, ignoring `state`. This preserves the contract "any agent can
+   * be resumed even if it doesn't know it's been suspended."
+   */
+  async onResume(task: Task, state: unknown): Promise<TaskResult> {
+    try {
+      const output = await this.handleResume(task, state)
+      return this.ok(task.id, output)
+    } catch (err) {
+      // Re-throw suspend so an agent can chain `suspendAgain` — useful
+      // when the wake-up condition still isn't met and the agent wants
+      // to sleep another window.
+      if (err instanceof SuspendTaskError) throw err
       return this.fail(task.id, err instanceof Error ? err.message : String(err))
     }
   }
@@ -60,6 +87,16 @@ export abstract class AgentParticipant implements Participant {
    * results or cancellation).
    */
   protected abstract handleTask(task: Task): Promise<unknown> | unknown
+
+  /**
+   * Phase 11 M1 — Override to handle resume specially (e.g. read
+   * `state` and skip a step that already ran). Default: re-runs
+   * `handleTask(task)` from the top. Subclasses that persist working
+   * memory (Phase 11 M4) override this to splice state back in.
+   */
+  protected handleResume(task: Task, _state: unknown): Promise<unknown> | unknown {
+    return this.handleTask(task)
+  }
 
   // result helpers --------------------------------------------------------
 
