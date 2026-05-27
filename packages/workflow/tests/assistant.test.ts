@@ -1,0 +1,461 @@
+/**
+ * Unit tests for `WorkflowAssistantAgent` and its pure helpers.
+ *
+ * The agent itself is exercised with a `MockLlmProvider` — these are
+ * NOT integration tests against real Anthropic / OpenAI. Real-provider
+ * smoke tests live in `examples/workflow-assistant/` (Phase 13 M5).
+ *
+ * What we verify here:
+ *   1. Helpers (`buildSystemPrompt` / `renderUserMessage` /
+ *      `extractYamlAndExplanation`) work in isolation, in every fence
+ *      shape an LLM might produce.
+ *   2. The agent honours its constructor defaults (id / capability /
+ *      system prompt) and that the system prompt actually carries the
+ *      schema doc + few-shot examples.
+ *   3. Dispatching a `workflow:assist` payload through a real Hub
+ *      ends-to-end: the mock provider sees our description verbatim,
+ *      and the agent extracts the YAML and returns the right output
+ *      shape.
+ *   4. Bad payloads throw the right errors (description missing /
+ *      empty / wrong shape).
+ *   5. Generated YAML that follows the schema parses through
+ *      `parseWorkflow` — i.e. the schema doc embedded in the system
+ *      prompt actually matches what the validator accepts. (This is a
+ *      sanity check on the prompt, not on the LLM.)
+ */
+
+import { describe, expect, it } from 'vitest'
+import { Hub } from '@aipehub/core'
+import { MockLlmProvider } from '@aipehub/llm'
+
+import {
+  buildSystemPrompt,
+  extractYamlAndExplanation,
+  parseWorkflow,
+  renderUserMessage,
+  WORKFLOW_ASSISTANT_CAPABILITY,
+  WORKFLOW_ASSISTANT_DEFAULT_ID,
+  WorkflowAssistantAgent,
+  type WorkflowAssistantOutput,
+  type WorkflowAssistantPayload,
+  type WorkflowExample,
+} from '../src/index.js'
+
+// ---------------------------------------------------------------------------
+// Sample YAML the mock will pretend the LLM generated. Real, parseable
+// against `aipehub.workflow/v1`.
+// ---------------------------------------------------------------------------
+
+const SAMPLE_YAML = `schema: aipehub.workflow/v1
+
+workflow:
+  id: news-digest
+  name: Weekly news digest
+  description: Crawl 3 sources, summarize, post to channel.
+
+  trigger:
+    capability: run-news-digest
+
+  steps:
+    - id: crawl
+      dispatch:
+        strategy: { kind: capability, capabilities: [crawl-news] }
+        title: "Crawl sources"
+        payload:
+          sources: $trigger.payload.sources
+
+    - id: summarize
+      dispatch:
+        strategy: { kind: capability, capabilities: [summarize] }
+        title: "Summarize crawl results"
+        payload:
+          raw: $crawl.output
+
+  output:
+    summary: $summarize.output
+`
+
+const SAMPLE_RESPONSE_TEXT = `这是一个 3 步的新闻摘要 workflow：crawl → summarize → 输出。
+
+\`\`\`yaml
+${SAMPLE_YAML.trim()}
+\`\`\`
+
+注意 \`run-news-digest\` 是 trigger capability — 派任务到这个 cap 就跑整个 flow。`
+
+// ---------------------------------------------------------------------------
+// Pure-helper tests
+// ---------------------------------------------------------------------------
+
+describe('extractYamlAndExplanation', () => {
+  it('extracts the first ```yaml fence', () => {
+    const { yaml, explanation } = extractYamlAndExplanation(SAMPLE_RESPONSE_TEXT)
+    expect(yaml).toBe(SAMPLE_YAML.trim())
+    expect(explanation).toContain('3 步的新闻摘要')
+    expect(explanation).toContain('run-news-digest')
+    expect(explanation).not.toContain('```yaml')
+  })
+
+  it('accepts ```yml fence too', () => {
+    const raw = 'prefix\n```yml\nschema: aipehub.workflow/v1\n```\nsuffix'
+    const { yaml, explanation } = extractYamlAndExplanation(raw)
+    expect(yaml).toBe('schema: aipehub.workflow/v1')
+    expect(explanation).toBe('prefix\n\nsuffix')
+  })
+
+  it('falls back to plain ``` fence if no yaml lang tag', () => {
+    const raw = 'desc\n```\nschema: aipehub.workflow/v1\n```\n'
+    const { yaml, explanation } = extractYamlAndExplanation(raw)
+    expect(yaml).toBe('schema: aipehub.workflow/v1')
+    expect(explanation).toBe('desc')
+  })
+
+  it('case-insensitive on the lang tag', () => {
+    const raw = '```YAML\nschema: foo\n```'
+    const { yaml } = extractYamlAndExplanation(raw)
+    expect(yaml).toBe('schema: foo')
+  })
+
+  it('no fence at all → yaml=empty, explanation=raw', () => {
+    const raw = "Sorry, I can't help with that."
+    const { yaml, explanation } = extractYamlAndExplanation(raw)
+    expect(yaml).toBe('')
+    expect(explanation).toBe("Sorry, I can't help with that.")
+  })
+
+  it('prefers ```yaml over plain ``` even if plain fence comes first', () => {
+    const raw = '```\nfirst\n```\n\n```yaml\nschema: real\n```'
+    const { yaml } = extractYamlAndExplanation(raw)
+    expect(yaml).toBe('schema: real')
+  })
+})
+
+describe('renderUserMessage', () => {
+  it('description only', () => {
+    expect(renderUserMessage({ description: 'crawl news weekly' })).toBe('crawl news weekly')
+  })
+
+  it('appends agent hints under a divider', () => {
+    const msg = renderUserMessage({
+      description: 'crawl news weekly',
+      contextHints: {
+        agents: [
+          { id: 'writer', capabilities: ['draft', 'edit'] },
+          { id: 'reviewer', capabilities: ['review'], description: 'native zh editor' },
+        ],
+      },
+    })
+    expect(msg).toContain('crawl news weekly')
+    expect(msg).toContain('---')
+    expect(msg).toContain('Available agents:')
+    expect(msg).toContain('writer [draft, edit]')
+    expect(msg).toContain('reviewer [review] — native zh editor')
+  })
+
+  it('mcp servers + existing workflow ids', () => {
+    const msg = renderUserMessage({
+      description: 'foo',
+      contextHints: {
+        mcpServers: ['brave-search', 'fs'],
+        existingWorkflowIds: ['editorial-flow', 'personal-growth-flow'],
+      },
+    })
+    expect(msg).toContain('Available MCP servers:')
+    expect(msg).toContain('- brave-search')
+    expect(msg).toContain('Existing workflow ids')
+    expect(msg).toContain('editorial-flow')
+  })
+
+  it('empty contextHints arrays do not emit empty sections', () => {
+    const msg = renderUserMessage({
+      description: 'foo',
+      contextHints: { agents: [], mcpServers: [] },
+    })
+    expect(msg).toBe('foo')
+    expect(msg).not.toContain('---')
+  })
+
+  it('trims whitespace on description', () => {
+    expect(renderUserMessage({ description: '  bar  \n' })).toBe('bar')
+  })
+})
+
+describe('buildSystemPrompt', () => {
+  it('returns base verbatim when no examples', () => {
+    expect(buildSystemPrompt('BASE', [])).toBe('BASE')
+  })
+
+  it('appends each example as a User/Assistant pair with yaml fence', () => {
+    const examples: WorkflowExample[] = [
+      { description: 'edit Chinese articles', yaml: 'schema: aipehub.workflow/v1\nworkflow:\n  id: editorial' },
+    ]
+    const out = buildSystemPrompt('BASE', examples)
+    expect(out).toContain('BASE')
+    expect(out).toContain('# Examples')
+    expect(out).toContain('--- example 1 ---')
+    expect(out).toContain('User: edit Chinese articles')
+    expect(out).toContain('Assistant:')
+    expect(out).toContain('```yaml')
+    expect(out).toContain('id: editorial')
+  })
+
+  it('numbers multiple examples', () => {
+    const out = buildSystemPrompt('B', [
+      { description: 'a', yaml: 'x' },
+      { description: 'b', yaml: 'y' },
+    ])
+    expect(out).toContain('--- example 1 ---')
+    expect(out).toContain('--- example 2 ---')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Agent integration with mock provider
+// ---------------------------------------------------------------------------
+
+function makeAssistantTask(payload: WorkflowAssistantPayload) {
+  return {
+    from: 'admin' as const,
+    strategy: { kind: 'capability' as const, capabilities: [WORKFLOW_ASSISTANT_CAPABILITY] },
+    payload,
+  }
+}
+
+describe('WorkflowAssistantAgent — defaults', () => {
+  it('default id and capability', () => {
+    const a = new WorkflowAssistantAgent({
+      provider: new MockLlmProvider({ reply: '' }),
+    })
+    expect(a.id).toBe(WORKFLOW_ASSISTANT_DEFAULT_ID)
+    expect(a.capabilities).toEqual([WORKFLOW_ASSISTANT_CAPABILITY])
+  })
+
+  it('custom id / capabilities still work', () => {
+    const a = new WorkflowAssistantAgent({
+      provider: new MockLlmProvider({ reply: '' }),
+      id: 'my-assistant',
+      capabilities: ['custom:assist'],
+    })
+    expect(a.id).toBe('my-assistant')
+    expect(a.capabilities).toEqual(['custom:assist'])
+  })
+})
+
+describe('WorkflowAssistantAgent — request building', () => {
+  it('description goes through as the user message', async () => {
+    let captured: { system?: string; userMsg?: string } = {}
+    const provider = new MockLlmProvider({
+      reply: (req) => {
+        captured = {
+          system: req.system,
+          userMsg: typeof req.messages[0]?.content === 'string' ? req.messages[0].content : '',
+        }
+        return SAMPLE_RESPONSE_TEXT
+      },
+    })
+
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(makeAssistantTask({
+      description: 'Crawl 3 news sources and summarize',
+    }))
+    await hub.stop()
+
+    expect(result.kind).toBe('ok')
+    expect(captured.userMsg).toBe('Crawl 3 news sources and summarize')
+    // System prompt should carry the schema doc.
+    expect(captured.system).toContain('aipehub.workflow/v1')
+    expect(captured.system).toContain('trigger:')
+    expect(captured.system).toContain('steps:')
+    expect(captured.system).toContain('$trigger.payload')
+  })
+
+  it('contextHints are appended after a --- divider', async () => {
+    let userMsg = ''
+    const provider = new MockLlmProvider({
+      reply: (req) => {
+        const c = req.messages[0]?.content
+        userMsg = typeof c === 'string' ? c : ''
+        return SAMPLE_RESPONSE_TEXT
+      },
+    })
+
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    await hub.dispatch(makeAssistantTask({
+      description: 'crawl',
+      contextHints: {
+        agents: [{ id: 'writer', capabilities: ['draft'] }],
+        mcpServers: ['brave-search'],
+      },
+    }))
+    await hub.stop()
+
+    expect(userMsg).toContain('crawl')
+    expect(userMsg).toContain('---')
+    expect(userMsg).toContain('writer [draft]')
+    expect(userMsg).toContain('brave-search')
+  })
+
+  it('few-shot examples land in the system prompt', async () => {
+    let system = ''
+    const provider = new MockLlmProvider({
+      reply: (req) => {
+        system = req.system ?? ''
+        return SAMPLE_RESPONSE_TEXT
+      },
+    })
+
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(
+      new WorkflowAssistantAgent({
+        provider,
+        examples: [
+          {
+            description: 'simple 2-step draft + review',
+            yaml: 'schema: aipehub.workflow/v1\nworkflow:\n  id: example-1',
+          },
+        ],
+      }),
+    )
+
+    await hub.dispatch(makeAssistantTask({ description: 'anything' }))
+    await hub.stop()
+
+    expect(system).toContain('--- example 1 ---')
+    expect(system).toContain('simple 2-step draft + review')
+    expect(system).toContain('id: example-1')
+  })
+
+  it('honours maxTokens / temperature / model passthrough', async () => {
+    let req: { maxTokens?: number; temperature?: number; model?: string } = {}
+    const provider = new MockLlmProvider({
+      reply: (r) => {
+        req = { maxTokens: r.maxTokens, temperature: r.temperature, model: r.model }
+        return SAMPLE_RESPONSE_TEXT
+      },
+    })
+
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(
+      new WorkflowAssistantAgent({
+        provider,
+        maxTokens: 1234,
+        temperature: 0.1,
+        model: 'mock-large',
+      }),
+    )
+
+    await hub.dispatch(makeAssistantTask({ description: 'x' }))
+    await hub.stop()
+
+    expect(req.maxTokens).toBe(1234)
+    expect(req.temperature).toBe(0.1)
+    expect(req.model).toBe('mock-large')
+  })
+})
+
+describe('WorkflowAssistantAgent — response parsing', () => {
+  it('extracts yaml + explanation from a well-formed fence', async () => {
+    const provider = new MockLlmProvider({ reply: SAMPLE_RESPONSE_TEXT })
+
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(makeAssistantTask({ description: 'crawl' }))
+    await hub.stop()
+
+    expect(result.kind).toBe('ok')
+    const out = (result as { output: WorkflowAssistantOutput }).output
+    expect(out.yaml).toContain('schema: aipehub.workflow/v1')
+    expect(out.yaml).toContain('id: news-digest')
+    expect(out.explanation).toContain('3 步的新闻摘要')
+    expect(out.raw).toBe(SAMPLE_RESPONSE_TEXT)
+    expect(out.by).toBe('mock')
+  })
+
+  it('YAML the agent extracts parses through parseWorkflow', async () => {
+    const provider = new MockLlmProvider({ reply: SAMPLE_RESPONSE_TEXT })
+
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(makeAssistantTask({ description: 'crawl' }))
+    await hub.stop()
+
+    const out = (result as { output: WorkflowAssistantOutput }).output
+    // The whole point: what the agent extracts must round-trip
+    // through the v1 validator. If the system-prompt schema doc
+    // ever drifts from the actual schema, this will fail loud.
+    const def = parseWorkflow(out.yaml)
+    expect(def.id).toBe('news-digest')
+    expect(def.trigger.capability).toBe('run-news-digest')
+    expect(def.steps.length).toBe(2)
+  })
+
+  it('missing fence → yaml=empty, explanation=full text, kind still ok', async () => {
+    const provider = new MockLlmProvider({
+      reply: "Sorry, I can't help with that.",
+    })
+
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(makeAssistantTask({ description: 'x' }))
+    await hub.stop()
+
+    expect(result.kind).toBe('ok')
+    const out = (result as { output: WorkflowAssistantOutput }).output
+    expect(out.yaml).toBe('')
+    expect(out.explanation).toBe("Sorry, I can't help with that.")
+  })
+})
+
+describe('WorkflowAssistantAgent — bad payload', () => {
+  it('missing description → failed result', async () => {
+    const provider = new MockLlmProvider({ reply: SAMPLE_RESPONSE_TEXT })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    // @ts-expect-error — deliberately wrong shape for the test
+    const result = await hub.dispatch(makeAssistantTask({}))
+    await hub.stop()
+    expect(result.kind).toBe('failed')
+  })
+
+  it('empty description → failed result', async () => {
+    const provider = new MockLlmProvider({ reply: SAMPLE_RESPONSE_TEXT })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(makeAssistantTask({ description: '   ' }))
+    await hub.stop()
+    expect(result.kind).toBe('failed')
+  })
+
+  it('non-object payload → failed result', async () => {
+    const provider = new MockLlmProvider({ reply: SAMPLE_RESPONSE_TEXT })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch({
+      from: 'admin',
+      strategy: { kind: 'capability', capabilities: [WORKFLOW_ASSISTANT_CAPABILITY] },
+      payload: 'just a string',
+    })
+    await hub.stop()
+    expect(result.kind).toBe('failed')
+  })
+})

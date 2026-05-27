@@ -653,6 +653,9 @@ importers:
       '@aipehub/core':
         specifier: workspace:*
         version: link:../core
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../llm
       yaml:
         specifier: ^2.5.0
         version: 2.9.0

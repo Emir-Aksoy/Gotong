@@ -34,6 +34,7 @@
   },
   "dependencies": {
     "@aipehub/core": "workspace:*",
+    "@aipehub/llm": "workspace:*",
     "yaml": "^2.5.0"
   },
   "devDependencies": {

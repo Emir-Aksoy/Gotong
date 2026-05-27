@@ -38,3 +38,19 @@ export { RunStore } from './run-store.js'
 
 export { WorkflowRunner, workflowParticipantId } from './runner.js'
 export type { WorkflowRunnerOptions, HubLike } from './runner.js'
+
+// Phase 13 M1 — AI-assisted workflow authoring.
+export {
+  WorkflowAssistantAgent,
+  buildSystemPrompt,
+  renderUserMessage,
+  extractYamlAndExplanation,
+  WORKFLOW_ASSISTANT_CAPABILITY,
+  WORKFLOW_ASSISTANT_DEFAULT_ID,
+} from './assistant.js'
+export type {
+  WorkflowAssistantPayload,
+  WorkflowAssistantOutput,
+  WorkflowAssistantOptions,
+  WorkflowExample,
+} from './assistant.js'
