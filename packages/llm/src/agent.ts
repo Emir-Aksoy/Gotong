@@ -1,5 +1,7 @@
 import {
   AgentParticipant,
+  SuspendTaskError,
+  isSuspendTaskError,
   type AgentOptions,
   type Task,
 } from '@aipehub/core'
@@ -549,7 +551,73 @@ export class LlmAgent extends AgentParticipant {
    *      `tool_result` blocks to messages, and loop.
    */
   protected async handleTaskWithTools(task: Task): Promise<unknown> {
+    return this.runToolLoop(task, this.buildRequest(task))
+  }
+
+  /**
+   * Phase 11 M4 — resume entry for `LlmAgent`. When the suspended
+   * row's `state` carries persisted working memory (the tool-use
+   * loop's `req.messages` at suspend time), splice it back into the
+   * request and continue the loop from that point. Otherwise we fall
+   * back to a fresh run via `handleTask`.
+   *
+   * The state key (`__llmMessages`) is private — agents writing their
+   * own SuspendTaskError calls don't need to know about it. The LLM
+   * loop itself wraps any in-loop SuspendTaskError to inject this
+   * field automatically (see `runToolLoop`).
+   */
+  protected override async handleResume(task: Task, state: unknown): Promise<unknown> {
+    const restored = LlmAgent.extractRestoredMessages(state)
+    if (!restored || restored.length === 0 || !this.toolset) {
+      // No persisted memory, or no toolset → fresh run. Mirrors
+      // AgentParticipant.handleResume's default behavior.
+      return this.handleTask(task)
+    }
+    // Same `runToolLoop` path as a fresh tool-use task, but seed
+    // the messages array with what we'd saved. `buildRequest`
+    // populates other fields (model, system, etc.) from the task /
+    // agent config; we don't try to persist those — they're
+    // re-derivable on every resume.
     const baseReq = this.buildRequest(task)
+    return this.runToolLoop(task, { ...baseReq, messages: restored })
+  }
+
+  private static extractRestoredMessages(state: unknown): LlmMessage[] | null {
+    if (!state || typeof state !== 'object') return null
+    const s = state as { __llmMessages?: unknown }
+    if (!Array.isArray(s.__llmMessages)) return null
+    // We trust the persistence layer — the same code shape wrote it.
+    // A future schema bump would migrate via a version key inside the
+    // packed state (see __llmAgentMemVersion below).
+    return s.__llmMessages as LlmMessage[]
+  }
+
+  /**
+   * Phase 11 M4 — augment a SuspendTaskError thrown from inside the
+   * tool-use loop with the current `messages` array, so the resume
+   * sweep restores conversation state automatically. Other state the
+   * suspender carried is preserved under `user` so agents can read
+   * back what they themselves stashed.
+   */
+  private packLoopMemoryIntoSuspend(err: SuspendTaskError, messages: LlmMessage[]): SuspendTaskError {
+    const userState = err.state
+    const packed: Record<string, unknown> = {
+      __llmAgentMemVersion: 1,
+      __llmMessages: messages,
+    }
+    if (userState !== undefined) packed.user = userState
+    return new SuspendTaskError({ resumeAt: err.resumeAt, state: packed })
+  }
+
+  /**
+   * The actual tool-use loop body, factored out so both `handleTask`
+   * (with `toolset` set) and `handleResume` (with restored messages)
+   * can share it. The shape is unchanged from Phase 10; the new
+   * concern is catching SuspendTaskError per round and re-throwing
+   * it with `__llmMessages` injected so the next resume picks up
+   * exactly where this round left off.
+   */
+  protected async runToolLoop(task: Task, initialReq: LlmRequest): Promise<unknown> {
     // Snapshot the tool list once per task. Re-listing every round
     // would be wasteful — MCP tool schemas don't change mid-session
     // in practice, and the SDK doesn't push a tools-changed event we
@@ -557,12 +625,25 @@ export class LlmAgent extends AgentParticipant {
     const tools = await this.listToolsForLlm()
 
     let req: LlmRequest =
-      tools.length > 0 ? { ...baseReq, tools } : { ...baseReq }
+      tools.length > 0 ? { ...initialReq, tools } : { ...initialReq }
     let rounds = 0
 
     while (true) {
-      if (this.preCallHook) await this.preCallHook(task)
-      const res = await this.streamWithAuthHook(req, task)
+      let res: LlmResponse
+      try {
+        if (this.preCallHook) await this.preCallHook(task)
+        res = await this.streamWithAuthHook(req, task)
+      } catch (err) {
+        // Phase 11 M4 — preCallHook or provider stream threw. If
+        // the throw is a SuspendTaskError (quota gate trips, or an
+        // agent-level pre-call hook explicitly asks to park), wrap
+        // it with the current messages so the next resume can
+        // splice them back in. Anything else propagates untouched.
+        if (isSuspendTaskError(err)) {
+          throw this.packLoopMemoryIntoSuspend(err, req.messages)
+        }
+        throw err
+      }
       const wantsTool =
         res.stopReason === 'tool_use' &&
         res.toolUses !== undefined &&
