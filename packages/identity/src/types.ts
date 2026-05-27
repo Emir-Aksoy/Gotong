@@ -778,3 +778,104 @@ export interface ListDueSuspendedTasksQuery {
   /** Cap on returned rows; defaults to 100. Useful for sweep batching. */
   limit?: number
 }
+
+// ===========================================================================
+// Phase 12 M1 — IM bindings (Telegram / Matrix / Lark / Discord / Slack / QQ).
+//
+// IM bridges (separate `@aipehub/im-*` packages) need to map "this
+// Telegram user" to "that AipeHub user" so dispatches carry a proper
+// `Task.origin.userId`. The binding flow is:
+//
+//   1. User logs into admin UI → clicks "Bind IM" → calls
+//      `issueImBindingCode(userId)`. The store mints a 6-digit numeric
+//      code with a 10-min TTL and returns it. UI shows it.
+//   2. User opens the IM client and DMs the bot `/bind 123456`. The
+//      bridge calls `claimImBindingCode({ code, platform, platformUserId })`.
+//      Store verifies + deletes the code row + INSERT OR REPLACE into
+//      `im_bindings`. Returns the resolved AipeHub user id.
+//   3. Subsequent IM messages from that user: bridge calls
+//      `getUserIdByImBinding(platform, platformUserId)` to populate
+//      `task.origin.userId`.
+//
+// Re-bind semantics:
+//   - Same (platform, platformUserId) re-claiming a fresh code = move
+//     the binding to a (possibly different) AipeHub user. Allowed; no
+//     unbind required. `INSERT OR REPLACE` does the right thing.
+//   - One AipeHub user can have many bindings across platforms (and
+//     even multiple bindings on the SAME platform if a user happens to
+//     have multiple IM accounts). The unique index is on (platform,
+//     platformUserId), not on user_id.
+// ===========================================================================
+
+/**
+ * One confirmed IM-to-AipeHub binding. PK is `(platform,
+ * platformUserId)`.
+ */
+export interface ImBinding {
+  platform: string
+  platformUserId: string
+  userId: string
+  /** Best-effort cached display name from the IM client. May be stale. */
+  displayName: string | null
+  createdAt: number
+}
+
+/**
+ * A short-lived numeric code that's been issued to a logged-in user
+ * in the admin UI. The user types it into the IM client (`/bind
+ * 123456`); the IM bridge calls {@link IdentityStore.claimImBindingCode}
+ * to verify + consume.
+ *
+ * Codes are single-shot: claim deletes the row. One user can have at
+ * most one outstanding code at a time — re-issue rotates (deletes the
+ * prior row first) so a leaked old code is dead the moment a new one
+ * is minted.
+ */
+export interface ImBindingCode {
+  /**
+   * Opaque. Default mint format is 6-digit zero-padded numeric (easy
+   * to type into mobile IM clients; ~1M space + 5x collision retry
+   * makes per-user dupes effectively zero). Tests / deep-link flows
+   * may inject explicit codes via `IssueImBindingCodeInput.code`.
+   */
+  code: string
+  userId: string
+  /** Unix ms; codes are rejected on `claim` if `expiresAt < now`. */
+  expiresAt: number
+  createdAt: number
+}
+
+export interface IssueImBindingCodeInput {
+  userId: string
+  /**
+   * TTL in ms. Defaults to 10 minutes; clamped to [60_000, 3_600_000]
+   * (1 min .. 1 h). Lower bound prevents zero-TTL footguns; upper
+   * bound forces re-issuing rather than letting a code sit forever
+   * in some unread DM.
+   */
+  ttlMs?: number
+  /**
+   * Optional explicit code (must be 4-32 chars of [A-Za-z0-9]). When
+   * omitted, the store mints a 6-digit zero-padded numeric. Provided
+   * for test determinism and future deep-link flows.
+   */
+  code?: string
+}
+
+export interface ClaimImBindingCodeInput {
+  code: string
+  platform: string
+  platformUserId: string
+  /** Best-effort display name from the IM client; nullable. */
+  displayName?: string | null
+}
+
+export interface ClaimImBindingResult {
+  userId: string
+  binding: ImBinding
+}
+
+export interface ListImBindingsQuery {
+  /** Filter by platform; omit for "all platforms". */
+  platform?: string
+}

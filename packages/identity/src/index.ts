@@ -68,6 +68,13 @@ export type {
   SuspendedTask,
   PersistSuspendedTaskInput,
   ListDueSuspendedTasksQuery,
+  // Phase 12 M1 — IM bindings
+  ImBinding,
+  ImBindingCode,
+  IssueImBindingCodeInput,
+  ClaimImBindingCodeInput,
+  ClaimImBindingResult,
+  ListImBindingsQuery,
 } from './types.js'
 export {
   AUDIT_ACTIONS,

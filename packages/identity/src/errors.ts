@@ -71,6 +71,21 @@ export type IdentityErrorCode =
   // E1 (Phase 5) — org soft quotas.
   /** No org_quotas row for the requested (metric, period) tuple. */
   | 'org_quota_not_found'
+  // Phase 12 M1 — IM bindings.
+  /**
+   * `claimImBindingCode` was called with a code that no row matches.
+   * Common causes: the code was already redeemed (single-shot), the
+   * user mistyped, or it was expired/swept long enough ago that the
+   * row is gone. UX: ask the user to reissue from the admin UI.
+   */
+  | 'im_binding_code_invalid'
+  /**
+   * `claimImBindingCode` matched a row but `expires_at < now`. The
+   * row IS deleted on this path so the user can immediately request
+   * a fresh code. Distinct from `_invalid` so the IM bot can render
+   * a friendlier "this code expired; ask for a new one" message.
+   */
+  | 'im_binding_code_expired'
 
 export interface IdentityErrorOptions {
   code: IdentityErrorCode

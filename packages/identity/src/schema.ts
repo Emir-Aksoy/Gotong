@@ -418,6 +418,56 @@ const MIGRATIONS: Migration[] = [
         ON suspended_tasks(agent_id);
     `,
   },
+  {
+    // Phase 12 M1 — IM bindings. Two tables, one migration:
+    //
+    //   im_bindings — confirmed (platform, platformUserId) → userId
+    //                 rows. PK on (platform, platformUserId) means one
+    //                 IM identity binds to exactly one AipeHub user.
+    //                 ON DELETE CASCADE strips bindings when the
+    //                 AipeHub user is deleted.
+    //   im_binding_codes — short-lived (10 min default) codes the user
+    //                 types into the IM client to prove ownership.
+    //                 PK on `code` so a re-issued code rotates
+    //                 atomically (we DELETE-by-user before INSERT to
+    //                 keep "at most one outstanding code per user").
+    //
+    // Why both here and not split: they're an indivisible feature pair;
+    // a deploy that has one but not the other can't run the bind flow.
+    //
+    // Indexes:
+    //   - im_bindings(user_id): "list all bindings for this user" — admin
+    //     UI "Connected accounts" page.
+    //   - im_binding_codes(user_id): backs the rotate-before-insert
+    //     delete on re-issue.
+    //   - im_binding_codes(expires_at): backs `sweepExpiredImBindingCodes`
+    //     housekeeping pass; cheap to add now while the table is new.
+    version: 10,
+    name: 'im-bindings',
+    sql: `
+      CREATE TABLE IF NOT EXISTS im_bindings (
+        platform           TEXT NOT NULL,
+        platform_user_id   TEXT NOT NULL,
+        user_id            TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        display_name       TEXT,
+        created_at         INTEGER NOT NULL,
+        PRIMARY KEY (platform, platform_user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_im_bindings_user
+        ON im_bindings(user_id);
+
+      CREATE TABLE IF NOT EXISTS im_binding_codes (
+        code        TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        expires_at  INTEGER NOT NULL,
+        created_at  INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_im_binding_codes_user
+        ON im_binding_codes(user_id);
+      CREATE INDEX IF NOT EXISTS idx_im_binding_codes_expires
+        ON im_binding_codes(expires_at);
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {

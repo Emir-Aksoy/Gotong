@@ -102,7 +102,15 @@ import {
   type SuspendedTask,
   type PersistSuspendedTaskInput,
   type ListDueSuspendedTasksQuery,
+  // Phase 12 M1 — IM bindings.
+  type ImBinding,
+  type ImBindingCode,
+  type IssueImBindingCodeInput,
+  type ClaimImBindingCodeInput,
+  type ClaimImBindingResult,
+  type ListImBindingsQuery,
 } from './types.js'
+import { randomInt } from 'node:crypto'
 
 const DEFAULT_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
@@ -485,6 +493,21 @@ export class IdentityStore {
   private readonly stmtSuspendListDue: SqliteStmt
   private readonly stmtSuspendListByAgent: SqliteStmt
 
+  // Phase 12 M1 — IM bindings. Two adjacent tables (im_bindings +
+  // im_binding_codes) with a small set of hot statements. The bot DM
+  // path (claim) and per-message resolve path (getUserIdByImBinding)
+  // both want O(1) PK lookups.
+  private readonly stmtImBindingInsert: SqliteStmt
+  private readonly stmtImBindingGetByPlatformUser: SqliteStmt
+  private readonly stmtImBindingListByUser: SqliteStmt
+  private readonly stmtImBindingListByUserPlatform: SqliteStmt
+  private readonly stmtImBindingDelete: SqliteStmt
+  private readonly stmtImBindingCodeInsert: SqliteStmt
+  private readonly stmtImBindingCodeGetByCode: SqliteStmt
+  private readonly stmtImBindingCodeDeleteByCode: SqliteStmt
+  private readonly stmtImBindingCodeDeleteByUser: SqliteStmt
+  private readonly stmtImBindingCodeDeleteExpired: SqliteStmt
+
   constructor(db: SqliteDb, defaultSessionTtlMs: number, masterKey?: Buffer) {
     this.db = db
     this.defaultSessionTtlMs = defaultSessionTtlMs
@@ -741,6 +764,54 @@ export class IdentityStore {
       `SELECT * FROM suspended_tasks
          WHERE agent_id = ?
        ORDER BY resume_at ASC`,
+    )
+
+    // Phase 12 M1 — IM bindings.
+    //
+    // INSERT OR REPLACE on im_bindings handles the "user moves their
+    // (platform, platformUserId) to a different AipeHub account" case
+    // (or just re-binds after the prior owner of the IM identity
+    // explicitly unbound — same effect).
+    //
+    // INSERT (not OR REPLACE) on im_binding_codes; per-user code
+    // rotation runs DELETE-by-user first inside the same transaction.
+    // We want collision on the PK if two different mints picked the
+    // same random code so the issue path can retry, NOT silently
+    // overwrite some other user's pending code.
+    this.stmtImBindingInsert = db.prepare(
+      `INSERT OR REPLACE INTO im_bindings(
+         platform, platform_user_id, user_id, display_name, created_at
+       ) VALUES(?, ?, ?, ?, ?)`,
+    )
+    this.stmtImBindingGetByPlatformUser = db.prepare(
+      `SELECT * FROM im_bindings WHERE platform = ? AND platform_user_id = ?`,
+    )
+    this.stmtImBindingListByUser = db.prepare(
+      `SELECT * FROM im_bindings WHERE user_id = ? ORDER BY created_at ASC, platform ASC`,
+    )
+    this.stmtImBindingListByUserPlatform = db.prepare(
+      `SELECT * FROM im_bindings
+         WHERE user_id = ? AND platform = ?
+       ORDER BY created_at ASC`,
+    )
+    this.stmtImBindingDelete = db.prepare(
+      `DELETE FROM im_bindings WHERE platform = ? AND platform_user_id = ?`,
+    )
+    this.stmtImBindingCodeInsert = db.prepare(
+      `INSERT INTO im_binding_codes(code, user_id, expires_at, created_at)
+       VALUES(?, ?, ?, ?)`,
+    )
+    this.stmtImBindingCodeGetByCode = db.prepare(
+      `SELECT * FROM im_binding_codes WHERE code = ?`,
+    )
+    this.stmtImBindingCodeDeleteByCode = db.prepare(
+      `DELETE FROM im_binding_codes WHERE code = ?`,
+    )
+    this.stmtImBindingCodeDeleteByUser = db.prepare(
+      `DELETE FROM im_binding_codes WHERE user_id = ?`,
+    )
+    this.stmtImBindingCodeDeleteExpired = db.prepare(
+      `DELETE FROM im_binding_codes WHERE expires_at < ?`,
     )
   }
 
@@ -3190,6 +3261,281 @@ export class IdentityStore {
   }
 
   // =====================================================================
+  // Phase 12 M1 — IM bindings.
+  // =====================================================================
+
+  /**
+   * Mint a fresh binding code for a logged-in user. The admin UI calls
+   * this when the user clicks "Bind IM" / "Connect Telegram"; the
+   * resulting `code` is displayed to the user, who types it into the IM
+   * client.
+   *
+   * Atomic semantics: any prior outstanding code for the same userId
+   * is deleted in the same transaction before the new code is
+   * inserted. This means a leaked stale code stops working the moment
+   * the user re-issues, even if the user never typed it into an IM
+   * client (e.g. they walked away from the screen).
+   *
+   * Collision handling: when minting auto-codes (caller didn't pass
+   * `input.code`), we retry up to 5 times on PK conflict. With ~1M
+   * code space and the rotate-on-issue policy, the realistic outstanding
+   * population is ≤ user-count; collision probability per insert is
+   * tiny. After 5 tries we throw `invalid_input` — operator should
+   * widen the code space (future) rather than silently degrade.
+   *
+   * Explicit-code path (caller passed `input.code`): no retry; an
+   * explicit code that collides with another user's pending code is a
+   * caller bug. UNIQUE constraint throws and we surface it.
+   */
+  issueImBindingCode(input: IssueImBindingCodeInput): ImBindingCode {
+    if (!input || typeof input.userId !== 'string' || input.userId.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'issueImBindingCode: userId is required',
+      })
+    }
+    // verify user exists — otherwise FK on REFERENCES users(id) would
+    // throw at INSERT time with a less helpful error.
+    const user = this.stmtUserById.get(input.userId) as { id: string } | undefined
+    if (!user) {
+      throw new IdentityError({
+        code: 'user_not_found',
+        message: `issueImBindingCode: user ${input.userId} not found`,
+      })
+    }
+    // TTL clamp — see IssueImBindingCodeInput doc for bounds rationale.
+    const rawTtl = input.ttlMs ?? 10 * 60_000
+    if (typeof rawTtl !== 'number' || !Number.isFinite(rawTtl)) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `issueImBindingCode: ttlMs must be a finite number; got ${rawTtl}`,
+      })
+    }
+    const ttlMs = Math.max(60_000, Math.min(3_600_000, Math.floor(rawTtl)))
+    const now = Date.now()
+    const expiresAt = now + ttlMs
+
+    // Validate explicit code shape if supplied.
+    if (input.code !== undefined) {
+      if (
+        typeof input.code !== 'string' ||
+        !/^[A-Za-z0-9]{4,32}$/.test(input.code)
+      ) {
+        throw new IdentityError({
+          code: 'invalid_input',
+          message:
+            'issueImBindingCode: code must be 4-32 chars of [A-Za-z0-9] when supplied',
+        })
+      }
+    }
+
+    return transaction(this.db, () => {
+      this.stmtImBindingCodeDeleteByUser.run(input.userId)
+      if (input.code !== undefined) {
+        // Explicit-code path: single try, surface PK collisions as
+        // invalid_input so the caller can pick a different code.
+        try {
+          this.stmtImBindingCodeInsert.run(input.code, input.userId, expiresAt, now)
+        } catch (err) {
+          throw new IdentityError({
+            code: 'invalid_input',
+            message: `issueImBindingCode: explicit code conflict (${(err as Error).message})`,
+            cause: err,
+          })
+        }
+        return {
+          code: input.code,
+          userId: input.userId,
+          expiresAt,
+          createdAt: now,
+        }
+      }
+      // Auto-mint path: retry on PK collision up to 5 times.
+      for (let i = 0; i < 5; i++) {
+        const code = randomInt(0, 1_000_000).toString().padStart(6, '0')
+        try {
+          this.stmtImBindingCodeInsert.run(code, input.userId, expiresAt, now)
+          return { code, userId: input.userId, expiresAt, createdAt: now }
+        } catch (err) {
+          // Re-throw anything that isn't a unique-constraint conflict;
+          // PK collision is the only retryable condition. SQLite raises
+          // a SQLITE_CONSTRAINT_PRIMARYKEY error here (code 1555).
+          const msg = (err as Error).message ?? ''
+          if (!msg.includes('UNIQUE')) throw err
+        }
+      }
+      throw new IdentityError({
+        code: 'invalid_input',
+        message:
+          'issueImBindingCode: 5 random codes all collided — widen code space or sweep',
+      })
+    })
+  }
+
+  /**
+   * Verify + consume a binding code. Called by an IM bridge when its
+   * user DMs the bot `/bind <code>`. On success: deletes the code row
+   * (single-shot) and creates/updates the `im_bindings` row in the
+   * same transaction; returns the resolved AipeHub user id + binding.
+   *
+   * Failure modes (each throws an IdentityError with a distinct code):
+   *   - `invalid_input` — empty / wrong-shape platform/platformUserId/code
+   *   - `im_binding_code_invalid` — no row matches the supplied code
+   *   - `im_binding_code_expired` — row found but `expires_at < now`.
+   *     The row is NOT auto-deleted here (it would fight the rollback
+   *     on the rethrown error). The next `issueImBindingCode` for the
+   *     same user OR the periodic `sweepExpiredImBindingCodes` cleans
+   *     it up — bounded latency, no race.
+   */
+  claimImBindingCode(input: ClaimImBindingCodeInput): ClaimImBindingResult {
+    if (!input || typeof input.code !== 'string' || input.code.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'claimImBindingCode: code is required',
+      })
+    }
+    if (typeof input.platform !== 'string' || input.platform.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'claimImBindingCode: platform is required',
+      })
+    }
+    if (
+      typeof input.platformUserId !== 'string' ||
+      input.platformUserId.length === 0
+    ) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'claimImBindingCode: platformUserId is required',
+      })
+    }
+    if (input.displayName !== undefined && input.displayName !== null) {
+      if (typeof input.displayName !== 'string') {
+        throw new IdentityError({
+          code: 'invalid_input',
+          message: 'claimImBindingCode: displayName must be string or null',
+        })
+      }
+    }
+    return transaction(this.db, () => {
+      const row = this.stmtImBindingCodeGetByCode.get(input.code) as
+        | { code: string; user_id: string; expires_at: number; created_at: number }
+        | undefined
+      if (!row) {
+        throw new IdentityError({
+          code: 'im_binding_code_invalid',
+          message: 'claimImBindingCode: code does not exist',
+        })
+      }
+      const now = Date.now()
+      if (row.expires_at < now) {
+        // Don't DELETE here — the surrounding transaction would roll
+        // it back when we re-throw. The expired row lingers until the
+        // next reissue (which does DELETE-by-user before INSERT) or
+        // sweepExpiredImBindingCodes. Bounded; no race.
+        throw new IdentityError({
+          code: 'im_binding_code_expired',
+          message: `claimImBindingCode: code expired at ${new Date(row.expires_at).toISOString()}`,
+        })
+      }
+      // Consume + bind.
+      this.stmtImBindingCodeDeleteByCode.run(input.code)
+      const displayName = input.displayName ?? null
+      this.stmtImBindingInsert.run(
+        input.platform,
+        input.platformUserId,
+        row.user_id,
+        displayName,
+        now,
+      )
+      return {
+        userId: row.user_id,
+        binding: {
+          platform: input.platform,
+          platformUserId: input.platformUserId,
+          userId: row.user_id,
+          displayName,
+          createdAt: now,
+        },
+      }
+    })
+  }
+
+  /**
+   * Hot-path resolver — every incoming IM message calls this to map
+   * the IM identity back to an AipeHub user id. Returns `null` for
+   * unbound IM users (the bridge typically replies with a "bind first
+   * via `/bind <code>`" prompt in that case).
+   */
+  getUserIdByImBinding(platform: string, platformUserId: string): string | null {
+    if (typeof platform !== 'string' || platform.length === 0) return null
+    if (typeof platformUserId !== 'string' || platformUserId.length === 0) return null
+    const row = this.stmtImBindingGetByPlatformUser.get(platform, platformUserId) as
+      | { user_id: string }
+      | undefined
+    return row?.user_id ?? null
+  }
+
+  /** Full binding row (or null) — admin UI "connected accounts" detail. */
+  getImBinding(platform: string, platformUserId: string): ImBinding | null {
+    if (typeof platform !== 'string' || platform.length === 0) return null
+    if (typeof platformUserId !== 'string' || platformUserId.length === 0) return null
+    const row = this.stmtImBindingGetByPlatformUser.get(platform, platformUserId) as
+      | ImBindingRow
+      | undefined
+    return row ? rowToImBinding(row) : null
+  }
+
+  /**
+   * List all IM bindings for a user (admin UI "connected accounts").
+   * Optional `platform` filter for "show me my Telegram bindings"
+   * style queries.
+   */
+  listImBindings(userId: string, query: ListImBindingsQuery = {}): ImBinding[] {
+    if (typeof userId !== 'string' || userId.length === 0) return []
+    const rows = (
+      query.platform
+        ? this.stmtImBindingListByUserPlatform.all(userId, query.platform)
+        : this.stmtImBindingListByUser.all(userId)
+    ) as ImBindingRow[]
+    return rows.map(rowToImBinding)
+  }
+
+  /** Remove a binding (user clicked "Disconnect"). Returns rows removed (0 or 1). */
+  removeImBinding(platform: string, platformUserId: string): number {
+    if (typeof platform !== 'string' || platform.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'removeImBinding: platform is required',
+      })
+    }
+    if (typeof platformUserId !== 'string' || platformUserId.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'removeImBinding: platformUserId is required',
+      })
+    }
+    const info = this.stmtImBindingDelete.run(platform, platformUserId)
+    return Number(info.changes)
+  }
+
+  /**
+   * Housekeeping: delete `im_binding_codes` rows where `expires_at < now`.
+   * Host scheduler may call this periodically (cheap, indexed sweep).
+   * Returns the count removed for diagnostics.
+   */
+  sweepExpiredImBindingCodes(now: number = Date.now()): number {
+    if (!Number.isFinite(now)) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `sweepExpiredImBindingCodes: invalid now=${now}`,
+      })
+    }
+    const info = this.stmtImBindingCodeDeleteExpired.run(now)
+    return Number(info.changes)
+  }
+
+  // =====================================================================
   // Lifecycle
   // =====================================================================
 
@@ -3411,6 +3757,26 @@ function rowToSuspendedTask(r: SuspendedTaskRow): SuspendedTask {
     resumeAt: r.resume_at,
     state: r.state === null ? null : JSON.parse(r.state),
     taskJson: r.task_json,
+    createdAt: r.created_at,
+  }
+}
+
+// ---- Phase 12 M1 — IM bindings helpers ----
+
+interface ImBindingRow {
+  platform: string
+  platform_user_id: string
+  user_id: string
+  display_name: string | null
+  created_at: number
+}
+
+function rowToImBinding(r: ImBindingRow): ImBinding {
+  return {
+    platform: r.platform,
+    platformUserId: r.platform_user_id,
+    userId: r.user_id,
+    displayName: r.display_name,
     createdAt: r.created_at,
   }
 }
