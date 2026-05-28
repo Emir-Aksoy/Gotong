@@ -1,0 +1,23 @@
+{
+  "name": "@aipehub/example-workflow-assistant",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Phase 13 M5 — natural-language → workflow YAML demo. Drives WorkflowAssistantAgent against a real LLM (DeepSeek default, Anthropic/OpenAI optional), then runs the M4 deep checker against a synthetic hub inventory to demonstrate the full editor pipeline (LLM → parseWorkflow → deepCheck → save).",
+  "scripts": {
+    "start": "tsx --env-file=../../.env.local src/index.ts",
+    "start:mock": "tsx src/index.ts --provider mock",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/evals": "workspace:*",
+    "@aipehub/llm": "workspace:*",
+    "@aipehub/llm-anthropic": "workspace:*",
+    "@aipehub/llm-openai": "workspace:*",
+    "@aipehub/workflow": "workspace:*",
+    "@aipehub/workflow-assistant": "workspace:*",
+    "@anthropic-ai/sdk": "^0.96.0",
+    "openai": "^6.38.0"
+  }
+}
