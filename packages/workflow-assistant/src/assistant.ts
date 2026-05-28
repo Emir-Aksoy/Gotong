@@ -42,8 +42,7 @@ import {
 } from '@aipehub/llm'
 import type { Task } from '@aipehub/core'
 
-import { parseWorkflow } from './schema.js'
-import { WORKFLOW_SCHEMA_V1, WorkflowSchemaError } from './types.js'
+import { parseWorkflow, WORKFLOW_SCHEMA_V1, WorkflowSchemaError } from '@aipehub/workflow'
 
 // ---------------------------------------------------------------------------
 // Public payload / output shapes — exported so callers and HTTP routes can

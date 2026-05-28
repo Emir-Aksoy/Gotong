@@ -27,11 +27,11 @@
 import { describe, expect, it } from 'vitest'
 import { Hub } from '@aipehub/core'
 import { MockLlmProvider } from '@aipehub/llm'
+import { parseWorkflow } from '@aipehub/workflow'
 
 import {
   buildSystemPrompt,
   extractYamlAndExplanation,
-  parseWorkflow,
   renderUserMessage,
   verdictForYaml,
   WORKFLOW_ASSISTANT_CAPABILITY,

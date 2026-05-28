@@ -39,20 +39,8 @@ export { RunStore } from './run-store.js'
 export { WorkflowRunner, workflowParticipantId } from './runner.js'
 export type { WorkflowRunnerOptions, HubLike } from './runner.js'
 
-// Phase 13 M1 — AI-assisted workflow authoring.
-export {
-  WorkflowAssistantAgent,
-  buildSystemPrompt,
-  renderUserMessage,
-  extractYamlAndExplanation,
-  verdictForYaml,
-  WORKFLOW_ASSISTANT_CAPABILITY,
-  WORKFLOW_ASSISTANT_DEFAULT_ID,
-} from './assistant.js'
-export type {
-  WorkflowAssistantPayload,
-  WorkflowAssistantOutput,
-  WorkflowAssistantOptions,
-  WorkflowDraftStatus,
-  WorkflowExample,
-} from './assistant.js'
+// Phase 13 M1 — AI-assisted workflow authoring moved out to its own
+// package, `@aipehub/workflow-assistant`, so this runner stays free of
+// any LLM runtime dependency. Import from there if you want the agent:
+//
+//   import { WorkflowAssistantAgent } from '@aipehub/workflow-assistant'

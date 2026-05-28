@@ -1,17 +1,10 @@
 {
-  "name": "@aipehub/workflow",
-  "version": "1.1.0",
+  "name": "@aipehub/workflow-assistant",
+  "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub workflow runner — pluggable, file-first multi-step orchestration that lives outside the Hub core.",
+  "description": "AipeHub workflow assistant — LlmAgent that turns a natural-language description into an aipehub.workflow/v1 YAML draft. Lives outside @aipehub/workflow so the runner stays free of any LLM runtime dependency.",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Emir-Aksoy/AipeHub.git",
-    "directory": "packages/workflow"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
+  "private": true,
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -29,12 +22,12 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest",
-    "prepack": "tsc -p tsconfig.json"
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@aipehub/core": "workspace:*",
-    "yaml": "^2.5.0"
+    "@aipehub/llm": "workspace:*",
+    "@aipehub/workflow": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

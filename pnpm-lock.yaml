@@ -653,12 +653,25 @@ importers:
       '@aipehub/core':
         specifier: workspace:*
         version: link:../core
-      '@aipehub/llm':
-        specifier: workspace:*
-        version: link:../llm
       yaml:
         specifier: ^2.5.0
         version: 2.9.0
+    devDependencies:
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@20.19.41)(tsx@4.22.0)(yaml@2.9.0)
+
+  packages/workflow-assistant:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../core
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@aipehub/workflow':
+        specifier: workspace:*
+        version: link:../workflow
     devDependencies:
       vitest:
         specifier: ^3.2.4
