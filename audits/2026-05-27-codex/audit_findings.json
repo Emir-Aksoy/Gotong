@@ -1,0 +1,107 @@
+{
+  "project": "AipeHub",
+  "workspace": "/Users/emiraksoy/Desktop/AipeHub",
+  "head": {
+    "shortSha": "823c49a",
+    "subject": "feat(workflow): WorkflowAssistantAgent — natural language → workflow YAML (Phase 13 M1)"
+  },
+  "summary": {
+    "architectureDrift": "moderate-boundary-drift",
+    "coreStillAligned": true,
+    "mainConclusion": "Core Hub design is still aligned with the original north star, but protocol, documentation, workflow assistant packaging, and quality gates need cleanup."
+  },
+  "findings": [
+    {
+      "id": "P1-protocol-core-dependency",
+      "severity": "P1",
+      "title": "@aipehub/protocol depends on @aipehub/core",
+      "evidence": [
+        "packages/protocol/package.json declares description: Zero runtime",
+        "packages/protocol/package.json dependencies includes @aipehub/core",
+        "packages/protocol/src/frames.ts imports wire types from @aipehub/core"
+      ],
+      "impact": "Protocol is no longer the lowest-level wire contract and pulls core into lightweight protocol consumers.",
+      "recommendation": "Move wire primitives into protocol or a shared zero-runtime types package; remove protocol -> core dependency."
+    },
+    {
+      "id": "P1-doc-truth-source-stale",
+      "severity": "P1",
+      "title": "Architecture documents are stale",
+      "evidence": [
+        "docs/zh/ARCHITECTURE.md claims it is the truth source",
+        "docs/zh/V4-ARCH.md still says Phase 1 in progress",
+        "HEAD is Phase 13 M1",
+        "AGENTS.md is untracked and has outdated package counts / next-step table"
+      ],
+      "impact": "Agents and maintainers can follow stale guidance and recreate old decisions.",
+      "recommendation": "Commit/update AGENTS.md, mark old architecture docs historical or refresh the current truth source."
+    },
+    {
+      "id": "P2-workflow-llm-boundary",
+      "severity": "P2",
+      "title": "@aipehub/workflow includes LLM authoring",
+      "evidence": [
+        "packages/workflow/package.json depends on @aipehub/llm",
+        "packages/workflow/src/index.ts exports WorkflowAssistantAgent",
+        "packages/workflow/src/assistant.ts implements natural-language -> YAML agent"
+      ],
+      "impact": "Workflow runner package is no longer just schema / runner / validator.",
+      "recommendation": "Move WorkflowAssistantAgent into @aipehub/workflow-assistant or host/web integration package."
+    },
+    {
+      "id": "P2-workflow-assistant-success-semantics",
+      "severity": "P2",
+      "title": "Workflow assistant returns ok even without usable YAML",
+      "evidence": [
+        "assistant.ts deliberately does not validate YAML",
+        "assistant.test.ts expects missing fence -> kind ok and yaml empty"
+      ],
+      "impact": "Callers may treat an unusable draft as successful.",
+      "recommendation": "Add validation status or return failed/no_yaml when extraction fails; route layer should parseWorkflow before import."
+    },
+    {
+      "id": "P2-python-test-script",
+      "severity": "P2",
+      "title": "pnpm test:python fails without implicit import setup",
+      "evidence": [
+        "pnpm test:python fails with ModuleNotFoundError: No module named 'aipehub'",
+        "PYTHONPATH=src .venv/bin/python -m pytest -q passes with 57 tests"
+      ],
+      "impact": "Root quality gate is not reproducible on current workspace state.",
+      "recommendation": "Set PYTHONPATH=src in the script or add explicit editable-install bootstrap."
+    },
+    {
+      "id": "P3-large-files",
+      "severity": "P3",
+      "title": "Several implementation files are too large",
+      "evidence": [
+        "packages/web/src/server.ts ~3563 lines",
+        "packages/web/static/admin.js ~3265 lines",
+        "packages/core/src/space.ts ~1325 lines",
+        "packages/host/src/main.ts ~1099 lines",
+        "packages/host/src/local-agent-pool.ts ~1101 lines"
+      ],
+      "impact": "Maintenance and security review cost is increasing.",
+      "recommendation": "Split route/domain modules and admin UI feature modules incrementally."
+    }
+  ],
+  "verification": {
+    "nodeTests": {
+      "command": "pnpm -r test",
+      "result": "passed outside sandbox"
+    },
+    "typecheck": {
+      "command": "pnpm -r typecheck",
+      "result": "passed"
+    },
+    "pythonRootScript": {
+      "command": "pnpm test:python",
+      "result": "failed",
+      "error": "ModuleNotFoundError: No module named 'aipehub'"
+    },
+    "pythonDirect": {
+      "command": "cd python-sdk && PYTHONPATH=src .venv/bin/python -m pytest -q",
+      "result": "57 passed"
+    }
+  }
+}
