@@ -326,6 +326,9 @@
           <span id="wf-summary" class="lb-summary"></span>
           <button type="button" id="bundle-import-btn" class="ma-btn">导入团队 (bundle)</button>
           <button type="button" id="wf-import-btn" class="ma-btn ma-btn-secondary" data-i18n="importWorkflow">导入工作流</button>
+          <!-- Phase 13 M3 — AI 助手按钮; 不可用时(host 没装 assistant)点击会
+               提示 503, 暂不在前端 probe 隐藏(避免 boot 时多一个 round-trip) -->
+          <button type="button" id="wf-assist-btn" class="ma-btn ma-btn-secondary">AI 助手 (beta)</button>
         </h2>
         <div id="workflows-list" class="managed-agents-list"></div>
         <p class="hint">
@@ -428,6 +431,57 @@
               </div>
             </div>
             <p id="wf-runs-msg" class="form-msg"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Phase 13 M3 — AI 助手对话框: 自然语言 → workflow YAML 草稿 -->
+      <div id="wf-assist-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card" role="dialog" aria-modal="true" style="max-width: 48rem;">
+          <header class="modal-head">
+            <h3>AI 助手 — 生成工作流草稿</h3>
+            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+          </header>
+          <div class="dispatch-form">
+            <p class="hint">
+              用一句话描述你想要的工作流(中文 / 英文都行)。AI 会按
+              <code>aipehub.workflow/v1</code> 生成 YAML 草稿,自动 validate
+              通过后才能保存。
+            </p>
+            <label>
+              <span>描述</span>
+              <textarea id="wf-assist-description" rows="4"
+                        placeholder="例:每周一爬 5 个新闻源、用 DeepSeek 总结、发到 Telegram 群"></textarea>
+            </label>
+            <button type="button" id="wf-assist-generate" class="ma-btn">生成草稿</button>
+            <p id="wf-assist-msg" class="form-msg"></p>
+
+            <!-- Result panel — hidden until first generate -->
+            <div id="wf-assist-result" hidden style="margin-top: 1rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
+                <strong>状态:</strong>
+                <span id="wf-assist-status-chip" class="lb-summary"></span>
+              </div>
+              <div id="wf-assist-explanation" class="hint" style="margin: 0.4rem 0 0.8rem;"></div>
+              <details open>
+                <summary>YAML 草稿</summary>
+                <pre style="background: #f5f5f5; padding: 0.6rem; overflow-x: auto;
+                            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                            font-size: 0.85em; max-height: 24rem;"><code id="wf-assist-yaml"></code></pre>
+              </details>
+              <details id="wf-assist-error-details" hidden style="margin-top: 0.5rem;">
+                <summary>校验错误</summary>
+                <pre style="background: #fef2f2; color: #b91c1c; padding: 0.6rem; overflow-x: auto;
+                            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                            font-size: 0.85em;"><code id="wf-assist-validation-error"></code></pre>
+              </details>
+              <div style="display: flex; gap: 0.5rem; margin-top: 0.8rem;">
+                <!-- save button only enabled when draftStatus === 'valid' -->
+                <button type="button" id="wf-assist-save" class="ma-btn" disabled>保存为工作流</button>
+                <button type="button" id="wf-assist-regenerate" class="ma-btn ma-btn-secondary">重新生成</button>
+              </div>
+            </div>
           </div>
         </div>
       </div>

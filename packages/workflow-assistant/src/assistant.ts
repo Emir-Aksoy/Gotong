@@ -131,7 +131,13 @@ export interface WorkflowAssistantOutput extends LlmTaskOutput {
  * `capabilities` (defaulted; can override if hosting multiple assistants
  * on the same hub).
  */
-export interface WorkflowAssistantOptions extends Omit<LlmAgentOptions, 'system'> {
+export interface WorkflowAssistantOptions extends Omit<LlmAgentOptions, 'system' | 'id'> {
+  /**
+   * Optional override for the agent's id. Defaults to
+   * `WORKFLOW_ASSISTANT_DEFAULT_ID` (`'workflow-assistant'`). Override
+   * when hosting multiple assistants on the same hub or in tests.
+   */
+  id?: string
   /**
    * Optional override for the built-in system prompt. **Only do this if
    * you know what you're doing** — the default prompt encodes the v1

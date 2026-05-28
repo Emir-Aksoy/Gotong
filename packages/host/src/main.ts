@@ -94,6 +94,10 @@ import {
 import { createUploadSurface } from './uploads.js'
 import { createWorkflowController } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
+import {
+  createWorkflowAssistAgent,
+  resolveWorkflowAssistConfig,
+} from './workflow-assist-agent.js'
 
 // CLI flags handled before any work — keep these cheap and side-effect free
 // so `npx @aipehub/host --help` exits in milliseconds without trying to
@@ -262,6 +266,14 @@ ENVIRONMENT
   AIPE_WORKFLOWS_DIR      directory of *.yaml/*.json workflow files to
                           auto-load on boot
                           (default: <AIPE_SPACE>/workflows/definitions)
+
+  AIPE_ASSISTANT_PROVIDER 'anthropic' (default) | 'openai' | 'mock' —
+                          provider for the host-built-in WorkflowAssistantAgent
+                          (Phase 13 M3). Skip registration when no key
+                          available; admin UI's AI button hides via 503.
+  AIPE_ASSISTANT_MODEL    optional provider-specific model id for the assistant
+  AIPE_ASSISTANT_MAX_TOKENS  integer cap on assist response tokens (default 4096)
+  AIPE_ASSISTANT_DISABLED '1' | 'true' → don't register the assistant at all
 
   AIPE_SECRET_KEY         optional master key for secrets encryption
                           (64 hex chars; overrides on-disk runtime/secret.key)
@@ -775,6 +787,23 @@ async function main(): Promise<void> {
     workflowReport,
   )
 
+  // Phase 13 M3 — host-built-in workflow assistant agent. Registers a
+  // `WorkflowAssistantAgent` on the hub (cap=`workflow:assist`) and
+  // exposes a duck-typed surface for the Web layer's
+  // `POST /api/admin/workflows/assist` route. Returns null (and the
+  // route stays 503) when AIPE_ASSISTANT_DISABLED=1 or no LLM API key
+  // can be resolved for the configured provider — non-AI hosts pay zero
+  // boot cost beyond the env probe.
+  const assistConfig = resolveWorkflowAssistConfig()
+  const workflowAssist = assistConfig
+    ? createWorkflowAssistAgent({
+        hub,
+        config: assistConfig,
+        ...(orgApiPool ? { orgApiPool } : {}),
+        logger: log,
+      })
+    : null
+
   const allowedHosts = envList('AIPE_ALLOWED_HOSTS')
   const adminRateMax = envInt('AIPE_ADMIN_RATE_MAX', 10)
   const adminRateSec = envInt('AIPE_ADMIN_RATE_SEC', 60)
@@ -862,6 +891,10 @@ async function main(): Promise<void> {
     cookieSecure: config.cookieSecure,
     lifecycle: localAgents,
     workflows: workflowController,
+    // Phase 13 M3 — null when no API key / disabled. Web responds 503
+    // on /api/admin/workflows/assist in that case so the UI can hide
+    // the "AI assistant" button cleanly.
+    ...(workflowAssist ? { workflowAssist } : {}),
     // services may be undefined if bootstrap failed; serveWeb handles
     // that by responding 503 on the /api/admin/services/* routes.
     ...(services ? { services: services.asAdminSurface() } : {}),

@@ -58,6 +58,7 @@
     "@aipehub/transport-ws": "workspace:*",
     "@aipehub/web": "workspace:*",
     "@aipehub/workflow": "workspace:*",
+    "@aipehub/workflow-assistant": "workspace:*",
     "@anthropic-ai/sdk": "^0.96.0",
     "openai": "^6.38.0",
     "better-sqlite3": "^12.10.0"

@@ -364,6 +364,9 @@ importers:
       '@aipehub/workflow':
         specifier: workspace:*
         version: link:../workflow
+      '@aipehub/workflow-assistant':
+        specifier: workspace:*
+        version: link:../workflow-assistant
       '@anthropic-ai/sdk':
         specifier: ^0.96.0
         version: 0.96.0(zod@4.4.3)

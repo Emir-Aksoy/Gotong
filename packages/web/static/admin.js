@@ -183,6 +183,20 @@
       wfImportText: $('wf-import-text'),
       wfImportSubmit: $('wf-import-submit'),
       wfImportMsg: $('wf-import-msg'),
+      // Phase 13 M3 — AI assistant dialog
+      wfAssistBtn: $('wf-assist-btn'),
+      wfAssistModal: $('wf-assist-modal'),
+      wfAssistDescription: $('wf-assist-description'),
+      wfAssistGenerate: $('wf-assist-generate'),
+      wfAssistMsg: $('wf-assist-msg'),
+      wfAssistResult: $('wf-assist-result'),
+      wfAssistStatusChip: $('wf-assist-status-chip'),
+      wfAssistExplanation: $('wf-assist-explanation'),
+      wfAssistYaml: $('wf-assist-yaml'),
+      wfAssistErrorDetails: $('wf-assist-error-details'),
+      wfAssistValidationError: $('wf-assist-validation-error'),
+      wfAssistSave: $('wf-assist-save'),
+      wfAssistRegenerate: $('wf-assist-regenerate'),
       // Run history modal (v0.3)
       wfRunsModal: $('wf-runs-modal'),
       wfRunsTarget: $('wf-runs-target'),
@@ -2287,6 +2301,165 @@
     }
   }
 
+  // --- workflow AI assistant (Phase 13 M3) -------------------------------
+  // 自然语言 → workflow YAML 草稿。
+  //   - 输入: textarea 描述
+  //   - 调 POST /api/admin/workflows/assist (走 host 注册的 WorkflowAssistantAgent)
+  //   - 回 { yaml, explanation, draftStatus, validationError?, ... }
+  //   - 渲染: status chip + explanation + YAML preview + 校验错误
+  //   - 仅当 draftStatus === 'valid' 才启用"保存为工作流"按钮 (走 /import)
+
+  function openWorkflowAssistModal() {
+    dom.wfAssistDescription.value = ''
+    dom.wfAssistMsg.textContent = ''
+    dom.wfAssistMsg.classList.remove('ok', 'err')
+    dom.wfAssistResult.hidden = true
+    dom.wfAssistSave.disabled = true
+    dom.wfAssistModal.hidden = false
+    setTimeout(() => dom.wfAssistDescription?.focus(), 0)
+  }
+
+  function closeWorkflowAssistModal() {
+    dom.wfAssistModal.hidden = true
+  }
+
+  function renderAssistStatusChip(status) {
+    const chip = dom.wfAssistStatusChip
+    chip.textContent = ''
+    chip.classList.remove('ok', 'err')
+    chip.style.padding = '0.15rem 0.5rem'
+    chip.style.borderRadius = '0.25rem'
+    chip.style.fontSize = '0.85em'
+    if (status === 'valid') {
+      chip.textContent = '✓ 校验通过 (可保存)'
+      chip.style.background = '#d1fae5'
+      chip.style.color = '#065f46'
+    } else if (status === 'invalid') {
+      chip.textContent = '✗ YAML 不合 v1 schema'
+      chip.style.background = '#fee2e2'
+      chip.style.color = '#991b1b'
+    } else if (status === 'no_yaml') {
+      chip.textContent = '— LLM 没生成 YAML'
+      chip.style.background = '#e5e7eb'
+      chip.style.color = '#374151'
+    } else {
+      chip.textContent = status || '(未知)'
+      chip.style.background = '#e5e7eb'
+      chip.style.color = '#374151'
+    }
+  }
+
+  async function submitWorkflowAssist() {
+    const description = (dom.wfAssistDescription.value || '').trim()
+    dom.wfAssistMsg.textContent = ''
+    dom.wfAssistMsg.classList.remove('ok', 'err')
+    if (!description) {
+      dom.wfAssistMsg.textContent = '请先填一句描述'
+      dom.wfAssistMsg.classList.add('err')
+      return
+    }
+    dom.wfAssistGenerate.disabled = true
+    dom.wfAssistGenerate.textContent = '生成中…'
+    dom.wfAssistMsg.textContent = '正在生成,通常 5-20 秒…'
+    try {
+      // 把当前 hub 已有的 agents + workflow ids 当 contextHints — 让 LLM
+      // 用真名而不是编名字。MCP servers 暂不喂(admin UI 没有 /api 暴露)。
+      const contextHints = {}
+      if (Array.isArray(ma?.agents) && ma.agents.length > 0) {
+        contextHints.agents = ma.agents.map((a) => {
+          const entry = { id: a.id, capabilities: a.capabilities || [] }
+          if (a.description) entry.description = a.description
+          return entry
+        })
+      }
+      if (Array.isArray(wf?.workflows) && wf.workflows.length > 0) {
+        contextHints.existingWorkflowIds = wf.workflows.map((w) => w.id)
+      }
+
+      const body = { description }
+      if (Object.keys(contextHints).length > 0) body.contextHints = contextHints
+
+      const r = await fetch('/api/admin/workflows/assist', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const json = await r.json().catch(() => ({}))
+      if (r.status === 503) {
+        dom.wfAssistMsg.textContent =
+          'AI 助手未启用 — 设置 AIPE_ASSISTANT_PROVIDER + 对应 API key 后重启 host'
+        dom.wfAssistMsg.classList.add('err')
+        return
+      }
+      if (!r.ok) {
+        dom.wfAssistMsg.textContent = '生成失败:' + (json.error || `HTTP ${r.status}`)
+        dom.wfAssistMsg.classList.add('err')
+        return
+      }
+      dom.wfAssistMsg.textContent = ''
+      renderAssistResult(json)
+    } catch (err) {
+      dom.wfAssistMsg.textContent = '生成失败:' + (err.message || String(err))
+      dom.wfAssistMsg.classList.add('err')
+    } finally {
+      dom.wfAssistGenerate.disabled = false
+      dom.wfAssistGenerate.textContent = '生成草稿'
+    }
+  }
+
+  function renderAssistResult(result) {
+    dom.wfAssistResult.hidden = false
+    renderAssistStatusChip(result.draftStatus)
+    dom.wfAssistExplanation.textContent = result.explanation || ''
+    dom.wfAssistYaml.textContent = result.yaml || '(空 — LLM 没生成 YAML fence)'
+    if (result.draftStatus === 'invalid' && result.validationError) {
+      dom.wfAssistErrorDetails.hidden = false
+      dom.wfAssistValidationError.textContent = result.validationError
+    } else {
+      dom.wfAssistErrorDetails.hidden = true
+      dom.wfAssistValidationError.textContent = ''
+    }
+    // 仅当 schema 合法时才允许 "保存为工作流" — 把 yaml 缓存在 button
+    // 的 dataset 上,save 时直接读。
+    if (result.draftStatus === 'valid' && result.yaml) {
+      dom.wfAssistSave.disabled = false
+      dom.wfAssistSave.dataset.yaml = result.yaml
+    } else {
+      dom.wfAssistSave.disabled = true
+      delete dom.wfAssistSave.dataset.yaml
+    }
+  }
+
+  async function saveAssistedWorkflow() {
+    const yaml = dom.wfAssistSave.dataset.yaml
+    if (!yaml) return
+    dom.wfAssistMsg.textContent = '保存中…'
+    dom.wfAssistMsg.classList.remove('ok', 'err')
+    try {
+      // 走现有 /import route — 同一段 schema 验证 + 落盘 + register
+      // 在 hub。导入失败(例如 id 冲突)会把错误回显在同一个 msg 区。
+      const r = await fetch('/api/admin/workflows/import', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: yaml,
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        dom.wfAssistMsg.textContent = '保存失败:' + (body.error || `HTTP ${r.status}`)
+        dom.wfAssistMsg.classList.add('err')
+        return
+      }
+      const id = body.workflow?.id || '?'
+      dom.wfAssistMsg.textContent = `已保存 workflow ${id}`
+      dom.wfAssistMsg.classList.add('ok')
+      await refreshWorkflows()
+      setTimeout(closeWorkflowAssistModal, 900)
+    } catch (err) {
+      dom.wfAssistMsg.textContent = '保存失败:' + (err.message || String(err))
+      dom.wfAssistMsg.classList.add('err')
+    }
+  }
+
   // --- workflow run history ---------------------------------------------
   //
   // The runs modal is two panes: a left-side list of recent runs (sorted
@@ -2687,6 +2860,11 @@
     dom.wfStartSubmit?.addEventListener('click', submitWorkflowStart)
     dom.bundleImportBtn?.addEventListener('click', openBundleImportModal)
     dom.bundleImportSubmit?.addEventListener('click', submitBundleImport)
+    // Phase 13 M3 — AI assistant dialog
+    dom.wfAssistBtn?.addEventListener('click', openWorkflowAssistModal)
+    dom.wfAssistGenerate?.addEventListener('click', submitWorkflowAssist)
+    dom.wfAssistRegenerate?.addEventListener('click', submitWorkflowAssist)
+    dom.wfAssistSave?.addEventListener('click', saveAssistedWorkflow)
     // "Use built-in template" button — fetches the embedded
     // personal-growth bundle yaml from the static-asset path
     // (web build embeds it under /builtin-bundles/). Pre-populates
@@ -2753,6 +2931,7 @@
         if (dom.maGhImportModal && !dom.maGhImportModal.hidden) closeGithubImportModal()
         if (!dom.maKeysModal.hidden) closeKeysModal()
         if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal()
+        if (dom.wfAssistModal && !dom.wfAssistModal.hidden) closeWorkflowAssistModal()
         if (dom.wfRunsModal && !dom.wfRunsModal.hidden) closeWorkflowRunsModal()
         if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal()
         if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart()

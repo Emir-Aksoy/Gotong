@@ -208,6 +208,15 @@ export interface WebServerOptions {
    */
   workflows?: WorkflowSurface
   /**
+   * Phase 13 M3 — optional workflow assistant surface. The host wires
+   * `createWorkflowAssistAgent(...)` here when a built-in
+   * `WorkflowAssistantAgent` registered successfully. When absent (no
+   * LLM key, or operator disabled it via env), the
+   * `POST /api/admin/workflows/assist` endpoint returns 503 and the
+   * admin UI can hide the "AI assistant" button.
+   */
+  workflowAssist?: WorkflowAssistSurface
+  /**
    * Optional Hub Services admin surface (PR-11). The host wires
    * `hubServices.asAdminSurface()` here. When absent, all
    * `/api/admin/services/...` endpoints return 503 so the admin UI
@@ -379,6 +388,59 @@ export interface WorkflowSurface {
   readRun(runId: string): Promise<unknown>
 }
 
+/**
+ * Phase 13 M3 — host-injected workflow assistant surface. Wraps a
+ * registered `WorkflowAssistantAgent` so the Web layer can answer
+ * `POST /api/admin/workflows/assist` without taking a runtime dep on
+ * `@aipehub/workflow-assistant` / `@aipehub/llm`. Same posture as
+ * `WorkflowSurface` above.
+ *
+ * Absent when:
+ *   - operator set `AIPE_ASSISTANT_DISABLED=1`, OR
+ *   - the host couldn't resolve an LLM API key for the configured
+ *     provider (no org-pool entry, no env fallback).
+ * In either case, the route responds 503 and the admin UI hides the
+ * "AI assistant" button.
+ */
+export interface WorkflowAssistSurface {
+  assist(input: {
+    description: string
+    /** Optional hints — agent ids / MCP servers / existing workflow ids in this hub. */
+    contextHints?: WorkflowAssistContextHints
+    /** Caller (admin) participant id — stamped onto the dispatched task's `from`. */
+    by: ParticipantId
+  }): Promise<WorkflowAssistResult>
+}
+
+/**
+ * Mirror of `@aipehub/workflow-assistant`'s `WorkflowAssistantPayload.contextHints`.
+ * Kept as a structural duplicate so Web has zero workflow-assistant dep.
+ */
+export interface WorkflowAssistContextHints {
+  agents?: ReadonlyArray<{
+    id: string
+    capabilities: ReadonlyArray<string>
+    description?: string
+  }>
+  mcpServers?: ReadonlyArray<string>
+  existingWorkflowIds?: ReadonlyArray<string>
+}
+
+/**
+ * Mirror of `@aipehub/workflow-assistant`'s `WorkflowAssistantOutput`. The
+ * Web layer returns these fields verbatim in the assist route's JSON body
+ * (under `{ ok: true, ...result }`).
+ */
+export interface WorkflowAssistResult {
+  yaml: string
+  explanation: string
+  raw: string
+  draftStatus: 'valid' | 'no_yaml' | 'invalid'
+  validationError?: string
+  by?: string
+  stopReason?: string
+}
+
 export interface WorkflowSummary {
   id: string
   participantId: string
@@ -480,6 +542,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     workerCreateLimiter,
     lifecycle: opts.lifecycle,
     workflows: opts.workflows,
+    workflowAssist: opts.workflowAssist,
     services: opts.services,
     growthReports: opts.growthReports,
     readinessGate: opts.readinessGate,
@@ -598,6 +661,8 @@ interface HandlerCtx {
   workerCreateLimiter: RateLimiter
   lifecycle: ManagedAgentLifecycle | undefined
   workflows: WorkflowSurface | undefined
+  /** Phase 13 M3 — see WebServerOptions.workflowAssist doc above. */
+  workflowAssist: WorkflowAssistSurface | undefined
   services: ServicesAdminSurface | undefined
   growthReports: GrowthReportsAdminSurface | undefined
   readinessGate: { isReady: () => boolean } | undefined
@@ -1772,6 +1837,46 @@ async function handle(
       sendJson(res, { ok: true, workflow: summary })
     } catch (err) {
       sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+    return
+  }
+
+  // Phase 13 M3 — natural-language → workflow YAML draft. The host wires
+  // `ctx.workflowAssist` to a `WorkflowAssistantAgent` registered at boot
+  // (capability=`workflow:assist`). When absent (no LLM key resolved, or
+  // operator set `AIPE_ASSISTANT_DISABLED=1`), respond 503 so the admin
+  // UI can hide the "AI assistant" button cleanly.
+  //
+  // Request body (JSON):
+  //   { description: string, contextHints?: WorkflowAssistContextHints }
+  // Response body (200):
+  //   { ok: true, yaml, explanation, raw, draftStatus, validationError?, by?, stopReason? }
+  // Response body (4xx/5xx): { error: string }
+  if (method === 'POST' && path === '/api/admin/workflows/assist') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.workflowAssist) {
+      sendJson(res, { error: 'workflow assistant not enabled on this host' }, 503)
+      return
+    }
+    const body = (await readJsonBody(req).catch(() => undefined)) as
+      | { description?: unknown; contextHints?: WorkflowAssistContextHints }
+      | undefined
+    const description =
+      body && typeof body.description === 'string' ? body.description : ''
+    if (description.trim().length === 0) {
+      sendJson(res, { error: 'description is required (non-empty string)' }, 400)
+      return
+    }
+    try {
+      const result = await ctx.workflowAssist.assist({
+        description,
+        ...(body?.contextHints ? { contextHints: body.contextHints } : {}),
+        by: admin.id,
+      })
+      sendJson(res, { ok: true, ...result })
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
     }
     return
   }
