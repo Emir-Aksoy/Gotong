@@ -470,9 +470,12 @@
     })
     // Order matters: admin.js depends on window.AipeHub from app-core.js
     // (already loaded via the synchronous <script defer> tag above us);
-    // identity-ui.js depends on the users-panel DOM that admin.html
-    // declares. We just chain.
-    inject('/admin.js')
+    // admin-wf-assist.js registers window.AipeHub.installWorkflowAssist
+    // which admin.js then calls at IIFE init time — so it MUST load before
+    // admin.js; identity-ui.js depends on the users-panel DOM that
+    // admin.html declares. We just chain.
+    inject('/admin-wf-assist.js')
+      .then(() => inject('/admin.js'))
       .then(() => inject('/identity-ui.js'))
       .then(() => inject('/quotas-ui.js'))
       .then(() => inject('/reputation-ui.js'))
