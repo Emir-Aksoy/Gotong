@@ -439,6 +439,33 @@ export interface WorkflowAssistResult {
   validationError?: string
   by?: string
   stopReason?: string
+  /**
+   * Phase 13 M4 — deep structural check result. Present iff the host's
+   * assist surface ran the check (host only runs it when the request
+   * carried `contextHints` AND the YAML parsed cleanly). Mirrors
+   * `WorkflowStructureCheckResult` from `@aipehub/evals` — kept as a
+   * duck-typed structural copy so the web layer has zero evals dep.
+   */
+  deepCheck?: WorkflowDeepCheckResult
+}
+
+/** Mirror of `WorkflowStructureCheckResult` (see `@aipehub/evals`). */
+export interface WorkflowDeepCheckResult {
+  ok: boolean
+  violations: ReadonlyArray<WorkflowDeepCheckViolation>
+}
+
+/** Mirror of `WorkflowStructureViolation` (see `@aipehub/evals`). */
+export interface WorkflowDeepCheckViolation {
+  kind:
+    | 'unknown_agent'
+    | 'unknown_capability'
+    | 'bad_ref'
+    | 'forward_ref'
+    | 'self_trigger_cycle'
+    | 'id_collision'
+  message: string
+  path: string
 }
 
 export interface WorkflowSummary {
@@ -1850,7 +1877,13 @@ async function handle(
   // Request body (JSON):
   //   { description: string, contextHints?: WorkflowAssistContextHints }
   // Response body (200):
-  //   { ok: true, yaml, explanation, raw, draftStatus, validationError?, by?, stopReason? }
+  //   { ok: true, yaml, explanation, raw, draftStatus, validationError?,
+  //     by?, stopReason?, deepCheck? }
+  //   - `deepCheck` (Phase 13 M4) is populated iff the request carried
+  //     `contextHints` AND the YAML parsed cleanly. Caller treats
+  //     `deepCheck.ok=false` as a yellow "warnings" state — admin can
+  //     still save, but the workflow references hub entities that don't
+  //     currently exist. See WorkflowDeepCheckResult above.
   // Response body (4xx/5xx): { error: string }
   if (method === 'POST' && path === '/api/admin/workflows/assist') {
     const admin = await requireAdmin(ctx, req, res)

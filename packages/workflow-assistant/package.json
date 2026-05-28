@@ -26,6 +26,7 @@
   },
   "dependencies": {
     "@aipehub/core": "workspace:*",
+    "@aipehub/evals": "workspace:*",
     "@aipehub/llm": "workspace:*",
     "@aipehub/workflow": "workspace:*"
   },

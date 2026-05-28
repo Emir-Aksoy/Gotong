@@ -31,3 +31,4 @@
 
 export * from './checkers/three-segment.js'
 export * from './checkers/structure.js'
+export * from './checkers/workflow-structure.js'

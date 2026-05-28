@@ -315,6 +315,10 @@ importers:
         version: 3.2.4(@types/node@20.19.41)(tsx@4.22.0)(yaml@2.9.0)
 
   packages/evals:
+    dependencies:
+      '@aipehub/workflow':
+        specifier: workspace:*
+        version: link:../workflow
     devDependencies:
       vitest:
         specifier: ^3.2.4
@@ -669,6 +673,9 @@ importers:
       '@aipehub/core':
         specifier: workspace:*
         version: link:../core
+      '@aipehub/evals':
+        specifier: workspace:*
+        version: link:../evals
       '@aipehub/llm':
         specifier: workspace:*
         version: link:../llm

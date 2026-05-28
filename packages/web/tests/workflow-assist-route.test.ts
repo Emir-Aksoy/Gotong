@@ -262,4 +262,88 @@ describe('POST /api/admin/workflows/assist', () => {
     expect(b.assistCalls.length).toBe(1)
     expect(b.assistCalls[0]!.contextHints).toBeUndefined()
   })
+
+  // ── Phase 13 M4 ────────────────────────────────────────────────
+
+  it('200 forwards deepCheck.ok=true verbatim from the surface', async () => {
+    b = await boot()
+    b.assistResponse = {
+      ...b.assistResponse,
+      deepCheck: { ok: true, violations: [] },
+    }
+    const r = await fetch(`${b.baseUrl}/api/admin/workflows/assist`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${b.adminToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        description: 'with deep check',
+        contextHints: { agents: [{ id: 'a', capabilities: ['c'] }] },
+      }),
+    })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.deepCheck).toEqual({ ok: true, violations: [] })
+  })
+
+  it('200 forwards deepCheck.ok=false with violations verbatim', async () => {
+    b = await boot()
+    b.assistResponse = {
+      ...b.assistResponse,
+      deepCheck: {
+        ok: false,
+        violations: [
+          {
+            kind: 'unknown_capability',
+            message: 'no agent satisfies cap "summarize"',
+            path: 'workflow.steps[1].dispatch.strategy.capabilities',
+          },
+          {
+            kind: 'id_collision',
+            message: "workflow.id 'news-digest' already exists",
+            path: 'workflow.id',
+          },
+        ],
+      },
+    }
+    const r = await fetch(`${b.baseUrl}/api/admin/workflows/assist`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${b.adminToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        description: 'collides',
+        contextHints: {
+          agents: [{ id: 'a', capabilities: ['c'] }],
+          existingWorkflowIds: ['news-digest'],
+        },
+      }),
+    })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.draftStatus).toBe('valid')
+    expect(j.deepCheck.ok).toBe(false)
+    expect(j.deepCheck.violations).toHaveLength(2)
+    expect(j.deepCheck.violations[0].kind).toBe('unknown_capability')
+    expect(j.deepCheck.violations[1].kind).toBe('id_collision')
+  })
+
+  it('omits deepCheck when surface does not include it', async () => {
+    b = await boot()
+    // Default assistResponse has no deepCheck — i.e. the host's surface
+    // didn't run the check (no contextHints, or yaml was invalid).
+    const r = await fetch(`${b.baseUrl}/api/admin/workflows/assist`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${b.adminToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ description: 'no hints' }),
+    })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.deepCheck).toBeUndefined()
+  })
 })

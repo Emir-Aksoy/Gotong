@@ -476,6 +476,13 @@
                             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
                             font-size: 0.85em;"><code id="wf-assist-validation-error"></code></pre>
               </details>
+              <!-- Phase 13 M4 — deep-check warnings. Shown when draftStatus=valid
+                   but the workflow references things the current hub doesn't have. -->
+              <details id="wf-assist-deepcheck-details" hidden open style="margin-top: 0.5rem;">
+                <summary id="wf-assist-deepcheck-summary">深度检查警告</summary>
+                <ul id="wf-assist-deepcheck-list" style="margin: 0.4rem 0 0 1.2rem; padding: 0;
+                                                         font-size: 0.85em; color: #92400e;"></ul>
+              </details>
               <div style="display: flex; gap: 0.5rem; margin-top: 0.8rem;">
                 <!-- save button only enabled when draftStatus === 'valid' -->
                 <button type="button" id="wf-assist-save" class="ma-btn" disabled>保存为工作流</button>

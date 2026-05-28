@@ -18,6 +18,8 @@ export {
   renderUserMessage,
   extractYamlAndExplanation,
   verdictForYaml,
+  verdictForYamlWithDeepCheck,
+  inventoryFromContextHints,
   WORKFLOW_ASSISTANT_CAPABILITY,
   WORKFLOW_ASSISTANT_DEFAULT_ID,
 } from './assistant.js'
@@ -29,3 +31,12 @@ export type {
   WorkflowDraftStatus,
   WorkflowExample,
 } from './assistant.js'
+
+// Phase 13 M4 — re-export the deep-check shapes so callers don't need
+// a separate `@aipehub/evals` import just to type the deepCheck field.
+export type {
+  WorkflowInventory,
+  WorkflowStructureCheckResult,
+  WorkflowStructureViolation,
+  WorkflowStructureViolationKind,
+} from '@aipehub/evals/checkers/workflow-structure'

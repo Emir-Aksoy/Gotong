@@ -43,6 +43,12 @@ import {
 import type { Task } from '@aipehub/core'
 
 import { parseWorkflow, WORKFLOW_SCHEMA_V1, WorkflowSchemaError } from '@aipehub/workflow'
+import {
+  checkWorkflowStructure,
+  type WorkflowInventory,
+  type WorkflowStructureCheckResult,
+  type WorkflowStructureViolation,
+} from '@aipehub/evals/checkers/workflow-structure'
 
 // ---------------------------------------------------------------------------
 // Public payload / output shapes — exported so callers and HTTP routes can
@@ -123,6 +129,27 @@ export interface WorkflowAssistantOutput extends LlmTaskOutput {
    * message the parser produced — safe to surface in admin UI verbatim.
    */
   validationError?: string
+  /**
+   * Phase 13 M4 — deep structural check against the inventory of agents /
+   * workflow ids that were threaded in via `payload.contextHints`. Only
+   * populated when:
+   *   1. `draftStatus === 'valid'` (no point deep-checking unparseable YAML)
+   *   2. The task payload carried `contextHints` (i.e. caller wanted the
+   *      check; passing no hints means "portable / no hub context").
+   *
+   * The check surfaces things `parseWorkflow` can't see, like dispatching
+   * to an agent id that doesn't exist on this hub, or to a capability no
+   * registered agent satisfies, or `$stepId.output` refs to nonexistent
+   * steps. See `@aipehub/evals/checkers/workflow-structure` for the full
+   * violation taxonomy.
+   *
+   * UI convention: when `deepCheck.ok === false` but `draftStatus ===
+   * 'valid'`, treat as a "yellow / warnings" state — the YAML is
+   * structurally fine and would import, but it references things this hub
+   * doesn't actually have, so the workflow would fail at runtime. Caller
+   * decides whether to let the admin save it anyway.
+   */
+  deepCheck?: WorkflowStructureCheckResult
 }
 
 /**
@@ -330,12 +357,16 @@ export class WorkflowAssistantAgent extends LlmAgent {
    */
   protected override parseResponse(
     response: LlmResponse,
-    _task: Task,
+    task: Task,
     _toolRounds = 0,
   ): WorkflowAssistantOutput {
     const raw = response.text
     const { yaml, explanation } = extractYamlAndExplanation(raw)
-    const verdict = verdictForYaml(yaml)
+    const payload = task.payload as WorkflowAssistantPayload | undefined
+    const verdict = verdictForYamlWithDeepCheck(
+      yaml,
+      payload?.contextHints ? inventoryFromContextHints(payload.contextHints) : undefined,
+    )
     const out: WorkflowAssistantOutput = {
       // LlmTaskOutput contract: `text` is what transcript / SDK
       // consumers see. We use the explanation (human-readable) rather
@@ -350,6 +381,9 @@ export class WorkflowAssistantAgent extends LlmAgent {
     }
     if (verdict.validationError !== undefined) {
       out.validationError = verdict.validationError
+    }
+    if (verdict.deepCheck !== undefined) {
+      out.deepCheck = verdict.deepCheck
     }
     if (response.usage) out.usage = response.usage
     return out
@@ -385,6 +419,64 @@ export function verdictForYaml(yaml: string): {
         : String(err)
     return { status: 'invalid', validationError: msg }
   }
+}
+
+/**
+ * Phase 13 M4 — same as `verdictForYaml` but, when status comes back
+ * `'valid'` AND an `inventory` is supplied, runs the deep structural
+ * check from `@aipehub/evals` against the parsed workflow and returns the
+ * result. Status itself is never downgraded by the deep check — caller
+ * inspects `deepCheck.ok` and decides how to render (a typical UI: green
+ * iff both `status==='valid'` and `deepCheck.ok`; yellow if valid but
+ * deep-check-fail; red on invalid; gray on no_yaml).
+ *
+ * Exported so HTTP routes / SDK callers can reuse the same logic the
+ * agent's `parseResponse` uses — keeping the verdict shape stable across
+ * call sites avoids "agent says X, route says Y" drift.
+ */
+export function verdictForYamlWithDeepCheck(
+  yaml: string,
+  inventory: WorkflowInventory | undefined,
+): {
+  status: WorkflowDraftStatus
+  validationError?: string
+  deepCheck?: WorkflowStructureCheckResult
+} {
+  const base = verdictForYaml(yaml)
+  if (base.status !== 'valid') return base
+  if (inventory === undefined) return base
+  // Safe: status='valid' guarantees parseWorkflow succeeded once. We
+  // re-parse here because verdictForYaml doesn't hand back the parsed
+  // definition — keeping its signature byte-for-byte stable matters more
+  // than the microsecond saved.
+  const parsed = parseWorkflow(yaml)
+  const deepCheck = checkWorkflowStructure(parsed, inventory)
+  return { status: 'valid', deepCheck }
+}
+
+/**
+ * Translate a payload's `contextHints` into the `WorkflowInventory`
+ * shape the deep checker wants. Both are intentionally similar — but
+ * `contextHints` carries fields the LLM prompt cares about
+ * (`description`, `mcpServers`) and the checker ignores those.
+ *
+ * Keeps the contextHints-vs-inventory mapping in one place so callers
+ * (route handler, tests) don't reinvent it.
+ */
+export function inventoryFromContextHints(
+  hints: NonNullable<WorkflowAssistantPayload['contextHints']>,
+): WorkflowInventory {
+  const inv: WorkflowInventory = {}
+  if (hints.agents && hints.agents.length > 0) {
+    inv.agents = hints.agents.map((a) => ({
+      id: a.id,
+      capabilities: a.capabilities,
+    }))
+  }
+  if (hints.existingWorkflowIds && hints.existingWorkflowIds.length > 0) {
+    inv.existingWorkflowIds = hints.existingWorkflowIds
+  }
+  return inv
 }
 
 // ---------------------------------------------------------------------------

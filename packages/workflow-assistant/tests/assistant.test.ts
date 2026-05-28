@@ -32,8 +32,10 @@ import { parseWorkflow } from '@aipehub/workflow'
 import {
   buildSystemPrompt,
   extractYamlAndExplanation,
+  inventoryFromContextHints,
   renderUserMessage,
   verdictForYaml,
+  verdictForYamlWithDeepCheck,
   WORKFLOW_ASSISTANT_CAPABILITY,
   WORKFLOW_ASSISTANT_DEFAULT_ID,
   WorkflowAssistantAgent,
@@ -520,5 +522,176 @@ describe('WorkflowAssistantAgent — bad payload', () => {
     })
     await hub.stop()
     expect(result.kind).toBe('failed')
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────
+// Phase 13 M4 — deep check integration
+// ───────────────────────────────────────────────────────────────────
+
+describe('inventoryFromContextHints', () => {
+  it('returns empty inventory when hints have no agents / ids', () => {
+    expect(inventoryFromContextHints({})).toEqual({})
+  })
+
+  it('passes through agents (id + capabilities only — strips description)', () => {
+    const inv = inventoryFromContextHints({
+      agents: [
+        { id: 'writer', capabilities: ['draft'], description: 'ignored here' },
+      ],
+    })
+    expect(inv.agents).toEqual([{ id: 'writer', capabilities: ['draft'] }])
+  })
+
+  it('passes through existingWorkflowIds', () => {
+    const inv = inventoryFromContextHints({
+      existingWorkflowIds: ['a', 'b'],
+    })
+    expect(inv.existingWorkflowIds).toEqual(['a', 'b'])
+  })
+
+  it('drops mcpServers (deep checker ignores them)', () => {
+    const inv = inventoryFromContextHints({
+      mcpServers: ['search'],
+      agents: [{ id: 'x', capabilities: ['y'] }],
+    }) as Record<string, unknown>
+    expect(inv.mcpServers).toBeUndefined()
+  })
+})
+
+describe('verdictForYamlWithDeepCheck', () => {
+  it("forwards 'no_yaml' verbatim", () => {
+    const v = verdictForYamlWithDeepCheck('', undefined)
+    expect(v.status).toBe('no_yaml')
+    expect(v.deepCheck).toBeUndefined()
+  })
+
+  it("forwards 'invalid' verbatim", () => {
+    const v = verdictForYamlWithDeepCheck('not a workflow', undefined)
+    expect(v.status).toBe('invalid')
+    expect(v.deepCheck).toBeUndefined()
+  })
+
+  it('skips deep check when inventory is undefined even on valid yaml', () => {
+    const v = verdictForYamlWithDeepCheck(SAMPLE_YAML.trim(), undefined)
+    expect(v.status).toBe('valid')
+    expect(v.deepCheck).toBeUndefined()
+  })
+
+  it("runs deep check on 'valid' + inventory; passes when inventory satisfies it", () => {
+    const v = verdictForYamlWithDeepCheck(SAMPLE_YAML.trim(), {
+      agents: [
+        { id: 'crawler', capabilities: ['crawl-news'] },
+        { id: 'summarizer', capabilities: ['summarize'] },
+      ],
+    })
+    expect(v.status).toBe('valid')
+    expect(v.deepCheck?.ok).toBe(true)
+  })
+
+  it("returns deepCheck.ok=false with violations when inventory doesn't satisfy", () => {
+    const v = verdictForYamlWithDeepCheck(SAMPLE_YAML.trim(), {
+      agents: [{ id: 'noop', capabilities: ['something-else'] }],
+      existingWorkflowIds: ['news-digest'], // collision with SAMPLE_YAML.id
+    })
+    expect(v.status).toBe('valid')
+    expect(v.deepCheck?.ok).toBe(false)
+    const kinds = (v.deepCheck?.violations ?? []).map((x) => x.kind)
+    expect(kinds).toContain('id_collision')
+    expect(kinds).toContain('unknown_capability')
+  })
+})
+
+describe('WorkflowAssistantAgent — deep check via parseResponse', () => {
+  it('omits deepCheck when payload had no contextHints', async () => {
+    const provider = new MockLlmProvider({ reply: SAMPLE_RESPONSE_TEXT })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(makeAssistantTask({ description: 'crawl' }))
+    await hub.stop()
+
+    const out = (result as { output: WorkflowAssistantOutput }).output
+    expect(out.draftStatus).toBe('valid')
+    expect(out.deepCheck).toBeUndefined()
+  })
+
+  it('populates deepCheck.ok=true when contextHints satisfy the YAML', async () => {
+    const provider = new MockLlmProvider({ reply: SAMPLE_RESPONSE_TEXT })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(
+      makeAssistantTask({
+        description: 'crawl',
+        contextHints: {
+          agents: [
+            { id: 'crawler', capabilities: ['crawl-news'] },
+            { id: 'summarizer', capabilities: ['summarize'] },
+          ],
+        },
+      }),
+    )
+    await hub.stop()
+
+    const out = (result as { output: WorkflowAssistantOutput }).output
+    expect(out.draftStatus).toBe('valid')
+    expect(out.deepCheck?.ok).toBe(true)
+    expect(out.deepCheck?.violations).toEqual([])
+  })
+
+  it('populates deepCheck.ok=false when contextHints flag a problem', async () => {
+    const provider = new MockLlmProvider({ reply: SAMPLE_RESPONSE_TEXT })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(
+      makeAssistantTask({
+        description: 'crawl',
+        contextHints: {
+          agents: [{ id: 'wrong-agent', capabilities: ['unrelated'] }],
+          existingWorkflowIds: ['news-digest'],
+        },
+      }),
+    )
+    await hub.stop()
+
+    const out = (result as { output: WorkflowAssistantOutput }).output
+    expect(out.draftStatus).toBe('valid')
+    expect(out.deepCheck?.ok).toBe(false)
+    const kinds = (out.deepCheck?.violations ?? []).map((v) => v.kind)
+    expect(kinds).toContain('id_collision')
+    expect(kinds).toContain('unknown_capability')
+  })
+
+  it('omits deepCheck on invalid YAML even when hints are present', async () => {
+    const badYaml = `schema: aipehub.workflow/v1
+workflow:
+  id: broken
+  trigger: {}
+  steps: []
+`
+    const provider = new MockLlmProvider({
+      reply: `oops\n\n\`\`\`yaml\n${badYaml.trim()}\n\`\`\``,
+    })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(
+      makeAssistantTask({
+        description: 'doesnt matter',
+        contextHints: { agents: [{ id: 'x', capabilities: ['y'] }] },
+      }),
+    )
+    await hub.stop()
+
+    const out = (result as { output: WorkflowAssistantOutput }).output
+    expect(out.draftStatus).toBe('invalid')
+    expect(out.deepCheck).toBeUndefined()
+    expect(out.validationError).toBeTruthy()
   })
 })

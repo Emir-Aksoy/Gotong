@@ -19,6 +19,10 @@
     "./checkers/structure": {
       "types": "./dist/checkers/structure.d.ts",
       "import": "./dist/checkers/structure.js"
+    },
+    "./checkers/workflow-structure": {
+      "types": "./dist/checkers/workflow-structure.d.ts",
+      "import": "./dist/checkers/workflow-structure.js"
     }
   },
   "files": [
@@ -31,6 +35,9 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aipehub/workflow": "workspace:*"
   },
   "devDependencies": {
     "vitest": "^3.2.4"

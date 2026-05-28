@@ -159,7 +159,10 @@ function buildAssistProvider(
             '  id: assistant-mock-draft',
             '  name: Mock-generated draft',
             '  trigger:',
-            '    capability: chat',
+            // Deliberately NOT the same cap as the step's dispatch — the
+            // M4 deep checker flags self-cycles, and a stub that always
+            // triggers itself would confuse users who enable contextHints.
+            '    capability: mock-draft:run',
             '  steps:',
             '    - id: greet',
             '      dispatch:',

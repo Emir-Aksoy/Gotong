@@ -195,6 +195,10 @@
       wfAssistYaml: $('wf-assist-yaml'),
       wfAssistErrorDetails: $('wf-assist-error-details'),
       wfAssistValidationError: $('wf-assist-validation-error'),
+      // Phase 13 M4 — deep-check warnings panel.
+      wfAssistDeepcheckDetails: $('wf-assist-deepcheck-details'),
+      wfAssistDeepcheckSummary: $('wf-assist-deepcheck-summary'),
+      wfAssistDeepcheckList: $('wf-assist-deepcheck-list'),
       wfAssistSave: $('wf-assist-save'),
       wfAssistRegenerate: $('wf-assist-regenerate'),
       // Run history modal (v0.3)
@@ -2315,6 +2319,10 @@
     dom.wfAssistMsg.classList.remove('ok', 'err')
     dom.wfAssistResult.hidden = true
     dom.wfAssistSave.disabled = true
+    // Reset the deep-check panel so a previous run's warnings don't
+    // bleed into this session — renderAssistResult will repopulate it.
+    if (dom.wfAssistDeepcheckDetails) dom.wfAssistDeepcheckDetails.hidden = true
+    if (dom.wfAssistDeepcheckList) dom.wfAssistDeepcheckList.innerHTML = ''
     dom.wfAssistModal.hidden = false
     setTimeout(() => dom.wfAssistDescription?.focus(), 0)
   }
@@ -2323,7 +2331,7 @@
     dom.wfAssistModal.hidden = true
   }
 
-  function renderAssistStatusChip(status) {
+  function renderAssistStatusChip(status, deepCheck) {
     const chip = dom.wfAssistStatusChip
     chip.textContent = ''
     chip.classList.remove('ok', 'err')
@@ -2331,9 +2339,19 @@
     chip.style.borderRadius = '0.25rem'
     chip.style.fontSize = '0.85em'
     if (status === 'valid') {
-      chip.textContent = '✓ 校验通过 (可保存)'
-      chip.style.background = '#d1fae5'
-      chip.style.color = '#065f46'
+      // M4: valid + deep-check failed → yellow "warnings" state instead
+      // of green. YAML still parses, but it references things this hub
+      // doesn't actually have, so it'd fail at runtime.
+      if (deepCheck && deepCheck.ok === false) {
+        const n = (deepCheck.violations || []).length
+        chip.textContent = `⚠ schema 通过，但有 ${n} 项深度警告`
+        chip.style.background = '#fef3c7'
+        chip.style.color = '#92400e'
+      } else {
+        chip.textContent = '✓ 校验通过 (可保存)'
+        chip.style.background = '#d1fae5'
+        chip.style.color = '#065f46'
+      }
     } else if (status === 'invalid') {
       chip.textContent = '✗ YAML 不合 v1 schema'
       chip.style.background = '#fee2e2'
@@ -2346,6 +2364,71 @@
       chip.textContent = status || '(未知)'
       chip.style.background = '#e5e7eb'
       chip.style.color = '#374151'
+    }
+  }
+
+  // Phase 13 M4 — short human label for each deep-check violation kind.
+  // Comes from `WorkflowStructureViolationKind` in @aipehub/evals.
+  function deepCheckKindLabel(kind) {
+    switch (kind) {
+      case 'unknown_agent':
+        return '指向不存在的 agent'
+      case 'unknown_capability':
+        return '当前 hub 没 agent 提供该 capability'
+      case 'bad_ref':
+        return '$ref 指向不存在的 step'
+      case 'forward_ref':
+        return '$ref 指向更晚执行的 step'
+      case 'self_trigger_cycle':
+        return '会触发自己 — 死循环'
+      case 'id_collision':
+        return 'workflow.id 已存在'
+      default:
+        return kind || '(unknown)'
+    }
+  }
+
+  function renderAssistDeepCheck(deepCheck) {
+    const details = dom.wfAssistDeepcheckDetails
+    const summary = dom.wfAssistDeepcheckSummary
+    const list = dom.wfAssistDeepcheckList
+    if (!details || !summary || !list) return
+    list.innerHTML = ''
+    // No deepCheck attached → hide panel entirely. Caller didn't pass
+    // contextHints, or the YAML wasn't even valid.
+    if (!deepCheck) {
+      details.hidden = true
+      return
+    }
+    if (deepCheck.ok) {
+      // Quietly tell the admin everything passed; collapsed by default
+      // so it doesn't compete with the YAML preview for attention.
+      details.hidden = false
+      details.open = false
+      summary.textContent = '深度检查通过 (0 项警告)'
+      summary.style.color = '#065f46'
+      return
+    }
+    const violations = deepCheck.violations || []
+    details.hidden = false
+    details.open = true
+    summary.textContent = `深度检查警告 — ${violations.length} 项 (workflow 可保存，但运行时可能失败)`
+    summary.style.color = '#92400e'
+    for (const v of violations) {
+      const li = document.createElement('li')
+      li.style.margin = '0.2rem 0'
+      const label = document.createElement('strong')
+      label.textContent = deepCheckKindLabel(v.kind) + ' — '
+      li.appendChild(label)
+      li.appendChild(document.createTextNode(v.message || ''))
+      if (v.path) {
+        const path = document.createElement('code')
+        path.textContent = ' (' + v.path + ')'
+        path.style.color = '#6b7280'
+        path.style.fontSize = '0.9em'
+        li.appendChild(path)
+      }
+      list.appendChild(li)
     }
   }
 
@@ -2409,7 +2492,7 @@
 
   function renderAssistResult(result) {
     dom.wfAssistResult.hidden = false
-    renderAssistStatusChip(result.draftStatus)
+    renderAssistStatusChip(result.draftStatus, result.deepCheck)
     dom.wfAssistExplanation.textContent = result.explanation || ''
     dom.wfAssistYaml.textContent = result.yaml || '(空 — LLM 没生成 YAML fence)'
     if (result.draftStatus === 'invalid' && result.validationError) {
@@ -2419,6 +2502,10 @@
       dom.wfAssistErrorDetails.hidden = true
       dom.wfAssistValidationError.textContent = ''
     }
+    // Phase 13 M4 — render deep-check warnings (or pass note) below the
+    // YAML preview. Save is still allowed when deepCheck.ok=false (admin
+    // decides), so we only gate the save button on draftStatus.
+    renderAssistDeepCheck(result.deepCheck)
     // 仅当 schema 合法时才允许 "保存为工作流" — 把 yaml 缓存在 button
     // 的 dataset 上,save 时直接读。
     if (result.draftStatus === 'valid' && result.yaml) {
