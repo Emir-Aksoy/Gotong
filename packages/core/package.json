@@ -32,6 +32,9 @@
     "test:watch": "vitest",
     "prepack": "tsc -p tsconfig.json"
   },
+  "dependencies": {
+    "@aipehub/protocol": "workspace:*"
+  },
   "peerDependencies": {
     "better-sqlite3": ">=11.0.0"
   },

@@ -5,7 +5,7 @@ import type {
   Task,
   TaskId,
   TaskResult,
-} from '@aipehub/core'
+} from './types.js'
 
 // =============================================================================
 // Service RPC (protocol v1.1, additive on top of v1.0)
