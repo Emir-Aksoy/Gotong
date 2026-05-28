@@ -42,7 +42,8 @@ import {
 } from '@aipehub/llm'
 import type { Task } from '@aipehub/core'
 
-import { WORKFLOW_SCHEMA_V1 } from './types.js'
+import { parseWorkflow } from './schema.js'
+import { WORKFLOW_SCHEMA_V1, WorkflowSchemaError } from './types.js'
 
 // ---------------------------------------------------------------------------
 // Public payload / output shapes — exported so callers and HTTP routes can
@@ -76,13 +77,38 @@ export interface WorkflowAssistantPayload {
 }
 
 /**
+ * Verdict on the YAML the assistant produced for THIS draft.
+ *
+ *   - `'valid'`   — yaml was extracted and `parseWorkflow(yaml)` succeeded.
+ *                   Caller can hand it straight to `WorkflowRunner` or save
+ *                   it as a workflow file. Most common happy-path outcome.
+ *   - `'no_yaml'` — LLM didn't put a yaml fence in its reply (refused,
+ *                   went off-topic, or asked a clarifying question). `yaml`
+ *                   is `''`; the human-readable answer is in `explanation`.
+ *                   Caller should re-prompt the user, not save anything.
+ *   - `'invalid'` — yaml fence was extracted but `parseWorkflow` rejected it.
+ *                   `validationError` carries the parser's message verbatim
+ *                   (the same string admins see when uploading a bad YAML
+ *                   file). Caller can show the error inline and let the
+ *                   user re-prompt with hints (e.g. "the LLM forgot to
+ *                   declare a unique step id").
+ *
+ * The three states let routes / UI / SDK callers distinguish "LLM
+ * answered correctly", "LLM cooperated but the spec was wrong", and "LLM
+ * refused / didn't try" without re-parsing the response themselves. This
+ * is the Phase 13 M1 success-semantics fix flagged by
+ * `audits/2026-05-27-codex/findings.md` (P2 — assistant success too loose).
+ */
+export type WorkflowDraftStatus = 'valid' | 'no_yaml' | 'invalid'
+
+/**
  * What `WorkflowAssistantAgent` returns.
  *
  * Extends `LlmTaskOutput` so the agent is a well-behaved `LlmAgent`
  * subclass — `text` is the explanation (what a transcript reader
  * sees), `stopReason` / `usage` / `by` come from the base contract.
- * The workflow-specific fields (`yaml`, `explanation`, `raw`) are
- * additive.
+ * The workflow-specific fields (`yaml`, `explanation`, `raw`,
+ * `draftStatus`, `validationError`) are additive.
  */
 export interface WorkflowAssistantOutput extends LlmTaskOutput {
   /** The extracted YAML. Empty string if extraction failed (then `raw` has the answer). */
@@ -91,6 +117,13 @@ export interface WorkflowAssistantOutput extends LlmTaskOutput {
   explanation: string
   /** Full LLM response, before any extraction. Useful for debugging extraction failures. */
   raw: string
+  /** Verdict on the produced yaml — see {@link WorkflowDraftStatus}. */
+  draftStatus: WorkflowDraftStatus
+  /**
+   * Present iff `draftStatus === 'invalid'`. The exact `WorkflowSchemaError`
+   * message the parser produced — safe to surface in admin UI verbatim.
+   */
+  validationError?: string
 }
 
 /**
@@ -273,10 +306,22 @@ export class WorkflowAssistantAgent extends LlmAgent {
   }
 
   /**
-   * Extract the YAML fence from the LLM response.
+   * Extract the YAML fence from the LLM response and produce a verdict.
    *
-   * We deliberately don't validate the YAML here. `validateWorkflowYaml`
-   * (M2) is the validator; the assistant agent stays single-purpose.
+   * Three possible `draftStatus` outcomes:
+   *
+   *   - `'no_yaml'` — extraction returned `yaml === ''` (LLM refused or
+   *     didn't put a fence in the reply).
+   *   - `'invalid'` — yaml was extracted but `parseWorkflow` threw a
+   *     `WorkflowSchemaError`. The error message is surfaced in
+   *     `validationError`.
+   *   - `'valid'` — yaml parsed cleanly.
+   *
+   * Per Phase 13 M1 design: we self-validate (single round, no loop) so
+   * callers don't have to re-parse. M2's HTTP route can forward the
+   * status verbatim; nothing else needs to call `parseWorkflow` first.
+   * Self-correcting LLM loops are still out of scope — the caller decides
+   * whether to re-prompt with the error appended.
    */
   protected override parseResponse(
     response: LlmResponse,
@@ -285,6 +330,7 @@ export class WorkflowAssistantAgent extends LlmAgent {
   ): WorkflowAssistantOutput {
     const raw = response.text
     const { yaml, explanation } = extractYamlAndExplanation(raw)
+    const verdict = verdictForYaml(yaml)
     const out: WorkflowAssistantOutput = {
       // LlmTaskOutput contract: `text` is what transcript / SDK
       // consumers see. We use the explanation (human-readable) rather
@@ -295,9 +341,44 @@ export class WorkflowAssistantAgent extends LlmAgent {
       yaml,
       explanation,
       raw,
+      draftStatus: verdict.status,
+    }
+    if (verdict.validationError !== undefined) {
+      out.validationError = verdict.validationError
     }
     if (response.usage) out.usage = response.usage
     return out
+  }
+}
+
+/**
+ * Determine the draft status for a freshly-extracted yaml string by
+ * trying `parseWorkflow`. Exported so M2 route logic / unit tests can
+ * reuse the exact same verdict function as the agent.
+ *
+ *   - empty string → `'no_yaml'`
+ *   - parses cleanly → `'valid'`
+ *   - throws `WorkflowSchemaError` → `'invalid'` with the message attached
+ *   - throws any other error → `'invalid'` with the message attached
+ *     (defensive — we never want to bubble an unexpected exception out
+ *     of the verdict path; the caller still gets actionable output)
+ */
+export function verdictForYaml(yaml: string): {
+  status: WorkflowDraftStatus
+  validationError?: string
+} {
+  if (yaml.length === 0) return { status: 'no_yaml' }
+  try {
+    parseWorkflow(yaml)
+    return { status: 'valid' }
+  } catch (err) {
+    const msg =
+      err instanceof WorkflowSchemaError
+        ? err.message
+        : err instanceof Error
+        ? err.message
+        : String(err)
+    return { status: 'invalid', validationError: msg }
   }
 }
 

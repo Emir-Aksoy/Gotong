@@ -45,6 +45,7 @@ export {
   buildSystemPrompt,
   renderUserMessage,
   extractYamlAndExplanation,
+  verdictForYaml,
   WORKFLOW_ASSISTANT_CAPABILITY,
   WORKFLOW_ASSISTANT_DEFAULT_ID,
 } from './assistant.js'
@@ -52,5 +53,6 @@ export type {
   WorkflowAssistantPayload,
   WorkflowAssistantOutput,
   WorkflowAssistantOptions,
+  WorkflowDraftStatus,
   WorkflowExample,
 } from './assistant.js'

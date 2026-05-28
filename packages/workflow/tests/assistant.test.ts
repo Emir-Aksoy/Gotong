@@ -33,6 +33,7 @@ import {
   extractYamlAndExplanation,
   parseWorkflow,
   renderUserMessage,
+  verdictForYaml,
   WORKFLOW_ASSISTANT_CAPABILITY,
   WORKFLOW_ASSISTANT_DEFAULT_ID,
   WorkflowAssistantAgent,
@@ -379,6 +380,8 @@ describe('WorkflowAssistantAgent — response parsing', () => {
     expect(out.explanation).toContain('3 步的新闻摘要')
     expect(out.raw).toBe(SAMPLE_RESPONSE_TEXT)
     expect(out.by).toBe('mock')
+    expect(out.draftStatus).toBe('valid')
+    expect(out.validationError).toBeUndefined()
   })
 
   it('YAML the agent extracts parses through parseWorkflow', async () => {
@@ -401,7 +404,7 @@ describe('WorkflowAssistantAgent — response parsing', () => {
     expect(def.steps.length).toBe(2)
   })
 
-  it('missing fence → yaml=empty, explanation=full text, kind still ok', async () => {
+  it('missing fence → draftStatus=no_yaml, explanation=full text, kind still ok', async () => {
     const provider = new MockLlmProvider({
       reply: "Sorry, I can't help with that.",
     })
@@ -417,6 +420,66 @@ describe('WorkflowAssistantAgent — response parsing', () => {
     const out = (result as { output: WorkflowAssistantOutput }).output
     expect(out.yaml).toBe('')
     expect(out.explanation).toBe("Sorry, I can't help with that.")
+    expect(out.draftStatus).toBe('no_yaml')
+    expect(out.validationError).toBeUndefined()
+  })
+
+  it('yaml fence with invalid workflow → draftStatus=invalid + validationError', async () => {
+    // LLM produced a yaml fence but the schema is wrong: no trigger
+    // capability, which `parseWorkflow` rejects.
+    const badYaml = `schema: aipehub.workflow/v1
+workflow:
+  id: broken-flow
+  trigger: {}
+  steps:
+    - id: a
+      dispatch:
+        strategy: { kind: capability, capabilities: [foo] }
+`
+    const provider = new MockLlmProvider({
+      reply: `Here is a draft:\n\n\`\`\`yaml\n${badYaml.trim()}\n\`\`\``,
+    })
+
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(makeAssistantTask({ description: 'broken' }))
+    await hub.stop()
+
+    expect(result.kind).toBe('ok')
+    const out = (result as { output: WorkflowAssistantOutput }).output
+    expect(out.yaml).toContain('id: broken-flow')
+    expect(out.draftStatus).toBe('invalid')
+    expect(out.validationError).toBeTruthy()
+    // The exact message the parser produces — surfaced verbatim so admin
+    // UI / route handlers don't need to re-parse.
+    expect(out.validationError).toContain('trigger')
+  })
+})
+
+describe('verdictForYaml', () => {
+  it("empty string → 'no_yaml'", () => {
+    expect(verdictForYaml('')).toEqual({ status: 'no_yaml' })
+  })
+
+  it('clean v1 yaml → valid + no validationError', () => {
+    const v = verdictForYaml(SAMPLE_YAML.trim())
+    expect(v.status).toBe('valid')
+    expect(v.validationError).toBeUndefined()
+  })
+
+  it('garbage yaml → invalid + validationError set', () => {
+    const v = verdictForYaml('this is not yaml: at all: {[')
+    expect(v.status).toBe('invalid')
+    expect(typeof v.validationError).toBe('string')
+    expect((v.validationError ?? '').length).toBeGreaterThan(0)
+  })
+
+  it('wrong schema header → invalid', () => {
+    const v = verdictForYaml('schema: aipehub.workflow/v2\nworkflow: { id: x }')
+    expect(v.status).toBe('invalid')
+    expect(v.validationError).toContain('schema')
   })
 })
 
