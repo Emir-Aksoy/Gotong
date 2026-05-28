@@ -1,0 +1,29 @@
+# Single-step workflow — useful as a few-shot example of the simplest
+# possible shape (one dispatch, $-ref output shorthand). Synced from
+# /templates/workflows/admin-report-restyle-flow.yaml (manually).
+# If you change this file or the canonical one, update both.
+
+schema: aipehub.workflow/v1
+
+workflow:
+  id: admin-report-restyle-flow
+  name: 行政任务 · 报告改写
+  description: 已有报告 + 新口径 → 同事实、新表达的新报告
+
+  trigger:
+    capability: restyle-report
+
+  steps:
+    - id: restyle
+      description: report-restyler 按新口径重写
+      dispatch:
+        strategy: { kind: capability, capabilities: [restyle] }
+        title: "报告改写"
+        payload:
+          original_report: $trigger.payload.original_report
+          new_brief: $trigger.payload.new_brief
+          extra_materials: $trigger.payload.extra_materials
+          target_audience: $trigger.payload.target_audience
+          length_hint: $trigger.payload.length_hint
+
+  output: $restyle.output

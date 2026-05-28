@@ -60,6 +60,7 @@ import { OpenAIProvider } from '@aipehub/llm-openai'
 import { parseWorkflow } from '@aipehub/workflow'
 import {
   inventoryFromContextHints,
+  loadBundledExamples,
   verdictForYamlWithDeepCheck,
   WORKFLOW_ASSISTANT_CAPABILITY,
   WorkflowAssistantAgent,
@@ -259,12 +260,19 @@ async function main(): Promise<void> {
 
   const hub = Hub.inMemory()
   await hub.start()
+  // Phase 13 few-shot follow-up — preload the bundled templates as
+  // few-shot examples so the LLM has concrete shapes to imitate
+  // (single-step, parallel, $-refs). Host does this automatically; we
+  // do it here too so this demo reflects what production sees.
+  const examples = loadBundledExamples()
+  console.log(`  few-shot: ${examples.length} bundled examples`)
   hub.register(
     new WorkflowAssistantAgent({
       provider: llm,
       // The agent's own default is fine for everything else; just pin
       // maxTokens generously so a 60-line yaml doesn't truncate.
       maxTokens: 4096,
+      examples,
     }),
   )
 

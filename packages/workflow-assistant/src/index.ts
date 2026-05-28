@@ -32,6 +32,14 @@ export type {
   WorkflowExample,
 } from './assistant.js'
 
+// Phase 13 follow-up — few-shot example loader. Bundled templates ship
+// inside the package's `templates/` dir; callers can also supply their
+// own directory of YAMLs.
+export {
+  loadBundledExamples,
+  loadExamplesFromDir,
+} from './examples-loader.js'
+
 // Phase 13 M4 — re-export the deep-check shapes so callers don't need
 // a separate `@aipehub/evals` import just to type the deepCheck field.
 export type {

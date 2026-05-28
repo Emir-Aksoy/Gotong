@@ -40,6 +40,7 @@ import {
   WorkflowAssistantAgent,
   WORKFLOW_ASSISTANT_CAPABILITY,
   WORKFLOW_ASSISTANT_DEFAULT_ID,
+  loadBundledExamples,
   type WorkflowAssistantOutput,
   type WorkflowAssistantPayload,
 } from '@aipehub/workflow-assistant'
@@ -87,6 +88,8 @@ export interface WorkflowAssistSurface {
  *   AIPE_ASSISTANT_MODEL     provider-specific model id (optional)
  *   AIPE_ASSISTANT_MAX_TOKENS  integer (optional, default 4096)
  *   AIPE_ASSISTANT_DISABLED  '1' / 'true' → skip registration entirely
+ *   AIPE_ASSISTANT_NO_EXAMPLES '1' / 'true' → skip few-shot examples
+ *                              (consumed in createWorkflowAssistAgent, not here)
  */
 export function resolveWorkflowAssistConfig(): WorkflowAssistAgentConfig | null {
   const disabled = process.env.AIPE_ASSISTANT_DISABLED
@@ -231,6 +234,20 @@ export function createWorkflowAssistAgent(deps: {
   if (config.model) agentOpts.model = config.model
   agentOpts.maxTokens = config.maxTokens ?? 4096
 
+  // Phase 13 follow-up — few-shot examples. The bundled set (2-3 small
+  // templates) gives the LLM concrete patterns to imitate (parallel
+  // branches, $-refs, output composition) and noticeably improves
+  // happy-path latency and accuracy. Opt out with
+  // AIPE_ASSISTANT_NO_EXAMPLES=1 if you want to A/B against the
+  // schema-doc-only baseline, or pinch tokens on a tight budget.
+  const noExamples = process.env.AIPE_ASSISTANT_NO_EXAMPLES
+  if (noExamples !== '1' && noExamples !== 'true') {
+    const examples = loadBundledExamples()
+    if (examples.length > 0) {
+      agentOpts.examples = examples
+    }
+  }
+
   const agent = new WorkflowAssistantAgent(agentOpts)
   hub.register(agent)
   logger.info('workflow-assistant: registered', {
@@ -238,6 +255,7 @@ export function createWorkflowAssistAgent(deps: {
     capability: WORKFLOW_ASSISTANT_CAPABILITY,
     provider: config.provider,
     model: config.model ?? '(provider default)',
+    examplesLoaded: agentOpts.examples?.length ?? 0,
   })
 
   return {

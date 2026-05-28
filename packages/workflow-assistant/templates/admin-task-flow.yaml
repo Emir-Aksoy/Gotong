@@ -1,0 +1,91 @@
+# Multi-step + parallel fan-out — useful as a few-shot example that
+# demonstrates `parallel: true`/`branches:`, $stepId.output refs, and
+# composite output. Synced from /templates/workflows/admin-task-flow.yaml
+# (manually). If you change this file or the canonical one, update both.
+
+schema: aipehub.workflow/v1
+
+workflow:
+  id: admin-task-flow
+  name: 行政任务编排（全流程）
+  description: 解析 → 拆解 → 联络起草 + 派发 → 报告 → 归档；一键全自动
+
+  trigger:
+    capability: orchestrate-admin-task
+
+  steps:
+    # ----- 1. 解析任务通知书 -----
+    - id: parse
+      description: 把原始通知书读成结构化 JSON
+      dispatch:
+        strategy: { kind: capability, capabilities: [parse-brief] }
+        title: "解析任务通知书"
+        payload:
+          brief_text: $trigger.payload.brief_text
+          source: $trigger.payload.source
+          attachments: $trigger.payload.attachments
+      onFailure: { action: retry, max: 1 }
+
+    # ----- 2. 拆解 WBS -----
+    - id: decompose
+      description: 拆解为带依赖的工作清单
+      dispatch:
+        strategy: { kind: capability, capabilities: [wbs] }
+        title: "WBS 拆解"
+        payload:
+          parsed_brief: $parse.output
+          team_capacity: $trigger.payload.team_capacity
+
+    # ----- 3. 并行：起草联络稿 + 生成内部派发列表 -----
+    - id: handoff
+      description: 联络稿 + 内部派发，并行起草
+      parallel: true
+      branches:
+        - id: contacts
+          description: 给外部联系人起 3 版稿（邮件 / IM / 电话）
+          dispatch:
+            strategy: { kind: capability, capabilities: [contact-draft] }
+            title: "联络稿起草"
+            payload:
+              wbs: $decompose.output
+              tone_preference: $trigger.payload.tone_preference
+
+        - id: assignments
+          description: 把内部任务变成可粘贴的 dispatch 指令
+          dispatch:
+            strategy: { kind: capability, capabilities: [assign] }
+            title: "内部派发清单"
+            payload:
+              wbs: $decompose.output
+              available_workers: $trigger.payload.available_workers
+
+    # ----- 4. 写阶段总结报告 -----
+    - id: report
+      description: 写一份"我们做了什么、下一步" 报告
+      dispatch:
+        strategy: { kind: capability, capabilities: [report-write] }
+        title: "阶段总结报告"
+        payload:
+          original_brief: $parse.output
+          wbs: $decompose.output
+          contact_drafts: $handoff.contacts.output
+          assignment_list: $handoff.assignments.output
+          report_audience: $trigger.payload.report_audience
+
+    # ----- 5. 归档元数据 -----
+    - id: archive
+      description: 生成归档元数据（文件夹结构、tag、索引摘要）
+      dispatch:
+        strategy: { kind: capability, capabilities: [archive] }
+        title: "归档元数据"
+        payload:
+          original_brief: $parse.output
+          final_report: $report.output
+          deadline: $trigger.payload.deadline
+
+  # 最终返回：报告 + 归档元数据 + 联络稿 + 派发列表（admin 一键复制）
+  output:
+    report: $report.output
+    archive_meta: $archive.output
+    contact_drafts: $handoff.contacts.output
+    assignment_list: $handoff.assignments.output

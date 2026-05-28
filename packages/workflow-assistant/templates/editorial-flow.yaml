@@ -1,0 +1,40 @@
+# Simple two-step pipeline — useful as a baseline few-shot example.
+# Pattern: capability dispatch → previous step output → final composite.
+# Synced from /templates/workflows/editorial-flow.yaml (manually). If you
+# change this file or the canonical one, update both.
+
+schema: aipehub.workflow/v1
+
+workflow:
+  id: editorial-flow
+  name: 中文编辑流水线
+  description: writer-zh 起草 → reviewer-zh 评审，一键跑完
+
+  trigger:
+    capability: run-editorial   # admin 派任务到这个 cap 就触发整个 flow
+
+  steps:
+    - id: draft
+      description: 由 writer-zh 出第一稿
+      dispatch:
+        strategy: { kind: capability, capabilities: [draft] }
+        title: "起草: $trigger.payload.topic"
+        payload:
+          topic: $trigger.payload.topic
+          notes: $trigger.payload.notes
+
+    - id: review
+      description: 由 reviewer-zh 评审上一步的产出
+      dispatch:
+        strategy: { kind: capability, capabilities: [review] }
+        title: "评审"
+        payload:
+          original_topic: $trigger.payload.topic
+          draft_to_review: $draft.output
+          review_focus: $trigger.payload.review_focus
+
+  # 最终回给 admin 的就是评审意见 + 原稿（方便对比）
+  output:
+    topic: $trigger.payload.topic
+    draft: $draft.output
+    review: $review.output
