@@ -32,7 +32,7 @@
     "demo:federated-team": "pnpm --filter @aipehub/example-federated-team start",
     "host": "pnpm --filter @aipehub/host start",
     "test": "pnpm -r test",
-    "test:python": "cd python-sdk && .venv/bin/python -m pytest -q",
+    "test:python": "cd python-sdk && PYTHONPATH=src .venv/bin/python -m pytest -q",
     "test:all": "pnpm -r test && pnpm -r typecheck && pnpm test:python"
   },
   "devDependencies": {
