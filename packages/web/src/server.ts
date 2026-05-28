@@ -46,6 +46,7 @@ import {
   type IdentityPeerReputationDTO,
 } from './identity-routes.js'
 import { handleMeRoute } from './me-routes.js'
+import { handleWorkflowRoute } from './workflow-routes.js'
 
 export type {
   IdentitySurface,
@@ -1421,6 +1422,32 @@ async function handle(
     return
   }
 
+  // --- workflows (v2.1) ------------------------------------------------
+  // P3 audit cleanup — these routes used to live inline in this handler
+  // (~190 lines around line 1830). Now extracted into workflow-routes.ts;
+  // the dispatcher returns true iff it matched the request so we can
+  // fall through to the rest of the handler chain otherwise.
+  //
+  // Auth: each handler in the sub-module calls back into our
+  // `requireAdmin` closure so the v3 admin auth machinery (cookies,
+  // sessions, rate limiter) stays here in server.ts.
+  if (path.startsWith('/api/admin/workflows')) {
+    const handled = await handleWorkflowRoute(
+      {
+        hub: ctx.hub,
+        workflows: ctx.workflows,
+        workflowAssist: ctx.workflowAssist,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req,
+      res,
+      method,
+      path,
+      url,
+    )
+    if (handled) return
+  }
+
   // --- admin: invite (mint a new admin) -----------------------------------
   // Sister-admin onboarding. The current admin POSTs { displayName }; the
   // server mints a fresh admin row + plaintext token and returns it ONCE.
@@ -1827,141 +1854,9 @@ async function handle(
     return
   }
 
-  // --- workflows (v2.1) ------------------------------------------------
-  // The Web layer does not depend on `@aipehub/workflow` directly — it
-  // talks to `ctx.workflows` (a duck-typed `WorkflowSurface`) which the
-  // host wires up. When the surface is absent (embedded use, tests
-  // without the workflow runner), these endpoints respond 404 so the
-  // admin UI can hide the panel.
-
-  if (method === 'GET' && path === '/api/admin/workflows') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.workflows) {
-      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
-      return
-    }
-    try {
-      const list = await ctx.workflows.list()
-      sendJson(res, { workflows: list })
-    } catch (err) {
-      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
-    }
-    return
-  }
-
-  if (method === 'POST' && path === '/api/admin/workflows/import') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.workflows) {
-      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
-      return
-    }
-    const raw = await readTextBody(req).catch(() => '')
-    if (!raw) { sendJson(res, { error: 'empty body' }, 400); return }
-    try {
-      const summary = await ctx.workflows.importFromText(raw)
-      sendJson(res, { ok: true, workflow: summary })
-    } catch (err) {
-      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
-    }
-    return
-  }
-
-  // Phase 13 M3 — natural-language → workflow YAML draft. The host wires
-  // `ctx.workflowAssist` to a `WorkflowAssistantAgent` registered at boot
-  // (capability=`workflow:assist`). When absent (no LLM key resolved, or
-  // operator set `AIPE_ASSISTANT_DISABLED=1`), respond 503 so the admin
-  // UI can hide the "AI assistant" button cleanly.
-  //
-  // Request body (JSON):
-  //   { description: string, contextHints?: WorkflowAssistContextHints }
-  // Response body (200):
-  //   { ok: true, yaml, explanation, raw, draftStatus, validationError?,
-  //     by?, stopReason?, deepCheck? }
-  //   - `deepCheck` (Phase 13 M4) is populated iff the request carried
-  //     `contextHints` AND the YAML parsed cleanly. Caller treats
-  //     `deepCheck.ok=false` as a yellow "warnings" state — admin can
-  //     still save, but the workflow references hub entities that don't
-  //     currently exist. See WorkflowDeepCheckResult above.
-  // Response body (4xx/5xx): { error: string }
-  if (method === 'POST' && path === '/api/admin/workflows/assist') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.workflowAssist) {
-      sendJson(res, { error: 'workflow assistant not enabled on this host' }, 503)
-      return
-    }
-    const body = (await readJsonBody(req).catch(() => undefined)) as
-      | { description?: unknown; contextHints?: WorkflowAssistContextHints }
-      | undefined
-    const description =
-      body && typeof body.description === 'string' ? body.description : ''
-    if (description.trim().length === 0) {
-      sendJson(res, { error: 'description is required (non-empty string)' }, 400)
-      return
-    }
-    try {
-      const result = await ctx.workflowAssist.assist({
-        description,
-        ...(body?.contextHints ? { contextHints: body.contextHints } : {}),
-        by: admin.id,
-      })
-      sendJson(res, { ok: true, ...result })
-    } catch (err) {
-      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
-    }
-    return
-  }
-
-  // List recorded workflow runs. Both /runs and /runs/:id are wired
-  // before the catch-all DELETE /:id route so a runId can never get
-  // routed as a workflow id.
-  if (method === 'GET' && path === '/api/admin/workflows/runs') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.workflows) {
-      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
-      return
-    }
-    const workflowIdRaw = url.searchParams.get('workflowId') ?? undefined
-    const limitRaw = url.searchParams.get('limit')
-    const opts: { workflowId?: string; limit?: number } = {}
-    if (workflowIdRaw) opts.workflowId = workflowIdRaw
-    if (limitRaw !== null) {
-      const n = Number(limitRaw)
-      if (Number.isFinite(n) && n >= 0) opts.limit = Math.min(1000, Math.floor(n))
-    }
-    try {
-      const runs = await ctx.workflows.listRuns(opts)
-      sendJson(res, { runs })
-    } catch (err) {
-      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
-    }
-    return
-  }
-
-  const readRunMatch = path.match(/^\/api\/admin\/workflows\/runs\/([^/]+)$/)
-  if (method === 'GET' && readRunMatch) {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.workflows) {
-      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
-      return
-    }
-    const runId = decodeURIComponent(readRunMatch[1]!)
-    try {
-      const run = await ctx.workflows.readRun(runId)
-      if (run == null) {
-        sendJson(res, { error: `unknown run '${runId}'` }, 404)
-        return
-      }
-      sendJson(res, { run })
-    } catch (err) {
-      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
-    }
-    return
-  }
+  // Workflow CRUD + AI assist + run history live in workflow-routes.ts
+  // (extracted in the P3 audit cleanup). The dispatcher is wired further
+  // up — see the `/api/admin/workflows` block right after identity.
 
   // --- Hub-mesh feedback inbound (M8) -------------------------------------
   // Shows evaluations OTHER hubs have written about us, pulled via the
@@ -2004,26 +1899,8 @@ async function handle(
     return
   }
 
-  const deleteWorkflowMatch = path.match(/^\/api\/admin\/workflows\/([^/]+)$/)
-  if (method === 'DELETE' && deleteWorkflowMatch) {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.workflows) {
-      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
-      return
-    }
-    const id = decodeURIComponent(deleteWorkflowMatch[1]!)
-    try {
-      await ctx.workflows.remove(id)
-      sendJson(res, { ok: true })
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      // "not loaded" → 404, everything else → 400
-      const status = /not loaded|unknown/i.test(msg) ? 404 : 400
-      sendJson(res, { error: msg }, status)
-    }
-    return
-  }
+  // DELETE /api/admin/workflows/:id lives in workflow-routes.ts (see top
+  // dispatcher).
 
   // --- Hub Services admin (v2.2) ------------------------------------------
   // All endpoints require admin auth. When the host didn't supply a
