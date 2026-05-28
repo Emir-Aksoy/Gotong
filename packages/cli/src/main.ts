@@ -18,6 +18,7 @@
  * a devDep so the published CLI bundles it via `bundleDependencies`).
  */
 
+import { init } from './commands/init.js'
 import { newAgent } from './commands/new-agent.js'
 import { ping } from './commands/ping.js'
 import { repl } from './commands/repl.js'
@@ -47,6 +48,8 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
   }
   try {
     switch (cmd) {
+      case 'init':
+        return await init(rest)
       case 'new': {
         const [kind, ...args] = rest
         if (kind === 'agent') return await newAgent({ language: 'ts', args })

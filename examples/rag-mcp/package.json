@@ -1,0 +1,19 @@
+{
+  "name": "@aipehub/example-rag-mcp",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "RAG via MCP — an agent with a knowledge MCP server (chroma-mcp) that ingests documents and answers questions from them.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/llm": "workspace:*",
+    "@aipehub/mcp-client": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0"
+  }
+}

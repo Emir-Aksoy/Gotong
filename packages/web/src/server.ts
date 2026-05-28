@@ -8,15 +8,12 @@ import {
   HumanParticipant,
   createLogger,
   type AdminRecord,
-  type AgentRecord,
   type DispatchStrategy,
   type FeedbackQuery,
   type GrowthReportsAdminSurface,
   type Hub,
   type ManagedAgentLifecycle,
-  type ManagedAgentSpec,
   type ParticipantId,
-  type ServiceTrashRef,
   type ServicesAdminSurface,
   type Space,
   type TaskId,
@@ -26,17 +23,8 @@ import { PROTOCOL_VERSION } from '@aipehub/protocol'
 
 const log = createLogger('web')
 
-import {
-  AGENT_SCHEMA_V1,
-  BUNDLE_SCHEMA_V1,
-  TEAM_SCHEMA_V1,
-  ManifestError,
-  parseBundle,
-  parseManifest,
-  renderAgentManifest,
-  validateUsesArray,
-  type ParsedAgent,
-} from './manifest.js'
+// Manifest parsing is used by agents-routes.ts (P3 audit cleanup).
+// server.ts no longer needs these imports directly.
 import { STATIC_ASSETS_BASE64 } from './static-assets.js'
 import {
   handleIdentityRoute,
@@ -47,6 +35,9 @@ import {
 } from './identity-routes.js'
 import { handleMeRoute } from './me-routes.js'
 import { handleWorkflowRoute } from './workflow-routes.js'
+import { handleAgentsRoute } from './agents-routes.js'
+import { handleServicesRoute } from './services-routes.js'
+import { handleUploadsRoute } from './uploads-routes.js'
 
 export type {
   IdentitySurface,
@@ -1448,6 +1439,45 @@ async function handle(
     if (handled) return
   }
 
+  // Agents CRUD + bundle import live in agents-routes.ts (P3 audit cleanup).
+  if (path.startsWith('/api/admin/agents') || path === '/api/admin/bundles/import') {
+    const handled = await handleAgentsRoute(
+      {
+        hub: ctx.hub,
+        space: ctx.space,
+        lifecycle: ctx.lifecycle,
+        workflows: ctx.workflows,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // Hub Services admin (plugins, trash, sweep) in services-routes.ts.
+  if (path.startsWith('/api/admin/services')) {
+    const handled = await handleServicesRoute(
+      {
+        services: ctx.services,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // File upload / download in uploads-routes.ts.
+  if (path === '/api/admin/uploads') {
+    const handled = await handleUploadsRoute(
+      {
+        uploads: ctx.uploads,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
   // --- admin: invite (mint a new admin) -----------------------------------
   // Sister-admin onboarding. The current admin POSTs { displayName }; the
   // server mints a fresh admin row + plaintext token and returns it ONCE.
@@ -1550,309 +1580,9 @@ async function handle(
     return
   }
 
-  // --- admin: managed agents (v2.1) --------------------------------------
-  // Six routes that let an admin manage the host's in-process LLM-agent
-  // pool from the browser. The pool is materialised by an `AgentSupervisor`
-  // running in the host process; we talk to it via the optional `lifecycle`
-  // hook passed on `serveWeb({ lifecycle })`. Without a lifecycle these
-  // endpoints still persist records (so the next host boot would replay
-  // them) but no live participant is spawned in this process — useful
-  // for embedded tests.
-
-  // List all managed agents currently in agents.json. Public to admins.
-  if (method === 'GET' && path === '/api/admin/agents') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    const agents = await ctx.space.agents()
-    const liveIds = new Set(ctx.hub.participants().map((p) => p.id))
-    sendJson(res, {
-      agents: agents.map((a) => ({
-        id: a.id,
-        allowedCapabilities: a.allowedCapabilities,
-        displayName: a.displayName,
-        managed: a.managed,             // undefined for externally-connected agents
-        createdAt: a.createdAt,
-        lastSeen: a.lastSeen,
-        online: liveIds.has(a.id),
-      })),
-    })
-    return
-  }
-
-  // What providers can the host actually spawn right now (based on env)?
-  if (method === 'GET' && path === '/api/admin/agents/providers') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    // No lifecycle → no managed agents possible → empty list.
-    const providers = ctx.lifecycle ? await ctx.lifecycle.availableProviders() : []
-    sendJson(res, { providers })
-    return
-  }
-
-  // Create one managed agent. Body = ParsedAgent shape (id / caps /
-  // managed). On success the lifecycle.start spawns the live LlmAgent.
-  if (method === 'POST' && path === '/api/admin/agents') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    const body = (await readJsonBody(req).catch(() => ({}))) as Record<string, unknown>
-    let parsed: ParsedAgent
-    try {
-      parsed = validateAgentBody(body)
-    } catch (err) {
-      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
-      return
-    }
-    if ((await ctx.space.agents()).some((a) => a.id === parsed.id)) {
-      sendJson(res, { error: `agent '${parsed.id}' already exists; use PUT to edit` }, 409)
-      return
-    }
-    // Provider availability check is **soft** now: a missing key is OK
-    // because the caller can attach a per-agent override on this same
-    // POST via the `apiKey` field. We only block if neither workspace
-    // default, env, nor per-agent override is present.
-    if (ctx.lifecycle) {
-      const avail = new Set(await ctx.lifecycle.availableProviders())
-      const hasApiKey = typeof (body as { apiKey?: unknown }).apiKey === 'string' && (body as { apiKey?: string }).apiKey!.length > 0
-      if (!avail.has(parsed.managed.provider) && !hasApiKey) {
-        sendJson(
-          res,
-          { error: `provider '${parsed.managed.provider}' has no API key (set a workspace default or attach one to this agent)` },
-          400,
-        )
-        return
-      }
-      // openai-compatible has no workspace/env fallback by design (each
-      // baseURL is a different vendor). Reject upfront if the caller
-      // forgot the per-agent key instead of persisting a stub the host
-      // will refuse to spawn on the next boot.
-      if (parsed.managed.provider === 'openai-compatible' && !hasApiKey) {
-        sendJson(
-          res,
-          { error: `provider 'openai-compatible' requires a per-agent apiKey (workspace keys don't apply)` },
-          400,
-        )
-        return
-      }
-    }
-    const record = await ctx.space.upsertAgent({
-      id: parsed.id,
-      allowedCapabilities: parsed.capabilities,
-      displayName: parsed.displayName,
-      managed: parsed.managed,
-    })
-    // If the body carries a per-agent apiKey, save it before spawning
-    // so the pool's resolveApiKey() finds it. The plaintext is encrypted
-    // on disk; it never appears in any subsequent response.
-    const inlineKey = (body as { apiKey?: string }).apiKey
-    if (typeof inlineKey === 'string' && inlineKey.length > 0) {
-      await ctx.space.setAgentApiKey(parsed.id, inlineKey)
-    }
-    if (ctx.lifecycle) {
-      try {
-        await ctx.lifecycle.start(record)
-      } catch (err) {
-        // Persist the record but tell the caller spawn failed — they can
-        // edit + retry without re-uploading the manifest.
-        sendJson(res, {
-          ok: false,
-          warning: 'persisted but failed to spawn',
-          error: err instanceof Error ? err.message : String(err),
-        }, 500)
-        return
-      }
-    }
-    sendJson(res, { ok: true, agent: publicAgent(record, ctx.hub) })
-    return
-  }
-
-  // Bulk import from a manifest (YAML or JSON in the request body — the
-  // parser sniffs the format). Returns the list of created agents.
-  if (method === 'POST' && path === '/api/admin/agents/import') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    const raw = await readTextBody(req).catch(() => '')
-    if (!raw) { sendJson(res, { error: 'empty body' }, 400); return }
-    let manifest
-    try {
-      manifest = parseManifest(raw)
-    } catch (err) {
-      const msg = err instanceof ManifestError ? err.message : (err instanceof Error ? err.message : String(err))
-      sendJson(res, { error: msg }, 400)
-      return
-    }
-    const existing = new Set((await ctx.space.agents()).map((a) => a.id))
-    const skipped: string[] = []
-    const created: AgentRecord[] = []
-    const avail = ctx.lifecycle ? new Set(await ctx.lifecycle.availableProviders()) : null
-    for (const a of manifest.agents) {
-      if (existing.has(a.id)) { skipped.push(a.id); continue }
-      // Import doesn't carry per-agent keys (templates never embed them),
-      // so we still hard-block on missing keys. Hint how to fix.
-      if (avail && !avail.has(a.managed.provider)) {
-        sendJson(res, {
-          error: `agent '${a.id}' uses provider '${a.managed.provider}' but no key is configured — set the workspace default first, then re-import`,
-        }, 400)
-        return
-      }
-      const rec = await ctx.space.upsertAgent({
-        id: a.id,
-        allowedCapabilities: a.capabilities,
-        displayName: a.displayName,
-        managed: a.managed,
-      })
-      created.push(rec)
-      existing.add(a.id)
-    }
-    // Best-effort spawn pass. Failures are collected but don't roll back
-    // the persisted records — operator can retry via the edit path.
-    const spawnErrors: { id: string; error: string }[] = []
-    if (ctx.lifecycle) {
-      for (const rec of created) {
-        try { await ctx.lifecycle.start(rec) }
-        catch (err) {
-          spawnErrors.push({ id: rec.id, error: err instanceof Error ? err.message : String(err) })
-        }
-      }
-    }
-    sendJson(res, {
-      ok: true,
-      created: created.map((r) => publicAgent(r, ctx.hub)),
-      skipped,
-      spawnErrors,
-      team: manifest.schema === TEAM_SCHEMA_V1
-        ? { name: manifest.teamName, description: manifest.teamDescription }
-        : undefined,
-    })
-    return
-  }
-
-  // --- bundle import (v2.4 personal-growth-ready) -------------------------
-  //
-  // One-call upload that:
-  //   1. upserts every agent in `bundle.team`
-  //   2. (optional) applies the supplied `apiKey` to every openai-
-  //      compatible agent in the team — solves the "new user has to
-  //      paste a DeepSeek key into 7 agents" friction
-  //   3. forwards `bundle.workflow` (if present) to the workflow importer
-  //   4. spawns every agent it just upserted (best-effort)
-  //
-  // Body: JSON `{ yaml: string, apiKey?: string }`.
-  // Response: `{ ok, bundle, team: {created, skipped, spawnErrors}, workflow }`.
-  //
-  // Why a separate endpoint (rather than extending /agents/import):
-  // bundle import has materially different semantics — it talks to the
-  // workflow surface, it accepts a key (which agents/import never has),
-  // and the response shape carries workflow info. Keeping them separate
-  // means /agents/import stays backward-compatible (template authors
-  // who curl yaml at it keep working) and the bundle endpoint is free
-  // to evolve.
-  if (method === 'POST' && path === '/api/admin/bundles/import') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    const rawBody = await readTextBody(req).catch(() => '')
-    if (!rawBody) { sendJson(res, { error: 'empty body' }, 400); return }
-    let body: { yaml?: unknown; apiKey?: unknown }
-    try {
-      body = JSON.parse(rawBody)
-    } catch (err) {
-      sendJson(res, {
-        error: `body must be JSON {"yaml": "<bundle yaml>", "apiKey": "<optional key>"} — got: ${err instanceof Error ? err.message : String(err)}`,
-      }, 400)
-      return
-    }
-    if (typeof body.yaml !== 'string' || body.yaml.length === 0) {
-      sendJson(res, { error: 'body.yaml is required (non-empty string)' }, 400)
-      return
-    }
-    const apiKey = typeof body.apiKey === 'string' && body.apiKey.length > 0
-      ? body.apiKey
-      : undefined
-
-    let bundle
-    try {
-      bundle = parseBundle(body.yaml)
-    } catch (err) {
-      const msg = err instanceof ManifestError ? err.message : (err instanceof Error ? err.message : String(err))
-      sendJson(res, { error: msg }, 400)
-      return
-    }
-
-    // Upsert agents. We apply the apiKey first (so the spawn after
-    // upsert has the key in place) and skip ones that already exist
-    // unchanged — same semantics as /agents/import. A bundle re-import
-    // is therefore safe: existing agents stay put, the workflow gets
-    // re-loaded.
-    const existing = new Set((await ctx.space.agents()).map((a) => a.id))
-    const created: AgentRecord[] = []
-    const skipped: string[] = []
-    for (const a of bundle.team.agents) {
-      if (existing.has(a.id)) { skipped.push(a.id); continue }
-      const rec = await ctx.space.upsertAgent({
-        id: a.id,
-        allowedCapabilities: a.capabilities,
-        displayName: a.displayName,
-        managed: a.managed,
-      })
-      // Apply the supplied key to every openai-compatible agent. This
-      // is the one and only place we touch encrypted secret storage;
-      // anthropic / openai agents read from workspace defaults so they
-      // don't need a per-agent key.
-      if (apiKey && a.managed.provider === 'openai-compatible') {
-        try { await ctx.space.setAgentApiKey(a.id, apiKey) }
-        catch (err) {
-          log.warn('bundle import: failed to set per-agent key', { id: a.id, err })
-        }
-      }
-      created.push(rec)
-      existing.add(a.id)
-    }
-
-    // Best-effort spawn. Failures don't roll back — the operator can
-    // re-edit any broken agent from the agents tab.
-    const spawnErrors: { id: string; error: string }[] = []
-    if (ctx.lifecycle) {
-      for (const rec of created) {
-        try { await ctx.lifecycle.start(rec) }
-        catch (err) {
-          spawnErrors.push({ id: rec.id, error: err instanceof Error ? err.message : String(err) })
-        }
-      }
-    }
-
-    // Forward the embedded workflow yaml to the workflow runner.
-    // Workflow import failures don't roll back the agents either —
-    // the agents are usable on their own (capability dispatch) even
-    // without the workflow.
-    let workflowSummary: unknown = undefined
-    let workflowError: string | undefined
-    if (bundle.workflowYaml) {
-      if (!ctx.workflows) {
-        workflowError = 'workflows surface not enabled on this host — agents were imported but the bundle workflow is unavailable'
-      } else {
-        try {
-          workflowSummary = await ctx.workflows.importFromText(bundle.workflowYaml)
-        } catch (err) {
-          workflowError = err instanceof Error ? err.message : String(err)
-        }
-      }
-    }
-
-    sendJson(res, {
-      ok: true,
-      bundle: {
-        name: bundle.bundleName,
-        description: bundle.bundleDescription,
-      },
-      team: {
-        created: created.map((r) => publicAgent(r, ctx.hub)),
-        skipped,
-        spawnErrors,
-      },
-      workflow: workflowSummary,
-      workflowError,
-    })
-    return
-  }
+  // Managed agents CRUD + bundle import live in agents-routes.ts
+  // (extracted in the P3 audit cleanup). The dispatcher is wired
+  // further up — see the `/api/admin/agents` block.
 
   // Workflow CRUD + AI assist + run history live in workflow-routes.ts
   // (extracted in the P3 audit cleanup). The dispatcher is wired further
@@ -1902,138 +1632,9 @@ async function handle(
   // DELETE /api/admin/workflows/:id lives in workflow-routes.ts (see top
   // dispatcher).
 
-  // --- Hub Services admin (v2.2) ------------------------------------------
-  // All endpoints require admin auth. When the host didn't supply a
-  // services surface (Hub Services failed to bootstrap, or this is an
-  // embedded use without the host wiring), every route returns 503 so
-  // the UI can hide the tab cleanly rather than render a half-broken
-  // page. Errors get translated to status:
-  //   PluginNotFoundError      → 404
-  //   TrashRestoreConflictError → 409
-  //   ServiceConfigError       → 400
-  //   everything else          → 500
-
-  if (method === 'GET' && path === '/api/admin/services/plugins') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
-    sendJson(res, { plugins: ctx.services.listPlugins() })
-    return
-  }
-
-  // Describe one (plugin, owner) pair. Returns `{ snapshot: null }`
-  // (HTTP 200) when the plugin has no data for the owner — the admin
-  // UI uses that to keep the row in the table greyed out.
-  const describeMatch = path.match(
-    /^\/api\/admin\/services\/owners\/([^/]+)\/([^/]+)\/([^/]+)\/([^/]+)$/,
-  )
-  if (method === 'GET' && describeMatch) {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
-    const [, type, impl, ownerKind, ownerId] = describeMatch
-    try {
-      const snap = await ctx.services.describe({
-        type: decodeURIComponent(type!),
-        impl: decodeURIComponent(impl!),
-        owner: { kind: decodeURIComponent(ownerKind!), id: decodeURIComponent(ownerId!) },
-      })
-      sendJson(res, { snapshot: snap })
-    } catch (err) {
-      sendServiceError(res, err)
-    }
-    return
-  }
-
-  // Soft-delete an owner's data for one plugin.
-  if (method === 'DELETE' && describeMatch) {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
-    const [, type, impl, ownerKind, ownerId] = describeMatch
-    // readJsonBody returns undefined on empty body. Treat that as
-    // "no reason supplied" rather than throwing.
-    const raw = await readJsonBody(req).catch(() => undefined)
-    const body = (raw && typeof raw === 'object' ? raw : {}) as { reason?: string }
-    try {
-      const ref = await ctx.services.softDelete({
-        type: decodeURIComponent(type!),
-        impl: decodeURIComponent(impl!),
-        owner: { kind: decodeURIComponent(ownerKind!), id: decodeURIComponent(ownerId!) },
-        by: admin.id,
-        ...(typeof body.reason === 'string' && body.reason.length > 0 ? { reason: body.reason } : {}),
-      })
-      sendJson(res, { ok: true, ref })
-    } catch (err) {
-      sendServiceError(res, err)
-    }
-    return
-  }
-
-  // List all trash entries across plugins. Sorted newest-first so the
-  // admin UI shows recent trash at the top.
-  if (method === 'GET' && path === '/api/admin/services/trash') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
-    try {
-      const all = await ctx.services.listTrash()
-      const sorted = [...all].sort((a, b) => b.deletedAt - a.deletedAt)
-      sendJson(res, { trash: sorted })
-    } catch (err) {
-      sendServiceError(res, err)
-    }
-    return
-  }
-
-  // Restore via POST so the body can carry the full ServiceTrashRef
-  // (the path alone doesn't have all the fields the plugin needs).
-  // Returns 409 if the original owner slot is occupied.
-  const restoreMatch = path.match(/^\/api\/admin\/services\/trash\/([^/]+)\/([^/]+)\/([^/]+)\/restore$/)
-  if (method === 'POST' && restoreMatch) {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
-    const [, type, impl, id] = restoreMatch
-    const t = decodeURIComponent(type!)
-    const i = decodeURIComponent(impl!)
-    const refId = decodeURIComponent(id!)
-    try {
-      // Find the ref in the union — saves an admin from having to
-      // POST the whole TrashRef body. The set is small (admin trash);
-      // a linear scan is fine.
-      const all = await ctx.services.listTrash()
-      const ref = all.find((r) => r.type === t && r.impl === i && r.id === refId)
-      if (!ref) { sendJson(res, { error: 'trash entry not found' }, 404); return }
-      await ctx.services.restore(ref)
-      sendJson(res, { ok: true })
-    } catch (err) {
-      sendServiceError(res, err)
-    }
-    return
-  }
-
-  // Hard delete one trash entry. Irreversible.
-  const hardDeleteMatch = path.match(/^\/api\/admin\/services\/trash\/([^/]+)\/([^/]+)\/([^/]+)$/)
-  if (method === 'DELETE' && hardDeleteMatch) {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
-    const [, type, impl, id] = hardDeleteMatch
-    const t = decodeURIComponent(type!)
-    const i = decodeURIComponent(impl!)
-    const refId = decodeURIComponent(id!)
-    try {
-      const all = await ctx.services.listTrash()
-      const ref = all.find((r) => r.type === t && r.impl === i && r.id === refId)
-      if (!ref) { sendJson(res, { error: 'trash entry not found' }, 404); return }
-      await ctx.services.hardDelete(ref)
-      sendJson(res, { ok: true })
-    } catch (err) {
-      sendServiceError(res, err)
-    }
-    return
-  }
+  // Hub Services admin (plugins, trash, sweep) lives in services-routes.ts
+  // (extracted in the P3 audit cleanup). The dispatcher is wired further
+  // up — see the `/api/admin/services` block.
 
   // --- Growth reports (v2.4 personal-growth-flow) -------------------------
   // Two routes, both admin-only and both 503 when the host didn't
@@ -2093,150 +1694,6 @@ async function handle(
       log.warn('growth-reports read failed', { path: reportPath, err })
       sendJson(res, { error: 'not found' }, 404)
     }
-    return
-  }
-
-  // Manual sweep — admin button "purge expired now". Returns the same
-  // `{ scanned, purged }` shape the periodic sweeper logs.
-  if (method === 'POST' && path === '/api/admin/services/sweep') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.services) { sendJson(res, { error: 'services not enabled' }, 503); return }
-    try {
-      if (!ctx.services.sweepExpired) {
-        sendJson(res, { error: 'manual sweep not supported by this host' }, 405)
-        return
-      }
-      const out = await ctx.services.sweepExpired()
-      sendJson(res, { ok: true, ...out })
-    } catch (err) {
-      sendServiceError(res, err)
-    }
-    return
-  }
-
-  // Edit one. Same body shape as POST. Lifecycle.start on the new
-  // record reloads the live agent (stop+start).
-  const editAgentMatch = path.match(/^\/api\/admin\/agents\/([^/]+)$/)
-  if (method === 'PUT' && editAgentMatch) {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    const id = decodeURIComponent(editAgentMatch[1]!)
-    const body = (await readJsonBody(req).catch(() => ({}))) as Record<string, unknown>
-    // Lock id from the URL — body can't rename. Saves a class of bugs.
-    body.id = id
-    let parsed: ParsedAgent
-    try {
-      parsed = validateAgentBody(body)
-    } catch (err) {
-      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
-      return
-    }
-    const existing = (await ctx.space.agents()).find((a) => a.id === id)
-    if (!existing) { sendJson(res, { error: `unknown agent '${id}'` }, 404); return }
-    if (ctx.lifecycle) {
-      const avail = new Set(await ctx.lifecycle.availableProviders())
-      const hasInlineKey = typeof (body as { apiKey?: unknown }).apiKey === 'string' && (body as { apiKey?: string }).apiKey!.length > 0
-      const hasStoredKey = (await ctx.space.getAgentApiKey(id).catch(() => null)) !== null
-      if (!avail.has(parsed.managed.provider) && !hasInlineKey && !hasStoredKey) {
-        sendJson(
-          res,
-          { error: `provider '${parsed.managed.provider}' has no API key` },
-          400,
-        )
-        return
-      }
-      // openai-compatible-specific: edit can't strip the per-agent key.
-      // The `apiKey` field has tri-state semantics: undefined = keep
-      // current, "" = clear, "<non-empty>" = replace. We compute the
-      // post-edit state and reject if it leaves an openai-compatible
-      // agent without any key (since workspace/env can't cover for it).
-      if (parsed.managed.provider === 'openai-compatible') {
-        const editKey = (body as { apiKey?: unknown }).apiKey
-        const willClear = editKey === ''
-        const willSet = typeof editKey === 'string' && editKey.length > 0
-        const willHaveKey = willSet || (!willClear && hasStoredKey)
-        if (!willHaveKey) {
-          sendJson(
-            res,
-            { error: `provider 'openai-compatible' requires a per-agent apiKey (workspace keys don't apply)` },
-            400,
-          )
-          return
-        }
-      }
-    }
-    const record = await ctx.space.upsertAgent({
-      id,
-      allowedCapabilities: parsed.capabilities,
-      displayName: parsed.displayName,
-      managed: parsed.managed,
-    })
-    // PUT can rotate (or remove) the per-agent key. `apiKey: ""` means
-    // "remove the override and fall back to workspace / env".
-    const editKey = (body as { apiKey?: string }).apiKey
-    if (typeof editKey === 'string') {
-      if (editKey.length === 0) {
-        await ctx.space.removeAgentApiKey(id).catch(() => { /* no-op */ })
-      } else {
-        await ctx.space.setAgentApiKey(id, editKey)
-      }
-    }
-    if (ctx.lifecycle) {
-      try {
-        await ctx.lifecycle.start(record)   // reload semantics: stop+start
-      } catch (err) {
-        sendJson(res, { ok: false, error: err instanceof Error ? err.message : String(err) }, 500)
-        return
-      }
-    }
-    sendJson(res, { ok: true, agent: publicAgent(record, ctx.hub) })
-    return
-  }
-
-  // Remove. Lifecycle.stop first so the live agent leaves the registry,
-  // then erase from agents.json. A managed agent that fails to stop
-  // (e.g. its provider is mid-call) is still removed from disk — the
-  // next boot won't bring it back. After the record is gone we ping
-  // `lifecycle.onAgentRemoved` (PR-10) so the host can soft-delete
-  // every Hub Service this agent's data lives in; failures here are
-  // logged but never roll back the deletion.
-  if (method === 'DELETE' && editAgentMatch) {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    const id = decodeURIComponent(editAgentMatch[1]!)
-    if (ctx.lifecycle) {
-      await ctx.lifecycle.stop(id).catch((err) => log.error('lifecycle stop failed', { id, err }))
-    }
-    const ok = await ctx.space.removeAgent(id)
-    if (!ok) { sendJson(res, { error: `unknown agent '${id}'` }, 404); return }
-    if (ctx.lifecycle?.onAgentRemoved) {
-      await ctx.lifecycle.onAgentRemoved(id).catch((err) =>
-        log.error('lifecycle.onAgentRemoved failed', { id, err }),
-      )
-    }
-    sendJson(res, { ok: true })
-    return
-  }
-
-  // Download one agent as a v1 manifest. JSON only (YAML round-trip is
-  // not needed for export — the user can convert if they like).
-  const exportAgentMatch = path.match(/^\/api\/admin\/agents\/([^/]+)\/export$/)
-  if (method === 'GET' && exportAgentMatch) {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    const id = decodeURIComponent(exportAgentMatch[1]!)
-    const rec = (await ctx.space.agents()).find((a) => a.id === id)
-    if (!rec) { sendJson(res, { error: `unknown agent '${id}'` }, 404); return }
-    if (!rec.managed) {
-      sendJson(res, { error: `agent '${id}' is externally-connected (no managed spec to export)` }, 400)
-      return
-    }
-    res.writeHead(200, {
-      'content-type': 'application/json; charset=utf-8',
-      'content-disposition': `attachment; filename="${encodeURIComponent(id)}.aipehub-agent.json"`,
-    })
-    res.end(JSON.stringify(renderAgentManifest(rec), null, 2))
     return
   }
 
@@ -2315,151 +1772,8 @@ async function handle(
     return
   }
 
-  // --- admin: download an uploaded artifact (Phase 9 M5) ----------------
-  // Pairs with POST /api/admin/uploads. Browser <img src="...">,
-  // <audio src="...">, and download anchor tags all hit this with
-  // `?id=<artifactId>`. The route streams bytes back with the
-  // recorded mime + a cache-control of `private,max-age=300` (5 min —
-  // the artifactId is content-addressed-ish but not immutable from
-  // the browser's POV).
-  //
-  // Why query string not path: artifactId looks like
-  // `uploads/2026-05-26/abcdef.png` — embedding the literal slashes
-  // in the URL path would require either heavy encoding or a
-  // wildcard route; query-stringifying it sidesteps both.
-  if (method === 'GET' && path === '/api/admin/uploads') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.uploads) {
-      sendJson(res, { error: 'uploads not enabled on this host' }, 503)
-      return
-    }
-    const u = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
-    const id = u.searchParams.get('id')
-    if (!id) {
-      sendJson(res, { error: 'missing ?id=<artifactId>' }, 400)
-      return
-    }
-    try {
-      const { bytes, mime } = await ctx.uploads.get(id)
-      // Content-Disposition: inline is the right call — the admin UI
-      // wants `<img>` / `<audio>` previews to work. Operators can
-      // still trigger a download via the anchor's `download` attr.
-      // Filename hint is the last path segment, dropped if it would
-      // confuse the browser's save-as.
-      const filename = id.split('/').pop() ?? 'artifact'
-      const safeFilename = filename.replace(/[^A-Za-z0-9._-]/g, '_')
-      res.writeHead(200, {
-        'content-type': mime || 'application/octet-stream',
-        'content-length': String(bytes.byteLength),
-        'content-disposition': `inline; filename="${safeFilename}"`,
-        'cache-control': 'private, max-age=300',
-      })
-      res.end(Buffer.from(bytes))
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      // ENOENT / "no such file" → 404; sanitisePath traversal-style
-      // errors → 400; other → 500. Same pattern as the upload route.
-      const lower = msg.toLowerCase()
-      const code = lower.includes('enoent') || lower.includes('no such file')
-        ? 404
-        : (/traversal|relative|null byte/.test(msg) ? 400 : 500)
-      sendJson(res, { error: msg }, code)
-    }
-    return
-  }
-
-  // --- admin: upload (Phase 9 M4 multimodal file) -----------------------
-  // Raw octet-stream upload. The admin SPA `fetch(url, { body: file })`
-  // posts the File object directly; no multipart parsing dep.
-  //
-  //   POST /api/admin/uploads?filename=cat.png&mime=image/png
-  //   <raw bytes in body>
-  //   ───────────────────────────────────────────────────────────────
-  //   200 { artifactId, mime, size }
-  //
-  // The artifactId is what the UI then stamps into a payload's
-  // `LlmFileRefBlock` (`{ type: 'file_ref', artifactId, mime }`). The
-  // host wires `ctx.uploads` to its system-owned artifact handle, so
-  // bytes land on disk under a single shared namespace that downstream
-  // multimodal providers can resolve via the artifactResolver path.
-  //
-  // 503 when `ctx.uploads` isn't wired (services bootstrap failed or
-  // host didn't expose the surface). 413 on body-too-large.
-  if (method === 'POST' && path === '/api/admin/uploads') {
-    const admin = await requireAdmin(ctx, req, res)
-    if (!admin) return
-    if (!ctx.uploads) {
-      sendJson(res, { error: 'uploads not enabled on this host' }, 503)
-      return
-    }
-    const u = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
-    const filename = u.searchParams.get('filename') || undefined
-    const declaredMime =
-      u.searchParams.get('mime')
-      || (typeof req.headers['content-type'] === 'string'
-          ? req.headers['content-type']!.split(';')[0]!.trim()
-          : '')
-      || 'application/octet-stream'
-
-    // 50 MB hard ceiling at the HTTP layer — keeps a misbehaving client
-    // from buffering arbitrary memory before the plugin's own cap kicks
-    // in. The plugin still enforces its own per-file ceiling (default
-    // 10 MB); this just stops us from holding a 1 GB Buffer in RAM
-    // while we're about to reject it anyway.
-    //
-    // Check `Content-Length` first — well-behaved clients always send
-    // it for a known-size body, so we can return a clean 413 with the
-    // response actually reaching the client. The streaming check
-    // below covers chunked / mis-stated lengths; in that case we
-    // hard-close the socket (the client is misbehaving by definition).
-    const HARD_CEILING_BYTES = 50 * 1024 * 1024
-    const declaredLen = Number.parseInt(
-      typeof req.headers['content-length'] === 'string' ? req.headers['content-length'] : '',
-      10,
-    )
-    if (Number.isFinite(declaredLen) && declaredLen > HARD_CEILING_BYTES) {
-      sendJson(res, { error: `body too large (limit ${HARD_CEILING_BYTES} bytes)` }, 413)
-      // Drain the request stream so the client's socket doesn't sit
-      // half-closed — node would otherwise keep buffering until the
-      // client times out.
-      req.resume()
-      return
-    }
-    let bytes: Buffer
-    try {
-      bytes = await readRawBody(req, HARD_CEILING_BYTES)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      // "body too large" → 413; anything else (eg. socket error) → 400.
-      const code = msg.startsWith('body too large') ? 413 : 400
-      sendJson(res, { error: msg }, code)
-      return
-    }
-    if (bytes.length === 0) {
-      sendJson(res, { error: 'empty body (no file content)' }, 400)
-      return
-    }
-    try {
-      const put = await ctx.uploads.put({
-        bytes,
-        declaredMime,
-        ...(filename ? { filename } : {}),
-        by: admin.id,
-      })
-      sendJson(res, put)
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      log.warn('upload rejected', { by: admin.id, mime: declaredMime, size: bytes.length, err: msg })
-      // The plugin throws on mime-not-allowed and size-over-cap; both
-      // map naturally to 400 (the client supplied something the host
-      // doesn't accept). Anything that looks like our own plumbing
-      // breaking gets 500.
-      const isClientError = /mime|exceeds maxBytes|traversal|relative|null byte/.test(msg)
-      sendJson(res, { error: msg }, isClientError ? 400 : 500)
-    }
-    return
-  }
+  // Upload/download routes live in uploads-routes.ts (P3 audit cleanup).
+  // The dispatcher is wired further up — see the `/api/admin/uploads` block.
 
   // --- admin: dispatch ----------------------------------------------------
   if (method === 'POST' && path === '/api/admin/dispatch') {
@@ -3156,111 +2470,8 @@ function readTextBody(req: IncomingMessage): Promise<string> {
   })
 }
 
-/**
- * Read the body as raw bytes with a configurable cap. Phase 9 M4
- * upload endpoint. We accumulate Buffer chunks and concat once at
- * end-of-stream — avoids the cost of utf-8 decoding (which would
- * corrupt binary payloads anyway).
- *
- * The cap must be supplied (no implicit default) so each caller
- * thinks about how big its payload can legitimately be. Cap is in
- * bytes, applied to the running concatenation length; on overflow
- * the request is destroyed and the promise rejects with a clear
- * message that the upload route forwards to the client as 413.
- */
-function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    let total = 0
-    req.on('data', (chunk: Buffer | string) => {
-      const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-      total += buf.length
-      if (total > maxBytes) {
-        req.destroy()
-        reject(new Error(`body too large (limit ${maxBytes} bytes)`))
-        return
-      }
-      chunks.push(buf)
-    })
-    req.on('end', () => resolve(Buffer.concat(chunks, total)))
-    req.on('error', reject)
-  })
-}
-
-/**
- * Validate the POST/PUT body for /api/admin/agents. Accepts the same
- * `agent: {...}` shape as the v1 manifest (without the schema wrapper)
- * — that way the admin UI form posts the same fields it'd write into a
- * YAML file.
- */
-function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
-  if (typeof body.id !== 'string' || body.id.length === 0) {
-    throw new ManifestError(`id is required`)
-  }
-  if (body.id.length > 80) throw new ManifestError(`id too long`)
-  if (!/^[a-zA-Z0-9_.:-]+$/.test(body.id)) {
-    throw new ManifestError(`id may only contain letters, digits, '_', '.', ':', '-'`)
-  }
-  const caps = body.capabilities
-  if (!Array.isArray(caps)) throw new ManifestError(`capabilities must be an array`)
-  const capabilities: string[] = []
-  for (const c of caps) {
-    if (typeof c !== 'string' || c.length === 0) throw new ManifestError(`capabilities must contain non-empty strings`)
-    capabilities.push(c)
-  }
-  const provider = body.provider
-  if (
-    provider !== 'anthropic' &&
-    provider !== 'openai' &&
-    provider !== 'openai-compatible' &&
-    provider !== 'mock'
-  ) {
-    throw new ManifestError(`provider must be 'anthropic', 'openai', 'openai-compatible' or 'mock'`)
-  }
-  const system = body.system
-  if (typeof system !== 'string' || system.length === 0) throw new ManifestError(`system is required`)
-  // openai-compatible additionally requires a baseURL. We validate it
-  // here so the API rejects bad inputs before they hit the supervisor.
-  if (provider === 'openai-compatible') {
-    if (typeof body.baseURL !== 'string' || body.baseURL.length === 0) {
-      throw new ManifestError(`baseURL is required when provider is 'openai-compatible'`)
-    }
-  }
-  const managed: ManagedAgentSpec = { kind: 'llm', provider, system }
-  if (typeof body.model === 'string' && body.model.length > 0) managed.model = body.model
-  if (typeof body.weightDefault === 'number' && Number.isFinite(body.weightDefault)) {
-    managed.weightDefault = body.weightDefault
-  }
-  if (provider === 'openai-compatible') {
-    managed.baseURL = body.baseURL as string
-    if (typeof body.providerLabel === 'string' && body.providerLabel.length > 0) {
-      managed.providerLabel = body.providerLabel
-    }
-  }
-  // Hub Services declarations (v2.2). Same plugin-agnostic checks as
-  // the manifest path — both routes must accept identical shapes so
-  // an admin can switch between "paste YAML" and "fill the form"
-  // without losing any field.
-  if (body.uses !== undefined) {
-    managed.uses = validateUsesArray(body.uses, 'uses')
-  }
-  const out: ParsedAgent = { id: body.id, capabilities, managed }
-  if (typeof body.displayName === 'string') out.displayName = body.displayName
-  return out
-}
-
-/** Public-safe projection of an AgentRecord for the API. */
-function publicAgent(rec: AgentRecord, hub: Hub) {
-  return {
-    id: rec.id,
-    allowedCapabilities: rec.allowedCapabilities,
-    displayName: rec.displayName,
-    managed: rec.managed,
-    createdAt: rec.createdAt,
-    lastSeen: rec.lastSeen,
-    online: hub.participant(rec.id) != null,
-  }
-}
+// validateAgentBody, publicAgent, readRawBody moved to
+// agents-routes.ts / uploads-routes.ts (P3 audit cleanup).
 
 function sendJson(res: ServerResponse, data: unknown, status = 200): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
@@ -3554,16 +2765,7 @@ const PROTOCOL_VERSION_LITERAL: string = PROTOCOL_VERSION
  * those names are stable string constants set in the sdk's
  * `new.target.name` and round-trip across module boundaries.
  */
-function sendServiceError(res: ServerResponse, err: unknown): void {
-  const e = err as { name?: string; message?: string }
-  const name = e?.name ?? ''
-  const msg = e?.message ?? String(err)
-  let status = 500
-  if (name === 'PluginNotFoundError') status = 404
-  else if (name === 'TrashRestoreConflictError') status = 409
-  else if (name === 'ServiceConfigError') status = 400
-  sendJson(res, { error: msg, code: name || 'unknown' }, status)
-}
+// sendServiceError moved to services-routes.ts (P3 audit cleanup).
 
 /**
  * Parse a `?from=` / `?to=` query param as a UNIX-ms timestamp. Returns

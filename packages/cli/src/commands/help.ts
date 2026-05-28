@@ -7,6 +7,7 @@
 const SHELL = `aipehub <command> [args]
 
 Commands:
+  init                        Initialize a workspace (personal mode by default)
   new agent <name>            Scaffold a TypeScript sidecar agent project
   new python-agent <name>     Scaffold a Python sidecar agent project
   ping <ws-url>               Verify a Hub is reachable (HELLO/WELCOME handshake)
@@ -15,6 +16,7 @@ Commands:
   --version                   Print the CLI version
 
 Examples:
+  aipehub init
   aipehub new agent greeter
   aipehub new python-agent classifier --capabilities=triage,classify
   aipehub ping ws://127.0.0.1:4000
@@ -22,6 +24,24 @@ Examples:
 `
 
 const PER_COMMAND: Readonly<Record<string, string>> = {
+  init: `aipehub init [options]
+
+Initializes a new AipeHub workspace. Creates the directory structure,
+a bootstrap admin, and initial configuration. On first host start the
+identity layer auto-detects single-user and enters personal mode
+("my AI desktop").
+
+Options:
+  --space-dir=<path>      Workspace root (default: .aipehub)
+  --admin-name=<name>     First admin display name (default: Operator)
+  --pin-team              Force team mode instead of personal auto-detect
+  --help / -h             Show this message
+
+Examples:
+  aipehub init
+  aipehub init --space-dir=/opt/aipehub --admin-name="Alice"
+  aipehub init --pin-team
+`,
   new: `aipehub new <agent|python-agent> <name> [options]
 
 Scaffolds a fresh sidecar agent project in <name>/. The project is
