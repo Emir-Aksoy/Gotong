@@ -457,6 +457,22 @@
             <button type="button" id="wf-assist-generate" class="ma-btn">生成草稿</button>
             <p id="wf-assist-msg" class="form-msg"></p>
 
+            <!-- Phase 13 follow-up — live streaming preview. Shown only
+                 while the LLM is producing chunks; replaced by the
+                 final result panel below once the request completes. -->
+            <div id="wf-assist-streaming" hidden style="margin-top: 0.8rem;">
+              <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
+                <span class="live-stream-dot" style="color: #2563eb;">●</span>
+                <strong style="color: #2563eb;">LLM 正在生成中…</strong>
+                <span id="wf-assist-streaming-meta" class="hint"></span>
+              </div>
+              <pre id="wf-assist-streaming-text"
+                   style="background: #f0f9ff; border-left: 3px solid #2563eb;
+                          padding: 0.6rem; overflow-x: auto; margin: 0;
+                          font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                          font-size: 0.85em; max-height: 18rem; white-space: pre-wrap;"></pre>
+            </div>
+
             <!-- Result panel — hidden until first generate -->
             <div id="wf-assist-result" hidden style="margin-top: 1rem;">
               <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">

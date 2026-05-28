@@ -61,6 +61,20 @@
     //     lastTs: number,
     //   }>
     liveStreams: new Map(),
+    // Phase 13 follow-up — workflow-assist streaming subscription. Set
+    // by submitWorkflowAssist while a /api/admin/workflows/assist call
+    // is in flight; null otherwise. The shape:
+    //
+    //   {
+    //     taskId: TaskId | null,     // locked from the matching `task` SSE event
+    //     onTask: (taskId) => void,  // called once when taskId resolves
+    //     onChunk: (text) => void,   // called on each cumulative text update
+    //     onEnd: () => void,         // called on matching task_result
+    //   }
+    //
+    // The modal installs/clears this; applyEvent + handleStreamChunk
+    // call into it when matching events flow through the SSE feed.
+    assistWatcher: null,
   }
 
   // Per-tab filter on the task panel; cleared on reload (no browser storage)
@@ -199,6 +213,10 @@
       wfAssistDeepcheckDetails: $('wf-assist-deepcheck-details'),
       wfAssistDeepcheckSummary: $('wf-assist-deepcheck-summary'),
       wfAssistDeepcheckList: $('wf-assist-deepcheck-list'),
+      // Phase 13 follow-up — live streaming preview.
+      wfAssistStreaming: $('wf-assist-streaming'),
+      wfAssistStreamingText: $('wf-assist-streaming-text'),
+      wfAssistStreamingMeta: $('wf-assist-streaming-meta'),
       wfAssistSave: $('wf-assist-save'),
       wfAssistRegenerate: $('wf-assist-regenerate'),
       // Run history modal (v0.3)
@@ -255,6 +273,14 @@
       case 'error':
         live.isDone = true
         break
+    }
+    // Phase 13 follow-up — if this chunk belongs to a workflow-assist
+    // dispatch the modal is watching, push the running text into the
+    // streaming preview. The modal renders it character-by-character
+    // as the LLM types instead of waiting 30-40s for the final result.
+    const w = state.assistWatcher
+    if (w && w.taskId === taskId && typeof w.onChunk === 'function') {
+      w.onChunk(live.text, { isDone: live.isDone, toolUses: live.toolUses })
     }
   }
 
@@ -343,6 +369,34 @@
         // disappears as soon as the final answer is known.
         if (ev.kind === 'task_result' && ev.data?.taskId) {
           state.liveStreams.delete(ev.data.taskId)
+        }
+        // Phase 13 follow-up — workflow-assist streaming hooks. Lock
+        // the watcher onto the first matching `task` event so we
+        // know which taskId's chunks belong to this modal session,
+        // and fire onEnd on the matching task_result so the modal
+        // can swap from "live" to "final" rendering. Title matching
+        // is best-effort (host's surface sets title='workflow:assist')
+        // and there's no harm if it misses — the fetch resolve path
+        // still renders the final result.
+        if (state.assistWatcher) {
+          const w = state.assistWatcher
+          if (
+            ev.kind === 'task'
+            && !w.taskId
+            && typeof ev.data?.title === 'string'
+            && ev.data.title.includes('workflow:assist')
+            && typeof ev.data.taskId === 'string'
+          ) {
+            w.taskId = ev.data.taskId
+            if (typeof w.onTask === 'function') w.onTask(ev.data.taskId)
+          } else if (
+            ev.kind === 'task_result'
+            && w.taskId
+            && ev.data?.taskId === w.taskId
+            && typeof w.onEnd === 'function'
+          ) {
+            w.onEnd()
+          }
         }
         // Tasks are derived from the transcript; rather than reimplement
         // the merge here, just re-pull state. Small, fine for v2.
@@ -2323,12 +2377,25 @@
     // bleed into this session — renderAssistResult will repopulate it.
     if (dom.wfAssistDeepcheckDetails) dom.wfAssistDeepcheckDetails.hidden = true
     if (dom.wfAssistDeepcheckList) dom.wfAssistDeepcheckList.innerHTML = ''
+    // Phase 13 follow-up — reset streaming preview pane.
+    if (dom.wfAssistStreaming) dom.wfAssistStreaming.hidden = true
+    if (dom.wfAssistStreamingText) dom.wfAssistStreamingText.textContent = ''
+    if (dom.wfAssistStreamingMeta) dom.wfAssistStreamingMeta.textContent = ''
+    // Defensive: if a previous run's watcher leaked (modal closed
+    // before fetch resolved), clear it so it can't taint this run.
+    state.assistWatcher = null
     dom.wfAssistModal.hidden = false
     setTimeout(() => dom.wfAssistDescription?.focus(), 0)
   }
 
   function closeWorkflowAssistModal() {
     dom.wfAssistModal.hidden = true
+    // If the user closes mid-stream the fetch is still in flight, but
+    // the modal is gone — drop the watcher so its callbacks don't poke
+    // hidden DOM nodes. The fetch resolve path also clears it, so this
+    // is just belt-and-suspenders.
+    state.assistWatcher = null
+    if (dom.wfAssistStreaming) dom.wfAssistStreaming.hidden = true
   }
 
   function renderAssistStatusChip(status, deepCheck) {
@@ -2444,6 +2511,43 @@
     dom.wfAssistGenerate.disabled = true
     dom.wfAssistGenerate.textContent = '生成中…'
     dom.wfAssistMsg.textContent = '正在生成,通常 5-20 秒…'
+
+    // Phase 13 follow-up — open the streaming preview pane and install
+    // a watcher that listens on the existing SSE feed for matching
+    // task / chunk / task_result events. The watcher narrows onto the
+    // first `task` event with title='workflow:assist', then renders
+    // each cumulative text update into the preview pane until the
+    // POST resolves (or the user closes the modal).
+    if (dom.wfAssistStreaming) {
+      dom.wfAssistStreaming.hidden = false
+      dom.wfAssistStreamingText.textContent = ''
+      dom.wfAssistStreamingMeta.textContent = '等待 LLM 第一个 chunk…'
+    }
+    state.assistWatcher = {
+      taskId: null,
+      onTask: (taskId) => {
+        if (dom.wfAssistStreamingMeta) {
+          dom.wfAssistStreamingMeta.textContent = `task=${String(taskId).slice(0, 8)}…`
+        }
+      },
+      onChunk: (text, meta) => {
+        if (!dom.wfAssistStreamingText) return
+        dom.wfAssistStreamingText.textContent = text
+        // Keep the latest characters in view as text grows.
+        dom.wfAssistStreamingText.scrollTop = dom.wfAssistStreamingText.scrollHeight
+        if (dom.wfAssistStreamingMeta && meta) {
+          const tools = meta.toolUses ? ` · 🔧 ${meta.toolUses}` : ''
+          dom.wfAssistStreamingMeta.textContent =
+            (meta.isDone ? '✓ 流结束' : '● 生成中') + ` · ${text.length} chars${tools}`
+        }
+      },
+      onEnd: () => {
+        if (dom.wfAssistStreamingMeta) {
+          dom.wfAssistStreamingMeta.textContent = '✓ 流结束 — 等待 schema 校验 + 深度检查…'
+        }
+      },
+    }
+
     try {
       // 把当前 hub 已有的 agents + workflow ids 当 contextHints — 让 LLM
       // 用真名而不是编名字。MCP servers 暂不喂(admin UI 没有 /api 暴露)。
@@ -2487,6 +2591,12 @@
     } finally {
       dom.wfAssistGenerate.disabled = false
       dom.wfAssistGenerate.textContent = '生成草稿'
+      // Tear down the streaming watcher + collapse the live preview.
+      // The result panel (with final yaml + deep-check) is now the
+      // canonical view — the streaming pane was only useful while
+      // the LLM was producing chunks.
+      state.assistWatcher = null
+      if (dom.wfAssistStreaming) dom.wfAssistStreaming.hidden = true
     }
   }
 

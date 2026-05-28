@@ -152,6 +152,12 @@ function buildAssistProvider(
       // aipehub.workflow/v1 so the round-trip happy path
       // (draftStatus === 'valid') stays exercisable in mock mode.
       return new MockLlmProvider({
+        // Phase 13 follow-up — split the reply into 8 chunks so admin
+        // UI's streaming preview pane actually demonstrates incremental
+        // delivery in mock mode. Real providers naturally stream many
+        // small chunks; the mock would otherwise spit the whole reply
+        // as one chunk and the "live typing" UX wouldn't show.
+        textChunkCount: 8,
         reply: () =>
           [
             'Mock assistant — replace `AIPE_ASSISTANT_PROVIDER=mock` with `anthropic` or `openai` for real generation.',
@@ -245,6 +251,27 @@ export function createWorkflowAssistAgent(deps: {
     const examples = loadBundledExamples()
     if (examples.length > 0) {
       agentOpts.examples = examples
+    }
+  }
+
+  // Phase 13 follow-up — pipe LLM stream chunks into the transcript so
+  // the admin UI's assist modal can show the LLM typing in real time
+  // (mirrors what LocalAgentPool does for user-authored managed agents).
+  // Without this hook every assist call looks like a 30-40s silent
+  // pause to the user; with it they get incremental feedback.
+  // Best-effort: a failure to append a single chunk shouldn't break
+  // the assist call itself, so we log and continue.
+  agentOpts.onStreamChunk = (chunk, task) => {
+    try {
+      hub.transcript.append({
+        ts: Date.now(),
+        kind: 'llm_stream_chunk',
+        data: { taskId: task.id, agentId: WORKFLOW_ASSISTANT_DEFAULT_ID, chunk },
+      })
+    } catch (err) {
+      logger.warn('workflow-assistant: transcript append failed for llm_stream_chunk', {
+        err: err instanceof Error ? err.message : String(err),
+      })
     }
   }
 
