@@ -1,9 +1,11 @@
 # AipeHub v4 架构 ——「灵活组织级 agent 框架」
 
-> Status: Phase 1 (基础设施) 进行中。本文档记录架构选择 + Phase 1 已落地 +
-> Phase 2/3 计划草图,供后续 commit 校对方向用。
+> Status: **historical** —— 本文是 v4 启动 (Phase 1) 时的架构设计文档,
+> 记录"为什么这么决策"。最新进度看项目根 `CLAUDE.md` 第二节(Phase 表)
+> + 各 phase 的 `docs/zh/V4-PHASEXX-FINAL.md` release notes。如果想知
+> 道"现在框架什么样", 别从这里读 —— 这里只解释"v4 当初为什么这样设计"。
 >
-> Last updated: 2026-05-24
+> 历史 Last updated: 2026-05-24
 >
 > Previous reading: `docs/zh/HITL-GLOSSARY.md` (HITL 四模式词典),
 > v3 examples `federated-team` / `open-space` (federation 基础)。
