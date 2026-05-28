@@ -72,12 +72,17 @@ describe('aipehub init', () => {
     expect(code).toBe(2)
   })
 
-  it('--pin-team writes team config', async () => {
+  it('--pin-team creates workspace successfully', async () => {
     const dir = tmpSpace()
     dirs.push(dir)
-    await init([`--space-dir=${dir}`, '--pin-team'])
+    const code = await init([`--space-dir=${dir}`, '--pin-team'])
+    expect(code).toBe(0)
+    expect(existsSync(join(dir, 'space.json'))).toBe(true)
 
+    // --pin-team no longer writes orgMode to config.json — it tells
+    // the user to set AIPE_MODE=team when starting the host (Phase 7
+    // env override mechanism). Verify config is default.
     const config = JSON.parse(await readFile(join(dir, 'config.json'), 'utf8'))
-    expect(config.orgMode).toBe('team')
+    expect(config.orgMode).toBeUndefined()
   })
 })

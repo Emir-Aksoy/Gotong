@@ -72,7 +72,6 @@ export async function init(args: readonly string[]): Promise<number> {
     const { adminToken } = await Space.init(root, {
       name: 'AipeHub',
       adminDisplayName: parsed.adminName,
-      config: parsed.pinTeam ? { orgMode: 'team' } : undefined,
     })
 
     const mode = parsed.pinTeam ? 'team' : 'personal'
@@ -90,8 +89,13 @@ export async function init(args: readonly string[]): Promise<number> {
     console.log('       export ANTHROPIC_API_KEY=sk-...')
     console.log('       # or: export OPENAI_API_KEY=sk-...')
     console.log('')
-    console.log('    2. Start the hub:')
-    console.log(`       AIPE_SPACE=${parsed.spaceDir} npx @aipehub/host`)
+    if (parsed.pinTeam) {
+      console.log('    2. Start the hub (team mode pinned):')
+      console.log(`       AIPE_MODE=team AIPE_SPACE=${parsed.spaceDir} npx @aipehub/host`)
+    } else {
+      console.log('    2. Start the hub:')
+      console.log(`       AIPE_SPACE=${parsed.spaceDir} npx @aipehub/host`)
+    }
     console.log('')
     console.log('    3. Open the admin URL printed by the host.')
     console.log('')

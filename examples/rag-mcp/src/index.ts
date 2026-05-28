@@ -56,7 +56,7 @@ async function main() {
 
   // When running with a real host, the agent YAML in agents/ does
   // everything. This script just demonstrates the config structure.
-  const hub = new Hub({ name: 'rag-demo' })
+  const hub = new Hub({})
 
   log.info('Hub created. In production, the host would:')
   log.info('  1. Read agents/rag-researcher.yaml')
@@ -68,7 +68,7 @@ async function main() {
   log.info('The MCP server (chroma-mcp) handles all RAG internals.')
   log.info('AipeHub just routes messages and manages the agent lifecycle.')
 
-  hub.shutdown()
+  await hub.stop()
   log.info('Done.')
 }
 

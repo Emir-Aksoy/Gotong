@@ -231,6 +231,22 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
+  examples/rag-mcp:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@aipehub/mcp-client':
+        specifier: workspace:*
+        version: link:../../packages/mcp-client
+    devDependencies:
+      tsx:
+        specifier: ^4.7.0
+        version: 4.22.0
+
   examples/remote-agent:
     dependencies:
       '@aipehub/core':
