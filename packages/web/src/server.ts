@@ -1,6 +1,7 @@
 import { randomBytes } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { readBearer, readCookie, readJsonBody, sendJson } from './http-helpers.js'
 import { dirname, extname, join, normalize, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -1937,25 +1938,6 @@ async function handle(
 
 // --- admin auth helpers ----------------------------------------------------
 
-function readCookie(req: IncomingMessage, name: string): string | undefined {
-  const header = req.headers.cookie
-  if (!header) return undefined
-  for (const part of header.split(';')) {
-    const eq = part.indexOf('=')
-    if (eq < 0) continue
-    const k = part.slice(0, eq).trim()
-    if (k === name) return part.slice(eq + 1).trim()
-  }
-  return undefined
-}
-
-function readBearer(req: IncomingMessage): string | undefined {
-  const auth = req.headers['authorization']
-  if (typeof auth !== 'string') return undefined
-  const m = /^Bearer\s+(.+)$/i.exec(auth.trim())
-  return m ? m[1]!.trim() : undefined
-}
-
 /**
  * Pure check — return the admin behind the request, or `null`, without
  * writing to `res`. Use {@link requireAdmin} when the caller wants the
@@ -2346,52 +2328,8 @@ async function serveAppHtml(
   res.end(out)
 }
 
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let buf = ''
-    req.on('data', (chunk) => {
-      buf += chunk
-      if (buf.length > 1_000_000) {
-        req.destroy()
-        reject(new Error('body too large'))
-      }
-    })
-    req.on('end', () => {
-      if (!buf) return resolve(undefined)
-      try { resolve(JSON.parse(buf)) }
-      catch (err) { reject(err) }
-    })
-    req.on('error', reject)
-  })
-}
-
-/**
- * Read the body as raw text. Used by /api/admin/agents/import which
- * accepts either YAML or JSON. Same 1MB cap as `readJsonBody` so a
- * runaway upload can't OOM the server.
- */
-function readTextBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let buf = ''
-    req.on('data', (chunk) => {
-      buf += chunk
-      if (buf.length > 1_000_000) {
-        req.destroy()
-        reject(new Error('body too large'))
-      }
-    })
-    req.on('end', () => resolve(buf))
-    req.on('error', reject)
-  })
-}
-
 // validateAgentBody, publicAgent, readRawBody moved to
 // agents-routes.ts / uploads-routes.ts (P3 audit cleanup).
-
-function sendJson(res: ServerResponse, data: unknown, status = 200): void {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify(data))
-}
 
 /**
  * Render `hub` state as a Prometheus / OpenMetrics text exposition.

@@ -38,6 +38,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { readJsonBody, sendJson } from './http-helpers.js'
 
 import type { Hub } from '@aipehub/core'
 import type { GrowthReportsAdminSurface } from '@aipehub/core'
@@ -82,35 +83,6 @@ const ALLOWED_WORKFLOWS: Record<string, AllowedWorkflow> = {
 // ---------------------------------------------------------------------------
 // Helpers — kept private to this module to mirror identity-routes.ts.
 // ---------------------------------------------------------------------------
-
-const MAX_BODY_BYTES = 1_000_000 // 1MB — matches server.ts / identity-routes.ts
-
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let buf = ''
-    req.on('data', (chunk) => {
-      buf += chunk
-      if (buf.length > MAX_BODY_BYTES) {
-        req.destroy()
-        reject(new Error('body too large'))
-      }
-    })
-    req.on('end', () => {
-      if (!buf) return resolve(undefined)
-      try {
-        resolve(JSON.parse(buf))
-      } catch (err) {
-        reject(err)
-      }
-    })
-    req.on('error', reject)
-  })
-}
-
-function sendJson(res: ServerResponse, data: unknown, status = 200): void {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify(data))
-}
 
 /**
  * Pull the caseId out of a `reports/<caseId>/<file>.md` path. Returns

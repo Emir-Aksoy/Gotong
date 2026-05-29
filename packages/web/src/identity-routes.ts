@@ -37,6 +37,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { readBearer, readCookie, readJsonBody, sendJson } from './http-helpers.js'
 
 // Audit #155 — the reputation snapshot row shape is owned by
 // @aipehub/core (where the EWMA store lives). Web extends rather than
@@ -324,25 +325,13 @@ export interface IdentitySurface {
 }
 
 // ---------------------------------------------------------------------------
-// Cookie / IO helpers — kept private to this module so it stays
-// independent of server.ts's helpers. Each is ≤20 lines; the
-// duplication is preferable to widening server.ts's export surface.
+// Identity cookie builders. The generic IO helpers (readCookie / readBearer
+// / readJsonBody / sendJson) moved to ./http-helpers.js in the C3 cleanup;
+// what stays here is the identity-specific cookie construction.
 // ---------------------------------------------------------------------------
 
 export const IDENTITY_COOKIE = 'aipehub_identity'
 const COOKIE_MAX_AGE_S = 60 * 60 * 24 * 7 // 7 days; mirrors IdentityStore default TTL
-const MAX_BODY_BYTES = 1_000_000 // 1MB — matches server.ts readJsonBody
-
-function readCookie(req: IncomingMessage, name: string): string | undefined {
-  const h = req.headers.cookie
-  if (!h) return undefined
-  for (const part of h.split(';')) {
-    const eq = part.indexOf('=')
-    if (eq < 0) continue
-    if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim()
-  }
-  return undefined
-}
 
 function setIdentityCookie(value: string, secure: boolean): string {
   const sameSite = secure ? 'Strict' : 'Lax'
@@ -353,40 +342,6 @@ function expireIdentityCookie(secure: boolean): string {
   const sameSite = secure ? 'Strict' : 'Lax'
   const sec = secure ? '; Secure' : ''
   return `${IDENTITY_COOKIE}=; HttpOnly; SameSite=${sameSite}${sec}; Path=/; Max-Age=0`
-}
-
-function readBearer(req: IncomingMessage): string | undefined {
-  const h = req.headers['authorization']
-  if (typeof h !== 'string') return undefined
-  const m = /^Bearer\s+(.+)$/.exec(h)
-  return m ? m[1]!.trim() : undefined
-}
-
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let buf = ''
-    req.on('data', (chunk) => {
-      buf += chunk
-      if (buf.length > MAX_BODY_BYTES) {
-        req.destroy()
-        reject(new Error('body too large'))
-      }
-    })
-    req.on('end', () => {
-      if (!buf) return resolve(undefined)
-      try {
-        resolve(JSON.parse(buf))
-      } catch (err) {
-        reject(err)
-      }
-    })
-    req.on('error', reject)
-  })
-}
-
-function sendJson(res: ServerResponse, data: unknown, status = 200): void {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify(data))
 }
 
 // ---------------------------------------------------------------------------

@@ -9,6 +9,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { sendJson } from './http-helpers.js'
 import type { AdminRecord, ParticipantId } from '@aipehub/core'
 import { createLogger } from '@aipehub/core'
 
@@ -33,11 +34,6 @@ export interface UploadsRoutesCtx {
 }
 
 // -- HTTP helpers ---------------------------------------------------------
-
-function sendJson(res: ServerResponse, data: unknown, status = 200): void {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify(data))
-}
 
 function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {

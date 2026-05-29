@@ -26,34 +26,13 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { readJsonBody, sendJson } from './http-helpers.js'
 import type { IdentitySurface } from './identity-routes.js'
 
 // -- types ----------------------------------------------------------------
 
 export interface SetupRoutesCtx {
   identity?: IdentitySurface
-}
-
-// -- HTTP helpers ---------------------------------------------------------
-
-function sendJson(res: ServerResponse, data: unknown, status = 200): void {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify(data))
-}
-
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let buf = ''
-    req.on('data', (chunk: string) => {
-      buf += chunk
-      if (buf.length > 1_000_000) { req.destroy(); reject(new Error('body too large')) }
-    })
-    req.on('end', () => {
-      if (!buf) return resolve(undefined)
-      try { resolve(JSON.parse(buf)) } catch (err) { reject(err) }
-    })
-    req.on('error', reject)
-  })
 }
 
 // -- route handler --------------------------------------------------------

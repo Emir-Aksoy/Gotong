@@ -5,7 +5,7 @@
  * pattern of identity-routes.ts / workflow-routes.ts:
  *   - narrow ctx projection (AgentsRoutesCtx)
  *   - single entry point handleAgentsRoute()
- *   - self-contained HTTP helpers (sendJson, readJsonBody, readTextBody)
+ *   - shared HTTP helpers (sendJson, readJsonBody, readTextBody) from ./http-helpers.js
  *
  * Routes handled:
  *   GET    /api/admin/agents              list agents
@@ -19,6 +19,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { readJsonBody, readTextBody, sendJson } from './http-helpers.js'
 import type {
   AdminRecord,
   AgentRecord,
@@ -55,40 +56,6 @@ export interface AgentsRoutesCtx {
   lifecycle?: ManagedAgentLifecycle
   workflows?: AgentsWorkflowSurface
   requireAdmin: (req: IncomingMessage, res: ServerResponse) => Promise<AdminRecord | null>
-}
-
-// -- HTTP helpers (self-contained to avoid cross-file coupling) ------------
-
-function sendJson(res: ServerResponse, data: unknown, status = 200): void {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify(data))
-}
-
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let buf = ''
-    req.on('data', (chunk: string) => {
-      buf += chunk
-      if (buf.length > 1_000_000) { req.destroy(); reject(new Error('body too large')) }
-    })
-    req.on('end', () => {
-      if (!buf) return resolve(undefined)
-      try { resolve(JSON.parse(buf)) } catch (err) { reject(err) }
-    })
-    req.on('error', reject)
-  })
-}
-
-function readTextBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let buf = ''
-    req.on('data', (chunk: string) => {
-      buf += chunk
-      if (buf.length > 1_000_000) { req.destroy(); reject(new Error('body too large')) }
-    })
-    req.on('end', () => resolve(buf))
-    req.on('error', reject)
-  })
 }
 
 // -- validation -----------------------------------------------------------

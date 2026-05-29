@@ -4,10 +4,8 @@
  * Extracted from server.ts (P3 audit cleanup — server.ts is 3700+ lines)
  * following the same shape as identity-routes.ts / me-routes.ts:
  *
- *   - Self-contained helpers (sendJson / readJsonBody / readTextBody) so
- *     this module compiles in isolation and matches the duplicated-helper
- *     convention already in identity-routes.ts. Future cleanup can fold
- *     them into a shared http-utils.ts (audit follow-up).
+ *   - Shared HTTP helpers (sendJson / readJsonBody / readTextBody) from
+ *     ./http-helpers.js — the C3 cleanup that folded the per-route copies.
  *   - Narrow `WorkflowRoutesCtx` projection of server.ts's HandlerCtx —
  *     only the fields these handlers need (hub, workflows surface,
  *     workflow-assist surface, plus the parent's `requireAdmin` closure
@@ -31,6 +29,7 @@
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { readJsonBody, readTextBody, sendJson } from './http-helpers.js'
 
 import type { AdminRecord, Hub } from '@aipehub/core'
 
@@ -60,53 +59,6 @@ export interface WorkflowRoutesCtx {
     req: IncomingMessage,
     res: ServerResponse,
   ): Promise<AdminRecord | null>
-}
-
-// ---------------------------------------------------------------------------
-// Local helpers — duplicated from server.ts to keep this module self-
-// contained (same convention as identity-routes.ts). 1 MB body cap to
-// match server.ts's readJsonBody / readTextBody.
-// ---------------------------------------------------------------------------
-
-const MAX_BODY_BYTES = 1_000_000
-
-function sendJson(res: ServerResponse, data: unknown, status = 200): void {
-  res.writeHead(status, { 'content-type': 'application/json; charset=utf-8' })
-  res.end(JSON.stringify(data))
-}
-
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let buf = ''
-    req.on('data', (chunk) => {
-      buf += chunk
-      if (buf.length > MAX_BODY_BYTES) {
-        req.destroy()
-        reject(new Error('body too large'))
-      }
-    })
-    req.on('end', () => {
-      if (!buf) return resolve(undefined)
-      try { resolve(JSON.parse(buf)) }
-      catch (err) { reject(err) }
-    })
-    req.on('error', reject)
-  })
-}
-
-function readTextBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let buf = ''
-    req.on('data', (chunk) => {
-      buf += chunk
-      if (buf.length > MAX_BODY_BYTES) {
-        req.destroy()
-        reject(new Error('body too large'))
-      }
-    })
-    req.on('end', () => resolve(buf))
-    req.on('error', reject)
-  })
 }
 
 // ---------------------------------------------------------------------------
