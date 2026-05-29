@@ -195,16 +195,25 @@
     document.getElementById('settings-logout-btn')?.addEventListener('click', doLogout)
   }
 
-  // ---- Tab nav (hash-driven, identical contract to admin.js) -----------
+  // ---- Tab nav (hash-driven, sole router for the whole console) --------
   //
-  // admin.js owns the hash listener for its own tabs (overview/agents/
-  // workflows/tasks/activity/services/users). Our orchestrator owns
-  // hash-driven activation for the C1-only tabs (home, settings) AND
-  // computes the default tab on first paint based on role. We do NOT
-  // remove admin.js's hashchange listener — both fire on each change;
-  // each only acts on tabs it knows about.
+  // R14b — this orchestrator owns the ONE tab router: it wires the tabbar
+  // clicks + the single hashchange listener and drives setActiveTab across
+  // BOTH families (admin tabs overview/agents/workflows/tasks/activity/
+  // services/users AND the C1-only home/settings). admin.js used to run a
+  // second setActiveTab + hashchange of its own — both fired on every
+  // change and, since admin.js loads later, it stomped C1 tabs back to
+  // overview. Now setActiveTab dispatches `aipehub:tabchange` and admin.js
+  // just listens for its per-tab side effects. See window.AipeHub.gotoTab.
+  //
+  // ADMIN_TABS must list EVERY admin-shell tabbar button so the router can
+  // activate it. `quotas` / `reputation` are real tabs whose sections are
+  // populated by the lazy-loaded quotas-ui.js / reputation-ui.js bundles
+  // (they observe <body data-active-tab> and refresh when it flips to their
+  // name). Neither router used to include them, so clicking those buttons
+  // just fell through to overview — R14b folds them into the one router.
   const C1_TABS = new Set(['home', 'settings'])
-  const ADMIN_TABS = new Set(['overview', 'agents', 'workflows', 'tasks', 'activity', 'services', 'users'])
+  const ADMIN_TABS = new Set(['overview', 'agents', 'workflows', 'tasks', 'activity', 'services', 'users', 'quotas', 'reputation'])
 
   function defaultTabForRole() {
     if (ADMIN_OR_OWNER) return 'overview'
@@ -228,6 +237,10 @@
       btn.classList.toggle('active', (btn.dataset.tab || '') === name)
     })
     document.body.dataset.activeTab = name
+    // Notify subscribers (admin.js) of the resolved tab so they can run
+    // per-tab side effects (e.g. refresh growth reports on 'workflows')
+    // without owning a competing router.
+    window.dispatchEvent(new CustomEvent('aipehub:tabchange', { detail: { name } }))
   }
 
   function currentTabFromHash() {
@@ -237,22 +250,35 @@
     return defaultTabForRole()
   }
 
+  // Programmatic navigation. Mirrors a tabbar click: set the hash
+  // (→ hashchange → setActiveTab) unless we're already there, in which
+  // case switch directly. Exposed on window.AipeHub so admin.js can do
+  // cross-tab jumps (e.g. click a task_result row → open the Tasks tab).
+  function gotoTab(name) {
+    if (window.location.hash !== `#${name}`) {
+      window.location.hash = name
+    } else {
+      setActiveTab(name)
+    }
+  }
+
   function wireTabs() {
     $$('.tabbar-btn:not([hidden])').forEach((btn) => {
       btn.addEventListener('click', () => {
         const name = btn.dataset.tab
-        if (!name) return
-        // Setting hash triggers hashchange → setActiveTab below.
-        if (window.location.hash !== `#${name}`) {
-          window.location.hash = name
-        } else {
-          setActiveTab(name)
-        }
+        if (name) gotoTab(name)
       })
     })
     window.addEventListener('hashchange', () => setActiveTab(currentTabFromHash()))
     setActiveTab(currentTabFromHash())
   }
+
+  // Publish gotoTab for admin.js (lazy-loaded later in boot). app-core.js
+  // already created window.AipeHub by the time this IIFE evaluates — line ~37
+  // destructures from it, so it's guaranteed present here. We expose only
+  // gotoTab (not setActiveTab): callers must go through the hash so the URL
+  // stays in sync — a bare setActiveTab would diverge body state from #hash.
+  window.AipeHub.gotoTab = gotoTab
 
   // ---- Home tab — port of /me functionality (whoami / dispatch / reports)
   //

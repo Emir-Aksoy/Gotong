@@ -18,7 +18,8 @@ import { createWorkflows } from './workflows.js'
   const { $, t, applyStaticI18n, onLangChange, escapeHtml, summarize, isBadResult,
           fetchJson, connectStream, syncLangFromConfig, formatBytes,
           fetchLeaderboard, renderLeaderboard, taskMetricsHtml, formatScore,
-          attachContribToggle, applyContribToggleState, attachCapChips } = window.AipeHub
+          attachContribToggle, applyContribToggleState, attachCapChips,
+          gotoTab } = window.AipeHub
 
   // Managed-agent state: list, providers available, secrets status, form mode.
   const ma = {
@@ -1870,62 +1871,18 @@ import { createWorkflows } from './workflows.js'
 
   // ── Tab navigation ───────────────────────────────────────────────────
   //
-  // The admin console used to be a tall single-page scroll of every
-  // section. With managed agents + workflows + tasks + transcript +
-  // leaderboard + pending applications all on one page, finding the
-  // thing you wanted got expensive. We split sections into 5 tabs:
-  // overview / agents / workflows / tasks / activity.
+  // R14b — the SOLE tab router now lives in app.js (the SPA orchestrator):
+  // it wires the tabbar clicks + the single hashchange listener and drives
+  // setActiveTab, which toggles `.tab-hidden` / `.active` / <body
+  // data-active-tab> and dispatches `aipehub:tabchange`. We used to run a
+  // duplicate setActiveTab + hashchange here; both fired on every change
+  // and raced (admin.js, loading later, even stomped C1 tabs back to
+  // overview). This bundle now only LISTENS (see boot) and reuses app.js's
+  // gotoTab (destructured off window.AipeHub) for cross-tab jumps.
   //
-  // Active tab lives in the URL hash (`/admin#agents`) so refreshes
-  // remember the user's position without touching localStorage — same
-  // "browser stays state-less except for the HttpOnly cookie" rule the
-  // rest of the app follows.
-  //
-  // All sections stay in the DOM at all times; tab switches just flip
-  // a `tab-hidden` class. Keeping them in the DOM means cross-tab
-  // interactions (e.g. clicking a task_result row in Activity auto-
-  // fills the eval form in Tasks) keep working without rewiring.
-  const TABS = ['overview', 'agents', 'workflows', 'tasks', 'activity', 'services', 'users']
-
-  function activeTabFromHash() {
-    const h = (location.hash || '').replace(/^#/, '')
-    return TABS.includes(h) ? h : 'overview'
-  }
-
-  function setActiveTab(name) {
-    if (!TABS.includes(name)) name = 'overview'
-    document.querySelectorAll('.tabbar-btn').forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.tab === name)
-    })
-    document.querySelectorAll('section[data-tab]').forEach((sec) => {
-      sec.classList.toggle('tab-hidden', sec.dataset.tab !== name)
-    })
-    // Mirror the active tab onto `<body>` so CSS can flatten the
-    // 3-col admin grid for tabs that don't fill all three columns
-    // (Tasks would otherwise hug the right edge; Activity would
-    // leave an empty third column). Overview keeps the original
-    // 3-col layout.
-    document.body.dataset.activeTab = name
-    // Workflows tab carries the growth-reports panel too — refresh
-    // when the user lands on the tab so an upload from the
-    // synthesist mid-session shows up without needing the manual
-    // refresh button.
-    if (name === 'workflows') {
-      refreshGrowthReports().catch(() => {})
-    }
-  }
-
-  function gotoTab(name) {
-    if (!TABS.includes(name)) name = 'overview'
-    // Use replace so the back button doesn't pile up tab clicks; users
-    // who land here from a deep link still get URL-based persistence.
-    if (location.hash.replace(/^#/, '') !== name) {
-      // setting hash fires hashchange → setActiveTab via the listener
-      location.hash = name
-    } else {
-      setActiveTab(name)
-    }
-  }
+  // All sections stay in the DOM at all times — tab switches just flip the
+  // `tab-hidden` class — so cross-tab interactions (clicking a task_result
+  // row in Activity auto-fills the eval form in Tasks) keep working.
 
   const boot = async () => {
     resolveDom()
@@ -1936,17 +1893,15 @@ import { createWorkflows } from './workflows.js'
     workflows.setDom(dom)
     updateDispatchVisibility()
 
-    // Tabbar wiring. Initial tab comes from URL hash; clicks update
-    // both the DOM and the hash so deep-linking just works.
-    setActiveTab(activeTabFromHash())
-    document.querySelectorAll('.tabbar-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const tab = btn.dataset.tab
-        if (tab) gotoTab(tab)
-      })
-    })
-    window.addEventListener('hashchange', () => {
-      setActiveTab(activeTabFromHash())
+    // R14b — app.js owns the tabbar clicks + hashchange + setActiveTab and
+    // dispatches `aipehub:tabchange`. We just subscribe and run the admin-
+    // only per-tab side effect: refresh the growth-reports panel (which
+    // lives under the Workflows tab) whenever the user lands there mid-
+    // session — e.g. after the synthesist uploads a report. The initial
+    // population on first load is covered by the unconditional
+    // refreshGrowthReports() later in boot, so no deep-link catch-up needed.
+    window.addEventListener('aipehub:tabchange', (e) => {
+      if (e.detail?.name === 'workflows') refreshGrowthReports().catch(() => {})
     })
 
     dom.dStrategy.addEventListener('change', updateDispatchVisibility)

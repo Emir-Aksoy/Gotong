@@ -36,11 +36,14 @@ const AIPEHUB_HELPERS = [
   'isBadResult', 'fetchJson', 'connectStream', 'syncLangFromConfig',
   'fetchLeaderboard', 'renderLeaderboard', 'taskMetricsHtml', 'formatScore',
   'attachContribToggle', 'applyContribToggleState', 'attachCapChips',
+  // R14b — app.js publishes the sole tab router here; main.js destructures it.
+  'gotoTab',
 ]
 
 interface RunResult {
   domListeners: Record<string, unknown>
-  /** True if boot() ran: setActiveTab (boot-only) stamps body.dataset.activeTab. */
+  winListeners: Record<string, unknown>
+  /** True if boot() ran: R14b registers a window `aipehub:tabchange` listener. */
   bootRan: boolean
 }
 
@@ -83,12 +86,19 @@ function runBundle(opts: { readyState?: string; tolerantDom?: boolean } = {}): R
   aipeHub.installWorkflowAssist = () => ({ open() {}, close() {}, submit() {}, save() {} })
 
   const domListeners: Record<string, unknown> = {}
+  // Window listeners boot registers (R14b: the `aipehub:tabchange`
+  // subscription). Recording them is how we prove boot ran.
+  const winListeners: Record<string, unknown> = {}
   // Shared by `window.location` and the bare `location` global the source
-  // reads (e.g. activeTabFromHash → location.hash).
+  // reads (logout() → window.location.href).
   const location = { hash: '', href: '' }
   const body = makeEl()
   const ctx = {
-    window: { AipeHub: aipeHub, addEventListener: () => {}, location },
+    window: {
+      AipeHub: aipeHub,
+      addEventListener: (type: string, cb: unknown) => { winListeners[type] = cb },
+      location,
+    },
     location,
     document: {
       readyState: opts.readyState,
@@ -110,7 +120,11 @@ function runBundle(opts: { readyState?: string; tolerantDom?: boolean } = {}): R
   runInNewContext(ADMIN_JS, ctx)
   return {
     domListeners,
-    bootRan: (body.dataset as Record<string, unknown>).activeTab !== undefined,
+    winListeners,
+    // R14b — admin.js no longer runs its own setActiveTab at boot; the
+    // proof that boot ran is the window `aipehub:tabchange` subscription it
+    // registers (before suspending on the first `await fetchJson`).
+    bootRan: typeof winListeners['aipehub:tabchange'] === 'function',
   }
 }
 
@@ -138,7 +152,7 @@ describe('static/admin.js — esbuild bundle smoke', () => {
     // dead. The readyState guard must boot init synchronously instead.
     let result: RunResult | undefined
     expect(() => { result = runBundle({ readyState: 'complete', tolerantDom: true }) }).not.toThrow()
-    // init ran: setActiveTab() stamped <body data-active-tab>...
+    // init ran: boot registered its window `aipehub:tabchange` listener...
     expect(result!.bootRan).toBe(true)
     // ...and it did NOT defer to a DOMContentLoaded that would never fire.
     expect(result!.domListeners.DOMContentLoaded).toBeUndefined()

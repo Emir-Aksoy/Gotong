@@ -963,7 +963,8 @@
       formatScore,
       attachContribToggle,
       applyContribToggleState,
-      attachCapChips
+      attachCapChips,
+      gotoTab
     } = window.AipeHub;
     const ma = {
       agents: [],
@@ -2322,47 +2323,14 @@
       }
       window.location.href = "/admin";
     }
-    const TABS = ["overview", "agents", "workflows", "tasks", "activity", "services", "users"];
-    function activeTabFromHash() {
-      const h = (location.hash || "").replace(/^#/, "");
-      return TABS.includes(h) ? h : "overview";
-    }
-    function setActiveTab(name) {
-      if (!TABS.includes(name)) name = "overview";
-      document.querySelectorAll(".tabbar-btn").forEach((btn) => {
-        btn.classList.toggle("active", btn.dataset.tab === name);
-      });
-      document.querySelectorAll("section[data-tab]").forEach((sec) => {
-        sec.classList.toggle("tab-hidden", sec.dataset.tab !== name);
-      });
-      document.body.dataset.activeTab = name;
-      if (name === "workflows") {
-        refreshGrowthReports().catch(() => {
-        });
-      }
-    }
-    function gotoTab(name) {
-      if (!TABS.includes(name)) name = "overview";
-      if (location.hash.replace(/^#/, "") !== name) {
-        location.hash = name;
-      } else {
-        setActiveTab(name);
-      }
-    }
     const boot = async () => {
       resolveDom();
       managedAgents.setDom(dom);
       workflows.setDom(dom);
       updateDispatchVisibility();
-      setActiveTab(activeTabFromHash());
-      document.querySelectorAll(".tabbar-btn").forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const tab = btn.dataset.tab;
-          if (tab) gotoTab(tab);
+      window.addEventListener("aipehub:tabchange", (e) => {
+        if (e.detail?.name === "workflows") refreshGrowthReports().catch(() => {
         });
-      });
-      window.addEventListener("hashchange", () => {
-        setActiveTab(activeTabFromHash());
       });
       dom.dStrategy.addEventListener("change", updateDispatchVisibility);
       dom.dispatchForm.addEventListener("submit", submitDispatch);
