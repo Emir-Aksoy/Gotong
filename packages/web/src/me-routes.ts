@@ -42,12 +42,15 @@ import { readJsonBody, sendJson } from './http-helpers.js'
 
 import type { Hub } from '@aipehub/core'
 import type { GrowthReportsAdminSurface } from '@aipehub/core'
+import { createLogger } from '@aipehub/core'
 
 import {
   resolveV4Auth,
   type IdentitySurface,
   type LoginRateLimiterLike,
 } from './identity-routes.js'
+
+const log = createLogger('me-routes')
 
 // ---------------------------------------------------------------------------
 // Allowlist
@@ -289,8 +292,7 @@ async function handleMeDispatch(
       .catch((err) => {
         // Best-effort log only — by this point the user already saw 200.
         // Re-throwing here would unhandled-promise the process.
-        // eslint-disable-next-line no-console
-        console.error('me-routes: dispatch failed', err)
+        log.error('dispatch failed', { err })
       })
     sendJson(res, {
       ok: true,
@@ -417,7 +419,7 @@ async function handleMeDownloadReport(
 // as a function so the constant above stays the single source of truth.
 // ---------------------------------------------------------------------------
 
-export function listAllowedWorkflowsForMe(): ReadonlyArray<{
+function listAllowedWorkflowsForMe(): ReadonlyArray<{
   workflowId: string
   capability: string
   payloadFields: readonly string[]

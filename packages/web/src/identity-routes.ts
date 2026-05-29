@@ -59,7 +59,7 @@ const ROLE_RANK: Record<IdentityRole, number> = {
   viewer: 1,
 }
 
-export function roleAtLeast(actual: IdentityRole, required: IdentityRole): boolean {
+function roleAtLeast(actual: IdentityRole, required: IdentityRole): boolean {
   return ROLE_RANK[actual] >= ROLE_RANK[required]
 }
 
