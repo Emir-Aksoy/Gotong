@@ -12,6 +12,7 @@
  */
 import { createServices } from './services.js'
 import { createManagedAgents } from './managed-agents.js'
+import { createWorkflows } from './workflows.js'
 
 (() => {
   const { $, t, applyStaticI18n, onLangChange, escapeHtml, summarize, isBadResult,
@@ -105,6 +106,13 @@ import { createManagedAgents } from './managed-agents.js'
   // lives here, so openBundleImportModal is passed in. (openBundleImportModal
   // is a hoisted function declaration, defined below — available here.)
   const managedAgents = createManagedAgents({ ma, openBundleImportModal })
+  // Workflows tab lives in admin-src/workflows.js (P3 Phase 2, third
+  // ES-module split). Self-contained panel + import + run-history; closes
+  // over the shared `wf` state and gets the resolved `dom` via setDom()
+  // after resolveDom(). The workflow-start form + AI-assistant wrappers
+  // stay in main.js (entangled with shared field/multimodal renderers and
+  // wfAssist) — see the module header.
+  const workflows = createWorkflows({ wf })
 
   function resolveDom() {
     dom = {
@@ -365,14 +373,14 @@ import { createManagedAgents } from './managed-agents.js'
         managedAgents.refreshManagedAgents().catch(() => {})
         // Workflow runners use id prefix `workflow:`; pull when one appears.
         if (typeof ev.data.id === 'string' && ev.data.id.startsWith('workflow:')) {
-          refreshWorkflows().catch(() => {})
+          workflows.refreshWorkflows().catch(() => {})
         }
         break
       case 'participant_left':
         state.participants = state.participants.filter((p) => p.id !== ev.data.id)
         managedAgents.refreshManagedAgents().catch(() => {})
         if (typeof ev.data.id === 'string' && ev.data.id.startsWith('workflow:')) {
-          refreshWorkflows().catch(() => {})
+          workflows.refreshWorkflows().catch(() => {})
         }
         break
       case 'agent_pending':
@@ -451,7 +459,7 @@ import { createManagedAgents } from './managed-agents.js'
     renderTasks()
     renderKnownRoster()
     managedAgents.renderManagedAgents()
-    if (wf.available) renderWorkflows()
+    if (wf.available) workflows.renderWorkflows()
     // v2.5 HITL — re-decorate the Tasks tab with a count of pending
     // agent-question tasks so the badge is right after every snapshot.
     renderAgentQuestionBadge()
@@ -969,92 +977,6 @@ import { createManagedAgents } from './managed-agents.js'
       const card = document.querySelector(sel)
       if (card) card.scrollIntoView({ behavior: 'smooth', block: 'center' })
     })
-  }
-
-  // --- workflows (v2.1) --------------------------------------------------
-
-  async function refreshWorkflows() {
-    if (!dom?.wfSection) return
-    try {
-      const r = await fetch('/api/admin/workflows')
-      if (r.status === 404) {
-        // Host has no workflow surface (embedded mode / older host).
-        wf.available = false
-        dom.wfSection.hidden = true
-        return
-      }
-      if (!r.ok) {
-        // Unexpected — log and leave the section as it was.
-        console.warn('refreshWorkflows: HTTP', r.status)
-        return
-      }
-      const body = await r.json()
-      wf.available = true
-      wf.workflows = body.workflows || []
-      dom.wfSection.hidden = false
-      renderWorkflows()
-    } catch (err) {
-      console.warn('refreshWorkflows:', err)
-    }
-  }
-
-  function renderWorkflows() {
-    if (!dom.wfList) return
-    if (dom.wfSummary) {
-      dom.wfSummary.textContent =
-        wf.workflows.length === 0 ? '' : t.workflowsSummary(wf.workflows.length)
-    }
-    if (wf.workflows.length === 0) {
-      dom.wfList.innerHTML = `<p class="empty">${escapeHtml(t.workflowsEmpty)}</p>`
-      return
-    }
-    dom.wfList.innerHTML = wf.workflows.map((w) => {
-      const name = w.name ? escapeHtml(w.name) : escapeHtml(w.id)
-      const desc = w.description ? `<p class="hint">${escapeHtml(w.description)}</p>` : ''
-      const file = w.file ? `<small class="hint">${escapeHtml(w.file)}</small>` : ''
-      // "开始" button: primary action — opens a payload-schema-driven
-      // form modal so users don't have to write JSON by hand. For
-      // workflows without a schema, the button opens the generic
-      // dispatch form pre-filled with the trigger capability.
-      return `<article class="ma-card">
-        <header>
-          <strong>${name}</strong>
-          <code>${escapeHtml(w.participantId)}</code>
-          <button type="button" class="ma-btn"
-                  data-act="start-workflow"
-                  data-id="${escapeHtml(w.id)}">开始</button>
-          <button type="button" class="ma-btn ma-btn-secondary"
-                  data-act="open-workflow-runs"
-                  data-id="${escapeHtml(w.id)}">${escapeHtml(t.workflowRunsBtn)}</button>
-          <button type="button" class="ma-btn ma-btn-secondary"
-                  data-act="remove-workflow"
-                  data-id="${escapeHtml(w.id)}">${escapeHtml(t.workflowRemoveBtn)}</button>
-        </header>
-        ${desc}
-        <ul class="ma-meta">
-          <li><span class="ma-label">${escapeHtml(t.workflowTriggerLabel)}:</span> <code>${escapeHtml(w.triggerCapability)}</code></li>
-          <li>${escapeHtml(t.workflowStepsLabel(w.stepCount))}</li>
-        </ul>
-        ${file}
-      </article>`
-    }).join('')
-  }
-
-  async function removeWorkflow(id) {
-    if (!confirm(t.confirmRemoveWorkflow(id))) return
-    try {
-      const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-      })
-      if (!r.ok) {
-        const body = await r.json().catch(() => ({}))
-        alert(t.failedAlert(body.error || `${r.status}`))
-        return
-      }
-      await refreshWorkflows()
-    } catch (err) {
-      alert(t.failedAlert(err.message || String(err)))
-    }
   }
 
   // --- growth reports (v2.4 personal-growth) -----------------------------
@@ -1827,59 +1749,11 @@ import { createManagedAgents } from './managed-agents.js'
       dom.bundleImportMsg.textContent = '导入完成 — ' + parts.join('、')
       dom.bundleImportMsg.classList.add('ok')
       await managedAgents.refreshManagedAgents().catch(() => {})
-      await refreshWorkflows().catch(() => {})
+      await workflows.refreshWorkflows().catch(() => {})
       setTimeout(closeBundleImportModal, 1200)
     } catch (err) {
       dom.bundleImportMsg.textContent = '失败:' + (err.message || String(err))
       dom.bundleImportMsg.classList.add('err')
-    }
-  }
-
-  function openWorkflowImportModal() {
-    dom.wfImportText.value = ''
-    dom.wfImportFile.value = ''
-    dom.wfImportMsg.textContent = ''
-    dom.wfImportMsg.classList.remove('ok', 'err')
-    dom.wfImportModal.hidden = false
-  }
-
-  function closeWorkflowImportModal() {
-    dom.wfImportModal.hidden = true
-  }
-
-  async function submitWorkflowImport() {
-    dom.wfImportMsg.textContent = ''
-    dom.wfImportMsg.classList.remove('ok', 'err')
-    let text = dom.wfImportText.value
-    const file = dom.wfImportFile.files?.[0]
-    if (file && !text) {
-      text = await file.text()
-    }
-    if (!text || !text.trim()) {
-      dom.wfImportMsg.textContent = t.importEmpty
-      dom.wfImportMsg.classList.add('err')
-      return
-    }
-    try {
-      const r = await fetch('/api/admin/workflows/import', {
-        method: 'POST',
-        headers: { 'content-type': 'text/plain' },
-        body: text,
-      })
-      const body = await r.json().catch(() => ({}))
-      if (!r.ok) {
-        dom.wfImportMsg.textContent = t.failedAlert(body.error || `${r.status}`)
-        dom.wfImportMsg.classList.add('err')
-        return
-      }
-      const id = body.workflow?.id || '?'
-      dom.wfImportMsg.textContent = t.workflowImportDone(id)
-      dom.wfImportMsg.classList.add('ok')
-      await refreshWorkflows()
-      setTimeout(closeWorkflowImportModal, 700)
-    } catch (err) {
-      dom.wfImportMsg.textContent = t.failedAlert(err.message || String(err))
-      dom.wfImportMsg.classList.add('err')
     }
   }
 
@@ -1895,141 +1769,13 @@ import { createManagedAgents } from './managed-agents.js'
         state,
         ma,
         wf,
-        refreshWorkflows: () => refreshWorkflows(),
+        refreshWorkflows: () => workflows.refreshWorkflows(),
       })
     : null
   function openWorkflowAssistModal() { wfAssist?.open() }
   function closeWorkflowAssistModal() { wfAssist?.close() }
   function submitWorkflowAssist() { return wfAssist?.submit() }
   function saveAssistedWorkflow() { return wfAssist?.save() }
-
-  // --- workflow run history ---------------------------------------------
-  //
-  // The runs modal is two panes: a left-side list of recent runs (sorted
-  // newest-first) and a right-side detail view. Clicking a row pulls the
-  // full `RunState` from /api/admin/workflows/runs/:id; the detail
-  // renders each step with its status + timing + sub-task ids.
-
-  async function openWorkflowRunsModal(workflowId) {
-    wf.runs.workflowId = workflowId
-    wf.runs.selectedRunId = null
-    wf.runs.rows = []
-    if (dom.wfRunsTarget) dom.wfRunsTarget.textContent = workflowId
-    if (dom.wfRunsMsg) dom.wfRunsMsg.textContent = ''
-    if (dom.wfRunsList) dom.wfRunsList.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
-    if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = true
-    if (dom.wfRunDetail) dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml(t.workflowRunsPickHint)}</p>`
-    if (dom.wfRunsModal) dom.wfRunsModal.hidden = false
-    try {
-      const url = `/api/admin/workflows/runs?workflowId=${encodeURIComponent(workflowId)}&limit=100`
-      const r = await fetch(url)
-      if (!r.ok) {
-        const body = await r.json().catch(() => ({}))
-        dom.wfRunsList.innerHTML = ''
-        dom.wfRunsMsg.textContent = t.failedAlert(body.error || `${r.status}`)
-        dom.wfRunsMsg.classList.add('err')
-        return
-      }
-      const body = await r.json()
-      wf.runs.rows = body.runs || []
-      renderWorkflowRunsList()
-    } catch (err) {
-      dom.wfRunsList.innerHTML = ''
-      dom.wfRunsMsg.textContent = t.failedAlert(err.message || String(err))
-      dom.wfRunsMsg.classList.add('err')
-    }
-  }
-
-  function closeWorkflowRunsModal() {
-    if (dom.wfRunsModal) dom.wfRunsModal.hidden = true
-  }
-
-  function renderWorkflowRunsList() {
-    if (!dom.wfRunsList) return
-    if (wf.runs.rows.length === 0) {
-      dom.wfRunsList.innerHTML = ''
-      if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = false
-      return
-    }
-    if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = true
-    dom.wfRunsList.innerHTML = wf.runs.rows.map((row) => {
-      const dur = row.endedAt ? `${row.endedAt - row.startedAt}ms` : '—'
-      const selected = row.runId === wf.runs.selectedRunId ? ' wf-run-row-active' : ''
-      return `<button type="button" class="wf-run-row${selected}"
-                      data-act="open-workflow-run"
-                      data-run-id="${escapeHtml(row.runId)}">
-        <span class="wf-run-status wf-run-${escapeHtml(row.status)}">${escapeHtml(row.status)}</span>
-        <span class="wf-run-time">${escapeHtml(new Date(row.startedAt).toLocaleString())}</span>
-        <span class="wf-run-meta">${escapeHtml(t.workflowRunStepCount(row.stepCount))} · ${escapeHtml(dur)}</span>
-        <code class="wf-run-id">${escapeHtml(row.runId)}</code>
-      </button>`
-    }).join('')
-  }
-
-  async function openWorkflowRunDetail(runId) {
-    wf.runs.selectedRunId = runId
-    renderWorkflowRunsList()
-    if (!dom.wfRunDetail) return
-    dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
-    try {
-      const r = await fetch(`/api/admin/workflows/runs/${encodeURIComponent(runId)}`)
-      if (!r.ok) {
-        const body = await r.json().catch(() => ({}))
-        dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml(body.error || `${r.status}`)}</p>`
-        return
-      }
-      const body = await r.json()
-      renderWorkflowRunDetail(body.run)
-    } catch (err) {
-      dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml(err.message || String(err))}</p>`
-    }
-  }
-
-  function renderWorkflowRunDetail(run) {
-    if (!dom.wfRunDetail) return
-    const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t.workflowRunStillRunning
-    const finalBlock =
-      run.status === 'failed'
-        ? `<p class="form-msg err">${escapeHtml(run.error || '')}</p>`
-        : run.finalOutput !== undefined
-          ? `<details open><summary>${escapeHtml(t.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml(JSON.stringify(run.finalOutput, null, 2))}</pre></details>`
-          : ''
-    const steps = (run.steps || []).map((s) => {
-      const sDur = s.endedAt ? `${s.endedAt - s.startedAt}ms` : '—'
-      const subtasks = (s.subTaskIds || []).length
-        ? `<small class="hint">${escapeHtml(t.workflowRunSubTasks)}: ${s.subTaskIds.map(escapeHtml).join(', ')}</small>`
-        : ''
-      const out = s.output !== undefined
-        ? `<details><summary>${escapeHtml(t.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml(JSON.stringify(s.output, null, 2))}</pre></details>`
-        : ''
-      const err = s.error
-        ? `<p class="form-msg err">${escapeHtml(s.error)}</p>`
-        : ''
-      return `<article class="wf-step">
-        <header>
-          <span class="wf-run-status wf-run-${escapeHtml(s.status)}">${escapeHtml(s.status)}</span>
-          <strong>${escapeHtml(s.stepId)}</strong>
-          <span class="wf-step-meta">${escapeHtml(sDur)} · ${escapeHtml(t.workflowRunAttempts(s.attempts || 1))}</span>
-        </header>
-        ${err}
-        ${subtasks}
-        ${out}
-      </article>`
-    }).join('')
-    const payloadBlock = run.triggerPayload !== undefined
-      ? `<details><summary>${escapeHtml(t.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>`
-      : ''
-    dom.wfRunDetail.innerHTML = `
-      <h4>
-        <span class="wf-run-status wf-run-${escapeHtml(run.status)}">${escapeHtml(run.status)}</span>
-        <code>${escapeHtml(run.runId)}</code>
-      </h4>
-      <p class="hint">${escapeHtml(t.workflowRunDuration)}: ${escapeHtml(dur)} · ${escapeHtml(t.workflowRunTriggeredBy)}: <code>${escapeHtml(run.triggeredByTaskId)}</code></p>
-      ${payloadBlock}
-      ${steps || `<p class="empty">${escapeHtml(t.workflowRunNoSteps)}</p>`}
-      ${finalBlock}
-    `
-  }
 
   function renderKnownRoster() {
     if (!dom.knownAdminsList || !dom.knownWorkersList) return
@@ -2197,9 +1943,11 @@ import { createManagedAgents } from './managed-agents.js'
 
   document.addEventListener('DOMContentLoaded', async () => {
     resolveDom()
-    // Hand the resolved DOM cache to the managed-agents module — its
-    // closure references this `dom` for every render/mutate after init.
+    // Hand the resolved DOM cache to the managed-agents + workflows
+    // modules — their closures reference this `dom` for every
+    // render/mutate after init.
     managedAgents.setDom(dom)
+    workflows.setDom(dom)
     updateDispatchVisibility()
 
     // Tabbar wiring. Initial tab comes from URL hash; clicks update
@@ -2286,8 +2034,8 @@ import { createManagedAgents } from './managed-agents.js'
     })
 
     // Workflow panel events
-    dom.wfImportBtn?.addEventListener('click', openWorkflowImportModal)
-    dom.wfImportSubmit?.addEventListener('click', submitWorkflowImport)
+    dom.wfImportBtn?.addEventListener('click', workflows.openWorkflowImportModal)
+    dom.wfImportSubmit?.addEventListener('click', workflows.submitWorkflowImport)
     dom.wfStartSubmit?.addEventListener('click', submitWorkflowStart)
     dom.bundleImportBtn?.addEventListener('click', openBundleImportModal)
     dom.bundleImportSubmit?.addEventListener('click', submitBundleImport)
@@ -2361,9 +2109,9 @@ import { createManagedAgents } from './managed-agents.js'
         if (!dom.maImportModal.hidden) managedAgents.closeImportModal()
         if (dom.maGhImportModal && !dom.maGhImportModal.hidden) managedAgents.closeGithubImportModal()
         if (!dom.maKeysModal.hidden) managedAgents.closeKeysModal()
-        if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal()
+        if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal()
         if (dom.wfAssistModal && !dom.wfAssistModal.hidden) closeWorkflowAssistModal()
-        if (dom.wfRunsModal && !dom.wfRunsModal.hidden) closeWorkflowRunsModal()
+        if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal()
         if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal()
         if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart()
         if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport()
@@ -2393,12 +2141,12 @@ import { createManagedAgents } from './managed-agents.js'
       } else if (act === 'remove-agent') {
         managedAgents.removeAgent(id)
       } else if (act === 'remove-workflow') {
-        removeWorkflow(id)
+        workflows.removeWorkflow(id)
       } else if (act === 'open-workflow-runs') {
-        openWorkflowRunsModal(id)
+        workflows.openWorkflowRunsModal(id)
       } else if (act === 'open-workflow-run') {
         const runId = target.dataset.runId
-        if (runId) openWorkflowRunDetail(runId)
+        if (runId) workflows.openWorkflowRunDetail(runId)
       } else if (act === 'start-workflow') {
         openWorkflowStart(id)
       } else if (act === 'view-growth-report') {
@@ -2414,8 +2162,8 @@ import { createManagedAgents } from './managed-agents.js'
       if (!dom.maImportModal.hidden) managedAgents.closeImportModal()
       if (dom.maGhImportModal && !dom.maGhImportModal.hidden) managedAgents.closeGithubImportModal()
       if (!dom.maKeysModal.hidden) managedAgents.closeKeysModal()
-      if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal()
-      if (dom.wfRunsModal && !dom.wfRunsModal.hidden) closeWorkflowRunsModal()
+      if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal()
+      if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal()
       if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal()
       if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart()
       if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport()
@@ -2437,7 +2185,7 @@ import { createManagedAgents } from './managed-agents.js'
     })
 
     managedAgents.refreshManagedAgents().catch((err) => console.warn('initial agents refresh:', err))
-    refreshWorkflows().catch((err) => console.warn('initial workflows refresh:', err))
+    workflows.refreshWorkflows().catch((err) => console.warn('initial workflows refresh:', err))
     refreshGrowthReports().catch((err) => console.warn('initial growth-reports refresh:', err))
     if (dom.grRefreshBtn) {
       dom.grRefreshBtn.addEventListener('click', () => {

@@ -705,14 +705,257 @@
     };
   }
 
+  // admin-src/workflows.js
+  var { t: t3, escapeHtml: escapeHtml3 } = window.AipeHub;
+  function createWorkflows({ wf }) {
+    let dom = null;
+    function setDom(d) {
+      dom = d;
+    }
+    async function refreshWorkflows() {
+      if (!dom?.wfSection) return;
+      try {
+        const r = await fetch("/api/admin/workflows");
+        if (r.status === 404) {
+          wf.available = false;
+          dom.wfSection.hidden = true;
+          return;
+        }
+        if (!r.ok) {
+          console.warn("refreshWorkflows: HTTP", r.status);
+          return;
+        }
+        const body = await r.json();
+        wf.available = true;
+        wf.workflows = body.workflows || [];
+        dom.wfSection.hidden = false;
+        renderWorkflows();
+      } catch (err) {
+        console.warn("refreshWorkflows:", err);
+      }
+    }
+    function renderWorkflows() {
+      if (!dom.wfList) return;
+      if (dom.wfSummary) {
+        dom.wfSummary.textContent = wf.workflows.length === 0 ? "" : t3.workflowsSummary(wf.workflows.length);
+      }
+      if (wf.workflows.length === 0) {
+        dom.wfList.innerHTML = `<p class="empty">${escapeHtml3(t3.workflowsEmpty)}</p>`;
+        return;
+      }
+      dom.wfList.innerHTML = wf.workflows.map((w) => {
+        const name = w.name ? escapeHtml3(w.name) : escapeHtml3(w.id);
+        const desc = w.description ? `<p class="hint">${escapeHtml3(w.description)}</p>` : "";
+        const file = w.file ? `<small class="hint">${escapeHtml3(w.file)}</small>` : "";
+        return `<article class="ma-card">
+        <header>
+          <strong>${name}</strong>
+          <code>${escapeHtml3(w.participantId)}</code>
+          <button type="button" class="ma-btn"
+                  data-act="start-workflow"
+                  data-id="${escapeHtml3(w.id)}">开始</button>
+          <button type="button" class="ma-btn ma-btn-secondary"
+                  data-act="open-workflow-runs"
+                  data-id="${escapeHtml3(w.id)}">${escapeHtml3(t3.workflowRunsBtn)}</button>
+          <button type="button" class="ma-btn ma-btn-secondary"
+                  data-act="remove-workflow"
+                  data-id="${escapeHtml3(w.id)}">${escapeHtml3(t3.workflowRemoveBtn)}</button>
+        </header>
+        ${desc}
+        <ul class="ma-meta">
+          <li><span class="ma-label">${escapeHtml3(t3.workflowTriggerLabel)}:</span> <code>${escapeHtml3(w.triggerCapability)}</code></li>
+          <li>${escapeHtml3(t3.workflowStepsLabel(w.stepCount))}</li>
+        </ul>
+        ${file}
+      </article>`;
+      }).join("");
+    }
+    async function removeWorkflow(id) {
+      if (!confirm(t3.confirmRemoveWorkflow(id))) return;
+      try {
+        const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}`, {
+          method: "DELETE"
+        });
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          alert(t3.failedAlert(body.error || `${r.status}`));
+          return;
+        }
+        await refreshWorkflows();
+      } catch (err) {
+        alert(t3.failedAlert(err.message || String(err)));
+      }
+    }
+    function openWorkflowImportModal() {
+      dom.wfImportText.value = "";
+      dom.wfImportFile.value = "";
+      dom.wfImportMsg.textContent = "";
+      dom.wfImportMsg.classList.remove("ok", "err");
+      dom.wfImportModal.hidden = false;
+    }
+    function closeWorkflowImportModal() {
+      dom.wfImportModal.hidden = true;
+    }
+    async function submitWorkflowImport() {
+      dom.wfImportMsg.textContent = "";
+      dom.wfImportMsg.classList.remove("ok", "err");
+      let text = dom.wfImportText.value;
+      const file = dom.wfImportFile.files?.[0];
+      if (file && !text) {
+        text = await file.text();
+      }
+      if (!text || !text.trim()) {
+        dom.wfImportMsg.textContent = t3.importEmpty;
+        dom.wfImportMsg.classList.add("err");
+        return;
+      }
+      try {
+        const r = await fetch("/api/admin/workflows/import", {
+          method: "POST",
+          headers: { "content-type": "text/plain" },
+          body: text
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          dom.wfImportMsg.textContent = t3.failedAlert(body.error || `${r.status}`);
+          dom.wfImportMsg.classList.add("err");
+          return;
+        }
+        const id = body.workflow?.id || "?";
+        dom.wfImportMsg.textContent = t3.workflowImportDone(id);
+        dom.wfImportMsg.classList.add("ok");
+        await refreshWorkflows();
+        setTimeout(closeWorkflowImportModal, 700);
+      } catch (err) {
+        dom.wfImportMsg.textContent = t3.failedAlert(err.message || String(err));
+        dom.wfImportMsg.classList.add("err");
+      }
+    }
+    async function openWorkflowRunsModal(workflowId) {
+      wf.runs.workflowId = workflowId;
+      wf.runs.selectedRunId = null;
+      wf.runs.rows = [];
+      if (dom.wfRunsTarget) dom.wfRunsTarget.textContent = workflowId;
+      if (dom.wfRunsMsg) dom.wfRunsMsg.textContent = "";
+      if (dom.wfRunsList) dom.wfRunsList.innerHTML = `<p class="hint">${escapeHtml3(t3.loading)}</p>`;
+      if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = true;
+      if (dom.wfRunDetail) dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml3(t3.workflowRunsPickHint)}</p>`;
+      if (dom.wfRunsModal) dom.wfRunsModal.hidden = false;
+      try {
+        const url = `/api/admin/workflows/runs?workflowId=${encodeURIComponent(workflowId)}&limit=100`;
+        const r = await fetch(url);
+        if (!r.ok) {
+          const body2 = await r.json().catch(() => ({}));
+          dom.wfRunsList.innerHTML = "";
+          dom.wfRunsMsg.textContent = t3.failedAlert(body2.error || `${r.status}`);
+          dom.wfRunsMsg.classList.add("err");
+          return;
+        }
+        const body = await r.json();
+        wf.runs.rows = body.runs || [];
+        renderWorkflowRunsList();
+      } catch (err) {
+        dom.wfRunsList.innerHTML = "";
+        dom.wfRunsMsg.textContent = t3.failedAlert(err.message || String(err));
+        dom.wfRunsMsg.classList.add("err");
+      }
+    }
+    function closeWorkflowRunsModal() {
+      if (dom.wfRunsModal) dom.wfRunsModal.hidden = true;
+    }
+    function renderWorkflowRunsList() {
+      if (!dom.wfRunsList) return;
+      if (wf.runs.rows.length === 0) {
+        dom.wfRunsList.innerHTML = "";
+        if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = false;
+        return;
+      }
+      if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = true;
+      dom.wfRunsList.innerHTML = wf.runs.rows.map((row) => {
+        const dur = row.endedAt ? `${row.endedAt - row.startedAt}ms` : "—";
+        const selected = row.runId === wf.runs.selectedRunId ? " wf-run-row-active" : "";
+        return `<button type="button" class="wf-run-row${selected}"
+                      data-act="open-workflow-run"
+                      data-run-id="${escapeHtml3(row.runId)}">
+        <span class="wf-run-status wf-run-${escapeHtml3(row.status)}">${escapeHtml3(row.status)}</span>
+        <span class="wf-run-time">${escapeHtml3(new Date(row.startedAt).toLocaleString())}</span>
+        <span class="wf-run-meta">${escapeHtml3(t3.workflowRunStepCount(row.stepCount))} · ${escapeHtml3(dur)}</span>
+        <code class="wf-run-id">${escapeHtml3(row.runId)}</code>
+      </button>`;
+      }).join("");
+    }
+    async function openWorkflowRunDetail(runId) {
+      wf.runs.selectedRunId = runId;
+      renderWorkflowRunsList();
+      if (!dom.wfRunDetail) return;
+      dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml3(t3.loading)}</p>`;
+      try {
+        const r = await fetch(`/api/admin/workflows/runs/${encodeURIComponent(runId)}`);
+        if (!r.ok) {
+          const body2 = await r.json().catch(() => ({}));
+          dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml3(body2.error || `${r.status}`)}</p>`;
+          return;
+        }
+        const body = await r.json();
+        renderWorkflowRunDetail(body.run);
+      } catch (err) {
+        dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml3(err.message || String(err))}</p>`;
+      }
+    }
+    function renderWorkflowRunDetail(run) {
+      if (!dom.wfRunDetail) return;
+      const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t3.workflowRunStillRunning;
+      const finalBlock = run.status === "failed" ? `<p class="form-msg err">${escapeHtml3(run.error || "")}</p>` : run.finalOutput !== void 0 ? `<details open><summary>${escapeHtml3(t3.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml3(JSON.stringify(run.finalOutput, null, 2))}</pre></details>` : "";
+      const steps = (run.steps || []).map((s) => {
+        const sDur = s.endedAt ? `${s.endedAt - s.startedAt}ms` : "—";
+        const subtasks = (s.subTaskIds || []).length ? `<small class="hint">${escapeHtml3(t3.workflowRunSubTasks)}: ${s.subTaskIds.map(escapeHtml3).join(", ")}</small>` : "";
+        const out = s.output !== void 0 ? `<details><summary>${escapeHtml3(t3.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml3(JSON.stringify(s.output, null, 2))}</pre></details>` : "";
+        const err = s.error ? `<p class="form-msg err">${escapeHtml3(s.error)}</p>` : "";
+        return `<article class="wf-step">
+        <header>
+          <span class="wf-run-status wf-run-${escapeHtml3(s.status)}">${escapeHtml3(s.status)}</span>
+          <strong>${escapeHtml3(s.stepId)}</strong>
+          <span class="wf-step-meta">${escapeHtml3(sDur)} · ${escapeHtml3(t3.workflowRunAttempts(s.attempts || 1))}</span>
+        </header>
+        ${err}
+        ${subtasks}
+        ${out}
+      </article>`;
+      }).join("");
+      const payloadBlock = run.triggerPayload !== void 0 ? `<details><summary>${escapeHtml3(t3.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml3(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>` : "";
+      dom.wfRunDetail.innerHTML = `
+      <h4>
+        <span class="wf-run-status wf-run-${escapeHtml3(run.status)}">${escapeHtml3(run.status)}</span>
+        <code>${escapeHtml3(run.runId)}</code>
+      </h4>
+      <p class="hint">${escapeHtml3(t3.workflowRunDuration)}: ${escapeHtml3(dur)} · ${escapeHtml3(t3.workflowRunTriggeredBy)}: <code>${escapeHtml3(run.triggeredByTaskId)}</code></p>
+      ${payloadBlock}
+      ${steps || `<p class="empty">${escapeHtml3(t3.workflowRunNoSteps)}</p>`}
+      ${finalBlock}
+    `;
+    }
+    return {
+      setDom,
+      refreshWorkflows,
+      renderWorkflows,
+      removeWorkflow,
+      openWorkflowImportModal,
+      closeWorkflowImportModal,
+      submitWorkflowImport,
+      openWorkflowRunsModal,
+      closeWorkflowRunsModal,
+      openWorkflowRunDetail
+    };
+  }
+
   // admin-src/main.js
   (() => {
     const {
       $,
-      t: t3,
+      t: t4,
       applyStaticI18n,
       onLangChange,
-      escapeHtml: escapeHtml3,
+      escapeHtml: escapeHtml4,
       summarize,
       isBadResult,
       fetchJson: fetchJson3,
@@ -792,6 +1035,7 @@
     let dom = null;
     const services = createServices(ma);
     const managedAgents = createManagedAgents({ ma, openBundleImportModal });
+    const workflows = createWorkflows({ wf });
     function resolveDom() {
       dom = {
         participantsList: $("participants-list"),
@@ -984,14 +1228,14 @@
       if (!live) return "";
       const PREVIEW_MAX = 120;
       const truncated = live.text.length > PREVIEW_MAX ? live.text.slice(0, PREVIEW_MAX) + "…" : live.text;
-      const escaped = escapeHtml3(truncated || "(no text yet)");
+      const escaped = escapeHtml4(truncated || "(no text yet)");
       const tools = live.toolUses > 0 ? `<span class="live-stream-tools" title="tool_use chunks">🔧 ${live.toolUses}</span>` : "";
       if (live.isDone) {
         return `<div class="live-stream-indicator live-stream-done" title="stream ended">✓ ${tools}</div>`;
       }
       return `<div class="live-stream-indicator live-stream-active">
       <span class="live-stream-dot">●</span>
-      <span class="live-stream-by">${escapeHtml3(live.agentId)}</span>
+      <span class="live-stream-by">${escapeHtml4(live.agentId)}</span>
       ${tools}
       <span class="live-stream-text">${escaped}</span>
     </div>`;
@@ -1016,7 +1260,7 @@
           managedAgents.refreshManagedAgents().catch(() => {
           });
           if (typeof ev.data.id === "string" && ev.data.id.startsWith("workflow:")) {
-            refreshWorkflows().catch(() => {
+            workflows.refreshWorkflows().catch(() => {
             });
           }
           break;
@@ -1025,7 +1269,7 @@
           managedAgents.refreshManagedAgents().catch(() => {
           });
           if (typeof ev.data.id === "string" && ev.data.id.startsWith("workflow:")) {
-            refreshWorkflows().catch(() => {
+            workflows.refreshWorkflows().catch(() => {
             });
           }
           break;
@@ -1056,7 +1300,7 @@
           refresh().catch((err) => console.error("task refresh failed:", err));
           return;
         case "service_trashed":
-          services.showServicesToast(t3.servicesToastTrashed);
+          services.showServicesToast(t4.servicesToastTrashed);
           if (document.body.dataset.activeTab === "services") {
             services.refreshServices().catch((err) => console.warn("services refresh failed:", err));
           }
@@ -1078,7 +1322,7 @@
       renderTasks();
       renderKnownRoster();
       managedAgents.renderManagedAgents();
-      if (wf.available) renderWorkflows();
+      if (wf.available) workflows.renderWorkflows();
       renderAgentQuestionBadge();
       refreshLeaderboard().catch((err) => console.warn("leaderboard refresh failed:", err));
       refreshHealth().catch((err) => console.warn("health refresh failed:", err));
@@ -1127,17 +1371,17 @@
       }
       dom.hToday.textContent = String(todayTasks);
       dom.hOnline.textContent = String(onlineAgents + onlineHumans);
-      const subFn = t3.healthOnlineSub;
+      const subFn = t4.healthOnlineSub;
       dom.hOnlineSub.textContent = typeof subFn === "function" ? subFn(onlineAgents, onlineHumans) : `${onlineAgents} · ${onlineHumans}`;
       dom.hUnrated.textContent = lb ? String(lb.unratedTaskCount) : "—";
       const top3 = lb?.rows?.slice(0, 3) ?? [];
       if (top3.length === 0) {
         dom.hTop3.classList.add("empty");
-        dom.hTop3.textContent = t3.healthTop3Empty ?? "—";
+        dom.hTop3.textContent = t4.healthTop3Empty ?? "—";
       } else {
         dom.hTop3.classList.remove("empty");
         dom.hTop3.innerHTML = top3.map(
-          (row) => `<li><span class="top-id">${escapeHtml3(row.participantId)}</span><span class="top-score">${formatScore(row.totalContribution)}</span></li>`
+          (row) => `<li><span class="top-id">${escapeHtml4(row.participantId)}</span><span class="top-score">${formatScore(row.totalContribution)}</span></li>`
         ).join("");
       }
     }
@@ -1150,7 +1394,7 @@
       const root = dom.pendingAppsList;
       root.innerHTML = "";
       if (state.pendingApplications.length === 0) {
-        root.innerHTML = `<p class="empty">${escapeHtml3(t3.noPendingAgents)}</p>`;
+        root.innerHTML = `<p class="empty">${escapeHtml4(t4.noPendingAgents)}</p>`;
         dom.pendingAppsSection.classList.remove("has-pending");
         return;
       }
@@ -1158,26 +1402,26 @@
       for (const app of state.pendingApplications) {
         const card = document.createElement("div");
         card.className = "pending-app-card";
-        const agents = app.agents.map((a) => `<span class="cap">${escapeHtml3(a.id)}${a.capabilities && a.capabilities.length ? " · " + escapeHtml3(a.capabilities.join(",")) : ""}</span>`).join("");
+        const agents = app.agents.map((a) => `<span class="cap">${escapeHtml4(a.id)}${a.capabilities && a.capabilities.length ? " · " + escapeHtml4(a.capabilities.join(",")) : ""}</span>`).join("");
         const meta = app.meta || {};
         const metaBits = [];
-        if (meta.clientName) metaBits.push(`${escapeHtml3(t3.clientLabel)}: ${escapeHtml3(meta.clientName)}${meta.clientVersion ? " " + escapeHtml3(meta.clientVersion) : ""}`);
-        if (meta.remoteAddress) metaBits.push(`${escapeHtml3(t3.remoteAddress)}: ${escapeHtml3(meta.remoteAddress)}`);
-        metaBits.push(`${escapeHtml3(t3.pendingSince)}: ${new Date(app.pendingSince).toLocaleString()}`);
+        if (meta.clientName) metaBits.push(`${escapeHtml4(t4.clientLabel)}: ${escapeHtml4(meta.clientName)}${meta.clientVersion ? " " + escapeHtml4(meta.clientVersion) : ""}`);
+        if (meta.remoteAddress) metaBits.push(`${escapeHtml4(t4.remoteAddress)}: ${escapeHtml4(meta.remoteAddress)}`);
+        metaBits.push(`${escapeHtml4(t4.pendingSince)}: ${new Date(app.pendingSince).toLocaleString()}`);
         let servicesBlock = "";
         const services2 = Array.isArray(app.services) ? app.services : [];
         if (services2.length > 0) {
           const items = services2.map((s) => {
-            const owner = `${escapeHtml3(s.owner.kind)}/${escapeHtml3(s.owner.id)}`;
+            const owner = `${escapeHtml4(s.owner.kind)}/${escapeHtml4(s.owner.id)}`;
             const methodsArr = Array.isArray(s.methods) ? s.methods : [];
-            const methodsLabel = t3.appServicesMethodsAny || "(any method)";
-            const methodsTxt = methodsArr.length > 0 ? methodsArr.map((m) => `<code>${escapeHtml3(String(m))}</code>`).join(", ") : `<span class="muted">${escapeHtml3(methodsLabel)}</span>`;
-            return `<li><code>${escapeHtml3(s.type)}:${escapeHtml3(s.impl)}</code> <span class="muted">@</span> <code>${owner}</code> <span class="muted">·</span> ${methodsTxt}</li>`;
+            const methodsLabel = t4.appServicesMethodsAny || "(any method)";
+            const methodsTxt = methodsArr.length > 0 ? methodsArr.map((m) => `<code>${escapeHtml4(String(m))}</code>`).join(", ") : `<span class="muted">${escapeHtml4(methodsLabel)}</span>`;
+            return `<li><code>${escapeHtml4(s.type)}:${escapeHtml4(s.impl)}</code> <span class="muted">@</span> <code>${owner}</code> <span class="muted">·</span> ${methodsTxt}</li>`;
           }).join("");
-          const label = t3.appServicesRequested || "Services requested";
-          servicesBlock = `<div class="pending-services"><div class="pending-services-label">${escapeHtml3(label)}</div><ul class="pending-services-list">${items}</ul></div>`;
+          const label = t4.appServicesRequested || "Services requested";
+          servicesBlock = `<div class="pending-services"><div class="pending-services-label">${escapeHtml4(label)}</div><ul class="pending-services-list">${items}</ul></div>`;
         }
-        card.innerHTML = `<div class="t-head"><span class="t-title">${agents}</span></div><div class="pending-meta">${metaBits.join(" · ")}</div>` + servicesBlock + `<div class="pending-actions"><input class="reject-reason" placeholder="${escapeHtml3(t3.rejectReason)}" data-id="${escapeHtml3(app.id)}" /><button class="btn-approve" data-act="approve-app" data-id="${escapeHtml3(app.id)}">${escapeHtml3(t3.approve)}</button><button class="btn-reject" data-act="reject-app" data-id="${escapeHtml3(app.id)}">${escapeHtml3(t3.reject)}</button></div>`;
+        card.innerHTML = `<div class="t-head"><span class="t-title">${agents}</span></div><div class="pending-meta">${metaBits.join(" · ")}</div>` + servicesBlock + `<div class="pending-actions"><input class="reject-reason" placeholder="${escapeHtml4(t4.rejectReason)}" data-id="${escapeHtml4(app.id)}" /><button class="btn-approve" data-act="approve-app" data-id="${escapeHtml4(app.id)}">${escapeHtml4(t4.approve)}</button><button class="btn-reject" data-act="reject-app" data-id="${escapeHtml4(app.id)}">${escapeHtml4(t4.reject)}</button></div>`;
         root.appendChild(card);
       }
     }
@@ -1185,15 +1429,15 @@
       const root = dom.participantsList;
       root.innerHTML = "";
       if (state.participants.length === 0) {
-        root.innerHTML = `<p class="empty">${escapeHtml3(t3.noParticipants)}</p>`;
+        root.innerHTML = `<p class="empty">${escapeHtml4(t4.noParticipants)}</p>`;
         return;
       }
       for (const p of state.participants) {
         const div = document.createElement("div");
         div.className = `participant participant-${p.kind}`;
-        const caps = (p.capabilities || []).map((c) => `<span class="cap">${escapeHtml3(c)}</span>`).join("") || `<em class="empty">${escapeHtml3(t3.noCaps)}</em>`;
-        const kindLabel = t3.pKind[p.kind] || p.kind;
-        div.innerHTML = `<div class="p-head"><span class="p-kind">${escapeHtml3(kindLabel)}</span><span class="p-id">${escapeHtml3(p.id)}</span><span class="p-load">${escapeHtml3(t3.load)} ${p.load}</span></div><div class="p-caps">${caps}</div>`;
+        const caps = (p.capabilities || []).map((c) => `<span class="cap">${escapeHtml4(c)}</span>`).join("") || `<em class="empty">${escapeHtml4(t4.noCaps)}</em>`;
+        const kindLabel = t4.pKind[p.kind] || p.kind;
+        div.innerHTML = `<div class="p-head"><span class="p-kind">${escapeHtml4(kindLabel)}</span><span class="p-id">${escapeHtml4(p.id)}</span><span class="p-load">${escapeHtml4(t4.load)} ${p.load}</span></div><div class="p-caps">${caps}</div>`;
         root.appendChild(div);
       }
     }
@@ -1204,10 +1448,10 @@
       for (let i = state.transcript.length - 1; i >= 0; i--) {
         const e = state.transcript[i];
         const li = document.createElement("li");
-        const taskIdAttr = e.kind === "task_result" ? ` data-taskid="${escapeHtml3(e.data.taskId)}"` : "";
+        const taskIdAttr = e.kind === "task_result" ? ` data-taskid="${escapeHtml4(e.data.taskId)}"` : "";
         const clickableCls = e.kind === "task_result" ? " entry-clickable" : "";
         li.className = `entry entry-${e.kind}${clickableCls}` + (isBadResult(e) ? " bad" : "");
-        li.innerHTML = `<span class="seq">${e.seq}</span><span class="kind">${e.kind}</span><span class="body"${taskIdAttr}>${escapeHtml3(summarize(e))}</span>`;
+        li.innerHTML = `<span class="seq">${e.seq}</span><span class="kind">${e.kind}</span><span class="body"${taskIdAttr}>${escapeHtml4(summarize(e))}</span>`;
         root.appendChild(li);
       }
     }
@@ -1222,7 +1466,7 @@
       const filtered = state.tasks.filter((task) => taskFilter === "all" ? true : task.status === taskFilter).slice().reverse();
       root.innerHTML = "";
       if (filtered.length === 0) {
-        root.innerHTML = `<p class="empty">${escapeHtml3(t3.noTasks)}</p>`;
+        root.innerHTML = `<p class="empty">${escapeHtml4(t4.noTasks)}</p>`;
         return;
       }
       for (const v of filtered) {
@@ -1230,15 +1474,15 @@
         const div = document.createElement("div");
         div.className = `task-card task-${v.status}` + (isOpen ? " expanded" : "");
         div.dataset.taskId = v.id;
-        const statusLabel = v.status === "pending" ? t3.taskStatusPending : v.status === "done" ? t3.taskStatusDone : v.status === "failed" ? t3.taskStatusFailed : t3.taskStatusCancelled;
-        const title = v.task.title || t3.untitled;
+        const statusLabel = v.status === "pending" ? t4.taskStatusPending : v.status === "done" ? t4.taskStatusDone : v.status === "failed" ? t4.taskStatusFailed : t4.taskStatusCancelled;
+        const title = v.task.title || t4.untitled;
         const s = v.task.strategy;
         const target = s.kind === "explicit" ? `to=${s.to}` : s.kind === "capability" ? `caps=[${s.capabilities.join(",")}]` : "broadcast";
         const canRetry = v.status === "failed" || v.status === "cancelled";
         const caret = isOpen ? "▾" : "▸";
-        const headHtml = `<div class="task-head" data-act="toggle-task" data-id="${escapeHtml3(v.id)}" role="button" tabindex="0" aria-expanded="${isOpen ? "true" : "false"}"><span class="task-caret">${caret}</span><span class="task-status task-status-${v.status}">${escapeHtml3(statusLabel)}</span><span class="task-title">${escapeHtml3(title)}</span><span class="task-strategy">${escapeHtml3(s.kind)} · ${escapeHtml3(target)}</span></div>`;
-        const metaHtml = `<div class="task-metrics">${taskMetricsHtml(v)}</div><div class="task-meta"><code class="task-id" data-act="copy-task-id" data-id="${escapeHtml3(v.id)}" title="${escapeHtml3(t3.taskIdHint)}">${escapeHtml3(v.id.slice(0, 8))}…</code>` + (v.result ? ` · ${escapeHtml3(resultSummary(v.result))}` : "") + `</div>`;
-        const retryHtml = canRetry ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml3(v.id)}">${escapeHtml3(t3.retry)}</button></div>` : "";
+        const headHtml = `<div class="task-head" data-act="toggle-task" data-id="${escapeHtml4(v.id)}" role="button" tabindex="0" aria-expanded="${isOpen ? "true" : "false"}"><span class="task-caret">${caret}</span><span class="task-status task-status-${v.status}">${escapeHtml4(statusLabel)}</span><span class="task-title">${escapeHtml4(title)}</span><span class="task-strategy">${escapeHtml4(s.kind)} · ${escapeHtml4(target)}</span></div>`;
+        const metaHtml = `<div class="task-metrics">${taskMetricsHtml(v)}</div><div class="task-meta"><code class="task-id" data-act="copy-task-id" data-id="${escapeHtml4(v.id)}" title="${escapeHtml4(t4.taskIdHint)}">${escapeHtml4(v.id.slice(0, 8))}…</code>` + (v.result ? ` · ${escapeHtml4(resultSummary(v.result))}` : "") + `</div>`;
+        const retryHtml = canRetry ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml4(v.id)}">${escapeHtml4(t4.retry)}</button></div>` : "";
         const liveHtml = renderLiveStreamIndicator(v.id);
         const detailHtml = isOpen ? renderTaskDetail(v) : "";
         div.innerHTML = headHtml + metaHtml + liveHtml + retryHtml + detailHtml;
@@ -1246,10 +1490,10 @@
       }
     }
     function resultSummary(r) {
-      if (r.kind === "ok") return t3.sumOk(r.by);
-      if (r.kind === "failed") return t3.sumFailed(r.by, r.error);
-      if (r.kind === "cancelled") return t3.sumCancelled(r.reason);
-      return t3.sumNoParticipant(r.reason);
+      if (r.kind === "ok") return t4.sumOk(r.by);
+      if (r.kind === "failed") return t4.sumFailed(r.by, r.error);
+      if (r.kind === "cancelled") return t4.sumCancelled(r.reason);
+      return t4.sumNoParticipant(r.reason);
     }
     function renderTaskDetail(v) {
       const sections = [];
@@ -1260,14 +1504,14 @@
       const completed = v.completedAt ? new Date(v.completedAt).toLocaleString() : "—";
       const dur = v.completedAt ? formatDuration(v.completedAt - v.createdAt) : "—";
       sections.push(
-        `<div class="task-detail-section task-detail-timing"><span><strong>${escapeHtml3(t3.detailCreated)}</strong> ${escapeHtml3(created)}</span><span><strong>${escapeHtml3(t3.detailCompleted)}</strong> ${escapeHtml3(completed)}</span><span><strong>${escapeHtml3(t3.detailDuration)}</strong> ${escapeHtml3(dur)}</span></div>`
+        `<div class="task-detail-section task-detail-timing"><span><strong>${escapeHtml4(t4.detailCreated)}</strong> ${escapeHtml4(created)}</span><span><strong>${escapeHtml4(t4.detailCompleted)}</strong> ${escapeHtml4(completed)}</span><span><strong>${escapeHtml4(t4.detailDuration)}</strong> ${escapeHtml4(dur)}</span></div>`
       );
       if (Array.isArray(v.task.ancestry) && v.task.ancestry.length > 0) {
         const chain = v.task.ancestry.map((node) => {
           const id = String(node.taskId || "");
           const idShort = id ? id.slice(0, 8) + "…" : "?";
-          const by = escapeHtml3(String(node.by || "?"));
-          return `<li><code>${by}</code> <span class="anc-tid" title="${escapeHtml3(id)}">${escapeHtml3(idShort)}</span></li>`;
+          const by = escapeHtml4(String(node.by || "?"));
+          return `<li><code>${by}</code> <span class="anc-tid" title="${escapeHtml4(id)}">${escapeHtml4(idShort)}</span></li>`;
         }).join(' <span class="anc-arrow">→</span> ');
         sections.push(
           `<div class="task-detail-section task-detail-ancestry"><strong>↰ dispatch chain (${v.task.ancestry.length}):</strong> <ol class="anc-chain">${chain}</ol></div>`
@@ -1276,7 +1520,7 @@
       const mm = extractMultimodalBlocks(v.task.payload);
       const mmHtml = mm.length > 0 ? `<div class="task-detail-multimodal">${mm.map(renderMultimodalBlock).join("")}</div>` : "";
       sections.push(
-        `<details class="task-detail-section" open><summary>${escapeHtml3(t3.detailPayload)}</summary>` + mmHtml + `<pre class="task-detail-pre">${escapeHtml3(formatJsonPretty(v.task.payload))}</pre></details>`
+        `<details class="task-detail-section" open><summary>${escapeHtml4(t4.detailPayload)}</summary>` + mmHtml + `<pre class="task-detail-pre">${escapeHtml4(formatJsonPretty(v.task.payload))}</pre></details>`
       );
       if (v.result) {
         sections.push(renderResultBlock(v.result));
@@ -1284,13 +1528,13 @@
       if (Array.isArray(v.evaluations) && v.evaluations.length > 0) {
         const rows = v.evaluations.map((ev) => {
           const when = ev.ts ? new Date(ev.ts).toLocaleString() : "";
-          const rating = typeof ev.rating === "number" ? `★ ${formatScore(ev.rating)}/5` : t3.detailCommentOnly;
-          const comment = ev.comment ? escapeHtml3(ev.comment) : "";
-          const author = ev.from ? `<code>${escapeHtml3(ev.from)}</code>` : "";
-          return `<li><span class="ev-rating">${escapeHtml3(rating)}</span>` + (author ? ` <span class="ev-from">${author}</span>` : "") + (when ? ` <span class="ev-ts">${escapeHtml3(when)}</span>` : "") + (comment ? `<div class="ev-comment">${comment}</div>` : "") + `</li>`;
+          const rating = typeof ev.rating === "number" ? `★ ${formatScore(ev.rating)}/5` : t4.detailCommentOnly;
+          const comment = ev.comment ? escapeHtml4(ev.comment) : "";
+          const author = ev.from ? `<code>${escapeHtml4(ev.from)}</code>` : "";
+          return `<li><span class="ev-rating">${escapeHtml4(rating)}</span>` + (author ? ` <span class="ev-from">${author}</span>` : "") + (when ? ` <span class="ev-ts">${escapeHtml4(when)}</span>` : "") + (comment ? `<div class="ev-comment">${comment}</div>` : "") + `</li>`;
         }).join("");
         sections.push(
-          `<details class="task-detail-section" open><summary>${escapeHtml3(t3.detailEvaluations)} (${v.evaluations.length})</summary><ul class="task-detail-evals">${rows}</ul></details>`
+          `<details class="task-detail-section" open><summary>${escapeHtml4(t4.detailEvaluations)} (${v.evaluations.length})</summary><ul class="task-detail-evals">${rows}</ul></details>`
         );
       }
       if (v.status === "done" || v.status === "failed") {
@@ -1303,24 +1547,24 @@
         const out = r.output;
         if (out && typeof out === "object" && typeof out.text === "string") {
           const meta = [];
-          if (out.by) meta.push(`${escapeHtml3(t3.detailBy)} <code>${escapeHtml3(out.by)}</code>`);
-          if (out.stopReason) meta.push(`${escapeHtml3(t3.detailStopReason)} ${escapeHtml3(out.stopReason)}`);
+          if (out.by) meta.push(`${escapeHtml4(t4.detailBy)} <code>${escapeHtml4(out.by)}</code>`);
+          if (out.stopReason) meta.push(`${escapeHtml4(t4.detailStopReason)} ${escapeHtml4(out.stopReason)}`);
           if (out.usage) {
             const u = out.usage;
             const tokens = [];
             if (typeof u.inputTokens === "number") tokens.push(`in ${u.inputTokens}`);
             if (typeof u.outputTokens === "number") tokens.push(`out ${u.outputTokens}`);
-            if (tokens.length) meta.push(`${escapeHtml3(t3.detailUsage)} ${escapeHtml3(tokens.join(" / "))}`);
+            if (tokens.length) meta.push(`${escapeHtml4(t4.detailUsage)} ${escapeHtml4(tokens.join(" / "))}`);
           }
-          return `<details class="task-detail-section" open><summary>${escapeHtml3(t3.detailOutput)}</summary>` + (meta.length ? `<div class="task-detail-meta">${meta.join(" · ")}</div>` : "") + `<pre class="task-detail-pre task-detail-text">${escapeHtml3(out.text)}</pre></details>`;
+          return `<details class="task-detail-section" open><summary>${escapeHtml4(t4.detailOutput)}</summary>` + (meta.length ? `<div class="task-detail-meta">${meta.join(" · ")}</div>` : "") + `<pre class="task-detail-pre task-detail-text">${escapeHtml4(out.text)}</pre></details>`;
         }
-        return `<details class="task-detail-section" open><summary>${escapeHtml3(t3.detailOutput)}</summary><div class="task-detail-meta">${escapeHtml3(t3.detailBy)} <code>${escapeHtml3(r.by)}</code></div><pre class="task-detail-pre">${escapeHtml3(formatJsonPretty(out))}</pre></details>`;
+        return `<details class="task-detail-section" open><summary>${escapeHtml4(t4.detailOutput)}</summary><div class="task-detail-meta">${escapeHtml4(t4.detailBy)} <code>${escapeHtml4(r.by)}</code></div><pre class="task-detail-pre">${escapeHtml4(formatJsonPretty(out))}</pre></details>`;
       }
       const summary = resultSummary(r);
-      return `<div class="task-detail-section task-detail-error"><strong>${escapeHtml3(t3.detailOutput)}</strong> ${escapeHtml3(summary)}</div>`;
+      return `<div class="task-detail-section task-detail-error"><strong>${escapeHtml4(t4.detailOutput)}</strong> ${escapeHtml4(summary)}</div>`;
     }
     function renderInlineEvalForm(taskId) {
-      return `<div class="task-detail-section task-detail-eval"><strong>${escapeHtml3(t3.detailEvaluate)}</strong><div class="inline-eval-row"><label>${escapeHtml3(t3.evaluateRating)}<input type="number" min="0" max="5" step="0.1" data-inline-eval-rating="${escapeHtml3(taskId)}" /></label><label class="inline-eval-comment-label">${escapeHtml3(t3.evaluateComment)}<textarea rows="2" data-inline-eval-comment="${escapeHtml3(taskId)}"></textarea></label></div><div class="inline-eval-actions"><button data-act="inline-eval-submit" data-id="${escapeHtml3(taskId)}">${escapeHtml3(t3.evaluateButton)}</button><span class="inline-eval-msg" data-inline-eval-msg="${escapeHtml3(taskId)}"></span></div></div>`;
+      return `<div class="task-detail-section task-detail-eval"><strong>${escapeHtml4(t4.detailEvaluate)}</strong><div class="inline-eval-row"><label>${escapeHtml4(t4.evaluateRating)}<input type="number" min="0" max="5" step="0.1" data-inline-eval-rating="${escapeHtml4(taskId)}" /></label><label class="inline-eval-comment-label">${escapeHtml4(t4.evaluateComment)}<textarea rows="2" data-inline-eval-comment="${escapeHtml4(taskId)}"></textarea></label></div><div class="inline-eval-actions"><button data-act="inline-eval-submit" data-id="${escapeHtml4(taskId)}">${escapeHtml4(t4.evaluateButton)}</button><span class="inline-eval-msg" data-inline-eval-msg="${escapeHtml4(taskId)}"></span></div></div>`;
     }
     function formatJsonPretty(value) {
       try {
@@ -1353,7 +1597,7 @@
       const comment = (commentEl?.value ?? "").trim() || void 0;
       if (rating == null && !comment) {
         if (msgEl) {
-          msgEl.textContent = t3.evaluateEmpty;
+          msgEl.textContent = t4.evaluateEmpty;
           msgEl.classList.add("err");
         }
         return;
@@ -1366,13 +1610,13 @@
           body: JSON.stringify({ taskId, rating, comment })
         });
         if (msgEl) {
-          msgEl.textContent = t3.evaluateSuccess;
+          msgEl.textContent = t4.evaluateSuccess;
           msgEl.classList.add("ok");
         }
         if (commentEl) commentEl.value = "";
       } catch (err) {
         if (msgEl) {
-          msgEl.textContent = t3.failedAlert(err.message || String(err));
+          msgEl.textContent = t4.failedAlert(err.message || String(err));
           msgEl.classList.add("err");
         }
       } finally {
@@ -1387,80 +1631,6 @@
         const card = document.querySelector(sel);
         if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
       });
-    }
-    async function refreshWorkflows() {
-      if (!dom?.wfSection) return;
-      try {
-        const r = await fetch("/api/admin/workflows");
-        if (r.status === 404) {
-          wf.available = false;
-          dom.wfSection.hidden = true;
-          return;
-        }
-        if (!r.ok) {
-          console.warn("refreshWorkflows: HTTP", r.status);
-          return;
-        }
-        const body = await r.json();
-        wf.available = true;
-        wf.workflows = body.workflows || [];
-        dom.wfSection.hidden = false;
-        renderWorkflows();
-      } catch (err) {
-        console.warn("refreshWorkflows:", err);
-      }
-    }
-    function renderWorkflows() {
-      if (!dom.wfList) return;
-      if (dom.wfSummary) {
-        dom.wfSummary.textContent = wf.workflows.length === 0 ? "" : t3.workflowsSummary(wf.workflows.length);
-      }
-      if (wf.workflows.length === 0) {
-        dom.wfList.innerHTML = `<p class="empty">${escapeHtml3(t3.workflowsEmpty)}</p>`;
-        return;
-      }
-      dom.wfList.innerHTML = wf.workflows.map((w) => {
-        const name = w.name ? escapeHtml3(w.name) : escapeHtml3(w.id);
-        const desc = w.description ? `<p class="hint">${escapeHtml3(w.description)}</p>` : "";
-        const file = w.file ? `<small class="hint">${escapeHtml3(w.file)}</small>` : "";
-        return `<article class="ma-card">
-        <header>
-          <strong>${name}</strong>
-          <code>${escapeHtml3(w.participantId)}</code>
-          <button type="button" class="ma-btn"
-                  data-act="start-workflow"
-                  data-id="${escapeHtml3(w.id)}">开始</button>
-          <button type="button" class="ma-btn ma-btn-secondary"
-                  data-act="open-workflow-runs"
-                  data-id="${escapeHtml3(w.id)}">${escapeHtml3(t3.workflowRunsBtn)}</button>
-          <button type="button" class="ma-btn ma-btn-secondary"
-                  data-act="remove-workflow"
-                  data-id="${escapeHtml3(w.id)}">${escapeHtml3(t3.workflowRemoveBtn)}</button>
-        </header>
-        ${desc}
-        <ul class="ma-meta">
-          <li><span class="ma-label">${escapeHtml3(t3.workflowTriggerLabel)}:</span> <code>${escapeHtml3(w.triggerCapability)}</code></li>
-          <li>${escapeHtml3(t3.workflowStepsLabel(w.stepCount))}</li>
-        </ul>
-        ${file}
-      </article>`;
-      }).join("");
-    }
-    async function removeWorkflow(id) {
-      if (!confirm(t3.confirmRemoveWorkflow(id))) return;
-      try {
-        const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}`, {
-          method: "DELETE"
-        });
-        if (!r.ok) {
-          const body = await r.json().catch(() => ({}));
-          alert(t3.failedAlert(body.error || `${r.status}`));
-          return;
-        }
-        await refreshWorkflows();
-      } catch (err) {
-        alert(t3.failedAlert(err.message || String(err)));
-      }
     }
     async function refreshGrowthReports() {
       if (!dom?.grSection) return;
@@ -1500,15 +1670,15 @@
         const sizeKb = (rep.sizeBytes / 1024).toFixed(1) + " KB";
         const dlHref = "/api/admin/growth-reports/download?path=" + encodeURIComponent(rep.path);
         return `<tr>
-        <td>${escapeHtml3(when)}</td>
-        <td><code>${escapeHtml3(rep.caseId)}</code></td>
-        <td>${escapeHtml3(sizeKb)}</td>
+        <td>${escapeHtml4(when)}</td>
+        <td><code>${escapeHtml4(rep.caseId)}</code></td>
+        <td>${escapeHtml4(sizeKb)}</td>
         <td>
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="view-growth-report"
-                  data-path="${escapeHtml3(rep.path)}"
-                  data-when="${escapeHtml3(when)}">查看</button>
-          <a class="ma-btn ma-btn-secondary" href="${escapeHtml3(dlHref)}" download>下载</a>
+                  data-path="${escapeHtml4(rep.path)}"
+                  data-when="${escapeHtml4(when)}">查看</button>
+          <a class="ma-btn ma-btn-secondary" href="${escapeHtml4(dlHref)}" download>下载</a>
         </td>
       </tr>`;
       }).join("");
@@ -1562,7 +1732,7 @@
         const text = await r.text();
         dom.grReportBody.innerHTML = renderMarkdown(text);
       } catch (err) {
-        dom.grReportBody.innerHTML = `<p class="hint">加载失败:${escapeHtml3(err.message || String(err))}</p>`;
+        dom.grReportBody.innerHTML = `<p class="hint">加载失败:${escapeHtml4(err.message || String(err))}</p>`;
       }
     }
     function closeGrowthReport() {
@@ -1580,8 +1750,8 @@
         dom.wfStartTitle.textContent = w.name || w.id;
       }
       if (dom.wfStartDesc) {
-        const cap = `<code>${escapeHtml3(w.triggerCapability)}</code>`;
-        dom.wfStartDesc.innerHTML = w.description ? `${escapeHtml3(w.description)}<br/><small>派发能力:${cap}</small>` : `派发能力:${cap}`;
+        const cap = `<code>${escapeHtml4(w.triggerCapability)}</code>`;
+        dom.wfStartDesc.innerHTML = w.description ? `${escapeHtml4(w.description)}<br/><small>派发能力:${cap}</small>` : `派发能力:${cap}`;
       }
       renderWorkflowStartFields(w.payloadSchema);
       if (dom.wfStartMsg) {
@@ -1616,24 +1786,24 @@
       const ctx = typeof payload.context === "string" ? payload.context : "";
       const fromAgent = typeof payload.fromAgent === "string" ? payload.fromAgent : "(agent)";
       const fields = qs.map((q, i) => renderAgentQuestionField(v.id, q, i)).join("");
-      return `<div class="task-detail-section agent-question-form" data-aq-id="${escapeHtml3(v.id)}"><div class="aq-header"><strong>🤖 ${escapeHtml3(fromAgent)} 想再问你 ${qs.length} 件事</strong>` + (ctx ? `<p class="aq-context">${escapeHtml3(ctx)}</p>` : "") + `</div><div class="aq-fields">${fields}</div><div class="aq-actions"><button class="primary" data-act="submit-agent-question" data-id="${escapeHtml3(v.id)}">提交回答 (agent 会接着跑)</button><button class="secondary" data-act="skip-agent-question" data-id="${escapeHtml3(v.id)}" title="跳过 — agent 会按它第一轮的判断继续">跳过</button><span class="aq-msg" data-aq-msg="${escapeHtml3(v.id)}"></span></div></div>`;
+      return `<div class="task-detail-section agent-question-form" data-aq-id="${escapeHtml4(v.id)}"><div class="aq-header"><strong>🤖 ${escapeHtml4(fromAgent)} 想再问你 ${qs.length} 件事</strong>` + (ctx ? `<p class="aq-context">${escapeHtml4(ctx)}</p>` : "") + `</div><div class="aq-fields">${fields}</div><div class="aq-actions"><button class="primary" data-act="submit-agent-question" data-id="${escapeHtml4(v.id)}">提交回答 (agent 会接着跑)</button><button class="secondary" data-act="skip-agent-question" data-id="${escapeHtml4(v.id)}" title="跳过 — agent 会按它第一轮的判断继续">跳过</button><span class="aq-msg" data-aq-msg="${escapeHtml4(v.id)}"></span></div></div>`;
     }
     function renderAgentQuestionField(taskId, q, idx) {
       const fid = q && typeof q.id === "string" ? q.id : `q${idx}`;
       const fieldDomId = `aq-${taskId}-${fid}`;
       const label = q && typeof q.label === "string" ? q.label : `Q${idx + 1}`;
-      const hint = q && typeof q.hint === "string" ? `<small class="hint">${escapeHtml3(q.hint)}</small>` : "";
+      const hint = q && typeof q.hint === "string" ? `<small class="hint">${escapeHtml4(q.hint)}</small>` : "";
       const required = q && q.required ? ' <span style="color:#c33">*</span>' : "";
       let control;
       if (q && q.type === "text") {
-        control = `<input type="text" id="${escapeHtml3(fieldDomId)}" data-aq-fid="${escapeHtml3(fid)}" />`;
+        control = `<input type="text" id="${escapeHtml4(fieldDomId)}" data-aq-fid="${escapeHtml4(fid)}" />`;
       } else if (q && q.type === "number") {
-        control = `<input type="number" id="${escapeHtml3(fieldDomId)}" data-aq-fid="${escapeHtml3(fid)}" />`;
+        control = `<input type="number" id="${escapeHtml4(fieldDomId)}" data-aq-fid="${escapeHtml4(fid)}" />`;
       } else {
         const rows = q && typeof q.rows === "number" && q.rows > 0 ? q.rows : 4;
-        control = `<textarea id="${escapeHtml3(fieldDomId)}" data-aq-fid="${escapeHtml3(fid)}" rows="${rows}"></textarea>`;
+        control = `<textarea id="${escapeHtml4(fieldDomId)}" data-aq-fid="${escapeHtml4(fid)}" rows="${rows}"></textarea>`;
       }
-      return `<label class="aq-field"><span>${escapeHtml3(label)}${required}</span>` + control + hint + `</label>`;
+      return `<label class="aq-field"><span>${escapeHtml4(label)}${required}</span>` + control + hint + `</label>`;
     }
     async function submitAgentQuestion(taskId) {
       const card = document.querySelector(`.agent-question-form[data-aq-id="${cssEscape(taskId)}"]`);
@@ -1756,23 +1926,23 @@
       if (b.type === "file_ref") {
         const url = `/api/admin/uploads?id=${encodeURIComponent(b.artifactId)}`;
         const tail = b.artifactId.split("/").pop() || b.artifactId;
-        const meta = `<div class="mm-meta"><code>${escapeHtml3(b.mime)}</code> · ${escapeHtml3(tail)}</div>`;
+        const meta = `<div class="mm-meta"><code>${escapeHtml4(b.mime)}</code> · ${escapeHtml4(tail)}</div>`;
         if (b.mime.startsWith("image/")) {
           return `<div class="mm-block mm-image">
-          <a href="${escapeHtml3(url)}" target="_blank" rel="noopener">
-            <img src="${escapeHtml3(url)}" alt="${escapeHtml3(tail)}" loading="lazy" />
+          <a href="${escapeHtml4(url)}" target="_blank" rel="noopener">
+            <img src="${escapeHtml4(url)}" alt="${escapeHtml4(tail)}" loading="lazy" />
           </a>
           ${meta}
         </div>`;
         }
         if (b.mime.startsWith("audio/")) {
           return `<div class="mm-block mm-audio">
-          <audio controls src="${escapeHtml3(url)}"></audio>
+          <audio controls src="${escapeHtml4(url)}"></audio>
           ${meta}
         </div>`;
         }
         return `<div class="mm-block mm-file">
-        <a href="${escapeHtml3(url)}" download="${escapeHtml3(tail)}">📎 ${escapeHtml3(tail)}</a>
+        <a href="${escapeHtml4(url)}" download="${escapeHtml4(tail)}">📎 ${escapeHtml4(tail)}</a>
         ${meta}
       </div>`;
       }
@@ -1780,19 +1950,19 @@
         const src = imageOrAudioSourceToSrc(b.source);
         if (!src) return renderUnknownBlock(b);
         return `<div class="mm-block mm-image">
-        <a href="${escapeHtml3(src.url)}" target="_blank" rel="noopener">
-          <img src="${escapeHtml3(src.url)}" alt="image" loading="lazy" />
+        <a href="${escapeHtml4(src.url)}" target="_blank" rel="noopener">
+          <img src="${escapeHtml4(src.url)}" alt="image" loading="lazy" />
         </a>
-        <div class="mm-meta"><code>${escapeHtml3(src.label)}</code></div>
+        <div class="mm-meta"><code>${escapeHtml4(src.label)}</code></div>
       </div>`;
       }
       if (b.type === "audio") {
         const src = imageOrAudioSourceToSrc(b.source);
         if (!src) return renderUnknownBlock(b);
-        const fmt = b.format ? ` · ${escapeHtml3(b.format)}` : "";
+        const fmt = b.format ? ` · ${escapeHtml4(b.format)}` : "";
         return `<div class="mm-block mm-audio">
-        <audio controls src="${escapeHtml3(src.url)}"></audio>
-        <div class="mm-meta"><code>${escapeHtml3(src.label)}</code>${fmt}</div>
+        <audio controls src="${escapeHtml4(src.url)}"></audio>
+        <div class="mm-meta"><code>${escapeHtml4(src.label)}</code>${fmt}</div>
       </div>`;
       }
       return renderUnknownBlock(b);
@@ -1818,26 +1988,26 @@
     }
     function renderUnknownBlock(b) {
       return `<div class="mm-block mm-unknown">
-      <small>未识别的 ${escapeHtml3(String(b && b.type) || "unknown")} 块</small>
+      <small>未识别的 ${escapeHtml4(String(b && b.type) || "unknown")} 块</small>
     </div>`;
     }
     function renderOneField(f) {
-      const id = `wf-start-field-${escapeHtml3(f.id)}`;
+      const id = `wf-start-field-${escapeHtml4(f.id)}`;
       const required = f.required ? ' <span style="color:#c33">*</span>' : "";
-      const hint = f.hint ? `<small class="hint">${escapeHtml3(f.hint)}</small>` : "";
-      const ph = f.placeholder ? ` placeholder="${escapeHtml3(f.placeholder)}"` : "";
-      const defaultV = f.defaultValue != null ? escapeHtml3(String(f.defaultValue)) : "";
+      const hint = f.hint ? `<small class="hint">${escapeHtml4(f.hint)}</small>` : "";
+      const ph = f.placeholder ? ` placeholder="${escapeHtml4(f.placeholder)}"` : "";
+      const defaultV = f.defaultValue != null ? escapeHtml4(String(f.defaultValue)) : "";
       let control;
       if (f.type === "textarea") {
         const rows = typeof f.rows === "number" ? f.rows : 4;
         control = `<textarea id="${id}" rows="${rows}"${ph}>${defaultV}</textarea>`;
       } else if (f.type === "select") {
-        const opts = (f.options || []).map((o) => `<option value="${escapeHtml3(o.value)}"${o.value === f.defaultValue ? " selected" : ""}>${escapeHtml3(o.label)}</option>`).join("");
+        const opts = (f.options || []).map((o) => `<option value="${escapeHtml4(o.value)}"${o.value === f.defaultValue ? " selected" : ""}>${escapeHtml4(o.label)}</option>`).join("");
         control = `<select id="${id}">${opts}</select>`;
       } else if (f.type === "number") {
         control = `<input type="number" id="${id}"${ph} value="${defaultV}" />`;
       } else if (f.type === "file") {
-        const accept = Array.isArray(f.accept) && f.accept.length > 0 ? ` accept="${escapeHtml3(f.accept.join(","))}"` : "";
+        const accept = Array.isArray(f.accept) && f.accept.length > 0 ? ` accept="${escapeHtml4(f.accept.join(","))}"` : "";
         const sizeHint = typeof f.maxSizeMb === "number" ? `<small class="hint">最大 ${f.maxSizeMb} MB</small>` : "";
         control = `<input type="file" id="${id}" data-aipe-file="1"${accept} />
         <span class="aipe-file-status" data-aipe-file-status="${id}" style="font-size:0.85em;color:#666;margin-left:0.5em;"></span>
@@ -1846,7 +2016,7 @@
         control = `<input type="text" id="${id}"${ph} value="${defaultV}" />`;
       }
       return `<label>
-      <span>${escapeHtml3(f.label)}${required}</span>
+      <span>${escapeHtml4(f.label)}${required}</span>
       ${control}
       ${hint}
     </label>`;
@@ -1892,10 +2062,10 @@
                 statusEl.style.color = "#080";
                 if (ref.mime && ref.mime.startsWith("image/")) {
                   const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`;
-                  statusEl.innerHTML = `<span>已上传 (${escapeHtml3(formatBytes(ref.size))})</span> <img src="${escapeHtml3(url)}" alt="preview" style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`;
+                  statusEl.innerHTML = `<span>已上传 (${escapeHtml4(formatBytes(ref.size))})</span> <img src="${escapeHtml4(url)}" alt="preview" style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`;
                 } else if (ref.mime && ref.mime.startsWith("audio/")) {
                   const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`;
-                  statusEl.innerHTML = `<span>已上传 (${escapeHtml3(formatBytes(ref.size))})</span> <audio controls src="${escapeHtml3(url)}" style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`;
+                  statusEl.innerHTML = `<span>已上传 (${escapeHtml4(formatBytes(ref.size))})</span> <audio controls src="${escapeHtml4(url)}" style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`;
                 } else {
                   statusEl.textContent = `已上传 (${formatBytes(ref.size)})`;
                 }
@@ -2026,7 +2196,7 @@
         dom.bundleImportMsg.classList.add("ok");
         await managedAgents.refreshManagedAgents().catch(() => {
         });
-        await refreshWorkflows().catch(() => {
+        await workflows.refreshWorkflows().catch(() => {
         });
         setTimeout(closeBundleImportModal, 1200);
       } catch (err) {
@@ -2034,57 +2204,12 @@
         dom.bundleImportMsg.classList.add("err");
       }
     }
-    function openWorkflowImportModal() {
-      dom.wfImportText.value = "";
-      dom.wfImportFile.value = "";
-      dom.wfImportMsg.textContent = "";
-      dom.wfImportMsg.classList.remove("ok", "err");
-      dom.wfImportModal.hidden = false;
-    }
-    function closeWorkflowImportModal() {
-      dom.wfImportModal.hidden = true;
-    }
-    async function submitWorkflowImport() {
-      dom.wfImportMsg.textContent = "";
-      dom.wfImportMsg.classList.remove("ok", "err");
-      let text = dom.wfImportText.value;
-      const file = dom.wfImportFile.files?.[0];
-      if (file && !text) {
-        text = await file.text();
-      }
-      if (!text || !text.trim()) {
-        dom.wfImportMsg.textContent = t3.importEmpty;
-        dom.wfImportMsg.classList.add("err");
-        return;
-      }
-      try {
-        const r = await fetch("/api/admin/workflows/import", {
-          method: "POST",
-          headers: { "content-type": "text/plain" },
-          body: text
-        });
-        const body = await r.json().catch(() => ({}));
-        if (!r.ok) {
-          dom.wfImportMsg.textContent = t3.failedAlert(body.error || `${r.status}`);
-          dom.wfImportMsg.classList.add("err");
-          return;
-        }
-        const id = body.workflow?.id || "?";
-        dom.wfImportMsg.textContent = t3.workflowImportDone(id);
-        dom.wfImportMsg.classList.add("ok");
-        await refreshWorkflows();
-        setTimeout(closeWorkflowImportModal, 700);
-      } catch (err) {
-        dom.wfImportMsg.textContent = t3.failedAlert(err.message || String(err));
-        dom.wfImportMsg.classList.add("err");
-      }
-    }
     const wfAssist = window.AipeHub && window.AipeHub.installWorkflowAssist ? window.AipeHub.installWorkflowAssist({
       dom,
       state,
       ma,
       wf,
-      refreshWorkflows: () => refreshWorkflows()
+      refreshWorkflows: () => workflows.refreshWorkflows()
     }) : null;
     function openWorkflowAssistModal() {
       wfAssist?.open();
@@ -2098,117 +2223,14 @@
     function saveAssistedWorkflow() {
       return wfAssist?.save();
     }
-    async function openWorkflowRunsModal(workflowId) {
-      wf.runs.workflowId = workflowId;
-      wf.runs.selectedRunId = null;
-      wf.runs.rows = [];
-      if (dom.wfRunsTarget) dom.wfRunsTarget.textContent = workflowId;
-      if (dom.wfRunsMsg) dom.wfRunsMsg.textContent = "";
-      if (dom.wfRunsList) dom.wfRunsList.innerHTML = `<p class="hint">${escapeHtml3(t3.loading)}</p>`;
-      if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = true;
-      if (dom.wfRunDetail) dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml3(t3.workflowRunsPickHint)}</p>`;
-      if (dom.wfRunsModal) dom.wfRunsModal.hidden = false;
-      try {
-        const url = `/api/admin/workflows/runs?workflowId=${encodeURIComponent(workflowId)}&limit=100`;
-        const r = await fetch(url);
-        if (!r.ok) {
-          const body2 = await r.json().catch(() => ({}));
-          dom.wfRunsList.innerHTML = "";
-          dom.wfRunsMsg.textContent = t3.failedAlert(body2.error || `${r.status}`);
-          dom.wfRunsMsg.classList.add("err");
-          return;
-        }
-        const body = await r.json();
-        wf.runs.rows = body.runs || [];
-        renderWorkflowRunsList();
-      } catch (err) {
-        dom.wfRunsList.innerHTML = "";
-        dom.wfRunsMsg.textContent = t3.failedAlert(err.message || String(err));
-        dom.wfRunsMsg.classList.add("err");
-      }
-    }
-    function closeWorkflowRunsModal() {
-      if (dom.wfRunsModal) dom.wfRunsModal.hidden = true;
-    }
-    function renderWorkflowRunsList() {
-      if (!dom.wfRunsList) return;
-      if (wf.runs.rows.length === 0) {
-        dom.wfRunsList.innerHTML = "";
-        if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = false;
-        return;
-      }
-      if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = true;
-      dom.wfRunsList.innerHTML = wf.runs.rows.map((row) => {
-        const dur = row.endedAt ? `${row.endedAt - row.startedAt}ms` : "—";
-        const selected = row.runId === wf.runs.selectedRunId ? " wf-run-row-active" : "";
-        return `<button type="button" class="wf-run-row${selected}"
-                      data-act="open-workflow-run"
-                      data-run-id="${escapeHtml3(row.runId)}">
-        <span class="wf-run-status wf-run-${escapeHtml3(row.status)}">${escapeHtml3(row.status)}</span>
-        <span class="wf-run-time">${escapeHtml3(new Date(row.startedAt).toLocaleString())}</span>
-        <span class="wf-run-meta">${escapeHtml3(t3.workflowRunStepCount(row.stepCount))} · ${escapeHtml3(dur)}</span>
-        <code class="wf-run-id">${escapeHtml3(row.runId)}</code>
-      </button>`;
-      }).join("");
-    }
-    async function openWorkflowRunDetail(runId) {
-      wf.runs.selectedRunId = runId;
-      renderWorkflowRunsList();
-      if (!dom.wfRunDetail) return;
-      dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml3(t3.loading)}</p>`;
-      try {
-        const r = await fetch(`/api/admin/workflows/runs/${encodeURIComponent(runId)}`);
-        if (!r.ok) {
-          const body2 = await r.json().catch(() => ({}));
-          dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml3(body2.error || `${r.status}`)}</p>`;
-          return;
-        }
-        const body = await r.json();
-        renderWorkflowRunDetail(body.run);
-      } catch (err) {
-        dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml3(err.message || String(err))}</p>`;
-      }
-    }
-    function renderWorkflowRunDetail(run) {
-      if (!dom.wfRunDetail) return;
-      const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t3.workflowRunStillRunning;
-      const finalBlock = run.status === "failed" ? `<p class="form-msg err">${escapeHtml3(run.error || "")}</p>` : run.finalOutput !== void 0 ? `<details open><summary>${escapeHtml3(t3.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml3(JSON.stringify(run.finalOutput, null, 2))}</pre></details>` : "";
-      const steps = (run.steps || []).map((s) => {
-        const sDur = s.endedAt ? `${s.endedAt - s.startedAt}ms` : "—";
-        const subtasks = (s.subTaskIds || []).length ? `<small class="hint">${escapeHtml3(t3.workflowRunSubTasks)}: ${s.subTaskIds.map(escapeHtml3).join(", ")}</small>` : "";
-        const out = s.output !== void 0 ? `<details><summary>${escapeHtml3(t3.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml3(JSON.stringify(s.output, null, 2))}</pre></details>` : "";
-        const err = s.error ? `<p class="form-msg err">${escapeHtml3(s.error)}</p>` : "";
-        return `<article class="wf-step">
-        <header>
-          <span class="wf-run-status wf-run-${escapeHtml3(s.status)}">${escapeHtml3(s.status)}</span>
-          <strong>${escapeHtml3(s.stepId)}</strong>
-          <span class="wf-step-meta">${escapeHtml3(sDur)} · ${escapeHtml3(t3.workflowRunAttempts(s.attempts || 1))}</span>
-        </header>
-        ${err}
-        ${subtasks}
-        ${out}
-      </article>`;
-      }).join("");
-      const payloadBlock = run.triggerPayload !== void 0 ? `<details><summary>${escapeHtml3(t3.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml3(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>` : "";
-      dom.wfRunDetail.innerHTML = `
-      <h4>
-        <span class="wf-run-status wf-run-${escapeHtml3(run.status)}">${escapeHtml3(run.status)}</span>
-        <code>${escapeHtml3(run.runId)}</code>
-      </h4>
-      <p class="hint">${escapeHtml3(t3.workflowRunDuration)}: ${escapeHtml3(dur)} · ${escapeHtml3(t3.workflowRunTriggeredBy)}: <code>${escapeHtml3(run.triggeredByTaskId)}</code></p>
-      ${payloadBlock}
-      ${steps || `<p class="empty">${escapeHtml3(t3.workflowRunNoSteps)}</p>`}
-      ${finalBlock}
-    `;
-    }
     function renderKnownRoster() {
       if (!dom.knownAdminsList || !dom.knownWorkersList) return;
       dom.knownAdminsList.innerHTML = state.known.admins.map(
-        (a) => `<li><strong>${escapeHtml3(a.id)}</strong> · ${escapeHtml3(a.displayName)}</li>`
-      ).join("") || `<li class="empty">${escapeHtml3(t3.noParticipants)}</li>`;
+        (a) => `<li><strong>${escapeHtml4(a.id)}</strong> · ${escapeHtml4(a.displayName)}</li>`
+      ).join("") || `<li class="empty">${escapeHtml4(t4.noParticipants)}</li>`;
       dom.knownWorkersList.innerHTML = state.known.workers.map(
-        (w) => `<li><strong>${escapeHtml3(w.id)}</strong>${w.capabilities.length ? " · " + w.capabilities.map(escapeHtml3).join(", ") : ""}${w.lastSeen ? ` · ${new Date(w.lastSeen).toLocaleString()}` : ""}</li>`
-      ).join("") || `<li class="empty">${escapeHtml3(t3.noParticipants)}</li>`;
+        (w) => `<li><strong>${escapeHtml4(w.id)}</strong>${w.capabilities.length ? " · " + w.capabilities.map(escapeHtml4).join(", ") : ""}${w.lastSeen ? ` · ${new Date(w.lastSeen).toLocaleString()}` : ""}</li>`
+      ).join("") || `<li class="empty">${escapeHtml4(t4.noParticipants)}</li>`;
     }
     function updateDispatchVisibility() {
       const v = dom.dStrategy.value;
@@ -2224,14 +2246,14 @@
       if (kind === "explicit") {
         strategy = { kind, to: dom.dTo.value.trim() };
         if (!strategy.to) {
-          dom.dispatchMsg.textContent = t3.failedAlert("id required");
+          dom.dispatchMsg.textContent = t4.failedAlert("id required");
           dom.dispatchMsg.classList.add("err");
           return;
         }
       } else if (kind === "capability") {
         const caps = dom.dCaps.value.split(",").map((s) => s.trim()).filter(Boolean);
         if (caps.length === 0) {
-          dom.dispatchMsg.textContent = t3.failedAlert("capabilities required");
+          dom.dispatchMsg.textContent = t4.failedAlert("capabilities required");
           dom.dispatchMsg.classList.add("err");
           return;
         }
@@ -2244,7 +2266,7 @@
       try {
         payload = dom.dPayload.value.trim() ? JSON.parse(dom.dPayload.value) : {};
       } catch (err) {
-        dom.dispatchMsg.textContent = t3.failedAlert("payload is not valid JSON");
+        dom.dispatchMsg.textContent = t4.failedAlert("payload is not valid JSON");
         dom.dispatchMsg.classList.add("err");
         return;
       }
@@ -2259,10 +2281,10 @@
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ strategy, payload, title, priority, weight })
         });
-        dom.dispatchMsg.textContent = t3.dispatchSuccess;
+        dom.dispatchMsg.textContent = t4.dispatchSuccess;
         dom.dispatchMsg.classList.add("ok");
       } catch (err) {
-        dom.dispatchMsg.textContent = t3.failedAlert(err.message || String(err));
+        dom.dispatchMsg.textContent = t4.failedAlert(err.message || String(err));
         dom.dispatchMsg.classList.add("err");
       }
     }
@@ -2281,11 +2303,11 @@
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ taskId, rating, comment })
         });
-        dom.evaluateMsg.textContent = t3.evaluateSuccess;
+        dom.evaluateMsg.textContent = t4.evaluateSuccess;
         dom.evaluateMsg.classList.add("ok");
         dom.eComment.value = "";
       } catch (err) {
-        dom.evaluateMsg.textContent = t3.failedAlert(err.message || String(err));
+        dom.evaluateMsg.textContent = t4.failedAlert(err.message || String(err));
         dom.evaluateMsg.classList.add("err");
       }
     }
@@ -2339,6 +2361,7 @@
     document.addEventListener("DOMContentLoaded", async () => {
       resolveDom();
       managedAgents.setDom(dom);
+      workflows.setDom(dom);
       updateDispatchVisibility();
       setActiveTab(activeTabFromHash());
       document.querySelectorAll(".tabbar-btn").forEach((btn) => {
@@ -2402,8 +2425,8 @@
           dom.maImportDropdown.open = false;
         }
       });
-      dom.wfImportBtn?.addEventListener("click", openWorkflowImportModal);
-      dom.wfImportSubmit?.addEventListener("click", submitWorkflowImport);
+      dom.wfImportBtn?.addEventListener("click", workflows.openWorkflowImportModal);
+      dom.wfImportSubmit?.addEventListener("click", workflows.submitWorkflowImport);
       dom.wfStartSubmit?.addEventListener("click", submitWorkflowStart);
       dom.bundleImportBtn?.addEventListener("click", openBundleImportModal);
       dom.bundleImportSubmit?.addEventListener("click", submitBundleImport);
@@ -2453,7 +2476,7 @@
         ma._clearKeyOnSubmit = true;
         dom.maApiKey.value = "";
         dom.maApiKey.placeholder = "(将清空)";
-        dom.maApiKeyHint.textContent = `${t3.clearKey}: 保存后该 agent 的私有 key 会被移除`;
+        dom.maApiKeyHint.textContent = `${t4.clearKey}: 保存后该 agent 的私有 key 会被移除`;
       });
       document.addEventListener("click", (e) => {
         const target = e.target;
@@ -2463,9 +2486,9 @@
           if (!dom.maImportModal.hidden) managedAgents.closeImportModal();
           if (dom.maGhImportModal && !dom.maGhImportModal.hidden) managedAgents.closeGithubImportModal();
           if (!dom.maKeysModal.hidden) managedAgents.closeKeysModal();
-          if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal();
+          if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal();
           if (dom.wfAssistModal && !dom.wfAssistModal.hidden) closeWorkflowAssistModal();
-          if (dom.wfRunsModal && !dom.wfRunsModal.hidden) closeWorkflowRunsModal();
+          if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal();
           if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal();
           if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart();
           if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport();
@@ -2493,12 +2516,12 @@
         } else if (act === "remove-agent") {
           managedAgents.removeAgent(id);
         } else if (act === "remove-workflow") {
-          removeWorkflow(id);
+          workflows.removeWorkflow(id);
         } else if (act === "open-workflow-runs") {
-          openWorkflowRunsModal(id);
+          workflows.openWorkflowRunsModal(id);
         } else if (act === "open-workflow-run") {
           const runId = target.dataset.runId;
-          if (runId) openWorkflowRunDetail(runId);
+          if (runId) workflows.openWorkflowRunDetail(runId);
         } else if (act === "start-workflow") {
           openWorkflowStart(id);
         } else if (act === "view-growth-report") {
@@ -2513,8 +2536,8 @@
         if (!dom.maImportModal.hidden) managedAgents.closeImportModal();
         if (dom.maGhImportModal && !dom.maGhImportModal.hidden) managedAgents.closeGithubImportModal();
         if (!dom.maKeysModal.hidden) managedAgents.closeKeysModal();
-        if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal();
-        if (dom.wfRunsModal && !dom.wfRunsModal.hidden) closeWorkflowRunsModal();
+        if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal();
+        if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal();
         if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal();
         if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart();
         if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport();
@@ -2534,7 +2557,7 @@
         if (dom.disclaimerModal) dom.disclaimerModal.hidden = true;
       });
       managedAgents.refreshManagedAgents().catch((err) => console.warn("initial agents refresh:", err));
-      refreshWorkflows().catch((err) => console.warn("initial workflows refresh:", err));
+      workflows.refreshWorkflows().catch((err) => console.warn("initial workflows refresh:", err));
       refreshGrowthReports().catch((err) => console.warn("initial growth-reports refresh:", err));
       if (dom.grRefreshBtn) {
         dom.grRefreshBtn.addEventListener("click", () => {
@@ -2589,7 +2612,7 @@
             await skipAgentQuestion(id);
           }
         } catch (err) {
-          alert(t3.failedAlert(err.message || String(err)));
+          alert(t4.failedAlert(err.message || String(err)));
           if (actEl2 instanceof HTMLButtonElement) actEl2.disabled = false;
         }
       });
@@ -2622,10 +2645,10 @@
           sweepBtn.disabled = true;
           try {
             const r = await fetchJson3("/api/admin/services/sweep", { method: "POST" });
-            services.showServicesToast(t3.servicesSweepResult(r.scanned, r.purged));
+            services.showServicesToast(t4.servicesSweepResult(r.scanned, r.purged));
             await services.refreshServices();
           } catch (err) {
-            alert(t3.failedAlert(err?.message || String(err)));
+            alert(t4.failedAlert(err?.message || String(err)));
           } finally {
             sweepBtn.disabled = false;
           }
