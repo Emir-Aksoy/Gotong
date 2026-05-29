@@ -220,16 +220,6 @@ export function unregisterServiceMethods(
 }
 
 /**
- * @deprecated since v1.2 — use `isServiceMethodAllowed` / `getServiceMethods`
- * instead. Kept exported so existing third-party code that imported the
- * symbol keeps compiling; reflects only built-ins, not registered extensions.
- *
- * Will be removed in v2.0 once the in-tree callers are gone.
- */
-export const SERVICE_METHOD_ALLOWLIST: Readonly<Record<string, readonly string[]>> =
-  BUILTIN_SERVICE_METHODS
-
-/**
  * Default per-call deadline the SDK applies when awaiting a SERVICE_RESULT.
  * The server does NOT enforce this — it's purely a client-side guard so a
  * dead connection doesn't strand awaiters. Tunable per `connect()` call.

@@ -21,7 +21,6 @@ const expectedRuntimeExports = [
   'MAX_MISSED_PINGS',
   'DEFAULT_SERVICE_CALL_TIMEOUT_MS',
   'BUILTIN_SERVICE_METHODS',
-  'SERVICE_METHOD_ALLOWLIST',
   // method-allowlist API
   'majorVersionOf',
   'registerServiceMethods',

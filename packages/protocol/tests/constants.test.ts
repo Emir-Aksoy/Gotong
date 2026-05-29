@@ -20,7 +20,6 @@ import {
   PROTOCOL_VERSION,
   registerServiceMethods,
   resetServiceMethodsForTests,
-  SERVICE_METHOD_ALLOWLIST,
   unregisterServiceMethods,
 } from '../src/index.js'
 
@@ -195,13 +194,5 @@ describe('resetServiceMethodsForTests', () => {
     expect(getServiceMethods('notion')).toBeUndefined()
     // Built-ins still present.
     expect(isServiceMethodAllowed('memory', 'recall')).toBe(true)
-  })
-})
-
-describe('SERVICE_METHOD_ALLOWLIST (deprecated alias)', () => {
-  it('still exposes the built-in shape for backward compat', () => {
-    // Kept until v2.0 — third-party imports that grabbed this constant
-    // shouldn't break on a minor bump.
-    expect(SERVICE_METHOD_ALLOWLIST).toBe(BUILTIN_SERVICE_METHODS)
   })
 })
