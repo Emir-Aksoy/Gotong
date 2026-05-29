@@ -1824,6 +1824,9 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   justify-content: center;
   padding: 4rem 1rem;
 }
+/* Without this guard the `flex` above wins over the bare `hidden` attribute,
+ * so the login card stayed painted over the console once a session existed. */
+#login-shell[hidden] { display: none; }
 .login-card {
   max-width: 26rem;
   width: 100%;
