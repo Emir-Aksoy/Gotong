@@ -1941,7 +1941,7 @@ import { createWorkflows } from './workflows.js'
     }
   }
 
-  document.addEventListener('DOMContentLoaded', async () => {
+  const boot = async () => {
     resolveDom()
     // Hand the resolved DOM cache to the managed-agents + workflows
     // modules — their closures reference this `dom` for every
@@ -2339,6 +2339,19 @@ import { createWorkflows } from './workflows.js'
     })
 
     connectStream(applyEvent)
-  })
+  }
+
+  // admin.js is injected dynamically by app.js (loadAdminBundles), which
+  // runs from app.js's OWN DOMContentLoaded handler — i.e. AFTER the
+  // document has already finished parsing. A bare
+  // addEventListener('DOMContentLoaded', …) here registers a listener
+  // for an event that already fired, so boot() would never run and the
+  // whole admin console would stay non-interactive. Guard on readyState:
+  // run immediately when the document is already parsed.
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { void boot() })
+  } else {
+    void boot()
+  }
 
 })()

@@ -2358,7 +2358,7 @@
         setActiveTab(name);
       }
     }
-    document.addEventListener("DOMContentLoaded", async () => {
+    const boot = async () => {
       resolveDom();
       managedAgents.setDom(dom);
       workflows.setDom(dom);
@@ -2681,6 +2681,13 @@
         if (e.key === "Escape" && detailBackdrop && !detailBackdrop.hidden) services.closeServicesDetail();
       });
       connectStream(applyEvent);
-    });
+    };
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", () => {
+        void boot();
+      });
+    } else {
+      void boot();
+    }
   })();
 })();

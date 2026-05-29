@@ -5,21 +5,20 @@
  *
  * P3 moved the admin console source under `admin-src/` and now bundles it
  * through esbuild (IIFE format). esbuild prepends `"use strict";` and wraps
- * the file in its own IIFE — neither of which the hand-written admin.js
- * had. This smoke guards the two bundler-introduced risks that
- * `node --check` and the server-side route tests can't see:
+ * the file in its own IIFE. This smoke guards the risks that `node --check`
+ * and the server-side route tests can't see:
  *
- *   1. the product *executes* under strict mode (a stray implicit global
- *      or octal literal throws only at run time, not at parse/--check time)
- *   2. the IIFE runs to completion — it destructures the window.AipeHub
- *      helpers, defines every handler, and registers its single
- *      DOMContentLoaded listener (the real init defers entirely to that
- *      callback, see admin-src/main.js)
- *
- * It deliberately does NOT drive the DOMContentLoaded init: that body is
- * unchanged source that esbuild copies verbatim, and faking the full
- * resolveDom() DOM would be brittle. Bundler correctness — not admin UI
- * behavior — is the target here.
+ *   1. the product *executes* under strict mode (a stray implicit global or
+ *      octal literal throws only at run time, not at parse/--check time)
+ *   2. the IIFE runs to completion — destructures the window.AipeHub helpers,
+ *      defines every handler, and wires init through the readyState guard
+ *   3. the readyState guard itself: app.js injects admin.js from inside its
+ *      OWN DOMContentLoaded handler — i.e. AFTER the event already fired. A
+ *      bare addEventListener('DOMContentLoaded') would register a listener
+ *      that never runs, leaving the whole admin console dead. admin.js must
+ *      boot immediately when the document is already parsed. This is the
+ *      B1/B2 fix tracked in docs/zh/TECH-DEBT-2026-05.md — and exactly the
+ *      class of bug the old route-level tests could never catch.
  */
 
 import { describe, expect, it } from 'vitest'
@@ -31,8 +30,7 @@ import { runInNewContext } from 'node:vm'
 const HERE = dirname(fileURLToPath(import.meta.url))
 const ADMIN_JS = readFileSync(join(HERE, '..', 'static', 'admin.js'), 'utf8')
 
-// The helpers admin-src/main.js destructures off window.AipeHub. Stubbed as
-// noops so the IIFE's top-level destructure has a realistic namespace.
+// The helpers admin-src/main.js destructures off window.AipeHub.
 const AIPEHUB_HELPERS = [
   '$', 't', 'applyStaticI18n', 'onLangChange', 'escapeHtml', 'summarize',
   'isBadResult', 'fetchJson', 'connectStream', 'syncLangFromConfig',
@@ -40,47 +38,80 @@ const AIPEHUB_HELPERS = [
   'attachContribToggle', 'applyContribToggleState', 'attachCapChips',
 ]
 
-function runBundle(): { domListeners: Record<string, unknown> } {
-  const aipeHub: Record<string, unknown> = {}
-  for (const h of AIPEHUB_HELPERS) aipeHub[h] = () => {}
-  // The factory admin.js calls at init; return a no-op surface so a
-  // top-level install (if any) doesn't throw.
-  aipeHub.installWorkflowAssist = () => ({
-    open() {}, close() {}, submit() {}, save() {},
-  })
-  const domListeners: Record<string, unknown> = {}
-  const fakeEl = {
+interface RunResult {
+  domListeners: Record<string, unknown>
+  /** True if boot() ran: setActiveTab (boot-only) stamps body.dataset.activeTab. */
+  bootRan: boolean
+}
+
+function makeEl(): Record<string, unknown> {
+  return {
     style: {},
     dataset: {},
-    classList: { add() {}, remove() {}, contains: () => false },
+    classList: { add() {}, remove() {}, toggle() {}, contains: () => false },
     hidden: true,
     textContent: '',
     innerHTML: '',
     value: '',
     appendChild() {}, setAttribute() {}, addEventListener() {},
+    querySelector: () => null, querySelectorAll: () => [],
   }
+}
+
+/**
+ * Evaluate the bundle in a fresh VM context with a stubbed DOM.
+ *
+ * @param readyState `document.readyState`. `'loading'` makes the bundle
+ *   defer init to a DOMContentLoaded listener; anything else makes it boot
+ *   immediately (the dynamic-injection path admin.js actually hits).
+ * @param tolerantDom when true, getElementById/querySelector return a
+ *   permissive fake element so the immediate boot can run its synchronous
+ *   prefix; when false they return null (fine for the deferred path, which
+ *   never touches the DOM at eval time).
+ */
+function runBundle(opts: { readyState?: string; tolerantDom?: boolean } = {}): RunResult {
+  const aipeHub: Record<string, unknown> = {}
+  for (const h of AIPEHUB_HELPERS) aipeHub[h] = () => {}
+  // `$` is the selector helper resolveDom() uses to build its element
+  // cache (dom.dStrategy = $('d-strategy'), ...) — must return an element.
+  aipeHub.$ = () => makeEl()
+  // Never-resolving so boot() suspends at its first
+  // `await fetchJson('/api/whoami')` instead of dereferencing a fake
+  // result. We only need to prove boot STARTED (ran setActiveTab), not
+  // that the whole console finished wiring against a fake DOM.
+  aipeHub.fetchJson = () => new Promise(() => {})
+  aipeHub.installWorkflowAssist = () => ({ open() {}, close() {}, submit() {}, save() {} })
+
+  const domListeners: Record<string, unknown> = {}
+  // Shared by `window.location` and the bare `location` global the source
+  // reads (e.g. activeTabFromHash → location.hash).
+  const location = { hash: '', href: '' }
+  const body = makeEl()
   const ctx = {
-    window: {
-      AipeHub: aipeHub,
-      addEventListener: () => {},
-      location: { hash: '', href: '' },
-    },
+    window: { AipeHub: aipeHub, addEventListener: () => {}, location },
+    location,
     document: {
+      readyState: opts.readyState,
       addEventListener: (type: string, cb: unknown) => { domListeners[type] = cb },
-      getElementById: () => null,
-      querySelector: () => null,
+      getElementById: () => (opts.tolerantDom ? makeEl() : null),
+      querySelector: () => (opts.tolerantDom ? makeEl() : null),
       querySelectorAll: () => [],
-      createElement: () => ({ ...fakeEl }),
-      body: { appendChild() {} },
+      createElement: () => makeEl(),
+      body,
     },
     console,
     setTimeout: () => 0,
     clearTimeout: () => {},
-    fetch: async () => ({ ok: true, status: 200, json: async () => ({}) }),
+    setInterval: () => 0,
+    clearInterval: () => {},
+    fetch: async () => ({ ok: true, status: 200, json: async () => ({}), text: async () => '' }),
     EventSource: class { close() {} },
   }
   runInNewContext(ADMIN_JS, ctx)
-  return { domListeners }
+  return {
+    domListeners,
+    bootRan: (body.dataset as Record<string, unknown>).activeTab !== undefined,
+  }
 }
 
 describe('static/admin.js — esbuild bundle smoke', () => {
@@ -91,11 +122,25 @@ describe('static/admin.js — esbuild bundle smoke', () => {
     expect(ADMIN_JS).toContain('admin-src/main.js')
   })
 
-  it('executes under strict mode without throwing and registers DOMContentLoaded', () => {
-    let result: { domListeners: Record<string, unknown> } | undefined
-    expect(() => { result = runBundle() }).not.toThrow()
-    // The IIFE ran to completion if it got far enough to register the
-    // single DOMContentLoaded listener that owns real init.
+  it('defers init to a DOMContentLoaded listener while the document is still loading', () => {
+    let result: RunResult | undefined
+    expect(() => { result = runBundle({ readyState: 'loading' }) }).not.toThrow()
+    // Under 'loading' the guard registers the single init listener and has
+    // not booted yet.
     expect(typeof result!.domListeners.DOMContentLoaded).toBe('function')
+    expect(result!.bootRan).toBe(false)
+  })
+
+  it('boots immediately when the document is already parsed (dynamic-injection path)', () => {
+    // Regression for B1/B2: app.js injects admin.js from inside its own
+    // DOMContentLoaded handler — after the event already fired. A bare
+    // DOMContentLoaded listener never ran, so the whole admin console was
+    // dead. The readyState guard must boot init synchronously instead.
+    let result: RunResult | undefined
+    expect(() => { result = runBundle({ readyState: 'complete', tolerantDom: true }) }).not.toThrow()
+    // init ran: setActiveTab() stamped <body data-active-tab>...
+    expect(result!.bootRan).toBe(true)
+    // ...and it did NOT defer to a DOMContentLoaded that would never fire.
+    expect(result!.domListeners.DOMContentLoaded).toBeUndefined()
   })
 })
