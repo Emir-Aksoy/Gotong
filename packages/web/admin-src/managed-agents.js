@@ -1,0 +1,566 @@
+/* AipeHub admin — Managed Agents tab (local/cloud agent CRUD, provider
+ * API keys, paste / file / GitHub import).
+ *
+ * Second ES-module split of the admin console (P3 admin.js split, Phase 2),
+ * after services.js. Unlike services — which owns its own DOM ids and reads
+ * only `ma.agents` — this module drives the shared `dom` cache that
+ * resolveDom() builds. So the factory exposes `setDom(dom)`, called once by
+ * main.js right after resolveDom(); the closure references that `dom`
+ * thereafter, exactly as the inline code did.
+ *
+ * The empty-state onboarding button reaches into the bundle-import flow that
+ * still lives in main.js, so `openBundleImportModal` is passed in as a
+ * callback dependency. The shared `ma` state object is passed in too — the
+ * maApiKeyClear handler in main.js sets `ma._clearKeyOnSubmit`, which
+ * submitAgentForm reads here.
+ *
+ * Shared utilities (t / escapeHtml / fetchJson) come off window.AipeHub,
+ * same source as services.js / admin-wf-assist.js.
+ */
+
+const { t, escapeHtml, fetchJson } = window.AipeHub
+
+export function createManagedAgents({ ma, openBundleImportModal }) {
+  // Injected once after resolveDom() — see module header.
+  let dom = null
+  function setDom(d) { dom = d }
+
+  async function refreshManagedAgents() {
+    if (!dom?.maList) return
+    try {
+      const [agentsResp, provResp, secretsResp] = await Promise.all([
+        fetchJson('/api/admin/agents'),
+        fetchJson('/api/admin/agents/providers'),
+        fetchJson('/api/admin/secrets'),
+      ])
+      ma.agents = agentsResp.agents || []
+      ma.providers = provResp.providers || []
+      ma.secrets = {
+        providers: secretsResp.providers || {},
+        agents: secretsResp.agents || {},
+        env: secretsResp.env || {},
+      }
+      renderManagedAgents()
+      syncProviderSelect()
+    } catch (err) {
+      console.warn('refreshManagedAgents:', err)
+    }
+  }
+
+  function renderManagedAgents() {
+    if (!dom?.maList) return
+    const list = ma.agents
+    const managedCount = list.filter((a) => !!a.managed).length
+    const onlineManaged = list.filter((a) => !!a.managed && a.online).length
+    dom.maSummary.textContent = list.length === 0
+      ? t.maEmpty
+      : t.maSummary(managedCount, onlineManaged, list.length - managedCount)
+    if (list.length === 0) {
+      // Empty space — offer the one-click onboarding bundle alongside
+      // the bare "no agents yet" message. Acts as the "is this thing on?"
+      // wizard for non-technical users who just installed AipeHub.
+      dom.maList.innerHTML = `<div class="empty-state" style="padding: 1.2rem; line-height: 1.7;">
+        <p style="margin: 0 0 0.6rem; font-weight: 600;">${escapeHtml(t.maEmpty)}</p>
+        <p style="margin: 0 0 0.8rem; color: #555;">第一次用?试试 5 分钟出一份"12 周个人成长计划":</p>
+        <p style="margin: 0;">
+          <button type="button" id="onboarding-pg-btn" class="ma-btn">🎁 装个人成长团队 (7 教练 · DeepSeek)</button>
+        </p>
+        <small class="hint" style="display: block; margin-top: 0.6rem; color: #777;">
+          先去 <a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a> 申请 API key (新用户送 10 元额度 ≈ 几十次跑工作流)。
+        </small>
+      </div>`
+      // Wire the button right after innerHTML — it's destroyed and
+      // recreated on every refresh so we re-bind each time.
+      const btn = document.getElementById('onboarding-pg-btn')
+      btn?.addEventListener('click', async () => {
+        // 1. open the bundle import modal
+        openBundleImportModal()
+        // 2. auto-click "use built-in template" so the user lands with
+        //    the yaml pre-loaded — they only need to paste the key.
+        await new Promise((r) => setTimeout(r, 50))
+        dom.bundleBuiltinPgBtn?.click()
+        // 3. focus the key input so they can paste-and-go.
+        await new Promise((r) => setTimeout(r, 100))
+        dom.bundleImportKey?.focus()
+      })
+      return
+    }
+    const html = list.map((a) => {
+      const managed = a.managed
+      const onlineCls = a.online ? 'agent-online' : 'agent-offline'
+      const onlineLabel = a.online ? t.online : t.offline
+      const caps = (a.allowedCapabilities || []).map((c) => `<span class="cap">${escapeHtml(c)}</span>`).join('')
+      const kindBadge = managed
+        ? `<span class="agent-kind-badge agent-kind-local">${escapeHtml(t.localAgentBadge)}</span>`
+        : `<span class="agent-kind-badge agent-kind-cloud">${escapeHtml(t.cloudAgentBadge)}</span>`
+      // For openai-compatible agents, show the friendly label (or
+      // baseURL host) instead of the literal "openai-compatible" string
+      // so the card communicates the actual vendor at a glance.
+      let providerText = managed?.provider || ''
+      if (managed?.provider === 'openai-compatible') {
+        let host = managed.providerLabel
+        if (!host && managed.baseURL) {
+          try { host = new URL(managed.baseURL).host } catch { /* ignore */ }
+        }
+        providerText = host ? `openai-compat · ${host}` : 'openai-compat'
+      }
+      const meta = managed
+        ? `${kindBadge}<span class="ma-provider">${escapeHtml(providerText)}${managed.model ? ' · ' + escapeHtml(managed.model) : ''}</span>`
+        : `${kindBadge}<span class="ma-external">${escapeHtml(t.externalAgent)}</span>`
+      const actions = managed ? `
+        <button class="ma-action" data-act="edit-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.edit)}</button>
+        <button class="ma-action" data-act="export-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.export_)}</button>
+        <button class="ma-action ma-danger" data-act="remove-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.remove)}</button>
+      ` : ''
+      return `
+        <div class="ma-row ${onlineCls}">
+          <div class="ma-head">
+            <strong class="ma-id">${escapeHtml(a.displayName || a.id)}</strong>
+            ${a.displayName ? `<code class="ma-realid">${escapeHtml(a.id)}</code>` : ''}
+            <span class="ma-status">${escapeHtml(onlineLabel)}</span>
+          </div>
+          <div class="ma-meta">${meta}</div>
+          <div class="ma-caps">${caps}</div>
+          <div class="ma-actions">${actions}</div>
+        </div>
+      `
+    }).join('')
+    dom.maList.innerHTML = html
+  }
+
+  function syncProviderSelect() {
+    if (!dom?.maProvider) return
+    // All four are valid in agents.json; greyed out if env doesn't supply a key.
+    // openai-compatible is always available — its key MUST be per-agent.
+    const all = ['mock', 'anthropic', 'openai', 'openai-compatible']
+    const avail = new Set(ma.providers)
+    dom.maProvider.innerHTML = all.map((p) => {
+      const disabled = !avail.has(p)
+      const suffix = disabled ? ` — ${t.providerDisabled}` : ''
+      // Friendlier label for openai-compatible — the raw string would
+      // be opaque to non-developers picking from the dropdown.
+      const display = p === 'openai-compatible'
+        ? `openai-compatible · ${t.openaiCompatHint}`
+        : p
+      return `<option value="${p}"${disabled ? ' disabled' : ''}>${display}${suffix}</option>`
+    }).join('')
+    // Default to the first available
+    const first = all.find((p) => avail.has(p))
+    if (first) dom.maProvider.value = first
+    syncProviderDependentFields()
+  }
+
+  /**
+   * Show / hide the `openai-compatible`-only fields (baseURL,
+   * providerLabel) based on the current provider selection, and update
+   * the API-key hint to flag that the key is REQUIRED for that path.
+   */
+  function syncProviderDependentFields() {
+    if (!dom?.maProvider) return
+    const isCompat = dom.maProvider.value === 'openai-compatible'
+    document.querySelectorAll('.ma-compat-only').forEach((el) => {
+      el.hidden = !isCompat
+    })
+    // Make baseURL native-required when shown so the browser blocks
+    // an empty submit before our server-side check fires.
+    if (dom.maBaseUrl) dom.maBaseUrl.required = isCompat
+    // Hint copy + visual emphasis depending on provider.
+    if (dom.maApiKeyHint && !ma._clearKeyOnSubmit) {
+      // Only swap the hint when we're not mid-clear (which sets its own message).
+      if (ma.formMode === 'edit') {
+        // Edit mode is handled by openAgentForm; don't override it here.
+      } else {
+        dom.maApiKeyHint.textContent = isCompat
+          ? t.agentApiKeyHintCompat
+          : t.agentApiKeyHint
+      }
+    }
+  }
+
+  function openAgentForm(mode, agent) {
+    ma.formMode = mode
+    ma.editingId = mode === 'edit' ? agent?.id ?? null : null
+    dom.maFormTitle.textContent = mode === 'edit' ? t.editAgent : t.newAgent
+    dom.maFormEditWarning.hidden = mode !== 'edit'
+    dom.maFormMsg.textContent = ''
+    dom.maFormMsg.classList.remove('ok', 'err')
+
+    if (mode === 'edit' && agent) {
+      dom.maId.value = agent.id
+      dom.maId.disabled = true
+      dom.maDisplayName.value = agent.displayName || ''
+      dom.maCaps.value = (agent.allowedCapabilities || []).join(', ')
+      if (agent.managed) {
+        dom.maProvider.value = agent.managed.provider
+        dom.maModel.value = agent.managed.model || ''
+        dom.maSystem.value = agent.managed.system || ''
+        dom.maWeight.value = agent.managed.weightDefault != null ? String(agent.managed.weightDefault) : ''
+        // openai-compatible-specific fields. Echo them back into the
+        // form so the user can edit them without retyping.
+        if (dom.maBaseUrl) dom.maBaseUrl.value = agent.managed.baseURL || ''
+        if (dom.maProviderLabel) dom.maProviderLabel.value = agent.managed.providerLabel || ''
+      }
+      // Show "this agent has its own key" hint + a Clear button when applicable
+      const hasOverride = !!ma.secrets.agents[agent.id]
+      dom.maApiKey.value = ''
+      dom.maApiKey.placeholder = hasOverride ? '••••••••' : ''
+      dom.maApiKeyHint.textContent = hasOverride ? t.agentApiKeyHintEdit : t.agentApiKeyHint
+      dom.maApiKeyClear.hidden = !hasOverride
+      // Toggle baseURL row visibility based on the loaded provider.
+      syncProviderDependentFields()
+    } else {
+      dom.maForm.reset()
+      dom.maId.disabled = false
+      dom.maApiKey.placeholder = ''
+      dom.maApiKeyHint.textContent = t.agentApiKeyHint
+      dom.maApiKeyClear.hidden = true
+      syncProviderSelect()
+    }
+    dom.maFormModal.hidden = false
+  }
+
+  function closeAgentForm() {
+    dom.maFormModal.hidden = true
+  }
+
+  async function submitAgentForm(e) {
+    e.preventDefault()
+    dom.maFormMsg.textContent = ''
+    dom.maFormMsg.classList.remove('ok', 'err')
+    const id = dom.maId.value.trim()
+    const displayName = dom.maDisplayName.value.trim() || undefined
+    const capabilities = dom.maCaps.value.split(',').map((s) => s.trim()).filter(Boolean)
+    const provider = dom.maProvider.value
+    const model = dom.maModel.value.trim() || undefined
+    const system = dom.maSystem.value
+    const weightStr = dom.maWeight.value.trim()
+    const weightDefault = weightStr ? Number(weightStr) : undefined
+    const apiKey = dom.maApiKey.value
+    // openai-compatible-only payload pieces. Only attached when the
+    // provider actually uses them so we don't pollute agents.json for
+    // OpenAI / Anthropic agents that happen to have the inputs in the
+    // DOM. Server-side validation rejects empty baseURL on this path.
+    const baseURL = provider === 'openai-compatible'
+      ? (dom.maBaseUrl?.value.trim() || undefined)
+      : undefined
+    const providerLabel = provider === 'openai-compatible'
+      ? (dom.maProviderLabel?.value.trim() || undefined)
+      : undefined
+    // Carry apiKey only when the user typed something OR (in edit mode)
+    // they used the Clear button — clearing is represented as an explicit
+    // empty string; "no apiKey field at all" means "leave it alone".
+    const body = { id, displayName, capabilities, provider, model, system, weightDefault, baseURL, providerLabel }
+    if (apiKey.length > 0) body.apiKey = apiKey
+    if (ma._clearKeyOnSubmit) { body.apiKey = ''; ma._clearKeyOnSubmit = false }
+    try {
+      const url = ma.formMode === 'edit'
+        ? `/api/admin/agents/${encodeURIComponent(ma.editingId)}`
+        : '/api/admin/agents'
+      const method = ma.formMode === 'edit' ? 'PUT' : 'POST'
+      const r = await fetchJson(url, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      if (r?.warning) {
+        dom.maFormMsg.textContent = t.savedWithWarning(r.error || r.warning)
+        dom.maFormMsg.classList.add('err')
+      } else {
+        dom.maFormMsg.textContent = t.saveOk
+        dom.maFormMsg.classList.add('ok')
+        setTimeout(closeAgentForm, 400)
+      }
+      await refreshManagedAgents()
+    } catch (err) {
+      dom.maFormMsg.textContent = t.failedAlert(err.message || String(err))
+      dom.maFormMsg.classList.add('err')
+    }
+  }
+
+  function openImportModal() {
+    dom.maImportText.value = ''
+    dom.maImportFile.value = ''
+    dom.maImportMsg.textContent = ''
+    dom.maImportMsg.classList.remove('ok', 'err')
+    dom.maImportModal.hidden = false
+  }
+
+  // --- API key manager modal -------------------------------------------
+
+  function openKeysModal() {
+    renderKeysList()
+    dom.maKeysMsg.textContent = ''
+    dom.maKeysMsg.classList.remove('ok', 'err')
+    dom.maKeysModal.hidden = false
+  }
+
+  function closeKeysModal() {
+    dom.maKeysModal.hidden = true
+  }
+
+  function renderKeysList() {
+    const providers = ['anthropic', 'openai']
+    const html = providers.map((p) => {
+      const wsConfigured = !!ma.secrets.providers[p]
+      const envConfigured = !!ma.secrets.env[p]
+      const ts = ma.secrets.providers[p]
+      let statusHtml
+      if (wsConfigured) {
+        statusHtml = `<span class="key-status ok">${escapeHtml(t.apiKeySet)}</span><span class="key-ts">${escapeHtml(t.apiKeyUpdated(ts))}</span>`
+      } else if (envConfigured) {
+        statusHtml = `<span class="key-status env">${escapeHtml(t.apiKeyEnv)}</span>`
+      } else {
+        statusHtml = `<span class="key-status missing">${escapeHtml(t.apiKeyMissing)}</span>`
+      }
+      return `
+        <div class="key-row" data-provider="${p}">
+          <div class="key-head">
+            <strong>${p}</strong>
+            ${statusHtml}
+          </div>
+          <div class="key-controls">
+            <input type="password" class="key-input" placeholder="${escapeHtml(t.keyEnterHere)}" autocomplete="off" />
+            <button type="button" class="ma-btn" data-act="set-provider-key" data-provider="${p}">${escapeHtml(wsConfigured ? t.updateKey : t.setKey)}</button>
+            ${wsConfigured ? `<button type="button" class="ma-btn ma-btn-secondary ma-danger" data-act="remove-provider-key" data-provider="${p}">${escapeHtml(t.clearKey)}</button>` : ''}
+          </div>
+        </div>
+      `
+    }).join('')
+    dom.maKeysList.innerHTML = html
+  }
+
+  async function setProviderKey(provider, input) {
+    const key = input.value.trim()
+    if (!key) {
+      dom.maKeysMsg.textContent = t.failedAlert(t.keyEnterHere)
+      dom.maKeysMsg.classList.add('err')
+      return
+    }
+    try {
+      const r = await fetchJson(`/api/admin/secrets/${encodeURIComponent(provider)}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ apiKey: key }),
+      })
+      input.value = ''
+      dom.maKeysMsg.textContent = r?.note ? t.keyWarnRestart : t.keySetOk
+      dom.maKeysMsg.classList.remove('err')
+      dom.maKeysMsg.classList.add('ok')
+      await refreshManagedAgents()
+      renderKeysList()
+    } catch (err) {
+      dom.maKeysMsg.textContent = t.failedAlert(err.message || String(err))
+      dom.maKeysMsg.classList.add('err')
+    }
+  }
+
+  async function removeProviderKey(provider) {
+    if (!confirm(t.failedAlert?.length ? `${provider}: ${t.clearKey}?` : `${provider}: remove?`)) return
+    try {
+      await fetchJson(`/api/admin/secrets/${encodeURIComponent(provider)}`, { method: 'DELETE' })
+      dom.maKeysMsg.textContent = t.keyRemoved
+      dom.maKeysMsg.classList.remove('err')
+      dom.maKeysMsg.classList.add('ok')
+      await refreshManagedAgents()
+      renderKeysList()
+    } catch (err) {
+      dom.maKeysMsg.textContent = t.failedAlert(err.message || String(err))
+      dom.maKeysMsg.classList.add('err')
+    }
+  }
+
+  function closeImportModal() {
+    dom.maImportModal.hidden = true
+  }
+
+  async function submitImport() {
+    dom.maImportMsg.textContent = ''
+    dom.maImportMsg.classList.remove('ok', 'err')
+    let text = dom.maImportText.value
+    const file = dom.maImportFile.files?.[0]
+    if (file && !text) {
+      text = await file.text()
+    }
+    if (!text || !text.trim()) {
+      dom.maImportMsg.textContent = t.importEmpty
+      dom.maImportMsg.classList.add('err')
+      return
+    }
+    try {
+      const r = await fetch('/api/admin/agents/import', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: text,
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        dom.maImportMsg.textContent = t.failedAlert(body.error || `${r.status}`)
+        dom.maImportMsg.classList.add('err')
+        return
+      }
+      const createdCount = (body.created || []).length
+      const skippedCount = (body.skipped || []).length
+      const spawnErrCount = (body.spawnErrors || []).length
+      dom.maImportMsg.textContent = t.importDone(createdCount, skippedCount, spawnErrCount)
+      dom.maImportMsg.classList.add(spawnErrCount > 0 ? 'err' : 'ok')
+      await refreshManagedAgents()
+      if (createdCount > 0 && spawnErrCount === 0) {
+        setTimeout(closeImportModal, 700)
+      }
+    } catch (err) {
+      dom.maImportMsg.textContent = t.failedAlert(err.message || String(err))
+      dom.maImportMsg.classList.add('err')
+    }
+  }
+
+  // --- GitHub import (with optional China-friendly mirror) -------------
+  //
+  // Accept any of:
+  //   https://github.com/<o>/<r>/blob/<ref>/<path...>
+  //   https://github.com/<o>/<r>/raw/<ref>/<path...>
+  //   https://raw.githubusercontent.com/<o>/<r>/<ref>/<path...>
+  //
+  // and rewrite to one of three download sources picked in the UI:
+  //   - github   : raw.githubusercontent.com (default upstream)
+  //   - jsdelivr : cdn.jsdelivr.net/gh/<o>/<r>@<ref>/<path>  (CDN, China-OK)
+  //   - ghproxy  : mirror.ghproxy.com/<raw_url>             (transparent proxy)
+  //
+  // The actual download URL is shown live in the modal so users can sanity-
+  // check before hitting "import". On submit we fetch the text client-side
+  // and feed it to the existing POST /api/admin/agents/import — no new
+  // server endpoint, no CORS dance for the host.
+
+  function parseGithubUrl(rawInput) {
+    const u = (rawInput || '').trim()
+    if (!u) return null
+    // raw.githubusercontent.com/<o>/<r>/<ref>/<path>
+    let m = u.match(/^https?:\/\/raw\.githubusercontent\.com\/([^/]+)\/([^/]+)\/([^/]+)\/(.+)$/i)
+    if (m) return { owner: m[1], repo: m[2], ref: m[3], path: m[4] }
+    // github.com/<o>/<r>/(blob|raw)/<ref>/<path>
+    m = u.match(/^https?:\/\/github\.com\/([^/]+)\/([^/]+)\/(?:blob|raw)\/([^/]+)\/(.+)$/i)
+    if (m) return { owner: m[1], repo: m[2], ref: m[3], path: m[4] }
+    return null
+  }
+
+  function buildDownloadUrl(parts, source) {
+    const { owner, repo, ref, path } = parts
+    if (source === 'jsdelivr') {
+      return `https://cdn.jsdelivr.net/gh/${owner}/${repo}@${ref}/${path}`
+    }
+    if (source === 'ghproxy') {
+      return `https://mirror.ghproxy.com/https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path}`
+    }
+    return `https://raw.githubusercontent.com/${owner}/${repo}/${ref}/${path}`
+  }
+
+  function updateGhResolved() {
+    if (!dom.maGhResolved) return
+    const parts = parseGithubUrl(dom.maGhUrl.value)
+    if (!parts) {
+      dom.maGhResolved.textContent = '—'
+      return
+    }
+    dom.maGhResolved.textContent = buildDownloadUrl(parts, dom.maGhSource.value)
+  }
+
+  function openGithubImportModal() {
+    dom.maGhUrl.value = ''
+    dom.maGhResolved.textContent = '—'
+    dom.maGhImportMsg.textContent = ''
+    dom.maGhImportMsg.classList.remove('ok', 'err')
+    dom.maGhImportModal.hidden = false
+  }
+
+  function closeGithubImportModal() {
+    dom.maGhImportModal.hidden = true
+  }
+
+  async function submitGithubImport() {
+    dom.maGhImportMsg.textContent = ''
+    dom.maGhImportMsg.classList.remove('ok', 'err')
+    const parts = parseGithubUrl(dom.maGhUrl.value)
+    if (!parts) {
+      dom.maGhImportMsg.textContent = t.ghImportBadUrl
+      dom.maGhImportMsg.classList.add('err')
+      return
+    }
+    const dlUrl = buildDownloadUrl(parts, dom.maGhSource.value)
+    // Step 1 — fetch the YAML/JSON text from the chosen mirror.
+    let text = ''
+    try {
+      const r = await fetch(dlUrl, { mode: 'cors' })
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      text = await r.text()
+      if (!text.trim()) throw new Error('empty response')
+    } catch (err) {
+      dom.maGhImportMsg.textContent = t.ghFetchFailed(err.message || String(err))
+      dom.maGhImportMsg.classList.add('err')
+      return
+    }
+    // Step 2 — feed the text to the existing import endpoint. Same path
+    // as the paste/upload flow, so the server treats it identically.
+    try {
+      const r = await fetch('/api/admin/agents/import', {
+        method: 'POST',
+        headers: { 'content-type': 'text/plain' },
+        body: text,
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        dom.maGhImportMsg.textContent = t.failedAlert(body.error || `${r.status}`)
+        dom.maGhImportMsg.classList.add('err')
+        return
+      }
+      const createdCount = (body.created || []).length
+      const skippedCount = (body.skipped || []).length
+      const spawnErrCount = (body.spawnErrors || []).length
+      dom.maGhImportMsg.textContent = t.importDone(createdCount, skippedCount, spawnErrCount)
+      dom.maGhImportMsg.classList.add(spawnErrCount > 0 ? 'err' : 'ok')
+      await refreshManagedAgents()
+      if (createdCount > 0 && spawnErrCount === 0) {
+        setTimeout(closeGithubImportModal, 700)
+      }
+    } catch (err) {
+      dom.maGhImportMsg.textContent = t.failedAlert(err.message || String(err))
+      dom.maGhImportMsg.classList.add('err')
+    }
+  }
+
+  async function exportAgent(id) {
+    // GET with browser-driven download (content-disposition on server side)
+    window.location.href = `/api/admin/agents/${encodeURIComponent(id)}/export`
+  }
+
+  async function removeAgent(id) {
+    if (!confirm(t.confirmRemoveAgent(id))) return
+    try {
+      await fetchJson(`/api/admin/agents/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      await refreshManagedAgents()
+    } catch (err) {
+      alert(t.failedAlert(err.message || String(err)))
+    }
+  }
+
+  return {
+    setDom,
+    refreshManagedAgents,
+    renderManagedAgents,
+    syncProviderDependentFields,
+    openAgentForm,
+    closeAgentForm,
+    submitAgentForm,
+    openImportModal,
+    openKeysModal,
+    closeKeysModal,
+    setProviderKey,
+    removeProviderKey,
+    closeImportModal,
+    submitImport,
+    updateGhResolved,
+    openGithubImportModal,
+    closeGithubImportModal,
+    submitGithubImport,
+    exportAgent,
+    removeAgent,
+  }
+}

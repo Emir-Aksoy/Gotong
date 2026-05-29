@@ -255,687 +255,12 @@
     return { refreshServices, renderServicesAudit, closeServicesDetail, showServicesToast };
   }
 
-  // admin-src/main.js
-  (() => {
-    const {
-      $,
-      t: t2,
-      applyStaticI18n,
-      onLangChange,
-      escapeHtml: escapeHtml2,
-      summarize,
-      isBadResult,
-      fetchJson: fetchJson2,
-      connectStream,
-      syncLangFromConfig,
-      fetchLeaderboard,
-      renderLeaderboard,
-      taskMetricsHtml,
-      formatScore,
-      attachContribToggle,
-      applyContribToggleState,
-      attachCapChips
-    } = window.AipeHub;
-    const ma = {
-      agents: [],
-      providers: [],
-      // Mirrors GET /api/admin/secrets — used to decorate the "API key" panel
-      // and to figure out whether a given agent has its own override key.
-      secrets: { providers: {}, agents: {}, env: {} },
-      formMode: "create",
-      // 'create' | 'edit'
-      editingId: null
-    };
-    const wf = {
-      available: null,
-      workflows: [],
-      // Run history modal state. `workflowId` is set when an admin clicks
-      // "view history" on a card; `runs` is the most-recent N rows we
-      // fetched; `selectedRunId` is whichever row the admin opened.
-      runs: {
-        workflowId: null,
-        rows: [],
-        selectedRunId: null
-      }
-    };
-    const state = {
-      participants: [],
-      transcript: [],
-      pendingApplications: [],
-      tasks: [],
-      known: { admins: [], workers: [] },
-      // Task cards remember their expanded/collapsed state across re-renders.
-      // Plain `Set<TaskId>` — wiped on reload (no localStorage), restored by
-      // clicking transcript rows or the card head again. Memory-only.
-      expandedTasks: /* @__PURE__ */ new Set(),
-      // Phase 8 M7 — per-task accumulator for in-flight LLM stream output.
-      // Keyed by taskId. Wiped when the matching task_result arrives.
-      // Memory-only (deliberately not persisted) — operators wanting the
-      // final text use task_result.output; this is just for "watching the
-      // model type" in the admin UI.
-      //
-      //   Map<taskId, {
-      //     agentId: ParticipantId,
-      //     text: string,         // concatenated text chunks
-      //     toolUses: number,     // count of tool_use chunks observed
-      //     isDone: boolean,      // an `end` or `error` chunk arrived
-      //     lastTs: number,
-      //   }>
-      liveStreams: /* @__PURE__ */ new Map(),
-      // Phase 13 follow-up — workflow-assist streaming subscription. Set
-      // by submitWorkflowAssist while a /api/admin/workflows/assist call
-      // is in flight; null otherwise. The shape:
-      //
-      //   {
-      //     taskId: TaskId | null,     // locked from the matching `task` SSE event
-      //     onTask: (taskId) => void,  // called once when taskId resolves
-      //     onChunk: (text) => void,   // called on each cumulative text update
-      //     onEnd: () => void,         // called on matching task_result
-      //   }
-      //
-      // The modal installs/clears this; applyEvent + handleStreamChunk
-      // call into it when matching events flow through the SSE feed.
-      assistWatcher: null
-    };
-    let taskFilter = "all";
-    let lbWindow = "all";
+  // admin-src/managed-agents.js
+  var { t: t2, escapeHtml: escapeHtml2, fetchJson: fetchJson2 } = window.AipeHub;
+  function createManagedAgents({ ma, openBundleImportModal }) {
     let dom = null;
-    const services = createServices(ma);
-    function resolveDom() {
-      dom = {
-        participantsList: $("participants-list"),
-        transcriptList: $("transcript-list"),
-        transcriptCount: $("transcript-count"),
-        pendingAppsSection: $("pending-apps"),
-        pendingAppsList: $("pending-apps-list"),
-        dispatchForm: $("dispatch-form"),
-        dispatchMsg: $("dispatch-msg"),
-        dStrategy: $("d-strategy"),
-        dTo: $("d-to"),
-        dToLabel: $("d-to-label"),
-        dCaps: $("d-caps"),
-        dCapsLabel: $("d-caps-label"),
-        dTitle: $("d-title"),
-        dPayload: $("d-payload"),
-        dPriority: $("d-priority"),
-        dWeight: $("d-weight"),
-        evaluateForm: $("evaluate-form"),
-        evaluateMsg: $("evaluate-msg"),
-        eTask: $("e-task"),
-        eRating: $("e-rating"),
-        eComment: $("e-comment"),
-        tasksFilters: $("tasks-filters"),
-        tasksList: $("tasks-list"),
-        knownAdminsList: $("known-admins-list"),
-        knownWorkersList: $("known-workers-list"),
-        logoutBtn: $("logout-btn"),
-        lbWindow: $("lb-window"),
-        lbList: $("leaderboard-list"),
-        lbSummary: $("lb-summary"),
-        contribToggle: $("contrib-toggle"),
-        contribToggleInput: $("contrib-toggle-input"),
-        // Managed agents (v2.1)
-        maList: $("managed-agents-list"),
-        maSummary: $("ma-summary"),
-        maNewBtn: $("ma-new-btn"),
-        maImportBtn: $("ma-import-btn"),
-        maKeysBtn: $("ma-keys-btn"),
-        maKeysModal: $("ma-keys-modal"),
-        maKeysList: $("ma-keys-list"),
-        maKeysMsg: $("ma-keys-msg"),
-        maApiKey: $("ma-api-key"),
-        maApiKeyHint: $("ma-api-key-hint"),
-        maApiKeyClear: $("ma-api-key-clear"),
-        maFormModal: $("ma-form-modal"),
-        maForm: $("ma-form"),
-        maFormTitle: $("ma-form-title"),
-        maFormEditWarning: $("ma-form-edit-warning"),
-        maFormMsg: $("ma-form-msg"),
-        maId: $("ma-id"),
-        maDisplayName: $("ma-display-name"),
-        maCaps: $("ma-caps"),
-        maProvider: $("ma-provider"),
-        maBaseUrl: $("ma-base-url"),
-        maProviderLabel: $("ma-provider-label"),
-        maModel: $("ma-model"),
-        maSystem: $("ma-system"),
-        maWeight: $("ma-weight"),
-        maImportModal: $("ma-import-modal"),
-        maImportFile: $("ma-import-file"),
-        maImportText: $("ma-import-text"),
-        maImportSubmit: $("ma-import-submit"),
-        maImportMsg: $("ma-import-msg"),
-        maGhImportBtn: $("ma-gh-import-btn"),
-        maGhImportModal: $("ma-gh-import-modal"),
-        maGhUrl: $("ma-gh-url"),
-        maGhSource: $("ma-gh-source"),
-        maGhResolved: $("ma-gh-resolved"),
-        maGhImportSubmit: $("ma-gh-import-submit"),
-        maGhImportMsg: $("ma-gh-import-msg"),
-        maImportDropdown: document.querySelector(".ma-import-dropdown"),
-        // Growth reports (v2.4 personal-growth)
-        grSection: $("growth-reports"),
-        grTable: $("growth-reports-table"),
-        grTbody: $("growth-reports-tbody"),
-        grEmpty: $("growth-reports-empty"),
-        grSummary: $("growth-reports-summary"),
-        grRefreshBtn: $("growth-reports-refresh"),
-        // One-time disclaimer (v2.4)
-        disclaimerModal: $("disclaimer-modal"),
-        disclaimerAccept: $("disclaimer-accept"),
-        // Growth report inline-viewer modal (v2.4)
-        grReportModal: $("growth-report-modal"),
-        grReportTitle: $("growth-report-title"),
-        grReportBody: $("growth-report-body"),
-        grReportDownload: $("growth-report-download"),
-        // Workflows (v2.1)
-        wfSection: $("workflows"),
-        wfList: $("workflows-list"),
-        wfSummary: $("wf-summary"),
-        wfImportBtn: $("wf-import-btn"),
-        // Workflow start (v2.4) — payload-schema-driven dispatch form
-        wfStartModal: $("wf-start-modal"),
-        wfStartTitle: $("wf-start-title"),
-        wfStartDesc: $("wf-start-desc"),
-        wfStartFields: $("wf-start-fields"),
-        wfStartSubmit: $("wf-start-submit"),
-        wfStartMsg: $("wf-start-msg"),
-        // Bundle import (v2.4) — team + workflow + apiKey in one upload
-        bundleImportBtn: $("bundle-import-btn"),
-        bundleImportModal: $("bundle-import-modal"),
-        bundleImportFile: $("bundle-import-file"),
-        bundleImportText: $("bundle-import-text"),
-        bundleImportKey: $("bundle-import-key"),
-        bundleKeyLabel: $("bundle-key-label"),
-        bundleImportSubmit: $("bundle-import-submit"),
-        bundleImportMsg: $("bundle-import-msg"),
-        bundleBuiltinPgBtn: $("bundle-builtin-pg-btn"),
-        wfImportModal: $("wf-import-modal"),
-        wfImportFile: $("wf-import-file"),
-        wfImportText: $("wf-import-text"),
-        wfImportSubmit: $("wf-import-submit"),
-        wfImportMsg: $("wf-import-msg"),
-        // Phase 13 M3 — AI assistant dialog
-        wfAssistBtn: $("wf-assist-btn"),
-        wfAssistModal: $("wf-assist-modal"),
-        wfAssistDescription: $("wf-assist-description"),
-        wfAssistGenerate: $("wf-assist-generate"),
-        wfAssistMsg: $("wf-assist-msg"),
-        wfAssistResult: $("wf-assist-result"),
-        wfAssistStatusChip: $("wf-assist-status-chip"),
-        wfAssistExplanation: $("wf-assist-explanation"),
-        wfAssistYaml: $("wf-assist-yaml"),
-        wfAssistErrorDetails: $("wf-assist-error-details"),
-        wfAssistValidationError: $("wf-assist-validation-error"),
-        // Phase 13 M4 — deep-check warnings panel.
-        wfAssistDeepcheckDetails: $("wf-assist-deepcheck-details"),
-        wfAssistDeepcheckSummary: $("wf-assist-deepcheck-summary"),
-        wfAssistDeepcheckList: $("wf-assist-deepcheck-list"),
-        // Phase 13 follow-up — live streaming preview.
-        wfAssistStreaming: $("wf-assist-streaming"),
-        wfAssistStreamingText: $("wf-assist-streaming-text"),
-        wfAssistStreamingMeta: $("wf-assist-streaming-meta"),
-        wfAssistSave: $("wf-assist-save"),
-        wfAssistRegenerate: $("wf-assist-regenerate"),
-        // Run history modal (v0.3)
-        wfRunsModal: $("wf-runs-modal"),
-        wfRunsTarget: $("wf-runs-target"),
-        wfRunsList: $("wf-runs-list"),
-        wfRunsEmpty: $("wf-runs-empty"),
-        wfRunDetail: $("wf-run-detail"),
-        wfRunsMsg: $("wf-runs-msg"),
-        // Room health banner (v2.1+)
-        hToday: $("health-today-tasks"),
-        hOnline: $("health-online"),
-        hOnlineSub: $("health-online-sub"),
-        hUnrated: $("health-unrated"),
-        hTop3: $("health-top3")
-      };
-    }
-    async function refresh() {
-      const snap = await fetchJson2("/api/state");
-      state.participants = snap.participants;
-      state.transcript = snap.transcript;
-      state.pendingApplications = snap.pendingApplications || [];
-      state.tasks = snap.tasks || [];
-      state.known = snap.known || { admins: [], workers: [] };
-      if (snap.config?.defaultLang) syncLangFromConfig(snap.config.defaultLang);
-      renderAll();
-    }
-    function handleStreamChunk(ev) {
-      const { taskId, agentId, chunk } = ev.data || {};
-      if (!taskId || !chunk || typeof chunk !== "object") return;
-      let live = state.liveStreams.get(taskId);
-      if (!live) {
-        live = { agentId, text: "", toolUses: 0, isDone: false, lastTs: ev.ts || Date.now() };
-        state.liveStreams.set(taskId, live);
-      }
-      live.lastTs = ev.ts || Date.now();
-      switch (chunk.type) {
-        case "text":
-          if (typeof chunk.text === "string") live.text += chunk.text;
-          break;
-        case "tool_use":
-          live.toolUses += 1;
-          break;
-        case "end":
-        case "error":
-          live.isDone = true;
-          break;
-      }
-      const w = state.assistWatcher;
-      if (w && w.taskId === taskId && typeof w.onChunk === "function") {
-        w.onChunk(live.text, { isDone: live.isDone, toolUses: live.toolUses });
-      }
-    }
-    function renderLiveStreamIndicator(taskId) {
-      const live = state.liveStreams.get(taskId);
-      if (!live) return "";
-      const PREVIEW_MAX = 120;
-      const truncated = live.text.length > PREVIEW_MAX ? live.text.slice(0, PREVIEW_MAX) + "…" : live.text;
-      const escaped = escapeHtml2(truncated || "(no text yet)");
-      const tools = live.toolUses > 0 ? `<span class="live-stream-tools" title="tool_use chunks">🔧 ${live.toolUses}</span>` : "";
-      if (live.isDone) {
-        return `<div class="live-stream-indicator live-stream-done" title="stream ended">✓ ${tools}</div>`;
-      }
-      return `<div class="live-stream-indicator live-stream-active">
-      <span class="live-stream-dot">●</span>
-      <span class="live-stream-by">${escapeHtml2(live.agentId)}</span>
-      ${tools}
-      <span class="live-stream-text">${escaped}</span>
-    </div>`;
-    }
-    function applyEvent(ev) {
-      if (ev.kind === "llm_stream_chunk") {
-        handleStreamChunk(ev);
-        renderTasks();
-        return;
-      }
-      state.transcript.push(ev);
-      switch (ev.kind) {
-        case "participant_joined":
-          if (!state.participants.find((p) => p.id === ev.data.id)) {
-            state.participants.push({
-              id: ev.data.id,
-              kind: ev.data.participantKind,
-              capabilities: ev.data.capabilities,
-              load: 0
-            });
-          }
-          refreshManagedAgents().catch(() => {
-          });
-          if (typeof ev.data.id === "string" && ev.data.id.startsWith("workflow:")) {
-            refreshWorkflows().catch(() => {
-            });
-          }
-          break;
-        case "participant_left":
-          state.participants = state.participants.filter((p) => p.id !== ev.data.id);
-          refreshManagedAgents().catch(() => {
-          });
-          if (typeof ev.data.id === "string" && ev.data.id.startsWith("workflow:")) {
-            refreshWorkflows().catch(() => {
-            });
-          }
-          break;
-        case "agent_pending":
-          state.pendingApplications.push(ev.data);
-          break;
-        case "agent_approved":
-        case "agent_rejected":
-          state.pendingApplications = state.pendingApplications.filter(
-            (a) => a.id !== ev.data.applicationId
-          );
-          break;
-        case "task":
-        case "task_result":
-        case "evaluation":
-          if (ev.kind === "task_result" && ev.data?.taskId) {
-            state.liveStreams.delete(ev.data.taskId);
-          }
-          if (state.assistWatcher) {
-            const w = state.assistWatcher;
-            if (ev.kind === "task" && !w.taskId && typeof ev.data?.title === "string" && ev.data.title.includes("workflow:assist") && typeof ev.data.taskId === "string") {
-              w.taskId = ev.data.taskId;
-              if (typeof w.onTask === "function") w.onTask(ev.data.taskId);
-            } else if (ev.kind === "task_result" && w.taskId && ev.data?.taskId === w.taskId && typeof w.onEnd === "function") {
-              w.onEnd();
-            }
-          }
-          refresh().catch((err) => console.error("task refresh failed:", err));
-          return;
-        case "service_trashed":
-          services.showServicesToast(t2.servicesToastTrashed);
-          if (document.body.dataset.activeTab === "services") {
-            services.refreshServices().catch((err) => console.warn("services refresh failed:", err));
-          }
-          break;
-        case "service_purged":
-          if (document.body.dataset.activeTab === "services") {
-            services.refreshServices().catch(() => {
-            });
-          }
-          break;
-      }
-      renderAll();
-    }
-    function renderAll() {
-      if (!dom) return;
-      renderPendingApps();
-      renderParticipants();
-      renderTranscript();
-      renderTasks();
-      renderKnownRoster();
-      renderManagedAgents();
-      if (wf.available) renderWorkflows();
-      renderAgentQuestionBadge();
-      refreshLeaderboard().catch((err) => console.warn("leaderboard refresh failed:", err));
-      refreshHealth().catch((err) => console.warn("health refresh failed:", err));
-    }
-    function renderAgentQuestionBadge() {
-      const btn = document.querySelector('.tabbar-btn[data-tab="tasks"]');
-      if (!btn) return;
-      const n = (state.tasks || []).filter(
-        (v) => v.status === "pending" && isAgentQuestionPayload(v.task && v.task.payload)
-      ).length;
-      let badge = btn.querySelector(".tab-badge");
-      if (n === 0) {
-        if (badge) badge.remove();
-        return;
-      }
-      if (!badge) {
-        badge = document.createElement("span");
-        badge.className = "tab-badge";
-        btn.appendChild(badge);
-      }
-      badge.textContent = String(n);
-      badge.title = `${n} 个 agent 正在等你回答`;
-    }
-    async function refreshHealth() {
-      if (!dom?.hToday) return;
-      const today0 = /* @__PURE__ */ new Date();
-      today0.setHours(0, 0, 0, 0);
-      const todayStart = today0.getTime();
-      let todayTasks = 0;
-      for (const e of state.transcript) {
-        if (e.kind === "task" && e.ts >= todayStart) todayTasks++;
-      }
-      let onlineAgents = 0;
-      let onlineHumans = 0;
-      for (const p of state.participants) {
-        if (p.kind === "agent") onlineAgents++;
-        else if (p.kind === "human") onlineHumans++;
-      }
-      const now = Date.now();
-      const weekStart = now - 7 * 24 * 60 * 60 * 1e3;
-      let lb = null;
-      try {
-        lb = await fetchJson2(`/api/leaderboard?from=${weekStart}&to=${now}`);
-      } catch (err) {
-        console.warn("refreshHealth leaderboard fetch failed:", err);
-      }
-      dom.hToday.textContent = String(todayTasks);
-      dom.hOnline.textContent = String(onlineAgents + onlineHumans);
-      const subFn = t2.healthOnlineSub;
-      dom.hOnlineSub.textContent = typeof subFn === "function" ? subFn(onlineAgents, onlineHumans) : `${onlineAgents} · ${onlineHumans}`;
-      dom.hUnrated.textContent = lb ? String(lb.unratedTaskCount) : "—";
-      const top3 = lb?.rows?.slice(0, 3) ?? [];
-      if (top3.length === 0) {
-        dom.hTop3.classList.add("empty");
-        dom.hTop3.textContent = t2.healthTop3Empty ?? "—";
-      } else {
-        dom.hTop3.classList.remove("empty");
-        dom.hTop3.innerHTML = top3.map(
-          (row) => `<li><span class="top-id">${escapeHtml2(row.participantId)}</span><span class="top-score">${formatScore(row.totalContribution)}</span></li>`
-        ).join("");
-      }
-    }
-    async function refreshLeaderboard() {
-      if (!dom?.lbList) return;
-      const lb = await fetchLeaderboard(lbWindow);
-      renderLeaderboard(dom.lbList, lb, dom.lbSummary);
-    }
-    function renderPendingApps() {
-      const root = dom.pendingAppsList;
-      root.innerHTML = "";
-      if (state.pendingApplications.length === 0) {
-        root.innerHTML = `<p class="empty">${escapeHtml2(t2.noPendingAgents)}</p>`;
-        dom.pendingAppsSection.classList.remove("has-pending");
-        return;
-      }
-      dom.pendingAppsSection.classList.add("has-pending");
-      for (const app of state.pendingApplications) {
-        const card = document.createElement("div");
-        card.className = "pending-app-card";
-        const agents = app.agents.map((a) => `<span class="cap">${escapeHtml2(a.id)}${a.capabilities && a.capabilities.length ? " · " + escapeHtml2(a.capabilities.join(",")) : ""}</span>`).join("");
-        const meta = app.meta || {};
-        const metaBits = [];
-        if (meta.clientName) metaBits.push(`${escapeHtml2(t2.clientLabel)}: ${escapeHtml2(meta.clientName)}${meta.clientVersion ? " " + escapeHtml2(meta.clientVersion) : ""}`);
-        if (meta.remoteAddress) metaBits.push(`${escapeHtml2(t2.remoteAddress)}: ${escapeHtml2(meta.remoteAddress)}`);
-        metaBits.push(`${escapeHtml2(t2.pendingSince)}: ${new Date(app.pendingSince).toLocaleString()}`);
-        let servicesBlock = "";
-        const services2 = Array.isArray(app.services) ? app.services : [];
-        if (services2.length > 0) {
-          const items = services2.map((s) => {
-            const owner = `${escapeHtml2(s.owner.kind)}/${escapeHtml2(s.owner.id)}`;
-            const methodsArr = Array.isArray(s.methods) ? s.methods : [];
-            const methodsLabel = t2.appServicesMethodsAny || "(any method)";
-            const methodsTxt = methodsArr.length > 0 ? methodsArr.map((m) => `<code>${escapeHtml2(String(m))}</code>`).join(", ") : `<span class="muted">${escapeHtml2(methodsLabel)}</span>`;
-            return `<li><code>${escapeHtml2(s.type)}:${escapeHtml2(s.impl)}</code> <span class="muted">@</span> <code>${owner}</code> <span class="muted">·</span> ${methodsTxt}</li>`;
-          }).join("");
-          const label = t2.appServicesRequested || "Services requested";
-          servicesBlock = `<div class="pending-services"><div class="pending-services-label">${escapeHtml2(label)}</div><ul class="pending-services-list">${items}</ul></div>`;
-        }
-        card.innerHTML = `<div class="t-head"><span class="t-title">${agents}</span></div><div class="pending-meta">${metaBits.join(" · ")}</div>` + servicesBlock + `<div class="pending-actions"><input class="reject-reason" placeholder="${escapeHtml2(t2.rejectReason)}" data-id="${escapeHtml2(app.id)}" /><button class="btn-approve" data-act="approve-app" data-id="${escapeHtml2(app.id)}">${escapeHtml2(t2.approve)}</button><button class="btn-reject" data-act="reject-app" data-id="${escapeHtml2(app.id)}">${escapeHtml2(t2.reject)}</button></div>`;
-        root.appendChild(card);
-      }
-    }
-    function renderParticipants() {
-      const root = dom.participantsList;
-      root.innerHTML = "";
-      if (state.participants.length === 0) {
-        root.innerHTML = `<p class="empty">${escapeHtml2(t2.noParticipants)}</p>`;
-        return;
-      }
-      for (const p of state.participants) {
-        const div = document.createElement("div");
-        div.className = `participant participant-${p.kind}`;
-        const caps = (p.capabilities || []).map((c) => `<span class="cap">${escapeHtml2(c)}</span>`).join("") || `<em class="empty">${escapeHtml2(t2.noCaps)}</em>`;
-        const kindLabel = t2.pKind[p.kind] || p.kind;
-        div.innerHTML = `<div class="p-head"><span class="p-kind">${escapeHtml2(kindLabel)}</span><span class="p-id">${escapeHtml2(p.id)}</span><span class="p-load">${escapeHtml2(t2.load)} ${p.load}</span></div><div class="p-caps">${caps}</div>`;
-        root.appendChild(div);
-      }
-    }
-    function renderTranscript() {
-      const root = dom.transcriptList;
-      dom.transcriptCount.textContent = String(state.transcript.length);
-      root.innerHTML = "";
-      for (let i = state.transcript.length - 1; i >= 0; i--) {
-        const e = state.transcript[i];
-        const li = document.createElement("li");
-        const taskIdAttr = e.kind === "task_result" ? ` data-taskid="${escapeHtml2(e.data.taskId)}"` : "";
-        const clickableCls = e.kind === "task_result" ? " entry-clickable" : "";
-        li.className = `entry entry-${e.kind}${clickableCls}` + (isBadResult(e) ? " bad" : "");
-        li.innerHTML = `<span class="seq">${e.seq}</span><span class="kind">${e.kind}</span><span class="body"${taskIdAttr}>${escapeHtml2(summarize(e))}</span>`;
-        root.appendChild(li);
-      }
-    }
-    function renderTasks() {
-      const root = dom.tasksList;
-      if (!root) return;
-      if (dom.tasksFilters) {
-        for (const btn of dom.tasksFilters.querySelectorAll("button[data-filter]")) {
-          btn.classList.toggle("active", btn.dataset.filter === taskFilter);
-        }
-      }
-      const filtered = state.tasks.filter((task) => taskFilter === "all" ? true : task.status === taskFilter).slice().reverse();
-      root.innerHTML = "";
-      if (filtered.length === 0) {
-        root.innerHTML = `<p class="empty">${escapeHtml2(t2.noTasks)}</p>`;
-        return;
-      }
-      for (const v of filtered) {
-        const isOpen = state.expandedTasks.has(v.id);
-        const div = document.createElement("div");
-        div.className = `task-card task-${v.status}` + (isOpen ? " expanded" : "");
-        div.dataset.taskId = v.id;
-        const statusLabel = v.status === "pending" ? t2.taskStatusPending : v.status === "done" ? t2.taskStatusDone : v.status === "failed" ? t2.taskStatusFailed : t2.taskStatusCancelled;
-        const title = v.task.title || t2.untitled;
-        const s = v.task.strategy;
-        const target = s.kind === "explicit" ? `to=${s.to}` : s.kind === "capability" ? `caps=[${s.capabilities.join(",")}]` : "broadcast";
-        const canRetry = v.status === "failed" || v.status === "cancelled";
-        const caret = isOpen ? "▾" : "▸";
-        const headHtml = `<div class="task-head" data-act="toggle-task" data-id="${escapeHtml2(v.id)}" role="button" tabindex="0" aria-expanded="${isOpen ? "true" : "false"}"><span class="task-caret">${caret}</span><span class="task-status task-status-${v.status}">${escapeHtml2(statusLabel)}</span><span class="task-title">${escapeHtml2(title)}</span><span class="task-strategy">${escapeHtml2(s.kind)} · ${escapeHtml2(target)}</span></div>`;
-        const metaHtml = `<div class="task-metrics">${taskMetricsHtml(v)}</div><div class="task-meta"><code class="task-id" data-act="copy-task-id" data-id="${escapeHtml2(v.id)}" title="${escapeHtml2(t2.taskIdHint)}">${escapeHtml2(v.id.slice(0, 8))}…</code>` + (v.result ? ` · ${escapeHtml2(resultSummary(v.result))}` : "") + `</div>`;
-        const retryHtml = canRetry ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml2(v.id)}">${escapeHtml2(t2.retry)}</button></div>` : "";
-        const liveHtml = renderLiveStreamIndicator(v.id);
-        const detailHtml = isOpen ? renderTaskDetail(v) : "";
-        div.innerHTML = headHtml + metaHtml + liveHtml + retryHtml + detailHtml;
-        root.appendChild(div);
-      }
-    }
-    function resultSummary(r) {
-      if (r.kind === "ok") return t2.sumOk(r.by);
-      if (r.kind === "failed") return t2.sumFailed(r.by, r.error);
-      if (r.kind === "cancelled") return t2.sumCancelled(r.reason);
-      return t2.sumNoParticipant(r.reason);
-    }
-    function renderTaskDetail(v) {
-      const sections = [];
-      if (v.status === "pending" && isAgentQuestionPayload(v.task.payload)) {
-        sections.push(renderAgentQuestionForm(v));
-      }
-      const created = new Date(v.createdAt).toLocaleString();
-      const completed = v.completedAt ? new Date(v.completedAt).toLocaleString() : "—";
-      const dur = v.completedAt ? formatDuration(v.completedAt - v.createdAt) : "—";
-      sections.push(
-        `<div class="task-detail-section task-detail-timing"><span><strong>${escapeHtml2(t2.detailCreated)}</strong> ${escapeHtml2(created)}</span><span><strong>${escapeHtml2(t2.detailCompleted)}</strong> ${escapeHtml2(completed)}</span><span><strong>${escapeHtml2(t2.detailDuration)}</strong> ${escapeHtml2(dur)}</span></div>`
-      );
-      if (Array.isArray(v.task.ancestry) && v.task.ancestry.length > 0) {
-        const chain = v.task.ancestry.map((node) => {
-          const id = String(node.taskId || "");
-          const idShort = id ? id.slice(0, 8) + "…" : "?";
-          const by = escapeHtml2(String(node.by || "?"));
-          return `<li><code>${by}</code> <span class="anc-tid" title="${escapeHtml2(id)}">${escapeHtml2(idShort)}</span></li>`;
-        }).join(' <span class="anc-arrow">→</span> ');
-        sections.push(
-          `<div class="task-detail-section task-detail-ancestry"><strong>↰ dispatch chain (${v.task.ancestry.length}):</strong> <ol class="anc-chain">${chain}</ol></div>`
-        );
-      }
-      const mm = extractMultimodalBlocks(v.task.payload);
-      const mmHtml = mm.length > 0 ? `<div class="task-detail-multimodal">${mm.map(renderMultimodalBlock).join("")}</div>` : "";
-      sections.push(
-        `<details class="task-detail-section" open><summary>${escapeHtml2(t2.detailPayload)}</summary>` + mmHtml + `<pre class="task-detail-pre">${escapeHtml2(formatJsonPretty(v.task.payload))}</pre></details>`
-      );
-      if (v.result) {
-        sections.push(renderResultBlock(v.result));
-      }
-      if (Array.isArray(v.evaluations) && v.evaluations.length > 0) {
-        const rows = v.evaluations.map((ev) => {
-          const when = ev.ts ? new Date(ev.ts).toLocaleString() : "";
-          const rating = typeof ev.rating === "number" ? `★ ${formatScore(ev.rating)}/5` : t2.detailCommentOnly;
-          const comment = ev.comment ? escapeHtml2(ev.comment) : "";
-          const author = ev.from ? `<code>${escapeHtml2(ev.from)}</code>` : "";
-          return `<li><span class="ev-rating">${escapeHtml2(rating)}</span>` + (author ? ` <span class="ev-from">${author}</span>` : "") + (when ? ` <span class="ev-ts">${escapeHtml2(when)}</span>` : "") + (comment ? `<div class="ev-comment">${comment}</div>` : "") + `</li>`;
-        }).join("");
-        sections.push(
-          `<details class="task-detail-section" open><summary>${escapeHtml2(t2.detailEvaluations)} (${v.evaluations.length})</summary><ul class="task-detail-evals">${rows}</ul></details>`
-        );
-      }
-      if (v.status === "done" || v.status === "failed") {
-        sections.push(renderInlineEvalForm(v.id));
-      }
-      return `<div class="task-detail">${sections.join("")}</div>`;
-    }
-    function renderResultBlock(r) {
-      if (r.kind === "ok") {
-        const out = r.output;
-        if (out && typeof out === "object" && typeof out.text === "string") {
-          const meta = [];
-          if (out.by) meta.push(`${escapeHtml2(t2.detailBy)} <code>${escapeHtml2(out.by)}</code>`);
-          if (out.stopReason) meta.push(`${escapeHtml2(t2.detailStopReason)} ${escapeHtml2(out.stopReason)}`);
-          if (out.usage) {
-            const u = out.usage;
-            const tokens = [];
-            if (typeof u.inputTokens === "number") tokens.push(`in ${u.inputTokens}`);
-            if (typeof u.outputTokens === "number") tokens.push(`out ${u.outputTokens}`);
-            if (tokens.length) meta.push(`${escapeHtml2(t2.detailUsage)} ${escapeHtml2(tokens.join(" / "))}`);
-          }
-          return `<details class="task-detail-section" open><summary>${escapeHtml2(t2.detailOutput)}</summary>` + (meta.length ? `<div class="task-detail-meta">${meta.join(" · ")}</div>` : "") + `<pre class="task-detail-pre task-detail-text">${escapeHtml2(out.text)}</pre></details>`;
-        }
-        return `<details class="task-detail-section" open><summary>${escapeHtml2(t2.detailOutput)}</summary><div class="task-detail-meta">${escapeHtml2(t2.detailBy)} <code>${escapeHtml2(r.by)}</code></div><pre class="task-detail-pre">${escapeHtml2(formatJsonPretty(out))}</pre></details>`;
-      }
-      const summary = resultSummary(r);
-      return `<div class="task-detail-section task-detail-error"><strong>${escapeHtml2(t2.detailOutput)}</strong> ${escapeHtml2(summary)}</div>`;
-    }
-    function renderInlineEvalForm(taskId) {
-      return `<div class="task-detail-section task-detail-eval"><strong>${escapeHtml2(t2.detailEvaluate)}</strong><div class="inline-eval-row"><label>${escapeHtml2(t2.evaluateRating)}<input type="number" min="0" max="5" step="0.1" data-inline-eval-rating="${escapeHtml2(taskId)}" /></label><label class="inline-eval-comment-label">${escapeHtml2(t2.evaluateComment)}<textarea rows="2" data-inline-eval-comment="${escapeHtml2(taskId)}"></textarea></label></div><div class="inline-eval-actions"><button data-act="inline-eval-submit" data-id="${escapeHtml2(taskId)}">${escapeHtml2(t2.evaluateButton)}</button><span class="inline-eval-msg" data-inline-eval-msg="${escapeHtml2(taskId)}"></span></div></div>`;
-    }
-    function formatJsonPretty(value) {
-      try {
-        return JSON.stringify(value, null, 2);
-      } catch (err) {
-        return String(value);
-      }
-    }
-    function formatDuration(ms) {
-      if (!Number.isFinite(ms) || ms < 0) return "—";
-      if (ms < 1e3) return `${ms} ms`;
-      const s = Math.round(ms / 100) / 10;
-      if (s < 60) return `${s.toFixed(1)} s`;
-      const m = Math.floor(s / 60);
-      const rem = Math.round(s - m * 60);
-      return `${m}m ${rem}s`;
-    }
-    async function submitInlineEval(taskId, btn) {
-      const card = btn.closest(".task-card");
-      if (!card) return;
-      const ratingEl = card.querySelector(`[data-inline-eval-rating="${CSS.escape(taskId)}"]`);
-      const commentEl = card.querySelector(`[data-inline-eval-comment="${CSS.escape(taskId)}"]`);
-      const msgEl = card.querySelector(`[data-inline-eval-msg="${CSS.escape(taskId)}"]`);
-      if (msgEl) {
-        msgEl.textContent = "";
-        msgEl.classList.remove("ok", "err");
-      }
-      const ratingStr = (ratingEl?.value ?? "").trim();
-      const rating = ratingStr ? Number(ratingStr) : void 0;
-      const comment = (commentEl?.value ?? "").trim() || void 0;
-      if (rating == null && !comment) {
-        if (msgEl) {
-          msgEl.textContent = t2.evaluateEmpty;
-          msgEl.classList.add("err");
-        }
-        return;
-      }
-      btn.disabled = true;
-      try {
-        await fetchJson2("/api/admin/evaluate", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ taskId, rating, comment })
-        });
-        if (msgEl) {
-          msgEl.textContent = t2.evaluateSuccess;
-          msgEl.classList.add("ok");
-        }
-        if (commentEl) commentEl.value = "";
-      } catch (err) {
-        if (msgEl) {
-          msgEl.textContent = t2.failedAlert(err.message || String(err));
-          msgEl.classList.add("err");
-        }
-      } finally {
-        btn.disabled = false;
-      }
-    }
-    function expandTaskAndScroll(taskId) {
-      state.expandedTasks.add(taskId);
-      renderTasks();
-      requestAnimationFrame(() => {
-        const sel = `.task-card[data-task-id="${CSS.escape(taskId)}"]`;
-        const card = document.querySelector(sel);
-        if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
+    function setDom(d) {
+      dom = d;
     }
     async function refreshManagedAgents() {
       if (!dom?.maList) return;
@@ -1344,6 +669,725 @@
         dom.maGhImportMsg.classList.add("err");
       }
     }
+    async function exportAgent(id) {
+      window.location.href = `/api/admin/agents/${encodeURIComponent(id)}/export`;
+    }
+    async function removeAgent(id) {
+      if (!confirm(t2.confirmRemoveAgent(id))) return;
+      try {
+        await fetchJson2(`/api/admin/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+        await refreshManagedAgents();
+      } catch (err) {
+        alert(t2.failedAlert(err.message || String(err)));
+      }
+    }
+    return {
+      setDom,
+      refreshManagedAgents,
+      renderManagedAgents,
+      syncProviderDependentFields,
+      openAgentForm,
+      closeAgentForm,
+      submitAgentForm,
+      openImportModal,
+      openKeysModal,
+      closeKeysModal,
+      setProviderKey,
+      removeProviderKey,
+      closeImportModal,
+      submitImport,
+      updateGhResolved,
+      openGithubImportModal,
+      closeGithubImportModal,
+      submitGithubImport,
+      exportAgent,
+      removeAgent
+    };
+  }
+
+  // admin-src/main.js
+  (() => {
+    const {
+      $,
+      t: t3,
+      applyStaticI18n,
+      onLangChange,
+      escapeHtml: escapeHtml3,
+      summarize,
+      isBadResult,
+      fetchJson: fetchJson3,
+      connectStream,
+      syncLangFromConfig,
+      fetchLeaderboard,
+      renderLeaderboard,
+      taskMetricsHtml,
+      formatScore,
+      attachContribToggle,
+      applyContribToggleState,
+      attachCapChips
+    } = window.AipeHub;
+    const ma = {
+      agents: [],
+      providers: [],
+      // Mirrors GET /api/admin/secrets — used to decorate the "API key" panel
+      // and to figure out whether a given agent has its own override key.
+      secrets: { providers: {}, agents: {}, env: {} },
+      formMode: "create",
+      // 'create' | 'edit'
+      editingId: null
+    };
+    const wf = {
+      available: null,
+      workflows: [],
+      // Run history modal state. `workflowId` is set when an admin clicks
+      // "view history" on a card; `runs` is the most-recent N rows we
+      // fetched; `selectedRunId` is whichever row the admin opened.
+      runs: {
+        workflowId: null,
+        rows: [],
+        selectedRunId: null
+      }
+    };
+    const state = {
+      participants: [],
+      transcript: [],
+      pendingApplications: [],
+      tasks: [],
+      known: { admins: [], workers: [] },
+      // Task cards remember their expanded/collapsed state across re-renders.
+      // Plain `Set<TaskId>` — wiped on reload (no localStorage), restored by
+      // clicking transcript rows or the card head again. Memory-only.
+      expandedTasks: /* @__PURE__ */ new Set(),
+      // Phase 8 M7 — per-task accumulator for in-flight LLM stream output.
+      // Keyed by taskId. Wiped when the matching task_result arrives.
+      // Memory-only (deliberately not persisted) — operators wanting the
+      // final text use task_result.output; this is just for "watching the
+      // model type" in the admin UI.
+      //
+      //   Map<taskId, {
+      //     agentId: ParticipantId,
+      //     text: string,         // concatenated text chunks
+      //     toolUses: number,     // count of tool_use chunks observed
+      //     isDone: boolean,      // an `end` or `error` chunk arrived
+      //     lastTs: number,
+      //   }>
+      liveStreams: /* @__PURE__ */ new Map(),
+      // Phase 13 follow-up — workflow-assist streaming subscription. Set
+      // by submitWorkflowAssist while a /api/admin/workflows/assist call
+      // is in flight; null otherwise. The shape:
+      //
+      //   {
+      //     taskId: TaskId | null,     // locked from the matching `task` SSE event
+      //     onTask: (taskId) => void,  // called once when taskId resolves
+      //     onChunk: (text) => void,   // called on each cumulative text update
+      //     onEnd: () => void,         // called on matching task_result
+      //   }
+      //
+      // The modal installs/clears this; applyEvent + handleStreamChunk
+      // call into it when matching events flow through the SSE feed.
+      assistWatcher: null
+    };
+    let taskFilter = "all";
+    let lbWindow = "all";
+    let dom = null;
+    const services = createServices(ma);
+    const managedAgents = createManagedAgents({ ma, openBundleImportModal });
+    function resolveDom() {
+      dom = {
+        participantsList: $("participants-list"),
+        transcriptList: $("transcript-list"),
+        transcriptCount: $("transcript-count"),
+        pendingAppsSection: $("pending-apps"),
+        pendingAppsList: $("pending-apps-list"),
+        dispatchForm: $("dispatch-form"),
+        dispatchMsg: $("dispatch-msg"),
+        dStrategy: $("d-strategy"),
+        dTo: $("d-to"),
+        dToLabel: $("d-to-label"),
+        dCaps: $("d-caps"),
+        dCapsLabel: $("d-caps-label"),
+        dTitle: $("d-title"),
+        dPayload: $("d-payload"),
+        dPriority: $("d-priority"),
+        dWeight: $("d-weight"),
+        evaluateForm: $("evaluate-form"),
+        evaluateMsg: $("evaluate-msg"),
+        eTask: $("e-task"),
+        eRating: $("e-rating"),
+        eComment: $("e-comment"),
+        tasksFilters: $("tasks-filters"),
+        tasksList: $("tasks-list"),
+        knownAdminsList: $("known-admins-list"),
+        knownWorkersList: $("known-workers-list"),
+        logoutBtn: $("logout-btn"),
+        lbWindow: $("lb-window"),
+        lbList: $("leaderboard-list"),
+        lbSummary: $("lb-summary"),
+        contribToggle: $("contrib-toggle"),
+        contribToggleInput: $("contrib-toggle-input"),
+        // Managed agents (v2.1)
+        maList: $("managed-agents-list"),
+        maSummary: $("ma-summary"),
+        maNewBtn: $("ma-new-btn"),
+        maImportBtn: $("ma-import-btn"),
+        maKeysBtn: $("ma-keys-btn"),
+        maKeysModal: $("ma-keys-modal"),
+        maKeysList: $("ma-keys-list"),
+        maKeysMsg: $("ma-keys-msg"),
+        maApiKey: $("ma-api-key"),
+        maApiKeyHint: $("ma-api-key-hint"),
+        maApiKeyClear: $("ma-api-key-clear"),
+        maFormModal: $("ma-form-modal"),
+        maForm: $("ma-form"),
+        maFormTitle: $("ma-form-title"),
+        maFormEditWarning: $("ma-form-edit-warning"),
+        maFormMsg: $("ma-form-msg"),
+        maId: $("ma-id"),
+        maDisplayName: $("ma-display-name"),
+        maCaps: $("ma-caps"),
+        maProvider: $("ma-provider"),
+        maBaseUrl: $("ma-base-url"),
+        maProviderLabel: $("ma-provider-label"),
+        maModel: $("ma-model"),
+        maSystem: $("ma-system"),
+        maWeight: $("ma-weight"),
+        maImportModal: $("ma-import-modal"),
+        maImportFile: $("ma-import-file"),
+        maImportText: $("ma-import-text"),
+        maImportSubmit: $("ma-import-submit"),
+        maImportMsg: $("ma-import-msg"),
+        maGhImportBtn: $("ma-gh-import-btn"),
+        maGhImportModal: $("ma-gh-import-modal"),
+        maGhUrl: $("ma-gh-url"),
+        maGhSource: $("ma-gh-source"),
+        maGhResolved: $("ma-gh-resolved"),
+        maGhImportSubmit: $("ma-gh-import-submit"),
+        maGhImportMsg: $("ma-gh-import-msg"),
+        maImportDropdown: document.querySelector(".ma-import-dropdown"),
+        // Growth reports (v2.4 personal-growth)
+        grSection: $("growth-reports"),
+        grTable: $("growth-reports-table"),
+        grTbody: $("growth-reports-tbody"),
+        grEmpty: $("growth-reports-empty"),
+        grSummary: $("growth-reports-summary"),
+        grRefreshBtn: $("growth-reports-refresh"),
+        // One-time disclaimer (v2.4)
+        disclaimerModal: $("disclaimer-modal"),
+        disclaimerAccept: $("disclaimer-accept"),
+        // Growth report inline-viewer modal (v2.4)
+        grReportModal: $("growth-report-modal"),
+        grReportTitle: $("growth-report-title"),
+        grReportBody: $("growth-report-body"),
+        grReportDownload: $("growth-report-download"),
+        // Workflows (v2.1)
+        wfSection: $("workflows"),
+        wfList: $("workflows-list"),
+        wfSummary: $("wf-summary"),
+        wfImportBtn: $("wf-import-btn"),
+        // Workflow start (v2.4) — payload-schema-driven dispatch form
+        wfStartModal: $("wf-start-modal"),
+        wfStartTitle: $("wf-start-title"),
+        wfStartDesc: $("wf-start-desc"),
+        wfStartFields: $("wf-start-fields"),
+        wfStartSubmit: $("wf-start-submit"),
+        wfStartMsg: $("wf-start-msg"),
+        // Bundle import (v2.4) — team + workflow + apiKey in one upload
+        bundleImportBtn: $("bundle-import-btn"),
+        bundleImportModal: $("bundle-import-modal"),
+        bundleImportFile: $("bundle-import-file"),
+        bundleImportText: $("bundle-import-text"),
+        bundleImportKey: $("bundle-import-key"),
+        bundleKeyLabel: $("bundle-key-label"),
+        bundleImportSubmit: $("bundle-import-submit"),
+        bundleImportMsg: $("bundle-import-msg"),
+        bundleBuiltinPgBtn: $("bundle-builtin-pg-btn"),
+        wfImportModal: $("wf-import-modal"),
+        wfImportFile: $("wf-import-file"),
+        wfImportText: $("wf-import-text"),
+        wfImportSubmit: $("wf-import-submit"),
+        wfImportMsg: $("wf-import-msg"),
+        // Phase 13 M3 — AI assistant dialog
+        wfAssistBtn: $("wf-assist-btn"),
+        wfAssistModal: $("wf-assist-modal"),
+        wfAssistDescription: $("wf-assist-description"),
+        wfAssistGenerate: $("wf-assist-generate"),
+        wfAssistMsg: $("wf-assist-msg"),
+        wfAssistResult: $("wf-assist-result"),
+        wfAssistStatusChip: $("wf-assist-status-chip"),
+        wfAssistExplanation: $("wf-assist-explanation"),
+        wfAssistYaml: $("wf-assist-yaml"),
+        wfAssistErrorDetails: $("wf-assist-error-details"),
+        wfAssistValidationError: $("wf-assist-validation-error"),
+        // Phase 13 M4 — deep-check warnings panel.
+        wfAssistDeepcheckDetails: $("wf-assist-deepcheck-details"),
+        wfAssistDeepcheckSummary: $("wf-assist-deepcheck-summary"),
+        wfAssistDeepcheckList: $("wf-assist-deepcheck-list"),
+        // Phase 13 follow-up — live streaming preview.
+        wfAssistStreaming: $("wf-assist-streaming"),
+        wfAssistStreamingText: $("wf-assist-streaming-text"),
+        wfAssistStreamingMeta: $("wf-assist-streaming-meta"),
+        wfAssistSave: $("wf-assist-save"),
+        wfAssistRegenerate: $("wf-assist-regenerate"),
+        // Run history modal (v0.3)
+        wfRunsModal: $("wf-runs-modal"),
+        wfRunsTarget: $("wf-runs-target"),
+        wfRunsList: $("wf-runs-list"),
+        wfRunsEmpty: $("wf-runs-empty"),
+        wfRunDetail: $("wf-run-detail"),
+        wfRunsMsg: $("wf-runs-msg"),
+        // Room health banner (v2.1+)
+        hToday: $("health-today-tasks"),
+        hOnline: $("health-online"),
+        hOnlineSub: $("health-online-sub"),
+        hUnrated: $("health-unrated"),
+        hTop3: $("health-top3")
+      };
+    }
+    async function refresh() {
+      const snap = await fetchJson3("/api/state");
+      state.participants = snap.participants;
+      state.transcript = snap.transcript;
+      state.pendingApplications = snap.pendingApplications || [];
+      state.tasks = snap.tasks || [];
+      state.known = snap.known || { admins: [], workers: [] };
+      if (snap.config?.defaultLang) syncLangFromConfig(snap.config.defaultLang);
+      renderAll();
+    }
+    function handleStreamChunk(ev) {
+      const { taskId, agentId, chunk } = ev.data || {};
+      if (!taskId || !chunk || typeof chunk !== "object") return;
+      let live = state.liveStreams.get(taskId);
+      if (!live) {
+        live = { agentId, text: "", toolUses: 0, isDone: false, lastTs: ev.ts || Date.now() };
+        state.liveStreams.set(taskId, live);
+      }
+      live.lastTs = ev.ts || Date.now();
+      switch (chunk.type) {
+        case "text":
+          if (typeof chunk.text === "string") live.text += chunk.text;
+          break;
+        case "tool_use":
+          live.toolUses += 1;
+          break;
+        case "end":
+        case "error":
+          live.isDone = true;
+          break;
+      }
+      const w = state.assistWatcher;
+      if (w && w.taskId === taskId && typeof w.onChunk === "function") {
+        w.onChunk(live.text, { isDone: live.isDone, toolUses: live.toolUses });
+      }
+    }
+    function renderLiveStreamIndicator(taskId) {
+      const live = state.liveStreams.get(taskId);
+      if (!live) return "";
+      const PREVIEW_MAX = 120;
+      const truncated = live.text.length > PREVIEW_MAX ? live.text.slice(0, PREVIEW_MAX) + "…" : live.text;
+      const escaped = escapeHtml3(truncated || "(no text yet)");
+      const tools = live.toolUses > 0 ? `<span class="live-stream-tools" title="tool_use chunks">🔧 ${live.toolUses}</span>` : "";
+      if (live.isDone) {
+        return `<div class="live-stream-indicator live-stream-done" title="stream ended">✓ ${tools}</div>`;
+      }
+      return `<div class="live-stream-indicator live-stream-active">
+      <span class="live-stream-dot">●</span>
+      <span class="live-stream-by">${escapeHtml3(live.agentId)}</span>
+      ${tools}
+      <span class="live-stream-text">${escaped}</span>
+    </div>`;
+    }
+    function applyEvent(ev) {
+      if (ev.kind === "llm_stream_chunk") {
+        handleStreamChunk(ev);
+        renderTasks();
+        return;
+      }
+      state.transcript.push(ev);
+      switch (ev.kind) {
+        case "participant_joined":
+          if (!state.participants.find((p) => p.id === ev.data.id)) {
+            state.participants.push({
+              id: ev.data.id,
+              kind: ev.data.participantKind,
+              capabilities: ev.data.capabilities,
+              load: 0
+            });
+          }
+          managedAgents.refreshManagedAgents().catch(() => {
+          });
+          if (typeof ev.data.id === "string" && ev.data.id.startsWith("workflow:")) {
+            refreshWorkflows().catch(() => {
+            });
+          }
+          break;
+        case "participant_left":
+          state.participants = state.participants.filter((p) => p.id !== ev.data.id);
+          managedAgents.refreshManagedAgents().catch(() => {
+          });
+          if (typeof ev.data.id === "string" && ev.data.id.startsWith("workflow:")) {
+            refreshWorkflows().catch(() => {
+            });
+          }
+          break;
+        case "agent_pending":
+          state.pendingApplications.push(ev.data);
+          break;
+        case "agent_approved":
+        case "agent_rejected":
+          state.pendingApplications = state.pendingApplications.filter(
+            (a) => a.id !== ev.data.applicationId
+          );
+          break;
+        case "task":
+        case "task_result":
+        case "evaluation":
+          if (ev.kind === "task_result" && ev.data?.taskId) {
+            state.liveStreams.delete(ev.data.taskId);
+          }
+          if (state.assistWatcher) {
+            const w = state.assistWatcher;
+            if (ev.kind === "task" && !w.taskId && typeof ev.data?.title === "string" && ev.data.title.includes("workflow:assist") && typeof ev.data.taskId === "string") {
+              w.taskId = ev.data.taskId;
+              if (typeof w.onTask === "function") w.onTask(ev.data.taskId);
+            } else if (ev.kind === "task_result" && w.taskId && ev.data?.taskId === w.taskId && typeof w.onEnd === "function") {
+              w.onEnd();
+            }
+          }
+          refresh().catch((err) => console.error("task refresh failed:", err));
+          return;
+        case "service_trashed":
+          services.showServicesToast(t3.servicesToastTrashed);
+          if (document.body.dataset.activeTab === "services") {
+            services.refreshServices().catch((err) => console.warn("services refresh failed:", err));
+          }
+          break;
+        case "service_purged":
+          if (document.body.dataset.activeTab === "services") {
+            services.refreshServices().catch(() => {
+            });
+          }
+          break;
+      }
+      renderAll();
+    }
+    function renderAll() {
+      if (!dom) return;
+      renderPendingApps();
+      renderParticipants();
+      renderTranscript();
+      renderTasks();
+      renderKnownRoster();
+      managedAgents.renderManagedAgents();
+      if (wf.available) renderWorkflows();
+      renderAgentQuestionBadge();
+      refreshLeaderboard().catch((err) => console.warn("leaderboard refresh failed:", err));
+      refreshHealth().catch((err) => console.warn("health refresh failed:", err));
+    }
+    function renderAgentQuestionBadge() {
+      const btn = document.querySelector('.tabbar-btn[data-tab="tasks"]');
+      if (!btn) return;
+      const n = (state.tasks || []).filter(
+        (v) => v.status === "pending" && isAgentQuestionPayload(v.task && v.task.payload)
+      ).length;
+      let badge = btn.querySelector(".tab-badge");
+      if (n === 0) {
+        if (badge) badge.remove();
+        return;
+      }
+      if (!badge) {
+        badge = document.createElement("span");
+        badge.className = "tab-badge";
+        btn.appendChild(badge);
+      }
+      badge.textContent = String(n);
+      badge.title = `${n} 个 agent 正在等你回答`;
+    }
+    async function refreshHealth() {
+      if (!dom?.hToday) return;
+      const today0 = /* @__PURE__ */ new Date();
+      today0.setHours(0, 0, 0, 0);
+      const todayStart = today0.getTime();
+      let todayTasks = 0;
+      for (const e of state.transcript) {
+        if (e.kind === "task" && e.ts >= todayStart) todayTasks++;
+      }
+      let onlineAgents = 0;
+      let onlineHumans = 0;
+      for (const p of state.participants) {
+        if (p.kind === "agent") onlineAgents++;
+        else if (p.kind === "human") onlineHumans++;
+      }
+      const now = Date.now();
+      const weekStart = now - 7 * 24 * 60 * 60 * 1e3;
+      let lb = null;
+      try {
+        lb = await fetchJson3(`/api/leaderboard?from=${weekStart}&to=${now}`);
+      } catch (err) {
+        console.warn("refreshHealth leaderboard fetch failed:", err);
+      }
+      dom.hToday.textContent = String(todayTasks);
+      dom.hOnline.textContent = String(onlineAgents + onlineHumans);
+      const subFn = t3.healthOnlineSub;
+      dom.hOnlineSub.textContent = typeof subFn === "function" ? subFn(onlineAgents, onlineHumans) : `${onlineAgents} · ${onlineHumans}`;
+      dom.hUnrated.textContent = lb ? String(lb.unratedTaskCount) : "—";
+      const top3 = lb?.rows?.slice(0, 3) ?? [];
+      if (top3.length === 0) {
+        dom.hTop3.classList.add("empty");
+        dom.hTop3.textContent = t3.healthTop3Empty ?? "—";
+      } else {
+        dom.hTop3.classList.remove("empty");
+        dom.hTop3.innerHTML = top3.map(
+          (row) => `<li><span class="top-id">${escapeHtml3(row.participantId)}</span><span class="top-score">${formatScore(row.totalContribution)}</span></li>`
+        ).join("");
+      }
+    }
+    async function refreshLeaderboard() {
+      if (!dom?.lbList) return;
+      const lb = await fetchLeaderboard(lbWindow);
+      renderLeaderboard(dom.lbList, lb, dom.lbSummary);
+    }
+    function renderPendingApps() {
+      const root = dom.pendingAppsList;
+      root.innerHTML = "";
+      if (state.pendingApplications.length === 0) {
+        root.innerHTML = `<p class="empty">${escapeHtml3(t3.noPendingAgents)}</p>`;
+        dom.pendingAppsSection.classList.remove("has-pending");
+        return;
+      }
+      dom.pendingAppsSection.classList.add("has-pending");
+      for (const app of state.pendingApplications) {
+        const card = document.createElement("div");
+        card.className = "pending-app-card";
+        const agents = app.agents.map((a) => `<span class="cap">${escapeHtml3(a.id)}${a.capabilities && a.capabilities.length ? " · " + escapeHtml3(a.capabilities.join(",")) : ""}</span>`).join("");
+        const meta = app.meta || {};
+        const metaBits = [];
+        if (meta.clientName) metaBits.push(`${escapeHtml3(t3.clientLabel)}: ${escapeHtml3(meta.clientName)}${meta.clientVersion ? " " + escapeHtml3(meta.clientVersion) : ""}`);
+        if (meta.remoteAddress) metaBits.push(`${escapeHtml3(t3.remoteAddress)}: ${escapeHtml3(meta.remoteAddress)}`);
+        metaBits.push(`${escapeHtml3(t3.pendingSince)}: ${new Date(app.pendingSince).toLocaleString()}`);
+        let servicesBlock = "";
+        const services2 = Array.isArray(app.services) ? app.services : [];
+        if (services2.length > 0) {
+          const items = services2.map((s) => {
+            const owner = `${escapeHtml3(s.owner.kind)}/${escapeHtml3(s.owner.id)}`;
+            const methodsArr = Array.isArray(s.methods) ? s.methods : [];
+            const methodsLabel = t3.appServicesMethodsAny || "(any method)";
+            const methodsTxt = methodsArr.length > 0 ? methodsArr.map((m) => `<code>${escapeHtml3(String(m))}</code>`).join(", ") : `<span class="muted">${escapeHtml3(methodsLabel)}</span>`;
+            return `<li><code>${escapeHtml3(s.type)}:${escapeHtml3(s.impl)}</code> <span class="muted">@</span> <code>${owner}</code> <span class="muted">·</span> ${methodsTxt}</li>`;
+          }).join("");
+          const label = t3.appServicesRequested || "Services requested";
+          servicesBlock = `<div class="pending-services"><div class="pending-services-label">${escapeHtml3(label)}</div><ul class="pending-services-list">${items}</ul></div>`;
+        }
+        card.innerHTML = `<div class="t-head"><span class="t-title">${agents}</span></div><div class="pending-meta">${metaBits.join(" · ")}</div>` + servicesBlock + `<div class="pending-actions"><input class="reject-reason" placeholder="${escapeHtml3(t3.rejectReason)}" data-id="${escapeHtml3(app.id)}" /><button class="btn-approve" data-act="approve-app" data-id="${escapeHtml3(app.id)}">${escapeHtml3(t3.approve)}</button><button class="btn-reject" data-act="reject-app" data-id="${escapeHtml3(app.id)}">${escapeHtml3(t3.reject)}</button></div>`;
+        root.appendChild(card);
+      }
+    }
+    function renderParticipants() {
+      const root = dom.participantsList;
+      root.innerHTML = "";
+      if (state.participants.length === 0) {
+        root.innerHTML = `<p class="empty">${escapeHtml3(t3.noParticipants)}</p>`;
+        return;
+      }
+      for (const p of state.participants) {
+        const div = document.createElement("div");
+        div.className = `participant participant-${p.kind}`;
+        const caps = (p.capabilities || []).map((c) => `<span class="cap">${escapeHtml3(c)}</span>`).join("") || `<em class="empty">${escapeHtml3(t3.noCaps)}</em>`;
+        const kindLabel = t3.pKind[p.kind] || p.kind;
+        div.innerHTML = `<div class="p-head"><span class="p-kind">${escapeHtml3(kindLabel)}</span><span class="p-id">${escapeHtml3(p.id)}</span><span class="p-load">${escapeHtml3(t3.load)} ${p.load}</span></div><div class="p-caps">${caps}</div>`;
+        root.appendChild(div);
+      }
+    }
+    function renderTranscript() {
+      const root = dom.transcriptList;
+      dom.transcriptCount.textContent = String(state.transcript.length);
+      root.innerHTML = "";
+      for (let i = state.transcript.length - 1; i >= 0; i--) {
+        const e = state.transcript[i];
+        const li = document.createElement("li");
+        const taskIdAttr = e.kind === "task_result" ? ` data-taskid="${escapeHtml3(e.data.taskId)}"` : "";
+        const clickableCls = e.kind === "task_result" ? " entry-clickable" : "";
+        li.className = `entry entry-${e.kind}${clickableCls}` + (isBadResult(e) ? " bad" : "");
+        li.innerHTML = `<span class="seq">${e.seq}</span><span class="kind">${e.kind}</span><span class="body"${taskIdAttr}>${escapeHtml3(summarize(e))}</span>`;
+        root.appendChild(li);
+      }
+    }
+    function renderTasks() {
+      const root = dom.tasksList;
+      if (!root) return;
+      if (dom.tasksFilters) {
+        for (const btn of dom.tasksFilters.querySelectorAll("button[data-filter]")) {
+          btn.classList.toggle("active", btn.dataset.filter === taskFilter);
+        }
+      }
+      const filtered = state.tasks.filter((task) => taskFilter === "all" ? true : task.status === taskFilter).slice().reverse();
+      root.innerHTML = "";
+      if (filtered.length === 0) {
+        root.innerHTML = `<p class="empty">${escapeHtml3(t3.noTasks)}</p>`;
+        return;
+      }
+      for (const v of filtered) {
+        const isOpen = state.expandedTasks.has(v.id);
+        const div = document.createElement("div");
+        div.className = `task-card task-${v.status}` + (isOpen ? " expanded" : "");
+        div.dataset.taskId = v.id;
+        const statusLabel = v.status === "pending" ? t3.taskStatusPending : v.status === "done" ? t3.taskStatusDone : v.status === "failed" ? t3.taskStatusFailed : t3.taskStatusCancelled;
+        const title = v.task.title || t3.untitled;
+        const s = v.task.strategy;
+        const target = s.kind === "explicit" ? `to=${s.to}` : s.kind === "capability" ? `caps=[${s.capabilities.join(",")}]` : "broadcast";
+        const canRetry = v.status === "failed" || v.status === "cancelled";
+        const caret = isOpen ? "▾" : "▸";
+        const headHtml = `<div class="task-head" data-act="toggle-task" data-id="${escapeHtml3(v.id)}" role="button" tabindex="0" aria-expanded="${isOpen ? "true" : "false"}"><span class="task-caret">${caret}</span><span class="task-status task-status-${v.status}">${escapeHtml3(statusLabel)}</span><span class="task-title">${escapeHtml3(title)}</span><span class="task-strategy">${escapeHtml3(s.kind)} · ${escapeHtml3(target)}</span></div>`;
+        const metaHtml = `<div class="task-metrics">${taskMetricsHtml(v)}</div><div class="task-meta"><code class="task-id" data-act="copy-task-id" data-id="${escapeHtml3(v.id)}" title="${escapeHtml3(t3.taskIdHint)}">${escapeHtml3(v.id.slice(0, 8))}…</code>` + (v.result ? ` · ${escapeHtml3(resultSummary(v.result))}` : "") + `</div>`;
+        const retryHtml = canRetry ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml3(v.id)}">${escapeHtml3(t3.retry)}</button></div>` : "";
+        const liveHtml = renderLiveStreamIndicator(v.id);
+        const detailHtml = isOpen ? renderTaskDetail(v) : "";
+        div.innerHTML = headHtml + metaHtml + liveHtml + retryHtml + detailHtml;
+        root.appendChild(div);
+      }
+    }
+    function resultSummary(r) {
+      if (r.kind === "ok") return t3.sumOk(r.by);
+      if (r.kind === "failed") return t3.sumFailed(r.by, r.error);
+      if (r.kind === "cancelled") return t3.sumCancelled(r.reason);
+      return t3.sumNoParticipant(r.reason);
+    }
+    function renderTaskDetail(v) {
+      const sections = [];
+      if (v.status === "pending" && isAgentQuestionPayload(v.task.payload)) {
+        sections.push(renderAgentQuestionForm(v));
+      }
+      const created = new Date(v.createdAt).toLocaleString();
+      const completed = v.completedAt ? new Date(v.completedAt).toLocaleString() : "—";
+      const dur = v.completedAt ? formatDuration(v.completedAt - v.createdAt) : "—";
+      sections.push(
+        `<div class="task-detail-section task-detail-timing"><span><strong>${escapeHtml3(t3.detailCreated)}</strong> ${escapeHtml3(created)}</span><span><strong>${escapeHtml3(t3.detailCompleted)}</strong> ${escapeHtml3(completed)}</span><span><strong>${escapeHtml3(t3.detailDuration)}</strong> ${escapeHtml3(dur)}</span></div>`
+      );
+      if (Array.isArray(v.task.ancestry) && v.task.ancestry.length > 0) {
+        const chain = v.task.ancestry.map((node) => {
+          const id = String(node.taskId || "");
+          const idShort = id ? id.slice(0, 8) + "…" : "?";
+          const by = escapeHtml3(String(node.by || "?"));
+          return `<li><code>${by}</code> <span class="anc-tid" title="${escapeHtml3(id)}">${escapeHtml3(idShort)}</span></li>`;
+        }).join(' <span class="anc-arrow">→</span> ');
+        sections.push(
+          `<div class="task-detail-section task-detail-ancestry"><strong>↰ dispatch chain (${v.task.ancestry.length}):</strong> <ol class="anc-chain">${chain}</ol></div>`
+        );
+      }
+      const mm = extractMultimodalBlocks(v.task.payload);
+      const mmHtml = mm.length > 0 ? `<div class="task-detail-multimodal">${mm.map(renderMultimodalBlock).join("")}</div>` : "";
+      sections.push(
+        `<details class="task-detail-section" open><summary>${escapeHtml3(t3.detailPayload)}</summary>` + mmHtml + `<pre class="task-detail-pre">${escapeHtml3(formatJsonPretty(v.task.payload))}</pre></details>`
+      );
+      if (v.result) {
+        sections.push(renderResultBlock(v.result));
+      }
+      if (Array.isArray(v.evaluations) && v.evaluations.length > 0) {
+        const rows = v.evaluations.map((ev) => {
+          const when = ev.ts ? new Date(ev.ts).toLocaleString() : "";
+          const rating = typeof ev.rating === "number" ? `★ ${formatScore(ev.rating)}/5` : t3.detailCommentOnly;
+          const comment = ev.comment ? escapeHtml3(ev.comment) : "";
+          const author = ev.from ? `<code>${escapeHtml3(ev.from)}</code>` : "";
+          return `<li><span class="ev-rating">${escapeHtml3(rating)}</span>` + (author ? ` <span class="ev-from">${author}</span>` : "") + (when ? ` <span class="ev-ts">${escapeHtml3(when)}</span>` : "") + (comment ? `<div class="ev-comment">${comment}</div>` : "") + `</li>`;
+        }).join("");
+        sections.push(
+          `<details class="task-detail-section" open><summary>${escapeHtml3(t3.detailEvaluations)} (${v.evaluations.length})</summary><ul class="task-detail-evals">${rows}</ul></details>`
+        );
+      }
+      if (v.status === "done" || v.status === "failed") {
+        sections.push(renderInlineEvalForm(v.id));
+      }
+      return `<div class="task-detail">${sections.join("")}</div>`;
+    }
+    function renderResultBlock(r) {
+      if (r.kind === "ok") {
+        const out = r.output;
+        if (out && typeof out === "object" && typeof out.text === "string") {
+          const meta = [];
+          if (out.by) meta.push(`${escapeHtml3(t3.detailBy)} <code>${escapeHtml3(out.by)}</code>`);
+          if (out.stopReason) meta.push(`${escapeHtml3(t3.detailStopReason)} ${escapeHtml3(out.stopReason)}`);
+          if (out.usage) {
+            const u = out.usage;
+            const tokens = [];
+            if (typeof u.inputTokens === "number") tokens.push(`in ${u.inputTokens}`);
+            if (typeof u.outputTokens === "number") tokens.push(`out ${u.outputTokens}`);
+            if (tokens.length) meta.push(`${escapeHtml3(t3.detailUsage)} ${escapeHtml3(tokens.join(" / "))}`);
+          }
+          return `<details class="task-detail-section" open><summary>${escapeHtml3(t3.detailOutput)}</summary>` + (meta.length ? `<div class="task-detail-meta">${meta.join(" · ")}</div>` : "") + `<pre class="task-detail-pre task-detail-text">${escapeHtml3(out.text)}</pre></details>`;
+        }
+        return `<details class="task-detail-section" open><summary>${escapeHtml3(t3.detailOutput)}</summary><div class="task-detail-meta">${escapeHtml3(t3.detailBy)} <code>${escapeHtml3(r.by)}</code></div><pre class="task-detail-pre">${escapeHtml3(formatJsonPretty(out))}</pre></details>`;
+      }
+      const summary = resultSummary(r);
+      return `<div class="task-detail-section task-detail-error"><strong>${escapeHtml3(t3.detailOutput)}</strong> ${escapeHtml3(summary)}</div>`;
+    }
+    function renderInlineEvalForm(taskId) {
+      return `<div class="task-detail-section task-detail-eval"><strong>${escapeHtml3(t3.detailEvaluate)}</strong><div class="inline-eval-row"><label>${escapeHtml3(t3.evaluateRating)}<input type="number" min="0" max="5" step="0.1" data-inline-eval-rating="${escapeHtml3(taskId)}" /></label><label class="inline-eval-comment-label">${escapeHtml3(t3.evaluateComment)}<textarea rows="2" data-inline-eval-comment="${escapeHtml3(taskId)}"></textarea></label></div><div class="inline-eval-actions"><button data-act="inline-eval-submit" data-id="${escapeHtml3(taskId)}">${escapeHtml3(t3.evaluateButton)}</button><span class="inline-eval-msg" data-inline-eval-msg="${escapeHtml3(taskId)}"></span></div></div>`;
+    }
+    function formatJsonPretty(value) {
+      try {
+        return JSON.stringify(value, null, 2);
+      } catch (err) {
+        return String(value);
+      }
+    }
+    function formatDuration(ms) {
+      if (!Number.isFinite(ms) || ms < 0) return "—";
+      if (ms < 1e3) return `${ms} ms`;
+      const s = Math.round(ms / 100) / 10;
+      if (s < 60) return `${s.toFixed(1)} s`;
+      const m = Math.floor(s / 60);
+      const rem = Math.round(s - m * 60);
+      return `${m}m ${rem}s`;
+    }
+    async function submitInlineEval(taskId, btn) {
+      const card = btn.closest(".task-card");
+      if (!card) return;
+      const ratingEl = card.querySelector(`[data-inline-eval-rating="${CSS.escape(taskId)}"]`);
+      const commentEl = card.querySelector(`[data-inline-eval-comment="${CSS.escape(taskId)}"]`);
+      const msgEl = card.querySelector(`[data-inline-eval-msg="${CSS.escape(taskId)}"]`);
+      if (msgEl) {
+        msgEl.textContent = "";
+        msgEl.classList.remove("ok", "err");
+      }
+      const ratingStr = (ratingEl?.value ?? "").trim();
+      const rating = ratingStr ? Number(ratingStr) : void 0;
+      const comment = (commentEl?.value ?? "").trim() || void 0;
+      if (rating == null && !comment) {
+        if (msgEl) {
+          msgEl.textContent = t3.evaluateEmpty;
+          msgEl.classList.add("err");
+        }
+        return;
+      }
+      btn.disabled = true;
+      try {
+        await fetchJson3("/api/admin/evaluate", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ taskId, rating, comment })
+        });
+        if (msgEl) {
+          msgEl.textContent = t3.evaluateSuccess;
+          msgEl.classList.add("ok");
+        }
+        if (commentEl) commentEl.value = "";
+      } catch (err) {
+        if (msgEl) {
+          msgEl.textContent = t3.failedAlert(err.message || String(err));
+          msgEl.classList.add("err");
+        }
+      } finally {
+        btn.disabled = false;
+      }
+    }
+    function expandTaskAndScroll(taskId) {
+      state.expandedTasks.add(taskId);
+      renderTasks();
+      requestAnimationFrame(() => {
+        const sel = `.task-card[data-task-id="${CSS.escape(taskId)}"]`;
+        const card = document.querySelector(sel);
+        if (card) card.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    }
     async function refreshWorkflows() {
       if (!dom?.wfSection) return;
       try {
@@ -1369,53 +1413,53 @@
     function renderWorkflows() {
       if (!dom.wfList) return;
       if (dom.wfSummary) {
-        dom.wfSummary.textContent = wf.workflows.length === 0 ? "" : t2.workflowsSummary(wf.workflows.length);
+        dom.wfSummary.textContent = wf.workflows.length === 0 ? "" : t3.workflowsSummary(wf.workflows.length);
       }
       if (wf.workflows.length === 0) {
-        dom.wfList.innerHTML = `<p class="empty">${escapeHtml2(t2.workflowsEmpty)}</p>`;
+        dom.wfList.innerHTML = `<p class="empty">${escapeHtml3(t3.workflowsEmpty)}</p>`;
         return;
       }
       dom.wfList.innerHTML = wf.workflows.map((w) => {
-        const name = w.name ? escapeHtml2(w.name) : escapeHtml2(w.id);
-        const desc = w.description ? `<p class="hint">${escapeHtml2(w.description)}</p>` : "";
-        const file = w.file ? `<small class="hint">${escapeHtml2(w.file)}</small>` : "";
+        const name = w.name ? escapeHtml3(w.name) : escapeHtml3(w.id);
+        const desc = w.description ? `<p class="hint">${escapeHtml3(w.description)}</p>` : "";
+        const file = w.file ? `<small class="hint">${escapeHtml3(w.file)}</small>` : "";
         return `<article class="ma-card">
         <header>
           <strong>${name}</strong>
-          <code>${escapeHtml2(w.participantId)}</code>
+          <code>${escapeHtml3(w.participantId)}</code>
           <button type="button" class="ma-btn"
                   data-act="start-workflow"
-                  data-id="${escapeHtml2(w.id)}">开始</button>
+                  data-id="${escapeHtml3(w.id)}">开始</button>
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="open-workflow-runs"
-                  data-id="${escapeHtml2(w.id)}">${escapeHtml2(t2.workflowRunsBtn)}</button>
+                  data-id="${escapeHtml3(w.id)}">${escapeHtml3(t3.workflowRunsBtn)}</button>
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="remove-workflow"
-                  data-id="${escapeHtml2(w.id)}">${escapeHtml2(t2.workflowRemoveBtn)}</button>
+                  data-id="${escapeHtml3(w.id)}">${escapeHtml3(t3.workflowRemoveBtn)}</button>
         </header>
         ${desc}
         <ul class="ma-meta">
-          <li><span class="ma-label">${escapeHtml2(t2.workflowTriggerLabel)}:</span> <code>${escapeHtml2(w.triggerCapability)}</code></li>
-          <li>${escapeHtml2(t2.workflowStepsLabel(w.stepCount))}</li>
+          <li><span class="ma-label">${escapeHtml3(t3.workflowTriggerLabel)}:</span> <code>${escapeHtml3(w.triggerCapability)}</code></li>
+          <li>${escapeHtml3(t3.workflowStepsLabel(w.stepCount))}</li>
         </ul>
         ${file}
       </article>`;
       }).join("");
     }
     async function removeWorkflow(id) {
-      if (!confirm(t2.confirmRemoveWorkflow(id))) return;
+      if (!confirm(t3.confirmRemoveWorkflow(id))) return;
       try {
         const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}`, {
           method: "DELETE"
         });
         if (!r.ok) {
           const body = await r.json().catch(() => ({}));
-          alert(t2.failedAlert(body.error || `${r.status}`));
+          alert(t3.failedAlert(body.error || `${r.status}`));
           return;
         }
         await refreshWorkflows();
       } catch (err) {
-        alert(t2.failedAlert(err.message || String(err)));
+        alert(t3.failedAlert(err.message || String(err)));
       }
     }
     async function refreshGrowthReports() {
@@ -1456,15 +1500,15 @@
         const sizeKb = (rep.sizeBytes / 1024).toFixed(1) + " KB";
         const dlHref = "/api/admin/growth-reports/download?path=" + encodeURIComponent(rep.path);
         return `<tr>
-        <td>${escapeHtml2(when)}</td>
-        <td><code>${escapeHtml2(rep.caseId)}</code></td>
-        <td>${escapeHtml2(sizeKb)}</td>
+        <td>${escapeHtml3(when)}</td>
+        <td><code>${escapeHtml3(rep.caseId)}</code></td>
+        <td>${escapeHtml3(sizeKb)}</td>
         <td>
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="view-growth-report"
-                  data-path="${escapeHtml2(rep.path)}"
-                  data-when="${escapeHtml2(when)}">查看</button>
-          <a class="ma-btn ma-btn-secondary" href="${escapeHtml2(dlHref)}" download>下载</a>
+                  data-path="${escapeHtml3(rep.path)}"
+                  data-when="${escapeHtml3(when)}">查看</button>
+          <a class="ma-btn ma-btn-secondary" href="${escapeHtml3(dlHref)}" download>下载</a>
         </td>
       </tr>`;
       }).join("");
@@ -1518,7 +1562,7 @@
         const text = await r.text();
         dom.grReportBody.innerHTML = renderMarkdown(text);
       } catch (err) {
-        dom.grReportBody.innerHTML = `<p class="hint">加载失败:${escapeHtml2(err.message || String(err))}</p>`;
+        dom.grReportBody.innerHTML = `<p class="hint">加载失败:${escapeHtml3(err.message || String(err))}</p>`;
       }
     }
     function closeGrowthReport() {
@@ -1536,8 +1580,8 @@
         dom.wfStartTitle.textContent = w.name || w.id;
       }
       if (dom.wfStartDesc) {
-        const cap = `<code>${escapeHtml2(w.triggerCapability)}</code>`;
-        dom.wfStartDesc.innerHTML = w.description ? `${escapeHtml2(w.description)}<br/><small>派发能力:${cap}</small>` : `派发能力:${cap}`;
+        const cap = `<code>${escapeHtml3(w.triggerCapability)}</code>`;
+        dom.wfStartDesc.innerHTML = w.description ? `${escapeHtml3(w.description)}<br/><small>派发能力:${cap}</small>` : `派发能力:${cap}`;
       }
       renderWorkflowStartFields(w.payloadSchema);
       if (dom.wfStartMsg) {
@@ -1572,24 +1616,24 @@
       const ctx = typeof payload.context === "string" ? payload.context : "";
       const fromAgent = typeof payload.fromAgent === "string" ? payload.fromAgent : "(agent)";
       const fields = qs.map((q, i) => renderAgentQuestionField(v.id, q, i)).join("");
-      return `<div class="task-detail-section agent-question-form" data-aq-id="${escapeHtml2(v.id)}"><div class="aq-header"><strong>🤖 ${escapeHtml2(fromAgent)} 想再问你 ${qs.length} 件事</strong>` + (ctx ? `<p class="aq-context">${escapeHtml2(ctx)}</p>` : "") + `</div><div class="aq-fields">${fields}</div><div class="aq-actions"><button class="primary" data-act="submit-agent-question" data-id="${escapeHtml2(v.id)}">提交回答 (agent 会接着跑)</button><button class="secondary" data-act="skip-agent-question" data-id="${escapeHtml2(v.id)}" title="跳过 — agent 会按它第一轮的判断继续">跳过</button><span class="aq-msg" data-aq-msg="${escapeHtml2(v.id)}"></span></div></div>`;
+      return `<div class="task-detail-section agent-question-form" data-aq-id="${escapeHtml3(v.id)}"><div class="aq-header"><strong>🤖 ${escapeHtml3(fromAgent)} 想再问你 ${qs.length} 件事</strong>` + (ctx ? `<p class="aq-context">${escapeHtml3(ctx)}</p>` : "") + `</div><div class="aq-fields">${fields}</div><div class="aq-actions"><button class="primary" data-act="submit-agent-question" data-id="${escapeHtml3(v.id)}">提交回答 (agent 会接着跑)</button><button class="secondary" data-act="skip-agent-question" data-id="${escapeHtml3(v.id)}" title="跳过 — agent 会按它第一轮的判断继续">跳过</button><span class="aq-msg" data-aq-msg="${escapeHtml3(v.id)}"></span></div></div>`;
     }
     function renderAgentQuestionField(taskId, q, idx) {
       const fid = q && typeof q.id === "string" ? q.id : `q${idx}`;
       const fieldDomId = `aq-${taskId}-${fid}`;
       const label = q && typeof q.label === "string" ? q.label : `Q${idx + 1}`;
-      const hint = q && typeof q.hint === "string" ? `<small class="hint">${escapeHtml2(q.hint)}</small>` : "";
+      const hint = q && typeof q.hint === "string" ? `<small class="hint">${escapeHtml3(q.hint)}</small>` : "";
       const required = q && q.required ? ' <span style="color:#c33">*</span>' : "";
       let control;
       if (q && q.type === "text") {
-        control = `<input type="text" id="${escapeHtml2(fieldDomId)}" data-aq-fid="${escapeHtml2(fid)}" />`;
+        control = `<input type="text" id="${escapeHtml3(fieldDomId)}" data-aq-fid="${escapeHtml3(fid)}" />`;
       } else if (q && q.type === "number") {
-        control = `<input type="number" id="${escapeHtml2(fieldDomId)}" data-aq-fid="${escapeHtml2(fid)}" />`;
+        control = `<input type="number" id="${escapeHtml3(fieldDomId)}" data-aq-fid="${escapeHtml3(fid)}" />`;
       } else {
         const rows = q && typeof q.rows === "number" && q.rows > 0 ? q.rows : 4;
-        control = `<textarea id="${escapeHtml2(fieldDomId)}" data-aq-fid="${escapeHtml2(fid)}" rows="${rows}"></textarea>`;
+        control = `<textarea id="${escapeHtml3(fieldDomId)}" data-aq-fid="${escapeHtml3(fid)}" rows="${rows}"></textarea>`;
       }
-      return `<label class="aq-field"><span>${escapeHtml2(label)}${required}</span>` + control + hint + `</label>`;
+      return `<label class="aq-field"><span>${escapeHtml3(label)}${required}</span>` + control + hint + `</label>`;
     }
     async function submitAgentQuestion(taskId) {
       const card = document.querySelector(`.agent-question-form[data-aq-id="${cssEscape(taskId)}"]`);
@@ -1615,7 +1659,7 @@
         if (v != null && String(v).length > 0) answers[q.id] = String(v);
       }
       try {
-        await fetchJson2(`/api/tasks/${encodeURIComponent(taskId)}/complete`, {
+        await fetchJson3(`/api/tasks/${encodeURIComponent(taskId)}/complete`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ output: { answers } })
@@ -1633,7 +1677,7 @@
         msg.className = "aq-msg";
       }
       try {
-        await fetchJson2(`/api/tasks/${encodeURIComponent(taskId)}/reject`, {
+        await fetchJson3(`/api/tasks/${encodeURIComponent(taskId)}/reject`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ error: "admin skipped" })
@@ -1712,23 +1756,23 @@
       if (b.type === "file_ref") {
         const url = `/api/admin/uploads?id=${encodeURIComponent(b.artifactId)}`;
         const tail = b.artifactId.split("/").pop() || b.artifactId;
-        const meta = `<div class="mm-meta"><code>${escapeHtml2(b.mime)}</code> · ${escapeHtml2(tail)}</div>`;
+        const meta = `<div class="mm-meta"><code>${escapeHtml3(b.mime)}</code> · ${escapeHtml3(tail)}</div>`;
         if (b.mime.startsWith("image/")) {
           return `<div class="mm-block mm-image">
-          <a href="${escapeHtml2(url)}" target="_blank" rel="noopener">
-            <img src="${escapeHtml2(url)}" alt="${escapeHtml2(tail)}" loading="lazy" />
+          <a href="${escapeHtml3(url)}" target="_blank" rel="noopener">
+            <img src="${escapeHtml3(url)}" alt="${escapeHtml3(tail)}" loading="lazy" />
           </a>
           ${meta}
         </div>`;
         }
         if (b.mime.startsWith("audio/")) {
           return `<div class="mm-block mm-audio">
-          <audio controls src="${escapeHtml2(url)}"></audio>
+          <audio controls src="${escapeHtml3(url)}"></audio>
           ${meta}
         </div>`;
         }
         return `<div class="mm-block mm-file">
-        <a href="${escapeHtml2(url)}" download="${escapeHtml2(tail)}">📎 ${escapeHtml2(tail)}</a>
+        <a href="${escapeHtml3(url)}" download="${escapeHtml3(tail)}">📎 ${escapeHtml3(tail)}</a>
         ${meta}
       </div>`;
       }
@@ -1736,19 +1780,19 @@
         const src = imageOrAudioSourceToSrc(b.source);
         if (!src) return renderUnknownBlock(b);
         return `<div class="mm-block mm-image">
-        <a href="${escapeHtml2(src.url)}" target="_blank" rel="noopener">
-          <img src="${escapeHtml2(src.url)}" alt="image" loading="lazy" />
+        <a href="${escapeHtml3(src.url)}" target="_blank" rel="noopener">
+          <img src="${escapeHtml3(src.url)}" alt="image" loading="lazy" />
         </a>
-        <div class="mm-meta"><code>${escapeHtml2(src.label)}</code></div>
+        <div class="mm-meta"><code>${escapeHtml3(src.label)}</code></div>
       </div>`;
       }
       if (b.type === "audio") {
         const src = imageOrAudioSourceToSrc(b.source);
         if (!src) return renderUnknownBlock(b);
-        const fmt = b.format ? ` · ${escapeHtml2(b.format)}` : "";
+        const fmt = b.format ? ` · ${escapeHtml3(b.format)}` : "";
         return `<div class="mm-block mm-audio">
-        <audio controls src="${escapeHtml2(src.url)}"></audio>
-        <div class="mm-meta"><code>${escapeHtml2(src.label)}</code>${fmt}</div>
+        <audio controls src="${escapeHtml3(src.url)}"></audio>
+        <div class="mm-meta"><code>${escapeHtml3(src.label)}</code>${fmt}</div>
       </div>`;
       }
       return renderUnknownBlock(b);
@@ -1774,26 +1818,26 @@
     }
     function renderUnknownBlock(b) {
       return `<div class="mm-block mm-unknown">
-      <small>未识别的 ${escapeHtml2(String(b && b.type) || "unknown")} 块</small>
+      <small>未识别的 ${escapeHtml3(String(b && b.type) || "unknown")} 块</small>
     </div>`;
     }
     function renderOneField(f) {
-      const id = `wf-start-field-${escapeHtml2(f.id)}`;
+      const id = `wf-start-field-${escapeHtml3(f.id)}`;
       const required = f.required ? ' <span style="color:#c33">*</span>' : "";
-      const hint = f.hint ? `<small class="hint">${escapeHtml2(f.hint)}</small>` : "";
-      const ph = f.placeholder ? ` placeholder="${escapeHtml2(f.placeholder)}"` : "";
-      const defaultV = f.defaultValue != null ? escapeHtml2(String(f.defaultValue)) : "";
+      const hint = f.hint ? `<small class="hint">${escapeHtml3(f.hint)}</small>` : "";
+      const ph = f.placeholder ? ` placeholder="${escapeHtml3(f.placeholder)}"` : "";
+      const defaultV = f.defaultValue != null ? escapeHtml3(String(f.defaultValue)) : "";
       let control;
       if (f.type === "textarea") {
         const rows = typeof f.rows === "number" ? f.rows : 4;
         control = `<textarea id="${id}" rows="${rows}"${ph}>${defaultV}</textarea>`;
       } else if (f.type === "select") {
-        const opts = (f.options || []).map((o) => `<option value="${escapeHtml2(o.value)}"${o.value === f.defaultValue ? " selected" : ""}>${escapeHtml2(o.label)}</option>`).join("");
+        const opts = (f.options || []).map((o) => `<option value="${escapeHtml3(o.value)}"${o.value === f.defaultValue ? " selected" : ""}>${escapeHtml3(o.label)}</option>`).join("");
         control = `<select id="${id}">${opts}</select>`;
       } else if (f.type === "number") {
         control = `<input type="number" id="${id}"${ph} value="${defaultV}" />`;
       } else if (f.type === "file") {
-        const accept = Array.isArray(f.accept) && f.accept.length > 0 ? ` accept="${escapeHtml2(f.accept.join(","))}"` : "";
+        const accept = Array.isArray(f.accept) && f.accept.length > 0 ? ` accept="${escapeHtml3(f.accept.join(","))}"` : "";
         const sizeHint = typeof f.maxSizeMb === "number" ? `<small class="hint">最大 ${f.maxSizeMb} MB</small>` : "";
         control = `<input type="file" id="${id}" data-aipe-file="1"${accept} />
         <span class="aipe-file-status" data-aipe-file-status="${id}" style="font-size:0.85em;color:#666;margin-left:0.5em;"></span>
@@ -1802,7 +1846,7 @@
         control = `<input type="text" id="${id}"${ph} value="${defaultV}" />`;
       }
       return `<label>
-      <span>${escapeHtml2(f.label)}${required}</span>
+      <span>${escapeHtml3(f.label)}${required}</span>
       ${control}
       ${hint}
     </label>`;
@@ -1848,10 +1892,10 @@
                 statusEl.style.color = "#080";
                 if (ref.mime && ref.mime.startsWith("image/")) {
                   const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`;
-                  statusEl.innerHTML = `<span>已上传 (${escapeHtml2(formatBytes(ref.size))})</span> <img src="${escapeHtml2(url)}" alt="preview" style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`;
+                  statusEl.innerHTML = `<span>已上传 (${escapeHtml3(formatBytes(ref.size))})</span> <img src="${escapeHtml3(url)}" alt="preview" style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`;
                 } else if (ref.mime && ref.mime.startsWith("audio/")) {
                   const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`;
-                  statusEl.innerHTML = `<span>已上传 (${escapeHtml2(formatBytes(ref.size))})</span> <audio controls src="${escapeHtml2(url)}" style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`;
+                  statusEl.innerHTML = `<span>已上传 (${escapeHtml3(formatBytes(ref.size))})</span> <audio controls src="${escapeHtml3(url)}" style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`;
                 } else {
                   statusEl.textContent = `已上传 (${formatBytes(ref.size)})`;
                 }
@@ -1980,7 +2024,7 @@
         }
         dom.bundleImportMsg.textContent = "导入完成 — " + parts.join("、");
         dom.bundleImportMsg.classList.add("ok");
-        await refreshManagedAgents().catch(() => {
+        await managedAgents.refreshManagedAgents().catch(() => {
         });
         await refreshWorkflows().catch(() => {
         });
@@ -2009,7 +2053,7 @@
         text = await file.text();
       }
       if (!text || !text.trim()) {
-        dom.wfImportMsg.textContent = t2.importEmpty;
+        dom.wfImportMsg.textContent = t3.importEmpty;
         dom.wfImportMsg.classList.add("err");
         return;
       }
@@ -2021,17 +2065,17 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          dom.wfImportMsg.textContent = t2.failedAlert(body.error || `${r.status}`);
+          dom.wfImportMsg.textContent = t3.failedAlert(body.error || `${r.status}`);
           dom.wfImportMsg.classList.add("err");
           return;
         }
         const id = body.workflow?.id || "?";
-        dom.wfImportMsg.textContent = t2.workflowImportDone(id);
+        dom.wfImportMsg.textContent = t3.workflowImportDone(id);
         dom.wfImportMsg.classList.add("ok");
         await refreshWorkflows();
         setTimeout(closeWorkflowImportModal, 700);
       } catch (err) {
-        dom.wfImportMsg.textContent = t2.failedAlert(err.message || String(err));
+        dom.wfImportMsg.textContent = t3.failedAlert(err.message || String(err));
         dom.wfImportMsg.classList.add("err");
       }
     }
@@ -2060,9 +2104,9 @@
       wf.runs.rows = [];
       if (dom.wfRunsTarget) dom.wfRunsTarget.textContent = workflowId;
       if (dom.wfRunsMsg) dom.wfRunsMsg.textContent = "";
-      if (dom.wfRunsList) dom.wfRunsList.innerHTML = `<p class="hint">${escapeHtml2(t2.loading)}</p>`;
+      if (dom.wfRunsList) dom.wfRunsList.innerHTML = `<p class="hint">${escapeHtml3(t3.loading)}</p>`;
       if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = true;
-      if (dom.wfRunDetail) dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml2(t2.workflowRunsPickHint)}</p>`;
+      if (dom.wfRunDetail) dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml3(t3.workflowRunsPickHint)}</p>`;
       if (dom.wfRunsModal) dom.wfRunsModal.hidden = false;
       try {
         const url = `/api/admin/workflows/runs?workflowId=${encodeURIComponent(workflowId)}&limit=100`;
@@ -2070,7 +2114,7 @@
         if (!r.ok) {
           const body2 = await r.json().catch(() => ({}));
           dom.wfRunsList.innerHTML = "";
-          dom.wfRunsMsg.textContent = t2.failedAlert(body2.error || `${r.status}`);
+          dom.wfRunsMsg.textContent = t3.failedAlert(body2.error || `${r.status}`);
           dom.wfRunsMsg.classList.add("err");
           return;
         }
@@ -2079,7 +2123,7 @@
         renderWorkflowRunsList();
       } catch (err) {
         dom.wfRunsList.innerHTML = "";
-        dom.wfRunsMsg.textContent = t2.failedAlert(err.message || String(err));
+        dom.wfRunsMsg.textContent = t3.failedAlert(err.message || String(err));
         dom.wfRunsMsg.classList.add("err");
       }
     }
@@ -2099,11 +2143,11 @@
         const selected = row.runId === wf.runs.selectedRunId ? " wf-run-row-active" : "";
         return `<button type="button" class="wf-run-row${selected}"
                       data-act="open-workflow-run"
-                      data-run-id="${escapeHtml2(row.runId)}">
-        <span class="wf-run-status wf-run-${escapeHtml2(row.status)}">${escapeHtml2(row.status)}</span>
-        <span class="wf-run-time">${escapeHtml2(new Date(row.startedAt).toLocaleString())}</span>
-        <span class="wf-run-meta">${escapeHtml2(t2.workflowRunStepCount(row.stepCount))} · ${escapeHtml2(dur)}</span>
-        <code class="wf-run-id">${escapeHtml2(row.runId)}</code>
+                      data-run-id="${escapeHtml3(row.runId)}">
+        <span class="wf-run-status wf-run-${escapeHtml3(row.status)}">${escapeHtml3(row.status)}</span>
+        <span class="wf-run-time">${escapeHtml3(new Date(row.startedAt).toLocaleString())}</span>
+        <span class="wf-run-meta">${escapeHtml3(t3.workflowRunStepCount(row.stepCount))} · ${escapeHtml3(dur)}</span>
+        <code class="wf-run-id">${escapeHtml3(row.runId)}</code>
       </button>`;
       }).join("");
     }
@@ -2111,72 +2155,60 @@
       wf.runs.selectedRunId = runId;
       renderWorkflowRunsList();
       if (!dom.wfRunDetail) return;
-      dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml2(t2.loading)}</p>`;
+      dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml3(t3.loading)}</p>`;
       try {
         const r = await fetch(`/api/admin/workflows/runs/${encodeURIComponent(runId)}`);
         if (!r.ok) {
           const body2 = await r.json().catch(() => ({}));
-          dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml2(body2.error || `${r.status}`)}</p>`;
+          dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml3(body2.error || `${r.status}`)}</p>`;
           return;
         }
         const body = await r.json();
         renderWorkflowRunDetail(body.run);
       } catch (err) {
-        dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml2(err.message || String(err))}</p>`;
+        dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml3(err.message || String(err))}</p>`;
       }
     }
     function renderWorkflowRunDetail(run) {
       if (!dom.wfRunDetail) return;
-      const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t2.workflowRunStillRunning;
-      const finalBlock = run.status === "failed" ? `<p class="form-msg err">${escapeHtml2(run.error || "")}</p>` : run.finalOutput !== void 0 ? `<details open><summary>${escapeHtml2(t2.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml2(JSON.stringify(run.finalOutput, null, 2))}</pre></details>` : "";
+      const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t3.workflowRunStillRunning;
+      const finalBlock = run.status === "failed" ? `<p class="form-msg err">${escapeHtml3(run.error || "")}</p>` : run.finalOutput !== void 0 ? `<details open><summary>${escapeHtml3(t3.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml3(JSON.stringify(run.finalOutput, null, 2))}</pre></details>` : "";
       const steps = (run.steps || []).map((s) => {
         const sDur = s.endedAt ? `${s.endedAt - s.startedAt}ms` : "—";
-        const subtasks = (s.subTaskIds || []).length ? `<small class="hint">${escapeHtml2(t2.workflowRunSubTasks)}: ${s.subTaskIds.map(escapeHtml2).join(", ")}</small>` : "";
-        const out = s.output !== void 0 ? `<details><summary>${escapeHtml2(t2.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml2(JSON.stringify(s.output, null, 2))}</pre></details>` : "";
-        const err = s.error ? `<p class="form-msg err">${escapeHtml2(s.error)}</p>` : "";
+        const subtasks = (s.subTaskIds || []).length ? `<small class="hint">${escapeHtml3(t3.workflowRunSubTasks)}: ${s.subTaskIds.map(escapeHtml3).join(", ")}</small>` : "";
+        const out = s.output !== void 0 ? `<details><summary>${escapeHtml3(t3.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml3(JSON.stringify(s.output, null, 2))}</pre></details>` : "";
+        const err = s.error ? `<p class="form-msg err">${escapeHtml3(s.error)}</p>` : "";
         return `<article class="wf-step">
         <header>
-          <span class="wf-run-status wf-run-${escapeHtml2(s.status)}">${escapeHtml2(s.status)}</span>
-          <strong>${escapeHtml2(s.stepId)}</strong>
-          <span class="wf-step-meta">${escapeHtml2(sDur)} · ${escapeHtml2(t2.workflowRunAttempts(s.attempts || 1))}</span>
+          <span class="wf-run-status wf-run-${escapeHtml3(s.status)}">${escapeHtml3(s.status)}</span>
+          <strong>${escapeHtml3(s.stepId)}</strong>
+          <span class="wf-step-meta">${escapeHtml3(sDur)} · ${escapeHtml3(t3.workflowRunAttempts(s.attempts || 1))}</span>
         </header>
         ${err}
         ${subtasks}
         ${out}
       </article>`;
       }).join("");
-      const payloadBlock = run.triggerPayload !== void 0 ? `<details><summary>${escapeHtml2(t2.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml2(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>` : "";
+      const payloadBlock = run.triggerPayload !== void 0 ? `<details><summary>${escapeHtml3(t3.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml3(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>` : "";
       dom.wfRunDetail.innerHTML = `
       <h4>
-        <span class="wf-run-status wf-run-${escapeHtml2(run.status)}">${escapeHtml2(run.status)}</span>
-        <code>${escapeHtml2(run.runId)}</code>
+        <span class="wf-run-status wf-run-${escapeHtml3(run.status)}">${escapeHtml3(run.status)}</span>
+        <code>${escapeHtml3(run.runId)}</code>
       </h4>
-      <p class="hint">${escapeHtml2(t2.workflowRunDuration)}: ${escapeHtml2(dur)} · ${escapeHtml2(t2.workflowRunTriggeredBy)}: <code>${escapeHtml2(run.triggeredByTaskId)}</code></p>
+      <p class="hint">${escapeHtml3(t3.workflowRunDuration)}: ${escapeHtml3(dur)} · ${escapeHtml3(t3.workflowRunTriggeredBy)}: <code>${escapeHtml3(run.triggeredByTaskId)}</code></p>
       ${payloadBlock}
-      ${steps || `<p class="empty">${escapeHtml2(t2.workflowRunNoSteps)}</p>`}
+      ${steps || `<p class="empty">${escapeHtml3(t3.workflowRunNoSteps)}</p>`}
       ${finalBlock}
     `;
-    }
-    async function exportAgent(id) {
-      window.location.href = `/api/admin/agents/${encodeURIComponent(id)}/export`;
-    }
-    async function removeAgent(id) {
-      if (!confirm(t2.confirmRemoveAgent(id))) return;
-      try {
-        await fetchJson2(`/api/admin/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
-        await refreshManagedAgents();
-      } catch (err) {
-        alert(t2.failedAlert(err.message || String(err)));
-      }
     }
     function renderKnownRoster() {
       if (!dom.knownAdminsList || !dom.knownWorkersList) return;
       dom.knownAdminsList.innerHTML = state.known.admins.map(
-        (a) => `<li><strong>${escapeHtml2(a.id)}</strong> · ${escapeHtml2(a.displayName)}</li>`
-      ).join("") || `<li class="empty">${escapeHtml2(t2.noParticipants)}</li>`;
+        (a) => `<li><strong>${escapeHtml3(a.id)}</strong> · ${escapeHtml3(a.displayName)}</li>`
+      ).join("") || `<li class="empty">${escapeHtml3(t3.noParticipants)}</li>`;
       dom.knownWorkersList.innerHTML = state.known.workers.map(
-        (w) => `<li><strong>${escapeHtml2(w.id)}</strong>${w.capabilities.length ? " · " + w.capabilities.map(escapeHtml2).join(", ") : ""}${w.lastSeen ? ` · ${new Date(w.lastSeen).toLocaleString()}` : ""}</li>`
-      ).join("") || `<li class="empty">${escapeHtml2(t2.noParticipants)}</li>`;
+        (w) => `<li><strong>${escapeHtml3(w.id)}</strong>${w.capabilities.length ? " · " + w.capabilities.map(escapeHtml3).join(", ") : ""}${w.lastSeen ? ` · ${new Date(w.lastSeen).toLocaleString()}` : ""}</li>`
+      ).join("") || `<li class="empty">${escapeHtml3(t3.noParticipants)}</li>`;
     }
     function updateDispatchVisibility() {
       const v = dom.dStrategy.value;
@@ -2192,14 +2224,14 @@
       if (kind === "explicit") {
         strategy = { kind, to: dom.dTo.value.trim() };
         if (!strategy.to) {
-          dom.dispatchMsg.textContent = t2.failedAlert("id required");
+          dom.dispatchMsg.textContent = t3.failedAlert("id required");
           dom.dispatchMsg.classList.add("err");
           return;
         }
       } else if (kind === "capability") {
         const caps = dom.dCaps.value.split(",").map((s) => s.trim()).filter(Boolean);
         if (caps.length === 0) {
-          dom.dispatchMsg.textContent = t2.failedAlert("capabilities required");
+          dom.dispatchMsg.textContent = t3.failedAlert("capabilities required");
           dom.dispatchMsg.classList.add("err");
           return;
         }
@@ -2212,7 +2244,7 @@
       try {
         payload = dom.dPayload.value.trim() ? JSON.parse(dom.dPayload.value) : {};
       } catch (err) {
-        dom.dispatchMsg.textContent = t2.failedAlert("payload is not valid JSON");
+        dom.dispatchMsg.textContent = t3.failedAlert("payload is not valid JSON");
         dom.dispatchMsg.classList.add("err");
         return;
       }
@@ -2222,15 +2254,15 @@
       const weightStr = dom.dWeight?.value?.trim?.() ?? "";
       const weight = weightStr ? Number(weightStr) : void 0;
       try {
-        await fetchJson2("/api/admin/dispatch", {
+        await fetchJson3("/api/admin/dispatch", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ strategy, payload, title, priority, weight })
         });
-        dom.dispatchMsg.textContent = t2.dispatchSuccess;
+        dom.dispatchMsg.textContent = t3.dispatchSuccess;
         dom.dispatchMsg.classList.add("ok");
       } catch (err) {
-        dom.dispatchMsg.textContent = t2.failedAlert(err.message || String(err));
+        dom.dispatchMsg.textContent = t3.failedAlert(err.message || String(err));
         dom.dispatchMsg.classList.add("err");
       }
     }
@@ -2244,35 +2276,35 @@
       const rating = ratingStr ? Number(ratingStr) : void 0;
       const comment = dom.eComment.value.trim() || void 0;
       try {
-        await fetchJson2("/api/admin/evaluate", {
+        await fetchJson3("/api/admin/evaluate", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ taskId, rating, comment })
         });
-        dom.evaluateMsg.textContent = t2.evaluateSuccess;
+        dom.evaluateMsg.textContent = t3.evaluateSuccess;
         dom.evaluateMsg.classList.add("ok");
         dom.eComment.value = "";
       } catch (err) {
-        dom.evaluateMsg.textContent = t2.failedAlert(err.message || String(err));
+        dom.evaluateMsg.textContent = t3.failedAlert(err.message || String(err));
         dom.evaluateMsg.classList.add("err");
       }
     }
     async function approveApp(appId) {
-      await fetchJson2(`/api/admin/applications/${encodeURIComponent(appId)}/approve`, { method: "POST" });
+      await fetchJson3(`/api/admin/applications/${encodeURIComponent(appId)}/approve`, { method: "POST" });
     }
     async function rejectApp(appId, reason) {
-      await fetchJson2(`/api/admin/applications/${encodeURIComponent(appId)}/reject`, {
+      await fetchJson3(`/api/admin/applications/${encodeURIComponent(appId)}/reject`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ reason: reason || "rejected by admin" })
       });
     }
     async function retryTask(taskId) {
-      await fetchJson2(`/api/admin/tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST" });
+      await fetchJson3(`/api/admin/tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST" });
     }
     async function logout() {
       try {
-        await fetchJson2("/api/admin/logout", { method: "POST" });
+        await fetchJson3("/api/admin/logout", { method: "POST" });
       } catch {
       }
       window.location.href = "/admin";
@@ -2306,6 +2338,7 @@
     }
     document.addEventListener("DOMContentLoaded", async () => {
       resolveDom();
+      managedAgents.setDom(dom);
       updateDispatchVisibility();
       setActiveTab(activeTabFromHash());
       document.querySelectorAll(".tabbar-btn").forEach((btn) => {
@@ -2339,29 +2372,29 @@
       }
       attachContribToggle(dom.contribToggle, dom.contribToggleInput);
       try {
-        const me = await fetchJson2("/api/whoami");
+        const me = await fetchJson3("/api/whoami");
         applyContribToggleState(dom.contribToggle, dom.contribToggleInput, me?.contributionOptOut === true);
       } catch (err) {
         console.warn("whoami failed:", err);
       }
       attachCapChips(dom.dCaps);
       attachCapChips(dom.maCaps);
-      dom.maNewBtn?.addEventListener("click", () => openAgentForm("create"));
-      dom.maProvider?.addEventListener("change", syncProviderDependentFields);
+      dom.maNewBtn?.addEventListener("click", () => managedAgents.openAgentForm("create"));
+      dom.maProvider?.addEventListener("change", managedAgents.syncProviderDependentFields);
       dom.maImportBtn?.addEventListener("click", () => {
         if (dom.maImportDropdown) dom.maImportDropdown.open = false;
-        openImportModal();
+        managedAgents.openImportModal();
       });
       dom.maGhImportBtn?.addEventListener("click", () => {
         if (dom.maImportDropdown) dom.maImportDropdown.open = false;
-        openGithubImportModal();
+        managedAgents.openGithubImportModal();
       });
-      dom.maKeysBtn?.addEventListener("click", openKeysModal);
-      dom.maForm?.addEventListener("submit", submitAgentForm);
-      dom.maImportSubmit?.addEventListener("click", submitImport);
-      dom.maGhImportSubmit?.addEventListener("click", submitGithubImport);
-      dom.maGhUrl?.addEventListener("input", updateGhResolved);
-      dom.maGhSource?.addEventListener("change", updateGhResolved);
+      dom.maKeysBtn?.addEventListener("click", managedAgents.openKeysModal);
+      dom.maForm?.addEventListener("submit", managedAgents.submitAgentForm);
+      dom.maImportSubmit?.addEventListener("click", managedAgents.submitImport);
+      dom.maGhImportSubmit?.addEventListener("click", managedAgents.submitGithubImport);
+      dom.maGhUrl?.addEventListener("input", managedAgents.updateGhResolved);
+      dom.maGhSource?.addEventListener("change", managedAgents.updateGhResolved);
       document.addEventListener("click", (e) => {
         if (!dom.maImportDropdown || !dom.maImportDropdown.open) return;
         if (!(e.target instanceof Node)) return;
@@ -2420,16 +2453,16 @@
         ma._clearKeyOnSubmit = true;
         dom.maApiKey.value = "";
         dom.maApiKey.placeholder = "(将清空)";
-        dom.maApiKeyHint.textContent = `${t2.clearKey}: 保存后该 agent 的私有 key 会被移除`;
+        dom.maApiKeyHint.textContent = `${t3.clearKey}: 保存后该 agent 的私有 key 会被移除`;
       });
       document.addEventListener("click", (e) => {
         const target = e.target;
         if (!(target instanceof HTMLElement)) return;
         if (target.dataset.act === "close-modal") {
-          if (!dom.maFormModal.hidden) closeAgentForm();
-          if (!dom.maImportModal.hidden) closeImportModal();
-          if (dom.maGhImportModal && !dom.maGhImportModal.hidden) closeGithubImportModal();
-          if (!dom.maKeysModal.hidden) closeKeysModal();
+          if (!dom.maFormModal.hidden) managedAgents.closeAgentForm();
+          if (!dom.maImportModal.hidden) managedAgents.closeImportModal();
+          if (dom.maGhImportModal && !dom.maGhImportModal.hidden) managedAgents.closeGithubImportModal();
+          if (!dom.maKeysModal.hidden) managedAgents.closeKeysModal();
           if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal();
           if (dom.wfAssistModal && !dom.wfAssistModal.hidden) closeWorkflowAssistModal();
           if (dom.wfRunsModal && !dom.wfRunsModal.hidden) closeWorkflowRunsModal();
@@ -2444,9 +2477,9 @@
           if (act === "set-provider-key") {
             const row = target.closest(".key-row");
             const input = row?.querySelector(".key-input");
-            if (input instanceof HTMLInputElement) setProviderKey(provider, input);
+            if (input instanceof HTMLInputElement) managedAgents.setProviderKey(provider, input);
           } else {
-            removeProviderKey(provider);
+            managedAgents.removeProviderKey(provider);
           }
           return;
         }
@@ -2454,11 +2487,11 @@
         if (!act || !id) return;
         if (act === "edit-agent") {
           const a = ma.agents.find((x) => x.id === id);
-          if (a) openAgentForm("edit", a);
+          if (a) managedAgents.openAgentForm("edit", a);
         } else if (act === "export-agent") {
-          exportAgent(id);
+          managedAgents.exportAgent(id);
         } else if (act === "remove-agent") {
-          removeAgent(id);
+          managedAgents.removeAgent(id);
         } else if (act === "remove-workflow") {
           removeWorkflow(id);
         } else if (act === "open-workflow-runs") {
@@ -2476,10 +2509,10 @@
       });
       document.addEventListener("keydown", (e) => {
         if (e.key !== "Escape") return;
-        if (!dom.maFormModal.hidden) closeAgentForm();
-        if (!dom.maImportModal.hidden) closeImportModal();
-        if (dom.maGhImportModal && !dom.maGhImportModal.hidden) closeGithubImportModal();
-        if (!dom.maKeysModal.hidden) closeKeysModal();
+        if (!dom.maFormModal.hidden) managedAgents.closeAgentForm();
+        if (!dom.maImportModal.hidden) managedAgents.closeImportModal();
+        if (dom.maGhImportModal && !dom.maGhImportModal.hidden) managedAgents.closeGithubImportModal();
+        if (!dom.maKeysModal.hidden) managedAgents.closeKeysModal();
         if (dom.wfImportModal && !dom.wfImportModal.hidden) closeWorkflowImportModal();
         if (dom.wfRunsModal && !dom.wfRunsModal.hidden) closeWorkflowRunsModal();
         if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal();
@@ -2500,7 +2533,7 @@
         }
         if (dom.disclaimerModal) dom.disclaimerModal.hidden = true;
       });
-      refreshManagedAgents().catch((err) => console.warn("initial agents refresh:", err));
+      managedAgents.refreshManagedAgents().catch((err) => console.warn("initial agents refresh:", err));
       refreshWorkflows().catch((err) => console.warn("initial workflows refresh:", err));
       refreshGrowthReports().catch((err) => console.warn("initial growth-reports refresh:", err));
       if (dom.grRefreshBtn) {
@@ -2556,7 +2589,7 @@
             await skipAgentQuestion(id);
           }
         } catch (err) {
-          alert(t2.failedAlert(err.message || String(err)));
+          alert(t3.failedAlert(err.message || String(err)));
           if (actEl2 instanceof HTMLButtonElement) actEl2.disabled = false;
         }
       });
@@ -2588,11 +2621,11 @@
         sweepBtn.addEventListener("click", async () => {
           sweepBtn.disabled = true;
           try {
-            const r = await fetchJson2("/api/admin/services/sweep", { method: "POST" });
-            services.showServicesToast(t2.servicesSweepResult(r.scanned, r.purged));
+            const r = await fetchJson3("/api/admin/services/sweep", { method: "POST" });
+            services.showServicesToast(t3.servicesSweepResult(r.scanned, r.purged));
             await services.refreshServices();
           } catch (err) {
-            alert(t2.failedAlert(err?.message || String(err)));
+            alert(t3.failedAlert(err?.message || String(err)));
           } finally {
             sweepBtn.disabled = false;
           }
@@ -2603,7 +2636,7 @@
         auditRefreshBtn.addEventListener("click", async () => {
           auditRefreshBtn.disabled = true;
           try {
-            const r = await fetchJson2("/api/admin/transcript/service-calls?limit=200");
+            const r = await fetchJson3("/api/admin/transcript/service-calls?limit=200");
             svc.audit = r.calls || [];
             services.renderServicesAudit();
           } catch (err) {
