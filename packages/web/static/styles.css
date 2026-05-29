@@ -1939,3 +1939,89 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .reputation-panel .rep-bar-neg { background: #e74c3c; }
 .reputation-panel .rep-bar-neutral { background: #bbb; }
 .reputation-panel .rep-bar-label { position: absolute; top: 0; left: 0; right: 0; text-align: center; font-size: 0.78rem; line-height: 1.2rem; color: #222; pointer-events: none; }
+
+/* ==================================================================== *
+ *  Mobile responsive  (Phase 12 M10 / M11)                             *
+ *                                                                      *
+ *  Desktop is a fixed-viewport app: a 3-column grid sitting under a    *
+ *  3rem header, each column scrolling internally (main height is       *
+ *  calc(100vh - 3rem)). That model fights a phone, so ≤720px flips to  *
+ *  a single-column, naturally-scrolling document with a sticky tabbar  *
+ *  — the same content, re-flowed top-to-bottom.                        *
+ * ==================================================================== */
+@media (max-width: 720px) {
+  /* Let the document grow with its content instead of trapping it in a
+     100vh shell with per-column scroll. */
+  html, body { height: auto; min-height: 100%; }
+
+  /* Header wraps to as many rows as it needs; drop the height lock the
+     desktop layout depended on (main goes auto-height below). The
+     subtitle is decorative — hide it so the first row stays essential. */
+  .site-header {
+    height: auto;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 0.5rem 0.9rem;
+    gap: 0.35rem 0.55rem;
+  }
+  .subtitle { display: none; }
+
+  /* Every tab collapses to one column and flows down the page.
+     !important beats the per-tab attribute-selector overrides
+     (overview 3-col, activity 280px 1fr, …) which out-specify a plain
+     `main` rule. */
+  main,
+  body.admin main.admin-grid {
+    grid-template-columns: 1fr !important;
+    grid-template-rows: none !important;
+    height: auto;
+  }
+  /* Sections stop being independent scroll panes — the window scrolls. */
+  section { overflow: visible; }
+
+  /* Tabbar stays pinned (already position:sticky + overflow-x:auto, so
+     the 11 tabs swipe horizontally); just tighten it for narrow widths.
+     A bottom-nav would only fit 3-5 items — wrong for an 11-tab console —
+     so the swipe-able top bar is the right mobile shell (M11). */
+  .tabbar { padding: 0 0.4rem; }
+  .tabbar-btn { padding: 0.65rem 0.8rem; font-size: 0.82rem; }
+
+  /* Touch targets (M11): the dense desktop action buttons are too small
+     to tap reliably; give them more room on touch screens. */
+  .ma-btn, .ma-action, .ma-import-summary { padding: 0.4rem 0.75rem; font-size: 0.78rem; }
+
+  /* iOS zooms the page when focusing an input whose font is <16px. Pin
+     form controls to 16px on mobile so focusing a field doesn't yank
+     the layout around. */
+  input, select, textarea { font-size: 16px; }
+
+  /* Card / dashboard grids → single column. */
+  .managed-agents-list { grid-template-columns: 1fr; }
+  .room-health { grid-template-columns: 1fr; }
+
+  /* Wide data tables (services / audit / trash / users / quotas) would
+     blow past the viewport; make each its own horizontal-scroll region
+     instead of stretching the page. */
+  section table {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    white-space: nowrap;
+  }
+
+  /* Modals take most of a phone screen. */
+  .modal-card {
+    width: min(36rem, 100% - 1rem);
+    max-height: calc(100vh - 1.5rem);
+  }
+
+  /* The tasks-tab centring cap is moot once there's a single column. */
+  body.admin[data-active-tab="tasks"] #controls { max-width: none; }
+}
+
+/* Small phones — squeeze the header chrome + tabs a little more. */
+@media (max-width: 420px) {
+  .site-header { padding: 0.45rem 0.7rem; gap: 0.3rem 0.45rem; }
+  .site-header h1 { font-size: 0.98rem; }
+  .tabbar-btn { padding: 0.45rem 0.6rem; font-size: 0.78rem; }
+}
