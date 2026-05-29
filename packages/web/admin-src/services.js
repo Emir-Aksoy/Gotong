@@ -12,7 +12,7 @@
  * hand-written file used, so no behavior changes.
  */
 
-const { t, escapeHtml, fetchJson } = window.AipeHub
+const { t, escapeHtml, fetchJson, formatBytes } = window.AipeHub
 
 export function createServices(ma) {
   const svc = {
@@ -258,12 +258,6 @@ export function createServices(ma) {
   function closeServicesDetail() {
     const modal = document.getElementById('services-detail-modal')
     if (modal) modal.hidden = true
-  }
-
-  function formatBytes(n) {
-    if (n < 1024) return `${n} B`
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-    return `${(n / 1024 / 1024).toFixed(2)} MB`
   }
 
   /**

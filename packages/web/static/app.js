@@ -31,6 +31,11 @@
   const show = (el) => { if (el) el.hidden = false }
   const hide = (el) => { if (el) el.hidden = true }
 
+  // ---- Shared formatters from app-core.js's window.AipeHub -------------
+  // escapeHtml is aliased to the historical local name `escape`; formatBytes
+  // is the guarded copy. R14 — these were 3 duplicated local defs.
+  const { escapeHtml: escape, formatBytes, formatTs } = window.AipeHub
+
   // ---- Apply role visibility filter ------------------------------------
   // Hide every [data-roles] element whose role list doesn't include the
   // viewer. Anonymous viewers get `data-roles="anonymous"` matches only.
@@ -482,27 +487,6 @@
       .catch((err) => {
         console.error('[app] failed to load admin bundles', err)
       })
-  }
-
-  // ---- Tiny utilities --------------------------------------------------
-  function escape(s) {
-    return String(s == null ? '' : s)
-      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;').replace(/'/g, '&#39;')
-  }
-  function formatBytes(n) {
-    if (typeof n !== 'number' || !Number.isFinite(n)) return '—'
-    if (n < 1024) return `${n} B`
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-    return `${(n / 1024 / 1024).toFixed(2)} MB`
-  }
-  function formatTs(t) {
-    if (!t) return '—'
-    try {
-      const d = typeof t === 'number' ? new Date(t) : new Date(String(t))
-      if (Number.isNaN(d.getTime())) return String(t)
-      return d.toLocaleString()
-    } catch { return String(t) }
   }
 
   // ---- Boot ------------------------------------------------------------

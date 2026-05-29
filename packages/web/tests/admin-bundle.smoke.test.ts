@@ -32,7 +32,7 @@ const ADMIN_JS = readFileSync(join(HERE, '..', 'static', 'admin.js'), 'utf8')
 
 // The helpers admin-src/main.js destructures off window.AipeHub.
 const AIPEHUB_HELPERS = [
-  '$', 't', 'applyStaticI18n', 'onLangChange', 'escapeHtml', 'summarize',
+  '$', 't', 'applyStaticI18n', 'onLangChange', 'escapeHtml', 'formatBytes', 'summarize',
   'isBadResult', 'fetchJson', 'connectStream', 'syncLangFromConfig',
   'fetchLeaderboard', 'renderLeaderboard', 'taskMetricsHtml', 'formatScore',
   'attachContribToggle', 'applyContribToggleState', 'attachCapChips',

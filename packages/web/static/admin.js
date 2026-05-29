@@ -3,7 +3,7 @@
 "use strict";
 (() => {
   // admin-src/services.js
-  var { t, escapeHtml, fetchJson } = window.AipeHub;
+  var { t, escapeHtml, fetchJson, formatBytes } = window.AipeHub;
   function createServices(ma) {
     const svc2 = {
       plugins: [],
@@ -231,11 +231,6 @@
     function closeServicesDetail() {
       const modal = document.getElementById("services-detail-modal");
       if (modal) modal.hidden = true;
-    }
-    function formatBytes(n) {
-      if (n < 1024) return `${n} B`;
-      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-      return `${(n / 1024 / 1024).toFixed(2)} MB`;
     }
     function showServicesToast(msg) {
       let container = document.getElementById("services-toast-container");
@@ -961,6 +956,7 @@
       fetchJson: fetchJson3,
       connectStream,
       syncLangFromConfig,
+      formatBytes: formatBytes2,
       fetchLeaderboard,
       renderLeaderboard,
       taskMetricsHtml,
@@ -1891,11 +1887,6 @@
       }
       return await r.json();
     }
-    function formatBytes(n) {
-      if (n < 1024) return `${n} B`;
-      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-      return `${(n / 1024 / 1024).toFixed(2)} MB`;
-    }
     function extractMultimodalBlocks(node) {
       const out = [];
       visit(node);
@@ -2062,12 +2053,12 @@
                 statusEl.style.color = "#080";
                 if (ref.mime && ref.mime.startsWith("image/")) {
                   const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`;
-                  statusEl.innerHTML = `<span>已上传 (${escapeHtml4(formatBytes(ref.size))})</span> <img src="${escapeHtml4(url)}" alt="preview" style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`;
+                  statusEl.innerHTML = `<span>已上传 (${escapeHtml4(formatBytes2(ref.size))})</span> <img src="${escapeHtml4(url)}" alt="preview" style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`;
                 } else if (ref.mime && ref.mime.startsWith("audio/")) {
                   const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`;
-                  statusEl.innerHTML = `<span>已上传 (${escapeHtml4(formatBytes(ref.size))})</span> <audio controls src="${escapeHtml4(url)}" style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`;
+                  statusEl.innerHTML = `<span>已上传 (${escapeHtml4(formatBytes2(ref.size))})</span> <audio controls src="${escapeHtml4(url)}" style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`;
                 } else {
-                  statusEl.textContent = `已上传 (${formatBytes(ref.size)})`;
+                  statusEl.textContent = `已上传 (${formatBytes2(ref.size)})`;
                 }
               }
               payload[f.id] = { type: "file_ref", artifactId: ref.artifactId, mime: ref.mime };

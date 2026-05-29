@@ -16,7 +16,7 @@ import { createWorkflows } from './workflows.js'
 
 (() => {
   const { $, t, applyStaticI18n, onLangChange, escapeHtml, summarize, isBadResult,
-          fetchJson, connectStream, syncLangFromConfig,
+          fetchJson, connectStream, syncLangFromConfig, formatBytes,
           fetchLeaderboard, renderLeaderboard, taskMetricsHtml, formatScore,
           attachContribToggle, applyContribToggleState, attachCapChips } = window.AipeHub
 
@@ -1348,20 +1348,6 @@ import { createWorkflows } from './workflows.js'
       throw new Error(msg)
     }
     return await r.json()
-  }
-
-  // Compact byte-count formatter for upload status text.
-  // 1234 → "1.2 KB"; 1234567 → "1.2 MB". No internationalisation —
-  // these are operator-facing log-style strings.
-  // NOTE: byte-identical to services.js's formatBytes. Before the P3 split
-  // this file had two `function formatBytes` declarations in one scope;
-  // hoisting made the services one (no guard, .toFixed(2)) win at runtime,
-  // so the multimodal callers below actually used that version. Kept
-  // identical here to preserve that runtime behavior across the split.
-  function formatBytes(n) {
-    if (n < 1024) return `${n} B`
-    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
-    return `${(n / 1024 / 1024).toFixed(2)} MB`
   }
 
   // --- Phase 9 M5: multimodal block helpers -----------------------------

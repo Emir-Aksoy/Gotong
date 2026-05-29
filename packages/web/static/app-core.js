@@ -646,7 +646,9 @@
 
   const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }
   function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, (c) => ESC[c])
+    // null/undefined → '' (not the literal "null"/"undefined") so callers
+    // can pass possibly-absent fields without rendering a stray word.
+    return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ESC[c])
   }
   const $ = (id) => document.getElementById(id)
 
@@ -1012,6 +1014,24 @@
     return parts.join('')
   }
 
+  // Compact byte-count + timestamp formatters, shared across app.js and the
+  // admin console. Collapsed here from 3 duplicated copies (R14). formatBytes
+  // guards non-numbers (→ '—'); the numeric tiers match the old copies.
+  function formatBytes(n) {
+    if (typeof n !== 'number' || !Number.isFinite(n)) return '—'
+    if (n < 1024) return `${n} B`
+    if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+    return `${(n / 1024 / 1024).toFixed(2)} MB`
+  }
+  function formatTs(ts) {
+    if (!ts) return '—'
+    try {
+      const d = typeof ts === 'number' ? new Date(ts) : new Date(String(ts))
+      if (Number.isNaN(d.getTime())) return String(ts)
+      return d.toLocaleString()
+    } catch { return String(ts) }
+  }
+
   // --- expose -------------------------------------------------------------
 
   window.AipeHub = {
@@ -1023,6 +1043,8 @@
     statusLabel,
     setConn,
     escapeHtml,
+    formatBytes,
+    formatTs,
     summarize,
     isBadResult,
     fetchJson,
