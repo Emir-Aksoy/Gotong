@@ -627,6 +627,18 @@ async function main(): Promise<void> {
       try {
         const due = swept.listDueSuspendedTasks({ now: Date.now(), limit: 100 })
         for (const row of due) {
+          if (row.corrupt) {
+            // Corrupt `state` blob (truncated/garbled write). The store
+            // flagged it instead of throwing — which previously aborted
+            // the whole batch and re-threw every tick, starving all
+            // other parked tasks. Drop it: a half-parsed state can't be
+            // resumed without re-entering the agent into a broken state.
+            log.error('resume sweep: corrupt suspended state — dropping row', {
+              taskId: row.taskId,
+            })
+            try { swept.removeSuspendedTask(row.taskId) } catch { /* noop */ }
+            continue
+          }
           let task: Task
           try {
             task = JSON.parse(row.taskJson) as Task

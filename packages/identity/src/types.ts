@@ -757,6 +757,14 @@ export interface SuspendedTask {
    * memory / other side channels."
    */
   state: unknown
+  /**
+   * Set to `true` only when the persisted `state` blob failed to
+   * JSON.parse (e.g. a truncated/corrupt write). `state` is then forced
+   * to `null`. The resume sweep treats a corrupt row as unrecoverable
+   * and drops it rather than re-entering the agent into a broken
+   * half-state. Absent on healthy rows so the record shape is unchanged.
+   */
+  corrupt?: boolean
   /** Stringified `Task` (JSON.stringify). Resume sweep re-hydrates this. */
   taskJson: string
   createdAt: number

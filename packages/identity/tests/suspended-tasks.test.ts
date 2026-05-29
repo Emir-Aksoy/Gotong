@@ -299,4 +299,65 @@ describe('IdentityStore — suspended_tasks (Phase 11 M2)', () => {
       }),
     ).not.toThrow()
   })
+
+  // --- corrupt `state` blob resilience (P0 — poison-row sweep) ---------------
+
+  it('flags a row with corrupt state instead of throwing (poison-row guard)', () => {
+    store.persistSuspendedTask({
+      taskId: 't-bad',
+      agentId: 'a',
+      resumeAt: 10,
+      state: { ok: true },
+      taskJson: '{"id":"t-bad"}',
+    })
+    // Can't inject invalid JSON through persistSuspendedTask (it
+    // JSON.stringifies), so reach the private db to simulate a
+    // truncated/garbled on-disk `state` column — test-only setup.
+    const db = (store as unknown as {
+      db: { prepare: (s: string) => { run: (...a: unknown[]) => unknown } }
+    }).db
+    db.prepare('UPDATE suspended_tasks SET state = ? WHERE task_id = ?').run('{not-valid', 't-bad')
+
+    let due = store.listDueSuspendedTasks({ now: 1_000 })
+    expect(() => {
+      due = store.listDueSuspendedTasks({ now: 1_000 })
+    }).not.toThrow()
+    expect(due).toHaveLength(1)
+    expect(due[0]!.corrupt).toBe(true)
+    expect(due[0]!.state).toBeNull()
+    expect(due[0]!.taskId).toBe('t-bad')
+
+    // getSuspendedTask is equally tolerant.
+    const got = store.getSuspendedTask('t-bad')
+    expect(got!.corrupt).toBe(true)
+    expect(got!.state).toBeNull()
+  })
+
+  it('does not set corrupt on healthy rows (record shape unchanged)', () => {
+    store.persistSuspendedTask({
+      taskId: 't-ok',
+      agentId: 'a',
+      resumeAt: 10,
+      state: { step: 1 },
+      taskJson: '{}',
+    })
+    const got = store.getSuspendedTask('t-ok')
+    expect(got!.corrupt).toBeUndefined()
+    expect('corrupt' in got!).toBe(false)
+  })
+
+  it('a corrupt row does not block other due rows from listing', () => {
+    // Regression for poison-row starvation: the bad row sorts to the
+    // head (resume_at ASC) but the good row must still be returned.
+    store.persistSuspendedTask({ taskId: 'bad', agentId: 'a', resumeAt: 1, state: {}, taskJson: '{}' })
+    store.persistSuspendedTask({ taskId: 'good', agentId: 'a', resumeAt: 2, state: { x: 1 }, taskJson: '{}' })
+    const db = (store as unknown as {
+      db: { prepare: (s: string) => { run: (...a: unknown[]) => unknown } }
+    }).db
+    db.prepare('UPDATE suspended_tasks SET state = ? WHERE task_id = ?').run('{trunc', 'bad')
+    const due = store.listDueSuspendedTasks({ now: 1_000 })
+    expect(due.map((r) => r.taskId)).toEqual(['bad', 'good'])
+    expect(due.find((r) => r.taskId === 'bad')!.corrupt).toBe(true)
+    expect(due.find((r) => r.taskId === 'good')!.corrupt).toBeUndefined()
+  })
 })

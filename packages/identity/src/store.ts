@@ -3744,18 +3744,33 @@ interface SuspendedTaskRow {
 function rowToSuspendedTask(r: SuspendedTaskRow): SuspendedTask {
   // Parse `state` from JSON. The persist side stores `null` for
   // "absent"; everything else round-trips through JSON.stringify /
-  // JSON.parse. A corrupt blob (e.g. truncated write) throws here
-  // — the resume sweep treats that as an unrecoverable row and the
-  // operator gets to investigate. We don't try to silently recover,
-  // since a corrupted state would resume the agent into a broken
-  // half-state.
+  // JSON.parse. A corrupt blob (e.g. a truncated write) must NOT throw
+  // here: `rowToSuspendedTask` feeds `listDueSuspendedTasks` via
+  // `.map()`, and a throw mid-map would abort the entire due batch.
+  // Worse, the bad row sorts to the head (ORDER BY resume_at ASC), so
+  // every subsequent sweep tick would re-throw on it and starve all
+  // other parked tasks forever. Instead we flag the row `corrupt` and
+  // null its state; the resume sweep detects the flag and drops the row
+  // (it can't be resumed — a half-parsed state would re-enter the agent
+  // into a broken state anyway).
+  let state: unknown = null
+  let corrupt = false
+  if (r.state !== null) {
+    try {
+      state = JSON.parse(r.state)
+    } catch {
+      corrupt = true
+    }
+  }
   return {
     taskId: r.task_id,
     agentId: r.agent_id,
     hubId: r.hub_id,
     originUserId: r.origin_user_id,
     resumeAt: r.resume_at,
-    state: r.state === null ? null : JSON.parse(r.state),
+    state,
+    // Omit on healthy rows so the record shape is unchanged.
+    ...(corrupt ? { corrupt: true } : {}),
     taskJson: r.task_json,
     createdAt: r.created_at,
   }
