@@ -604,3 +604,15 @@
     })
   }
 })()
+
+// PWA (Phase 12 M9) — register the app-shell service worker. Registration
+// only works in a secure context (https, or http on localhost / 127.0.0.1),
+// so a plain-http LAN host simply skips it. Failures are non-fatal: the app
+// is fully functional without offline support, so we swallow the error.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch((err) => {
+      console.debug('SW registration skipped/failed (non-fatal):', err)
+    })
+  })
+}

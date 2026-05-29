@@ -18,6 +18,15 @@
     -->
     <meta name="x-aipehub-role" content="<!--AIPE_ROLE-->" />
     <title>AipeHub</title>
+    <!-- PWA (Phase 12 M9) — installable app shell. The service worker is
+         registered from app.js; it never caches /api or the SSE stream. -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <meta name="theme-color" content="#1a1a1a" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icon.svg" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="AipeHub" />
     <link rel="stylesheet" href="/styles.css" />
     <script src="/app-core.js" defer></script>
     <script src="/app.js" defer></script>

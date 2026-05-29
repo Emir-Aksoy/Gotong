@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#1a1a1a" />
+    <title>AipeHub — 离线</title>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #1a1a1a;
+        color: #f7f7f5;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+      .wrap {
+        min-height: 100%;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.1rem;
+        padding: 2rem 1.5rem;
+        box-sizing: border-box;
+        text-align: center;
+      }
+      h1 { font-size: 1.4rem; font-weight: 600; margin: 0; }
+      p { margin: 0; color: #b9b9b3; line-height: 1.6; max-width: 24rem; }
+      button {
+        font: inherit;
+        font-weight: 600;
+        padding: 0.55rem 1.4rem;
+        border: 1px solid #5b9bd5;
+        background: #5b9bd5;
+        color: #fff;
+        border-radius: 6px;
+        cursor: pointer;
+      }
+      button:hover { filter: brightness(1.08); }
+      .dot { width: 56px; height: 56px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <img class="dot" src="/icon.svg" alt="" width="56" height="56" />
+      <h1>当前离线</h1>
+      <p>AipeHub 的实时数据需要联网。请检查网络连接后重试 —— 你的本地 hub 仍在磁盘上，重连即恢复。</p>
+      <button type="button" onclick="location.reload()">重试</button>
+    </div>
+  </body>
+</html>

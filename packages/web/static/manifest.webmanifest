@@ -1,0 +1,20 @@
+{
+  "name": "AipeHub",
+  "short_name": "AipeHub",
+  "description": "AipeHub — 人 / 智能体 / 机构 协作工作底座",
+  "lang": "zh",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#f7f7f5",
+  "theme_color": "#1a1a1a",
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

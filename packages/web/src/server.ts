@@ -118,6 +118,11 @@ const MIME: Record<string, string> = {
   '.yaml': 'text/yaml; charset=utf-8',
   '.yml': 'text/yaml; charset=utf-8',
   '.md': 'text/markdown; charset=utf-8',
+  // PWA assets (Phase 12 M9). The web app manifest spec mandates
+  // application/manifest+json; the SVG icon needs image/svg+xml so the
+  // browser (and the manifest icon loader) treats it as an image.
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.svg': 'image/svg+xml; charset=utf-8',
 }
 
 const ADMIN_COOKIE = 'aipehub_admin'
