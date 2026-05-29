@@ -2,17 +2,270 @@
 // Edit admin-src/*.js then run `pnpm -C packages/web build:admin`.
 "use strict";
 (() => {
+  // admin-src/services.js
+  var { t, escapeHtml, fetchJson } = window.AipeHub;
+  function createServices(ma) {
+    const svc2 = {
+      plugins: [],
+      // [{type, impl, version, description?}]
+      rows: [],
+      // [{type, impl, owner: {kind,id}, snapshot}]
+      trash: [],
+      // ServiceTrashRef[]
+      audit: [],
+      // [{ts, from, type, impl, ownerKind, ownerId, method, outcome, durationMs}]
+      disabled: false
+      // host didn't supply services
+    };
+    async function refreshServices() {
+      const tableEl = document.getElementById("services-table");
+      const tbodyEl = document.getElementById("services-tbody");
+      const emptyEl = document.getElementById("services-plugins-empty");
+      const disabledEl = document.getElementById("services-disabled");
+      const trashTableEl = document.getElementById("services-trash-table");
+      const trashTbodyEl = document.getElementById("services-trash-tbody");
+      const trashEmptyEl = document.getElementById("services-trash-empty");
+      if (!tableEl || !tbodyEl) return;
+      let plugins;
+      try {
+        const r = await fetch("/api/admin/services/plugins");
+        if (r.status === 503) {
+          svc2.disabled = true;
+          disabledEl.hidden = false;
+          tableEl.hidden = true;
+          emptyEl.hidden = true;
+          trashTableEl.hidden = true;
+          trashEmptyEl.hidden = true;
+          return;
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const j = await r.json();
+        plugins = j.plugins || [];
+      } catch (err) {
+        console.warn("services: plugins fetch failed", err);
+        return;
+      }
+      svc2.disabled = false;
+      disabledEl.hidden = true;
+      svc2.plugins = plugins;
+      if (plugins.length === 0) {
+        tableEl.hidden = true;
+        emptyEl.hidden = false;
+      } else {
+        emptyEl.hidden = true;
+        tableEl.hidden = false;
+      }
+      const rows = [];
+      for (const plugin of plugins) {
+        for (const agent of ma.agents || []) {
+          try {
+            const url = `/api/admin/services/owners/${encodeURIComponent(plugin.type)}/${encodeURIComponent(plugin.impl)}/agent/${encodeURIComponent(agent.id)}`;
+            const r = await fetchJson(url);
+            if (r.snapshot) {
+              rows.push({
+                type: plugin.type,
+                impl: plugin.impl,
+                owner: { kind: "agent", id: agent.id },
+                snapshot: r.snapshot
+              });
+            }
+          } catch (err) {
+          }
+        }
+      }
+      svc2.rows = rows;
+      renderServicesTable();
+      try {
+        const r = await fetchJson("/api/admin/services/trash");
+        svc2.trash = r.trash || [];
+        renderServicesTrash();
+      } catch (err) {
+        console.warn("services: trash fetch failed", err);
+      }
+      try {
+        const r = await fetchJson("/api/admin/transcript/service-calls?limit=200");
+        svc2.audit = r.calls || [];
+        renderServicesAudit();
+      } catch (err) {
+        console.warn("services: audit fetch failed", err);
+      }
+    }
+    function renderServicesAudit() {
+      const tableEl = document.getElementById("services-audit-table");
+      const tbodyEl = document.getElementById("services-audit-tbody");
+      const emptyEl = document.getElementById("services-audit-empty");
+      if (!tableEl || !tbodyEl) return;
+      tbodyEl.innerHTML = "";
+      const calls = svc2.audit || [];
+      if (calls.length === 0) {
+        tableEl.hidden = true;
+        emptyEl.hidden = false;
+        return;
+      }
+      emptyEl.hidden = true;
+      tableEl.hidden = false;
+      for (const c of calls) {
+        const tr = document.createElement("tr");
+        const okClass = c.outcome === "ok" ? "" : " bad";
+        tr.className = `audit-row${okClass}`;
+        tr.innerHTML = `
+        <td>${new Date(c.ts).toLocaleString()}</td>
+        <td><code>${escapeHtml(c.from)}</code></td>
+        <td><code>${escapeHtml(c.type)}:${escapeHtml(c.impl)}</code></td>
+        <td>${escapeHtml(c.ownerKind)}/${escapeHtml(c.ownerId)}</td>
+        <td><code>${escapeHtml(c.method)}</code></td>
+        <td>${escapeHtml(c.outcome)}</td>
+        <td>${c.durationMs}ms</td>
+      `;
+        tbodyEl.appendChild(tr);
+      }
+    }
+    function renderServicesTable() {
+      const tbodyEl = document.getElementById("services-tbody");
+      if (!tbodyEl) return;
+      tbodyEl.innerHTML = "";
+      for (const row of svc2.rows) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+        <td><code>${escapeHtml(row.type)}:${escapeHtml(row.impl)}</code></td>
+        <td>${escapeHtml(row.owner.kind)}/${escapeHtml(row.owner.id)}</td>
+        <td>${formatBytes(row.snapshot.sizeBytes)}</td>
+        <td>${row.snapshot.itemCount ?? ""}</td>
+        <td>${row.snapshot.lastAccess ? new Date(row.snapshot.lastAccess).toLocaleString() : ""}</td>
+        <td>
+          <button type="button" class="secondary-btn" data-action="detail">${escapeHtml(t.servicesDetail)}</button>
+          <button type="button" class="danger-btn" data-action="delete">${escapeHtml(t.servicesDelete)}</button>
+        </td>
+      `;
+        tr.querySelector('[data-action="detail"]').addEventListener("click", () => openServicesDetail(row));
+        tr.querySelector('[data-action="delete"]').addEventListener("click", () => softDeleteRow(row));
+        tbodyEl.appendChild(tr);
+      }
+    }
+    function renderServicesTrash() {
+      const tableEl = document.getElementById("services-trash-table");
+      const tbodyEl = document.getElementById("services-trash-tbody");
+      const emptyEl = document.getElementById("services-trash-empty");
+      if (!tableEl || !tbodyEl) return;
+      tbodyEl.innerHTML = "";
+      if (svc2.trash.length === 0) {
+        tableEl.hidden = true;
+        emptyEl.hidden = false;
+        return;
+      }
+      emptyEl.hidden = true;
+      tableEl.hidden = false;
+      for (const ref of svc2.trash) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+        <td><code>${escapeHtml(ref.type)}:${escapeHtml(ref.impl)}</code></td>
+        <td>${escapeHtml(ref.ownerKind)}/${escapeHtml(ref.ownerId)}</td>
+        <td>${new Date(ref.deletedAt).toLocaleString()}</td>
+        <td>${new Date(ref.expiresAt).toLocaleString()}</td>
+        <td>${escapeHtml(ref.reason || "")}</td>
+        <td>
+          <button type="button" class="secondary-btn" data-action="restore">${escapeHtml(t.servicesTrashRestore)}</button>
+          <button type="button" class="danger-btn" data-action="hard">${escapeHtml(t.servicesTrashHardDelete)}</button>
+        </td>
+      `;
+        tr.querySelector('[data-action="restore"]').addEventListener("click", () => restoreTrash(ref));
+        tr.querySelector('[data-action="hard"]').addEventListener("click", () => hardDeleteTrash(ref));
+        tbodyEl.appendChild(tr);
+      }
+    }
+    async function softDeleteRow(row) {
+      try {
+        await fetchJson(`/api/admin/services/owners/${encodeURIComponent(row.type)}/${encodeURIComponent(row.impl)}/agent/${encodeURIComponent(row.owner.id)}`, {
+          method: "DELETE"
+        });
+        await refreshServices();
+      } catch (err) {
+        alert(t.failedAlert(err?.message || String(err)));
+      }
+    }
+    async function restoreTrash(ref) {
+      try {
+        await fetchJson(`/api/admin/services/trash/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.impl)}/${encodeURIComponent(ref.id)}/restore`, {
+          method: "POST"
+        });
+        showServicesToast(t.servicesToastRestored);
+        await refreshServices();
+      } catch (err) {
+        alert(t.failedAlert(err?.message || String(err)));
+      }
+    }
+    async function hardDeleteTrash(ref) {
+      if (!confirm(t.servicesConfirmHardDelete)) return;
+      try {
+        await fetchJson(`/api/admin/services/trash/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.impl)}/${encodeURIComponent(ref.id)}`, {
+          method: "DELETE"
+        });
+        showServicesToast(t.servicesToastHardDeleted);
+        await refreshServices();
+      } catch (err) {
+        alert(t.failedAlert(err?.message || String(err)));
+      }
+    }
+    function openServicesDetail(row) {
+      const modal = document.getElementById("services-detail-modal");
+      const title = document.getElementById("services-detail-title");
+      const body = document.getElementById("services-detail-body");
+      const img = document.getElementById("services-detail-image");
+      if (!modal || !title || !body) return;
+      title.textContent = `${row.type}:${row.impl} — ${row.owner.kind}/${row.owner.id}`;
+      const p = row.snapshot.preview;
+      if (p && p.base64) {
+        img.src = `data:${p.mime};base64,${p.base64}`;
+        img.alt = title.textContent;
+        img.hidden = false;
+        body.textContent = "";
+      } else if (p && p.text) {
+        img.hidden = true;
+        body.textContent = p.text + (p.truncated ? "\n… (truncated)" : "");
+      } else {
+        img.hidden = true;
+        body.textContent = `${formatBytes(row.snapshot.sizeBytes)} • ${row.snapshot.itemCount ?? 0} items`;
+      }
+      modal.hidden = false;
+    }
+    function closeServicesDetail() {
+      const modal = document.getElementById("services-detail-modal");
+      if (modal) modal.hidden = true;
+    }
+    function formatBytes(n) {
+      if (n < 1024) return `${n} B`;
+      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+      return `${(n / 1024 / 1024).toFixed(2)} MB`;
+    }
+    function showServicesToast(msg) {
+      let container = document.getElementById("services-toast-container");
+      if (!container) {
+        container = document.createElement("div");
+        container.id = "services-toast-container";
+        container.className = "toast-container";
+        document.body.appendChild(container);
+      }
+      const el = document.createElement("div");
+      el.className = "toast";
+      el.textContent = msg;
+      container.appendChild(el);
+      setTimeout(() => el.classList.add("fade"), 3e3);
+      setTimeout(() => el.remove(), 4e3);
+    }
+    return { refreshServices, renderServicesAudit, closeServicesDetail, showServicesToast };
+  }
+
   // admin-src/main.js
   (() => {
     const {
       $,
-      t,
+      t: t2,
       applyStaticI18n,
       onLangChange,
-      escapeHtml,
+      escapeHtml: escapeHtml2,
       summarize,
       isBadResult,
-      fetchJson,
+      fetchJson: fetchJson2,
       connectStream,
       syncLangFromConfig,
       fetchLeaderboard,
@@ -87,6 +340,7 @@
     let taskFilter = "all";
     let lbWindow = "all";
     let dom = null;
+    const services = createServices(ma);
     function resolveDom() {
       dom = {
         participantsList: $("participants-list"),
@@ -239,7 +493,7 @@
       };
     }
     async function refresh() {
-      const snap = await fetchJson("/api/state");
+      const snap = await fetchJson2("/api/state");
       state.participants = snap.participants;
       state.transcript = snap.transcript;
       state.pendingApplications = snap.pendingApplications || [];
@@ -279,14 +533,14 @@
       if (!live) return "";
       const PREVIEW_MAX = 120;
       const truncated = live.text.length > PREVIEW_MAX ? live.text.slice(0, PREVIEW_MAX) + "…" : live.text;
-      const escaped = escapeHtml(truncated || "(no text yet)");
+      const escaped = escapeHtml2(truncated || "(no text yet)");
       const tools = live.toolUses > 0 ? `<span class="live-stream-tools" title="tool_use chunks">🔧 ${live.toolUses}</span>` : "";
       if (live.isDone) {
         return `<div class="live-stream-indicator live-stream-done" title="stream ended">✓ ${tools}</div>`;
       }
       return `<div class="live-stream-indicator live-stream-active">
       <span class="live-stream-dot">●</span>
-      <span class="live-stream-by">${escapeHtml(live.agentId)}</span>
+      <span class="live-stream-by">${escapeHtml2(live.agentId)}</span>
       ${tools}
       <span class="live-stream-text">${escaped}</span>
     </div>`;
@@ -351,14 +605,14 @@
           refresh().catch((err) => console.error("task refresh failed:", err));
           return;
         case "service_trashed":
-          showServicesToast(t.servicesToastTrashed);
+          services.showServicesToast(t2.servicesToastTrashed);
           if (document.body.dataset.activeTab === "services") {
-            refreshServices().catch((err) => console.warn("services refresh failed:", err));
+            services.refreshServices().catch((err) => console.warn("services refresh failed:", err));
           }
           break;
         case "service_purged":
           if (document.body.dataset.activeTab === "services") {
-            refreshServices().catch(() => {
+            services.refreshServices().catch(() => {
             });
           }
           break;
@@ -416,23 +670,23 @@
       const weekStart = now - 7 * 24 * 60 * 60 * 1e3;
       let lb = null;
       try {
-        lb = await fetchJson(`/api/leaderboard?from=${weekStart}&to=${now}`);
+        lb = await fetchJson2(`/api/leaderboard?from=${weekStart}&to=${now}`);
       } catch (err) {
         console.warn("refreshHealth leaderboard fetch failed:", err);
       }
       dom.hToday.textContent = String(todayTasks);
       dom.hOnline.textContent = String(onlineAgents + onlineHumans);
-      const subFn = t.healthOnlineSub;
+      const subFn = t2.healthOnlineSub;
       dom.hOnlineSub.textContent = typeof subFn === "function" ? subFn(onlineAgents, onlineHumans) : `${onlineAgents} · ${onlineHumans}`;
       dom.hUnrated.textContent = lb ? String(lb.unratedTaskCount) : "—";
       const top3 = lb?.rows?.slice(0, 3) ?? [];
       if (top3.length === 0) {
         dom.hTop3.classList.add("empty");
-        dom.hTop3.textContent = t.healthTop3Empty ?? "—";
+        dom.hTop3.textContent = t2.healthTop3Empty ?? "—";
       } else {
         dom.hTop3.classList.remove("empty");
         dom.hTop3.innerHTML = top3.map(
-          (row) => `<li><span class="top-id">${escapeHtml(row.participantId)}</span><span class="top-score">${formatScore(row.totalContribution)}</span></li>`
+          (row) => `<li><span class="top-id">${escapeHtml2(row.participantId)}</span><span class="top-score">${formatScore(row.totalContribution)}</span></li>`
         ).join("");
       }
     }
@@ -445,7 +699,7 @@
       const root = dom.pendingAppsList;
       root.innerHTML = "";
       if (state.pendingApplications.length === 0) {
-        root.innerHTML = `<p class="empty">${escapeHtml(t.noPendingAgents)}</p>`;
+        root.innerHTML = `<p class="empty">${escapeHtml2(t2.noPendingAgents)}</p>`;
         dom.pendingAppsSection.classList.remove("has-pending");
         return;
       }
@@ -453,26 +707,26 @@
       for (const app of state.pendingApplications) {
         const card = document.createElement("div");
         card.className = "pending-app-card";
-        const agents = app.agents.map((a) => `<span class="cap">${escapeHtml(a.id)}${a.capabilities && a.capabilities.length ? " · " + escapeHtml(a.capabilities.join(",")) : ""}</span>`).join("");
+        const agents = app.agents.map((a) => `<span class="cap">${escapeHtml2(a.id)}${a.capabilities && a.capabilities.length ? " · " + escapeHtml2(a.capabilities.join(",")) : ""}</span>`).join("");
         const meta = app.meta || {};
         const metaBits = [];
-        if (meta.clientName) metaBits.push(`${escapeHtml(t.clientLabel)}: ${escapeHtml(meta.clientName)}${meta.clientVersion ? " " + escapeHtml(meta.clientVersion) : ""}`);
-        if (meta.remoteAddress) metaBits.push(`${escapeHtml(t.remoteAddress)}: ${escapeHtml(meta.remoteAddress)}`);
-        metaBits.push(`${escapeHtml(t.pendingSince)}: ${new Date(app.pendingSince).toLocaleString()}`);
+        if (meta.clientName) metaBits.push(`${escapeHtml2(t2.clientLabel)}: ${escapeHtml2(meta.clientName)}${meta.clientVersion ? " " + escapeHtml2(meta.clientVersion) : ""}`);
+        if (meta.remoteAddress) metaBits.push(`${escapeHtml2(t2.remoteAddress)}: ${escapeHtml2(meta.remoteAddress)}`);
+        metaBits.push(`${escapeHtml2(t2.pendingSince)}: ${new Date(app.pendingSince).toLocaleString()}`);
         let servicesBlock = "";
-        const services = Array.isArray(app.services) ? app.services : [];
-        if (services.length > 0) {
-          const items = services.map((s) => {
-            const owner = `${escapeHtml(s.owner.kind)}/${escapeHtml(s.owner.id)}`;
+        const services2 = Array.isArray(app.services) ? app.services : [];
+        if (services2.length > 0) {
+          const items = services2.map((s) => {
+            const owner = `${escapeHtml2(s.owner.kind)}/${escapeHtml2(s.owner.id)}`;
             const methodsArr = Array.isArray(s.methods) ? s.methods : [];
-            const methodsLabel = t.appServicesMethodsAny || "(any method)";
-            const methodsTxt = methodsArr.length > 0 ? methodsArr.map((m) => `<code>${escapeHtml(String(m))}</code>`).join(", ") : `<span class="muted">${escapeHtml(methodsLabel)}</span>`;
-            return `<li><code>${escapeHtml(s.type)}:${escapeHtml(s.impl)}</code> <span class="muted">@</span> <code>${owner}</code> <span class="muted">·</span> ${methodsTxt}</li>`;
+            const methodsLabel = t2.appServicesMethodsAny || "(any method)";
+            const methodsTxt = methodsArr.length > 0 ? methodsArr.map((m) => `<code>${escapeHtml2(String(m))}</code>`).join(", ") : `<span class="muted">${escapeHtml2(methodsLabel)}</span>`;
+            return `<li><code>${escapeHtml2(s.type)}:${escapeHtml2(s.impl)}</code> <span class="muted">@</span> <code>${owner}</code> <span class="muted">·</span> ${methodsTxt}</li>`;
           }).join("");
-          const label = t.appServicesRequested || "Services requested";
-          servicesBlock = `<div class="pending-services"><div class="pending-services-label">${escapeHtml(label)}</div><ul class="pending-services-list">${items}</ul></div>`;
+          const label = t2.appServicesRequested || "Services requested";
+          servicesBlock = `<div class="pending-services"><div class="pending-services-label">${escapeHtml2(label)}</div><ul class="pending-services-list">${items}</ul></div>`;
         }
-        card.innerHTML = `<div class="t-head"><span class="t-title">${agents}</span></div><div class="pending-meta">${metaBits.join(" · ")}</div>` + servicesBlock + `<div class="pending-actions"><input class="reject-reason" placeholder="${escapeHtml(t.rejectReason)}" data-id="${escapeHtml(app.id)}" /><button class="btn-approve" data-act="approve-app" data-id="${escapeHtml(app.id)}">${escapeHtml(t.approve)}</button><button class="btn-reject" data-act="reject-app" data-id="${escapeHtml(app.id)}">${escapeHtml(t.reject)}</button></div>`;
+        card.innerHTML = `<div class="t-head"><span class="t-title">${agents}</span></div><div class="pending-meta">${metaBits.join(" · ")}</div>` + servicesBlock + `<div class="pending-actions"><input class="reject-reason" placeholder="${escapeHtml2(t2.rejectReason)}" data-id="${escapeHtml2(app.id)}" /><button class="btn-approve" data-act="approve-app" data-id="${escapeHtml2(app.id)}">${escapeHtml2(t2.approve)}</button><button class="btn-reject" data-act="reject-app" data-id="${escapeHtml2(app.id)}">${escapeHtml2(t2.reject)}</button></div>`;
         root.appendChild(card);
       }
     }
@@ -480,15 +734,15 @@
       const root = dom.participantsList;
       root.innerHTML = "";
       if (state.participants.length === 0) {
-        root.innerHTML = `<p class="empty">${escapeHtml(t.noParticipants)}</p>`;
+        root.innerHTML = `<p class="empty">${escapeHtml2(t2.noParticipants)}</p>`;
         return;
       }
       for (const p of state.participants) {
         const div = document.createElement("div");
         div.className = `participant participant-${p.kind}`;
-        const caps = (p.capabilities || []).map((c) => `<span class="cap">${escapeHtml(c)}</span>`).join("") || `<em class="empty">${escapeHtml(t.noCaps)}</em>`;
-        const kindLabel = t.pKind[p.kind] || p.kind;
-        div.innerHTML = `<div class="p-head"><span class="p-kind">${escapeHtml(kindLabel)}</span><span class="p-id">${escapeHtml(p.id)}</span><span class="p-load">${escapeHtml(t.load)} ${p.load}</span></div><div class="p-caps">${caps}</div>`;
+        const caps = (p.capabilities || []).map((c) => `<span class="cap">${escapeHtml2(c)}</span>`).join("") || `<em class="empty">${escapeHtml2(t2.noCaps)}</em>`;
+        const kindLabel = t2.pKind[p.kind] || p.kind;
+        div.innerHTML = `<div class="p-head"><span class="p-kind">${escapeHtml2(kindLabel)}</span><span class="p-id">${escapeHtml2(p.id)}</span><span class="p-load">${escapeHtml2(t2.load)} ${p.load}</span></div><div class="p-caps">${caps}</div>`;
         root.appendChild(div);
       }
     }
@@ -499,10 +753,10 @@
       for (let i = state.transcript.length - 1; i >= 0; i--) {
         const e = state.transcript[i];
         const li = document.createElement("li");
-        const taskIdAttr = e.kind === "task_result" ? ` data-taskid="${escapeHtml(e.data.taskId)}"` : "";
+        const taskIdAttr = e.kind === "task_result" ? ` data-taskid="${escapeHtml2(e.data.taskId)}"` : "";
         const clickableCls = e.kind === "task_result" ? " entry-clickable" : "";
         li.className = `entry entry-${e.kind}${clickableCls}` + (isBadResult(e) ? " bad" : "");
-        li.innerHTML = `<span class="seq">${e.seq}</span><span class="kind">${e.kind}</span><span class="body"${taskIdAttr}>${escapeHtml(summarize(e))}</span>`;
+        li.innerHTML = `<span class="seq">${e.seq}</span><span class="kind">${e.kind}</span><span class="body"${taskIdAttr}>${escapeHtml2(summarize(e))}</span>`;
         root.appendChild(li);
       }
     }
@@ -517,7 +771,7 @@
       const filtered = state.tasks.filter((task) => taskFilter === "all" ? true : task.status === taskFilter).slice().reverse();
       root.innerHTML = "";
       if (filtered.length === 0) {
-        root.innerHTML = `<p class="empty">${escapeHtml(t.noTasks)}</p>`;
+        root.innerHTML = `<p class="empty">${escapeHtml2(t2.noTasks)}</p>`;
         return;
       }
       for (const v of filtered) {
@@ -525,15 +779,15 @@
         const div = document.createElement("div");
         div.className = `task-card task-${v.status}` + (isOpen ? " expanded" : "");
         div.dataset.taskId = v.id;
-        const statusLabel = v.status === "pending" ? t.taskStatusPending : v.status === "done" ? t.taskStatusDone : v.status === "failed" ? t.taskStatusFailed : t.taskStatusCancelled;
-        const title = v.task.title || t.untitled;
+        const statusLabel = v.status === "pending" ? t2.taskStatusPending : v.status === "done" ? t2.taskStatusDone : v.status === "failed" ? t2.taskStatusFailed : t2.taskStatusCancelled;
+        const title = v.task.title || t2.untitled;
         const s = v.task.strategy;
         const target = s.kind === "explicit" ? `to=${s.to}` : s.kind === "capability" ? `caps=[${s.capabilities.join(",")}]` : "broadcast";
         const canRetry = v.status === "failed" || v.status === "cancelled";
         const caret = isOpen ? "▾" : "▸";
-        const headHtml = `<div class="task-head" data-act="toggle-task" data-id="${escapeHtml(v.id)}" role="button" tabindex="0" aria-expanded="${isOpen ? "true" : "false"}"><span class="task-caret">${caret}</span><span class="task-status task-status-${v.status}">${escapeHtml(statusLabel)}</span><span class="task-title">${escapeHtml(title)}</span><span class="task-strategy">${escapeHtml(s.kind)} · ${escapeHtml(target)}</span></div>`;
-        const metaHtml = `<div class="task-metrics">${taskMetricsHtml(v)}</div><div class="task-meta"><code class="task-id" data-act="copy-task-id" data-id="${escapeHtml(v.id)}" title="${escapeHtml(t.taskIdHint)}">${escapeHtml(v.id.slice(0, 8))}…</code>` + (v.result ? ` · ${escapeHtml(resultSummary(v.result))}` : "") + `</div>`;
-        const retryHtml = canRetry ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml(v.id)}">${escapeHtml(t.retry)}</button></div>` : "";
+        const headHtml = `<div class="task-head" data-act="toggle-task" data-id="${escapeHtml2(v.id)}" role="button" tabindex="0" aria-expanded="${isOpen ? "true" : "false"}"><span class="task-caret">${caret}</span><span class="task-status task-status-${v.status}">${escapeHtml2(statusLabel)}</span><span class="task-title">${escapeHtml2(title)}</span><span class="task-strategy">${escapeHtml2(s.kind)} · ${escapeHtml2(target)}</span></div>`;
+        const metaHtml = `<div class="task-metrics">${taskMetricsHtml(v)}</div><div class="task-meta"><code class="task-id" data-act="copy-task-id" data-id="${escapeHtml2(v.id)}" title="${escapeHtml2(t2.taskIdHint)}">${escapeHtml2(v.id.slice(0, 8))}…</code>` + (v.result ? ` · ${escapeHtml2(resultSummary(v.result))}` : "") + `</div>`;
+        const retryHtml = canRetry ? `<div class="task-actions"><button data-act="retry" data-id="${escapeHtml2(v.id)}">${escapeHtml2(t2.retry)}</button></div>` : "";
         const liveHtml = renderLiveStreamIndicator(v.id);
         const detailHtml = isOpen ? renderTaskDetail(v) : "";
         div.innerHTML = headHtml + metaHtml + liveHtml + retryHtml + detailHtml;
@@ -541,10 +795,10 @@
       }
     }
     function resultSummary(r) {
-      if (r.kind === "ok") return t.sumOk(r.by);
-      if (r.kind === "failed") return t.sumFailed(r.by, r.error);
-      if (r.kind === "cancelled") return t.sumCancelled(r.reason);
-      return t.sumNoParticipant(r.reason);
+      if (r.kind === "ok") return t2.sumOk(r.by);
+      if (r.kind === "failed") return t2.sumFailed(r.by, r.error);
+      if (r.kind === "cancelled") return t2.sumCancelled(r.reason);
+      return t2.sumNoParticipant(r.reason);
     }
     function renderTaskDetail(v) {
       const sections = [];
@@ -555,14 +809,14 @@
       const completed = v.completedAt ? new Date(v.completedAt).toLocaleString() : "—";
       const dur = v.completedAt ? formatDuration(v.completedAt - v.createdAt) : "—";
       sections.push(
-        `<div class="task-detail-section task-detail-timing"><span><strong>${escapeHtml(t.detailCreated)}</strong> ${escapeHtml(created)}</span><span><strong>${escapeHtml(t.detailCompleted)}</strong> ${escapeHtml(completed)}</span><span><strong>${escapeHtml(t.detailDuration)}</strong> ${escapeHtml(dur)}</span></div>`
+        `<div class="task-detail-section task-detail-timing"><span><strong>${escapeHtml2(t2.detailCreated)}</strong> ${escapeHtml2(created)}</span><span><strong>${escapeHtml2(t2.detailCompleted)}</strong> ${escapeHtml2(completed)}</span><span><strong>${escapeHtml2(t2.detailDuration)}</strong> ${escapeHtml2(dur)}</span></div>`
       );
       if (Array.isArray(v.task.ancestry) && v.task.ancestry.length > 0) {
         const chain = v.task.ancestry.map((node) => {
           const id = String(node.taskId || "");
           const idShort = id ? id.slice(0, 8) + "…" : "?";
-          const by = escapeHtml(String(node.by || "?"));
-          return `<li><code>${by}</code> <span class="anc-tid" title="${escapeHtml(id)}">${escapeHtml(idShort)}</span></li>`;
+          const by = escapeHtml2(String(node.by || "?"));
+          return `<li><code>${by}</code> <span class="anc-tid" title="${escapeHtml2(id)}">${escapeHtml2(idShort)}</span></li>`;
         }).join(' <span class="anc-arrow">→</span> ');
         sections.push(
           `<div class="task-detail-section task-detail-ancestry"><strong>↰ dispatch chain (${v.task.ancestry.length}):</strong> <ol class="anc-chain">${chain}</ol></div>`
@@ -571,7 +825,7 @@
       const mm = extractMultimodalBlocks(v.task.payload);
       const mmHtml = mm.length > 0 ? `<div class="task-detail-multimodal">${mm.map(renderMultimodalBlock).join("")}</div>` : "";
       sections.push(
-        `<details class="task-detail-section" open><summary>${escapeHtml(t.detailPayload)}</summary>` + mmHtml + `<pre class="task-detail-pre">${escapeHtml(formatJsonPretty(v.task.payload))}</pre></details>`
+        `<details class="task-detail-section" open><summary>${escapeHtml2(t2.detailPayload)}</summary>` + mmHtml + `<pre class="task-detail-pre">${escapeHtml2(formatJsonPretty(v.task.payload))}</pre></details>`
       );
       if (v.result) {
         sections.push(renderResultBlock(v.result));
@@ -579,13 +833,13 @@
       if (Array.isArray(v.evaluations) && v.evaluations.length > 0) {
         const rows = v.evaluations.map((ev) => {
           const when = ev.ts ? new Date(ev.ts).toLocaleString() : "";
-          const rating = typeof ev.rating === "number" ? `★ ${formatScore(ev.rating)}/5` : t.detailCommentOnly;
-          const comment = ev.comment ? escapeHtml(ev.comment) : "";
-          const author = ev.from ? `<code>${escapeHtml(ev.from)}</code>` : "";
-          return `<li><span class="ev-rating">${escapeHtml(rating)}</span>` + (author ? ` <span class="ev-from">${author}</span>` : "") + (when ? ` <span class="ev-ts">${escapeHtml(when)}</span>` : "") + (comment ? `<div class="ev-comment">${comment}</div>` : "") + `</li>`;
+          const rating = typeof ev.rating === "number" ? `★ ${formatScore(ev.rating)}/5` : t2.detailCommentOnly;
+          const comment = ev.comment ? escapeHtml2(ev.comment) : "";
+          const author = ev.from ? `<code>${escapeHtml2(ev.from)}</code>` : "";
+          return `<li><span class="ev-rating">${escapeHtml2(rating)}</span>` + (author ? ` <span class="ev-from">${author}</span>` : "") + (when ? ` <span class="ev-ts">${escapeHtml2(when)}</span>` : "") + (comment ? `<div class="ev-comment">${comment}</div>` : "") + `</li>`;
         }).join("");
         sections.push(
-          `<details class="task-detail-section" open><summary>${escapeHtml(t.detailEvaluations)} (${v.evaluations.length})</summary><ul class="task-detail-evals">${rows}</ul></details>`
+          `<details class="task-detail-section" open><summary>${escapeHtml2(t2.detailEvaluations)} (${v.evaluations.length})</summary><ul class="task-detail-evals">${rows}</ul></details>`
         );
       }
       if (v.status === "done" || v.status === "failed") {
@@ -598,24 +852,24 @@
         const out = r.output;
         if (out && typeof out === "object" && typeof out.text === "string") {
           const meta = [];
-          if (out.by) meta.push(`${escapeHtml(t.detailBy)} <code>${escapeHtml(out.by)}</code>`);
-          if (out.stopReason) meta.push(`${escapeHtml(t.detailStopReason)} ${escapeHtml(out.stopReason)}`);
+          if (out.by) meta.push(`${escapeHtml2(t2.detailBy)} <code>${escapeHtml2(out.by)}</code>`);
+          if (out.stopReason) meta.push(`${escapeHtml2(t2.detailStopReason)} ${escapeHtml2(out.stopReason)}`);
           if (out.usage) {
             const u = out.usage;
             const tokens = [];
             if (typeof u.inputTokens === "number") tokens.push(`in ${u.inputTokens}`);
             if (typeof u.outputTokens === "number") tokens.push(`out ${u.outputTokens}`);
-            if (tokens.length) meta.push(`${escapeHtml(t.detailUsage)} ${escapeHtml(tokens.join(" / "))}`);
+            if (tokens.length) meta.push(`${escapeHtml2(t2.detailUsage)} ${escapeHtml2(tokens.join(" / "))}`);
           }
-          return `<details class="task-detail-section" open><summary>${escapeHtml(t.detailOutput)}</summary>` + (meta.length ? `<div class="task-detail-meta">${meta.join(" · ")}</div>` : "") + `<pre class="task-detail-pre task-detail-text">${escapeHtml(out.text)}</pre></details>`;
+          return `<details class="task-detail-section" open><summary>${escapeHtml2(t2.detailOutput)}</summary>` + (meta.length ? `<div class="task-detail-meta">${meta.join(" · ")}</div>` : "") + `<pre class="task-detail-pre task-detail-text">${escapeHtml2(out.text)}</pre></details>`;
         }
-        return `<details class="task-detail-section" open><summary>${escapeHtml(t.detailOutput)}</summary><div class="task-detail-meta">${escapeHtml(t.detailBy)} <code>${escapeHtml(r.by)}</code></div><pre class="task-detail-pre">${escapeHtml(formatJsonPretty(out))}</pre></details>`;
+        return `<details class="task-detail-section" open><summary>${escapeHtml2(t2.detailOutput)}</summary><div class="task-detail-meta">${escapeHtml2(t2.detailBy)} <code>${escapeHtml2(r.by)}</code></div><pre class="task-detail-pre">${escapeHtml2(formatJsonPretty(out))}</pre></details>`;
       }
       const summary = resultSummary(r);
-      return `<div class="task-detail-section task-detail-error"><strong>${escapeHtml(t.detailOutput)}</strong> ${escapeHtml(summary)}</div>`;
+      return `<div class="task-detail-section task-detail-error"><strong>${escapeHtml2(t2.detailOutput)}</strong> ${escapeHtml2(summary)}</div>`;
     }
     function renderInlineEvalForm(taskId) {
-      return `<div class="task-detail-section task-detail-eval"><strong>${escapeHtml(t.detailEvaluate)}</strong><div class="inline-eval-row"><label>${escapeHtml(t.evaluateRating)}<input type="number" min="0" max="5" step="0.1" data-inline-eval-rating="${escapeHtml(taskId)}" /></label><label class="inline-eval-comment-label">${escapeHtml(t.evaluateComment)}<textarea rows="2" data-inline-eval-comment="${escapeHtml(taskId)}"></textarea></label></div><div class="inline-eval-actions"><button data-act="inline-eval-submit" data-id="${escapeHtml(taskId)}">${escapeHtml(t.evaluateButton)}</button><span class="inline-eval-msg" data-inline-eval-msg="${escapeHtml(taskId)}"></span></div></div>`;
+      return `<div class="task-detail-section task-detail-eval"><strong>${escapeHtml2(t2.detailEvaluate)}</strong><div class="inline-eval-row"><label>${escapeHtml2(t2.evaluateRating)}<input type="number" min="0" max="5" step="0.1" data-inline-eval-rating="${escapeHtml2(taskId)}" /></label><label class="inline-eval-comment-label">${escapeHtml2(t2.evaluateComment)}<textarea rows="2" data-inline-eval-comment="${escapeHtml2(taskId)}"></textarea></label></div><div class="inline-eval-actions"><button data-act="inline-eval-submit" data-id="${escapeHtml2(taskId)}">${escapeHtml2(t2.evaluateButton)}</button><span class="inline-eval-msg" data-inline-eval-msg="${escapeHtml2(taskId)}"></span></div></div>`;
     }
     function formatJsonPretty(value) {
       try {
@@ -648,26 +902,26 @@
       const comment = (commentEl?.value ?? "").trim() || void 0;
       if (rating == null && !comment) {
         if (msgEl) {
-          msgEl.textContent = t.evaluateEmpty;
+          msgEl.textContent = t2.evaluateEmpty;
           msgEl.classList.add("err");
         }
         return;
       }
       btn.disabled = true;
       try {
-        await fetchJson("/api/admin/evaluate", {
+        await fetchJson2("/api/admin/evaluate", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ taskId, rating, comment })
         });
         if (msgEl) {
-          msgEl.textContent = t.evaluateSuccess;
+          msgEl.textContent = t2.evaluateSuccess;
           msgEl.classList.add("ok");
         }
         if (commentEl) commentEl.value = "";
       } catch (err) {
         if (msgEl) {
-          msgEl.textContent = t.failedAlert(err.message || String(err));
+          msgEl.textContent = t2.failedAlert(err.message || String(err));
           msgEl.classList.add("err");
         }
       } finally {
@@ -687,9 +941,9 @@
       if (!dom?.maList) return;
       try {
         const [agentsResp, provResp, secretsResp] = await Promise.all([
-          fetchJson("/api/admin/agents"),
-          fetchJson("/api/admin/agents/providers"),
-          fetchJson("/api/admin/secrets")
+          fetchJson2("/api/admin/agents"),
+          fetchJson2("/api/admin/agents/providers"),
+          fetchJson2("/api/admin/secrets")
         ]);
         ma.agents = agentsResp.agents || [];
         ma.providers = provResp.providers || [];
@@ -709,10 +963,10 @@
       const list = ma.agents;
       const managedCount = list.filter((a) => !!a.managed).length;
       const onlineManaged = list.filter((a) => !!a.managed && a.online).length;
-      dom.maSummary.textContent = list.length === 0 ? t.maEmpty : t.maSummary(managedCount, onlineManaged, list.length - managedCount);
+      dom.maSummary.textContent = list.length === 0 ? t2.maEmpty : t2.maSummary(managedCount, onlineManaged, list.length - managedCount);
       if (list.length === 0) {
         dom.maList.innerHTML = `<div class="empty-state" style="padding: 1.2rem; line-height: 1.7;">
-        <p style="margin: 0 0 0.6rem; font-weight: 600;">${escapeHtml(t.maEmpty)}</p>
+        <p style="margin: 0 0 0.6rem; font-weight: 600;">${escapeHtml2(t2.maEmpty)}</p>
         <p style="margin: 0 0 0.8rem; color: #555;">第一次用?试试 5 分钟出一份"12 周个人成长计划":</p>
         <p style="margin: 0;">
           <button type="button" id="onboarding-pg-btn" class="ma-btn">🎁 装个人成长团队 (7 教练 · DeepSeek)</button>
@@ -734,9 +988,9 @@
       const html = list.map((a) => {
         const managed = a.managed;
         const onlineCls = a.online ? "agent-online" : "agent-offline";
-        const onlineLabel = a.online ? t.online : t.offline;
-        const caps = (a.allowedCapabilities || []).map((c) => `<span class="cap">${escapeHtml(c)}</span>`).join("");
-        const kindBadge = managed ? `<span class="agent-kind-badge agent-kind-local">${escapeHtml(t.localAgentBadge)}</span>` : `<span class="agent-kind-badge agent-kind-cloud">${escapeHtml(t.cloudAgentBadge)}</span>`;
+        const onlineLabel = a.online ? t2.online : t2.offline;
+        const caps = (a.allowedCapabilities || []).map((c) => `<span class="cap">${escapeHtml2(c)}</span>`).join("");
+        const kindBadge = managed ? `<span class="agent-kind-badge agent-kind-local">${escapeHtml2(t2.localAgentBadge)}</span>` : `<span class="agent-kind-badge agent-kind-cloud">${escapeHtml2(t2.cloudAgentBadge)}</span>`;
         let providerText = managed?.provider || "";
         if (managed?.provider === "openai-compatible") {
           let host = managed.providerLabel;
@@ -748,18 +1002,18 @@
           }
           providerText = host ? `openai-compat · ${host}` : "openai-compat";
         }
-        const meta = managed ? `${kindBadge}<span class="ma-provider">${escapeHtml(providerText)}${managed.model ? " · " + escapeHtml(managed.model) : ""}</span>` : `${kindBadge}<span class="ma-external">${escapeHtml(t.externalAgent)}</span>`;
+        const meta = managed ? `${kindBadge}<span class="ma-provider">${escapeHtml2(providerText)}${managed.model ? " · " + escapeHtml2(managed.model) : ""}</span>` : `${kindBadge}<span class="ma-external">${escapeHtml2(t2.externalAgent)}</span>`;
         const actions = managed ? `
-        <button class="ma-action" data-act="edit-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.edit)}</button>
-        <button class="ma-action" data-act="export-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.export_)}</button>
-        <button class="ma-action ma-danger" data-act="remove-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.remove)}</button>
+        <button class="ma-action" data-act="edit-agent" data-id="${escapeHtml2(a.id)}">${escapeHtml2(t2.edit)}</button>
+        <button class="ma-action" data-act="export-agent" data-id="${escapeHtml2(a.id)}">${escapeHtml2(t2.export_)}</button>
+        <button class="ma-action ma-danger" data-act="remove-agent" data-id="${escapeHtml2(a.id)}">${escapeHtml2(t2.remove)}</button>
       ` : "";
         return `
         <div class="ma-row ${onlineCls}">
           <div class="ma-head">
-            <strong class="ma-id">${escapeHtml(a.displayName || a.id)}</strong>
-            ${a.displayName ? `<code class="ma-realid">${escapeHtml(a.id)}</code>` : ""}
-            <span class="ma-status">${escapeHtml(onlineLabel)}</span>
+            <strong class="ma-id">${escapeHtml2(a.displayName || a.id)}</strong>
+            ${a.displayName ? `<code class="ma-realid">${escapeHtml2(a.id)}</code>` : ""}
+            <span class="ma-status">${escapeHtml2(onlineLabel)}</span>
           </div>
           <div class="ma-meta">${meta}</div>
           <div class="ma-caps">${caps}</div>
@@ -775,8 +1029,8 @@
       const avail = new Set(ma.providers);
       dom.maProvider.innerHTML = all.map((p) => {
         const disabled = !avail.has(p);
-        const suffix = disabled ? ` — ${t.providerDisabled}` : "";
-        const display = p === "openai-compatible" ? `openai-compatible · ${t.openaiCompatHint}` : p;
+        const suffix = disabled ? ` — ${t2.providerDisabled}` : "";
+        const display = p === "openai-compatible" ? `openai-compatible · ${t2.openaiCompatHint}` : p;
         return `<option value="${p}"${disabled ? " disabled" : ""}>${display}${suffix}</option>`;
       }).join("");
       const first = all.find((p) => avail.has(p));
@@ -793,14 +1047,14 @@
       if (dom.maApiKeyHint && !ma._clearKeyOnSubmit) {
         if (ma.formMode === "edit") {
         } else {
-          dom.maApiKeyHint.textContent = isCompat ? t.agentApiKeyHintCompat : t.agentApiKeyHint;
+          dom.maApiKeyHint.textContent = isCompat ? t2.agentApiKeyHintCompat : t2.agentApiKeyHint;
         }
       }
     }
     function openAgentForm(mode, agent) {
       ma.formMode = mode;
       ma.editingId = mode === "edit" ? agent?.id ?? null : null;
-      dom.maFormTitle.textContent = mode === "edit" ? t.editAgent : t.newAgent;
+      dom.maFormTitle.textContent = mode === "edit" ? t2.editAgent : t2.newAgent;
       dom.maFormEditWarning.hidden = mode !== "edit";
       dom.maFormMsg.textContent = "";
       dom.maFormMsg.classList.remove("ok", "err");
@@ -820,14 +1074,14 @@
         const hasOverride = !!ma.secrets.agents[agent.id];
         dom.maApiKey.value = "";
         dom.maApiKey.placeholder = hasOverride ? "••••••••" : "";
-        dom.maApiKeyHint.textContent = hasOverride ? t.agentApiKeyHintEdit : t.agentApiKeyHint;
+        dom.maApiKeyHint.textContent = hasOverride ? t2.agentApiKeyHintEdit : t2.agentApiKeyHint;
         dom.maApiKeyClear.hidden = !hasOverride;
         syncProviderDependentFields();
       } else {
         dom.maForm.reset();
         dom.maId.disabled = false;
         dom.maApiKey.placeholder = "";
-        dom.maApiKeyHint.textContent = t.agentApiKeyHint;
+        dom.maApiKeyHint.textContent = t2.agentApiKeyHint;
         dom.maApiKeyClear.hidden = true;
         syncProviderSelect();
       }
@@ -860,22 +1114,22 @@
       try {
         const url = ma.formMode === "edit" ? `/api/admin/agents/${encodeURIComponent(ma.editingId)}` : "/api/admin/agents";
         const method = ma.formMode === "edit" ? "PUT" : "POST";
-        const r = await fetchJson(url, {
+        const r = await fetchJson2(url, {
           method,
           headers: { "content-type": "application/json" },
           body: JSON.stringify(body)
         });
         if (r?.warning) {
-          dom.maFormMsg.textContent = t.savedWithWarning(r.error || r.warning);
+          dom.maFormMsg.textContent = t2.savedWithWarning(r.error || r.warning);
           dom.maFormMsg.classList.add("err");
         } else {
-          dom.maFormMsg.textContent = t.saveOk;
+          dom.maFormMsg.textContent = t2.saveOk;
           dom.maFormMsg.classList.add("ok");
           setTimeout(closeAgentForm, 400);
         }
         await refreshManagedAgents();
       } catch (err) {
-        dom.maFormMsg.textContent = t.failedAlert(err.message || String(err));
+        dom.maFormMsg.textContent = t2.failedAlert(err.message || String(err));
         dom.maFormMsg.classList.add("err");
       }
     }
@@ -903,11 +1157,11 @@
         const ts = ma.secrets.providers[p];
         let statusHtml;
         if (wsConfigured) {
-          statusHtml = `<span class="key-status ok">${escapeHtml(t.apiKeySet)}</span><span class="key-ts">${escapeHtml(t.apiKeyUpdated(ts))}</span>`;
+          statusHtml = `<span class="key-status ok">${escapeHtml2(t2.apiKeySet)}</span><span class="key-ts">${escapeHtml2(t2.apiKeyUpdated(ts))}</span>`;
         } else if (envConfigured) {
-          statusHtml = `<span class="key-status env">${escapeHtml(t.apiKeyEnv)}</span>`;
+          statusHtml = `<span class="key-status env">${escapeHtml2(t2.apiKeyEnv)}</span>`;
         } else {
-          statusHtml = `<span class="key-status missing">${escapeHtml(t.apiKeyMissing)}</span>`;
+          statusHtml = `<span class="key-status missing">${escapeHtml2(t2.apiKeyMissing)}</span>`;
         }
         return `
         <div class="key-row" data-provider="${p}">
@@ -916,9 +1170,9 @@
             ${statusHtml}
           </div>
           <div class="key-controls">
-            <input type="password" class="key-input" placeholder="${escapeHtml(t.keyEnterHere)}" autocomplete="off" />
-            <button type="button" class="ma-btn" data-act="set-provider-key" data-provider="${p}">${escapeHtml(wsConfigured ? t.updateKey : t.setKey)}</button>
-            ${wsConfigured ? `<button type="button" class="ma-btn ma-btn-secondary ma-danger" data-act="remove-provider-key" data-provider="${p}">${escapeHtml(t.clearKey)}</button>` : ""}
+            <input type="password" class="key-input" placeholder="${escapeHtml2(t2.keyEnterHere)}" autocomplete="off" />
+            <button type="button" class="ma-btn" data-act="set-provider-key" data-provider="${p}">${escapeHtml2(wsConfigured ? t2.updateKey : t2.setKey)}</button>
+            ${wsConfigured ? `<button type="button" class="ma-btn ma-btn-secondary ma-danger" data-act="remove-provider-key" data-provider="${p}">${escapeHtml2(t2.clearKey)}</button>` : ""}
           </div>
         </div>
       `;
@@ -928,38 +1182,38 @@
     async function setProviderKey(provider, input) {
       const key = input.value.trim();
       if (!key) {
-        dom.maKeysMsg.textContent = t.failedAlert(t.keyEnterHere);
+        dom.maKeysMsg.textContent = t2.failedAlert(t2.keyEnterHere);
         dom.maKeysMsg.classList.add("err");
         return;
       }
       try {
-        const r = await fetchJson(`/api/admin/secrets/${encodeURIComponent(provider)}`, {
+        const r = await fetchJson2(`/api/admin/secrets/${encodeURIComponent(provider)}`, {
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ apiKey: key })
         });
         input.value = "";
-        dom.maKeysMsg.textContent = r?.note ? t.keyWarnRestart : t.keySetOk;
+        dom.maKeysMsg.textContent = r?.note ? t2.keyWarnRestart : t2.keySetOk;
         dom.maKeysMsg.classList.remove("err");
         dom.maKeysMsg.classList.add("ok");
         await refreshManagedAgents();
         renderKeysList();
       } catch (err) {
-        dom.maKeysMsg.textContent = t.failedAlert(err.message || String(err));
+        dom.maKeysMsg.textContent = t2.failedAlert(err.message || String(err));
         dom.maKeysMsg.classList.add("err");
       }
     }
     async function removeProviderKey(provider) {
-      if (!confirm(t.failedAlert?.length ? `${provider}: ${t.clearKey}?` : `${provider}: remove?`)) return;
+      if (!confirm(t2.failedAlert?.length ? `${provider}: ${t2.clearKey}?` : `${provider}: remove?`)) return;
       try {
-        await fetchJson(`/api/admin/secrets/${encodeURIComponent(provider)}`, { method: "DELETE" });
-        dom.maKeysMsg.textContent = t.keyRemoved;
+        await fetchJson2(`/api/admin/secrets/${encodeURIComponent(provider)}`, { method: "DELETE" });
+        dom.maKeysMsg.textContent = t2.keyRemoved;
         dom.maKeysMsg.classList.remove("err");
         dom.maKeysMsg.classList.add("ok");
         await refreshManagedAgents();
         renderKeysList();
       } catch (err) {
-        dom.maKeysMsg.textContent = t.failedAlert(err.message || String(err));
+        dom.maKeysMsg.textContent = t2.failedAlert(err.message || String(err));
         dom.maKeysMsg.classList.add("err");
       }
     }
@@ -975,7 +1229,7 @@
         text = await file.text();
       }
       if (!text || !text.trim()) {
-        dom.maImportMsg.textContent = t.importEmpty;
+        dom.maImportMsg.textContent = t2.importEmpty;
         dom.maImportMsg.classList.add("err");
         return;
       }
@@ -987,21 +1241,21 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          dom.maImportMsg.textContent = t.failedAlert(body.error || `${r.status}`);
+          dom.maImportMsg.textContent = t2.failedAlert(body.error || `${r.status}`);
           dom.maImportMsg.classList.add("err");
           return;
         }
         const createdCount = (body.created || []).length;
         const skippedCount = (body.skipped || []).length;
         const spawnErrCount = (body.spawnErrors || []).length;
-        dom.maImportMsg.textContent = t.importDone(createdCount, skippedCount, spawnErrCount);
+        dom.maImportMsg.textContent = t2.importDone(createdCount, skippedCount, spawnErrCount);
         dom.maImportMsg.classList.add(spawnErrCount > 0 ? "err" : "ok");
         await refreshManagedAgents();
         if (createdCount > 0 && spawnErrCount === 0) {
           setTimeout(closeImportModal, 700);
         }
       } catch (err) {
-        dom.maImportMsg.textContent = t.failedAlert(err.message || String(err));
+        dom.maImportMsg.textContent = t2.failedAlert(err.message || String(err));
         dom.maImportMsg.classList.add("err");
       }
     }
@@ -1048,7 +1302,7 @@
       dom.maGhImportMsg.classList.remove("ok", "err");
       const parts = parseGithubUrl(dom.maGhUrl.value);
       if (!parts) {
-        dom.maGhImportMsg.textContent = t.ghImportBadUrl;
+        dom.maGhImportMsg.textContent = t2.ghImportBadUrl;
         dom.maGhImportMsg.classList.add("err");
         return;
       }
@@ -1060,7 +1314,7 @@
         text = await r.text();
         if (!text.trim()) throw new Error("empty response");
       } catch (err) {
-        dom.maGhImportMsg.textContent = t.ghFetchFailed(err.message || String(err));
+        dom.maGhImportMsg.textContent = t2.ghFetchFailed(err.message || String(err));
         dom.maGhImportMsg.classList.add("err");
         return;
       }
@@ -1072,21 +1326,21 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          dom.maGhImportMsg.textContent = t.failedAlert(body.error || `${r.status}`);
+          dom.maGhImportMsg.textContent = t2.failedAlert(body.error || `${r.status}`);
           dom.maGhImportMsg.classList.add("err");
           return;
         }
         const createdCount = (body.created || []).length;
         const skippedCount = (body.skipped || []).length;
         const spawnErrCount = (body.spawnErrors || []).length;
-        dom.maGhImportMsg.textContent = t.importDone(createdCount, skippedCount, spawnErrCount);
+        dom.maGhImportMsg.textContent = t2.importDone(createdCount, skippedCount, spawnErrCount);
         dom.maGhImportMsg.classList.add(spawnErrCount > 0 ? "err" : "ok");
         await refreshManagedAgents();
         if (createdCount > 0 && spawnErrCount === 0) {
           setTimeout(closeGithubImportModal, 700);
         }
       } catch (err) {
-        dom.maGhImportMsg.textContent = t.failedAlert(err.message || String(err));
+        dom.maGhImportMsg.textContent = t2.failedAlert(err.message || String(err));
         dom.maGhImportMsg.classList.add("err");
       }
     }
@@ -1115,53 +1369,53 @@
     function renderWorkflows() {
       if (!dom.wfList) return;
       if (dom.wfSummary) {
-        dom.wfSummary.textContent = wf.workflows.length === 0 ? "" : t.workflowsSummary(wf.workflows.length);
+        dom.wfSummary.textContent = wf.workflows.length === 0 ? "" : t2.workflowsSummary(wf.workflows.length);
       }
       if (wf.workflows.length === 0) {
-        dom.wfList.innerHTML = `<p class="empty">${escapeHtml(t.workflowsEmpty)}</p>`;
+        dom.wfList.innerHTML = `<p class="empty">${escapeHtml2(t2.workflowsEmpty)}</p>`;
         return;
       }
       dom.wfList.innerHTML = wf.workflows.map((w) => {
-        const name = w.name ? escapeHtml(w.name) : escapeHtml(w.id);
-        const desc = w.description ? `<p class="hint">${escapeHtml(w.description)}</p>` : "";
-        const file = w.file ? `<small class="hint">${escapeHtml(w.file)}</small>` : "";
+        const name = w.name ? escapeHtml2(w.name) : escapeHtml2(w.id);
+        const desc = w.description ? `<p class="hint">${escapeHtml2(w.description)}</p>` : "";
+        const file = w.file ? `<small class="hint">${escapeHtml2(w.file)}</small>` : "";
         return `<article class="ma-card">
         <header>
           <strong>${name}</strong>
-          <code>${escapeHtml(w.participantId)}</code>
+          <code>${escapeHtml2(w.participantId)}</code>
           <button type="button" class="ma-btn"
                   data-act="start-workflow"
-                  data-id="${escapeHtml(w.id)}">开始</button>
+                  data-id="${escapeHtml2(w.id)}">开始</button>
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="open-workflow-runs"
-                  data-id="${escapeHtml(w.id)}">${escapeHtml(t.workflowRunsBtn)}</button>
+                  data-id="${escapeHtml2(w.id)}">${escapeHtml2(t2.workflowRunsBtn)}</button>
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="remove-workflow"
-                  data-id="${escapeHtml(w.id)}">${escapeHtml(t.workflowRemoveBtn)}</button>
+                  data-id="${escapeHtml2(w.id)}">${escapeHtml2(t2.workflowRemoveBtn)}</button>
         </header>
         ${desc}
         <ul class="ma-meta">
-          <li><span class="ma-label">${escapeHtml(t.workflowTriggerLabel)}:</span> <code>${escapeHtml(w.triggerCapability)}</code></li>
-          <li>${escapeHtml(t.workflowStepsLabel(w.stepCount))}</li>
+          <li><span class="ma-label">${escapeHtml2(t2.workflowTriggerLabel)}:</span> <code>${escapeHtml2(w.triggerCapability)}</code></li>
+          <li>${escapeHtml2(t2.workflowStepsLabel(w.stepCount))}</li>
         </ul>
         ${file}
       </article>`;
       }).join("");
     }
     async function removeWorkflow(id) {
-      if (!confirm(t.confirmRemoveWorkflow(id))) return;
+      if (!confirm(t2.confirmRemoveWorkflow(id))) return;
       try {
         const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}`, {
           method: "DELETE"
         });
         if (!r.ok) {
           const body = await r.json().catch(() => ({}));
-          alert(t.failedAlert(body.error || `${r.status}`));
+          alert(t2.failedAlert(body.error || `${r.status}`));
           return;
         }
         await refreshWorkflows();
       } catch (err) {
-        alert(t.failedAlert(err.message || String(err)));
+        alert(t2.failedAlert(err.message || String(err)));
       }
     }
     async function refreshGrowthReports() {
@@ -1202,15 +1456,15 @@
         const sizeKb = (rep.sizeBytes / 1024).toFixed(1) + " KB";
         const dlHref = "/api/admin/growth-reports/download?path=" + encodeURIComponent(rep.path);
         return `<tr>
-        <td>${escapeHtml(when)}</td>
-        <td><code>${escapeHtml(rep.caseId)}</code></td>
-        <td>${escapeHtml(sizeKb)}</td>
+        <td>${escapeHtml2(when)}</td>
+        <td><code>${escapeHtml2(rep.caseId)}</code></td>
+        <td>${escapeHtml2(sizeKb)}</td>
         <td>
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="view-growth-report"
-                  data-path="${escapeHtml(rep.path)}"
-                  data-when="${escapeHtml(when)}">查看</button>
-          <a class="ma-btn ma-btn-secondary" href="${escapeHtml(dlHref)}" download>下载</a>
+                  data-path="${escapeHtml2(rep.path)}"
+                  data-when="${escapeHtml2(when)}">查看</button>
+          <a class="ma-btn ma-btn-secondary" href="${escapeHtml2(dlHref)}" download>下载</a>
         </td>
       </tr>`;
       }).join("");
@@ -1264,7 +1518,7 @@
         const text = await r.text();
         dom.grReportBody.innerHTML = renderMarkdown(text);
       } catch (err) {
-        dom.grReportBody.innerHTML = `<p class="hint">加载失败:${escapeHtml(err.message || String(err))}</p>`;
+        dom.grReportBody.innerHTML = `<p class="hint">加载失败:${escapeHtml2(err.message || String(err))}</p>`;
       }
     }
     function closeGrowthReport() {
@@ -1282,8 +1536,8 @@
         dom.wfStartTitle.textContent = w.name || w.id;
       }
       if (dom.wfStartDesc) {
-        const cap = `<code>${escapeHtml(w.triggerCapability)}</code>`;
-        dom.wfStartDesc.innerHTML = w.description ? `${escapeHtml(w.description)}<br/><small>派发能力:${cap}</small>` : `派发能力:${cap}`;
+        const cap = `<code>${escapeHtml2(w.triggerCapability)}</code>`;
+        dom.wfStartDesc.innerHTML = w.description ? `${escapeHtml2(w.description)}<br/><small>派发能力:${cap}</small>` : `派发能力:${cap}`;
       }
       renderWorkflowStartFields(w.payloadSchema);
       if (dom.wfStartMsg) {
@@ -1318,24 +1572,24 @@
       const ctx = typeof payload.context === "string" ? payload.context : "";
       const fromAgent = typeof payload.fromAgent === "string" ? payload.fromAgent : "(agent)";
       const fields = qs.map((q, i) => renderAgentQuestionField(v.id, q, i)).join("");
-      return `<div class="task-detail-section agent-question-form" data-aq-id="${escapeHtml(v.id)}"><div class="aq-header"><strong>🤖 ${escapeHtml(fromAgent)} 想再问你 ${qs.length} 件事</strong>` + (ctx ? `<p class="aq-context">${escapeHtml(ctx)}</p>` : "") + `</div><div class="aq-fields">${fields}</div><div class="aq-actions"><button class="primary" data-act="submit-agent-question" data-id="${escapeHtml(v.id)}">提交回答 (agent 会接着跑)</button><button class="secondary" data-act="skip-agent-question" data-id="${escapeHtml(v.id)}" title="跳过 — agent 会按它第一轮的判断继续">跳过</button><span class="aq-msg" data-aq-msg="${escapeHtml(v.id)}"></span></div></div>`;
+      return `<div class="task-detail-section agent-question-form" data-aq-id="${escapeHtml2(v.id)}"><div class="aq-header"><strong>🤖 ${escapeHtml2(fromAgent)} 想再问你 ${qs.length} 件事</strong>` + (ctx ? `<p class="aq-context">${escapeHtml2(ctx)}</p>` : "") + `</div><div class="aq-fields">${fields}</div><div class="aq-actions"><button class="primary" data-act="submit-agent-question" data-id="${escapeHtml2(v.id)}">提交回答 (agent 会接着跑)</button><button class="secondary" data-act="skip-agent-question" data-id="${escapeHtml2(v.id)}" title="跳过 — agent 会按它第一轮的判断继续">跳过</button><span class="aq-msg" data-aq-msg="${escapeHtml2(v.id)}"></span></div></div>`;
     }
     function renderAgentQuestionField(taskId, q, idx) {
       const fid = q && typeof q.id === "string" ? q.id : `q${idx}`;
       const fieldDomId = `aq-${taskId}-${fid}`;
       const label = q && typeof q.label === "string" ? q.label : `Q${idx + 1}`;
-      const hint = q && typeof q.hint === "string" ? `<small class="hint">${escapeHtml(q.hint)}</small>` : "";
+      const hint = q && typeof q.hint === "string" ? `<small class="hint">${escapeHtml2(q.hint)}</small>` : "";
       const required = q && q.required ? ' <span style="color:#c33">*</span>' : "";
       let control;
       if (q && q.type === "text") {
-        control = `<input type="text" id="${escapeHtml(fieldDomId)}" data-aq-fid="${escapeHtml(fid)}" />`;
+        control = `<input type="text" id="${escapeHtml2(fieldDomId)}" data-aq-fid="${escapeHtml2(fid)}" />`;
       } else if (q && q.type === "number") {
-        control = `<input type="number" id="${escapeHtml(fieldDomId)}" data-aq-fid="${escapeHtml(fid)}" />`;
+        control = `<input type="number" id="${escapeHtml2(fieldDomId)}" data-aq-fid="${escapeHtml2(fid)}" />`;
       } else {
         const rows = q && typeof q.rows === "number" && q.rows > 0 ? q.rows : 4;
-        control = `<textarea id="${escapeHtml(fieldDomId)}" data-aq-fid="${escapeHtml(fid)}" rows="${rows}"></textarea>`;
+        control = `<textarea id="${escapeHtml2(fieldDomId)}" data-aq-fid="${escapeHtml2(fid)}" rows="${rows}"></textarea>`;
       }
-      return `<label class="aq-field"><span>${escapeHtml(label)}${required}</span>` + control + hint + `</label>`;
+      return `<label class="aq-field"><span>${escapeHtml2(label)}${required}</span>` + control + hint + `</label>`;
     }
     async function submitAgentQuestion(taskId) {
       const card = document.querySelector(`.agent-question-form[data-aq-id="${cssEscape(taskId)}"]`);
@@ -1361,7 +1615,7 @@
         if (v != null && String(v).length > 0) answers[q.id] = String(v);
       }
       try {
-        await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/complete`, {
+        await fetchJson2(`/api/tasks/${encodeURIComponent(taskId)}/complete`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ output: { answers } })
@@ -1379,7 +1633,7 @@
         msg.className = "aq-msg";
       }
       try {
-        await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/reject`, {
+        await fetchJson2(`/api/tasks/${encodeURIComponent(taskId)}/reject`, {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ error: "admin skipped" })
@@ -1424,10 +1678,9 @@
       return await r.json();
     }
     function formatBytes(n) {
-      if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return "?";
       if (n < 1024) return `${n} B`;
       if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-      return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+      return `${(n / 1024 / 1024).toFixed(2)} MB`;
     }
     function extractMultimodalBlocks(node) {
       const out = [];
@@ -1459,23 +1712,23 @@
       if (b.type === "file_ref") {
         const url = `/api/admin/uploads?id=${encodeURIComponent(b.artifactId)}`;
         const tail = b.artifactId.split("/").pop() || b.artifactId;
-        const meta = `<div class="mm-meta"><code>${escapeHtml(b.mime)}</code> · ${escapeHtml(tail)}</div>`;
+        const meta = `<div class="mm-meta"><code>${escapeHtml2(b.mime)}</code> · ${escapeHtml2(tail)}</div>`;
         if (b.mime.startsWith("image/")) {
           return `<div class="mm-block mm-image">
-          <a href="${escapeHtml(url)}" target="_blank" rel="noopener">
-            <img src="${escapeHtml(url)}" alt="${escapeHtml(tail)}" loading="lazy" />
+          <a href="${escapeHtml2(url)}" target="_blank" rel="noopener">
+            <img src="${escapeHtml2(url)}" alt="${escapeHtml2(tail)}" loading="lazy" />
           </a>
           ${meta}
         </div>`;
         }
         if (b.mime.startsWith("audio/")) {
           return `<div class="mm-block mm-audio">
-          <audio controls src="${escapeHtml(url)}"></audio>
+          <audio controls src="${escapeHtml2(url)}"></audio>
           ${meta}
         </div>`;
         }
         return `<div class="mm-block mm-file">
-        <a href="${escapeHtml(url)}" download="${escapeHtml(tail)}">📎 ${escapeHtml(tail)}</a>
+        <a href="${escapeHtml2(url)}" download="${escapeHtml2(tail)}">📎 ${escapeHtml2(tail)}</a>
         ${meta}
       </div>`;
       }
@@ -1483,19 +1736,19 @@
         const src = imageOrAudioSourceToSrc(b.source);
         if (!src) return renderUnknownBlock(b);
         return `<div class="mm-block mm-image">
-        <a href="${escapeHtml(src.url)}" target="_blank" rel="noopener">
-          <img src="${escapeHtml(src.url)}" alt="image" loading="lazy" />
+        <a href="${escapeHtml2(src.url)}" target="_blank" rel="noopener">
+          <img src="${escapeHtml2(src.url)}" alt="image" loading="lazy" />
         </a>
-        <div class="mm-meta"><code>${escapeHtml(src.label)}</code></div>
+        <div class="mm-meta"><code>${escapeHtml2(src.label)}</code></div>
       </div>`;
       }
       if (b.type === "audio") {
         const src = imageOrAudioSourceToSrc(b.source);
         if (!src) return renderUnknownBlock(b);
-        const fmt = b.format ? ` · ${escapeHtml(b.format)}` : "";
+        const fmt = b.format ? ` · ${escapeHtml2(b.format)}` : "";
         return `<div class="mm-block mm-audio">
-        <audio controls src="${escapeHtml(src.url)}"></audio>
-        <div class="mm-meta"><code>${escapeHtml(src.label)}</code>${fmt}</div>
+        <audio controls src="${escapeHtml2(src.url)}"></audio>
+        <div class="mm-meta"><code>${escapeHtml2(src.label)}</code>${fmt}</div>
       </div>`;
       }
       return renderUnknownBlock(b);
@@ -1521,26 +1774,26 @@
     }
     function renderUnknownBlock(b) {
       return `<div class="mm-block mm-unknown">
-      <small>未识别的 ${escapeHtml(String(b && b.type) || "unknown")} 块</small>
+      <small>未识别的 ${escapeHtml2(String(b && b.type) || "unknown")} 块</small>
     </div>`;
     }
     function renderOneField(f) {
-      const id = `wf-start-field-${escapeHtml(f.id)}`;
+      const id = `wf-start-field-${escapeHtml2(f.id)}`;
       const required = f.required ? ' <span style="color:#c33">*</span>' : "";
-      const hint = f.hint ? `<small class="hint">${escapeHtml(f.hint)}</small>` : "";
-      const ph = f.placeholder ? ` placeholder="${escapeHtml(f.placeholder)}"` : "";
-      const defaultV = f.defaultValue != null ? escapeHtml(String(f.defaultValue)) : "";
+      const hint = f.hint ? `<small class="hint">${escapeHtml2(f.hint)}</small>` : "";
+      const ph = f.placeholder ? ` placeholder="${escapeHtml2(f.placeholder)}"` : "";
+      const defaultV = f.defaultValue != null ? escapeHtml2(String(f.defaultValue)) : "";
       let control;
       if (f.type === "textarea") {
         const rows = typeof f.rows === "number" ? f.rows : 4;
         control = `<textarea id="${id}" rows="${rows}"${ph}>${defaultV}</textarea>`;
       } else if (f.type === "select") {
-        const opts = (f.options || []).map((o) => `<option value="${escapeHtml(o.value)}"${o.value === f.defaultValue ? " selected" : ""}>${escapeHtml(o.label)}</option>`).join("");
+        const opts = (f.options || []).map((o) => `<option value="${escapeHtml2(o.value)}"${o.value === f.defaultValue ? " selected" : ""}>${escapeHtml2(o.label)}</option>`).join("");
         control = `<select id="${id}">${opts}</select>`;
       } else if (f.type === "number") {
         control = `<input type="number" id="${id}"${ph} value="${defaultV}" />`;
       } else if (f.type === "file") {
-        const accept = Array.isArray(f.accept) && f.accept.length > 0 ? ` accept="${escapeHtml(f.accept.join(","))}"` : "";
+        const accept = Array.isArray(f.accept) && f.accept.length > 0 ? ` accept="${escapeHtml2(f.accept.join(","))}"` : "";
         const sizeHint = typeof f.maxSizeMb === "number" ? `<small class="hint">最大 ${f.maxSizeMb} MB</small>` : "";
         control = `<input type="file" id="${id}" data-aipe-file="1"${accept} />
         <span class="aipe-file-status" data-aipe-file-status="${id}" style="font-size:0.85em;color:#666;margin-left:0.5em;"></span>
@@ -1549,7 +1802,7 @@
         control = `<input type="text" id="${id}"${ph} value="${defaultV}" />`;
       }
       return `<label>
-      <span>${escapeHtml(f.label)}${required}</span>
+      <span>${escapeHtml2(f.label)}${required}</span>
       ${control}
       ${hint}
     </label>`;
@@ -1595,10 +1848,10 @@
                 statusEl.style.color = "#080";
                 if (ref.mime && ref.mime.startsWith("image/")) {
                   const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`;
-                  statusEl.innerHTML = `<span>已上传 (${escapeHtml(formatBytes(ref.size))})</span> <img src="${escapeHtml(url)}" alt="preview" style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`;
+                  statusEl.innerHTML = `<span>已上传 (${escapeHtml2(formatBytes(ref.size))})</span> <img src="${escapeHtml2(url)}" alt="preview" style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`;
                 } else if (ref.mime && ref.mime.startsWith("audio/")) {
                   const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`;
-                  statusEl.innerHTML = `<span>已上传 (${escapeHtml(formatBytes(ref.size))})</span> <audio controls src="${escapeHtml(url)}" style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`;
+                  statusEl.innerHTML = `<span>已上传 (${escapeHtml2(formatBytes(ref.size))})</span> <audio controls src="${escapeHtml2(url)}" style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`;
                 } else {
                   statusEl.textContent = `已上传 (${formatBytes(ref.size)})`;
                 }
@@ -1756,7 +2009,7 @@
         text = await file.text();
       }
       if (!text || !text.trim()) {
-        dom.wfImportMsg.textContent = t.importEmpty;
+        dom.wfImportMsg.textContent = t2.importEmpty;
         dom.wfImportMsg.classList.add("err");
         return;
       }
@@ -1768,17 +2021,17 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          dom.wfImportMsg.textContent = t.failedAlert(body.error || `${r.status}`);
+          dom.wfImportMsg.textContent = t2.failedAlert(body.error || `${r.status}`);
           dom.wfImportMsg.classList.add("err");
           return;
         }
         const id = body.workflow?.id || "?";
-        dom.wfImportMsg.textContent = t.workflowImportDone(id);
+        dom.wfImportMsg.textContent = t2.workflowImportDone(id);
         dom.wfImportMsg.classList.add("ok");
         await refreshWorkflows();
         setTimeout(closeWorkflowImportModal, 700);
       } catch (err) {
-        dom.wfImportMsg.textContent = t.failedAlert(err.message || String(err));
+        dom.wfImportMsg.textContent = t2.failedAlert(err.message || String(err));
         dom.wfImportMsg.classList.add("err");
       }
     }
@@ -1807,9 +2060,9 @@
       wf.runs.rows = [];
       if (dom.wfRunsTarget) dom.wfRunsTarget.textContent = workflowId;
       if (dom.wfRunsMsg) dom.wfRunsMsg.textContent = "";
-      if (dom.wfRunsList) dom.wfRunsList.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`;
+      if (dom.wfRunsList) dom.wfRunsList.innerHTML = `<p class="hint">${escapeHtml2(t2.loading)}</p>`;
       if (dom.wfRunsEmpty) dom.wfRunsEmpty.hidden = true;
-      if (dom.wfRunDetail) dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml(t.workflowRunsPickHint)}</p>`;
+      if (dom.wfRunDetail) dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml2(t2.workflowRunsPickHint)}</p>`;
       if (dom.wfRunsModal) dom.wfRunsModal.hidden = false;
       try {
         const url = `/api/admin/workflows/runs?workflowId=${encodeURIComponent(workflowId)}&limit=100`;
@@ -1817,7 +2070,7 @@
         if (!r.ok) {
           const body2 = await r.json().catch(() => ({}));
           dom.wfRunsList.innerHTML = "";
-          dom.wfRunsMsg.textContent = t.failedAlert(body2.error || `${r.status}`);
+          dom.wfRunsMsg.textContent = t2.failedAlert(body2.error || `${r.status}`);
           dom.wfRunsMsg.classList.add("err");
           return;
         }
@@ -1826,7 +2079,7 @@
         renderWorkflowRunsList();
       } catch (err) {
         dom.wfRunsList.innerHTML = "";
-        dom.wfRunsMsg.textContent = t.failedAlert(err.message || String(err));
+        dom.wfRunsMsg.textContent = t2.failedAlert(err.message || String(err));
         dom.wfRunsMsg.classList.add("err");
       }
     }
@@ -1846,11 +2099,11 @@
         const selected = row.runId === wf.runs.selectedRunId ? " wf-run-row-active" : "";
         return `<button type="button" class="wf-run-row${selected}"
                       data-act="open-workflow-run"
-                      data-run-id="${escapeHtml(row.runId)}">
-        <span class="wf-run-status wf-run-${escapeHtml(row.status)}">${escapeHtml(row.status)}</span>
-        <span class="wf-run-time">${escapeHtml(new Date(row.startedAt).toLocaleString())}</span>
-        <span class="wf-run-meta">${escapeHtml(t.workflowRunStepCount(row.stepCount))} · ${escapeHtml(dur)}</span>
-        <code class="wf-run-id">${escapeHtml(row.runId)}</code>
+                      data-run-id="${escapeHtml2(row.runId)}">
+        <span class="wf-run-status wf-run-${escapeHtml2(row.status)}">${escapeHtml2(row.status)}</span>
+        <span class="wf-run-time">${escapeHtml2(new Date(row.startedAt).toLocaleString())}</span>
+        <span class="wf-run-meta">${escapeHtml2(t2.workflowRunStepCount(row.stepCount))} · ${escapeHtml2(dur)}</span>
+        <code class="wf-run-id">${escapeHtml2(row.runId)}</code>
       </button>`;
       }).join("");
     }
@@ -1858,49 +2111,49 @@
       wf.runs.selectedRunId = runId;
       renderWorkflowRunsList();
       if (!dom.wfRunDetail) return;
-      dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`;
+      dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml2(t2.loading)}</p>`;
       try {
         const r = await fetch(`/api/admin/workflows/runs/${encodeURIComponent(runId)}`);
         if (!r.ok) {
           const body2 = await r.json().catch(() => ({}));
-          dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml(body2.error || `${r.status}`)}</p>`;
+          dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml2(body2.error || `${r.status}`)}</p>`;
           return;
         }
         const body = await r.json();
         renderWorkflowRunDetail(body.run);
       } catch (err) {
-        dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml(err.message || String(err))}</p>`;
+        dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml2(err.message || String(err))}</p>`;
       }
     }
     function renderWorkflowRunDetail(run) {
       if (!dom.wfRunDetail) return;
-      const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t.workflowRunStillRunning;
-      const finalBlock = run.status === "failed" ? `<p class="form-msg err">${escapeHtml(run.error || "")}</p>` : run.finalOutput !== void 0 ? `<details open><summary>${escapeHtml(t.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml(JSON.stringify(run.finalOutput, null, 2))}</pre></details>` : "";
+      const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t2.workflowRunStillRunning;
+      const finalBlock = run.status === "failed" ? `<p class="form-msg err">${escapeHtml2(run.error || "")}</p>` : run.finalOutput !== void 0 ? `<details open><summary>${escapeHtml2(t2.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml2(JSON.stringify(run.finalOutput, null, 2))}</pre></details>` : "";
       const steps = (run.steps || []).map((s) => {
         const sDur = s.endedAt ? `${s.endedAt - s.startedAt}ms` : "—";
-        const subtasks = (s.subTaskIds || []).length ? `<small class="hint">${escapeHtml(t.workflowRunSubTasks)}: ${s.subTaskIds.map(escapeHtml).join(", ")}</small>` : "";
-        const out = s.output !== void 0 ? `<details><summary>${escapeHtml(t.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml(JSON.stringify(s.output, null, 2))}</pre></details>` : "";
-        const err = s.error ? `<p class="form-msg err">${escapeHtml(s.error)}</p>` : "";
+        const subtasks = (s.subTaskIds || []).length ? `<small class="hint">${escapeHtml2(t2.workflowRunSubTasks)}: ${s.subTaskIds.map(escapeHtml2).join(", ")}</small>` : "";
+        const out = s.output !== void 0 ? `<details><summary>${escapeHtml2(t2.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml2(JSON.stringify(s.output, null, 2))}</pre></details>` : "";
+        const err = s.error ? `<p class="form-msg err">${escapeHtml2(s.error)}</p>` : "";
         return `<article class="wf-step">
         <header>
-          <span class="wf-run-status wf-run-${escapeHtml(s.status)}">${escapeHtml(s.status)}</span>
-          <strong>${escapeHtml(s.stepId)}</strong>
-          <span class="wf-step-meta">${escapeHtml(sDur)} · ${escapeHtml(t.workflowRunAttempts(s.attempts || 1))}</span>
+          <span class="wf-run-status wf-run-${escapeHtml2(s.status)}">${escapeHtml2(s.status)}</span>
+          <strong>${escapeHtml2(s.stepId)}</strong>
+          <span class="wf-step-meta">${escapeHtml2(sDur)} · ${escapeHtml2(t2.workflowRunAttempts(s.attempts || 1))}</span>
         </header>
         ${err}
         ${subtasks}
         ${out}
       </article>`;
       }).join("");
-      const payloadBlock = run.triggerPayload !== void 0 ? `<details><summary>${escapeHtml(t.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>` : "";
+      const payloadBlock = run.triggerPayload !== void 0 ? `<details><summary>${escapeHtml2(t2.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml2(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>` : "";
       dom.wfRunDetail.innerHTML = `
       <h4>
-        <span class="wf-run-status wf-run-${escapeHtml(run.status)}">${escapeHtml(run.status)}</span>
-        <code>${escapeHtml(run.runId)}</code>
+        <span class="wf-run-status wf-run-${escapeHtml2(run.status)}">${escapeHtml2(run.status)}</span>
+        <code>${escapeHtml2(run.runId)}</code>
       </h4>
-      <p class="hint">${escapeHtml(t.workflowRunDuration)}: ${escapeHtml(dur)} · ${escapeHtml(t.workflowRunTriggeredBy)}: <code>${escapeHtml(run.triggeredByTaskId)}</code></p>
+      <p class="hint">${escapeHtml2(t2.workflowRunDuration)}: ${escapeHtml2(dur)} · ${escapeHtml2(t2.workflowRunTriggeredBy)}: <code>${escapeHtml2(run.triggeredByTaskId)}</code></p>
       ${payloadBlock}
-      ${steps || `<p class="empty">${escapeHtml(t.workflowRunNoSteps)}</p>`}
+      ${steps || `<p class="empty">${escapeHtml2(t2.workflowRunNoSteps)}</p>`}
       ${finalBlock}
     `;
     }
@@ -1908,22 +2161,22 @@
       window.location.href = `/api/admin/agents/${encodeURIComponent(id)}/export`;
     }
     async function removeAgent(id) {
-      if (!confirm(t.confirmRemoveAgent(id))) return;
+      if (!confirm(t2.confirmRemoveAgent(id))) return;
       try {
-        await fetchJson(`/api/admin/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
+        await fetchJson2(`/api/admin/agents/${encodeURIComponent(id)}`, { method: "DELETE" });
         await refreshManagedAgents();
       } catch (err) {
-        alert(t.failedAlert(err.message || String(err)));
+        alert(t2.failedAlert(err.message || String(err)));
       }
     }
     function renderKnownRoster() {
       if (!dom.knownAdminsList || !dom.knownWorkersList) return;
       dom.knownAdminsList.innerHTML = state.known.admins.map(
-        (a) => `<li><strong>${escapeHtml(a.id)}</strong> · ${escapeHtml(a.displayName)}</li>`
-      ).join("") || `<li class="empty">${escapeHtml(t.noParticipants)}</li>`;
+        (a) => `<li><strong>${escapeHtml2(a.id)}</strong> · ${escapeHtml2(a.displayName)}</li>`
+      ).join("") || `<li class="empty">${escapeHtml2(t2.noParticipants)}</li>`;
       dom.knownWorkersList.innerHTML = state.known.workers.map(
-        (w) => `<li><strong>${escapeHtml(w.id)}</strong>${w.capabilities.length ? " · " + w.capabilities.map(escapeHtml).join(", ") : ""}${w.lastSeen ? ` · ${new Date(w.lastSeen).toLocaleString()}` : ""}</li>`
-      ).join("") || `<li class="empty">${escapeHtml(t.noParticipants)}</li>`;
+        (w) => `<li><strong>${escapeHtml2(w.id)}</strong>${w.capabilities.length ? " · " + w.capabilities.map(escapeHtml2).join(", ") : ""}${w.lastSeen ? ` · ${new Date(w.lastSeen).toLocaleString()}` : ""}</li>`
+      ).join("") || `<li class="empty">${escapeHtml2(t2.noParticipants)}</li>`;
     }
     function updateDispatchVisibility() {
       const v = dom.dStrategy.value;
@@ -1939,14 +2192,14 @@
       if (kind === "explicit") {
         strategy = { kind, to: dom.dTo.value.trim() };
         if (!strategy.to) {
-          dom.dispatchMsg.textContent = t.failedAlert("id required");
+          dom.dispatchMsg.textContent = t2.failedAlert("id required");
           dom.dispatchMsg.classList.add("err");
           return;
         }
       } else if (kind === "capability") {
         const caps = dom.dCaps.value.split(",").map((s) => s.trim()).filter(Boolean);
         if (caps.length === 0) {
-          dom.dispatchMsg.textContent = t.failedAlert("capabilities required");
+          dom.dispatchMsg.textContent = t2.failedAlert("capabilities required");
           dom.dispatchMsg.classList.add("err");
           return;
         }
@@ -1959,7 +2212,7 @@
       try {
         payload = dom.dPayload.value.trim() ? JSON.parse(dom.dPayload.value) : {};
       } catch (err) {
-        dom.dispatchMsg.textContent = t.failedAlert("payload is not valid JSON");
+        dom.dispatchMsg.textContent = t2.failedAlert("payload is not valid JSON");
         dom.dispatchMsg.classList.add("err");
         return;
       }
@@ -1969,15 +2222,15 @@
       const weightStr = dom.dWeight?.value?.trim?.() ?? "";
       const weight = weightStr ? Number(weightStr) : void 0;
       try {
-        await fetchJson("/api/admin/dispatch", {
+        await fetchJson2("/api/admin/dispatch", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ strategy, payload, title, priority, weight })
         });
-        dom.dispatchMsg.textContent = t.dispatchSuccess;
+        dom.dispatchMsg.textContent = t2.dispatchSuccess;
         dom.dispatchMsg.classList.add("ok");
       } catch (err) {
-        dom.dispatchMsg.textContent = t.failedAlert(err.message || String(err));
+        dom.dispatchMsg.textContent = t2.failedAlert(err.message || String(err));
         dom.dispatchMsg.classList.add("err");
       }
     }
@@ -1991,35 +2244,35 @@
       const rating = ratingStr ? Number(ratingStr) : void 0;
       const comment = dom.eComment.value.trim() || void 0;
       try {
-        await fetchJson("/api/admin/evaluate", {
+        await fetchJson2("/api/admin/evaluate", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ taskId, rating, comment })
         });
-        dom.evaluateMsg.textContent = t.evaluateSuccess;
+        dom.evaluateMsg.textContent = t2.evaluateSuccess;
         dom.evaluateMsg.classList.add("ok");
         dom.eComment.value = "";
       } catch (err) {
-        dom.evaluateMsg.textContent = t.failedAlert(err.message || String(err));
+        dom.evaluateMsg.textContent = t2.failedAlert(err.message || String(err));
         dom.evaluateMsg.classList.add("err");
       }
     }
     async function approveApp(appId) {
-      await fetchJson(`/api/admin/applications/${encodeURIComponent(appId)}/approve`, { method: "POST" });
+      await fetchJson2(`/api/admin/applications/${encodeURIComponent(appId)}/approve`, { method: "POST" });
     }
     async function rejectApp(appId, reason) {
-      await fetchJson(`/api/admin/applications/${encodeURIComponent(appId)}/reject`, {
+      await fetchJson2(`/api/admin/applications/${encodeURIComponent(appId)}/reject`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ reason: reason || "rejected by admin" })
       });
     }
     async function retryTask(taskId) {
-      await fetchJson(`/api/admin/tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST" });
+      await fetchJson2(`/api/admin/tasks/${encodeURIComponent(taskId)}/retry`, { method: "POST" });
     }
     async function logout() {
       try {
-        await fetchJson("/api/admin/logout", { method: "POST" });
+        await fetchJson2("/api/admin/logout", { method: "POST" });
       } catch {
       }
       window.location.href = "/admin";
@@ -2086,7 +2339,7 @@
       }
       attachContribToggle(dom.contribToggle, dom.contribToggleInput);
       try {
-        const me = await fetchJson("/api/whoami");
+        const me = await fetchJson2("/api/whoami");
         applyContribToggleState(dom.contribToggle, dom.contribToggleInput, me?.contributionOptOut === true);
       } catch (err) {
         console.warn("whoami failed:", err);
@@ -2167,7 +2420,7 @@
         ma._clearKeyOnSubmit = true;
         dom.maApiKey.value = "";
         dom.maApiKey.placeholder = "(将清空)";
-        dom.maApiKeyHint.textContent = `${t.clearKey}: 保存后该 agent 的私有 key 会被移除`;
+        dom.maApiKeyHint.textContent = `${t2.clearKey}: 保存后该 agent 的私有 key 会被移除`;
       });
       document.addEventListener("click", (e) => {
         const target = e.target;
@@ -2303,7 +2556,7 @@
             await skipAgentQuestion(id);
           }
         } catch (err) {
-          alert(t.failedAlert(err.message || String(err)));
+          alert(t2.failedAlert(err.message || String(err)));
           if (actEl2 instanceof HTMLButtonElement) actEl2.disabled = false;
         }
       });
@@ -2324,22 +2577,22 @@
       }
       document.querySelectorAll('.tabbar-btn[data-tab="services"]').forEach((btn) => {
         btn.addEventListener("click", () => {
-          refreshServices().catch((err) => console.warn("services tab load failed:", err));
+          services.refreshServices().catch((err) => console.warn("services tab load failed:", err));
         });
       });
       if (document.body.dataset.activeTab === "services") {
-        refreshServices().catch((err) => console.warn("services initial load failed:", err));
+        services.refreshServices().catch((err) => console.warn("services initial load failed:", err));
       }
       const sweepBtn = document.getElementById("services-sweep-btn");
       if (sweepBtn) {
         sweepBtn.addEventListener("click", async () => {
           sweepBtn.disabled = true;
           try {
-            const r = await fetchJson("/api/admin/services/sweep", { method: "POST" });
-            showServicesToast(t.servicesSweepResult(r.scanned, r.purged));
-            await refreshServices();
+            const r = await fetchJson2("/api/admin/services/sweep", { method: "POST" });
+            services.showServicesToast(t2.servicesSweepResult(r.scanned, r.purged));
+            await services.refreshServices();
           } catch (err) {
-            alert(t.failedAlert(err?.message || String(err)));
+            alert(t2.failedAlert(err?.message || String(err)));
           } finally {
             sweepBtn.disabled = false;
           }
@@ -2350,9 +2603,9 @@
         auditRefreshBtn.addEventListener("click", async () => {
           auditRefreshBtn.disabled = true;
           try {
-            const r = await fetchJson("/api/admin/transcript/service-calls?limit=200");
+            const r = await fetchJson2("/api/admin/transcript/service-calls?limit=200");
             svc.audit = r.calls || [];
-            renderServicesAudit();
+            services.renderServicesAudit();
           } catch (err) {
             console.warn("services audit refresh failed:", err);
           } finally {
@@ -2362,263 +2615,16 @@
       }
       const detailClose = document.getElementById("services-detail-close");
       const detailBackdrop = document.getElementById("services-detail-modal");
-      if (detailClose) detailClose.addEventListener("click", () => closeServicesDetail());
+      if (detailClose) detailClose.addEventListener("click", () => services.closeServicesDetail());
       if (detailBackdrop) {
         detailBackdrop.addEventListener("click", (e) => {
-          if (e.target === detailBackdrop) closeServicesDetail();
+          if (e.target === detailBackdrop) services.closeServicesDetail();
         });
       }
       document.addEventListener("keydown", (e) => {
-        if (e.key === "Escape" && detailBackdrop && !detailBackdrop.hidden) closeServicesDetail();
+        if (e.key === "Escape" && detailBackdrop && !detailBackdrop.hidden) services.closeServicesDetail();
       });
       connectStream(applyEvent);
     });
-    const svc = {
-      plugins: [],
-      // [{type, impl, version, description?}]
-      rows: [],
-      // [{type, impl, owner: {kind,id}, snapshot}]
-      trash: [],
-      // ServiceTrashRef[]
-      audit: [],
-      // [{ts, from, type, impl, ownerKind, ownerId, method, outcome, durationMs}]
-      disabled: false
-      // host didn't supply services
-    };
-    async function refreshServices() {
-      const tableEl = document.getElementById("services-table");
-      const tbodyEl = document.getElementById("services-tbody");
-      const emptyEl = document.getElementById("services-plugins-empty");
-      const disabledEl = document.getElementById("services-disabled");
-      const trashTableEl = document.getElementById("services-trash-table");
-      const trashTbodyEl = document.getElementById("services-trash-tbody");
-      const trashEmptyEl = document.getElementById("services-trash-empty");
-      if (!tableEl || !tbodyEl) return;
-      let plugins;
-      try {
-        const r = await fetch("/api/admin/services/plugins");
-        if (r.status === 503) {
-          svc.disabled = true;
-          disabledEl.hidden = false;
-          tableEl.hidden = true;
-          emptyEl.hidden = true;
-          trashTableEl.hidden = true;
-          trashEmptyEl.hidden = true;
-          return;
-        }
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const j = await r.json();
-        plugins = j.plugins || [];
-      } catch (err) {
-        console.warn("services: plugins fetch failed", err);
-        return;
-      }
-      svc.disabled = false;
-      disabledEl.hidden = true;
-      svc.plugins = plugins;
-      if (plugins.length === 0) {
-        tableEl.hidden = true;
-        emptyEl.hidden = false;
-      } else {
-        emptyEl.hidden = true;
-        tableEl.hidden = false;
-      }
-      const rows = [];
-      for (const plugin of plugins) {
-        for (const agent of ma.agents || []) {
-          try {
-            const url = `/api/admin/services/owners/${encodeURIComponent(plugin.type)}/${encodeURIComponent(plugin.impl)}/agent/${encodeURIComponent(agent.id)}`;
-            const r = await fetchJson(url);
-            if (r.snapshot) {
-              rows.push({
-                type: plugin.type,
-                impl: plugin.impl,
-                owner: { kind: "agent", id: agent.id },
-                snapshot: r.snapshot
-              });
-            }
-          } catch (err) {
-          }
-        }
-      }
-      svc.rows = rows;
-      renderServicesTable();
-      try {
-        const r = await fetchJson("/api/admin/services/trash");
-        svc.trash = r.trash || [];
-        renderServicesTrash();
-      } catch (err) {
-        console.warn("services: trash fetch failed", err);
-      }
-      try {
-        const r = await fetchJson("/api/admin/transcript/service-calls?limit=200");
-        svc.audit = r.calls || [];
-        renderServicesAudit();
-      } catch (err) {
-        console.warn("services: audit fetch failed", err);
-      }
-    }
-    function renderServicesAudit() {
-      const tableEl = document.getElementById("services-audit-table");
-      const tbodyEl = document.getElementById("services-audit-tbody");
-      const emptyEl = document.getElementById("services-audit-empty");
-      if (!tableEl || !tbodyEl) return;
-      tbodyEl.innerHTML = "";
-      const calls = svc.audit || [];
-      if (calls.length === 0) {
-        tableEl.hidden = true;
-        emptyEl.hidden = false;
-        return;
-      }
-      emptyEl.hidden = true;
-      tableEl.hidden = false;
-      for (const c of calls) {
-        const tr = document.createElement("tr");
-        const okClass = c.outcome === "ok" ? "" : " bad";
-        tr.className = `audit-row${okClass}`;
-        tr.innerHTML = `
-        <td>${new Date(c.ts).toLocaleString()}</td>
-        <td><code>${escapeHtml(c.from)}</code></td>
-        <td><code>${escapeHtml(c.type)}:${escapeHtml(c.impl)}</code></td>
-        <td>${escapeHtml(c.ownerKind)}/${escapeHtml(c.ownerId)}</td>
-        <td><code>${escapeHtml(c.method)}</code></td>
-        <td>${escapeHtml(c.outcome)}</td>
-        <td>${c.durationMs}ms</td>
-      `;
-        tbodyEl.appendChild(tr);
-      }
-    }
-    function renderServicesTable() {
-      const tbodyEl = document.getElementById("services-tbody");
-      if (!tbodyEl) return;
-      tbodyEl.innerHTML = "";
-      for (const row of svc.rows) {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-        <td><code>${escapeHtml(row.type)}:${escapeHtml(row.impl)}</code></td>
-        <td>${escapeHtml(row.owner.kind)}/${escapeHtml(row.owner.id)}</td>
-        <td>${formatBytes(row.snapshot.sizeBytes)}</td>
-        <td>${row.snapshot.itemCount ?? ""}</td>
-        <td>${row.snapshot.lastAccess ? new Date(row.snapshot.lastAccess).toLocaleString() : ""}</td>
-        <td>
-          <button type="button" class="secondary-btn" data-action="detail">${escapeHtml(t.servicesDetail)}</button>
-          <button type="button" class="danger-btn" data-action="delete">${escapeHtml(t.servicesDelete)}</button>
-        </td>
-      `;
-        tr.querySelector('[data-action="detail"]').addEventListener("click", () => openServicesDetail(row));
-        tr.querySelector('[data-action="delete"]').addEventListener("click", () => softDeleteRow(row));
-        tbodyEl.appendChild(tr);
-      }
-    }
-    function renderServicesTrash() {
-      const tableEl = document.getElementById("services-trash-table");
-      const tbodyEl = document.getElementById("services-trash-tbody");
-      const emptyEl = document.getElementById("services-trash-empty");
-      if (!tableEl || !tbodyEl) return;
-      tbodyEl.innerHTML = "";
-      if (svc.trash.length === 0) {
-        tableEl.hidden = true;
-        emptyEl.hidden = false;
-        return;
-      }
-      emptyEl.hidden = true;
-      tableEl.hidden = false;
-      for (const ref of svc.trash) {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-        <td><code>${escapeHtml(ref.type)}:${escapeHtml(ref.impl)}</code></td>
-        <td>${escapeHtml(ref.ownerKind)}/${escapeHtml(ref.ownerId)}</td>
-        <td>${new Date(ref.deletedAt).toLocaleString()}</td>
-        <td>${new Date(ref.expiresAt).toLocaleString()}</td>
-        <td>${escapeHtml(ref.reason || "")}</td>
-        <td>
-          <button type="button" class="secondary-btn" data-action="restore">${escapeHtml(t.servicesTrashRestore)}</button>
-          <button type="button" class="danger-btn" data-action="hard">${escapeHtml(t.servicesTrashHardDelete)}</button>
-        </td>
-      `;
-        tr.querySelector('[data-action="restore"]').addEventListener("click", () => restoreTrash(ref));
-        tr.querySelector('[data-action="hard"]').addEventListener("click", () => hardDeleteTrash(ref));
-        tbodyEl.appendChild(tr);
-      }
-    }
-    async function softDeleteRow(row) {
-      try {
-        await fetchJson(`/api/admin/services/owners/${encodeURIComponent(row.type)}/${encodeURIComponent(row.impl)}/agent/${encodeURIComponent(row.owner.id)}`, {
-          method: "DELETE"
-        });
-        await refreshServices();
-      } catch (err) {
-        alert(t.failedAlert(err?.message || String(err)));
-      }
-    }
-    async function restoreTrash(ref) {
-      try {
-        await fetchJson(`/api/admin/services/trash/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.impl)}/${encodeURIComponent(ref.id)}/restore`, {
-          method: "POST"
-        });
-        showServicesToast(t.servicesToastRestored);
-        await refreshServices();
-      } catch (err) {
-        alert(t.failedAlert(err?.message || String(err)));
-      }
-    }
-    async function hardDeleteTrash(ref) {
-      if (!confirm(t.servicesConfirmHardDelete)) return;
-      try {
-        await fetchJson(`/api/admin/services/trash/${encodeURIComponent(ref.type)}/${encodeURIComponent(ref.impl)}/${encodeURIComponent(ref.id)}`, {
-          method: "DELETE"
-        });
-        showServicesToast(t.servicesToastHardDeleted);
-        await refreshServices();
-      } catch (err) {
-        alert(t.failedAlert(err?.message || String(err)));
-      }
-    }
-    function openServicesDetail(row) {
-      const modal = document.getElementById("services-detail-modal");
-      const title = document.getElementById("services-detail-title");
-      const body = document.getElementById("services-detail-body");
-      const img = document.getElementById("services-detail-image");
-      if (!modal || !title || !body) return;
-      title.textContent = `${row.type}:${row.impl} — ${row.owner.kind}/${row.owner.id}`;
-      const p = row.snapshot.preview;
-      if (p && p.base64) {
-        img.src = `data:${p.mime};base64,${p.base64}`;
-        img.alt = title.textContent;
-        img.hidden = false;
-        body.textContent = "";
-      } else if (p && p.text) {
-        img.hidden = true;
-        body.textContent = p.text + (p.truncated ? "\n… (truncated)" : "");
-      } else {
-        img.hidden = true;
-        body.textContent = `${formatBytes(row.snapshot.sizeBytes)} • ${row.snapshot.itemCount ?? 0} items`;
-      }
-      modal.hidden = false;
-    }
-    function closeServicesDetail() {
-      const modal = document.getElementById("services-detail-modal");
-      if (modal) modal.hidden = true;
-    }
-    function formatBytes(n) {
-      if (n < 1024) return `${n} B`;
-      if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-      return `${(n / 1024 / 1024).toFixed(2)} MB`;
-    }
-    function showServicesToast(msg) {
-      let container = document.getElementById("services-toast-container");
-      if (!container) {
-        container = document.createElement("div");
-        container.id = "services-toast-container";
-        container.className = "toast-container";
-        document.body.appendChild(container);
-      }
-      const el = document.createElement("div");
-      el.className = "toast";
-      el.textContent = msg;
-      container.appendChild(el);
-      setTimeout(() => el.classList.add("fade"), 3e3);
-      setTimeout(() => el.remove(), 4e3);
-    }
   })();
 })();
