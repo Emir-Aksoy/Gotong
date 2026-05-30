@@ -527,6 +527,41 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   margin-top: 0.2rem;
 }
 .dispatch-form button:hover { filter: brightness(1.08); }
+/* #2-M4c — MCP opt-in checkboxes inside the agent form. The generic
+   .dispatch-form label stacks its children in a column; the checkbox rows
+   need to sit inline (box + server name), and the checkbox itself must
+   shed the generic input padding/border so it renders as a native box. */
+.ma-mcp-fieldset {
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 0.45rem 0.7rem 0.6rem;
+  margin: 0;
+}
+.ma-mcp-fieldset legend {
+  font-size: 0.72rem;
+  color: #666;
+  padding: 0 0.3rem;
+}
+.ma-mcp-optin {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.ma-mcp-optin label.ma-mcp-cb {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.82rem;
+  color: #333;
+  cursor: pointer;
+}
+.ma-mcp-optin input[type="checkbox"] {
+  width: auto;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
 .form-msg {
   margin: 0;
   font-size: 0.78rem;

@@ -527,6 +527,50 @@
         }
       }
     }
+    async function loadMcpOptIn(selected) {
+      const fieldset = document.getElementById("ma-mcp-fieldset");
+      const container = document.getElementById("ma-mcp-optin");
+      const emptyEl = document.getElementById("ma-mcp-empty");
+      if (!fieldset || !container) return;
+      container.innerHTML = "";
+      ma._mcpAvailable = false;
+      let servers;
+      try {
+        const r = await fetch("/api/admin/mcp-servers");
+        if (r.status === 503) {
+          fieldset.hidden = true;
+          return;
+        }
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        servers = (await r.json()).servers || [];
+      } catch (err) {
+        console.warn("agent form: mcp list failed", err);
+        fieldset.hidden = true;
+        return;
+      }
+      ma._mcpAvailable = true;
+      fieldset.hidden = false;
+      const sel = new Set(selected || []);
+      if (servers.length === 0) {
+        if (emptyEl) emptyEl.hidden = false;
+        return;
+      }
+      if (emptyEl) emptyEl.hidden = true;
+      for (const rec of servers) {
+        const name = rec.spec?.name;
+        if (!name) continue;
+        const label = document.createElement("label");
+        label.className = "ma-mcp-cb";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.value = name;
+        cb.checked = sel.has(name);
+        const span = document.createElement("span");
+        span.textContent = rec.description ? `${name} — ${rec.description}` : name;
+        label.append(cb, span);
+        container.appendChild(label);
+      }
+    }
     function openAgentForm(mode, agent) {
       ma.formMode = mode;
       ma.editingId = mode === "edit" ? agent?.id ?? null : null;
@@ -561,6 +605,9 @@
         dom.maApiKeyClear.hidden = true;
         syncProviderSelect();
       }
+      ma._editingMcpServers = mode === "edit" && Array.isArray(agent?.managed?.useMcpServers) ? [...agent.managed.useMcpServers] : [];
+      loadMcpOptIn(ma._editingMcpServers).catch(() => {
+      });
       dom.maFormModal.hidden = false;
     }
     function closeAgentForm() {
@@ -586,6 +633,13 @@
       if (ma._clearKeyOnSubmit) {
         body.apiKey = "";
         ma._clearKeyOnSubmit = false;
+      }
+      if (ma._mcpAvailable) {
+        body.useMcpServers = Array.from(
+          document.querySelectorAll('#ma-mcp-optin input[type="checkbox"]:checked')
+        ).map((c) => c.value);
+      } else if (Array.isArray(ma._editingMcpServers) && ma._editingMcpServers.length > 0) {
+        body.useMcpServers = ma._editingMcpServers;
       }
       try {
         const url = ma.formMode === "edit" ? `/api/admin/agents/${encodeURIComponent(ma.editingId)}` : "/api/admin/agents";

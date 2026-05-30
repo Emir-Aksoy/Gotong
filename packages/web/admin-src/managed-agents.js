@@ -177,6 +177,58 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     }
   }
 
+  /**
+   * Populate the MCP opt-in checkboxes (#2-M4c) from the hub registry.
+   * `selected` is the agent's current useMcpServers (pre-checked). Sets
+   * `ma._mcpAvailable` so submit knows whether the checkbox set is the
+   * source of truth — when the registry surface is absent (503 / fetch
+   * fail) the fieldset hides and submit preserves the existing opt-in
+   * instead of wiping it on the wholesale `managed` replace.
+   */
+  async function loadMcpOptIn(selected) {
+    const fieldset = document.getElementById('ma-mcp-fieldset')
+    const container = document.getElementById('ma-mcp-optin')
+    const emptyEl = document.getElementById('ma-mcp-empty')
+    if (!fieldset || !container) return
+    container.innerHTML = ''
+    ma._mcpAvailable = false
+    let servers
+    try {
+      const r = await fetch('/api/admin/mcp-servers')
+      if (r.status === 503) { fieldset.hidden = true; return }
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      servers = (await r.json()).servers || []
+    } catch (err) {
+      console.warn('agent form: mcp list failed', err)
+      fieldset.hidden = true
+      return
+    }
+    ma._mcpAvailable = true
+    fieldset.hidden = false
+    const sel = new Set(selected || [])
+    if (servers.length === 0) {
+      if (emptyEl) emptyEl.hidden = false
+      return
+    }
+    if (emptyEl) emptyEl.hidden = true
+    // Build via createElement (not innerHTML) — server names / descriptions
+    // are user-supplied and must not be interpolated into markup.
+    for (const rec of servers) {
+      const name = rec.spec?.name
+      if (!name) continue
+      const label = document.createElement('label')
+      label.className = 'ma-mcp-cb'
+      const cb = document.createElement('input')
+      cb.type = 'checkbox'
+      cb.value = name
+      cb.checked = sel.has(name)
+      const span = document.createElement('span')
+      span.textContent = rec.description ? `${name} — ${rec.description}` : name
+      label.append(cb, span)
+      container.appendChild(label)
+    }
+  }
+
   function openAgentForm(mode, agent) {
     ma.formMode = mode
     ma.editingId = mode === 'edit' ? agent?.id ?? null : null
@@ -216,6 +268,13 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       dom.maApiKeyClear.hidden = true
       syncProviderSelect()
     }
+    // #2-M4c — capture the agent's current opt-in as the edit baseline,
+    // then (async) populate the registry checkboxes. Fire-and-forget: the
+    // modal opens now; the checkboxes fill a beat later.
+    ma._editingMcpServers = (mode === 'edit' && Array.isArray(agent?.managed?.useMcpServers))
+      ? [...agent.managed.useMcpServers]
+      : []
+    loadMcpOptIn(ma._editingMcpServers).catch(() => {})
     dom.maFormModal.hidden = false
   }
 
@@ -252,6 +311,18 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     const body = { id, displayName, capabilities, provider, model, system, weightDefault, baseURL, providerLabel }
     if (apiKey.length > 0) body.apiKey = apiKey
     if (ma._clearKeyOnSubmit) { body.apiKey = ''; ma._clearKeyOnSubmit = false }
+    // #2-M4c — useMcpServers. PUT replaces `managed` wholesale, so the
+    // body must carry the complete opt-in. When the registry checkboxes
+    // loaded they ARE the truth (incl. [] to clear); when they couldn't
+    // load (503 / fetch fail) we echo the captured baseline so an edit
+    // doesn't silently wipe a prior opt-in. Omit entirely otherwise.
+    if (ma._mcpAvailable) {
+      body.useMcpServers = Array.from(
+        document.querySelectorAll('#ma-mcp-optin input[type="checkbox"]:checked'),
+      ).map((c) => c.value)
+    } else if (Array.isArray(ma._editingMcpServers) && ma._editingMcpServers.length > 0) {
+      body.useMcpServers = ma._editingMcpServers
+    }
     try {
       const url = ma.formMode === 'edit'
         ? `/api/admin/agents/${encodeURIComponent(ma.editingId)}`

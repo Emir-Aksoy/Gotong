@@ -317,6 +317,15 @@
               <span data-i18n="agentWeightDefault">默认任务权重（可选，0.1-10）</span>
               <input id="ma-weight" type="number" step="0.1" min="0.1" max="10" />
             </label>
+            <!-- #2-M4c — opt this agent into hub-registry MCP servers by name.
+                 Checkboxes are populated from /api/admin/mcp-servers when the
+                 form opens; the whole fieldset hides if the registry surface
+                 isn't wired (503). Checked names POST as useMcpServers. -->
+            <fieldset id="ma-mcp-fieldset" class="ma-mcp-fieldset" hidden>
+              <legend data-i18n="mcpAgentOptIn">MCP 集成（勾选后本智能体可调用）</legend>
+              <div id="ma-mcp-optin" class="ma-mcp-optin"></div>
+              <p id="ma-mcp-empty" class="hint" hidden data-i18n="mcpAgentOptInEmpty">还没有可用的 MCP 集成。去「MCP」标签页安装一个。</p>
+            </fieldset>
             <label>
               <span data-i18n="agentApiKey">私有 API Key（可选，加密保存）</span>
               <input id="ma-api-key" type="password" autocomplete="off" />
