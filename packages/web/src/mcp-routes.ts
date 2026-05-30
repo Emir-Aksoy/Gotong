@@ -8,7 +8,7 @@
  *
  * Routes handled:
  *   GET    /api/admin/mcp-servers          list installed servers
- *   POST   /api/admin/mcp-servers          install / update one
+ *   POST   /api/admin/mcp-servers          install / update one (+ `shared` toggle)
  *   DELETE /api/admin/mcp-servers/<name>   uninstall one
  */
 
@@ -28,7 +28,13 @@ const log = createLogger('mcp-routes')
  */
 export interface McpRegistrySurface {
   list(): Promise<HubMcpServerRecord[]>
-  install(spec: McpServerSpec, description?: string): Promise<HubMcpServerRecord>
+  /**
+   * Install / upsert one server. `shared` is the cross-hub federation
+   * toggle (#2-M3): `true` exposes it to peer hubs, `false` revokes,
+   * `undefined` leaves the stored flag untouched (so re-installing to
+   * change a command never silently un-shares).
+   */
+  install(spec: McpServerSpec, description?: string, shared?: boolean): Promise<HubMcpServerRecord>
   uninstall(name: string): Promise<boolean>
 }
 
@@ -68,7 +74,7 @@ export async function handleMcpRoute(
 
   // POST /api/admin/mcp-servers — install / update
   if (path === PREFIX && method === 'POST') {
-    let body: { spec?: unknown; description?: unknown }
+    let body: { spec?: unknown; description?: unknown; shared?: unknown }
     try {
       body = (await readJsonBody(req)) as typeof body
     } catch {
@@ -89,9 +95,17 @@ export async function handleMcpRoute(
       sendJson(res, { error: 'description must be a string' }, 400)
       return true
     }
+    if (body.shared !== undefined && typeof body.shared !== 'boolean') {
+      sendJson(res, { error: 'shared must be a boolean' }, 400)
+      return true
+    }
     try {
-      const stored = await surface.install(spec, body.description as string | undefined)
-      log.info('mcp server installed', { by: admin.id, server: spec.name })
+      const stored = await surface.install(
+        spec,
+        body.description as string | undefined,
+        body.shared as boolean | undefined,
+      )
+      log.info('mcp server installed', { by: admin.id, server: spec.name, shared: stored.shared === true })
       sendJson(res, { ok: true, server: stored })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)

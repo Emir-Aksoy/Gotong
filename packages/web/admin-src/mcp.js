@@ -86,10 +86,37 @@ export function createMcp() {
         <td>${escapeHtml(transportOf(spec))}</td>
         <td><code>${escapeHtml(targetOf(spec))}</code></td>
         <td>${escapeHtml(rec.description || '')}</td>
+        <td class="mcp-share-cell"><label><input type="checkbox" data-action="share"${rec.shared ? ' checked' : ''} title="${escapeHtml(t.mcpSharedHint)}" /></label></td>
         <td><button type="button" class="danger-btn" data-action="uninstall">${escapeHtml(t.mcpUninstall)}</button></td>
       `
+      tr.querySelector('[data-action="share"]').addEventListener('change', (e) => setShared(rec, e.target))
       tr.querySelector('[data-action="uninstall"]').addEventListener('click', () => uninstallServer(spec.name))
       tbodyEl.appendChild(tr)
+    }
+  }
+
+  // Flip the cross-hub federation flag (#2-M3.4a). POST is upsert, so we
+  // re-send the stored spec/description and only `shared` changes; the
+  // server preserves createdAt. Optimistic toggle, revert on failure.
+  async function setShared(rec, checkboxEl) {
+    const next = checkboxEl.checked
+    checkboxEl.disabled = true
+    try {
+      await fetchJson('/api/admin/mcp-servers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          spec: rec.spec,
+          ...(rec.description ? { description: rec.description } : {}),
+          shared: next,
+        }),
+      })
+      rec.shared = next // keep the local model in sync without a full re-render
+    } catch (err) {
+      checkboxEl.checked = !next
+      alert(t.failedAlert(err?.message || String(err)))
+    } finally {
+      checkboxEl.disabled = false
     }
   }
 

@@ -940,10 +940,14 @@ async function main(): Promise<void> {
   // propagate live into running opted-in agents via LocalAgentPool.
   const mcpRegistry = {
     list: () => space.mcpServers(),
-    install: async (spec: McpServerSpec, description?: string) => {
+    install: async (spec: McpServerSpec, description?: string, shared?: boolean) => {
+      // `shared` is tri-state: include it (even `false`) only when the
+      // caller specified it, so a plain re-install (changing a command,
+      // toggling nothing) preserves the stored federation flag.
       const stored = await space.upsertMcpServer({
         spec,
         ...(description ? { description } : {}),
+        ...(shared !== undefined ? { shared } : {}),
       })
       await localAgents.installMcpServer(stored)
       return stored

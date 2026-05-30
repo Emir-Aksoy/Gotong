@@ -318,10 +318,33 @@
         <td>${escapeHtml2(transportOf(spec))}</td>
         <td><code>${escapeHtml2(targetOf(spec))}</code></td>
         <td>${escapeHtml2(rec.description || "")}</td>
+        <td class="mcp-share-cell"><label><input type="checkbox" data-action="share"${rec.shared ? " checked" : ""} title="${escapeHtml2(t2.mcpSharedHint)}" /></label></td>
         <td><button type="button" class="danger-btn" data-action="uninstall">${escapeHtml2(t2.mcpUninstall)}</button></td>
       `;
+        tr.querySelector('[data-action="share"]').addEventListener("change", (e) => setShared(rec, e.target));
         tr.querySelector('[data-action="uninstall"]').addEventListener("click", () => uninstallServer(spec.name));
         tbodyEl.appendChild(tr);
+      }
+    }
+    async function setShared(rec, checkboxEl) {
+      const next = checkboxEl.checked;
+      checkboxEl.disabled = true;
+      try {
+        await fetchJson2("/api/admin/mcp-servers", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            spec: rec.spec,
+            ...rec.description ? { description: rec.description } : {},
+            shared: next
+          })
+        });
+        rec.shared = next;
+      } catch (err) {
+        checkboxEl.checked = !next;
+        alert(t2.failedAlert(err?.message || String(err)));
+      } finally {
+        checkboxEl.disabled = false;
       }
     }
     async function uninstallServer(name) {

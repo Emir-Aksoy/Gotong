@@ -34,7 +34,7 @@ interface Boot {
   server: WebServerHandle
   baseUrl: string
   adminToken: string
-  installCalls: Array<{ spec: McpServerSpec; description?: string }>
+  installCalls: Array<{ spec: McpServerSpec; description?: string; shared?: boolean }>
   uninstallCalls: string[]
   servers: HubMcpServerRecord[]
   uninstallResult: boolean
@@ -63,12 +63,17 @@ async function boot(opts: { withRegistry?: boolean } = {}): Promise<Boot> {
     async list() {
       return out.servers
     },
-    async install(spec, description) {
-      out.installCalls.push({ spec, ...(description !== undefined ? { description } : {}) })
+    async install(spec, description, shared) {
+      out.installCalls.push({
+        spec,
+        ...(description !== undefined ? { description } : {}),
+        ...(shared !== undefined ? { shared } : {}),
+      })
       const rec: HubMcpServerRecord = {
         spec,
         createdAt: '2026-05-30T00:00:00.000Z',
         ...(description !== undefined ? { description } : {}),
+        ...(shared !== undefined ? { shared } : {}),
       }
       return rec
     },
@@ -161,6 +166,49 @@ describe('/api/admin/mcp-servers (#2-M2)', () => {
       body: JSON.stringify({ spec: { name: 'fs', command: 'npx' }, description: 42 }),
     })
     expect(r.status).toBe(400)
+  })
+
+  it('POST threads the shared flag through to the surface (#2-M3.4a)', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}/api/admin/mcp-servers`, {
+      method: 'POST',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({ spec: { name: 'fs', command: 'npx' }, shared: true }),
+    })
+    expect(r.status).toBe(200)
+    expect((await r.json()).server.shared).toBe(true)
+    expect(b.installCalls[0]!.shared).toBe(true)
+  })
+
+  it('POST shared:false is forwarded (revoke), not dropped', async () => {
+    b = await boot()
+    await fetch(`${b.baseUrl}/api/admin/mcp-servers`, {
+      method: 'POST',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({ spec: { name: 'fs', command: 'npx' }, shared: false }),
+    })
+    expect(b.installCalls[0]!.shared).toBe(false)
+  })
+
+  it('POST omitting shared leaves it untouched (undefined to surface)', async () => {
+    b = await boot()
+    await fetch(`${b.baseUrl}/api/admin/mcp-servers`, {
+      method: 'POST',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({ spec: { name: 'fs', command: 'npx' } }),
+    })
+    expect(b.installCalls[0]!.shared).toBeUndefined()
+  })
+
+  it('POST 400 on a non-boolean shared', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}/api/admin/mcp-servers`, {
+      method: 'POST',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({ spec: { name: 'fs', command: 'npx' }, shared: 'yes' }),
+    })
+    expect(r.status).toBe(400)
+    expect(b.installCalls).toHaveLength(0)
   })
 
   it('DELETE uninstalls by name', async () => {

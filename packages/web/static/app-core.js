@@ -76,6 +76,8 @@
       mcpConfirmUninstall: (name) => `确定卸载「${name}」？正在运行且勾选了它的智能体会失去其工具。`,
       mcpAgentOptIn: 'MCP 集成（勾选后本智能体可调用）',
       mcpAgentOptInEmpty: '还没有可用的 MCP 集成。去「MCP」标签页安装一个。',
+      mcpShared: '共享给 peer',
+      mcpSharedHint: '勾选后，peer hub 上的智能体可通过联邦链路调用此 server 的工具；凭证 / 子进程仍留在本机（凭证各归各家）。',
       // --- services tab (v2.2) ---
       servicesPanel: 'Hub 服务',
       servicesEmpty: '尚未注册任何服务插件',
@@ -396,6 +398,8 @@
       mcpConfirmUninstall: (name) => `Uninstall '${name}'? Running agents that opted in will lose its tools.`,
       mcpAgentOptIn: 'MCP integrations (checked = this agent may call)',
       mcpAgentOptInEmpty: 'No MCP integrations available yet. Install one on the “MCP” tab.',
+      mcpShared: 'Shared to peers',
+      mcpSharedHint: 'When checked, agents on peer hubs can call this server’s tools over the federation link; its credentials / subprocess stay on this host.',
       // --- services tab (v2.2) ---
       servicesPanel: 'Hub Services',
       servicesEmpty: 'No service plugins registered',
