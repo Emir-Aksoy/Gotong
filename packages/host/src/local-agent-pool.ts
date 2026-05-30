@@ -22,7 +22,11 @@ import { PersonalGrowthAgent } from './agents/personal-growth-agent.js'
 import { AnthropicProvider } from '@aipehub/llm-anthropic'
 import { OpenAIProvider } from '@aipehub/llm-openai'
 import { McpToolset, type McpServerConfig } from '@aipehub/mcp-client'
-import { resolveMcpServerConfig, envSecretSource } from './mcp-config.js'
+import {
+  resolveMcpServerConfig,
+  envSecretSource,
+  mergeAgentMcpSpecs,
+} from './mcp-config.js'
 import {
   resolveOwner,
   type AgentDispatchOpts,
@@ -393,8 +397,9 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     // A failed-to-spawn server still leaves its peers usable — see
     // McpToolset's "one server crashed, others stay live" contract.
     let mcpToolset: McpToolset | undefined
-    if (record.managed.mcpServers && record.managed.mcpServers.length > 0) {
-      mcpToolset = buildToolset(record.id, record.managed.mcpServers)
+    const mcpSpecs = await this.resolveAgentMcpSpecs(record.id, record.managed)
+    if (mcpSpecs.length > 0) {
+      mcpToolset = buildToolset(record.id, mcpSpecs)
       try {
         await mcpToolset.connect()
       } catch (err) {
@@ -617,6 +622,29 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * (`start(record)` / `start()` loop) catches and logs without
    * killing the whole pool.
    */
+  /**
+   * Resolve an agent's effective MCP server set: its inline `mcpServers`
+   * plus the hub-registry servers it opts into via `useMcpServers`. The
+   * merge rules live in {@link mergeAgentMcpSpecs}; here we just supply
+   * the live registry + a logging `onUnknown`.
+   */
+  private async resolveAgentMcpSpecs(
+    agentId: ParticipantId,
+    managed: ManagedAgentSpec,
+  ): Promise<McpServerSpec[]> {
+    const inline = managed.mcpServers ?? []
+    const optIn = managed.useMcpServers ?? []
+    if (optIn.length === 0) return [...inline]
+    const registry = await this.space.mcpServers()
+    const byName = new Map(registry.map((r) => [r.spec.name, r.spec]))
+    return mergeAgentMcpSpecs(inline, optIn, byName, (name) =>
+      log.warn('agent opts into unknown hub MCP server — skipping', {
+        id: agentId,
+        server: name,
+      }),
+    )
+  }
+
   private async attachServicesIfDeclared(
     record: AgentRecord,
   ): Promise<{ ctx?: ServiceCtx; owner?: Owner }> {

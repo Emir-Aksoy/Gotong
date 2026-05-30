@@ -667,6 +667,63 @@ agent:
     )
   })
 
+  // --- M1: useMcpServers (hub-registry opt-in) ------------------------------
+
+  it('parses useMcpServers as a list of registry names', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: writer
+  capabilities: [draft]
+  kind: llm
+  provider: anthropic
+  system: hi
+  useMcpServers: [shared-fs, team-github]
+`.trim()
+    const parsed = parseManifest(yaml)
+    expect(parsed.agents[0]!.managed.useMcpServers).toEqual(['shared-fs', 'team-github'])
+  })
+
+  it('rejects a useMcpServers entry with a bad name', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: writer
+  capabilities: [draft]
+  kind: llm
+  provider: anthropic
+  system: hi
+  useMcpServers: ['has space']
+`.trim()
+    expect(() => parseManifest(yaml)).toThrowError(/must match/)
+  })
+
+  it('renderAgentManifest round-trips useMcpServers', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: writer
+  capabilities: [draft]
+  kind: llm
+  provider: anthropic
+  system: hi
+  useMcpServers: [shared-fs]
+  mcpServers:
+    - { name: local, command: npx }
+`.trim()
+    const parsed = parseManifest(yaml)
+    const rendered = renderAgentManifest({
+      id: parsed.agents[0]!.id,
+      allowedCapabilities: parsed.agents[0]!.capabilities,
+      managed: parsed.agents[0]!.managed,
+    })
+    const reparsed = parseManifest(JSON.stringify(rendered))
+    expect(reparsed.agents[0]!.managed.useMcpServers).toEqual(['shared-fs'])
+    expect(reparsed.agents[0]!.managed.mcpServers).toEqual(
+      parsed.agents[0]!.managed.mcpServers,
+    )
+  })
+
   it('absent mcpServers (the common case) yields undefined, not []', () => {
     const yaml = `
 schema: aipehub.agent/v1

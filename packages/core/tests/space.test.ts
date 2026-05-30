@@ -122,6 +122,38 @@ describe('Space (v2.0 — file-first persistence)', () => {
     expect(await space.agents()).toHaveLength(1)
   })
 
+  it('mcp registry: install / list / update (createdAt preserved) / uninstall', async () => {
+    const { space } = await Space.init(root, { name: 'test' })
+    // Fresh space starts empty.
+    expect(await space.mcpServers()).toEqual([])
+
+    const r1 = await space.upsertMcpServer({
+      spec: { name: 'fs', command: 'npx', args: ['-y', 'server-fs'] },
+      description: 'filesystem',
+    })
+    expect(r1.spec.name).toBe('fs')
+    const created1 = r1.createdAt
+    expect(await space.mcpServers()).toHaveLength(1)
+
+    // Update same name → createdAt preserved, spec replaced.
+    await new Promise((r) => setTimeout(r, 5))
+    const r2 = await space.upsertMcpServer({
+      spec: { name: 'fs', transport: 'http', url: 'https://fs.example.com' },
+    })
+    expect(r2.createdAt).toBe(created1)
+    expect(r2.spec).toMatchObject({ transport: 'http', url: 'https://fs.example.com' })
+    expect(await space.mcpServers()).toHaveLength(1)
+
+    // Persists across re-open (file-first).
+    const fresh = await Space.open(root)
+    expect((await fresh.mcpServers())[0]?.spec.name).toBe('fs')
+
+    // Uninstall.
+    expect(await space.removeMcpServer('fs')).toBe(true)
+    expect(await space.removeMcpServer('fs')).toBe(false) // idempotent miss
+    expect(await space.mcpServers()).toEqual([])
+  })
+
   it('config: defaults + updateConfig merges patch', async () => {
     const { space } = await Space.init(root, { name: 'test' })
     const c0 = await space.config()

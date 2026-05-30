@@ -96,3 +96,42 @@ export function resolveMcpServerConfig(
   if (spec.cwd) cfg.cwd = spec.cwd
   return cfg
 }
+
+/**
+ * Merge an agent's MCP server specs from two sources, in tool-list
+ * order: the hub-registry servers it opts into (`useMcpServers`,
+ * resolved through `registry`) first, then its own inline `mcpServers`.
+ *
+ *   - an opt-in name with no registry entry is dropped + reported via
+ *     `onUnknown` (graceful — the agent still spawns);
+ *   - an opt-in name that collides with an inline server is dropped in
+ *     favour of the inline one (a local override of a hub default);
+ *   - duplicate opt-in names are de-duped (McpToolset requires unique
+ *     names).
+ *
+ * Pure function — the host method wraps it with the live registry +
+ * a logging `onUnknown`.
+ */
+export function mergeAgentMcpSpecs(
+  inline: readonly McpServerSpec[],
+  optInNames: readonly string[],
+  registry: ReadonlyMap<string, McpServerSpec>,
+  onUnknown?: (name: string) => void,
+): McpServerSpec[] {
+  if (optInNames.length === 0) return [...inline]
+  const inlineNames = new Set(inline.map((s) => s.name))
+  const resolved: McpServerSpec[] = []
+  const seen = new Set<string>()
+  for (const name of optInNames) {
+    if (seen.has(name)) continue
+    seen.add(name)
+    if (inlineNames.has(name)) continue // inline wins
+    const spec = registry.get(name)
+    if (!spec) {
+      onUnknown?.(name)
+      continue
+    }
+    resolved.push(spec)
+  }
+  return [...resolved, ...inline]
+}

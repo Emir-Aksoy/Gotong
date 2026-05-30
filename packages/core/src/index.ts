@@ -20,6 +20,7 @@ export type {
   McpStdioServerSpec,
   McpHttpServerSpec,
   McpSseServerSpec,
+  HubMcpServerRecord,
   ServiceUseSpec,
   WorkerRecord,
   SessionRecord,

@@ -121,6 +121,14 @@ export class Space {
     admins: '',
     agents: '',
     workers: '',
+    /**
+     * Hub-level MCP server registry (`mcp-servers.json`). A named set of
+     * MCP servers installed once at hub scope; agents opt into them by
+     * name via `ManagedAgentSpec.useMcpServers` (the `uses:`-for-services
+     * analogue). File-first so `cp -r .aipehub` carries the installed
+     * integrations with the room.
+     */
+    mcpServers: '',
     transcript: '',
     secrets: '',
     /**
@@ -161,6 +169,7 @@ export class Space {
     this.paths.admins = join(root, 'admins.json')
     this.paths.agents = join(root, 'agents.json')
     this.paths.workers = join(root, 'workers.json')
+    this.paths.mcpServers = join(root, 'mcp-servers.json')
     this.paths.transcript = join(root, 'transcript.jsonl')
     this.paths.secrets = join(root, 'secrets.enc.json')
     this.paths.services = join(root, 'services')
@@ -420,6 +429,7 @@ export class Space {
     writeJsonAtomicSync(s.paths.admins, { admins: [] }, SECURE_FILE_MODE)
     writeJsonAtomicSync(s.paths.agents, { agents: [] }, SECURE_FILE_MODE)
     writeJsonAtomicSync(s.paths.workers, { workers: [] }, SECURE_FILE_MODE)
+    writeJsonAtomicSync(s.paths.mcpServers, { servers: [] }, SECURE_FILE_MODE)
     writeJsonAtomicSync(s.paths.runtime.pendingApps, { apps: [] }, SECURE_FILE_MODE)
     writeJsonAtomicSync(s.paths.runtime.adminSessions, { sessions: [] }, SECURE_FILE_MODE)
     writeJsonAtomicSync(s.paths.runtime.workerSessions, { sessions: [] }, SECURE_FILE_MODE)
@@ -588,6 +598,57 @@ export class Space {
       if (idx < 0) return
       agents[idx]!.lastSeen = new Date().toISOString()
       await writeJsonAtomic(this.paths.agents, { agents }, SECURE_FILE_MODE)
+    })
+  }
+
+  // --- MCP server registry (hub-level) -------------------------------------
+
+  /**
+   * The hub's installed MCP servers. Agents opt into these by name via
+   * `ManagedAgentSpec.useMcpServers`. Tolerates a missing file (a space
+   * created before this registry existed) by returning `[]`.
+   */
+  async mcpServers(): Promise<HubMcpServerRecord[]> {
+    try {
+      const data = await readJson<{ servers: HubMcpServerRecord[] }>(this.paths.mcpServers)
+      return data.servers ?? []
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException)?.code === 'ENOENT') return []
+      throw err
+    }
+  }
+
+  /**
+   * Install or update an MCP server in the hub registry, keyed by
+   * `spec.name`. Returns the stored record (with its preserved
+   * `createdAt`). The name is the registry key AND the tool-name prefix
+   * agents see, so it must be unique.
+   */
+  async upsertMcpServer(
+    rec: Omit<HubMcpServerRecord, 'createdAt'> & { createdAt?: string },
+  ): Promise<HubMcpServerRecord> {
+    return this.withFileLock(this.paths.mcpServers, async () => {
+      const servers = await this.mcpServers()
+      const name = rec.spec.name
+      const idx = servers.findIndex((s) => s.spec.name === name)
+      if (idx >= 0) {
+        servers[idx] = { ...servers[idx]!, ...rec, createdAt: servers[idx]!.createdAt }
+      } else {
+        servers.push({ ...rec, createdAt: rec.createdAt ?? new Date().toISOString() })
+      }
+      await writeJsonAtomic(this.paths.mcpServers, { servers }, SECURE_FILE_MODE)
+      return servers.find((s) => s.spec.name === name)!
+    })
+  }
+
+  /** Uninstall an MCP server from the hub registry. Returns false if absent. */
+  async removeMcpServer(name: string): Promise<boolean> {
+    return this.withFileLock(this.paths.mcpServers, async () => {
+      const servers = await this.mcpServers()
+      const next = servers.filter((s) => s.spec.name !== name)
+      if (next.length === servers.length) return false
+      await writeJsonAtomic(this.paths.mcpServers, { servers: next }, SECURE_FILE_MODE)
+      return true
     })
   }
 
@@ -1080,6 +1141,20 @@ export interface ManagedAgentSpec {
    */
   mcpServers?: McpServerSpec[]
   /**
+   * Names of hub-registry MCP servers this agent opts into (the
+   * `uses:`-for-services analogue for MCP). Each name is resolved
+   * against the hub's `mcp-servers.json` registry at spawn time and
+   * merged with any inline `mcpServers` above — so an integration
+   * installed once at hub scope can be shared across many agents
+   * without copying its config into each manifest.
+   *
+   * A name with no matching registry entry is skipped with a warning
+   * (graceful, like a missing `${ENV}` ref). If a name here collides
+   * with an inline `mcpServers` entry, the inline one wins (an agent
+   * can override a hub default locally).
+   */
+  useMcpServers?: string[]
+  /**
    * Phase 10 M4 — allow-list for agent-to-agent dispatch via the
    * `DispatchToolset` (the Phase 10 tool-use path). When present,
    * `LocalAgentPool` attaches a `DispatchToolset` to the agent
@@ -1201,6 +1276,21 @@ export type McpServerSpec =
   | McpStdioServerSpec
   | McpHttpServerSpec
   | McpSseServerSpec
+
+/**
+ * One entry in the hub-level MCP server registry (`mcp-servers.json`).
+ * An MCP server installed once at hub scope; agents opt in by name via
+ * `ManagedAgentSpec.useMcpServers`. `spec.name` is the registry key AND
+ * the tool-name prefix the opting-in agents see, so it's unique.
+ */
+export interface HubMcpServerRecord {
+  /** The server config. `spec.name` is the registry key. */
+  spec: McpServerSpec
+  /** ISO timestamp of first install (preserved across updates). */
+  createdAt: string
+  /** Optional human description shown in the admin UI / onboarding. */
+  description?: string
+}
 
 /**
  * One entry under `ManagedAgentSpec.uses`. Plain JS interface so

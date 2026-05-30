@@ -30,8 +30,10 @@ import { LocalAgentPool } from '../src/local-agent-pool.js'
 import {
   expandSecretRefs,
   resolveMcpServerConfig,
+  mergeAgentMcpSpecs,
   type SecretSource,
 } from '../src/mcp-config.js'
+import type { McpServerSpec } from '@aipehub/core'
 
 const logger = createLogger('lap-mcp-test', { disabled: true })
 void logger
@@ -174,6 +176,54 @@ describe('resolveMcpServerConfig — spec→config across transports (R6)', () =
     } finally {
       delete process.env.FAKE_R6_DEFAULT_SRC
     }
+  })
+})
+
+// --- mergeAgentMcpSpecs (hub-registry opt-in merge, M1) ----------------
+
+describe('mergeAgentMcpSpecs — inline + hub-registry opt-in', () => {
+  const reg = (...specs: McpServerSpec[]) =>
+    new Map(specs.map((s) => [s.name, s]))
+
+  it('no opt-in → just the inline specs (copied)', () => {
+    const inline: McpServerSpec[] = [{ name: 'fs', command: 'npx' }]
+    expect(mergeAgentMcpSpecs(inline, [], reg())).toEqual(inline)
+  })
+
+  it('resolves opt-in names against the registry, registry-first order', () => {
+    const out = mergeAgentMcpSpecs(
+      [{ name: 'local', command: 'x' }],
+      ['hosted'],
+      reg({ name: 'hosted', transport: 'http', url: 'https://h' }),
+    )
+    expect(out.map((s) => s.name)).toEqual(['hosted', 'local'])
+  })
+
+  it('drops an unknown opt-in name + fires onUnknown', () => {
+    const unknown: string[] = []
+    const out = mergeAgentMcpSpecs([], ['ghost'], reg(), (n) => unknown.push(n))
+    expect(out).toEqual([])
+    expect(unknown).toEqual(['ghost'])
+  })
+
+  it('inline wins when an opt-in name collides with an inline server', () => {
+    const inlineFs: McpServerSpec = { name: 'fs', command: 'local-fs' }
+    const out = mergeAgentMcpSpecs(
+      [inlineFs],
+      ['fs'],
+      reg({ name: 'fs', transport: 'http', url: 'https://registry-fs' }),
+    )
+    // The registry copy is dropped; only the inline one survives.
+    expect(out).toEqual([inlineFs])
+  })
+
+  it('de-dupes repeated opt-in names', () => {
+    const out = mergeAgentMcpSpecs(
+      [],
+      ['a', 'a', 'b'],
+      reg({ name: 'a', command: 'x' }, { name: 'b', command: 'y' }),
+    )
+    expect(out.map((s) => s.name)).toEqual(['a', 'b'])
   })
 })
 
@@ -352,6 +402,59 @@ describe('LocalAgentPool — agent with mcpServers attaches a toolset', () => {
     const pool = new LocalAgentPool({ hub, space })
     await pool.start()
     expect(hub.participant('remote-bot')).toBeDefined()
+    const result = await hub.dispatch({
+      from: 'system',
+      strategy: { kind: 'capability', capabilities: ['draft'] },
+      payload: 'hi',
+    })
+    expect(result.kind).toBe('ok')
+    await pool.stopAll()
+  })
+
+  it('agent opts into a hub-registry MCP server via useMcpServers (M1)', async () => {
+    // Install a server in the hub registry (no inline config on the agent).
+    await space.upsertMcpServer({
+      spec: { name: 'shared-fs', command: process.execPath, args: [FAKE_MCP_SERVER] },
+      description: 'shared filesystem',
+    })
+    await persistAgent({
+      id: 'opt-in-bot',
+      allowedCapabilities: ['draft'],
+      createdAt: new Date().toISOString(),
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'uses a hub-installed tool',
+        useMcpServers: ['shared-fs'],
+      },
+    })
+    const pool = new LocalAgentPool({ hub, space })
+    await pool.start()
+    expect(hub.participant('opt-in-bot')).toBeDefined()
+    const result = await hub.dispatch({
+      from: 'system',
+      strategy: { kind: 'capability', capabilities: ['draft'] },
+      payload: 'hi',
+    })
+    expect(result.kind).toBe('ok')
+    await pool.stopAll()
+  })
+
+  it('an unknown useMcpServers name is skipped — the agent still spawns', async () => {
+    await persistAgent({
+      id: 'ghost-opt-in',
+      allowedCapabilities: ['draft'],
+      createdAt: new Date().toISOString(),
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'opts into a non-existent registry server',
+        useMcpServers: ['not-installed'],
+      },
+    })
+    const pool = new LocalAgentPool({ hub, space })
+    await pool.start()
+    expect(hub.participant('ghost-opt-in')).toBeDefined()
     const result = await hub.dispatch({
       from: 'system',
       strategy: { kind: 'capability', capabilities: ['draft'] },

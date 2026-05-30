@@ -406,6 +406,16 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
       `${path}.mcpServers`,
     )
   }
+  // Optional `useMcpServers:` — names of hub-registry MCP servers this
+  // agent opts into. Validate shape only (array of name-shaped strings);
+  // whether each name actually resolves to a registry entry is checked
+  // at spawn time (a miss is a warning, not a parse error).
+  if (a.useMcpServers !== undefined) {
+    managed.useMcpServers = validateUseMcpServersArray(
+      a.useMcpServers,
+      `${path}.useMcpServers`,
+    )
+  }
   const out: ParsedAgent = { id: a.id, capabilities, managed }
   if (typeof a.displayName === 'string') out.displayName = a.displayName
   return out
@@ -599,6 +609,32 @@ export function validateMcpServersArray(raw: unknown, path: string): McpServerSp
 }
 
 /**
+ * Validate a raw `useMcpServers:` array — names of hub-registry MCP
+ * servers an agent opts into. Each must be a name-shaped string (same
+ * regex as a server's own `name`, since it IS a reference to one).
+ * Duplicates are tolerated here (de-duped at spawn time).
+ */
+export function validateUseMcpServersArray(raw: unknown, path: string): string[] {
+  if (!Array.isArray(raw)) {
+    throw new ManifestError(`${path} must be an array`)
+  }
+  const out: string[] = []
+  for (let i = 0; i < raw.length; i++) {
+    const name = raw[i]
+    if (typeof name !== 'string' || name.length === 0) {
+      throw new ManifestError(`${path}[${i}] must be a non-empty string`)
+    }
+    if (!MCP_SERVER_NAME_RE.test(name)) {
+      throw new ManifestError(
+        `${path}[${i}] must match ${MCP_SERVER_NAME_RE} — got '${name}'`,
+      )
+    }
+    out.push(name)
+  }
+  return out
+}
+
+/**
  * Validate an optional `{ string: string }` map (used for both stdio
  * `env` and http/sse `headers`). Returns `undefined` when the field is
  * absent, the validated copy otherwise. Throws on a non-object or a
@@ -683,6 +719,9 @@ export function renderAgentManifest(rec: {
       if (m.cwd) out.cwd = m.cwd
       return out
     })
+  }
+  if (rec.managed.useMcpServers && rec.managed.useMcpServers.length > 0) {
+    agent.useMcpServers = [...rec.managed.useMcpServers]
   }
   if (rec.displayName) agent.displayName = rec.displayName
   return {
