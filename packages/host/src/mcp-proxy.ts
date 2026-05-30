@@ -8,10 +8,17 @@
  * answers those calls.
  *
  * `McpProxyHost.respond` is wired as the link's `rpcResponder`
- * (peer-registry → installPeerLink). The wire contract is two methods:
+ * (peer-registry → installPeerLink). The wire contract is three methods:
  *
+ *   mcp.listShared { }                        → SharedMcpServerInfo[]
  *   mcp.listTools  { server }                 → LlmToolDefinition[]
  *   mcp.callTool   { server, name, args }     → LlmToolCallResult
+ *
+ * `listShared` is the discovery call: it returns the NAMES (+ optional
+ * descriptions) of this hub's shared servers so a peer can browse them
+ * before referencing one. It deliberately omits the spec — transport,
+ * command, url, env all stay home; a peer never learns how a tool is
+ * wired, only that it exists.
  *
  * ACL: a call resolves a server only when a registry record with that
  * name exists AND has `shared: true`. The check runs on EVERY call (a
@@ -41,9 +48,20 @@ import {
 
 /** Wire method names for the cross-hub MCP proxy (shared with the consumer). */
 export const MCP_PROXY_METHODS = {
+  listShared: 'mcp.listShared',
   listTools: 'mcp.listTools',
   callTool: 'mcp.callTool',
 } as const
+
+/**
+ * One entry in a `mcp.listShared` reply: the public face of a shared
+ * server. Name + description only — never the spec (no credentials, no
+ * internal command / url / path crosses the link).
+ */
+export interface SharedMcpServerInfo {
+  name: string
+  description?: string
+}
 
 export interface McpListToolsParams {
   server: string
@@ -101,6 +119,18 @@ export class McpProxyHost {
     params: unknown
   }): Promise<unknown> => {
     switch (call.method) {
+      case MCP_PROXY_METHODS.listShared: {
+        // Discovery: just the public face of every shared server. No ACL
+        // beyond `shared` itself (an authenticated peer may already call
+        // these tools — knowing their names is strictly less) and no spec.
+        const records = await this.space.mcpServers()
+        return records
+          .filter((r) => r.shared === true)
+          .map((r): SharedMcpServerInfo => ({
+            name: r.spec.name,
+            ...(r.description ? { description: r.description } : {}),
+          }))
+      }
       case MCP_PROXY_METHODS.listTools: {
         const { server } = call.params as McpListToolsParams
         const ts = await this.toolsetFor(server)
@@ -196,6 +226,18 @@ export function parseRemoteMcpRef(name: string): RemoteMcpRef | null {
   const server = name.slice(idx + 1)
   if (!peer || !server) return null
   return { peer, server }
+}
+
+/**
+ * Discovery (consumer side): ask a peer hub over its link which MCP
+ * servers it shares. Thin wrapper over the `mcp.listShared` rpc — the
+ * caller decides what to do when the link is closed / the call rejects
+ * (the aggregating route skips offline peers). Returns [] when the peer
+ * answers with nothing.
+ */
+export async function fetchPeerSharedMcp(link: HubLink): Promise<SharedMcpServerInfo[]> {
+  const out = await link.rpc(MCP_PROXY_METHODS.listShared, {})
+  return (out as SharedMcpServerInfo[]) ?? []
 }
 
 /**

@@ -16,6 +16,7 @@ import {
   MCP_PROXY_METHODS,
   RemoteMcpToolset,
   parseRemoteMcpRef,
+  fetchPeerSharedMcp,
   type ProxyToolset,
 } from '../src/mcp-proxy.js'
 
@@ -56,6 +57,12 @@ function setup(records: HubMcpServerRecord[]) {
 const sharedFs: HubMcpServerRecord = {
   spec: { name: 'fs', command: 'npx', args: ['-y', 'srv'] },
   createdAt: '2026-05-30T00:00:00.000Z',
+  shared: true,
+}
+const sharedDocs: HubMcpServerRecord = {
+  spec: { name: 'docs', transport: 'http', url: 'https://internal.example/mcp' },
+  createdAt: '2026-05-30T00:00:00.000Z',
+  description: 'company docs search',
   shared: true,
 }
 const privateSrv: HubMcpServerRecord = {
@@ -138,6 +145,36 @@ describe('McpProxyHost (#2-M3.2)', () => {
     await proxy.respond({ method: MCP_PROXY_METHODS.listTools, params: { server: 'fs' } })
     await proxy.close()
     expect(made[0]!.calls.disconnect).toBe(1)
+  })
+})
+
+describe('McpProxyHost.listShared (#2-M3.4b)', () => {
+  it('returns only shared servers, name + description', async () => {
+    const { proxy } = setup([sharedFs, sharedDocs, privateSrv])
+    const out = (await proxy.respond({
+      method: MCP_PROXY_METHODS.listShared,
+      params: {},
+    })) as Array<{ name: string; description?: string }>
+    expect(out).toEqual([
+      { name: 'fs' },
+      { name: 'docs', description: 'company docs search' },
+    ])
+  })
+
+  it('never leaks the spec (no command / url / env crosses)', async () => {
+    const { proxy } = setup([sharedDocs])
+    const out = (await proxy.respond({
+      method: MCP_PROXY_METHODS.listShared,
+      params: {},
+    })) as Array<Record<string, unknown>>
+    expect(out[0]).not.toHaveProperty('spec')
+    expect(JSON.stringify(out)).not.toContain('internal.example')
+  })
+
+  it('returns [] when nothing is shared, builds no toolset', async () => {
+    const { proxy, factoryCalls } = setup([privateSrv])
+    expect(await proxy.respond({ method: MCP_PROXY_METHODS.listShared, params: {} })).toEqual([])
+    expect(factoryCalls()).toBe(0)
   })
 })
 
@@ -236,6 +273,27 @@ describe('RemoteMcpToolset (#2-M3.3, consumer)', () => {
   })
 })
 
+describe('fetchPeerSharedMcp (#2-M3.4b, consumer)', () => {
+  it('forwards the listShared rpc and returns the list', async () => {
+    const seen: Array<{ method: string; params: unknown }> = []
+    const link = {
+      status: 'open' as const,
+      rpc: async (method: string, params: unknown) => {
+        seen.push({ method, params })
+        return [{ name: 'fs' }, { name: 'docs', description: 'd' }]
+      },
+    } as unknown as HubLink
+    const out = await fetchPeerSharedMcp(link)
+    expect(out).toEqual([{ name: 'fs' }, { name: 'docs', description: 'd' }])
+    expect(seen).toEqual([{ method: MCP_PROXY_METHODS.listShared, params: {} }])
+  })
+
+  it('returns [] when the peer answers null', async () => {
+    const link = { status: 'open', rpc: async () => null } as unknown as HubLink
+    expect(await fetchPeerSharedMcp(link)).toEqual([])
+  })
+})
+
 describe('cross-hub MCP proxy — end to end (#2-M3.3)', () => {
   // Consumer RemoteMcpToolset → inproc HubLink → provider McpProxyHost →
   // (stub) local toolset → back. The whole proxy, no mocks on the seam.
@@ -278,5 +336,17 @@ describe('cross-hub MCP proxy — end to end (#2-M3.3)', () => {
     expect(out.isError).toBe(true)
     expect(String((out.content as Array<{ text?: string }>)[0]?.text)).toMatch(/not shared/)
     await close()
+  })
+
+  it('discovers a peer\'s shared servers over the live link (#2-M3.4b)', async () => {
+    const { a, b } = createInprocHubLinkPair({ aPeerId: 'provider', bPeerId: 'consumer' })
+    const proxy = new McpProxyHost({
+      space: { mcpServers: async () => [sharedFs, sharedDocs, privateSrv] },
+      secrets: () => undefined,
+    })
+    a.on('rpc', proxy.respond)
+    const shared = await fetchPeerSharedMcp(b)
+    expect(shared).toEqual([{ name: 'fs' }, { name: 'docs', description: 'company docs search' }])
+    await Promise.all([a.close(), proxy.close()])
   })
 })
