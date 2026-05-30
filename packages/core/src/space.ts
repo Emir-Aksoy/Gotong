@@ -1116,14 +1116,23 @@ export interface DispatchAllowList {
 /**
  * One entry under `ManagedAgentSpec.mcpServers`. A stripped-down,
  * yaml-friendly view of `@aipehub/mcp-client`'s `McpServerConfig` —
- * fields are 1:1 mapped at spawn time inside `LocalAgentPool`.
+ * fields are mapped to a resolved `McpServerConfig` at spawn time
+ * inside `LocalAgentPool` (`resolveMcpServerConfig`).
  *
- * `env` supports `${ENV_VAR}` expansion at spawn time so credentials
- * stay in the host's environment rather than persisted in plain text
- * in `agents.json`. Unknown env-var refs (`${MISSING}`) become empty
- * strings and the agent's spawn logs warn about it.
+ * A discriminated union over `transport` (defaulting to `'stdio'`):
+ *
+ *   - `stdio` (default) — `command` + `args` spawn a local child.
+ *   - `http`  — remote Streamable HTTP server at `url`; this is how an
+ *     agent reaches the hosted-MCP ecosystem.
+ *   - `sse`   — legacy remote HTTP+SSE server at `url`.
+ *
+ * Credential fields (`env` values for stdio, `headers` values for
+ * http/sse) support `${ENV_VAR}` expansion at spawn time so secrets
+ * stay in the host's environment / vault rather than persisted in
+ * plain text in `agents.json`. Unknown refs (`${MISSING}`) become
+ * empty strings and the agent's spawn logs warn about it.
  */
-export interface McpServerSpec {
+export interface McpStdioServerSpec {
   /**
    * Short identifier, used as the prefix on namespaced tool names
    * (`<name>__<tool>`). Must be unique within this agent's
@@ -1131,6 +1140,8 @@ export interface McpServerSpec {
    * (a-z, A-Z, 0-9, `_`, `-`; can't start with a digit).
    */
   name: string
+  /** Wire kind. Optional — omitting it means `'stdio'`. */
+  transport?: 'stdio'
   /**
    * Executable to spawn. Typically `npx` for installed-on-demand
    * servers (`npx -y @modelcontextprotocol/server-filesystem`), or an
@@ -1156,6 +1167,40 @@ export interface McpServerSpec {
    */
   cwd?: string
 }
+
+/** A remote MCP server over the Streamable HTTP transport. */
+export interface McpHttpServerSpec {
+  /** See {@link McpStdioServerSpec.name}. */
+  name: string
+  /** Selects the Streamable HTTP transport. */
+  transport: 'http'
+  /** Absolute server URL (e.g. `https://mcp.example.com/v1`). */
+  url: string
+  /**
+   * Extra HTTP headers sent on every request. Values may contain
+   * `${ENV_VAR}` placeholders (expanded at spawn time) so a bearer
+   * token stays in the host env: `{ Authorization: 'Bearer ${MCP_PAT}' }`.
+   */
+  headers?: Record<string, string>
+}
+
+/** A remote MCP server over the legacy HTTP+SSE transport. */
+export interface McpSseServerSpec {
+  /** See {@link McpStdioServerSpec.name}. */
+  name: string
+  /** Selects the legacy SSE transport. */
+  transport: 'sse'
+  /** Absolute SSE endpoint URL. */
+  url: string
+  /** See {@link McpHttpServerSpec.headers}. */
+  headers?: Record<string, string>
+}
+
+/** Discriminated union — see the doc block on {@link McpStdioServerSpec}. */
+export type McpServerSpec =
+  | McpStdioServerSpec
+  | McpHttpServerSpec
+  | McpSseServerSpec
 
 /**
  * One entry under `ManagedAgentSpec.uses`. Plain JS interface so

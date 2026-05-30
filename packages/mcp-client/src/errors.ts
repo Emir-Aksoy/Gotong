@@ -16,6 +16,9 @@
  *     tool name across a server restart.
  *   - `bad_tool_name` — tool name doesn't match the `<server>__<tool>`
  *     convention. Always a programmer error.
+ *   - `bad_config` — a server config is structurally invalid (e.g. an
+ *     `http`/`sse` entry with a missing or unparseable `url`). Surfaces
+ *     at `connect()` and marks just that server dead.
  *   - `duplicate_server` — two servers in the same toolset share the
  *     same `name` field. Always a programmer error.
  *   - `tool_call_failed` — the server returned a successful response
@@ -31,6 +34,7 @@ export type McpClientErrorKind =
   | 'server_crashed'
   | 'unknown_tool'
   | 'bad_tool_name'
+  | 'bad_config'
   | 'duplicate_server'
   | 'tool_call_failed'
   | 'transport_error'

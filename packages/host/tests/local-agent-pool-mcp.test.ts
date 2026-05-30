@@ -266,6 +266,43 @@ describe('LocalAgentPool — agent with mcpServers attaches a toolset', () => {
     await pool.stopAll()
   })
 
+  it('a remote (http) mcpServer flows through the spawn pipeline (R4 union)', async () => {
+    // The http transport can't reach a real server in-test, but the
+    // spec must still flow through `specToConfig` → McpToolset without
+    // tanking the agent: a dead remote server degrades like a dead
+    // stdio one. Pair it with a live stdio server so the agent has at
+    // least one working toolset.
+    await persistAgent({
+      id: 'remote-bot',
+      allowedCapabilities: ['draft'],
+      createdAt: new Date().toISOString(),
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'with a remote tool',
+        mcpServers: [
+          { name: 'fs', command: process.execPath, args: [FAKE_MCP_SERVER] },
+          {
+            name: 'hosted',
+            transport: 'http',
+            url: 'http://127.0.0.1:1/mcp', // refused fast — server marked dead
+            headers: { Authorization: 'Bearer ${FAKE_TOKEN_FOR_TEST}' },
+          },
+        ],
+      },
+    })
+    const pool = new LocalAgentPool({ hub, space })
+    await pool.start()
+    expect(hub.participant('remote-bot')).toBeDefined()
+    const result = await hub.dispatch({
+      from: 'system',
+      strategy: { kind: 'capability', capabilities: ['draft'] },
+      payload: 'hi',
+    })
+    expect(result.kind).toBe('ok')
+    await pool.stopAll()
+  })
+
   it('agent WITHOUT mcpServers spawns identically (no regression)', async () => {
     await persistAgent({
       id: 'plain',

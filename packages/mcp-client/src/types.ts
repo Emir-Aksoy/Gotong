@@ -7,21 +7,35 @@
 import type { Tool, CallToolResult } from '@modelcontextprotocol/sdk/types.js'
 
 /**
- * One MCP server in a toolset. The handshake + spawn happens lazily
- * when `connect()` is called on the parent toolset.
+ * Which wire the toolset uses to reach a server:
  *
- * `name` is the short identifier used to namespace tool names — see
- * `McpToolset.listTools()`. It must be unique within the toolset and
- * match `/^[a-zA-Z][a-zA-Z0-9_-]*$/` (a-z, A-Z, 0-9, `_`, `-`; can't
- * start with a digit). Validated at `connect()` time, not at
- * construction, so a typo doesn't reject the whole config eagerly.
+ *   - `stdio` — spawn a local child process, talk over its stdin/stdout
+ *     (the original MCP transport; what `npx @modelcontextprotocol/...`
+ *     servers use).
+ *   - `http`  — MCP **Streamable HTTP** transport: connect to a remote
+ *     URL over HTTPS (POST to send, GET+SSE to receive). This is what
+ *     most *hosted* MCP servers expose, so it's the one that lets an
+ *     AipeHub agent "borrow" the managed-MCP ecosystem.
+ *   - `sse`   — the legacy HTTP+SSE transport. Deprecated upstream but
+ *     still served by a long tail of remote servers, so we keep it.
  */
-export interface McpServerConfig {
+export type McpTransportKind = 'stdio' | 'http' | 'sse'
+
+/**
+ * A `stdio` MCP server: a local child process the toolset spawns and
+ * talks to over stdin/stdout. `transport` is optional and defaults to
+ * `'stdio'`, so a bare `{ name, command }` is a valid stdio config —
+ * the common case stays terse.
+ */
+export interface McpStdioServerConfig {
   /**
    * Short identifier, used as the prefix on namespaced tool names
    * (`<name>__<tool>`). Must be unique within the toolset.
    */
   name: string
+
+  /** Wire kind. Optional here — omitting it means `'stdio'`. */
+  transport?: 'stdio'
 
   /**
    * Executable to spawn. Typically `npx` for installed-on-demand
@@ -58,6 +72,61 @@ export interface McpServerConfig {
    */
   cwd?: string
 }
+
+/**
+ * A remote MCP server reached over the **Streamable HTTP** transport.
+ * No child process is spawned — the toolset POSTs to `url` and reads an
+ * SSE response stream. This is the transport hosted MCP providers use.
+ */
+export interface McpHttpServerConfig {
+  /** See {@link McpStdioServerConfig.name}. */
+  name: string
+  /** Selects the Streamable HTTP transport. */
+  transport: 'http'
+  /** Absolute server URL (e.g. `https://mcp.example.com/v1`). */
+  url: string
+  /**
+   * Extra HTTP headers sent on every request — the place for a bearer
+   * token: `{ Authorization: 'Bearer <pat>' }`. No `${ENV}` expansion
+   * happens in this package; resolve credentials upstream (the host's
+   * `resolveMcpServerConfig` does it against the secret source).
+   */
+  headers?: Record<string, string>
+}
+
+/**
+ * A remote MCP server reached over the **legacy HTTP+SSE** transport.
+ * Same `url`/`headers` shape as {@link McpHttpServerConfig}; prefer
+ * `'http'` for new servers and reach for this only when a server
+ * predates Streamable HTTP.
+ */
+export interface McpSseServerConfig {
+  /** See {@link McpStdioServerConfig.name}. */
+  name: string
+  /** Selects the legacy SSE transport. */
+  transport: 'sse'
+  /** Absolute SSE endpoint URL the stream is opened against. */
+  url: string
+  /** See {@link McpHttpServerConfig.headers}. */
+  headers?: Record<string, string>
+}
+
+/**
+ * One MCP server in a toolset. A discriminated union over `transport`:
+ * a local `stdio` child process, or a remote `http` / `sse` endpoint.
+ * The handshake + spawn/connect happens lazily when `connect()` is
+ * called on the parent toolset.
+ *
+ * `name` is the short identifier used to namespace tool names — see
+ * `McpToolset.listTools()`. It must be unique within the toolset and
+ * match `/^[a-zA-Z][a-zA-Z0-9_-]*$/` (a-z, A-Z, 0-9, `_`, `-`; can't
+ * start with a digit). Validated at `connect()` time, not at
+ * construction, so a typo doesn't reject the whole config eagerly.
+ */
+export type McpServerConfig =
+  | McpStdioServerConfig
+  | McpHttpServerConfig
+  | McpSseServerConfig
 
 /**
  * A tool exposed by an MCP server, with its origin server attached so

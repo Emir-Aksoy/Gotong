@@ -550,6 +550,80 @@ agent:
     ).toThrowError(/must be a string/)
   })
 
+  // --- R4: remote transports (http / sse) ----------------------------------
+
+  it('parses an http server (transport + url + headers)', () => {
+    const parsed = parseManifest(
+      withMcpServers(`
+    - name: hosted
+      transport: http
+      url: https://mcp.example.com/v1
+      headers:
+        Authorization: Bearer \${MCP_PAT}`),
+    )
+    expect(parsed.agents[0]!.managed.mcpServers![0]).toEqual({
+      name: 'hosted',
+      transport: 'http',
+      url: 'https://mcp.example.com/v1',
+      headers: { Authorization: 'Bearer ${MCP_PAT}' },
+    })
+  })
+
+  it('parses an sse server (no headers)', () => {
+    const parsed = parseManifest(
+      withMcpServers(`
+    - name: legacy
+      transport: sse
+      url: https://sse.example.com/stream`),
+    )
+    expect(parsed.agents[0]!.managed.mcpServers![0]).toEqual({
+      name: 'legacy',
+      transport: 'sse',
+      url: 'https://sse.example.com/stream',
+    })
+  })
+
+  it('omitting transport defaults to a stdio spec (no transport key emitted)', () => {
+    const parsed = parseManifest(
+      withMcpServers(`
+    - { name: fs, command: npx }`),
+    )
+    const s = parsed.agents[0]!.managed.mcpServers![0]!
+    expect(s).toEqual({ name: 'fs', command: 'npx' })
+    expect('transport' in s).toBe(false)
+  })
+
+  it('rejects an http server without url', () => {
+    expect(() =>
+      parseManifest(
+        withMcpServers(`
+    - { name: hosted, transport: http }`),
+      ),
+    ).toThrowError(/url is required/)
+  })
+
+  it('rejects an unknown transport value', () => {
+    expect(() =>
+      parseManifest(
+        withMcpServers(`
+    - { name: x, transport: carrier-pigeon, url: https://x }`),
+      ),
+    ).toThrowError(/transport must be one of/)
+  })
+
+  it('rejects non-string header values', () => {
+    expect(() =>
+      parseManifest(
+        withMcpServers(`
+    - name: hosted
+      transport: http
+      url: https://x
+      headers:
+        X-Count: 42`),
+      ),
+    ).toThrowError(/must be a string/)
+  })
+
   it('renderAgentManifest round-trips mcpServers', () => {
     const yaml = withMcpServers(`
     - name: fs
@@ -567,6 +641,27 @@ agent:
     })
     const reparsed = parseManifest(JSON.stringify(rendered))
     expect(reparsed.agents).toHaveLength(1)
+    expect(reparsed.agents[0]!.managed.mcpServers).toEqual(
+      parsed.agents[0]!.managed.mcpServers,
+    )
+  })
+
+  it('renderAgentManifest round-trips a mixed stdio + http + sse fleet', () => {
+    const yaml = withMcpServers(`
+    - { name: fs, command: npx, args: [-y, server-fs] }
+    - name: hosted
+      transport: http
+      url: https://mcp.example.com/v1
+      headers:
+        Authorization: Bearer \${MCP_PAT}
+    - { name: legacy, transport: sse, url: https://sse.example.com/stream }`)
+    const parsed = parseManifest(yaml)
+    const rendered = renderAgentManifest({
+      id: parsed.agents[0]!.id,
+      allowedCapabilities: parsed.agents[0]!.capabilities,
+      managed: parsed.agents[0]!.managed,
+    })
+    const reparsed = parseManifest(JSON.stringify(rendered))
     expect(reparsed.agents[0]!.managed.mcpServers).toEqual(
       parsed.agents[0]!.managed.mcpServers,
     )

@@ -16,6 +16,10 @@ export { McpClientError } from './errors.js'
 export type { McpClientErrorKind } from './errors.js'
 export type {
   McpServerConfig,
+  McpStdioServerConfig,
+  McpHttpServerConfig,
+  McpSseServerConfig,
+  McpTransportKind,
   NamespacedTool,
   ServerStatus,
   ServerStatusReport,

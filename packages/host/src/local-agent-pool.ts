@@ -1044,18 +1044,7 @@ function buildToolset(
   agentId: ParticipantId,
   servers: readonly McpServerSpec[],
 ): McpToolset {
-  const configs: McpServerConfig[] = servers.map((s) => {
-    const cfg: McpServerConfig = {
-      name: s.name,
-      command: s.command,
-    }
-    if (s.args) cfg.args = [...s.args]
-    if (s.env) {
-      cfg.env = expandEnvRefs(s.env, agentId, s.name)
-    }
-    if (s.cwd) cfg.cwd = s.cwd
-    return cfg
-  })
+  const configs: McpServerConfig[] = servers.map((s) => specToConfig(s, agentId))
   const toolset = new McpToolset({ servers: configs })
   // Route MCP-server stderr into our structured logger. Operators
   // running `journalctl -u aipehub` get one unified stream.
@@ -1063,6 +1052,27 @@ function buildToolset(
     log.info('mcp server stderr', { agentId, serverName, line })
   })
   return toolset
+}
+
+/**
+ * Map one yaml-level `McpServerSpec` to a resolved `McpServerConfig`,
+ * expanding `${ENV_VAR}` references in the credential-bearing fields:
+ * stdio `env` values and http/sse `headers` values (typically a
+ * `Authorization: Bearer ${...}` token). See {@link expandEnvRefs}.
+ */
+function specToConfig(s: McpServerSpec, agentId: ParticipantId): McpServerConfig {
+  if (s.transport === 'http' || s.transport === 'sse') {
+    const headers = s.headers ? expandEnvRefs(s.headers, agentId, s.name) : undefined
+    return s.transport === 'http'
+      ? { name: s.name, transport: 'http', url: s.url, ...(headers ? { headers } : {}) }
+      : { name: s.name, transport: 'sse', url: s.url, ...(headers ? { headers } : {}) }
+  }
+  // stdio (default)
+  const cfg: McpServerConfig = { name: s.name, command: s.command }
+  if (s.args) cfg.args = [...s.args]
+  if (s.env) cfg.env = expandEnvRefs(s.env, agentId, s.name)
+  if (s.cwd) cfg.cwd = s.cwd
+  return cfg
 }
 
 /**

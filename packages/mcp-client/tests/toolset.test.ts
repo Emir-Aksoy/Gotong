@@ -490,3 +490,84 @@ describe('McpToolset — server-stderr events', () => {
     expect(beta?.serverName).toBe('beta')
   })
 })
+
+// =============================================================================
+// Transport union (R4) — http / sse remote configs alongside stdio.
+//
+// We can't spin a real remote MCP server in-process, so these tests cover
+// the routing + graceful-degradation guarantees that DON'T need one: a
+// malformed remote config marks just that server dead (bad_config), and a
+// remote server failing never takes the local stdio servers down with it.
+// =============================================================================
+
+describe('McpToolset — transport union (R4)', () => {
+  it('an explicit transport:"stdio" config spawns + lists tools like the default', async () => {
+    const ts = new McpToolset({
+      servers: [{ name: 'fs', transport: 'stdio', command: process.execPath, args: [FAKE_SERVER] }],
+    })
+    try {
+      await ts.connect()
+      expect(ts.status()[0]?.status).toBe('live')
+      const tools = await ts.listTools()
+      expect(tools.length).toBeGreaterThan(0)
+      expect(tools.every((t) => t.serverName === 'fs')).toBe(true)
+    } finally {
+      await ts.disconnect()
+    }
+  })
+
+  it('an http server with an unparseable url is marked dead (bad_config), not thrown', async () => {
+    const ts = new McpToolset({
+      servers: [{ name: 'remote', transport: 'http', url: 'not a url' }],
+    })
+    try {
+      // connect() resolves — one server's bad config never rejects the
+      // whole toolset (same contract as a spawn ENOENT).
+      await ts.connect()
+      const r = ts.status()[0]!
+      expect(r.status).toBe('dead')
+      expect(r.lastError).toMatch(/invalid url/)
+      await expect(ts.callTool('remote__anything', {})).rejects.toMatchObject({
+        kind: 'server_crashed',
+        serverName: 'remote',
+      })
+    } finally {
+      await ts.disconnect()
+    }
+  })
+
+  it('an sse server with an empty url is marked dead (bad_config)', async () => {
+    const ts = new McpToolset({
+      servers: [{ name: 'legacy', transport: 'sse', url: '' }],
+    })
+    try {
+      await ts.connect()
+      const r = ts.status()[0]!
+      expect(r.status).toBe('dead')
+      expect(r.lastError).toMatch(/no url/)
+    } finally {
+      await ts.disconnect()
+    }
+  })
+
+  it('a dead remote server does not take down a live stdio server', async () => {
+    const mixed = new McpToolset({
+      servers: [
+        makeFakeServerConfig('local'),
+        { name: 'remote', transport: 'http', url: 'http://[bad' },
+      ],
+    })
+    try {
+      await mixed.connect()
+      const report = mixed.status()
+      expect(report.find((r) => r.name === 'local')?.status).toBe('live')
+      expect(report.find((r) => r.name === 'remote')?.status).toBe('dead')
+      // listTools degrades gracefully to just the live server's tools.
+      const tools = await mixed.listTools()
+      expect(tools.length).toBeGreaterThan(0)
+      expect(tools.every((t) => t.serverName === 'local')).toBe(true)
+    } finally {
+      await mixed.disconnect()
+    }
+  })
+})

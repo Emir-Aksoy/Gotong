@@ -29,6 +29,9 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js'
+import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js'
 import { EventEmitter } from 'node:events'
 
 import { McpClientError } from './errors.js'
@@ -81,7 +84,8 @@ interface ServerState {
   config: McpServerConfig
   status: ServerStatus
   client?: Client
-  transport?: StdioClientTransport
+  /** Base `Transport` — concrete type depends on `config.transport`. */
+  transport?: Transport
   lastError?: string
   /** Cached tool list from the most recent listTools roundtrip. */
   tools: NamespacedTool[]
@@ -374,22 +378,17 @@ export class McpToolset extends EventEmitter {
   }
 
   private async startOne(state: ServerState): Promise<void> {
-    const transport = new StdioClientTransport({
-      command: state.config.command,
-      args: state.config.args ? [...state.config.args] : [],
-      // The SDK treats `env=undefined` as "inherit a curated subset of
-      // the parent env"; an explicit object means "use exactly this".
-      // We pass through whatever the caller supplied — see the doc
-      // comment on McpServerConfig.env.
-      ...(state.config.env !== undefined ? { env: state.config.env } : {}),
-      ...(state.config.cwd !== undefined ? { cwd: state.config.cwd } : {}),
-      // 'pipe' so we can attach the line-by-line stderr listener below
-      // and forward each line as a `'server-stderr'` event. Operators
-      // who don't subscribe just see the events fall on the floor;
-      // the previous default ('inherit') would dump raw stderr to the
-      // parent process — noisier and harder to control for tests.
-      stderr: 'pipe',
-    })
+    let transport: Transport
+    try {
+      transport = this.makeTransport(state.config)
+    } catch (err) {
+      // A malformed config (e.g. http with no/invalid url) shouldn't
+      // tear the whole toolset down — mark just this server dead, same
+      // as a spawn/handshake failure below.
+      state.status = 'dead'
+      state.lastError = err instanceof Error ? err.message : String(err)
+      return
+    }
     const client = new Client(this.clientInfo, { capabilities: {} })
 
     // If the child dies mid-session, mark dead so callTool fails fast.
@@ -403,64 +402,11 @@ export class McpToolset extends EventEmitter {
       state.lastError = err instanceof Error ? err.message : String(err)
     }
 
-    // Wire up stderr line-streaming. The SDK exposes a PassThrough
-    // stream synchronously (per its docs: "available _immediately_,
-    // allowing callers to attach listeners before start"), so we can
-    // hook it up before `client.connect(transport)` and not lose any
-    // early auth-failure / banner output emitted by the child.
-    //
-    // We buffer partial trailing lines because Node streams hand us
-    // arbitrary byte chunks — a single log line can arrive split across
-    // two chunks or two lines can arrive in one chunk. Emit one event
-    // per `\n`-terminated line, hold the tail until the next chunk.
-    const stderrStream = transport.stderr
-    if (stderrStream) {
-      let lineBuf = ''
-      stderrStream.on('data', (chunk: Buffer | string) => {
-        // Buffer / string both safe: ascii log output is the common case.
-        lineBuf += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
-        // Strip carriage returns so CRLF logs (Windows / git-bash MCP
-        // servers) come through clean.
-        const normalized = lineBuf.replace(/\r/g, '')
-        const nl = normalized.lastIndexOf('\n')
-        if (nl === -1) {
-          // No complete line yet — keep buffering. Update lineBuf to
-          // the normalized form so future appends concatenate cleanly.
-          lineBuf = normalized
-          return
-        }
-        const complete = normalized.slice(0, nl)
-        lineBuf = normalized.slice(nl + 1)
-        for (const line of complete.split('\n')) {
-          // Skip blank lines: most servers print a trailing newline
-          // after each log, which would otherwise become an empty event.
-          if (line.length === 0) continue
-          this.emit('server-stderr', {
-            serverName: state.config.name,
-            line,
-          })
-        }
-      })
-      // On stream close, flush any unterminated trailing text so a
-      // server that crashes without `\n` doesn't lose its last gasp.
-      stderrStream.on('end', () => {
-        if (lineBuf.length > 0) {
-          this.emit('server-stderr', {
-            serverName: state.config.name,
-            line: lineBuf,
-          })
-          lineBuf = ''
-        }
-      })
-      // A stderr-stream error doesn't tear the toolset down (it's a
-      // diagnostic channel, not the JSON-RPC channel). Just surface
-      // the failure once on the event bus + on lastError.
-      stderrStream.on('error', (err: Error) => {
-        this.emit('server-stderr', {
-          serverName: state.config.name,
-          line: `[mcp-client] stderr stream error: ${err.message}`,
-        })
-      })
+    // stderr line-streaming is a stdio-only diagnostic: only a spawned
+    // child process has a stderr pipe. Remote (http/sse) transports
+    // surface failures through `onerror` / the JSON-RPC channel instead.
+    if (transport instanceof StdioClientTransport) {
+      this.wireStdioStderr(transport, state.config.name)
     }
 
     try {
@@ -471,12 +417,128 @@ export class McpToolset extends EventEmitter {
     } catch (err) {
       state.status = 'dead'
       state.lastError = err instanceof Error ? err.message : String(err)
-      // Best-effort cleanup of a half-spawned process. Don't await —
-      // we don't want startup failures to block on a hung close.
+      // Best-effort cleanup of a half-spawned process / open socket.
+      // Don't await — we don't want startup failures to block on a
+      // hung close.
       transport.close().catch(() => {
         /* ignore */
       })
     }
+  }
+
+  /**
+   * Build the SDK transport for one server config, dispatching on the
+   * `transport` discriminant (default `'stdio'`). Throws on a malformed
+   * remote config (missing/invalid url) so `startOne` can mark just that
+   * server dead.
+   */
+  private makeTransport(config: McpServerConfig): Transport {
+    if (config.transport === 'http' || config.transport === 'sse') {
+      const url = parseServerUrl(config.url, config.name)
+      // Custom headers (typically `Authorization: Bearer ...`) ride on
+      // `requestInit` for both transports. For SSE the initial GET that
+      // opens the stream goes through EventSource, which ignores
+      // `requestInit`, so we also hand it a fetch wrapper that injects
+      // the same headers — otherwise an authed SSE server 401s the
+      // stream open.
+      const headers = config.headers
+      if (config.transport === 'http') {
+        return new StreamableHTTPClientTransport(url, {
+          ...(headers ? { requestInit: { headers } } : {}),
+        })
+      }
+      return new SSEClientTransport(url, {
+        ...(headers ? { requestInit: { headers } } : {}),
+        ...(headers
+          ? {
+              // Inlined so the arrow is contextually typed as the
+              // eventsource `FetchLike` — it merges our headers into the
+              // GET that opens the stream.
+              eventSourceInit: {
+                fetch: (input, init) =>
+                  fetch(input as string | URL | Request, {
+                    ...init,
+                    headers: { ...(init?.headers as Record<string, string>), ...headers },
+                  }),
+              },
+            }
+          : {}),
+      })
+    }
+    // Default / explicit stdio: spawn a local child process.
+    return new StdioClientTransport({
+      command: config.command,
+      args: config.args ? [...config.args] : [],
+      // The SDK treats `env=undefined` as "inherit a curated subset of
+      // the parent env"; an explicit object means "use exactly this".
+      // We pass through whatever the caller supplied — see the doc
+      // comment on McpStdioServerConfig.env.
+      ...(config.env !== undefined ? { env: config.env } : {}),
+      ...(config.cwd !== undefined ? { cwd: config.cwd } : {}),
+      // 'pipe' so we can attach the line-by-line stderr listener and
+      // forward each line as a `'server-stderr'` event. Operators who
+      // don't subscribe just see the events fall on the floor; the
+      // previous default ('inherit') would dump raw stderr to the
+      // parent process — noisier and harder to control for tests.
+      stderr: 'pipe',
+    })
+  }
+
+  /**
+   * Attach the line-by-line stderr forwarder to a stdio child. The SDK
+   * exposes a PassThrough stream synchronously (per its docs: "available
+   * _immediately_, allowing callers to attach listeners before start"),
+   * so we can hook it up before `client.connect(transport)` and not lose
+   * any early auth-failure / banner output emitted by the child.
+   *
+   * We buffer partial trailing lines because Node streams hand us
+   * arbitrary byte chunks — a single log line can arrive split across
+   * two chunks or two lines can arrive in one chunk. Emit one event per
+   * `\n`-terminated line, hold the tail until the next chunk.
+   */
+  private wireStdioStderr(transport: StdioClientTransport, serverName: string): void {
+    const stderrStream = transport.stderr
+    if (!stderrStream) return
+    let lineBuf = ''
+    stderrStream.on('data', (chunk: Buffer | string) => {
+      // Buffer / string both safe: ascii log output is the common case.
+      lineBuf += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+      // Strip carriage returns so CRLF logs (Windows / git-bash MCP
+      // servers) come through clean.
+      const normalized = lineBuf.replace(/\r/g, '')
+      const nl = normalized.lastIndexOf('\n')
+      if (nl === -1) {
+        // No complete line yet — keep buffering. Update lineBuf to the
+        // normalized form so future appends concatenate cleanly.
+        lineBuf = normalized
+        return
+      }
+      const complete = normalized.slice(0, nl)
+      lineBuf = normalized.slice(nl + 1)
+      for (const line of complete.split('\n')) {
+        // Skip blank lines: most servers print a trailing newline after
+        // each log, which would otherwise become an empty event.
+        if (line.length === 0) continue
+        this.emit('server-stderr', { serverName, line })
+      }
+    })
+    // On stream close, flush any unterminated trailing text so a server
+    // that crashes without `\n` doesn't lose its last gasp.
+    stderrStream.on('end', () => {
+      if (lineBuf.length > 0) {
+        this.emit('server-stderr', { serverName, line: lineBuf })
+        lineBuf = ''
+      }
+    })
+    // A stderr-stream error doesn't tear the toolset down (it's a
+    // diagnostic channel, not the JSON-RPC channel). Just surface the
+    // failure once on the event bus.
+    stderrStream.on('error', (err: Error) => {
+      this.emit('server-stderr', {
+        serverName,
+        line: `[mcp-client] stderr stream error: ${err.message}`,
+      })
+    })
   }
 
   private async stopOne(state: ServerState): Promise<void> {
@@ -496,6 +558,30 @@ export class McpToolset extends EventEmitter {
     state.status = 'idle'
     state.client = undefined
     state.transport = undefined
+  }
+}
+
+/**
+ * Parse + validate a remote server URL. Throws a typed `McpClientError`
+ * (kind `bad_tool_name`, reused for "bad config") so a malformed http/sse
+ * entry marks just that server dead rather than crashing the toolset.
+ */
+function parseServerUrl(url: unknown, serverName: string): URL {
+  if (typeof url !== 'string' || url.length === 0) {
+    throw new McpClientError(
+      'bad_config',
+      `server '${serverName}' is http/sse but has no url`,
+      { serverName },
+    )
+  }
+  try {
+    return new URL(url)
+  } catch {
+    throw new McpClientError(
+      'bad_config',
+      `server '${serverName}' has an invalid url: ${url}`,
+      { serverName },
+    )
   }
 }
 

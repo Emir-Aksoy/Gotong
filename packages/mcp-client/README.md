@@ -215,10 +215,35 @@ specialized agent.
 
 | Option | Type | Default | Notes |
 |---|---|---|---|
-| `servers` | `McpServerConfig[]` | (required, ≥1) | Each server is spawned as a stdio child process. Names must be unique and match `/^[a-zA-Z][a-zA-Z0-9_-]*$/`. |
+| `servers` | `McpServerConfig[]` | (required, ≥1) | Each entry is a local `stdio` child process or a remote `http`/`sse` endpoint (see below). Names must be unique and match `/^[a-zA-Z][a-zA-Z0-9_-]*$/`. |
 | `listToolsTimeoutMs` | `number` | `10_000` | Per-server `tools/list` timeout. |
 | `callToolTimeoutMs` | `number` | `60_000` | Per-call `tools/call` timeout. Bump for long-running tools (DB queries, builds). |
 | `clientInfo` | `{ name, version }` | `@aipehub/mcp-client / 0.1.0` | Identity advertised to the MCP server during handshake. |
+
+#### Transports
+
+`McpServerConfig` is a discriminated union over `transport` (default
+`stdio`):
+
+```ts
+// stdio — local child process (transport optional; the common case)
+{ name: 'fs', command: 'npx', args: ['-y', '@modelcontextprotocol/server-filesystem', '.'] }
+
+// http — remote Streamable HTTP server (the hosted-MCP ecosystem)
+{ name: 'hosted', transport: 'http', url: 'https://mcp.example.com/v1',
+  headers: { Authorization: 'Bearer <token>' } }
+
+// sse — legacy remote HTTP+SSE server
+{ name: 'legacy', transport: 'sse', url: 'https://sse.example.com/stream' }
+```
+
+`http`/`sse` spawn no child process — `headers` is where a bearer token
+goes. This package does **not** expand `${ENV}` placeholders; resolve
+credentials before constructing the toolset (the AipeHub host expands
+`${ENV}` refs in `env`/`headers` at agent-spawn time). A remote server
+with a missing/invalid `url` is marked `dead` (`bad_config`) at
+`connect()` rather than throwing — same graceful-degradation contract as
+a stdio spawn failure.
 
 ### Methods
 

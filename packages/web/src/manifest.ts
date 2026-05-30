@@ -480,7 +480,7 @@ export function validateUsesArray(raw: unknown, path: string): ServiceUseSpec[] 
 /**
  * Walk a raw `mcpServers:` array, returning a typed `McpServerSpec[]`.
  *
- * Rules enforced at parse time (no spawn yet — that happens in
+ * Rules enforced at parse time (no spawn/connect yet — that happens in
  * `LocalAgentPool`):
  *
  *   - top-level must be an array
@@ -489,16 +489,19 @@ export function validateUsesArray(raw: unknown, path: string): ServiceUseSpec[] 
  *     used as a tool-name prefix so it has to satisfy the LLM tool-name
  *     regex `[a-zA-Z0-9_-]+`)
  *   - `name` must be unique within this agent's `mcpServers[]`
- *   - `command` must be a non-empty string
- *   - `args` if present must be an array of strings
- *   - `env` if present must be a plain object of `{ string: string }`
- *   - `cwd` if present must be a non-empty string
+ *   - `transport` if present must be one of `stdio` / `http` / `sse`
+ *     (default `stdio`)
+ *   - **stdio**: `command` non-empty string; `args` string[]; `env`
+ *     `{string:string}`; `cwd` non-empty string — all optional except
+ *     `command`
+ *   - **http / sse**: `url` non-empty string; `headers` `{string:string}`
  *
  * Exported so the admin POST/PUT path in `server.ts` can run the same
  * checks against form data without re-implementing them. `path` is the
  * cosmetic prefix for error messages.
  */
 const MCP_SERVER_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/
+const MCP_TRANSPORTS = ['stdio', 'http', 'sse'] as const
 
 export function validateMcpServersArray(raw: unknown, path: string): McpServerSpec[] {
   if (!Array.isArray(raw)) {
@@ -525,15 +528,45 @@ export function validateMcpServersArray(raw: unknown, path: string): McpServerSp
       throw new ManifestError(`${ep}.name '${e.name}' duplicates an earlier server`)
     }
     seenNames.add(e.name)
+
+    // Transport discriminant — defaults to stdio when omitted.
+    if (
+      e.transport !== undefined &&
+      !MCP_TRANSPORTS.includes(e.transport as (typeof MCP_TRANSPORTS)[number])
+    ) {
+      throw new ManifestError(
+        `${ep}.transport must be one of ${MCP_TRANSPORTS.join(' / ')} if present — got '${String(e.transport)}'`,
+      )
+    }
+    const transport = (e.transport as 'stdio' | 'http' | 'sse' | undefined) ?? 'stdio'
+
+    if (transport === 'http' || transport === 'sse') {
+      if (typeof e.url !== 'string' || e.url.length === 0) {
+        throw new ManifestError(
+          `${ep}.url is required (non-empty string) for transport '${transport}'`,
+        )
+      }
+      const headers = readStringMap(e.headers, `${ep}.headers`)
+      // Build via a literal per arm so the object narrows to the right
+      // union member (a union-typed `let` + property mutation wouldn't).
+      const spec: McpServerSpec =
+        transport === 'http'
+          ? { name: e.name, transport: 'http', url: e.url, ...(headers ? { headers } : {}) }
+          : { name: e.name, transport: 'sse', url: e.url, ...(headers ? { headers } : {}) }
+      out.push(spec)
+      continue
+    }
+
+    // stdio (default)
     if (typeof e.command !== 'string' || e.command.length === 0) {
       throw new ManifestError(`${ep}.command is required (non-empty string)`)
     }
-    const spec: McpServerSpec = { name: e.name, command: e.command }
+    let args: string[] | undefined
     if (e.args !== undefined) {
       if (!Array.isArray(e.args)) {
         throw new ManifestError(`${ep}.args must be an array of strings if present`)
       }
-      const args: string[] = []
+      args = []
       for (let j = 0; j < e.args.length; j++) {
         const a = e.args[j]
         if (typeof a !== 'string') {
@@ -541,32 +574,50 @@ export function validateMcpServersArray(raw: unknown, path: string): McpServerSp
         }
         args.push(a)
       }
-      spec.args = args
     }
-    if (e.env !== undefined) {
-      if (
-        typeof e.env !== 'object' ||
-        e.env === null ||
-        Array.isArray(e.env)
-      ) {
-        throw new ManifestError(`${ep}.env must be an object (string→string) if present`)
-      }
-      const env: Record<string, string> = {}
-      for (const [k, v] of Object.entries(e.env as Record<string, unknown>)) {
-        if (typeof v !== 'string') {
-          throw new ManifestError(`${ep}.env['${k}'] must be a string (got ${typeof v})`)
-        }
-        env[k] = v
-      }
-      spec.env = env
-    }
+    const env = readStringMap(e.env, `${ep}.env`)
+    let cwd: string | undefined
     if (e.cwd !== undefined) {
       if (typeof e.cwd !== 'string' || e.cwd.length === 0) {
         throw new ManifestError(`${ep}.cwd must be a non-empty string if present`)
       }
-      spec.cwd = e.cwd
+      cwd = e.cwd
+    }
+    const spec: McpServerSpec = {
+      name: e.name,
+      command: e.command,
+      // Echo an explicit `transport: stdio` only if the input carried
+      // one, so terse `{ name, command }` configs round-trip unchanged.
+      ...(e.transport !== undefined ? { transport: 'stdio' as const } : {}),
+      ...(args ? { args } : {}),
+      ...(env ? { env } : {}),
+      ...(cwd ? { cwd } : {}),
     }
     out.push(spec)
+  }
+  return out
+}
+
+/**
+ * Validate an optional `{ string: string }` map (used for both stdio
+ * `env` and http/sse `headers`). Returns `undefined` when the field is
+ * absent, the validated copy otherwise. Throws on a non-object or a
+ * non-string value.
+ */
+function readStringMap(
+  raw: unknown,
+  path: string,
+): Record<string, string> | undefined {
+  if (raw === undefined) return undefined
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new ManifestError(`${path} must be an object (string→string) if present`)
+  }
+  const out: Record<string, string> = {}
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (typeof v !== 'string') {
+      throw new ManifestError(`${path}['${k}'] must be a string (got ${typeof v})`)
+    }
+    out[k] = v
   }
   return out
 }
@@ -610,10 +661,23 @@ export function renderAgentManifest(rec: {
   }
   if (rec.managed.mcpServers && rec.managed.mcpServers.length > 0) {
     agent.mcpServers = rec.managed.mcpServers.map((m) => {
+      if (m.transport === 'http' || m.transport === 'sse') {
+        const out: Record<string, unknown> = {
+          name: m.name,
+          transport: m.transport,
+          url: m.url,
+        }
+        if (m.headers) out.headers = { ...m.headers }
+        return out
+      }
       const out: Record<string, unknown> = {
         name: m.name,
         command: m.command,
       }
+      // Only echo an explicit `transport: stdio` if the record carried
+      // one — keep the common terse `{ name, command }` round-tripping
+      // byte-for-byte.
+      if (m.transport) out.transport = m.transport
       if (m.args) out.args = [...m.args]
       if (m.env) out.env = { ...m.env }
       if (m.cwd) out.cwd = m.cwd
