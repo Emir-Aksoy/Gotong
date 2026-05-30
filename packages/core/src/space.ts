@@ -1290,6 +1290,13 @@ export interface HubMcpServerRecord {
   createdAt: string
   /** Optional human description shown in the admin UI / onboarding. */
   description?: string
+  /**
+   * #2-M3 — when true, this server is exposed to authenticated peer hubs
+   * via the cross-hub MCP proxy: a peer's agent can call its tools through
+   * the federation link while the credentials / subprocess stay on THIS
+   * hub ("凭证各归各家"). Default/absent = local-only, never proxied.
+   */
+  shared?: boolean
 }
 
 /**

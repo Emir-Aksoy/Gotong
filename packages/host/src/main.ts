@@ -84,6 +84,7 @@ import { PeerRegistry } from './peer-registry.js'
 import { serveWeb } from '@aipehub/web'
 
 import { LocalAgentPool } from './local-agent-pool.js'
+import { McpProxyHost } from './mcp-proxy.js'
 import { GrowthReportsAdmin } from './services/growth-reports-admin.js'
 import {
   BINARY_SAFE_PLUGINS,
@@ -842,6 +843,11 @@ async function main(): Promise<void> {
   // unwired (federation requires v4 identity) OR when the operator
   // explicitly skipped it via AIPE_PEERS_DISABLED=1.
   let peerRegistry: PeerRegistry | undefined
+  // #2-M3 — cross-hub MCP proxy (provider side). Lazily connects shared
+  // servers on first peer call; credentials resolve here, never cross the
+  // link. Built only when peers are enabled (it's wired as the registry's
+  // rpcResponder). `close()` runs on shutdown.
+  let mcpProxy: McpProxyHost | undefined
   if (identity && process.env.AIPE_PEERS_DISABLED !== '1') {
     const spaceMeta = await space.meta()
     const selfHubId = spaceMeta.hubId ?? 'self'
@@ -859,6 +865,10 @@ async function main(): Promise<void> {
     const rateLimitMax = envInt('AIPE_PEER_INBOUND_RATE_MAX', 60)
     const rateLimitWindowMs = envInt('AIPE_PEER_INBOUND_RATE_WINDOW_MS', 60_000)
     const inboundRateLimit = { max: rateLimitMax, windowMs: rateLimitWindowMs }
+    // Provider side of the cross-hub MCP proxy. Reads the same hub
+    // registry the admin UI writes; only servers flagged `shared` are
+    // ever served to a peer (ACL lives inside respond()).
+    mcpProxy = new McpProxyHost({ space, logger: log })
     peerRegistry = new PeerRegistry({
       hub,
       identity,
@@ -868,6 +878,7 @@ async function main(): Promise<void> {
       pollIntervalMs: pollMs,
       inboundRateLimit,
       ...(trustProxy ? { trustProxy: true } : {}),
+      rpcResponder: mcpProxy.respond,
       logger: log,
     })
     peerRegistry.start()
@@ -1086,6 +1097,9 @@ async function main(): Promise<void> {
     // server out from under them.
     if (peerRegistry) {
       try { await peerRegistry.stop() } catch (err) { log.error('peer registry stop error', { err }) }
+    }
+    if (mcpProxy) {
+      try { await mcpProxy.close() } catch (err) { log.error('mcp proxy close error', { err }) }
     }
     try { await ws.close() } catch (err) { log.error('ws close error', { err }) }
     try { await web.close() } catch (err) { log.error('web close error', { err }) }

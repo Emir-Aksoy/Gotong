@@ -93,6 +93,14 @@ export interface PeerRegistryOptions {
   pollIntervalMs?: number
   /** Optional logger; defaults to console-style noop-on-debug. */
   logger?: Logger
+  /**
+   * #2-M3 — responder for inbound HubLink RPC calls from peers (the
+   * cross-hub MCP proxy). Wired onto BOTH inbound and outbound links via
+   * `installPeerLink`. When omitted, inbound rpcs are answered with "peer
+   * has no rpc handler". The responder owns its own ACL (the proxy only
+   * serves servers flagged `shared`).
+   */
+  rpcResponder?: (call: { method: string; params: unknown }) => Promise<unknown>
 }
 
 interface InstalledState {
@@ -437,6 +445,7 @@ export class PeerRegistry {
         hub: this.opts.hub,
         link,
         selfHubId: this.opts.selfHubId,
+        ...(this.opts.rpcResponder ? { rpcResponder: this.opts.rpcResponder } : {}),
       })
       this.installed.set(row.id, { row, link, install })
       this.backoff.delete(row.id)
@@ -498,6 +507,7 @@ export class PeerRegistry {
       hub: this.opts.hub,
       link,
       selfHubId: this.opts.selfHubId,
+      ...(this.opts.rpcResponder ? { rpcResponder: this.opts.rpcResponder } : {}),
     })
     this.installed.set(row.id, { row, link, install })
     this.backoff.delete(row.id)
