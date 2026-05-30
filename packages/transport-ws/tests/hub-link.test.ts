@@ -17,6 +17,7 @@ import { WebSocketServer } from 'ws'
 import type { HubLink, Message, Task, TaskResult } from '@aipehub/core'
 
 import { acceptHubLinks, connectHubLink } from '../src/hub-link.js'
+import { bearerAuth } from '../src/peer-auth.js'
 
 const delay = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
 
@@ -43,7 +44,7 @@ async function startBench(
   acceptHubLinks({
     server: wss,
     selfId,
-    ...(opts.peerToken !== undefined ? { peerToken: opts.peerToken } : {}),
+    ...(opts.peerToken !== undefined ? { auth: bearerAuth({ token: opts.peerToken }) } : {}),
     onLink: (link) => {
       const w = waiters.shift()
       if (w) w(link)
@@ -338,7 +339,7 @@ describe('WebSocketHubLink — FED-M1 mutual peer auth', () => {
       const aLink = await connectHubLink({
         url: bench.url,
         selfId: 'hubA',
-        peerToken: 'shared-AB-secret',
+        auth: bearerAuth({ token: 'shared-AB-secret' }),
       })
       const bLink = await bench.nextLink()
       // Wire a task handler on B and dispatch from A — proves the link
@@ -371,7 +372,7 @@ describe('WebSocketHubLink — FED-M1 mutual peer auth', () => {
         connectHubLink({
           url: bench.url,
           selfId: 'hubA',
-          peerToken: 'client-different-secret',
+          auth: bearerAuth({ token: 'client-different-secret' }),
           handshakeTimeoutMs: 1000,
         }),
       ).rejects.toThrow(/closed during handshake|peer_disconnected|handshake/i)
@@ -408,7 +409,7 @@ describe('WebSocketHubLink — FED-M1 mutual peer auth', () => {
         connectHubLink({
           url: bench.url,
           selfId: 'hubA',
-          peerToken: 'client-secret',
+          auth: bearerAuth({ token: 'client-secret' }),
           handshakeTimeoutMs: 1000,
         }),
       ).rejects.toThrow(/peerToken|mutual auth/i)
@@ -433,23 +434,13 @@ describe('WebSocketHubLink — FED-M1 mutual peer auth', () => {
     }
   })
 
-  it('empty-string peerToken is rejected before opening the WebSocket (typo defense)', async () => {
+  it('empty-string bearer token is rejected at scheme construction (typo defense)', () => {
     // Catches the "MY_TOKEN env var was defined but empty" misconfig
-    // that would otherwise silently disable auth on the side that set
-    // peerToken: process.env.MY_TOKEN. The rejection happens BEFORE
-    // any socket is opened (the URL below is intentionally invalid;
-    // if the check ran after `new WebSocket()`, we'd see ECONNREFUSED
-    // as an unhandled error rather than our own throw).
-    //
-    // `connectHubLink` is an async function, so its synchronous throw
-    // surfaces as a rejected Promise — assert via `.rejects.toThrow`.
-    await expect(
-      connectHubLink({
-        url: 'ws://127.0.0.1:1',
-        selfId: 'hubA',
-        peerToken: '',
-        handshakeTimeoutMs: 100,
-      }),
-    ).rejects.toThrow(/peerToken must be a non-empty string/)
+    // that would otherwise silently present / expect a zero-length
+    // secret. bearerAuth validates eagerly, so the throw happens at
+    // scheme construction — before any link or socket is created.
+    expect(() => bearerAuth({ token: '' })).toThrow(
+      /token must be a non-empty string/,
+    )
   })
 })

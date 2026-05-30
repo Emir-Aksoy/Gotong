@@ -22,3 +22,11 @@ export type {
   ConnectHubLinkOptions,
   AcceptHubLinksOptions,
 } from './hub-link.js'
+
+export { bearerAuth } from './peer-auth.js'
+export type {
+  PeerAuthScheme,
+  PeerAuthEnvelope,
+  PeerAuthVerdict,
+  BearerAuthOptions,
+} from './peer-auth.js'

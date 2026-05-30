@@ -23,6 +23,7 @@ import { WebSocket, WebSocketServer } from 'ws'
 
 import {
   acceptHubLinks,
+  bearerAuth,
   MESH_PROTOCOL_VERSION,
   type HubLink,
 } from '../src/index.js'
@@ -46,7 +47,7 @@ async function startBench(selfId: string, peerToken: string): Promise<Bench> {
   acceptHubLinks({
     server: wss,
     selfId,
-    peerToken,
+    auth: bearerAuth({ token: peerToken }),
     onLink: (link) => {
       const w = waiters.shift()
       if (w) w(link)
@@ -98,7 +99,7 @@ describe('HubLink HELLO replay guard (Audit #143)', () => {
       type: 'MESH_HELLO',
       peerId: 'attackerVictim',
       protocolVersion: MESH_PROTOCOL_VERSION,
-      peerToken: 'shared-token-xyz',
+      auth: { scheme: 'bearer', credential: 'shared-token-xyz' },
     }))
 
     const link = await bench.nextLink()
@@ -116,7 +117,7 @@ describe('HubLink HELLO replay guard (Audit #143)', () => {
       type: 'MESH_HELLO',
       peerId: 'attackerHijackedId',
       protocolVersion: MESH_PROTOCOL_VERSION,
-      peerToken: 'shared-token-xyz',
+      auth: { scheme: 'bearer', credential: 'shared-token-xyz' },
     }))
     await new Promise((r) => setTimeout(r, 30))
 
@@ -146,7 +147,7 @@ describe('HubLink HELLO replay guard (Audit #143)', () => {
       type: 'MESH_HELLO',
       peerId: 'realPeer',
       protocolVersion: MESH_PROTOCOL_VERSION,
-      peerToken: 'real-token-abc',
+      auth: { scheme: 'bearer', credential: 'real-token-abc' },
     }))
     const link = await bench.nextLink()
     await new Promise((r) => setTimeout(r, 20))
@@ -160,7 +161,7 @@ describe('HubLink HELLO replay guard (Audit #143)', () => {
       type: 'MESH_HELLO',
       peerId: 'attackerWithBadToken',
       protocolVersion: MESH_PROTOCOL_VERSION,
-      peerToken: 'WRONG-TOKEN-xyz',
+      auth: { scheme: 'bearer', credential: 'WRONG-TOKEN-xyz' },
     }))
     await new Promise((r) => setTimeout(r, 30))
 

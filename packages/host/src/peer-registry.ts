@@ -27,7 +27,7 @@
 import type { Hub, HubLink, Logger, ParticipantId } from '@aipehub/core'
 import { installPeerLink, type InstalledPeerLink } from '@aipehub/core'
 import type { IdentityStore, PeerRegistration } from '@aipehub/identity'
-import { acceptHubLinks, connectHubLink } from '@aipehub/transport-ws'
+import { acceptHubLinks, bearerAuth, connectHubLink } from '@aipehub/transport-ws'
 // `WebSocketServer` is the runtime shape from `ws`. We don't take a
 // runtime dep on the `ws` package here (transport-ws owns that); the
 // caller passes the server instance from their `serveWebSocket` handle
@@ -266,13 +266,21 @@ export class PeerRegistry {
           return allowed
         }
         : undefined
+      // R1 — fold the shared-secret + per-peer resolver into one bearer
+      // scheme. The resolver wins for verification when both are present
+      // (bearerAuth's precedence), preserving the prior behavior.
+      const sharedToken = this.opts.sharedInboundPeerToken
+      const inboundAuth =
+        resolver || sharedToken
+          ? bearerAuth({
+              ...(sharedToken ? { token: sharedToken } : {}),
+              ...(resolver ? { resolver } : {}),
+            })
+          : undefined
       this.detachAccept = acceptHubLinks({
         server: this.opts.wss,
         selfId: this.opts.selfHubId,
-        ...(this.opts.sharedInboundPeerToken
-          ? { peerToken: this.opts.sharedInboundPeerToken }
-          : {}),
-        ...(resolver ? { peerTokenResolver: resolver } : {}),
+        ...(inboundAuth ? { auth: inboundAuth } : {}),
         ...(onConnectionAttempt ? { onConnectionAttempt } : {}),
         // Audit #142 — without this, rate-limiter buckets are keyed
         // on the proxy's loopback IP in proxied deployments.
@@ -423,7 +431,7 @@ export class PeerRegistry {
         url: row.endpointUrl,
         selfId: this.opts.selfHubId,
         expectedPeerId: row.peerId,
-        peerToken: token,
+        auth: bearerAuth({ token }),
       })
       const install = installPeerLink({
         hub: this.opts.hub,

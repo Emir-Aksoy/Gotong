@@ -1,9 +1,10 @@
 /**
- * Phase 6 #4 — Per-peer inbound token resolver.
+ * Phase 6 #4 — Per-peer inbound token resolver (R1: now expressed as a
+ * `bearerAuth({ resolver })` scheme).
  *
- * Verifies the new `peerTokenResolver` option on acceptHubLinks /
- * WebSocketHubLinkOptions. The shared-token path (FED-M1) remains in
- * hub-link.test.ts; this file isolates the resolver semantics:
+ * Verifies the per-peer resolver semantics of the bearer auth scheme.
+ * The shared-token path lives in hub-link.test.ts; this file isolates
+ * the resolver behavior:
  *
  *   - Resolver wins over shared token when both are set
  *   - Unknown peer (resolver returns null) → handshake rejected
@@ -16,11 +17,12 @@
  *     also requires non-empty peerId so we belt-and-braces here.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { WebSocketServer } from 'ws'
 
 import {
   acceptHubLinks,
+  bearerAuth,
   connectHubLink,
   type HubLink,
 } from '../src/index.js'
@@ -45,15 +47,23 @@ async function startBench(
   const port = typeof addr === 'object' && addr ? addr.port : 0
   const url = `ws://127.0.0.1:${port}`
 
+  // R1 — fold shared token + per-peer resolver into one bearer scheme,
+  // matching how the host's PeerRegistry wires it. Resolver wins for
+  // verification when both are present.
+  const auth =
+    opts.peerToken !== undefined || opts.peerTokenResolver
+      ? bearerAuth({
+          ...(opts.peerToken !== undefined ? { token: opts.peerToken } : {}),
+          ...(opts.peerTokenResolver ? { resolver: opts.peerTokenResolver } : {}),
+        })
+      : undefined
+
   const pendingLinks: HubLink[] = []
   const waiters: Array<(l: HubLink) => void> = []
   acceptHubLinks({
     server: wss,
     selfId,
-    ...(opts.peerToken !== undefined ? { peerToken: opts.peerToken } : {}),
-    ...(opts.peerTokenResolver
-      ? { peerTokenResolver: opts.peerTokenResolver }
-      : {}),
+    ...(auth ? { auth } : {}),
     onLink: (link) => {
       const w = waiters.shift()
       if (w) w(link)
@@ -82,7 +92,7 @@ async function startBench(
   }
 }
 
-describe('WebSocketHubLink — per-peer token resolver (Phase 6 #4)', () => {
+describe('WebSocketHubLink — per-peer token resolver (Phase 6 #4 / bearer)', () => {
   let bench: Bench
   afterEach(async () => { if (bench) await bench.stop() })
 
@@ -96,7 +106,7 @@ describe('WebSocketHubLink — per-peer token resolver (Phase 6 #4)', () => {
     const outP = connectHubLink({
       url: bench.url,
       selfId: 'hubA',
-      peerToken: 'token-for-A',
+      auth: bearerAuth({ token: 'token-for-A' }),
     })
     const inLink = await bench.nextLink()
     const outLink = await outP
@@ -113,7 +123,7 @@ describe('WebSocketHubLink — per-peer token resolver (Phase 6 #4)', () => {
       connectHubLink({
         url: bench.url,
         selfId: 'hubStranger',
-        peerToken: 'any-token',
+        auth: bearerAuth({ token: 'any-token' }),
       }),
     ).rejects.toThrow(/handshake|unknown peer|closed/i)
   })
@@ -126,7 +136,7 @@ describe('WebSocketHubLink — per-peer token resolver (Phase 6 #4)', () => {
       connectHubLink({
         url: bench.url,
         selfId: 'hubA',
-        peerToken: 'WRONG-token',
+        auth: bearerAuth({ token: 'WRONG-token' }),
       }),
     ).rejects.toThrow(/handshake|invalid|closed/i)
   })
@@ -139,7 +149,7 @@ describe('WebSocketHubLink — per-peer token resolver (Phase 6 #4)', () => {
       connectHubLink({
         url: bench.url,
         selfId: 'hubA',
-        // no peerToken
+        // no auth scheme — presents nothing
       }),
     ).rejects.toThrow(/handshake|mutual auth|closed/i)
   })
@@ -154,7 +164,7 @@ describe('WebSocketHubLink — per-peer token resolver (Phase 6 #4)', () => {
       connectHubLink({
         url: bench.url,
         selfId: 'hubA',
-        peerToken: 'any',
+        auth: bearerAuth({ token: 'any' }),
       }),
     ).rejects.toThrow(/handshake|refusing|closed/i)
   })
@@ -169,7 +179,7 @@ describe('WebSocketHubLink — per-peer token resolver (Phase 6 #4)', () => {
       connectHubLink({
         url: bench.url,
         selfId: 'hubA',
-        peerToken: 'any',
+        auth: bearerAuth({ token: 'any' }),
       }),
     ).rejects.toThrow(/handshake|empty|refusing|closed/i)
   })
@@ -189,14 +199,14 @@ describe('WebSocketHubLink — per-peer token resolver (Phase 6 #4)', () => {
       connectHubLink({
         url: bench.url,
         selfId: 'hubA',
-        peerToken: 'fallback-secret',
+        auth: bearerAuth({ token: 'fallback-secret' }),
       }),
     ).rejects.toThrow(/handshake|invalid|closed/i)
     // But the right per-peer token works.
     const outP = connectHubLink({
       url: bench.url,
       selfId: 'hubA',
-      peerToken: 'token-for-A',
+      auth: bearerAuth({ token: 'token-for-A' }),
     })
     await bench.nextLink()
     const outLink = await outP
@@ -216,13 +226,13 @@ describe('WebSocketHubLink — per-peer token resolver (Phase 6 #4)', () => {
     const a = await connectHubLink({
       url: bench.url,
       selfId: 'hubA',
-      peerToken: 'A-secret',
+      auth: bearerAuth({ token: 'A-secret' }),
     })
     await bench.nextLink()
     const b = await connectHubLink({
       url: bench.url,
       selfId: 'hubB',
-      peerToken: 'B-secret',
+      auth: bearerAuth({ token: 'B-secret' }),
     })
     await bench.nextLink()
 
@@ -236,7 +246,7 @@ describe('WebSocketHubLink — per-peer token resolver (Phase 6 #4)', () => {
       connectHubLink({
         url: bench.url,
         selfId: 'hubB',
-        peerToken: 'A-secret',
+        auth: bearerAuth({ token: 'A-secret' }),
       }),
     ).rejects.toThrow(/handshake|invalid|closed/i)
   })
