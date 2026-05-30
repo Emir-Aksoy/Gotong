@@ -3,8 +3,9 @@
  *
  * Two angles:
  *
- *   1. **Pure-function tests for `expandEnvRefs`** — `${VAR}` expansion
- *      semantics, missing-var fallback, multi-ref single-value.
+ *   1. **Pure-function tests for `mcp-config`** — `${VAR}` expansion
+ *      semantics (now against a pluggable `SecretSource`) +
+ *      `resolveMcpServerConfig` spec→config mapping across transports.
  *
  *   2. **End-to-end spawn → connect → tool-use → disconnect** — wire
  *      a managed agent whose manifest declares the in-tree fake MCP
@@ -25,10 +26,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { createLogger, Hub, Space, type AgentRecord } from '@aipehub/core'
 import type { LlmRequest } from '@aipehub/llm'
 
+import { LocalAgentPool } from '../src/local-agent-pool.js'
 import {
-  LocalAgentPool,
-  expandEnvRefs,
-} from '../src/local-agent-pool.js'
+  expandSecretRefs,
+  resolveMcpServerConfig,
+  type SecretSource,
+} from '../src/mcp-config.js'
 
 const logger = createLogger('lap-mcp-test', { disabled: true })
 void logger
@@ -46,76 +49,131 @@ const FAKE_MCP_SERVER = fileURLToPath(
 )
 void dirname
 
-// --- expandEnvRefs (pure-function tests) -------------------------------
+// --- expandSecretRefs (pure-function tests) ----------------------------
+//
+// R6: expansion now runs against a pluggable `SecretSource` instead of
+// reaching into `process.env` directly, so these tests feed a plain map
+// — no env mutation, no cleanup, vault-ready.
 
-describe('expandEnvRefs — ${VAR} substitution semantics', () => {
-  const originalEnv = { ...process.env }
-  beforeEach(() => {
-    process.env.FAKE_TOKEN_FOR_TEST = 'sk-test-12345'
-    process.env.FAKE_TEAM_FOR_TEST = 'TEAM-42'
-  })
-  afterEach(() => {
-    delete process.env.FAKE_TOKEN_FOR_TEST
-    delete process.env.FAKE_TEAM_FOR_TEST
-    delete process.env.FAKE_UNDEFINED_FOR_TEST
-    // Restore anything the test mutated (paranoia).
-    for (const k of Object.keys(process.env)) {
-      if (!(k in originalEnv)) delete process.env[k]
-    }
-  })
+const secrets: SecretSource = (name) =>
+  ({ FAKE_TOKEN: 'sk-test-12345', FAKE_TEAM: 'TEAM-42' })[name]
 
+describe('expandSecretRefs — ${VAR} substitution semantics', () => {
   it('expands a single ${VAR} reference', () => {
-    expect(
-      expandEnvRefs({ TOKEN: '${FAKE_TOKEN_FOR_TEST}' }, 'a', 's'),
-    ).toEqual({ TOKEN: 'sk-test-12345' })
+    expect(expandSecretRefs({ TOKEN: '${FAKE_TOKEN}' }, secrets, 's')).toEqual({
+      TOKEN: 'sk-test-12345',
+    })
   })
 
   it('expands multiple references in one value', () => {
     expect(
-      expandEnvRefs(
-        { COMPOSITE: 'prefix:${FAKE_TOKEN_FOR_TEST}-${FAKE_TEAM_FOR_TEST}' },
-        'a',
-        's',
-      ),
+      expandSecretRefs({ COMPOSITE: 'prefix:${FAKE_TOKEN}-${FAKE_TEAM}' }, secrets, 's'),
     ).toEqual({ COMPOSITE: 'prefix:sk-test-12345-TEAM-42' })
   })
 
-  it('missing var expands to empty string (does not throw)', () => {
+  it('missing var expands to empty string + fires onMissingSecret', () => {
+    const missed: Array<[string, string]> = []
     expect(
-      expandEnvRefs({ X: 'pre-${FAKE_UNDEFINED_FOR_TEST}-post' }, 'a', 's'),
+      expandSecretRefs({ X: 'pre-${NOPE}-post' }, secrets, 'srv', (v, s) =>
+        missed.push([v, s]),
+      ),
     ).toEqual({ X: 'pre--post' })
+    expect(missed).toEqual([['NOPE', 'srv']])
   })
 
   it('values without any ${} markers pass through unchanged', () => {
-    expect(
-      expandEnvRefs({ PATH_THING: '/usr/local/bin' }, 'a', 's'),
-    ).toEqual({ PATH_THING: '/usr/local/bin' })
+    expect(expandSecretRefs({ PATH_THING: '/usr/local/bin' }, secrets, 's')).toEqual({
+      PATH_THING: '/usr/local/bin',
+    })
   })
 
   it('does NOT expand a literal $5.99 — only the ${VAR} form', () => {
-    expect(
-      expandEnvRefs({ PRICE: '$5.99' }, 'a', 's'),
-    ).toEqual({ PRICE: '$5.99' })
+    expect(expandSecretRefs({ PRICE: '$5.99' }, secrets, 's')).toEqual({ PRICE: '$5.99' })
   })
 
   it('preserves keys with empty values', () => {
-    expect(expandEnvRefs({ EMPTY: '' }, 'a', 's')).toEqual({ EMPTY: '' })
+    expect(expandSecretRefs({ EMPTY: '' }, secrets, 's')).toEqual({ EMPTY: '' })
   })
 
-  it('only matches POSIX-shaped names ([A-Za-z_][A-Za-z0-9_]*) — leaves $1, ${1FOO} etc. alone', () => {
+  it('only matches POSIX-shaped names — leaves $1, ${1FOO}, $NOT_BRACED alone', () => {
     expect(
-      expandEnvRefs(
-        {
-          A: '${1STARTING_DIGIT}', // invalid name → literal pass-through
-          B: '$NOT_BRACED',         // no braces → pass-through
-        },
-        'a',
+      expandSecretRefs(
+        { A: '${1STARTING_DIGIT}', B: '$NOT_BRACED' },
+        secrets,
         's',
       ),
+    ).toEqual({ A: '${1STARTING_DIGIT}', B: '$NOT_BRACED' })
+  })
+})
+
+// --- resolveMcpServerConfig (spec → config mapping) --------------------
+
+describe('resolveMcpServerConfig — spec→config across transports (R6)', () => {
+  it('maps a stdio spec, expanding ${VAR} in env', () => {
+    expect(
+      resolveMcpServerConfig(
+        {
+          name: 'gh',
+          command: 'npx',
+          args: ['-y', 'server-github'],
+          env: { GITHUB_TOKEN: '${FAKE_TOKEN}' },
+          cwd: '/work',
+        },
+        secrets,
+      ),
     ).toEqual({
-      A: '${1STARTING_DIGIT}',
-      B: '$NOT_BRACED',
+      name: 'gh',
+      command: 'npx',
+      args: ['-y', 'server-github'],
+      env: { GITHUB_TOKEN: 'sk-test-12345' },
+      cwd: '/work',
     })
+  })
+
+  it('maps an http spec, expanding ${VAR} in headers + preserving url', () => {
+    expect(
+      resolveMcpServerConfig(
+        {
+          name: 'hosted',
+          transport: 'http',
+          url: 'https://mcp.example.com/v1',
+          headers: { Authorization: 'Bearer ${FAKE_TOKEN}' },
+        },
+        secrets,
+      ),
+    ).toEqual({
+      name: 'hosted',
+      transport: 'http',
+      url: 'https://mcp.example.com/v1',
+      headers: { Authorization: 'Bearer sk-test-12345' },
+    })
+  })
+
+  it('maps an sse spec with no headers', () => {
+    expect(
+      resolveMcpServerConfig(
+        { name: 'legacy', transport: 'sse', url: 'https://sse.example.com/stream' },
+        secrets,
+      ),
+    ).toEqual({
+      name: 'legacy',
+      transport: 'sse',
+      url: 'https://sse.example.com/stream',
+    })
+  })
+
+  it('defaults the secret source to process.env when omitted', () => {
+    process.env.FAKE_R6_DEFAULT_SRC = 'from-env'
+    try {
+      const cfg = resolveMcpServerConfig({
+        name: 'x',
+        command: 'run',
+        env: { K: '${FAKE_R6_DEFAULT_SRC}' },
+      })
+      expect(cfg).toMatchObject({ env: { K: 'from-env' } })
+    } finally {
+      delete process.env.FAKE_R6_DEFAULT_SRC
+    }
   })
 })
 

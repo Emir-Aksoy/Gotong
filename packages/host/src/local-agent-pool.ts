@@ -22,6 +22,7 @@ import { PersonalGrowthAgent } from './agents/personal-growth-agent.js'
 import { AnthropicProvider } from '@aipehub/llm-anthropic'
 import { OpenAIProvider } from '@aipehub/llm-openai'
 import { McpToolset, type McpServerConfig } from '@aipehub/mcp-client'
+import { resolveMcpServerConfig, envSecretSource } from './mcp-config.js'
 import {
   resolveOwner,
   type AgentDispatchOpts,
@@ -1027,12 +1028,13 @@ function buildProvider(spec: ManagedAgentSpec, apiKey: string | undefined): LlmP
  *
  * Two transformations happen here vs. raw `McpServerConfig`:
  *
- *   1. **`${ENV_VAR}` expansion in env values** — credentials stay in
- *      the host's environment rather than persisted plain-text in
- *      `agents.json`. A missing var expands to an empty string and
- *      the spawn proceeds; the MCP server itself will fail loudly if
- *      it actually needed that variable (typical: `401 Unauthorized`
- *      bubbling up as a `server-stderr` line).
+ *   1. **Credential resolution** — `resolveMcpServerConfig` expands
+ *      `${ENV_VAR}` refs in stdio `env` / http-sse `headers` against the
+ *      host env, so credentials stay out of `agents.json`. A missing
+ *      var expands to an empty string + a warning; the MCP server fails
+ *      loudly itself if it actually needed it (typical: `401` bubbling
+ *      up as a `server-stderr` line). The `SecretSource` seam lets a
+ *      future installer feed the vault here instead of `process.env`.
  *
  *   2. **Server stderr → host log forwarding** — auto-subscribe to
  *      `'server-stderr'` events and dump them to the structured
@@ -1044,7 +1046,16 @@ function buildToolset(
   agentId: ParticipantId,
   servers: readonly McpServerSpec[],
 ): McpToolset {
-  const configs: McpServerConfig[] = servers.map((s) => specToConfig(s, agentId))
+  const configs: McpServerConfig[] = servers.map((s) =>
+    resolveMcpServerConfig(s, envSecretSource, {
+      onMissingSecret: (varName, serverName) =>
+        log.warn('mcp env ref missing — expanded to empty string', {
+          agentId,
+          serverName,
+          var: varName,
+        }),
+    }),
+  )
   const toolset = new McpToolset({ servers: configs })
   // Route MCP-server stderr into our structured logger. Operators
   // running `journalctl -u aipehub` get one unified stream.
@@ -1052,60 +1063,4 @@ function buildToolset(
     log.info('mcp server stderr', { agentId, serverName, line })
   })
   return toolset
-}
-
-/**
- * Map one yaml-level `McpServerSpec` to a resolved `McpServerConfig`,
- * expanding `${ENV_VAR}` references in the credential-bearing fields:
- * stdio `env` values and http/sse `headers` values (typically a
- * `Authorization: Bearer ${...}` token). See {@link expandEnvRefs}.
- */
-function specToConfig(s: McpServerSpec, agentId: ParticipantId): McpServerConfig {
-  if (s.transport === 'http' || s.transport === 'sse') {
-    const headers = s.headers ? expandEnvRefs(s.headers, agentId, s.name) : undefined
-    return s.transport === 'http'
-      ? { name: s.name, transport: 'http', url: s.url, ...(headers ? { headers } : {}) }
-      : { name: s.name, transport: 'sse', url: s.url, ...(headers ? { headers } : {}) }
-  }
-  // stdio (default)
-  const cfg: McpServerConfig = { name: s.name, command: s.command }
-  if (s.args) cfg.args = [...s.args]
-  if (s.env) cfg.env = expandEnvRefs(s.env, agentId, s.name)
-  if (s.cwd) cfg.cwd = s.cwd
-  return cfg
-}
-
-/**
- * Expand `${ENV_VAR}` references in a `name → value` env map against
- * `process.env`. Unknown refs become empty strings (with a warning
- * log so the operator knows the spawn proceeded with a missing
- * credential). The case-sensitivity matches POSIX env var conventions.
- *
- * Exported only for unit tests — the production path always passes
- * `process.env` via the wrapper `buildToolset`.
- */
-export function expandEnvRefs(
-  raw: Record<string, string>,
-  agentId: ParticipantId,
-  serverName: string,
-): Record<string, string> {
-  const out: Record<string, string> = {}
-  // ${NAME} — anchored to standard POSIX env-var name shape so a
-  // literal "$5.99" in a value isn't mistaken for a reference.
-  const REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g
-  for (const [k, v] of Object.entries(raw)) {
-    out[k] = v.replace(REF, (_match, name: string) => {
-      const env = process.env[name]
-      if (env === undefined) {
-        log.warn('mcp env ref missing — expanded to empty string', {
-          agentId,
-          serverName,
-          var: name,
-        })
-        return ''
-      }
-      return env
-    })
-  }
-  return out
 }
