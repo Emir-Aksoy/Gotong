@@ -83,10 +83,21 @@ export type MeshFrame =
       kind: 'read' | 'rejected'
       reason?: string
     }
+  /** #2-M3: fine-grained request/response RPC (cross-hub MCP proxy etc). */
+  | { type: 'MESH_RPC_CALL'; rpcId: string; method: string; params: unknown }
+  /** #2-M3: reply to a MESH_RPC_CALL — `ok` discriminates value vs error. */
+  | {
+      type: 'MESH_RPC_RESULT'
+      rpcId: string
+      ok: boolean
+      value?: unknown
+      error?: string
+    }
   | { type: 'MESH_GOODBYE'; reason?: string }
 
 const DEFAULT_DISPATCH_TIMEOUT_MS = 30_000
 const DEFAULT_PULL_TIMEOUT_MS = 30_000
+const DEFAULT_RPC_TIMEOUT_MS = 30_000
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000
 
 interface PendingDispatch {
@@ -96,6 +107,12 @@ interface PendingDispatch {
 
 interface PendingPull {
   resolve: (entries: readonly FeedbackEntry[]) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
+interface PendingRpc {
+  resolve: (value: unknown) => void
+  reject: (err: Error) => void
   timer: ReturnType<typeof setTimeout>
 }
 
@@ -123,6 +140,8 @@ export interface WebSocketHubLinkOptions {
   auth?: PeerAuthScheme
   /** Per-dispatch timeout in ms. Default 30s. */
   dispatchTimeoutMs?: number
+  /** #2-M3 — per-rpc timeout in ms. Default 30s. */
+  rpcTimeoutMs?: number
 }
 
 class WebSocketHubLinkImpl implements HubLink {
@@ -145,10 +164,13 @@ class WebSocketHubLinkImpl implements HubLink {
     kind: 'read' | 'rejected'
     reason?: string
   }) => void | Promise<void>
+  private rpcHandler?: (call: { method: string; params: unknown }) => Promise<unknown>
+  private readonly rpcTimeoutMs: number
   private readonly messageHandlers: Array<(m: Message) => void> = []
   private readonly closedHandlers: Array<() => void> = []
   private readonly pendingDispatches = new Map<string, PendingDispatch>()
   private readonly pendingPulls = new Map<string, PendingPull>()
+  private readonly pendingRpcs = new Map<string, PendingRpc>()
 
   private readonly handshakePromise: Promise<void>
   private resolveHandshake!: () => void
@@ -167,6 +189,7 @@ class WebSocketHubLinkImpl implements HubLink {
     // `bearerAuth` rejects an empty token), so the link just stores it.
     this.auth = opts.auth
     this.dispatchTimeoutMs = opts.dispatchTimeoutMs ?? DEFAULT_DISPATCH_TIMEOUT_MS
+    this.rpcTimeoutMs = opts.rpcTimeoutMs ?? DEFAULT_RPC_TIMEOUT_MS
     this._peerId = opts.expectedPeerId ?? '<pending>'
 
     this.handshakePromise = new Promise<void>((resolve, reject) => {
@@ -469,6 +492,42 @@ class WebSocketHubLinkImpl implements HubLink {
         return
       }
 
+      case 'MESH_RPC_CALL': {
+        const handler = this.rpcHandler
+        if (!handler) {
+          this.sendFrame({
+            type: 'MESH_RPC_RESULT',
+            rpcId: frame.rpcId,
+            ok: false,
+            error: 'peer has no rpc handler',
+          })
+          return
+        }
+        Promise.resolve(handler({ method: frame.method, params: frame.params }))
+          .then((value) =>
+            this.sendFrame({ type: 'MESH_RPC_RESULT', rpcId: frame.rpcId, ok: true, value }),
+          )
+          .catch((err) =>
+            this.sendFrame({
+              type: 'MESH_RPC_RESULT',
+              rpcId: frame.rpcId,
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+            }),
+          )
+        return
+      }
+
+      case 'MESH_RPC_RESULT': {
+        const pending = this.pendingRpcs.get(frame.rpcId)
+        if (!pending) return // unknown / already-timed-out
+        clearTimeout(pending.timer)
+        this.pendingRpcs.delete(frame.rpcId)
+        if (frame.ok) pending.resolve(frame.value)
+        else pending.reject(new Error(frame.error || 'remote rpc failed'))
+        return
+      }
+
       case 'MESH_GOODBYE':
         this.transitionToClosed('peer_goodbye')
         return
@@ -539,6 +598,21 @@ class WebSocketHubLinkImpl implements HubLink {
     })
   }
 
+  async rpc(method: string, params: unknown): Promise<unknown> {
+    if (this._status !== 'open') {
+      throw new Error(`link_${this._status}`)
+    }
+    const rpcId = randomUUID()
+    return new Promise<unknown>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingRpcs.delete(rpcId)
+        reject(new Error(`rpc_timeout (${this.rpcTimeoutMs}ms)`))
+      }, this.rpcTimeoutMs)
+      this.pendingRpcs.set(rpcId, { resolve, reject, timer })
+      this.sendFrame({ type: 'MESH_RPC_CALL', rpcId, method, params })
+    })
+  }
+
   async close(): Promise<void> {
     if (this._status === 'closed') return
     if (this.ws.readyState === WebSocket.OPEN) {
@@ -587,6 +661,14 @@ class WebSocketHubLinkImpl implements HubLink {
     }
     this.pendingPulls.clear()
 
+    // Reject pending rpcs — unlike pull, rpc has a hard error contract so
+    // callers (e.g. RemoteMcpToolset) see the close instead of hanging.
+    for (const [, pending] of this.pendingRpcs) {
+      clearTimeout(pending.timer)
+      pending.reject(new Error(`link_closed (${reason})`))
+    }
+    this.pendingRpcs.clear()
+
     for (const h of this.closedHandlers) {
       try {
         h()
@@ -612,7 +694,11 @@ class WebSocketHubLinkImpl implements HubLink {
     }) => void | Promise<void>,
   ): void
   on(
-    event: 'task' | 'message' | 'closed' | 'pull' | 'receipt',
+    event: 'rpc',
+    handler: (call: { method: string; params: unknown }) => Promise<unknown>,
+  ): void
+  on(
+    event: 'task' | 'message' | 'closed' | 'pull' | 'receipt' | 'rpc',
     handler: unknown,
   ): void {
     switch (event) {
@@ -651,6 +737,17 @@ class WebSocketHubLinkImpl implements HubLink {
           kind: 'read' | 'rejected'
           reason?: string
         }) => void | Promise<void>
+        return
+      case 'rpc':
+        if (this.rpcHandler) {
+          throw new Error(
+            `HubLink: 'rpc' handler already registered (only one allowed per link)`,
+          )
+        }
+        this.rpcHandler = handler as (call: {
+          method: string
+          params: unknown
+        }) => Promise<unknown>
         return
     }
   }

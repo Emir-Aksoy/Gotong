@@ -173,6 +173,18 @@ export interface InstallPeerLinkOptions {
    * See `PeerLinkAcl` for the policy fields.
    */
   acl?: PeerLinkAcl
+  /**
+   * #2-M3 — responder for inbound `rpc(method, params)` calls from the
+   * peer (the generic HubLink RPC seam). When set, it's wired as the
+   * link's single `'rpc'` handler; its return value is sent back to the
+   * caller, a throw surfaces as a rejection on their side. When unset,
+   * inbound rpcs are answered with "peer has no rpc handler".
+   *
+   * The cross-hub MCP proxy supplies one of these (host side); the seam
+   * itself carries no MCP semantics. Keep the handler's own auth/ACL
+   * inside the responder — `installPeerLink` only gates Task dispatch.
+   */
+  rpcResponder?: (call: { method: string; params: unknown }) => Promise<unknown>
 }
 
 export interface InstalledPeerLink {
@@ -314,6 +326,14 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
       }
     }
   })
+
+  // ─── RPC (#2-M3): peer makes a fine-grained request/response call ──
+  // Only wired when the host opts in with a responder (e.g. the cross-hub
+  // MCP proxy). The seam stays inert otherwise — an unwired link answers
+  // inbound rpcs with "peer has no rpc handler".
+  if (opts.rpcResponder) {
+    opts.link.on('rpc', opts.rpcResponder)
+  }
 
   // pullNow: ask the peer for whatever they have about us, append to
   // our inbound ledger (idempotent — same entry id is upserted).

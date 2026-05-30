@@ -110,6 +110,20 @@ export interface HubLink {
     reason?: string
   }): Promise<void>
 
+  /**
+   * #2-M3 — fine-grained request/response RPC to the peer hub. Unlike
+   * `dispatch` (Task semantics, broad), this is a narrow call: the peer's
+   * registered `'rpc'` handler runs and its return value comes back as the
+   * resolved value. `method` namespaces the call (e.g. `'mcp.listTools'`);
+   * `params` and the return value must be JSON-serializable.
+   *
+   * REJECTS (not a soft failure result) when the link is not open, the
+   * call times out, the peer registered no `'rpc'` handler, or the
+   * handler threw. The generic seam underpins the cross-hub MCP proxy but
+   * carries no MCP semantics itself — those live in the responder.
+   */
+  rpc(method: string, params: unknown): Promise<unknown>
+
   on(event: 'task', handler: (task: Task) => Promise<TaskResult>): void
   on(event: 'message', handler: (msg: Message) => void): void
   on(event: 'closed', handler: () => void): void
@@ -138,6 +152,15 @@ export interface HubLink {
       reason?: string
     }) => void | Promise<void>,
   ): void
+  /**
+   * #2-M3 — handler invoked when the PEER calls `rpc(method, params)` over
+   * this link. Returns the value to send back; throwing surfaces as a
+   * rejection on the caller's side. Only one handler per link.
+   */
+  on(
+    event: 'rpc',
+    handler: (call: { method: string; params: unknown }) => Promise<unknown>,
+  ): void
 }
 
 // ─── inproc implementation ────────────────────────────────────────────────
@@ -156,6 +179,7 @@ class InprocHubLinkImpl implements HubLink {
     kind: 'read' | 'rejected'
     reason?: string
   }) => void | Promise<void>
+  private rpcHandler?: (call: { method: string; params: unknown }) => Promise<unknown>
   private messageHandlers: Array<(msg: Message) => void> = []
   private closedHandlers: Array<() => void> = []
 
@@ -249,6 +273,21 @@ class InprocHubLinkImpl implements HubLink {
     }
   }
 
+  async rpc(method: string, params: unknown): Promise<unknown> {
+    if (this._status !== 'open') {
+      throw new Error(`link_${this._status}`)
+    }
+    const handler = this.peer?.rpcHandler
+    if (!handler) {
+      throw new Error(`peer '${this.peerId}' has no rpc handler`)
+    }
+    // Round-trip through JSON like the ws transport would, so inproc and
+    // ws share identical "only serializable data crosses" semantics — a
+    // handler that returns a class instance / function fails the same way
+    // in tests as it would over the wire.
+    return handler({ method, params: JSON.parse(JSON.stringify(params ?? null)) })
+  }
+
   on(event: 'task', handler: (task: Task) => Promise<TaskResult>): void
   on(event: 'message', handler: (msg: Message) => void): void
   on(event: 'closed', handler: () => void): void
@@ -265,7 +304,11 @@ class InprocHubLinkImpl implements HubLink {
     }) => void | Promise<void>,
   ): void
   on(
-    event: 'task' | 'message' | 'closed' | 'pull' | 'receipt',
+    event: 'rpc',
+    handler: (call: { method: string; params: unknown }) => Promise<unknown>,
+  ): void
+  on(
+    event: 'task' | 'message' | 'closed' | 'pull' | 'receipt' | 'rpc',
     handler: unknown,
   ): void {
     switch (event) {
@@ -304,6 +347,17 @@ class InprocHubLinkImpl implements HubLink {
           kind: 'read' | 'rejected'
           reason?: string
         }) => void | Promise<void>
+        return
+      case 'rpc':
+        if (this.rpcHandler) {
+          throw new Error(
+            `HubLink: 'rpc' handler already registered (only one allowed per link)`,
+          )
+        }
+        this.rpcHandler = handler as (call: {
+          method: string
+          params: unknown
+        }) => Promise<unknown>
         return
     }
   }
