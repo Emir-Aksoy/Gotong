@@ -40,6 +40,7 @@ import { handleServicesRoute } from './services-routes.js'
 import { handleUploadsRoute } from './uploads-routes.js'
 import { handleSetupRoute } from './setup-routes.js'
 import { handleAdminRoute } from './admin-routes.js'
+import { handleMcpRoute, type McpRegistrySurface } from './mcp-routes.js'
 
 export type {
   IdentitySurface,
@@ -54,6 +55,8 @@ export type {
   IdentityInvitationDTO,
   IdentityPeerReputationDTO,
 } from './identity-routes.js'
+
+export type { McpRegistrySurface } from './mcp-routes.js'
 
 /**
  * Reference web UI for AipeHub (v2.0 — file-first).
@@ -320,6 +323,14 @@ export interface WebServerOptions {
    * serves the rendered JSON for the request-derived base URL.
    */
   agentCard?: AgentCardSurface
+  /**
+   * #2-M2 — host-injected hub MCP registry surface. When wired, the
+   * `/api/admin/mcp-servers` routes install / list / uninstall MCP
+   * servers at hub scope, with live propagation to running agents. When
+   * absent, those routes 503. The host implements it over Space +
+   * LocalAgentPool (see `packages/host/src/main.ts`).
+   */
+  mcpRegistry?: McpRegistrySurface
 }
 
 /**
@@ -596,6 +607,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     reputation: opts.reputation,
     uploads: opts.uploads,
     agentCard: opts.agentCard,
+    mcpRegistry: opts.mcpRegistry,
     httpStats: new HttpStats(),
   }
 
@@ -721,6 +733,8 @@ interface HandlerCtx {
   uploads: UploadSurface | undefined
   /** R3 — see WebServerOptions.agentCard doc above. */
   agentCard: AgentCardSurface | undefined
+  /** #2-M2 — see WebServerOptions.mcpRegistry doc above. */
+  mcpRegistry: McpRegistrySurface | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -1413,6 +1427,18 @@ async function handle(
     const handled = await handleUploadsRoute(
       {
         uploads: ctx.uploads,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // Hub MCP server registry (install / list / uninstall) in mcp-routes.ts.
+  if (path.startsWith('/api/admin/mcp-servers')) {
+    const handled = await handleMcpRoute(
+      {
+        mcpRegistry: ctx.mcpRegistry,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req, res, method, path,

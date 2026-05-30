@@ -65,7 +65,7 @@ import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-import { Hub, Space, createLogger, type SpaceConfig, type Task, type TranscriptEntry } from '@aipehub/core'
+import { Hub, Space, createLogger, type McpServerSpec, type SpaceConfig, type Task, type TranscriptEntry } from '@aipehub/core'
 import {
   AUDIT_ACTIONS,
   loadOrCreateMasterKey,
@@ -919,11 +919,31 @@ async function main(): Promise<void> {
       ),
   }
 
+  // #2-M2 — hub MCP server registry surface: persist to the Space +
+  // propagate live into running opted-in agents via LocalAgentPool.
+  const mcpRegistry = {
+    list: () => space.mcpServers(),
+    install: async (spec: McpServerSpec, description?: string) => {
+      const stored = await space.upsertMcpServer({
+        spec,
+        ...(description ? { description } : {}),
+      })
+      await localAgents.installMcpServer(stored)
+      return stored
+    },
+    uninstall: async (name: string) => {
+      const removed = await space.removeMcpServer(name)
+      if (removed) await localAgents.uninstallMcpServer(name)
+      return removed
+    },
+  }
+
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
     cookieSecure: config.cookieSecure,
     lifecycle: localAgents,
+    mcpRegistry,
     workflows: workflowController,
     // Phase 13 M3 — null when no API key / disabled. Web responds 503
     // on /api/admin/workflows/assist in that case so the UI can hide
