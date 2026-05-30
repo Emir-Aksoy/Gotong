@@ -5,6 +5,7 @@ import {
   type ManagedAgentLifecycle,
   type ManagedAgentSpec,
   type McpServerSpec,
+  type HubMcpServerRecord,
   type ParticipantId,
   type ServiceUseSpec,
   type Space,
@@ -353,6 +354,105 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       log.info('agent removed — services soft-deleted', { id, trashed, failed })
     } catch (err) {
       log.error('services soft-delete failed', { id, err })
+    }
+  }
+
+  /**
+   * Propagate a hub-registry MCP server **install** to every running
+   * agent that opts into it (`useMcpServers`), live where possible:
+   *
+   *   - agent already has a toolset → hot add/replace the server on it
+   *     (visible on its next task — LlmAgent re-lists tools per task,
+   *     so no respawn needed);
+   *   - agent opted in BEFORE the server existed → it has no toolset
+   *     yet, so respawn it to build one that now includes the server.
+   *
+   * Agents that inline-override the same name are left alone (they
+   * chose their own copy). Per-agent failures are logged, never thrown
+   * — one wedged agent shouldn't block the install for the others.
+   */
+  async installMcpServer(record: HubMcpServerRecord): Promise<void> {
+    const name = record.spec.name
+    const byId = new Map((await this.space.agents()).map((a) => [a.id, a]))
+    for (const agentId of [...this.running.keys()]) {
+      const rec = byId.get(agentId)
+      const managed = rec?.managed
+      if (!managed?.useMcpServers?.includes(name)) continue
+      if (managed.mcpServers?.some((s) => s.name === name)) continue // inline override
+      const toolset = this.mcpToolsetForAgent.get(agentId)
+      if (toolset) {
+        try {
+          // Re-install (upsert) of a name the toolset already has →
+          // drop the stale one first so the new config takes effect.
+          if (toolset.serverNames().includes(name)) {
+            await toolset.removeServer(name)
+          }
+          await toolset.addServer(this.resolveRegistryConfig(record, agentId))
+          log.info('mcp server hot-added to running agent', { id: agentId, server: name })
+        } catch (err) {
+          log.error('mcp hot-add failed', { id: agentId, server: name, err })
+        }
+      } else if (rec) {
+        log.info('respawning agent to attach newly-installed mcp server', {
+          id: agentId,
+          server: name,
+        })
+        await this.respawnQuietly(rec)
+      }
+    }
+  }
+
+  /**
+   * Propagate a hub-registry MCP server **uninstall**: hot-remove it
+   * from every running agent that opts into it (and doesn't inline-
+   * override the name). Symmetric with {@link installMcpServer}.
+   */
+  async uninstallMcpServer(name: string): Promise<void> {
+    const byId = new Map((await this.space.agents()).map((a) => [a.id, a]))
+    for (const agentId of [...this.running.keys()]) {
+      const managed = byId.get(agentId)?.managed
+      if (!managed?.useMcpServers?.includes(name)) continue
+      if (managed.mcpServers?.some((s) => s.name === name)) continue // inline override, leave it
+      const toolset = this.mcpToolsetForAgent.get(agentId)
+      if (!toolset || !toolset.serverNames().includes(name)) continue
+      try {
+        await toolset.removeServer(name)
+        log.info('mcp server hot-removed from running agent', { id: agentId, server: name })
+      } catch (err) {
+        log.error('mcp hot-remove failed', { id: agentId, server: name, err })
+      }
+    }
+  }
+
+  /**
+   * The live MCP server names attached to a running agent's toolset (or
+   * `[]` if the agent has no toolset / isn't running). Names include
+   * dead servers — pair with the toolset's own status for liveness.
+   * Surfaced for ops + the admin UI (show what an agent currently has).
+   */
+  mcpServersForAgent(id: ParticipantId): string[] {
+    return this.mcpToolsetForAgent.get(id)?.serverNames() ?? []
+  }
+
+  /** Resolve a registry record's spec to a live config (creds expanded). */
+  private resolveRegistryConfig(record: HubMcpServerRecord, agentId: ParticipantId) {
+    return resolveMcpServerConfig(record.spec, envSecretSource, {
+      onMissingSecret: (varName, server) =>
+        log.warn('mcp env ref missing — expanded to empty string', {
+          agentId,
+          server,
+          var: varName,
+        }),
+    })
+  }
+
+  /** stop()+start() one agent, swallowing+logging errors (used by hot install). */
+  private async respawnQuietly(record: AgentRecord): Promise<void> {
+    try {
+      await this.stop(record.id)
+      await this.start(record)
+    } catch (err) {
+      log.error('agent respawn failed', { id: record.id, err })
     }
   }
 

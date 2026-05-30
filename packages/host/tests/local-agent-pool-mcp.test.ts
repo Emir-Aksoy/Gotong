@@ -464,6 +464,88 @@ describe('LocalAgentPool — agent with mcpServers attaches a toolset', () => {
     await pool.stopAll()
   })
 
+  it('installMcpServer hot-adds to a running agent that already has a toolset (M2)', async () => {
+    // Agent spawns WITH an inline toolset + opts into a not-yet-installed
+    // registry server (skipped at spawn → only the inline one is live).
+    await persistAgent({
+      id: 'hot-add-bot',
+      allowedCapabilities: ['draft'],
+      createdAt: new Date().toISOString(),
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'inline + opt-in',
+        mcpServers: [{ name: 'inline', command: process.execPath, args: [FAKE_MCP_SERVER] }],
+        useMcpServers: ['shared'],
+      },
+    })
+    const pool = new LocalAgentPool({ hub, space })
+    await pool.start()
+    expect(pool.mcpServersForAgent('hot-add-bot')).toEqual(['inline'])
+
+    // Install the registry server → it hot-adds to the live toolset.
+    const rec = await space.upsertMcpServer({
+      spec: { name: 'shared', command: process.execPath, args: [FAKE_MCP_SERVER] },
+    })
+    await pool.installMcpServer(rec)
+    expect(pool.mcpServersForAgent('hot-add-bot').sort()).toEqual(['inline', 'shared'])
+
+    // Uninstall → it's hot-removed again.
+    await pool.uninstallMcpServer('shared')
+    expect(pool.mcpServersForAgent('hot-add-bot')).toEqual(['inline'])
+    await pool.stopAll()
+  })
+
+  it('installMcpServer respawns an agent that had no toolset (opted into an absent server) (M2)', async () => {
+    // Agent opts into a server that doesn't exist yet → no toolset at spawn.
+    await persistAgent({
+      id: 'respawn-bot',
+      allowedCapabilities: ['draft'],
+      createdAt: new Date().toISOString(),
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'opt-in only',
+        useMcpServers: ['shared'],
+      },
+    })
+    const pool = new LocalAgentPool({ hub, space })
+    await pool.start()
+    expect(pool.mcpServersForAgent('respawn-bot')).toEqual([]) // no toolset yet
+
+    // Install → the agent is respawned and now has the server.
+    const rec = await space.upsertMcpServer({
+      spec: { name: 'shared', command: process.execPath, args: [FAKE_MCP_SERVER] },
+    })
+    await pool.installMcpServer(rec)
+    expect(hub.participant('respawn-bot')).toBeDefined() // came back up
+    expect(pool.mcpServersForAgent('respawn-bot')).toEqual(['shared'])
+    await pool.stopAll()
+  })
+
+  it('installMcpServer leaves agents that did NOT opt in untouched (M2)', async () => {
+    await persistAgent({
+      id: 'no-opt-in',
+      allowedCapabilities: ['draft'],
+      createdAt: new Date().toISOString(),
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'inline only, no opt-in',
+        mcpServers: [{ name: 'inline', command: process.execPath, args: [FAKE_MCP_SERVER] }],
+      },
+    })
+    const pool = new LocalAgentPool({ hub, space })
+    await pool.start()
+    const rec = await space.upsertMcpServer({
+      spec: { name: 'shared', command: process.execPath, args: [FAKE_MCP_SERVER] },
+    })
+    await pool.installMcpServer(rec)
+    // Unchanged — the agent didn't opt into 'shared'.
+    expect(pool.mcpServersForAgent('no-opt-in')).toEqual(['inline'])
+    await pool.stopAll()
+  })
+
   it('agent WITHOUT mcpServers spawns identically (no regression)', async () => {
     await persistAgent({
       id: 'plain',
