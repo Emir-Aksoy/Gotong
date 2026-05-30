@@ -571,3 +571,99 @@ describe('McpToolset — transport union (R4)', () => {
     }
   })
 })
+
+// =============================================================================
+// Runtime add/remove (R5) — mutate a toolset's server set after construction,
+// the seam that makes "install an integration" a live action.
+// =============================================================================
+
+describe('McpToolset — runtime addServer / removeServer (R5)', () => {
+  it('addServer before connect() joins the set + comes up on connect()', async () => {
+    const ts = new McpToolset({ servers: [makeFakeServerConfig('a')] })
+    await ts.addServer(makeFakeServerConfig('b'))
+    expect(ts.serverNames()).toEqual(['a', 'b'])
+    try {
+      await ts.connect()
+      expect(ts.status().every((r) => r.status === 'live')).toBe(true)
+    } finally {
+      await ts.disconnect()
+    }
+  })
+
+  it('addServer after connect() starts the child immediately + its tools appear', async () => {
+    const ts = new McpToolset({ servers: [makeFakeServerConfig('a')] })
+    try {
+      await ts.connect()
+      expect((await ts.listTools()).every((t) => t.serverName === 'a')).toBe(true)
+
+      await ts.addServer(makeFakeServerConfig('b'))
+      expect(ts.status().find((r) => r.name === 'b')?.status).toBe('live')
+
+      // The new server's tools show up on the next listTools().
+      const tools = await ts.listTools()
+      expect(tools.some((t) => t.serverName === 'b')).toBe(true)
+      // And it's callable.
+      const res = await ts.callTool('b__echo', { text: 'hi' })
+      expect(res.isError).toBeFalsy()
+    } finally {
+      await ts.disconnect()
+    }
+  })
+
+  it('addServer rejects a duplicate name', async () => {
+    const ts = new McpToolset({ servers: [makeFakeServerConfig('a')] })
+    await expect(ts.addServer(makeFakeServerConfig('a'))).rejects.toMatchObject({
+      kind: 'duplicate_server',
+      serverName: 'a',
+    })
+  })
+
+  it('addServer rejects a malformed name', async () => {
+    const ts = new McpToolset({ servers: [makeFakeServerConfig('a')] })
+    await expect(
+      ts.addServer({ name: '1bad', command: 'x' }),
+    ).rejects.toMatchObject({ kind: 'bad_tool_name' })
+  })
+
+  it('removeServer stops the child + drops it from the set', async () => {
+    const ts = new McpToolset({
+      servers: [makeFakeServerConfig('a'), makeFakeServerConfig('b')],
+    })
+    try {
+      await ts.connect()
+      await ts.removeServer('b')
+      expect(ts.serverNames()).toEqual(['a'])
+      // The remaining server still works.
+      expect((await ts.listTools()).every((t) => t.serverName === 'a')).toBe(true)
+      // Calling the removed server now raises unknown_tool.
+      await expect(ts.callTool('b__echo', {})).rejects.toMatchObject({
+        kind: 'unknown_tool',
+      })
+    } finally {
+      await ts.disconnect()
+    }
+  })
+
+  it('removeServer is idempotent — removing an absent name is a no-op', async () => {
+    const ts = new McpToolset({ servers: [makeFakeServerConfig('a')] })
+    try {
+      await ts.connect()
+      await expect(ts.removeServer('ghost')).resolves.toBeUndefined()
+      expect(ts.serverNames()).toEqual(['a'])
+    } finally {
+      await ts.disconnect()
+    }
+  })
+
+  it('addServer of a dead remote does not disturb the live servers', async () => {
+    const ts = new McpToolset({ servers: [makeFakeServerConfig('a')] })
+    try {
+      await ts.connect()
+      await ts.addServer({ name: 'remote', transport: 'http', url: 'not a url' })
+      expect(ts.status().find((r) => r.name === 'a')?.status).toBe('live')
+      expect(ts.status().find((r) => r.name === 'remote')?.status).toBe('dead')
+    } finally {
+      await ts.disconnect()
+    }
+  })
+})

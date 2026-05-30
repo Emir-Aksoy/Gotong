@@ -251,6 +251,8 @@ a stdio spawn failure.
 |---|---|---|
 | `connect()` | `Promise<void>` | Spawns every server in parallel. Idempotent. A server that fails to spawn becomes `dead` but doesn't tank the toolset. |
 | `disconnect()` | `Promise<void>` | Shuts every live server down. Idempotent. |
+| `addServer(config)` | `Promise<void>` | Add a server at runtime. If already connected, it starts immediately (one child/socket). Rejects a duplicate/malformed name. `listTools()` again to pick up its tools. |
+| `removeServer(name)` | `Promise<void>` | Stop + drop a server at runtime. Idempotent (absent name → no-op). |
 | `listTools()` | `Promise<NamespacedTool[]>` | Merged tool list across live servers; dead servers contribute nothing. |
 | `callTool(name, args)` | `Promise<CallToolResult>` | Routes by `<server>__<tool>` prefix. Throws `McpClientError` with a discriminated `.kind` on failure. |
 | `status()` | `ServerStatusReport[]` | Per-server liveness snapshot; use for healthz / monitoring. |

@@ -166,25 +166,7 @@ export class McpToolset extends EventEmitter {
     }
     this.servers = new Map()
     for (const cfg of opts.servers) {
-      if (this.servers.has(cfg.name)) {
-        throw new McpClientError(
-          'duplicate_server',
-          `server name '${cfg.name}' is declared twice in the same toolset`,
-          { serverName: cfg.name },
-        )
-      }
-      if (!SERVER_NAME_RE.test(cfg.name)) {
-        throw new McpClientError(
-          'bad_tool_name',
-          `server name '${cfg.name}' must match ${SERVER_NAME_RE} (used as a tool-name prefix)`,
-          { serverName: cfg.name },
-        )
-      }
-      this.servers.set(cfg.name, {
-        config: cfg,
-        status: 'idle',
-        tools: [],
-      })
+      this.register(cfg)
     }
     this.listToolsTimeoutMs = opts.listToolsTimeoutMs ?? 10_000
     this.callToolTimeoutMs = opts.callToolTimeoutMs ?? 60_000
@@ -228,6 +210,70 @@ export class McpToolset extends EventEmitter {
     }
     await Promise.all(tasks)
     this.connectCalled = false
+  }
+
+  /**
+   * Add a server to a toolset at runtime. If the toolset is already
+   * connected, the new server is spawned/connected immediately (one
+   * child process / one socket); otherwise it just joins the set and
+   * comes up on the next `connect()`.
+   *
+   * This is what makes "install an integration" a live action: a host
+   * can add an MCP server to a running agent's toolset without
+   * respawning the agent. Call `listTools()` afterwards to pick up the
+   * new server's tools (the result isn't cached across an add).
+   *
+   * Rejects a duplicate or malformed `name` (same invariant as the
+   * constructor). Like `connect()`, a server that fails to start is
+   * marked `dead` rather than throwing — check `.status()` after.
+   */
+  async addServer(config: McpServerConfig): Promise<void> {
+    const state = this.register(config)
+    if (this.connectCalled) {
+      await this.startOne(state)
+    }
+  }
+
+  /**
+   * Remove a server from the toolset at runtime, shutting its child
+   * process / socket down if live. Idempotent: removing a name that
+   * isn't in the toolset is a no-op.
+   *
+   * Note: removing a server with a `callTool` in flight against it will
+   * make that call fail (the transport closes underneath it) — removal
+   * is inherently racy with concurrent calls, by design.
+   */
+  async removeServer(name: string): Promise<void> {
+    const state = this.servers.get(name)
+    if (!state) return
+    await this.stopOne(state)
+    this.servers.delete(name)
+  }
+
+  /**
+   * Validate a server config's `name` (unique + tool-name-prefix regex)
+   * and register an idle `ServerState` for it. Shared by the
+   * constructor and `addServer`. Returns the new state so `addServer`
+   * can start it.
+   */
+  private register(config: McpServerConfig): ServerState {
+    if (this.servers.has(config.name)) {
+      throw new McpClientError(
+        'duplicate_server',
+        `server name '${config.name}' is declared twice in the same toolset`,
+        { serverName: config.name },
+      )
+    }
+    if (!SERVER_NAME_RE.test(config.name)) {
+      throw new McpClientError(
+        'bad_tool_name',
+        `server name '${config.name}' must match ${SERVER_NAME_RE} (used as a tool-name prefix)`,
+        { serverName: config.name },
+      )
+    }
+    const state: ServerState = { config, status: 'idle', tools: [] }
+    this.servers.set(config.name, state)
+    return state
   }
 
   /**
