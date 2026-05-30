@@ -116,6 +116,7 @@
       <button class="tabbar-btn" type="button" data-tab="tasks"     data-roles="owner,admin" data-i18n="tabTasks">任务</button>
       <button class="tabbar-btn" type="button" data-tab="activity"  data-roles="owner,admin" data-i18n="tabActivity">活动</button>
       <button class="tabbar-btn" type="button" data-tab="services"  data-roles="owner,admin" data-i18n="tabServices">服务</button>
+      <button class="tabbar-btn" type="button" data-tab="mcp"       data-roles="owner,admin" data-i18n="tabMcp">MCP</button>
       <button class="tabbar-btn" type="button" data-tab="users"     data-roles="owner" data-i18n="tabUsers">用户</button>
       <button class="tabbar-btn" type="button" data-tab="quotas"    data-roles="owner" data-i18n="tabQuotas">配额</button>
       <button class="tabbar-btn" type="button" data-tab="reputation" data-roles="owner" data-i18n="tabReputation">信誉</button>
@@ -843,6 +844,74 @@
           </thead>
           <tbody id="services-audit-tbody"></tbody>
         </table>
+      </section>
+
+      <!-- #2-M4 — hub MCP server registry. Install external MCP servers
+           here; agents opt in by name (useMcpServers, in their Edit form)
+           to get the tools at spawn / live. Disabled state shows when the
+           host didn't wire the registry surface (GET → 503). -->
+      <section id="mcp" class="managed-agents" data-tab="mcp">
+        <h2><span data-i18n="mcpPanel">MCP 集成</span></h2>
+        <p class="hint" data-i18n="mcpIntro">把外部 MCP server 装进 hub，智能体在「编辑」表单里按名勾选即可调用其工具。凭证请用 ${ENV} 引用，别填明文。</p>
+        <div id="mcp-disabled" class="empty-state" hidden data-i18n="mcpDisabled">此主机未启用 MCP 注册表</div>
+        <div id="mcp-empty" class="empty-state" hidden data-i18n="mcpEmpty">尚未安装任何 MCP server</div>
+        <table id="mcp-table" class="services-table" hidden>
+          <thead>
+            <tr>
+              <th data-i18n="mcpName">名称</th>
+              <th data-i18n="mcpTransport">传输</th>
+              <th data-i18n="mcpTarget">目标</th>
+              <th data-i18n="mcpDescriptionCol">说明</th>
+              <th data-i18n="servicesActions">操作</th>
+            </tr>
+          </thead>
+          <tbody id="mcp-tbody"></tbody>
+        </table>
+
+        <h2 style="margin-top:1.4rem"><span data-i18n="mcpInstallTitle">安装 MCP server</span></h2>
+        <form id="mcp-form" class="dispatch-form">
+          <label>
+            <span data-i18n="mcpName">名称</span>
+            <input id="mcp-name" autocomplete="off" required maxlength="64" placeholder="filesystem" />
+          </label>
+          <label>
+            <span data-i18n="mcpTransport">传输</span>
+            <select id="mcp-transport">
+              <option value="stdio">stdio</option>
+              <option value="http">http</option>
+              <option value="sse">sse</option>
+            </select>
+          </label>
+          <!-- stdio fields — local subprocess. JS toggles these vs the
+               remote (http/sse) group on transport change. -->
+          <label class="mcp-stdio-only">
+            <span data-i18n="mcpCommand">命令</span>
+            <input id="mcp-command" autocomplete="off" placeholder="npx" />
+          </label>
+          <label class="mcp-stdio-only">
+            <span data-i18n="mcpArgs">参数（空格分隔）</span>
+            <input id="mcp-args" autocomplete="off" placeholder="-y @modelcontextprotocol/server-filesystem /data" />
+          </label>
+          <label class="mcp-stdio-only">
+            <span data-i18n="mcpEnv">环境变量（每行 KEY=值）</span>
+            <textarea id="mcp-env" rows="2" placeholder="API_KEY=${MCP_PAT}"></textarea>
+          </label>
+          <!-- http/sse fields — remote endpoint. -->
+          <label class="mcp-remote-only" hidden>
+            <span data-i18n="mcpUrl">URL</span>
+            <input id="mcp-url" type="url" autocomplete="off" placeholder="https://mcp.example.com/sse" />
+          </label>
+          <label class="mcp-remote-only" hidden>
+            <span data-i18n="mcpHeaders">请求头（每行 名称=值）</span>
+            <textarea id="mcp-headers" rows="2" placeholder="Authorization=Bearer ${MCP_TOKEN}"></textarea>
+          </label>
+          <label>
+            <span data-i18n="mcpDescriptionField">说明（可选）</span>
+            <input id="mcp-desc" autocomplete="off" maxlength="200" />
+          </label>
+          <button type="submit" data-i18n="mcpInstallBtn">安装</button>
+          <p id="mcp-form-msg" class="form-msg"></p>
+        </form>
       </section>
 
       <!-- v4 identity / user management. Content rendered entirely by

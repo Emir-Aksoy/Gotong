@@ -11,6 +11,7 @@
  * lands with zero behavior change.
  */
 import { createServices } from './services.js'
+import { createMcp } from './mcp.js'
 import { createManagedAgents } from './managed-agents.js'
 import { createWorkflows } from './workflows.js'
 
@@ -100,6 +101,10 @@ import { createWorkflows } from './workflows.js'
   // managed-agent list the Agents tab populates. Created once; init and
   // applyEvent call the returned entry points (services.refreshServices etc).
   const services = createServices(ma)
+  // MCP integration tab lives in admin-src/mcp.js (#2-M4). Self-contained
+  // — list / install / uninstall against /api/admin/mcp-servers, no shared
+  // state beyond window.AipeHub helpers. Lazy-loaded on first tab focus.
+  const mcp = createMcp()
   // Managed Agents tab lives in admin-src/managed-agents.js (P3 Phase 2,
   // second ES-module split). It drives the shared `dom` cache, so we hand
   // it the resolved `dom` via setDom() right after resolveDom(); the
@@ -1902,6 +1907,9 @@ import { createWorkflows } from './workflows.js'
     // refreshGrowthReports() later in boot, so no deep-link catch-up needed.
     window.addEventListener('aipehub:tabchange', (e) => {
       if (e.detail?.name === 'workflows') refreshGrowthReports().catch(() => {})
+      // MCP tab (#2-M4): lazy-refresh the registry list on every focus so
+      // installs/uninstalls from another window get picked up.
+      if (e.detail?.name === 'mcp') mcp.refreshMcp().catch((err) => console.warn('mcp refresh failed:', err))
     })
 
     dom.dStrategy.addEventListener('change', updateDispatchVisibility)
@@ -2232,6 +2240,19 @@ import { createWorkflows } from './workflows.js'
     })
     if (document.body.dataset.activeTab === 'services') {
       services.refreshServices().catch((err) => console.warn('services initial load failed:', err))
+    }
+
+    // MCP integration tab (#2-M4). Per-focus refresh rides the canonical
+    // aipehub:tabchange listener above; here we wire the install form + the
+    // stdio/remote field toggle once, set the initial field visibility, and
+    // populate on a deep link straight into #mcp.
+    const mcpForm = document.getElementById('mcp-form')
+    if (mcpForm) mcpForm.addEventListener('submit', (e) => mcp.submitMcpForm(e))
+    const mcpTransport = document.getElementById('mcp-transport')
+    if (mcpTransport) mcpTransport.addEventListener('change', () => mcp.syncMcpTransportFields())
+    mcp.syncMcpTransportFields()
+    if (document.body.dataset.activeTab === 'mcp') {
+      mcp.refreshMcp().catch((err) => console.warn('mcp initial load failed:', err))
     }
 
     const sweepBtn = document.getElementById('services-sweep-btn')
