@@ -312,6 +312,25 @@ export interface WebServerOptions {
    * the submit-time upload will surface a clear error.
    */
   uploads?: UploadSurface
+  /**
+   * R3 (A2A alignment) — host-injected Agent Card renderer. When wired,
+   * `GET /.well-known/agent-card.json` serves the A2A discovery document
+   * (public, unauthenticated). When absent, that route 404s. The host
+   * builds the card (see `packages/host/src/agent-card.ts`); web only
+   * serves the rendered JSON for the request-derived base URL.
+   */
+  agentCard?: AgentCardSurface
+}
+
+/**
+ * Narrow host-injected surface for the A2A Agent Card (R3). The host owns
+ * the card's content (identity + auth scheme); web passes it the public
+ * base URL derived from the request so the card's `url` reflects how the
+ * client actually reached the hub.
+ */
+export interface AgentCardSurface {
+  /** Render the Agent Card as a JSON string for the given public base URL. */
+  json(baseUrl: string): string
 }
 
 /**
@@ -576,6 +595,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     peerRegistry: opts.peerRegistry,
     reputation: opts.reputation,
     uploads: opts.uploads,
+    agentCard: opts.agentCard,
     httpStats: new HttpStats(),
   }
 
@@ -699,6 +719,8 @@ interface HandlerCtx {
   reputation: WebServerOptions['reputation'] | undefined
   /** Phase 9 M4 — see WebServerOptions.uploads doc above. */
   uploads: UploadSurface | undefined
+  /** R3 — see WebServerOptions.agentCard doc above. */
+  agentCard: AgentCardSurface | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -953,6 +975,37 @@ async function handle(
       res.writeHead(503, { 'content-type': 'application/json' })
       res.end(JSON.stringify({ error: 'starting' }))
     }
+    return
+  }
+
+  // --- A2A Agent Card (R3) — public discovery document ------------------
+  // Unauthenticated by design: /.well-known/* is a public convention and
+  // the conservative card carries only identity + auth-scheme declaration
+  // (no skills, no participant enumeration). 404 when the host didn't
+  // wire it (federation off / library use).
+  if (path === '/.well-known/agent-card.json') {
+    if (method !== 'GET') {
+      res.writeHead(405, { 'content-type': 'application/json', allow: 'GET' })
+      res.end(JSON.stringify({ error: 'method not allowed' }))
+      return
+    }
+    if (!ctx.agentCard) {
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'agent card not enabled' }))
+      return
+    }
+    // Request-derived base URL so the card's `url` reflects how the client
+    // actually reached us (correct behind a reverse proxy that sets
+    // X-Forwarded-Proto). Falls back to http on direct connections.
+    const xfProto = req.headers['x-forwarded-proto']
+    const fwdProto = (Array.isArray(xfProto) ? xfProto[0] : xfProto)?.split(',')[0]?.trim()
+    const proto = (ctx.trustProxy && fwdProto) || 'http'
+    const baseUrl = `${proto}://${req.headers.host ?? 'localhost'}`
+    res.writeHead(200, {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'public, max-age=300',
+    })
+    res.end(ctx.agentCard.json(baseUrl))
     return
   }
 

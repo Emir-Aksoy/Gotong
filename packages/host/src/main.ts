@@ -76,6 +76,7 @@ import {
 import { OrgApiPool } from './org-api-pool.js'
 
 import { BAKED_VERSION } from './version.js'
+import { buildAgentCard } from './agent-card.js'
 
 const log = createLogger('host')
 import { serveWebSocket } from '@aipehub/transport-ws'
@@ -897,6 +898,27 @@ async function main(): Promise<void> {
   // hold the pod in `NotReady` during the resume grace window instead
   // of restarting it.
   let bootReady = false
+
+  // R3 (A2A alignment) — Agent Card discovery surface. Conservative card:
+  // identity + auth scheme only, no skills (see agent-card.ts). Served
+  // public at /.well-known/agent-card.json. Bearer is advertised whenever
+  // inbound peer auth is active (peer registry on).
+  const cardMeta = await space.meta()
+  const agentCard = {
+    json: (baseUrl: string): string =>
+      JSON.stringify(
+        buildAgentCard({
+          name: cardMeta.name || cardMeta.hubId || 'AipeHub',
+          version: BAKED_VERSION,
+          url: baseUrl,
+          description: cardMeta.description,
+          authSchemes: peerRegistry ? ['bearer'] : [],
+        }),
+        null,
+        2,
+      ),
+  }
+
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
@@ -914,6 +936,8 @@ async function main(): Promise<void> {
     // handled by /api/admin/uploads with a clean 503.
     ...(uploads ? { uploads } : {}),
     growthReports,
+    // R3 — A2A Agent Card discovery (public /.well-known/agent-card.json).
+    agentCard,
     ...(allowedHosts ? { allowedHosts } : {}),
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },
     readinessGate: { isReady: () => bootReady },
