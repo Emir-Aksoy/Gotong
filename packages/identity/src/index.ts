@@ -10,7 +10,8 @@
  */
 
 export { openIdentityStore, IdentityStore } from './store.js'
-export type { VaultMutationReason } from './store.js'
+// R13 — vault domain extracted to vault-store.ts; the type lives there now.
+export type { VaultMutationReason } from './vault-store.js'
 // Phase 7 M4 — org-mode + general org-meta surface for the SPA shell
 // switch (personal vs team) and any future org-wide scalar config.
 export type OrgMode = 'personal' | 'team'

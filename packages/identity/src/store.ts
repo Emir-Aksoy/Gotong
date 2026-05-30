@@ -47,14 +47,12 @@ import {
   newSessionToken,
 } from './tokens.js'
 import { IdentityError } from './errors.js'
-import { decryptSecret, encryptSecret } from './crypto.js'
+import { VaultStore, type VaultMutationReason } from './vault-store.js'
 import {
   AUDIT_ACTIONS,
-  OWNER_KINDS,
   ROLES,
   USAGE_METRIC_MAX_LEN,
   USAGE_PERIODS,
-  VAULT_KINDS,
   type AcceptInvitationInput,
   type AuditAction,
   type AuditActorSource,
@@ -206,19 +204,6 @@ interface InvitationRow {
   accepted_at: number | null
   accepted_user_id: string | null
 }
-interface VaultRow {
-  id: string
-  kind: string
-  owner_kind: string
-  owner_id: string | null
-  label: string | null
-  secret_enc: string
-  metadata: string | null
-  created_at: number
-  last_used_at: number | null
-  revoked_at: number | null
-}
-
 const AUDIT_ACTOR_SOURCES: readonly AuditActorSource[] = [
   'v4-session',
   'v4-bearer',
@@ -368,39 +353,14 @@ function isUniqueViolation(err: unknown): boolean {
   return /UNIQUE constraint failed/.test(err.message)
 }
 
-/**
- * Audit #145 — values fired through `onVaultMutation`. Lets consumers
- * (OrgApiPool, future caches) tell apart "a row appeared" vs "a row
- * was retired" if they want different invalidation strategies. The
- * default consumer just flushes its cache regardless.
- */
-export type VaultMutationReason = 'create' | 'revoke'
-
 export class IdentityStore {
   private readonly db: SqliteDb
   private readonly defaultSessionTtlMs: number
-  /**
-   * A1 — present iff the caller passed `masterKey` to openIdentityStore.
-   * Vault APIs throw `vault_not_configured` when this is undefined.
-   * Kept as a field (not a closure capture) so methods can check it
-   * uniformly via a single `requireMasterKey()` helper.
-   */
-  private readonly masterKey?: Buffer
-  // Vault prepared statements — lazy because they're only allocated for
-  // hosts that actually use vault APIs. better-sqlite3's per-db statement
-  // cache makes the first prepare ~zero-cost; we just don't want to
-  // allocate them on every IdentityStore even when vault is unused.
-  private _stmtVaultInsert?: SqliteStmt
-  private _stmtVaultById?: SqliteStmt
-  private _stmtVaultTouch?: SqliteStmt
-  private _stmtVaultRevoke?: SqliteStmt
-
-  // Audit #145 — vault-mutation subscribers. OrgApiPool / future cache
-  // layers subscribe here; the store fires after every successful
-  // createVaultEntry / revokeVaultEntry / update so consumers can flush
-  // their memoised secrets without polling. Stored as a Set so an
-  // unsubscribe call can remove without an index search.
-  private readonly vaultMutationListeners = new Set<(reason: VaultMutationReason) => void>()
+  // R13 — the vault domain (AES-256-GCM secret storage) lives in its own
+  // VaultStore. IdentityStore composes one and forwards the public vault
+  // methods, so callers see no API change. masterKey + vault prepared
+  // statements + mutation listeners all moved with it.
+  private readonly vault: VaultStore
 
   // D1 — peer registry prepared statements. Lazy for the same reason
   // as vault (hosts without federation don't allocate).
@@ -511,9 +471,10 @@ export class IdentityStore {
   constructor(db: SqliteDb, defaultSessionTtlMs: number, masterKey?: Buffer) {
     this.db = db
     this.defaultSessionTtlMs = defaultSessionTtlMs
-    // Stored only when explicitly provided so vault APIs can detect
-    // "host didn't configure encryption" vs "wrong key supplied".
-    if (masterKey !== undefined) this.masterKey = masterKey
+    // R13 — vault domain extracted. VaultStore owns the masterKey (and
+    // detects "host didn't configure encryption" vs "wrong key supplied")
+    // plus its own lazy prepared statements + mutation listeners.
+    this.vault = new VaultStore(db, masterKey)
 
     this.stmtUserById = db.prepare('SELECT * FROM users WHERE id = ?')
     this.stmtUserByEmail = db.prepare('SELECT * FROM users WHERE email = ?')
@@ -2102,370 +2063,36 @@ export class IdentityStore {
   }
 
   // =====================================================================
-  // Vault (A1 — Phase 5 encrypted application-layer secret storage)
+  // Vault (A1 — Phase 5 encrypted secret storage) — extracted to VaultStore
   //
-  // Design notes:
-  //   - Distinct from `credentials` (one-way hashed login material).
-  //     Vault rows are AES-256-GCM encrypted and CAN be decrypted —
-  //     the host re-presents these secrets to upstream services.
-  //   - `createVaultEntry` / `readVaultSecret` / `revokeVaultEntry` all
-  //     require `masterKey` was supplied at openIdentityStore time;
-  //     otherwise they throw `vault_not_configured`. Listing is allowed
-  //     without a key because list results omit secret material.
-  //   - `revokeVaultEntry` is a soft delete (sets `revoked_at`) — rows
-  //     stay queryable for audit. The active hot path filters by
-  //     `revoked_at IS NULL`.
-  //   - Audit writes belong to the CALLING layer (web / OrgApiPool), not
-  //     the store. The store doesn't know who's calling, what surface
-  //     authenticated them, or whether the operation is admin-initiated
-  //     vs internal — the caller has that context.
+  // R13 — the implementation (encryption, prepared statements, mutation
+  // listeners, masterKey gating) moved to vault-store.ts. These thin
+  // forwarders keep IdentityStore's public surface unchanged; see
+  // VaultStore for the full design notes.
   // =====================================================================
 
-  /**
-   * Insert a new vault entry. Returns the row metadata WITHOUT the
-   * encrypted blob (list / get use the same shape). The plaintext
-   * `secret` is encrypted with the configured master key before
-   * touching disk.
-   *
-   * Validation:
-   *   - `kind` and `ownerKind` must be enum members; otherwise
-   *     `invalid_input`.
-   *   - `ownerKind === 'org'` requires `ownerId` to be null/undefined
-   *     (the host is the implicit org owner; explicit ids are rejected
-   *     to prevent silent misclassification).
-   *   - `ownerKind === 'user' | 'peer'` requires a non-empty `ownerId`.
-   *   - `secret` must be a non-empty string. Provider-format validation
-   *     is the caller's job (we don't know what `sk-ant-` should look
-   *     like for every kind).
-   *   - `metadata`, when present, is JSON-stringified and clamped to
-   *     8KB (same as audit_log).
-   */
   createVaultEntry(input: CreateVaultEntryInput): VaultEntry {
-    const key = this.requireMasterKey()
-    if (!input || typeof input !== 'object') {
-      throw new IdentityError({
-        code: 'invalid_input',
-        message: 'createVaultEntry input required',
-      })
-    }
-    if (!isVaultKind(input.kind)) {
-      throw new IdentityError({
-        code: 'invalid_input',
-        message: `vault kind must be one of ${VAULT_KINDS.join(', ')}; got ${JSON.stringify(input.kind)}`,
-      })
-    }
-    if (!isOwnerKind(input.ownerKind)) {
-      throw new IdentityError({
-        code: 'invalid_input',
-        message: `vault ownerKind must be one of ${OWNER_KINDS.join(', ')}; got ${JSON.stringify(input.ownerKind)}`,
-      })
-    }
-    // Owner-id shape gate, per the documented contract.
-    //
-    // Phase 6 #3 (multi-org): ownerKind='org' now accepts either:
-    //   - ownerId === null — primary / implicit-host org (legacy).
-    //     Single-tenant deployments stay here; nothing changed.
-    //   - ownerId === '<orgId>' — specific peer / sub-org. Lets one
-    //     host serve multiple orgs by scoping vault rows per orgId.
-    //     OrgApiPool instances are constructed with the matching
-    //     orgId and only see rows for that scope.
-    // ownerKind='user'/'peer' still require non-empty ownerId.
-    const ownerId = input.ownerId ?? null
-    if (input.ownerKind === 'org') {
-      if (ownerId !== null && (typeof ownerId !== 'string' || ownerId.length === 0)) {
-        throw new IdentityError({
-          code: 'invalid_input',
-          message:
-            'vault ownerKind=org requires either null ownerId (primary org) or a non-empty orgId string',
-        })
-      }
-    } else {
-      if (typeof ownerId !== 'string' || ownerId.length === 0) {
-        throw new IdentityError({
-          code: 'invalid_input',
-          message: `vault ownerKind=${input.ownerKind} requires non-empty ownerId`,
-        })
-      }
-    }
-    if (typeof input.secret !== 'string' || input.secret.length === 0) {
-      throw new IdentityError({
-        code: 'invalid_input',
-        message: 'vault secret must be a non-empty string',
-      })
-    }
-    const label = input.label === undefined ? null : input.label
-    if (label !== null && typeof label !== 'string') {
-      throw new IdentityError({
-        code: 'invalid_input',
-        message: 'vault label must be a string or null',
-      })
-    }
-    let metadataJson: string | null = null
-    let metadataObj: Record<string, unknown> | null = null
-    if (input.metadata !== undefined && input.metadata !== null) {
-      if (typeof input.metadata !== 'object' || Array.isArray(input.metadata)) {
-        throw new IdentityError({
-          code: 'invalid_input',
-          message: 'vault metadata must be a plain object or null',
-        })
-      }
-      try {
-        metadataJson = JSON.stringify(input.metadata)
-      } catch (err) {
-        throw new IdentityError({
-          code: 'invalid_input',
-          message: `vault metadata not JSON-serialisable: ${(err as Error).message}`,
-          cause: err,
-        })
-      }
-      if (metadataJson.length > 8192) {
-        throw new IdentityError({
-          code: 'invalid_input',
-          message: `vault metadata too large (max 8KB serialised); got ${metadataJson.length}`,
-        })
-      }
-      metadataObj = input.metadata
-    }
-
-    const id = newId()
-    const now = Date.now()
-    const secretEnc = encryptSecret(key, input.secret)
-    this.stmtVaultInsert.run(
-      id,
-      input.kind,
-      input.ownerKind,
-      ownerId,
-      label,
-      secretEnc,
-      metadataJson,
-      now,
-    )
-    // Audit #145 — let cache layers (OrgApiPool) invalidate.
-    this.emitVaultMutation('create')
-    return {
-      id,
-      kind: input.kind,
-      ownerKind: input.ownerKind,
-      ownerId,
-      label,
-      metadata: metadataObj,
-      createdAt: now,
-      lastUsedAt: null,
-      revokedAt: null,
-    }
+    return this.vault.createVaultEntry(input)
   }
 
-  /** Lookup by id. Returns null on missing id. Includes revoked rows. */
   getVaultEntry(id: string): VaultEntry | null {
-    if (typeof id !== 'string' || id.length === 0) return null
-    const row = this.stmtVaultById.get(id) as VaultRow | undefined
-    return row ? rowToVaultEntry(row) : null
+    return this.vault.getVaultEntry(id)
   }
 
-  /**
-   * Read + decrypt the plaintext secret. Side-effect: touches
-   * `last_used_at`. Throws:
-   *   - `vault_not_configured` if no master key was supplied at open
-   *   - `vault_entry_not_found` if no row matches
-   *   - `vault_entry_not_found` if the row is soft-revoked (we refuse to
-   *     hand out revoked secrets — callers needing forensics should use
-   *     `getVaultEntry` + admin-level intent)
-   *   - `vault_decrypt_failed` if the master key doesn't match the
-   *     row's ciphertext
-   */
   readVaultSecret(id: string): string {
-    const key = this.requireMasterKey()
-    if (typeof id !== 'string' || id.length === 0) {
-      throw new IdentityError({
-        code: 'vault_entry_not_found',
-        message: 'vault entry id required',
-      })
-    }
-    const row = this.stmtVaultById.get(id) as VaultRow | undefined
-    if (!row) {
-      throw new IdentityError({
-        code: 'vault_entry_not_found',
-        message: `vault entry not found: ${id}`,
-      })
-    }
-    if (row.revoked_at !== null) {
-      throw new IdentityError({
-        code: 'vault_entry_not_found',
-        message: `vault entry revoked: ${id}`,
-      })
-    }
-    const plaintext = decryptSecret(key, row.secret_enc)
-    this.stmtVaultTouch.run(Date.now(), id)
-    return plaintext
+    return this.vault.readVaultSecret(id)
   }
 
-  /**
-   * Soft-delete a vault entry by stamping `revoked_at`. Idempotent: a
-   * second revoke is a no-op (we only update rows where `revoked_at IS
-   * NULL`). Missing ids throw `vault_entry_not_found` so a confused
-   * caller doesn't believe a non-existent row was revoked.
-   */
-  /**
-   * Soft-delete a vault entry (sets `revoked_at`). Idempotent: a
-   * second call on an already-revoked id is a no-op.
-   *
-   * Returns `true` when this call performed the revoke (the row was
-   * active going in), `false` when it was already revoked (idempotent
-   * no-op). Audit #157 — callers that emit a side-effect audit row
-   * use the return value to dedup so N concurrent calls produce 1
-   * audit row, not N.
-   */
   revokeVaultEntry(id: string): boolean {
-    if (typeof id !== 'string' || id.length === 0) {
-      throw new IdentityError({
-        code: 'vault_entry_not_found',
-        message: 'vault entry id required',
-      })
-    }
-    const existing = this.stmtVaultById.get(id) as VaultRow | undefined
-    if (!existing) {
-      throw new IdentityError({
-        code: 'vault_entry_not_found',
-        message: `vault entry not found: ${id}`,
-      })
-    }
-    if (existing.revoked_at !== null) return false // already revoked
-    this.stmtVaultRevoke.run(Date.now(), id)
-    // Audit #145 — flush cached resolves of this entry.
-    this.emitVaultMutation('revoke')
-    return true
+    return this.vault.revokeVaultEntry(id)
   }
 
-  /**
-   * Filterable listing. Does NOT decrypt — secret material never leaves
-   * the store via list paths. The result rows let the caller decide
-   * which id to feed into `readVaultSecret`.
-   */
   listVaultEntries(query: ListVaultEntriesQuery = {}): VaultEntry[] {
-    const limit = Math.max(1, Math.min(500, query.limit ?? 100))
-    const offset = Math.max(0, query.offset ?? 0)
-    const activeOnly = query.activeOnly !== false
-    const where: string[] = []
-    const params: (string | number | null)[] = []
-    if (query.kind !== undefined) {
-      if (!isVaultKind(query.kind)) {
-        throw new IdentityError({
-          code: 'invalid_input',
-          message: `listVaultEntries: invalid kind filter: ${JSON.stringify(query.kind)}`,
-        })
-      }
-      where.push('kind = ?')
-      params.push(query.kind)
-    }
-    if (query.ownerKind !== undefined) {
-      if (!isOwnerKind(query.ownerKind)) {
-        throw new IdentityError({
-          code: 'invalid_input',
-          message: `listVaultEntries: invalid ownerKind filter: ${JSON.stringify(query.ownerKind)}`,
-        })
-      }
-      where.push('owner_kind = ?')
-      params.push(query.ownerKind)
-    }
-    // ownerId filter — `null` is a legitimate match value (it queries
-    // org-owned rows), so we check for explicit presence in the input.
-    if ('ownerId' in query) {
-      if (query.ownerId === null) {
-        where.push('owner_id IS NULL')
-      } else if (typeof query.ownerId === 'string' && query.ownerId.length > 0) {
-        where.push('owner_id = ?')
-        params.push(query.ownerId)
-      } else if (query.ownerId !== undefined) {
-        throw new IdentityError({
-          code: 'invalid_input',
-          message: 'listVaultEntries: ownerId must be a non-empty string or null',
-        })
-      }
-    }
-    if (activeOnly) {
-      where.push('revoked_at IS NULL')
-    }
-    const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
-    // rowid tie-breaker — see listAuditLog for the rationale.
-    const sql = `SELECT * FROM vault ${whereSql} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?`
-    params.push(limit, offset)
-    const rows = this.db.prepare(sql).all(...params) as VaultRow[]
-    return rows.map(rowToVaultEntry)
+    return this.vault.listVaultEntries(query)
   }
 
-  /**
-   * Audit #145 — subscribe to vault mutations. Returns an unsubscribe
-   * function. Fired AFTER a successful create / revoke commits, so
-   * subscribers may read fresh state.
-   *
-   * Use case: OrgApiPool subscribes here to flush its memoised
-   * resolveLlmKey cache the instant an admin rotates a key in vault.
-   * Before this hook the cache stayed stale until the next 401 (or
-   * never, if the rotated key never produced a 401).
-   *
-   * Listeners run synchronously; throwing from a listener is caught
-   * and silenced (their bugs shouldn't break the vault write that
-   * just happened). For ordered side effects, sequence them inside
-   * one listener instead of subscribing twice.
-   */
   onVaultMutation(fn: (reason: VaultMutationReason) => void): () => void {
-    if (typeof fn !== 'function') {
-      throw new TypeError('onVaultMutation requires a function')
-    }
-    this.vaultMutationListeners.add(fn)
-    return () => {
-      this.vaultMutationListeners.delete(fn)
-    }
-  }
-
-  private emitVaultMutation(reason: VaultMutationReason): void {
-    for (const fn of this.vaultMutationListeners) {
-      try {
-        fn(reason)
-      } catch {
-        // Audit #145 — listener bugs are non-fatal. The vault write
-        // already committed; one consumer's cache being stale is far
-        // less bad than throwing back to the caller and leaving them
-        // thinking the vault write failed when it didn't.
-      }
-    }
-  }
-
-  // ---- Vault internal helpers ----
-
-  private requireMasterKey(): Buffer {
-    if (!this.masterKey) {
-      throw new IdentityError({
-        code: 'vault_not_configured',
-        message:
-          'vault requires `masterKey` at openIdentityStore time; vault APIs are disabled until configured',
-      })
-    }
-    return this.masterKey
-  }
-
-  private get stmtVaultInsert(): SqliteStmt {
-    return (this._stmtVaultInsert ??= this.db.prepare(
-      `INSERT INTO vault(
-         id, kind, owner_kind, owner_id, label, secret_enc, metadata,
-         created_at, last_used_at, revoked_at
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
-    ))
-  }
-  private get stmtVaultById(): SqliteStmt {
-    return (this._stmtVaultById ??= this.db.prepare(
-      'SELECT * FROM vault WHERE id = ?',
-    ))
-  }
-  private get stmtVaultTouch(): SqliteStmt {
-    return (this._stmtVaultTouch ??= this.db.prepare(
-      'UPDATE vault SET last_used_at = ? WHERE id = ?',
-    ))
-  }
-  private get stmtVaultRevoke(): SqliteStmt {
-    return (this._stmtVaultRevoke ??= this.db.prepare(
-      'UPDATE vault SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL',
-    ))
+    return this.vault.onVaultMutation(fn)
   }
 
   // =====================================================================
@@ -3544,15 +3171,6 @@ export class IdentityStore {
   }
 }
 
-// ---- Module-private vault helpers (pure functions, kept out of class) ----
-
-function isVaultKind(s: unknown): s is VaultKind {
-  return typeof s === 'string' && (VAULT_KINDS as readonly string[]).includes(s)
-}
-function isOwnerKind(s: unknown): s is OwnerKind {
-  return typeof s === 'string' && (OWNER_KINDS as readonly string[]).includes(s)
-}
-
 // ---- B2.1 — usage-counter helpers ----
 
 /** Sqlite row shape — snake_case columns mirror the schema verbatim. */
@@ -3670,38 +3288,6 @@ function rowToOrgQuota(r: OrgQuotaRow): OrgQuota {
     updatedAt: r.updated_at,
   }
 }
-function rowToVaultEntry(r: VaultRow): VaultEntry {
-  let metadata: Record<string, unknown> | null = null
-  if (r.metadata) {
-    try {
-      const parsed: unknown = JSON.parse(r.metadata)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        metadata = parsed as Record<string, unknown>
-      }
-    } catch {
-      metadata = { _corrupt: r.metadata }
-    }
-  }
-  // Graceful fallback on db corruption (manual edit): clamp unknown
-  // strings to the closest valid enum so the row stays visible in the
-  // admin UI rather than crashing the list endpoint.
-  const kind = isVaultKind(r.kind) ? r.kind : ('third_party_api' as VaultKind)
-  const ownerKind = isOwnerKind(r.owner_kind)
-    ? r.owner_kind
-    : ('org' as OwnerKind)
-  return {
-    id: r.id,
-    kind,
-    ownerKind,
-    ownerId: r.owner_id,
-    label: r.label,
-    metadata,
-    createdAt: r.created_at,
-    lastUsedAt: r.last_used_at,
-    revokedAt: r.revoked_at,
-  }
-}
-
 // ---- D1 — peer registry helpers ----
 
 interface PeerRow {
