@@ -172,6 +172,13 @@ export class Hub {
   private readonly now: () => number
   private started = false
   private stopped = false
+  /**
+   * Most-recent in-flight `space.writePendingApps()` mirror write (see
+   * {@link syncPendingFile}). Tracked so {@link stop} can drain it before
+   * returning — otherwise a fire-and-forget write can land during a
+   * caller's teardown `rm(space, { recursive })` and trip ENOTEMPTY.
+   */
+  private pendingFileWrite: Promise<unknown> = Promise.resolve()
   private readonly pending = new Map<string, PendingEntry>()
   /**
    * Phase 11 M3 — stored separately so `resumeTask` can call it on
@@ -323,6 +330,13 @@ export class Hub {
       }
     }
     if (this.storage.close) await this.storage.close()
+    // Drain any in-flight pending-apps mirror write before returning so the
+    // space's runtime/ dir is quiescent once stop() resolves. Without this a
+    // fire-and-forget writePendingApps() rename (queued by approve/reject/
+    // requestAdmission) can land during a caller's recursive rm() of the
+    // space dir and trip ENOTEMPTY (rm's `force: true` only swallows ENOENT).
+    // Already `.catch()`-ed in syncPendingFile, so this await never rejects.
+    await this.pendingFileWrite
   }
 
   // --- participants ---------------------------------------------------------
@@ -490,7 +504,10 @@ export class Hub {
   private syncPendingFile(): void {
     if (!this.space) return
     const apps = [...this.pending.values()].map((e) => e.application)
-    this.space.writePendingApps(apps).catch((err) =>
+    // Track the in-flight write so stop() can drain it. writePendingApps
+    // serialises through the Space's per-file lock, so awaiting the most
+    // recent promise also awaits every write still queued behind it.
+    this.pendingFileWrite = this.space.writePendingApps(apps).catch((err) =>
       log.error('sync pending-apps failed', { err }),
     )
   }
