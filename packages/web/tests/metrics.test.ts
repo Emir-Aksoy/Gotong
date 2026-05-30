@@ -17,7 +17,7 @@ import { join } from 'node:path'
 
 import { Hub, Space, HumanParticipant } from '@aipehub/core'
 
-import { renderMetrics } from '../src/server.js'
+import { renderMetrics } from '../src/metrics.js'
 
 describe('renderMetrics', () => {
   let tmp: string
@@ -255,7 +255,7 @@ describe('renderMetrics', () => {
   })
 
   it('emits HTTP counters with all canonical classes when httpStats is supplied', async () => {
-    const { HttpStats } = await import('../src/server.js')
+    const { HttpStats } = await import('../src/metrics.js')
     const stats = new HttpStats()
     stats.record(200)
     stats.record(200)
@@ -271,7 +271,7 @@ describe('renderMetrics', () => {
   })
 
   it('HTTP counters surface a zero row for every canonical class even before traffic', async () => {
-    const { HttpStats } = await import('../src/server.js')
+    const { HttpStats } = await import('../src/metrics.js')
     const stats = new HttpStats()
     const text = renderMetrics(hub, { httpStats: stats })
     expect(text).toMatch(/aipehub_http_responses_total\{class="2xx"\} 0/)
@@ -279,7 +279,7 @@ describe('renderMetrics', () => {
   })
 
   it('HttpStats.record clamps out-of-range / non-finite codes into an "other" bucket', async () => {
-    const { HttpStats } = await import('../src/server.js')
+    const { HttpStats } = await import('../src/metrics.js')
     const stats = new HttpStats()
     stats.record(0)            // socket-closed-early on some Node paths
     stats.record(99)           // sub-1xx, never legal HTTP
