@@ -698,6 +698,38 @@ agent:
     expect(() => parseManifest(yaml)).toThrowError(/must match/)
   })
 
+  it('accepts a cross-hub <peer>:<server> ref (#2-M3)', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: writer
+  capabilities: [draft]
+  kind: llm
+  provider: anthropic
+  system: hi
+  useMcpServers: ['shared-fs', 'hub_a1b2c3d4:filesystem']
+`.trim()
+    const parsed = parseManifest(yaml)
+    expect(parsed.agents[0]!.managed.useMcpServers).toEqual([
+      'shared-fs',
+      'hub_a1b2c3d4:filesystem',
+    ])
+  })
+
+  it('rejects a cross-hub ref whose server segment is malformed (#2-M3)', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: writer
+  capabilities: [draft]
+  kind: llm
+  provider: anthropic
+  system: hi
+  useMcpServers: ['hub_x:has space']
+`.trim()
+    expect(() => parseManifest(yaml)).toThrowError(/must match/)
+  })
+
   it('renderAgentManifest round-trips useMcpServers', () => {
     const yaml = `
 schema: aipehub.agent/v1

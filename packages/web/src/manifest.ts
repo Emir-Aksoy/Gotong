@@ -511,6 +511,11 @@ export function validateUsesArray(raw: unknown, path: string): ServiceUseSpec[] 
  * cosmetic prefix for error messages.
  */
 const MCP_SERVER_NAME_RE = /^[a-zA-Z][a-zA-Z0-9_-]*$/
+// #2-M3 — a `useMcpServers` entry is either a bare local-registry name OR
+// a cross-hub reference `<peer>:<server>` (e.g. `hub_a1b2c3d4:filesystem`)
+// resolved to a RemoteMcpToolset at spawn. The peer segment is a hub id
+// (`hub_<hex>` / alias); the server segment is a normal server name.
+const USE_MCP_SERVER_RE = /^(?:[a-zA-Z0-9_-]+:)?[a-zA-Z][a-zA-Z0-9_-]*$/
 const MCP_TRANSPORTS = ['stdio', 'http', 'sse'] as const
 
 export function validateMcpServersArray(raw: unknown, path: string): McpServerSpec[] {
@@ -624,9 +629,9 @@ export function validateUseMcpServersArray(raw: unknown, path: string): string[]
     if (typeof name !== 'string' || name.length === 0) {
       throw new ManifestError(`${path}[${i}] must be a non-empty string`)
     }
-    if (!MCP_SERVER_NAME_RE.test(name)) {
+    if (!USE_MCP_SERVER_RE.test(name)) {
       throw new ManifestError(
-        `${path}[${i}] must match ${MCP_SERVER_NAME_RE} — got '${name}'`,
+        `${path}[${i}] must match ${USE_MCP_SERVER_RE} — got '${name}'`,
       )
     }
     out.push(name)

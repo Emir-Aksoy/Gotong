@@ -7,6 +7,7 @@ import {
   type McpServerSpec,
   type HubMcpServerRecord,
   type ParticipantId,
+  type HubLink,
   type ServiceUseSpec,
   type Space,
   type Task,
@@ -28,6 +29,7 @@ import {
   envSecretSource,
   mergeAgentMcpSpecs,
 } from './mcp-config.js'
+import { RemoteMcpToolset, parseRemoteMcpRef } from './mcp-proxy.js'
 import {
   resolveOwner,
   type AgentDispatchOpts,
@@ -188,6 +190,8 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * surface as plain task failures.
    */
   private readonly identity?: IdentityStore
+  /** #2-M3 — peer hub id → live HubLink, for cross-hub MCP refs. */
+  private readonly peerLinkResolver?: (peerId: string) => HubLink | null
 
   constructor(opts: {
     hub: Hub
@@ -200,12 +204,22 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
      * the same `IdentityStore` you passed to `OrgApiPool`.
      */
     identity?: IdentityStore
+    /**
+     * #2-M3 — resolve a peer hub id to its live HubLink (typically
+     * `peerRegistry.linkForHub`). When an agent opts into a cross-hub MCP
+     * server (`useMcpServers: ['<peer>:<server>']`), spawn builds a
+     * `RemoteMcpToolset` that forwards over this link. Omit on hosts
+     * without federation — remote refs then resolve to an offline link
+     * (empty tool list) instead of erroring the spawn.
+     */
+    peerLinkResolver?: (peerId: string) => HubLink | null
   }) {
     this.hub = opts.hub
     this.space = opts.space
     this.services = opts.services
     this.orgApiPool = opts.orgApiPool
     this.identity = opts.identity
+    this.peerLinkResolver = opts.peerLinkResolver
     // Built once: the gate is a stateless closure over `identity`,
     // shared by every managed LlmAgent. Settings (metric/period) are
     // hardcoded here in B2.2.2; C2 will surface them in admin UI.
@@ -542,12 +556,22 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       }
     }
 
-    let toolset: LlmAgentToolset | undefined
-    if (mcpToolset && dispatchToolset) {
-      toolset = ComposedToolset.of(dispatchToolset, mcpToolset)
-    } else {
-      toolset = dispatchToolset ?? mcpToolset
-    }
+    // #2-M3 — cross-hub MCP: one RemoteMcpToolset per `<peer>:<server>`
+    // ref in useMcpServers. Composed alongside the local MCP + dispatch
+    // toolsets so the agent sees peer tools as just more tools.
+    const remoteToolsets = this.buildRemoteMcpToolsets(record.id, record.managed)
+
+    // Compose whatever toolsets this agent ended up with. DispatchToolset
+    // goes FIRST so its ALS frame is outermost (ancestry must be live when
+    // any tool fires — see the dispatch block above). Local MCP next, then
+    // the remote (cross-hub) toolsets.
+    const parts: LlmAgentToolset[] = [
+      ...(dispatchToolset ? [dispatchToolset] : []),
+      ...(mcpToolset ? [mcpToolset] : []),
+      ...remoteToolsets,
+    ]
+    const toolset: LlmAgentToolset | undefined =
+      parts.length === 0 ? undefined : parts.length === 1 ? parts[0] : ComposedToolset.of(...parts)
 
     // v2.5: inject a reverse-dispatch surface so agents can ask
     // questions of the human who triggered them ("human-in-the-loop"
@@ -733,7 +757,10 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     managed: ManagedAgentSpec,
   ): Promise<McpServerSpec[]> {
     const inline = managed.mcpServers ?? []
-    const optIn = managed.useMcpServers ?? []
+    // #2-M3 — cross-hub refs (`<peer>:<server>`) become RemoteMcpToolsets
+    // (buildRemoteToolsets), NOT local registry lookups; drop them here so
+    // they don't trip the "unknown hub MCP server" warning below.
+    const optIn = (managed.useMcpServers ?? []).filter((n) => !parseRemoteMcpRef(n))
     if (optIn.length === 0) return [...inline]
     const registry = await this.space.mcpServers()
     const byName = new Map(registry.map((r) => [r.spec.name, r.spec]))
@@ -742,6 +769,39 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
         id: agentId,
         server: name,
       }),
+    )
+  }
+
+  /**
+   * #2-M3 — build a `RemoteMcpToolset` for each cross-hub ref in the
+   * agent's `useMcpServers` (`<peer>:<server>`). Returns [] when there are
+   * no remote refs, or when the host has no peer-link resolver (federation
+   * off) — in the latter case it warns rather than failing the spawn.
+   */
+  private buildRemoteMcpToolsets(
+    agentId: ParticipantId,
+    managed: ManagedAgentSpec,
+  ): RemoteMcpToolset[] {
+    const refs = (managed.useMcpServers ?? [])
+      .map(parseRemoteMcpRef)
+      .filter((r): r is NonNullable<typeof r> => r !== null)
+    if (refs.length === 0) return []
+    const resolver = this.peerLinkResolver
+    if (!resolver) {
+      log.warn('agent opts into cross-hub MCP but host has no peer link resolver — skipping', {
+        id: agentId,
+        refs: refs.map((r) => `${r.peer}:${r.server}`),
+      })
+      return []
+    }
+    return refs.map(
+      (r) =>
+        new RemoteMcpToolset({
+          peer: r.peer,
+          server: r.server,
+          resolveLink: resolver,
+          logger: log,
+        }),
     )
   }
 

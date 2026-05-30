@@ -25,9 +25,13 @@
  * across peers). `close()` disconnects them all on shutdown.
  */
 
-import type { HubMcpServerRecord } from '@aipehub/core'
+import type { HubLink, HubMcpServerRecord } from '@aipehub/core'
 import { McpToolset, type McpServerConfig } from '@aipehub/mcp-client'
-import type { LlmAgentToolset } from '@aipehub/llm'
+import type {
+  LlmAgentToolset,
+  LlmToolCallResult,
+  LlmToolDefinition,
+} from '@aipehub/llm'
 
 import {
   resolveMcpServerConfig,
@@ -163,6 +167,118 @@ export class McpProxyHost {
     const names = [...this.cache.keys()]
     for (const name of names) {
       await this.evict(name)
+    }
+  }
+}
+
+// ─── consumer side ──────────────────────────────────────────────────────────
+
+/**
+ * A remote MCP reference written in an agent's `useMcpServers`, of the
+ * form `<peer>:<server>` (e.g. `hub_a1b2c3d4:filesystem`) — "use the
+ * server `filesystem` shared by peer hub `hub_a1b2c3d4`". A bare name
+ * (no colon) is a LOCAL registry server and is NOT a remote ref.
+ */
+export interface RemoteMcpRef {
+  peer: string
+  server: string
+}
+
+/**
+ * Parse a `useMcpServers` entry into a remote ref, or null when it's a
+ * bare (local) name. Splits on the FIRST colon so the peer segment is
+ * everything before it; the server segment must be non-empty.
+ */
+export function parseRemoteMcpRef(name: string): RemoteMcpRef | null {
+  const idx = name.indexOf(':')
+  if (idx < 1) return null
+  const peer = name.slice(0, idx)
+  const server = name.slice(idx + 1)
+  if (!peer || !server) return null
+  return { peer, server }
+}
+
+/**
+ * Cross-hub MCP proxy — CONSUMER side (#2-M3.3). An `LlmAgentToolset`
+ * whose `listTools` / `callTool` forward over the federation link to a
+ * server shared by a peer hub. The agent sees the peer's tools exactly
+ * as if they were local; the credentials / subprocess stay on the peer.
+ *
+ * The peer link is resolved LAZILY per call (peers connect/reconnect
+ * asynchronously) — when it's absent or not open, `listTools` returns []
+ * (so a momentarily-offline peer just contributes no tools that round)
+ * and `callTool` returns an `isError` result (so the LLM sees a tool
+ * failure rather than the whole task throwing).
+ */
+export class RemoteMcpToolset implements LlmAgentToolset {
+  private readonly peer: string
+  private readonly server: string
+  private readonly resolveLink: (peerId: string) => HubLink | null
+  private readonly logger?: { warn?: (msg: string, meta?: Record<string, unknown>) => void }
+
+  constructor(opts: {
+    /** Peer hub id (the `<peer>` segment of the ref). */
+    peer: string
+    /** Server name AS KNOWN ON THE PEER (the `<server>` segment). */
+    server: string
+    /** Lazy peer-link lookup; typically `peerRegistry.linkForHub`. */
+    resolveLink: (peerId: string) => HubLink | null
+    logger?: { warn?: (msg: string, meta?: Record<string, unknown>) => void }
+  }) {
+    this.peer = opts.peer
+    this.server = opts.server
+    this.resolveLink = opts.resolveLink
+    this.logger = opts.logger
+  }
+
+  private openLink(): HubLink | null {
+    const link = this.resolveLink(this.peer)
+    return link && link.status === 'open' ? link : null
+  }
+
+  async listTools(): Promise<LlmToolDefinition[]> {
+    const link = this.openLink()
+    if (!link) return [] // peer offline → no remote tools this round
+    try {
+      const tools = await link.rpc(MCP_PROXY_METHODS.listTools, { server: this.server })
+      return (tools as LlmToolDefinition[]) ?? []
+    } catch (err) {
+      this.logger?.warn?.('remote mcp listTools failed', {
+        peer: this.peer,
+        server: this.server,
+        err: err instanceof Error ? err.message : String(err),
+      })
+      return []
+    }
+  }
+
+  async callTool(name: string, args: Record<string, unknown>): Promise<LlmToolCallResult> {
+    const link = this.openLink()
+    if (!link) {
+      return {
+        content: [{ type: 'text', text: `peer '${this.peer}' is offline` }],
+        isError: true,
+      }
+    }
+    try {
+      const out = await link.rpc(MCP_PROXY_METHODS.callTool, {
+        server: this.server,
+        name,
+        args,
+      })
+      return out as LlmToolCallResult
+    } catch (err) {
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `remote tool '${name}' on '${this.peer}:${this.server}' failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          },
+        ],
+        isError: true,
+      }
     }
   }
 }

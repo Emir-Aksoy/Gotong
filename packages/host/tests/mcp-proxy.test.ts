@@ -9,9 +9,15 @@
 
 import { describe, expect, it } from 'vitest'
 
-import type { HubMcpServerRecord } from '@aipehub/core'
+import { createInprocHubLinkPair, type HubLink, type HubMcpServerRecord } from '@aipehub/core'
 
-import { McpProxyHost, MCP_PROXY_METHODS, type ProxyToolset } from '../src/mcp-proxy.js'
+import {
+  McpProxyHost,
+  MCP_PROXY_METHODS,
+  RemoteMcpToolset,
+  parseRemoteMcpRef,
+  type ProxyToolset,
+} from '../src/mcp-proxy.js'
 
 function fakeToolset() {
   const calls = { connect: 0, disconnect: 0, listTools: 0, callTool: [] as Array<{ name: string; args: unknown }> }
@@ -132,5 +138,145 @@ describe('McpProxyHost (#2-M3.2)', () => {
     await proxy.respond({ method: MCP_PROXY_METHODS.listTools, params: { server: 'fs' } })
     await proxy.close()
     expect(made[0]!.calls.disconnect).toBe(1)
+  })
+})
+
+describe('parseRemoteMcpRef (#2-M3.3)', () => {
+  it('splits a <peer>:<server> ref', () => {
+    expect(parseRemoteMcpRef('hub_a1b2c3d4:filesystem')).toEqual({
+      peer: 'hub_a1b2c3d4',
+      server: 'filesystem',
+    })
+  })
+  it('returns null for a bare (local) name', () => {
+    expect(parseRemoteMcpRef('filesystem')).toBeNull()
+  })
+  it('returns null when either side is empty', () => {
+    expect(parseRemoteMcpRef(':filesystem')).toBeNull()
+    expect(parseRemoteMcpRef('hub_x:')).toBeNull()
+  })
+  it('splits on the FIRST colon only', () => {
+    expect(parseRemoteMcpRef('hub_x:a:b')).toEqual({ peer: 'hub_x', server: 'a:b' })
+  })
+})
+
+describe('RemoteMcpToolset (#2-M3.3, consumer)', () => {
+  // A fake HubLink exposing only what RemoteMcpToolset touches (status + rpc).
+  function fakeLink(opts: {
+    status?: 'open' | 'closed'
+    rpc?: (method: string, params: unknown) => Promise<unknown>
+  }): HubLink {
+    return {
+      status: opts.status ?? 'open',
+      rpc: opts.rpc ?? (async () => null),
+    } as unknown as HubLink
+  }
+
+  it('listTools forwards over the link and returns the tools', async () => {
+    const seen: Array<{ method: string; params: unknown }> = []
+    const link = fakeLink({
+      rpc: async (method, params) => {
+        seen.push({ method, params })
+        return [{ name: 'fs__read', description: 'r', inputSchema: { type: 'object' } }]
+      },
+    })
+    const ts = new RemoteMcpToolset({ peer: 'hub_x', server: 'fs', resolveLink: () => link })
+    const tools = await ts.listTools()
+    expect(tools[0]!.name).toBe('fs__read')
+    expect(seen).toEqual([{ method: MCP_PROXY_METHODS.listTools, params: { server: 'fs' } }])
+  })
+
+  it('callTool forwards name + args and returns the result', async () => {
+    const seen: Array<{ method: string; params: unknown }> = []
+    const link = fakeLink({
+      rpc: async (method, params) => {
+        seen.push({ method, params })
+        return { content: [{ type: 'text', text: 'ok' }] }
+      },
+    })
+    const ts = new RemoteMcpToolset({ peer: 'hub_x', server: 'fs', resolveLink: () => link })
+    const out = await ts.callTool('fs__read', { path: 'x' })
+    expect(out).toEqual({ content: [{ type: 'text', text: 'ok' }] })
+    expect(seen[0]).toEqual({
+      method: MCP_PROXY_METHODS.callTool,
+      params: { server: 'fs', name: 'fs__read', args: { path: 'x' } },
+    })
+  })
+
+  it('listTools returns [] when the peer link is absent', async () => {
+    const ts = new RemoteMcpToolset({ peer: 'hub_x', server: 'fs', resolveLink: () => null })
+    expect(await ts.listTools()).toEqual([])
+  })
+
+  it('listTools returns [] when the peer link is not open', async () => {
+    const ts = new RemoteMcpToolset({
+      peer: 'hub_x',
+      server: 'fs',
+      resolveLink: () => fakeLink({ status: 'closed' }),
+    })
+    expect(await ts.listTools()).toEqual([])
+  })
+
+  it('callTool returns an isError result when the peer is offline', async () => {
+    const ts = new RemoteMcpToolset({ peer: 'hub_x', server: 'fs', resolveLink: () => null })
+    const out = await ts.callTool('fs__read', {})
+    expect(out.isError).toBe(true)
+    expect(String((out.content as Array<{ text?: string }>)[0]?.text)).toMatch(/offline/)
+  })
+
+  it('callTool returns an isError result when the remote rpc rejects', async () => {
+    const ts = new RemoteMcpToolset({
+      peer: 'hub_x',
+      server: 'fs',
+      resolveLink: () => fakeLink({ rpc: async () => { throw new Error('not shared') } }),
+    })
+    const out = await ts.callTool('fs__read', {})
+    expect(out.isError).toBe(true)
+    expect(String((out.content as Array<{ text?: string }>)[0]?.text)).toMatch(/not shared/)
+  })
+})
+
+describe('cross-hub MCP proxy — end to end (#2-M3.3)', () => {
+  // Consumer RemoteMcpToolset → inproc HubLink → provider McpProxyHost →
+  // (stub) local toolset → back. The whole proxy, no mocks on the seam.
+  function wire(records: HubMcpServerRecord[], server = 'fs') {
+    const { a, b } = createInprocHubLinkPair({ aPeerId: 'provider', bPeerId: 'consumer' })
+    const proxy = new McpProxyHost({
+      space: { mcpServers: async () => records },
+      secrets: () => undefined,
+      toolsetFactory: () => ({
+        async connect() {},
+        async disconnect() {},
+        listTools() {
+          return [{ name: 'fs__read', description: 'read', inputSchema: { type: 'object' as const } }]
+        },
+        async callTool(name: string, args: Record<string, unknown>) {
+          return { content: [{ type: 'text', text: `${name}(${JSON.stringify(args)})` }] }
+        },
+      }),
+    })
+    // Provider answers rpc on its link end; consumer uses the other end.
+    a.on('rpc', proxy.respond)
+    const remote = new RemoteMcpToolset({ peer: 'provider', server, resolveLink: () => b })
+    return { remote, close: () => Promise.all([a.close(), proxy.close()]) }
+  }
+
+  it('lists + calls a shared peer server through the live link', async () => {
+    const { remote, close } = wire([sharedFs])
+    const tools = await remote.listTools()
+    expect(tools[0]!.name).toBe('fs__read')
+    const out = await remote.callTool('fs__read', { path: 'README.md' })
+    expect((out.content as Array<{ text: string }>)[0]!.text).toBe('fs__read({"path":"README.md"})')
+    await close()
+  })
+
+  it('a non-shared server surfaces the ACL rejection to the consumer', async () => {
+    const { remote, close } = wire([privateSrv], 'private')
+    // listTools degrades to [] (peer rejected); callTool surfaces isError.
+    expect(await remote.listTools()).toEqual([])
+    const out = await remote.callTool('private__x', {})
+    expect(out.isError).toBe(true)
+    expect(String((out.content as Array<{ text?: string }>)[0]?.text)).toMatch(/not shared/)
+    await close()
   })
 })

@@ -754,6 +754,12 @@ async function main(): Promise<void> {
     // the provider revokes that vault entry + writes audit + flushes
     // the OrgApiPool cache so next call doesn't reuse the dead key.
     ...(identity ? { identity } : {}),
+    // #2-M3 — cross-hub MCP refs (`useMcpServers: ['<peer>:<server>']`)
+    // resolve the peer link lazily through the registry, which is wired
+    // further down (peerRegistryRef is a forward-declared `let`). Reading
+    // it at call time means a not-yet-connected / reconnected peer is
+    // handled by RemoteMcpToolset's own offline path.
+    peerLinkResolver: (peerId) => peerRegistryRef?.linkForHub(peerId) ?? null,
   })
   await localAgents.start()
 
