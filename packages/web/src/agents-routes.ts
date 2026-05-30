@@ -38,6 +38,7 @@ import {
   parseManifest,
   renderAgentManifest,
   validateUsesArray,
+  validateUseMcpServersArray,
   type ParsedAgent,
 } from './manifest.js'
 
@@ -104,6 +105,12 @@ function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
   }
   if (body.uses !== undefined) {
     managed.uses = validateUsesArray(body.uses, 'uses')
+  }
+  // Opt-in names of hub-registry MCP servers (#2-M1). The names point at
+  // entries in mcp-servers.json; LocalAgentPool resolves them at spawn.
+  // Empty array = "use none" (lets the edit form clear a prior opt-in).
+  if (body.useMcpServers !== undefined) {
+    managed.useMcpServers = validateUseMcpServersArray(body.useMcpServers, 'useMcpServers')
   }
   const out: ParsedAgent = { id: body.id, capabilities, managed }
   if (typeof body.displayName === 'string') out.displayName = body.displayName
