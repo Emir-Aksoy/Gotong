@@ -91,6 +91,16 @@ class StubWorkflowSurface implements WorkflowSurface {
   async readRun(): Promise<null> {
     return null
   }
+  // Phase 15 lifecycle methods — unused by /me (it only reads list()).
+  async saveDraft(): Promise<WorkflowSummary> { throw new Error('stub: saveDraft') }
+  async publish(): Promise<WorkflowSummary> { throw new Error('stub: publish') }
+  async submitReview(): Promise<WorkflowSummary> { throw new Error('stub: submitReview') }
+  async backToDraft(): Promise<WorkflowSummary> { throw new Error('stub: backToDraft') }
+  async deprecate(): Promise<WorkflowSummary> { throw new Error('stub: deprecate') }
+  async archive(): Promise<WorkflowSummary> { throw new Error('stub: archive') }
+  async rollback(): Promise<WorkflowSummary> { throw new Error('stub: rollback') }
+  async listRevisions(): Promise<[]> { return [] }
+  async getState(): Promise<never> { throw new Error('stub: getState') }
 }
 
 /** Build a WorkflowSummary with sensible defaults; override what a test needs. */
@@ -364,6 +374,57 @@ describe('/api/me/workflows — member-facing catalog (Phase 14)', () => {
   it('requires a v4 session (anonymous → 401)', async () => {
     const r = await fetch(`${b.baseUrl}/api/me/workflows`)
     expect(r.status).toBe(401)
+  })
+})
+
+describe('/api/me — Phase 15 published-only gate', () => {
+  // All target the `plan-personal-growth` capability boot() registers a stub
+  // participant for, so a published one can actually dispatch. Every one
+  // declares surface.me.enabled — only `state` differs, isolating the gate.
+  const me = (id: string, state?: string): WorkflowSummary =>
+    meWf({
+      id,
+      triggerCapability: 'plan-personal-growth',
+      ...(state !== undefined ? { state } : {}),
+      surfaceMe: { enabled: true, label: id, inputSchema: [{ id: 'topic', type: 'text' }] },
+    })
+  const STATEFUL: WorkflowSummary[] = [
+    me('pub', 'published'),
+    me('draft', 'draft'),
+    me('review', 'review'),
+    me('dep', 'deprecated'),
+    me('arc', 'archived'),
+    me('legacy'), // no state → legacy compat (allowed)
+  ]
+
+  let b: BootResult
+  beforeEach(async () => { b = await boot({ workflows: STATEFUL }) })
+  afterEach(async () => { await teardown(b) })
+
+  it('catalog lists only published (+ legacy no-state)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/me/workflows`, { headers: { cookie: b.memberCookie } })
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { workflows: Array<{ id: string }> }
+    expect(body.workflows.map((w) => w.id).sort()).toEqual(['legacy', 'pub'])
+  })
+
+  const dispatch = (b: BootResult, workflowId: string): Promise<Response> =>
+    fetch(`${b.baseUrl}/api/me/dispatch`, {
+      method: 'POST',
+      headers: { cookie: b.memberCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ workflowId, payload: { topic: 'x' } }),
+    })
+
+  it('dispatch to draft / review / deprecated / archived is denied (403)', async () => {
+    for (const id of ['draft', 'review', 'dep', 'arc']) {
+      const r = await dispatch(b, id)
+      expect(r.status, `dispatch to ${id} should be 403`).toBe(403)
+    }
+  })
+
+  it('dispatch to a published workflow passes the gate (200)', async () => {
+    const r = await dispatch(b, 'pub')
+    expect(r.status).toBe(200)
   })
 })
 

@@ -158,6 +158,11 @@ function evaluateMeSurface(
   summary: MeWorkflowSummaryLike,
   role: string,
 ): ResolvedMeWorkflow | null {
+  // Phase 15 — only a PUBLISHED workflow is member-facing. A draft / review /
+  // deprecated / archived workflow is never runnable from /me, even when it
+  // declares `surface.me.enabled`. `state` is absent only on a legacy host that
+  // predates the lifecycle; there we fall through and let surface.me gate it.
+  if (summary.state !== undefined && summary.state !== 'published') return null
   const me = readMeSurface(summary.surfaceMe)
   if (!me || me.enabled !== true) return null
   const allowedRoles = me.allowedRoles ?? DEFAULT_ME_ROLES
@@ -226,6 +231,12 @@ export interface MeWorkflowSummaryLike {
   surfaceMe?: unknown
   /** Fallback dispatch-form fields when `surface.me.inputSchema` is absent. */
   payloadSchema?: unknown
+  /**
+   * Phase 15 lifecycle state. Only `'published'` is member-facing; a draft /
+   * deprecated / archived workflow is excluded from the `/me` catalog and its
+   * dispatch is denied (403). Absent on legacy hosts that predate lifecycle.
+   */
+  state?: string
 }
 
 export interface MeWorkflowSurface {
