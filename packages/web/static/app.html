@@ -119,6 +119,7 @@
       <button class="tabbar-btn" type="button" data-tab="mcp"       data-roles="owner,admin" data-i18n="tabMcp">MCP</button>
       <button class="tabbar-btn" type="button" data-tab="users"     data-roles="owner" data-i18n="tabUsers">用户</button>
       <button class="tabbar-btn" type="button" data-tab="quotas"    data-roles="owner" data-i18n="tabQuotas">配额</button>
+      <button class="tabbar-btn" type="button" data-tab="usage"     data-roles="owner" data-i18n="tabUsage">用量</button>
       <button class="tabbar-btn" type="button" data-tab="reputation" data-roles="owner" data-i18n="tabReputation">信誉</button>
       <button class="tabbar-btn" type="button" data-tab="settings"  data-roles="owner,admin,member,viewer" data-i18n="tabSettings">设置</button>
     </nav>
@@ -963,6 +964,11 @@
            /reputation-ui.js. Owner-only; hidden tab when host has no
            reputation snapshot adapter wired (UI surfaces 503 inline). -->
       <section id="reputation-panel" class="reputation-panel" data-tab="reputation"></section>
+
+      <!-- Phase 17 — usage / cost dashboard + export. Rendered by
+           /usage-ui.js. Owner-only; reads the usage ledger summary +
+           offers CSV/JSONL export of the ledger and audit log. -->
+      <section id="usage-panel" class="usage-panel" data-tab="usage"></section>
     </main>
   </body>
 </html>

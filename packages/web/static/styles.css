@@ -2047,6 +2047,28 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .reputation-panel .rep-bar-neutral { background: #bbb; }
 .reputation-panel .rep-bar-label { position: absolute; top: 0; left: 0; right: 0; text-align: center; font-size: 0.78rem; line-height: 1.2rem; color: #222; pointer-events: none; }
 
+/* Phase 17 — usage / cost dashboard (tab "用量"). */
+.usage-panel { padding: 1rem; }
+.usage-panel .usage-header h2 { margin: 0 0 0.35rem; }
+.usage-panel .usage-meta { color: #666; font-size: 0.85rem; margin: 0 0 0.6rem; }
+.usage-panel .usage-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+.usage-panel .usage-controls select { padding: 0.25rem 0.4rem; }
+.usage-panel .usage-status { font-size: 0.85rem; min-height: 1em; }
+.usage-panel .usage-status-loading { color: #888; }
+.usage-panel .usage-status-ok { color: #27ae60; }
+.usage-panel .usage-status-error { color: #c0392b; }
+.usage-panel .usage-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-bottom: 1.5rem; }
+.usage-panel .usage-table th, .usage-panel .usage-table td { text-align: left; border-bottom: 1px solid #eee; padding: 0.4rem 0.5rem; vertical-align: middle; }
+.usage-panel .usage-table th { background: #fafafa; font-weight: 600; color: #555; }
+.usage-panel .usage-table td:not(.usage-key):not(.usage-cost) { text-align: right; font-variant-numeric: tabular-nums; }
+.usage-panel .usage-cost { text-align: right; font-variant-numeric: tabular-nums; color: #1f6feb; }
+.usage-panel .usage-empty { color: #888; text-align: center; padding: 1.5rem; }
+.usage-panel .usage-total td { font-weight: 600; border-top: 2px solid #ddd; background: #fafbfc; }
+.usage-panel .usage-export h3 { margin: 0 0 0.3rem; font-size: 1rem; }
+.usage-panel .usage-export-links { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.usage-panel .usage-dl { display: inline-block; padding: 0.35rem 0.7rem; border: 1px solid #d0d7de; border-radius: 6px; background: #f6f8fa; color: #24292f; text-decoration: none; font-size: 0.85rem; }
+.usage-panel .usage-dl:hover { background: #eef1f4; }
+
 /* ==================================================================== *
  *  Mobile responsive  (Phase 12 M10 / M11)                             *
  *                                                                      *

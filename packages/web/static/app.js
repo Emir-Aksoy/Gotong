@@ -671,6 +671,7 @@
       .then(() => inject('/identity-ui.js'))
       .then(() => inject('/quotas-ui.js'))
       .then(() => inject('/reputation-ui.js'))
+      .then(() => inject('/usage-ui.js'))
       .catch((err) => {
         console.error('[app] failed to load admin bundles', err)
       })
