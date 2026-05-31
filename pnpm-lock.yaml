@@ -390,6 +390,9 @@ importers:
       '@aipehub/identity':
         specifier: workspace:*
         version: link:../identity
+      '@aipehub/inbox':
+        specifier: workspace:*
+        version: link:../inbox
       '@aipehub/llm':
         specifier: workspace:*
         version: link:../llm

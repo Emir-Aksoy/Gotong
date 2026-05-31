@@ -96,6 +96,8 @@ import {
 import { createUploadSurface } from './uploads.js'
 import { createWorkflowController } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
+import { HostInboxService } from './inbox-service.js'
+import { FileInboxStore, HumanInboxParticipant, HUMAN_CAPABILITY } from '@aipehub/inbox'
 import {
   createWorkflowAssistAgent,
   resolveWorkflowAssistConfig,
@@ -992,6 +994,21 @@ async function main(): Promise<void> {
     },
   }
 
+  // Phase 16 — member task inbox. A workflow's `human:` step dispatches to the
+  // `aipehub.human/v1` capability; the broker parks it as an inbox item and
+  // suspends (Phase 11). A member resolves it from /me, and HostInboxService
+  // runs the two-step resume (child broker → parent workflow run). Gated on
+  // identity: durable parking lives in suspended_tasks (identity SQLite), and
+  // /me itself requires a v4 user — so without identity there is no inbox.
+  let inboxService: HostInboxService | undefined
+  if (identity) {
+    const inboxStore = new FileInboxStore(SPACE_DIR)
+    inboxStore.ensureDirs()
+    hub.register(new HumanInboxParticipant({ store: inboxStore }))
+    inboxService = new HostInboxService({ hub, store: inboxStore, identity, logger: log })
+    log.info('member task inbox enabled', { capability: HUMAN_CAPABILITY })
+  }
+
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
@@ -1000,6 +1017,9 @@ async function main(): Promise<void> {
     mcpRegistry,
     mcpFederation,
     workflows: workflowController,
+    // Phase 16 — member task inbox; undefined when identity is unwired, in
+    // which case /me/inbox degrades (empty list / 503).
+    ...(inboxService ? { inbox: inboxService } : {}),
     // Phase 13 M3 — null when no API key / disabled. Web responds 503
     // on /api/admin/workflows/assist in that case so the UI can hide
     // the "AI assistant" button cleanly.

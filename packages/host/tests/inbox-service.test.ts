@@ -1,0 +1,220 @@
+/**
+ * Phase 16 M5 — HostInboxService two-step resume.
+ *
+ * Real Hub (InMemoryStorage) + real IdentityStore (tmp sqlite) + real broker
+ * (HumanInboxParticipant + FileInboxStore) + a production-shaped suspendNotifier
+ * that persists parked tasks to the store. The "parent workflow" is a stub that
+ * records each onResume (and can re-suspend) — the real runner's output
+ * propagation is the M7 E2E's job. Here we pin the orchestration: child strictly
+ * before parent, both rows removed on completion, the markResolved race guard,
+ * and the parent row kept on re-suspend.
+ */
+
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+
+import { Hub, InMemoryStorage, SuspendTaskError, type Participant, type Task } from '@aipehub/core'
+import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { FileInboxStore, HumanInboxParticipant, HUMAN_CAPABILITY, NEVER_RESUME_AT } from '@aipehub/inbox'
+
+import { HostInboxService } from '../src/inbox-service.js'
+
+describe('HostInboxService — two-step resume', () => {
+  let tmp: string
+  let identity: IdentityStore
+  let hub: Hub
+  let store: FileInboxStore
+  let service: HostInboxService
+  let parentResumes: Array<{ task: Task; state: unknown }>
+  let parentSuspendAgain: boolean
+
+  beforeEach(async () => {
+    tmp = mkdtempSync(join(tmpdir(), 'host-inbox-svc-'))
+    identity = openIdentityStore({ dbPath: join(tmp, 'identity.sqlite') })
+    hub = new Hub({
+      storage: new InMemoryStorage(),
+      // Production-shaped: persist parked tasks to the real store so resolve()
+      // can getSuspendedTask them out of band (just like the host wiring).
+      suspendNotifier: (task, by, s) => {
+        identity.persistSuspendedTask({
+          taskId: task.id,
+          agentId: by,
+          hubId: 'local',
+          originUserId: task.origin?.userId ?? null,
+          resumeAt: s.resumeAt,
+          state: s.state,
+          taskJson: JSON.stringify(task),
+        })
+      },
+    })
+    await hub.start()
+
+    store = new FileInboxStore(tmp)
+    store.ensureDirs()
+    hub.register(new HumanInboxParticipant({ store }))
+
+    // Stub "workflow" parent — never dispatched-to, only resumed.
+    parentResumes = []
+    parentSuspendAgain = false
+    const stubWorkflow: Participant = {
+      id: 'workflow:demo',
+      kind: 'agent',
+      capabilities: [],
+      async onTask(task) {
+        return { kind: 'ok', taskId: task.id, output: null, by: 'workflow:demo', ts: 1 }
+      },
+      async onResume(task, state) {
+        parentResumes.push({ task, state })
+        if (parentSuspendAgain) throw new SuspendTaskError({ resumeAt: NEVER_RESUME_AT, state })
+        return { kind: 'ok', taskId: task.id, output: 'parent-resumed', by: 'workflow:demo', ts: 1 }
+      },
+    }
+    hub.register(stubWorkflow)
+
+    service = new HostInboxService({ hub, store, identity })
+  })
+
+  afterEach(async () => {
+    await hub.stop()
+    identity.close()
+    rmSync(tmp, { recursive: true, force: true })
+  })
+
+  /** Dispatch a human task to the broker (parking it) and return its child id. */
+  async function park(
+    payload: Record<string, unknown>,
+    ancestry: { taskId: string; by: string }[] = [{ taskId: 'wf-trigger', by: 'workflow:demo' }],
+  ): Promise<string> {
+    const fired = await hub.dispatch({
+      from: 'workflow:demo',
+      strategy: { kind: 'capability', capabilities: [HUMAN_CAPABILITY] },
+      payload,
+      ancestry,
+    })
+    expect(fired.kind).toBe('suspended')
+    const [item] = await store.listPending(payload.assignee as string)
+    if (!item) throw new Error('expected a pending inbox item')
+    return item.itemId
+  }
+
+  /** Persist a parent workflow row, as if the runner had suspended. */
+  function parkParent(taskId = 'wf-trigger'): void {
+    identity.persistSuspendedTask({
+      taskId,
+      agentId: 'workflow:demo',
+      hubId: 'local',
+      originUserId: null,
+      resumeAt: NEVER_RESUME_AT,
+      state: { kind: 'workflow_step_suspended', runState: { runId: 'r1' } },
+      taskJson: JSON.stringify({ id: taskId, from: 'admin', payload: {} }),
+    })
+  }
+
+  it('resumes child then parent, removes both rows, decision is the child output', async () => {
+    const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+    parkParent()
+    expect(identity.getSuspendedTask(childId)).toBeTruthy()
+
+    await service.resolve({
+      itemId: childId,
+      userId: 'user-a',
+      decision: { kind: 'approval', approved: true },
+    })
+
+    const childResult = hub.taskResult(childId)
+    expect(childResult?.kind).toBe('ok')
+    expect(childResult?.kind === 'ok' && childResult.output).toEqual({
+      kind: 'approval',
+      approved: true,
+    })
+    expect(identity.getSuspendedTask(childId)).toBeNull()
+    expect(identity.getSuspendedTask('wf-trigger')).toBeNull()
+    expect(parentResumes).toHaveLength(1)
+    expect(parentResumes[0]!.state).toMatchObject({ kind: 'workflow_step_suspended' })
+    expect((await store.get(childId))!.status).toBe('resolved')
+  })
+
+  it('a second resolve is rejected (already_resolved) without a second resume', async () => {
+    const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+    parkParent()
+    await service.resolve({
+      itemId: childId,
+      userId: 'user-a',
+      decision: { kind: 'approval', approved: true },
+    })
+    expect(parentResumes).toHaveLength(1)
+
+    await expect(
+      service.resolve({
+        itemId: childId,
+        userId: 'user-a',
+        decision: { kind: 'approval', approved: false },
+      }),
+    ).rejects.toMatchObject({ code: 'already_resolved' })
+    expect(parentResumes).toHaveLength(1)
+  })
+
+  it('keeps the parent row when the workflow re-suspends on another human step', async () => {
+    const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+    parkParent()
+    parentSuspendAgain = true
+
+    await service.resolve({
+      itemId: childId,
+      userId: 'user-a',
+      decision: { kind: 'approval', approved: true },
+    })
+
+    expect(identity.getSuspendedTask(childId)).toBeNull()
+    expect(identity.getSuspendedTask('wf-trigger')).toBeTruthy()
+  })
+
+  it('rejects a non-owner (forbidden) and an unknown item (not_found)', async () => {
+    const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+    await expect(
+      service.resolve({
+        itemId: childId,
+        userId: 'user-b',
+        decision: { kind: 'approval', approved: true },
+      }),
+    ).rejects.toMatchObject({ code: 'forbidden' })
+    await expect(
+      service.resolve({
+        itemId: 'ghost',
+        userId: 'user-a',
+        decision: { kind: 'approval', approved: true },
+      }),
+    ).rejects.toMatchObject({ code: 'not_found' })
+  })
+
+  it('rejects a decision whose kind mismatches the item (invalid_decision)', async () => {
+    const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+    await expect(
+      service.resolve({
+        itemId: childId,
+        userId: 'user-a',
+        decision: { kind: 'choice', value: 'x' },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_decision' })
+    expect((await store.get(childId))!.status).toBe('pending')
+  })
+
+  it('with an agent (non-workflow) parent, resumes only the child', async () => {
+    const childId = await park({ assignee: 'user-a', kind: 'edit', prompt: 'fix' }, [
+      { taskId: 'agent-task', by: 'some-agent' },
+    ])
+    expect((await store.get(childId))!.parentKind).toBe('agent')
+
+    await service.resolve({
+      itemId: childId,
+      userId: 'user-a',
+      decision: { kind: 'edit', value: 'fixed' },
+    })
+
+    expect(hub.taskResult(childId)?.kind).toBe('ok')
+    expect(parentResumes).toHaveLength(0)
+  })
+})
