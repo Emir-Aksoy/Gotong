@@ -361,6 +361,20 @@ export async function handleMeRoute(
     await handleMeDispatch(ctx, req, res, userId, v4.role)
     return
   }
+  // Phase 16 — member task inbox. GET lists the caller's pending items;
+  // POST /:itemId/resolve submits their decision (userId forced server-side).
+  if (method === 'GET' && path === '/api/me/inbox') {
+    await handleMeListInbox(ctx, res, userId)
+    return
+  }
+  {
+    const m =
+      method === 'POST' ? /^\/api\/me\/inbox\/([^/]+)\/resolve$/.exec(path) : null
+    if (m) {
+      await handleMeResolveInbox(ctx, req, res, userId, decodeURIComponent(m[1]!))
+      return
+    }
+  }
   if (method === 'GET' && path === '/api/me/growth-reports') {
     await handleMeListReports(ctx, res, userId)
     return
@@ -500,6 +514,89 @@ async function handleMeDispatch(
       },
       400,
     )
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/me/inbox  +  POST /api/me/inbox/:itemId/resolve  (Phase 16)
+// ---------------------------------------------------------------------------
+
+async function handleMeListInbox(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  // No inbox wired → empty list (mirrors the workflows catalog degradation),
+  // so the client renders an empty panel rather than erroring.
+  if (!ctx.inbox) {
+    sendJson(res, { items: [] })
+    return
+  }
+  try {
+    // listPending is scoped to the caller server-side — a member can only ever
+    // see their own items. The surface returns the public view already.
+    const items = await ctx.inbox.listPending(userId)
+    sendJson(res, { items })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
+  }
+}
+
+async function handleMeResolveInbox(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  itemId: string,
+): Promise<void> {
+  if (!ctx.inbox) {
+    sendJson(res, { error: 'inbox not enabled on this host' }, 503)
+    return
+  }
+  // Rate-limit per-user: resolving resumes a parked workflow that may fan out
+  // to LLM agents downstream — same budget machinery as /me/dispatch. The
+  // markResolved guard already caps repeat-resolves of one item, but this
+  // bounds a member churning across many assigned items.
+  if (!ctx.loginLimiter.check(`me-inbox-resolve:${userId}`)) {
+    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+    res.end('too many inbox resolves; try again in a minute')
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (err) {
+    sendJson(res, { error: (err as Error).message ?? 'bad body' }, 400)
+    return
+  }
+  const decision =
+    body && typeof body === 'object' ? (body as { decision?: unknown }).decision : undefined
+  if (decision === undefined) {
+    sendJson(res, { error: 'body required: {decision}' }, 400)
+    return
+  }
+  try {
+    // userId is forced from the session — a member can never resolve another
+    // user's item (the surface re-checks ownership and throws 'forbidden').
+    await ctx.inbox.resolve({ itemId, userId, decision })
+    sendJson(res, { ok: true, itemId })
+  } catch (err) {
+    const code = (err as { code?: unknown }).code
+    const status =
+      code === 'not_found'
+        ? 404
+        : code === 'forbidden'
+          ? 403
+          : code === 'already_resolved'
+            ? 409
+            : code === 'invalid_decision' || code === 'invalid_payload'
+              ? 400
+              : 500
+    const payload: Record<string, unknown> = {
+      error: err instanceof Error ? err.message : String(err),
+    }
+    if (typeof code === 'string') payload.code = code
+    sendJson(res, payload, status)
   }
 }
 
