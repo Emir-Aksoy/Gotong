@@ -143,6 +143,16 @@ export type IdentityInvitationStatus =
  * `@aipehub/identity` structurally; web never imports the package
  * directly, so we declare the shape here.
  */
+// Phase 18 B-M1/B-M2 — per-peer cross-org policy (duck-typed mirrors of
+// the identity types; web keeps zero identity runtime dep).
+export type PeerKind = 'personal' | 'organization' | 'project' | 'service'
+export const PEER_KINDS: readonly PeerKind[] = ['personal', 'organization', 'project', 'service']
+export interface PeerInboundAcl {
+  capabilities?: string[]
+  requireOrigin?: boolean
+  requireOriginRole?: string[]
+}
+
 export interface IdentityPeerDTO {
   id: string
   peerId: string
@@ -152,6 +162,11 @@ export interface IdentityPeerDTO {
   vaultEntryId: string
   createdAt: number
   updatedAt: number
+  // Phase 18 B-M1 policy fields (always present from a v12 store).
+  kind: PeerKind
+  acl: PeerInboundAcl | null
+  outboundCaps: string[] | null
+  requireApprovalOutbound: boolean
 }
 
 export interface IdentityOrgQuotaDTO {
@@ -238,6 +253,10 @@ export interface IdentitySurface {
     endpointUrl: string
     label?: string | null
     peerToken: string
+    kind?: PeerKind
+    acl?: PeerInboundAcl | null
+    outboundCaps?: string[] | null
+    requireApprovalOutbound?: boolean
   }): IdentityPeerDTO
   listPeers?(): IdentityPeerDTO[]
   updatePeer?(
@@ -247,6 +266,10 @@ export interface IdentitySurface {
       enabled?: boolean
       peerToken?: string
       endpointUrl?: string
+      kind?: PeerKind
+      acl?: PeerInboundAcl | null
+      outboundCaps?: string[] | null
+      requireApprovalOutbound?: boolean
     },
   ): IdentityPeerDTO
   removePeer?(id: string): boolean
@@ -580,6 +603,15 @@ export interface HandleIdentityRouteCtx {
    */
   peerRegistry?: {
     invalidate(): void
+    /**
+     * Phase 18 B-M2 — re-apply a peer's policy by tearing down + redialing
+     * its live link. A plain `invalidate()` won't re-gate an already-
+     * connected peer (tick keeps the existing link), so the patch handler
+     * calls this when a policy/endpoint field changed. Optional so an
+     * older host registry (invalidate-only) still satisfies the surface;
+     * the handler falls back to invalidate when it's absent.
+     */
+    refreshPolicy?(peerRowId: string): void
     status(): Array<{
       peerRowId: string
       peerId: string
@@ -1828,6 +1860,84 @@ function handleAuditExport(
 // D1 — Peer registry handlers
 // ---------------------------------------------------------------------------
 
+function isStringArray(v: unknown): v is string[] {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string')
+}
+
+// Phase 18 B-M2 — normalized policy fields shared by add + patch.
+interface PeerPolicyFields {
+  kind?: PeerKind
+  acl?: PeerInboundAcl | null
+  outboundCaps?: string[] | null
+  requireApprovalOutbound?: boolean
+}
+
+/**
+ * Validate an optional inbound ACL from a request body. `undefined` →
+ * absent (leave unchanged); `null` → explicit clear (PATCH); an object is
+ * shape-checked field by field. Returns the first error otherwise — a bad
+ * `capabilities: "x"` would otherwise be JSON-stored and silently misgate.
+ */
+function parseAclField(
+  raw: unknown,
+): { ok: true; value: PeerInboundAcl | null | undefined } | { ok: false; error: string } {
+  if (raw === undefined) return { ok: true, value: undefined }
+  if (raw === null) return { ok: true, value: null }
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    return { ok: false, error: 'acl must be an object or null' }
+  }
+  const a = raw as Record<string, unknown>
+  const out: PeerInboundAcl = {}
+  if (a.capabilities !== undefined) {
+    if (!isStringArray(a.capabilities)) return { ok: false, error: 'acl.capabilities must be a string array' }
+    out.capabilities = a.capabilities
+  }
+  if (a.requireOrigin !== undefined) {
+    if (typeof a.requireOrigin !== 'boolean') return { ok: false, error: 'acl.requireOrigin must be a boolean' }
+    out.requireOrigin = a.requireOrigin
+  }
+  if (a.requireOriginRole !== undefined) {
+    if (!isStringArray(a.requireOriginRole)) return { ok: false, error: 'acl.requireOriginRole must be a string array' }
+    out.requireOriginRole = a.requireOriginRole
+  }
+  return { ok: true, value: out }
+}
+
+/**
+ * Validate the four optional policy fields. Only present fields appear in
+ * the result, so a PATCH preserves what the caller didn't send.
+ * `outboundCaps` accepts null (explicit clear).
+ */
+function parsePeerPolicyFields(b: {
+  kind?: unknown
+  acl?: unknown
+  outboundCaps?: unknown
+  requireApprovalOutbound?: unknown
+}): { ok: true; value: PeerPolicyFields } | { ok: false; error: string } {
+  const value: PeerPolicyFields = {}
+  if (b.kind !== undefined) {
+    if (typeof b.kind !== 'string' || !PEER_KINDS.includes(b.kind as PeerKind)) {
+      return { ok: false, error: `kind must be one of: ${PEER_KINDS.join(', ')}` }
+    }
+    value.kind = b.kind as PeerKind
+  }
+  const acl = parseAclField(b.acl)
+  if (!acl.ok) return acl
+  if (acl.value !== undefined) value.acl = acl.value
+  if (b.outboundCaps !== undefined) {
+    if (b.outboundCaps === null) value.outboundCaps = null
+    else if (isStringArray(b.outboundCaps)) value.outboundCaps = b.outboundCaps
+    else return { ok: false, error: 'outboundCaps must be a string array or null' }
+  }
+  if (b.requireApprovalOutbound !== undefined) {
+    if (typeof b.requireApprovalOutbound !== 'boolean') {
+      return { ok: false, error: 'requireApprovalOutbound must be a boolean' }
+    }
+    value.requireApprovalOutbound = b.requireApprovalOutbound
+  }
+  return { ok: true, value }
+}
+
 function ensurePeersSupported(
   ctx: HandleIdentityRouteCtx,
   res: ServerResponse,
@@ -1872,6 +1982,10 @@ async function handleAddPeer(
     endpointUrl?: unknown
     label?: unknown
     peerToken?: unknown
+    kind?: unknown
+    acl?: unknown
+    outboundCaps?: unknown
+    requireApprovalOutbound?: unknown
   }
   if (typeof b.peerId !== 'string' || b.peerId.length === 0) {
     sendJson(res, { error: 'peerId required (non-empty string)' }, 400)
@@ -1885,12 +1999,18 @@ async function handleAddPeer(
     sendJson(res, { error: 'peerToken required (non-empty string)' }, 400)
     return
   }
+  const policy = parsePeerPolicyFields(b)
+  if (!policy.ok) {
+    sendJson(res, { error: policy.error }, 400)
+    return
+  }
   try {
     const added = ctx.identity.addPeer!({
       peerId: b.peerId,
       endpointUrl: b.endpointUrl,
       ...(typeof b.label === 'string' ? { label: b.label } : {}),
       peerToken: b.peerToken,
+      ...policy.value,
     })
     ctx.peerRegistry?.invalidate()
     tryAudit(ctx, v4, {
@@ -1926,13 +2046,17 @@ async function handlePatchPeer(
     enabled?: unknown
     peerToken?: unknown
     endpointUrl?: unknown
+    kind?: unknown
+    acl?: unknown
+    outboundCaps?: unknown
+    requireApprovalOutbound?: unknown
   }
   const input: {
     label?: string | null
     enabled?: boolean
     peerToken?: string
     endpointUrl?: string
-  } = {}
+  } & PeerPolicyFields = {}
   if (b.label === null) input.label = null
   else if (typeof b.label === 'string') input.label = b.label
   if (typeof b.enabled === 'boolean') input.enabled = b.enabled
@@ -1942,9 +2066,20 @@ async function handlePatchPeer(
   if (typeof b.endpointUrl === 'string' && b.endpointUrl.length > 0) {
     input.endpointUrl = b.endpointUrl
   }
+  const policy = parsePeerPolicyFields(b)
+  if (!policy.ok) {
+    sendJson(res, { error: policy.error }, 400)
+    return
+  }
+  Object.assign(input, policy.value)
+  // A policy or endpoint change must re-gate / re-dial a CONNECTED peer;
+  // invalidate() alone won't (tick keeps the existing link). Label / enabled
+  // / token-only edits are fine with a plain reconcile.
+  const needsRelink = Object.keys(policy.value).length > 0 || input.endpointUrl !== undefined
   try {
     const updated = ctx.identity.updatePeer!(id, input)
-    ctx.peerRegistry?.invalidate()
+    if (needsRelink && ctx.peerRegistry?.refreshPolicy) ctx.peerRegistry.refreshPolicy(id)
+    else ctx.peerRegistry?.invalidate()
     sendJson(res, { peer: updated })
   } catch (err) {
     sendIdentityError(res, err)

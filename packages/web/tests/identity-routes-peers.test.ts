@@ -49,6 +49,7 @@ interface BootResult {
   ownerCookie: string
   memberCookie: string
   invalidateCount: { n: number }
+  refreshPolicyCount: { n: number }
 }
 
 async function boot(): Promise<BootResult> {
@@ -82,8 +83,10 @@ async function boot(): Promise<BootResult> {
   })
 
   const invalidateCount = { n: 0 }
+  const refreshPolicyCount = { n: 0 }
   const peerRegistry = {
     invalidate: () => { invalidateCount.n++ },
+    refreshPolicy: () => { refreshPolicyCount.n++ },
     status: () => [],
   }
 
@@ -127,6 +130,7 @@ async function boot(): Promise<BootResult> {
     ownerCookie,
     memberCookie,
     invalidateCount,
+    refreshPolicyCount,
   }
 }
 
@@ -330,5 +334,190 @@ describe('DELETE /api/admin/identity/peers/:id', () => {
       headers: { cookie: b.ownerCookie },
     })
     expect(r.status).toBe(404)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Phase 18 B-M2 — per-peer trust-contract policy over the same CRUD routes.
+//
+// The host-side proof that a stored ACL actually gates inbound tasks lives in
+// host/tests/peer-policy-acl.test.ts. What these pin is the WEB seam: the four
+// policy fields (kind / acl / outboundCaps / requireApprovalOutbound) validate,
+// persist, and round-trip; and a policy/endpoint edit kicks refreshPolicy()
+// (full re-dial of a connected peer) rather than the plain invalidate() that a
+// label/token edit gets — invalidate alone keeps the existing link, so a saved
+// ACL would silently not take effect ("我保存了但没变").
+// ---------------------------------------------------------------------------
+describe('peer policy fields (Phase 18 B-M2)', () => {
+  let b: BootResult
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  it('POST persists all four policy fields + round-trips via getPeer', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_policy',
+        endpointUrl: 'wss://policy.example',
+        peerToken: 'tok-policy-12345',
+        kind: 'organization',
+        acl: { capabilities: ['probe'], requireOrigin: true },
+        outboundCaps: ['chat'],
+        requireApprovalOutbound: true,
+      }),
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as {
+      peer: {
+        id: string
+        kind: string
+        acl: { capabilities?: string[]; requireOrigin?: boolean } | null
+        outboundCaps: string[] | null
+        requireApprovalOutbound: boolean
+      }
+    }
+    expect(j.peer.kind).toBe('organization')
+    expect(j.peer.acl).toEqual({ capabilities: ['probe'], requireOrigin: true })
+    expect(j.peer.outboundCaps).toEqual(['chat'])
+    expect(j.peer.requireApprovalOutbound).toBe(true)
+    // Persisted, not just echoed.
+    const stored = b.identity.getPeer(j.peer.id)!
+    expect(stored.kind).toBe('organization')
+    expect(stored.acl).toEqual({ capabilities: ['probe'], requireOrigin: true })
+    expect(stored.outboundCaps).toEqual(['chat'])
+    expect(stored.requireApprovalOutbound).toBe(true)
+  })
+
+  it('POST without policy fields → defaults (kind=service, acl null)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_default',
+        endpointUrl: 'wss://default.example',
+        peerToken: 'tok-default-1234',
+      }),
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as {
+      peer: { kind: string; acl: unknown; requireApprovalOutbound: boolean }
+    }
+    expect(j.peer.kind).toBe('service')
+    expect(j.peer.acl).toBeNull()
+    expect(j.peer.requireApprovalOutbound).toBe(false)
+  })
+
+  it('POST invalid kind → 400', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_badkind',
+        endpointUrl: 'wss://x.example',
+        peerToken: 'tok-badkind-123',
+        kind: 'bogus',
+      }),
+    })
+    expect(r.status).toBe(400)
+  })
+
+  it('POST acl with non-array capabilities → 400', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_badacl',
+        endpointUrl: 'wss://x.example',
+        peerToken: 'tok-badacl-1234',
+        acl: { capabilities: 'probe' },
+      }),
+    })
+    expect(r.status).toBe(400)
+  })
+
+  it('POST outboundCaps not an array → 400', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_badout',
+        endpointUrl: 'wss://x.example',
+        peerToken: 'tok-badout-1234',
+        outboundCaps: 'chat',
+      }),
+    })
+    expect(r.status).toBe(400)
+  })
+
+  it('PATCH a policy field calls refreshPolicy (re-dial), not invalidate', async () => {
+    const id = b.identity.addPeer({
+      peerId: 'hub_relink',
+      endpointUrl: 'wss://relink.example',
+      peerToken: 'tok-relink-1234',
+    }).id
+    const inv = b.invalidateCount.n
+    const rp = b.refreshPolicyCount.n
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ acl: { capabilities: ['probe'] } }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.refreshPolicyCount.n).toBe(rp + 1)
+    expect(b.invalidateCount.n).toBe(inv) // NOT bumped — refreshPolicy supersedes
+    const stored = b.identity.getPeer(id)!
+    expect(stored.acl).toEqual({ capabilities: ['probe'] })
+  })
+
+  it('PATCH label-only stays on the plain invalidate path', async () => {
+    const id = b.identity.addPeer({
+      peerId: 'hub_labelonly',
+      endpointUrl: 'wss://lo.example',
+      peerToken: 'tok-labelonly-12',
+    }).id
+    const inv = b.invalidateCount.n
+    const rp = b.refreshPolicyCount.n
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ label: 'renamed' }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.invalidateCount.n).toBe(inv + 1)
+    expect(b.refreshPolicyCount.n).toBe(rp) // policy untouched → no re-dial
+  })
+
+  it('PATCH endpointUrl change also re-dials via refreshPolicy', async () => {
+    const id = b.identity.addPeer({
+      peerId: 'hub_endpoint',
+      endpointUrl: 'wss://old.example',
+      peerToken: 'tok-endpoint-123',
+    }).id
+    const rp = b.refreshPolicyCount.n
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ endpointUrl: 'wss://new.example' }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.refreshPolicyCount.n).toBe(rp + 1)
+  })
+
+  it('PATCH acl:null clears a previously set ACL', async () => {
+    const id = b.identity.addPeer({
+      peerId: 'hub_clear',
+      endpointUrl: 'wss://clear.example',
+      peerToken: 'tok-clear-12345',
+      acl: { capabilities: ['probe'] },
+    }).id
+    expect(b.identity.getPeer(id)!.acl).toEqual({ capabilities: ['probe'] })
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ acl: null }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.identity.getPeer(id)!.acl).toBeNull()
   })
 })
