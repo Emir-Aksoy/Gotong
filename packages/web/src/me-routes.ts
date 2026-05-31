@@ -103,6 +103,112 @@ function parseCaseIdFromReportPath(path: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Member-facing workflow resolution (Phase 14)
+//
+// Replaces the hardcoded ALLOWED_WORKFLOWS table: the catalog of workflows
+// a member may run is DERIVED at request time from the live workflow list,
+// keeping only those that declare `surface.me.enabled` and allow the
+// caller's role. The trust boundary moves from a source edit of this file
+// to an import-time review of the workflow YAML (admin-gated import).
+// ---------------------------------------------------------------------------
+
+/** Roles that may run a member-facing workflow when it doesn't say otherwise.
+ *  Viewer is excluded by convention (read-only); a workflow opts them in. */
+const DEFAULT_ME_ROLES: readonly string[] = ['owner', 'admin', 'member']
+
+/**
+ * Read-side mirror of `@aipehub/workflow`'s `MeSurfaceSpec`. The web layer
+ * has no workflow dep, so `surfaceMe` arrives as `unknown` (already
+ * validated by the workflow parser at import) and we narrow it here. Only
+ * the fields `/me` consumes are typed.
+ */
+interface MeSurfaceView {
+  enabled: boolean
+  label?: string
+  description?: string
+  /** Field descriptors, passed through to the client for form rendering. */
+  inputSchema?: unknown[]
+  allowedRoles?: string[]
+  userScopeField?: string
+}
+
+/** A workflow resolved as runnable from `/me` for a specific caller. */
+interface ResolvedMeWorkflow {
+  workflowId: string
+  /** Trigger capability dispatched to — internal, never sent to clients. */
+  capability: string
+  label: string
+  description?: string
+  /** Raw input field descriptors for the client form. */
+  inputSchema: unknown[]
+  /** Field ids the dispatch handler copies from the body (scope key excluded). */
+  inputFieldIds: string[]
+  /** The payload key force-set to the caller's userId — internal. */
+  userScopeField: string
+}
+
+function readMeSurface(raw: unknown): MeSurfaceView | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
+  const m = raw as Record<string, unknown>
+  if (typeof m.enabled !== 'boolean') return null
+  const view: MeSurfaceView = { enabled: m.enabled }
+  if (typeof m.label === 'string') view.label = m.label
+  if (typeof m.description === 'string') view.description = m.description
+  if (Array.isArray(m.inputSchema)) view.inputSchema = m.inputSchema
+  if (Array.isArray(m.allowedRoles)) {
+    view.allowedRoles = m.allowedRoles.filter((r): r is string => typeof r === 'string')
+  }
+  if (typeof m.userScopeField === 'string') view.userScopeField = m.userScopeField
+  return view
+}
+
+function asFieldArray(raw: unknown): unknown[] | undefined {
+  return Array.isArray(raw) ? raw : undefined
+}
+
+function fieldIds(schema: unknown[]): string[] {
+  const ids: string[] = []
+  for (const f of schema) {
+    if (f && typeof f === 'object' && typeof (f as { id?: unknown }).id === 'string') {
+      ids.push((f as { id: string }).id)
+    }
+  }
+  return ids
+}
+
+/**
+ * Decide whether `summary` is runnable from `/me` by `role`, and resolve
+ * the effective label / input fields / scope key. Returns null when the
+ * workflow isn't member-facing, is disabled, or excludes the role.
+ */
+function evaluateMeSurface(
+  summary: MeWorkflowSummaryLike,
+  role: string,
+): ResolvedMeWorkflow | null {
+  const me = readMeSurface(summary.surfaceMe)
+  if (!me || me.enabled !== true) return null
+  const allowedRoles = me.allowedRoles ?? DEFAULT_ME_ROLES
+  if (!allowedRoles.includes(role)) return null
+  // input fields: surface.me.inputSchema first, else the trigger's
+  // payloadSchema (the long-form fallback), else nothing.
+  const inputSchema = me.inputSchema ?? asFieldArray(summary.payloadSchema) ?? []
+  const userScopeField = me.userScopeField ?? 'case_id'
+  const out: ResolvedMeWorkflow = {
+    workflowId: summary.id,
+    capability: summary.triggerCapability,
+    label: me.label ?? summary.name ?? summary.id,
+    inputSchema,
+    // The scope key is force-set server-side, never copied from the body —
+    // drop it from the copy set even if an author listed it as a field.
+    inputFieldIds: fieldIds(inputSchema).filter((id) => id !== userScopeField),
+    userScopeField,
+  }
+  const description = me.description ?? summary.description
+  if (description !== undefined) out.description = description
+  return out
+}
+
+// ---------------------------------------------------------------------------
 // Dispatcher
 // ---------------------------------------------------------------------------
 
@@ -182,6 +288,14 @@ export async function handleMeRoute(
 
   if (method === 'GET' && path === '/api/me/allowed-workflows') {
     sendJson(res, { workflows: listAllowedWorkflowsForMe() })
+    return
+  }
+  // Phase 14 — member-facing workflow catalog, DERIVED from the live
+  // workflow list (only those declaring surface.me.enabled and allowing
+  // the caller's role). Supersedes the hardcoded /allowed-workflows above
+  // (which M5 removes once dispatch is generalized).
+  if (method === 'GET' && path === '/api/me/workflows') {
+    await handleMeListWorkflows(ctx, res, v4.role)
     return
   }
   // Phase 7 M5 — org mode for the SPA shell. Every signed-in user can
@@ -339,6 +453,49 @@ async function handleMeDispatch(
       400,
     )
   }
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/me/workflows — member-facing catalog (Phase 14)
+// ---------------------------------------------------------------------------
+
+async function handleMeListWorkflows(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  role: string,
+): Promise<void> {
+  if (!ctx.workflows) {
+    sendJson(res, { workflows: [] })
+    return
+  }
+  let summaries: MeWorkflowSummaryLike[]
+  try {
+    summaries = await ctx.workflows.list()
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
+    return
+  }
+  // Project to the PUBLIC shape only: id / label / description / inputSchema.
+  // `capability` and `userScopeField` are internal enforcement details —
+  // never surfaced, so a member can't probe the dispatch internals.
+  const workflows: Array<{
+    id: string
+    label: string
+    description?: string
+    inputSchema: unknown[]
+  }> = []
+  for (const s of summaries) {
+    const resolved = evaluateMeSurface(s, role)
+    if (!resolved) continue
+    const entry: { id: string; label: string; description?: string; inputSchema: unknown[] } = {
+      id: resolved.workflowId,
+      label: resolved.label,
+      inputSchema: resolved.inputSchema,
+    }
+    if (resolved.description !== undefined) entry.description = resolved.description
+    workflows.push(entry)
+  }
+  sendJson(res, { workflows })
 }
 
 // ---------------------------------------------------------------------------

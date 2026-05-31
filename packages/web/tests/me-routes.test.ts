@@ -32,7 +32,12 @@ import {
 } from '@aipehub/core'
 import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
 
-import { serveWeb, type WebServerHandle } from '../src/server.js'
+import {
+  serveWeb,
+  type WebServerHandle,
+  type WorkflowSummary,
+  type WorkflowSurface,
+} from '../src/server.js'
 
 interface BootResult {
   tmp: string
@@ -64,10 +69,47 @@ class StubGrowthReports implements GrowthReportsAdminSurface {
   }
 }
 
+/**
+ * Minimal `WorkflowSurface` stub exposing a fixed list — enough to drive
+ * the Phase 14 member-facing catalog (`/api/me/workflows`) without booting
+ * a real WorkflowController. Write-side methods throw (unused here).
+ */
+class StubWorkflowSurface implements WorkflowSurface {
+  constructor(private readonly summaries: WorkflowSummary[]) {}
+  async list(): Promise<WorkflowSummary[]> {
+    return this.summaries
+  }
+  async importFromText(): Promise<WorkflowSummary> {
+    throw new Error('stub: importFromText not supported')
+  }
+  async remove(): Promise<void> {
+    throw new Error('stub: remove not supported')
+  }
+  async listRuns(): Promise<[]> {
+    return []
+  }
+  async readRun(): Promise<null> {
+    return null
+  }
+}
+
+/** Build a WorkflowSummary with sensible defaults; override what a test needs. */
+function meWf(over: Partial<WorkflowSummary> & { id: string }): WorkflowSummary {
+  return {
+    participantId: `workflow:${over.id}`,
+    triggerCapability: `cap-${over.id}`,
+    stepCount: 1,
+    file: null,
+    ...over,
+  }
+}
+
 async function boot(
   opts: {
     withGrowthReports?: boolean
     adminLoginRateLimit?: { max: number; windowSec: number }
+    /** Phase 14 — member-facing workflow catalog source. */
+    workflows?: WorkflowSummary[]
   } = {},
 ): Promise<BootResult> {
   const withGrowthReports = opts.withGrowthReports ?? true
@@ -118,6 +160,7 @@ async function boot(
     port: 0,
     identity,
     ...(withGrowthReports ? { growthReports } : {}),
+    ...(opts.workflows ? { workflows: new StubWorkflowSurface(opts.workflows) } : {}),
     ...(opts.adminLoginRateLimit
       ? { adminLoginRateLimit: opts.adminLoginRateLimit }
       : {}),
@@ -239,6 +282,112 @@ describe('/api/me/allowed-workflows', () => {
         'present_state', 'aspirations', 'struggles', 'focus_request',
       ]),
     )
+  })
+})
+
+describe('/api/me/workflows — member-facing catalog (Phase 14)', () => {
+  // A spread of summaries exercising every catalog gate: enabled +
+  // default role (visible), disabled (hidden), role-restricted (hidden
+  // from member), no surface.me at all (hidden), and an enabled one
+  // whose input fields fall back to trigger.payloadSchema.
+  const WORKFLOWS: WorkflowSummary[] = [
+    meWf({
+      id: 'open-flow',
+      name: 'Open Flow',
+      triggerCapability: 'cap-open',
+      surfaceMe: {
+        enabled: true,
+        label: '开放流程',
+        description: 'anyone signed in',
+        inputSchema: [
+          { id: 'topic', type: 'text', label: '主题' },
+          { id: 'notes', type: 'textarea' },
+        ],
+        userScopeField: 'case_id',
+      },
+    }),
+    meWf({
+      id: 'disabled-flow',
+      surfaceMe: { enabled: false, label: 'should never show' },
+    }),
+    meWf({
+      id: 'admin-only',
+      surfaceMe: { enabled: true, allowedRoles: ['owner', 'admin'] },
+    }),
+    meWf({ id: 'no-surface' }), // no surfaceMe block at all
+    meWf({
+      id: 'fallback-flow',
+      name: 'Fallback Flow',
+      surfaceMe: { enabled: true }, // no inputSchema → use payloadSchema
+      payloadSchema: [{ id: 'q', type: 'text' }],
+    }),
+  ]
+
+  let b: BootResult
+  beforeEach(async () => { b = await boot({ workflows: WORKFLOWS }) })
+  afterEach(async () => { await teardown(b) })
+
+  it('lists only enabled, role-allowed workflows (member sees open + fallback)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/me/workflows`, {
+      headers: { cookie: b.memberCookie },
+    })
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as {
+      workflows: Array<{ id: string; label: string; description?: string; inputSchema: unknown[] }>
+    }
+    const ids = body.workflows.map((w) => w.id).sort()
+    // disabled / admin-only / no-surface are all filtered out.
+    expect(ids).toEqual(['fallback-flow', 'open-flow'])
+  })
+
+  it('exposes only public fields — never capability or userScopeField', async () => {
+    const r = await fetch(`${b.baseUrl}/api/me/workflows`, {
+      headers: { cookie: b.memberCookie },
+    })
+    const body = (await r.json()) as { workflows: Array<Record<string, unknown>> }
+    const open = body.workflows.find((w) => w.id === 'open-flow')!
+    expect(open.label).toBe('开放流程')
+    expect(open.description).toBe('anyone signed in')
+    expect(open.inputSchema).toEqual([
+      { id: 'topic', type: 'text', label: '主题' },
+      { id: 'notes', type: 'textarea' },
+    ])
+    // Internal enforcement details must NOT leak to the client — exposing
+    // them would hand a member the dispatch internals to probe.
+    expect(open.capability).toBeUndefined()
+    expect(open.userScopeField).toBeUndefined()
+    expect(open.triggerCapability).toBeUndefined()
+  })
+
+  it('falls back to trigger.payloadSchema when surface.me omits inputSchema', async () => {
+    const r = await fetch(`${b.baseUrl}/api/me/workflows`, {
+      headers: { cookie: b.memberCookie },
+    })
+    const body = (await r.json()) as {
+      workflows: Array<{ id: string; label: string; inputSchema: unknown[] }>
+    }
+    const fb = body.workflows.find((w) => w.id === 'fallback-flow')!
+    expect(fb.label).toBe('Fallback Flow') // me.label absent → workflow.name
+    expect(fb.inputSchema).toEqual([{ id: 'q', type: 'text' }])
+  })
+
+  it('returns an empty catalog when the host wired no workflow surface', async () => {
+    const b2 = await boot() // no workflows option → ctx.workflows undefined
+    try {
+      const r = await fetch(`${b2.baseUrl}/api/me/workflows`, {
+        headers: { cookie: b2.memberCookie },
+      })
+      expect(r.status).toBe(200)
+      const body = (await r.json()) as { workflows: unknown[] }
+      expect(body.workflows).toEqual([])
+    } finally {
+      await teardown(b2)
+    }
+  })
+
+  it('requires a v4 session (anonymous → 401)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/me/workflows`)
+    expect(r.status).toBe(401)
   })
 })
 
