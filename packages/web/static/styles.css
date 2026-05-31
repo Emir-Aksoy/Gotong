@@ -2047,6 +2047,33 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .reputation-panel .rep-bar-neutral { background: #bbb; }
 .reputation-panel .rep-bar-label { position: absolute; top: 0; left: 0; right: 0; text-align: center; font-size: 0.78rem; line-height: 1.2rem; color: #222; pointer-events: none; }
 
+/* Phase 18 A-M3 — cross-hub peer capability manifest (tab "联邦"). Same
+   table shape as the reputation / usage panels; status chips reuse the
+   .wf-state colour language (green=online, amber=stale, grey=unknown). */
+.peer-federation-panel { padding: 1rem; }
+.peer-federation-panel .pf-header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+.peer-federation-panel .pf-header h2 { margin: 0; flex: 1 0 100%; }
+.peer-federation-panel .pf-meta { flex: 1 0 100%; color: #666; font-size: 0.85rem; margin: 0; }
+.peer-federation-panel .pf-status { font-size: 0.85rem; min-height: 1em; }
+.peer-federation-panel .pf-status-loading { color: #888; }
+.peer-federation-panel .pf-status-ok { color: #27ae60; }
+.peer-federation-panel .pf-status-error { color: #c0392b; }
+.peer-federation-panel .pf-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-bottom: 1.5rem; }
+.peer-federation-panel .pf-table th, .peer-federation-panel .pf-table td { text-align: left; border-bottom: 1px solid #eee; padding: 0.4rem 0.5rem; vertical-align: top; }
+.peer-federation-panel .pf-table th { background: #fafafa; font-weight: 600; color: #555; }
+.peer-federation-panel .pf-empty { color: #888; text-align: center; padding: 1.5rem; }
+.peer-federation-panel .pf-id { font-size: 0.78rem; color: #888; }
+.peer-federation-panel .pf-peer code { background: transparent; }
+.peer-federation-panel .pf-time { font-size: 0.78rem; color: #888; white-space: nowrap; }
+.peer-federation-panel .pf-caps { display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.peer-federation-panel .pf-cap { font-size: 0.72rem; padding: 2px 8px; border: 1px solid #d4d4cf; background: #fafaf7; color: #444; border-radius: 999px; font-family: "SF Mono", "Menlo", "Consolas", monospace; }
+.peer-federation-panel .pf-cap-empty { font-size: 0.78rem; color: #aaa; font-style: italic; }
+.peer-federation-panel .pf-badge { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 3px; font-weight: 700; white-space: nowrap; }
+.peer-federation-panel .pf-online { background: #d6ecdb; color: #1a6a3a; }
+.peer-federation-panel .pf-stale { background: #fde9cf; color: #9a5b13; }
+.peer-federation-panel .pf-unknown { background: #e9e9e9; color: #888; }
+.peer-federation-panel .pf-row-refresh { font-size: 0.78rem; padding: 2px 10px; }
+
 /* Phase 17 — usage / cost dashboard (tab "用量"). */
 .usage-panel { padding: 1rem; }
 .usage-panel .usage-header h2 { margin: 0 0 0.35rem; }

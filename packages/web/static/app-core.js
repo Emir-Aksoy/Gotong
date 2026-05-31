@@ -54,6 +54,7 @@
       tabActivity: '活动',
       tabServices: '服务',
       tabMcp: 'MCP',
+      tabFederation: '联邦',
       // --- MCP integration tab (#2-M4) ---
       mcpPanel: 'MCP 集成',
       mcpIntro: '把外部 MCP server 装进 hub，智能体在「编辑」表单里按名勾选即可调用其工具。凭证请用 ${ENV} 引用，别填明文。',
@@ -405,6 +406,7 @@
       tabActivity: 'Activity',
       tabServices: 'Services',
       tabMcp: 'MCP',
+      tabFederation: 'Federation',
       // --- MCP integration tab (#2-M4) ---
       mcpPanel: 'MCP Integration',
       mcpIntro: 'Install external MCP servers into the hub; agents opt in by name in their Edit form to get the tools. Reference credentials with ${ENV}, never paste plaintext.',

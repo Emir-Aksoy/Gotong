@@ -121,6 +121,7 @@
       <button class="tabbar-btn" type="button" data-tab="quotas"    data-roles="owner" data-i18n="tabQuotas">配额</button>
       <button class="tabbar-btn" type="button" data-tab="usage"     data-roles="owner" data-i18n="tabUsage">用量</button>
       <button class="tabbar-btn" type="button" data-tab="reputation" data-roles="owner" data-i18n="tabReputation">信誉</button>
+      <button class="tabbar-btn" type="button" data-tab="federation" data-roles="owner" data-i18n="tabFederation">联邦</button>
       <button class="tabbar-btn" type="button" data-tab="settings"  data-roles="owner,admin,member,viewer" data-i18n="tabSettings">设置</button>
     </nav>
 
@@ -969,6 +970,13 @@
            /usage-ui.js. Owner-only; reads the usage ledger summary +
            offers CSV/JSONL export of the ledger and audit log. -->
       <section id="usage-panel" class="usage-panel" data-tab="usage"></section>
+
+      <!-- Phase 18 A-M3 — cross-hub peer capability manifest browse +
+           refresh. Rendered by /peer-manifest-ui.js. Owner-only; shows
+           what each connected peer advertises (online / stale / unknown)
+           and lets the owner force an on-demand refresh. 503 inline when
+           the host has no peer federation wired (peers disabled). -->
+      <section id="peer-federation-panel" class="peer-federation-panel" data-tab="federation"></section>
     </main>
   </body>
 </html>
