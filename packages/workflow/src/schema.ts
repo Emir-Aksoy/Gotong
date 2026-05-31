@@ -35,6 +35,13 @@ import {
 
 const ID_RE = /^[a-zA-Z0-9_.:-]+$/
 
+/**
+ * The capability a `human:` step desugars to — the member task inbox
+ * (`@aipehub/inbox`). Hardcoded (not imported) so the workflow package keeps
+ * zero dep on `@aipehub/inbox`; it's a stable wire constant, like the schema id.
+ */
+const HUMAN_CAPABILITY = 'aipehub.human/v1'
+
 export function parseWorkflow(raw: string): WorkflowDefinition {
   const trimmed = raw.trim()
   if (trimmed.length === 0) {
@@ -168,6 +175,25 @@ function validateStep(raw: unknown, path: string, seenIds: Set<string>): Step {
   const when = validateWhen(s.when, `${path}.when`)
 
   const isParallel = s.parallel === true
+
+  // `human:` sugar — a human-in-the-loop step. Desugars to a plain dispatch to
+  // the member task inbox capability, so the runner, resolver, and deepCheck all
+  // see a normal capability dispatch and need zero changes. See @aipehub/inbox.
+  if (s.human !== undefined) {
+    if (isParallel) {
+      throw new WorkflowSchemaError(`${path} cannot be both 'human' and 'parallel'`)
+    }
+    if (s.dispatch !== undefined) {
+      throw new WorkflowSchemaError(`${path} cannot have both 'human' and 'dispatch'`)
+    }
+    const out: SimpleStep = { id: s.id, dispatch: humanToDispatch(s.human, `${path}.human`) }
+    if (typeof s.description === 'string') out.description = s.description
+    const fp = parseStepFailurePolicy(s.onFailure, `${path}.onFailure`)
+    if (fp) out.onFailure = fp
+    if (when !== undefined) out.when = when
+    return out
+  }
+
   if (isParallel) {
     const branchesRaw = s.branches
     if (!Array.isArray(branchesRaw) || branchesRaw.length === 0) {
@@ -207,6 +233,40 @@ function validateStep(raw: unknown, path: string, seenIds: Set<string>): Step {
   if (fp) out.onFailure = fp
   if (when !== undefined) out.when = when
   return out
+}
+
+/**
+ * Desugar a `human:` block into a dispatch to the member task inbox
+ * capability. The payload is the `HumanTaskPayload` the broker expects; the
+ * resolver substitutes any `$ref`s (e.g. `assignee: $trigger.payload.case_id`)
+ * at dispatch time exactly as for any other payload. Validated eagerly so a
+ * bad human block fails at import, not at first dispatch.
+ */
+function humanToDispatch(raw: unknown, path: string): DispatchSpec {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new WorkflowSchemaError(`${path} must be an object`)
+  }
+  const h = raw as Record<string, unknown>
+  if (typeof h.assignee !== 'string' || h.assignee.length === 0) {
+    throw new WorkflowSchemaError(`${path}.assignee is required (a user id or a $ref string)`)
+  }
+  if (h.kind !== 'approval' && h.kind !== 'choice' && h.kind !== 'edit') {
+    throw new WorkflowSchemaError(`${path}.kind must be 'approval' | 'choice' | 'edit'`)
+  }
+  if (typeof h.prompt !== 'string' || h.prompt.length === 0) {
+    throw new WorkflowSchemaError(`${path}.prompt is required (non-empty string)`)
+  }
+  if (h.kind === 'choice' && (!Array.isArray(h.options) || h.options.length === 0)) {
+    throw new WorkflowSchemaError(`${path}.options must be a non-empty array when kind is 'choice'`)
+  }
+  const payload: Record<string, unknown> = { assignee: h.assignee, kind: h.kind, prompt: h.prompt }
+  if (typeof h.title === 'string') payload.title = h.title
+  if (h.options !== undefined) payload.options = h.options
+  if (h.editField !== undefined) payload.editField = h.editField
+  return {
+    strategy: { kind: 'capability', capabilities: [HUMAN_CAPABILITY] },
+    payload,
+  }
 }
 
 /**
