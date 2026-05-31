@@ -29,6 +29,7 @@ import {
   type TaskResult,
 } from '@aipehub/core'
 
+import { WorkflowRevisionError } from './lifecycle.js'
 import { parsePredicate, type CompiledPredicate } from './predicate.js'
 import { resolveRefs, type ResolutionContext } from './resolver.js'
 import type { RunStore } from './run-store.js'
@@ -73,9 +74,40 @@ export interface HubLike {
   taskResult?(taskId: TaskId): TaskResult | undefined
 }
 
+/**
+ * Resolves the {@link WorkflowDefinition} a run should execute, by revision.
+ * Phase 15: a run binds to the revision it started under, so re-publishing a
+ * new revision never drifts an in-flight run onto new step logic.
+ *
+ * Synchronous on purpose — the runner stamps the revision into `RunState` and
+ * exposes a `definition` getter without `await`. A host-backed resolver keeps
+ * the needed revisions in memory (hydrated from the file stores, updated on
+ * publish/rollback); the default single-revision resolver is trivial.
+ */
+export interface DefinitionResolver {
+  /** The revision + definition a NEW run binds to (current published content). */
+  current(): ResolvedDefinition
+  /** The exact definition snapshot for a recorded run's revision. */
+  byRevision(revision: number): WorkflowDefinition
+}
+
+export interface ResolvedDefinition {
+  revision: number
+  definition: WorkflowDefinition
+}
+
 export interface WorkflowRunnerOptions {
   definition: WorkflowDefinition
   hub: HubLike
+  /**
+   * Phase 15 — resolves the definition to execute by revision. When omitted,
+   * the runner synthesizes a single-revision resolver from `definition` (rev 1),
+   * which keeps every pre-Phase-15 call-site (`new WorkflowRunner({definition,
+   * hub})`) working unchanged. The host injects a real, store-backed resolver
+   * so new runs bind to the current published revision and resumes bind to the
+   * revision they started under.
+   */
+  resolver?: DefinitionResolver
   /**
    * Persistence sink for `RunState` files. Pass `null` to disable
    * persistence (useful for in-memory tests).
@@ -96,57 +128,65 @@ export function workflowParticipantId(workflowId: string): ParticipantId {
 }
 
 export class WorkflowRunner extends AgentParticipant {
-  readonly definition: WorkflowDefinition
+  /** The workflow id — stable across revisions (identity + resume bind check). */
+  readonly workflowId: string
+  private readonly resolver: DefinitionResolver
   private readonly hub: HubLike
   private readonly runStore: RunStore | null
   private readonly idGen: () => string
   private readonly now: () => number
   /**
-   * Pre-compiled `when` predicates per step id. Empty entries mean the
-   * step has no `when`. Compiled once at construction so dispatch-time
-   * is just a tree walk; bad predicates would have already been caught
-   * by the schema validator at parseWorkflow time.
+   * Per-revision compiled `when` predicates, built lazily on first use of a
+   * revision and cached. Phase 15: a single runner can execute multiple
+   * revisions over its lifetime (new runs on the current published revision,
+   * resumes on whatever revision the run started under), so predicates can no
+   * longer be compiled once at construction — they're keyed by revision here.
+   * Bad predicates were already rejected at parseWorkflow time.
    */
-  private readonly whenPredicates = new Map<string, CompiledPredicate>()
-  /**
-   * Pre-compiled `when` predicates for individual parallel-branch
-   * entries. Keyed by `${stepId}::${branchId}`. Same compile-once
-   * lifecycle as `whenPredicates`.
-   */
-  private readonly branchWhenPredicates = new Map<string, CompiledPredicate>()
+  private readonly compiledCache = new Map<number, CompiledPredicates>()
 
   constructor(opts: WorkflowRunnerOptions) {
     super({
       id: workflowParticipantId(opts.definition.id),
       capabilities: [opts.definition.trigger.capability],
     })
-    this.definition = opts.definition
+    this.workflowId = opts.definition.id
+    this.resolver = opts.resolver ?? singleRevisionResolver(opts.definition)
     this.hub = opts.hub
     this.runStore = opts.runStore ?? null
     this.idGen = opts.idGenerator ?? (() => randomUUID())
     this.now = opts.now ?? (() => Date.now())
-    for (const step of opts.definition.steps) {
-      if (step.when) {
-        this.whenPredicates.set(step.id, parsePredicate(step.when))
-      }
-      if ('parallel' in step && step.parallel === true) {
-        for (const branch of step.branches) {
-          if (branch.when) {
-            this.branchWhenPredicates.set(
-              branchPredicateKey(step.id, branch.id),
-              parsePredicate(branch.when),
-            )
-          }
-        }
-      }
+  }
+
+  /**
+   * Back-compat accessor: the current published definition. Resolves through
+   * the (possibly host-backed) resolver, so it reflects the live revision.
+   */
+  get definition(): WorkflowDefinition {
+    return this.resolver.current().definition
+  }
+
+  /** Build (or fetch from cache) the per-revision execution bundle. */
+  private runDefnFor(revision: number, def: WorkflowDefinition): RunDefn {
+    let compiled = this.compiledCache.get(revision)
+    if (!compiled) {
+      compiled = compilePredicates(def)
+      this.compiledCache.set(revision, compiled)
     }
+    return { revision, def, when: compiled.when, branchWhen: compiled.branchWhen }
   }
 
   protected async handleTask(task: Task): Promise<unknown> {
     const runId = this.idGen()
+    // Bind this run to the CURRENT published revision and stamp it into the
+    // run state — resume later resolves the definition by this number, so a
+    // subsequent publish can't drift this run onto new step logic.
+    const { revision, definition } = this.resolver.current()
+    const rd = this.runDefnFor(revision, definition)
     const state: RunState = {
       runId,
-      workflowId: this.definition.id,
+      workflowId: this.workflowId,
+      definitionRevision: revision,
       triggeredByTaskId: task.id,
       // v2.5 — capture who fired the triggering task so HITL steps
       // can ask follow-up questions of that admin via `$trigger.from`.
@@ -172,7 +212,7 @@ export class WorkflowRunner extends AgentParticipant {
       ...(task.ancestry ? { triggerAncestry: task.ancestry } : {}),
       stepOutputs: new Map<string, unknown>(),
     }
-    return this.executeStartingAt(state, ctx, 0, undefined, { throwOnHaltFailure: true })
+    return this.executeStartingAt(rd, state, ctx, 0, undefined, { throwOnHaltFailure: true })
   }
 
   protected async handleResume(task: Task, state: unknown): Promise<unknown> {
@@ -211,9 +251,25 @@ export class WorkflowRunner extends AgentParticipant {
         `cannot resume run '${initial.runId}' — status is '${initial.status}', not 'running'`,
       )
     }
-    if (initial.workflowId !== this.definition.id) {
+    if (initial.workflowId !== this.workflowId) {
       throw new Error(
-        `cannot resume run '${initial.runId}' — its workflowId '${initial.workflowId}' does not match this runner ('${this.definition.id}')`,
+        `cannot resume run '${initial.runId}' — its workflowId '${initial.workflowId}' does not match this runner ('${this.workflowId}')`,
+      )
+    }
+
+    // Resolve the EXACT revision this run started under. Legacy runs with no
+    // stamped revision fall back to the current one — after boot-adoption that
+    // equals rev 1, identical to pre-Phase-15 behavior. If the revision is gone,
+    // fail loudly rather than silently resume against a different definition.
+    const revision = initial.definitionRevision ?? this.resolver.current().revision
+    let rd: RunDefn
+    try {
+      rd = this.runDefnFor(revision, this.resolver.byRevision(revision))
+    } catch (err) {
+      if (err instanceof WorkflowRevisionError) throw err
+      throw new WorkflowRevisionError(
+        `cannot resume run '${initial.runId}' — revision ${revision} is unavailable: ${err instanceof Error ? err.message : String(err)}`,
+        'revision_missing',
       )
     }
 
@@ -238,7 +294,7 @@ export class WorkflowRunner extends AgentParticipant {
       ...(state.triggeredByAncestry ? { triggerAncestry: state.triggeredByAncestry } : {}),
       stepOutputs: new Map<string, unknown>(),
     }
-    const workflowFailureMode: 'halt' | 'continue' = this.definition.onFailure ?? 'halt'
+    const workflowFailureMode: 'halt' | 'continue' = rd.def.onFailure ?? 'halt'
 
     // Index existing records by stepId. We keep the records that were in
     // a terminal-for-resume state; everything else gets dropped so the
@@ -258,7 +314,7 @@ export class WorkflowRunner extends AgentParticipant {
         keep.push(sr)
         completedOutputs.set(sr.stepId, undefined)
       } else if (sr.status === 'suspended') {
-        const step = this.definition.steps.find((s) => s.id === sr.stepId)
+        const step = rd.def.steps.find((s) => s.id === sr.stepId)
         if (!step) {
           sr.status = 'failed'
           sr.error = `cannot resume suspended step '${sr.stepId}' — step no longer exists`
@@ -301,8 +357,8 @@ export class WorkflowRunner extends AgentParticipant {
     // Find the first step in the definition that isn't already in
     // `completedOutputs`. That's where execution resumes from.
     let startIndex = 0
-    for (let i = 0; i < this.definition.steps.length; i++) {
-      const stepId = this.definition.steps[i]!.id
+    for (let i = 0; i < rd.def.steps.length; i++) {
+      const stepId = rd.def.steps[i]!.id
       if (completedOutputs.has(stepId)) {
         ctx.stepOutputs.set(stepId, completedOutputs.get(stepId))
         startIndex = i + 1
@@ -312,6 +368,7 @@ export class WorkflowRunner extends AgentParticipant {
     }
 
     return this.executeStartingAt(
+      rd,
       state,
       ctx,
       startIndex,
@@ -333,18 +390,19 @@ export class WorkflowRunner extends AgentParticipant {
    * has no caller and simply persists the failure state instead.
    */
   private async executeStartingAt(
+    rd: RunDefn,
     state: RunState,
     ctx: ResolutionContext,
     startIndex: number,
     initialLastStepOutput: unknown,
     opts: { throwOnHaltFailure: boolean },
   ): Promise<unknown> {
-    const workflowFailureMode: 'halt' | 'continue' = this.definition.onFailure ?? 'halt'
+    const workflowFailureMode: 'halt' | 'continue' = rd.def.onFailure ?? 'halt'
     let lastStepOutput = initialLastStepOutput
 
-    for (let i = startIndex; i < this.definition.steps.length; i++) {
-      const step = this.definition.steps[i]!
-      const record = await this.runStep(step, ctx, state)
+    for (let i = startIndex; i < rd.def.steps.length; i++) {
+      const step = rd.def.steps[i]!
+      const record = await this.runStep(rd, step, ctx)
       state.steps.push(record)
       await this.persist(state)
 
@@ -371,8 +429,8 @@ export class WorkflowRunner extends AgentParticipant {
 
     // Compute final output.
     let finalOutput: unknown
-    if (this.definition.output !== undefined) {
-      finalOutput = resolveRefs(this.definition.output, ctx)
+    if (rd.def.output !== undefined) {
+      finalOutput = resolveRefs(rd.def.output, ctx)
     } else {
       finalOutput = lastStepOutput
     }
@@ -387,9 +445,9 @@ export class WorkflowRunner extends AgentParticipant {
   // --- step execution -------------------------------------------------------
 
   private async runStep(
+    rd: RunDefn,
     step: Step,
     ctx: ResolutionContext,
-    _runState: RunState,
   ): Promise<StepRecord> {
     const record: StepRecord = {
       stepId: step.id,
@@ -402,7 +460,7 @@ export class WorkflowRunner extends AgentParticipant {
     // `when` gate — applies before any dispatch. A false predicate marks
     // the step as `skipped`, the runner doesn't call hub.dispatch, and
     // downstream refs to `$step.output` resolve to `undefined`.
-    const pred = this.whenPredicates.get(step.id)
+    const pred = rd.when.get(step.id)
     if (pred) {
       let passed: boolean
       try {
@@ -421,7 +479,7 @@ export class WorkflowRunner extends AgentParticipant {
     }
 
     if ('parallel' in step && step.parallel === true) {
-      return this.runParallelStep(step, ctx, record)
+      return this.runParallelStep(rd, step, ctx, record)
     }
     return this.runSimpleStep(step as SimpleStep, ctx, record)
   }
@@ -468,6 +526,7 @@ export class WorkflowRunner extends AgentParticipant {
   }
 
   private async runParallelStep(
+    rd: RunDefn,
     step: ParallelStep,
     ctx: ResolutionContext,
     record: StepRecord,
@@ -476,7 +535,7 @@ export class WorkflowRunner extends AgentParticipant {
     record.attempts = 1
 
     const results = await Promise.all(
-      step.branches.map((b) => this.runBranch(step.id, b, ctx)),
+      step.branches.map((b) => this.runBranch(rd, step.id, b, ctx)),
     )
 
     const branchOutputs: Record<string, unknown> = {}
@@ -509,7 +568,7 @@ export class WorkflowRunner extends AgentParticipant {
         record.attempts += 1
         const retrySuspended: SuspendedBranchTracker = { taskIds: {} }
         const retryResults = await Promise.all(
-          step.branches.map((b) => this.runBranch(step.id, b, ctx)),
+          step.branches.map((b) => this.runBranch(rd, step.id, b, ctx)),
         )
         failures.length = 0
         for (let i = 0; i < step.branches.length; i++) {
@@ -544,11 +603,12 @@ export class WorkflowRunner extends AgentParticipant {
    *   - `when-error`  — `when` evaluation threw → treated as a failure
    */
   private async runBranch(
+    rd: RunDefn,
     stepId: string,
     branch: Branch,
     ctx: ResolutionContext,
   ): Promise<BranchOutcome> {
-    const pred = this.branchWhenPredicates.get(branchPredicateKey(stepId, branch.id))
+    const pred = rd.branchWhen.get(branchPredicateKey(stepId, branch.id))
     if (pred) {
       let passed: boolean
       try {
@@ -833,4 +893,61 @@ interface SuspendedBranchTracker {
  */
 function branchPredicateKey(stepId: string, branchId: string): string {
   return `${stepId}::${branchId}`
+}
+
+/**
+ * The per-run execution bundle: the bound revision, its definition, and the
+ * `when` predicates compiled for THAT revision. Threaded through the execute
+ * path so a run always reads the steps/predicates of its own revision, not the
+ * runner's current one — this is what prevents an in-flight run from drifting
+ * onto a newly-published revision.
+ */
+interface RunDefn {
+  revision: number
+  def: WorkflowDefinition
+  when: Map<string, CompiledPredicate>
+  branchWhen: Map<string, CompiledPredicate>
+}
+
+interface CompiledPredicates {
+  when: Map<string, CompiledPredicate>
+  branchWhen: Map<string, CompiledPredicate>
+}
+
+/** Compile every `when` / branch-`when` predicate in a definition. */
+function compilePredicates(def: WorkflowDefinition): CompiledPredicates {
+  const when = new Map<string, CompiledPredicate>()
+  const branchWhen = new Map<string, CompiledPredicate>()
+  for (const step of def.steps) {
+    if (step.when) when.set(step.id, parsePredicate(step.when))
+    if ('parallel' in step && step.parallel === true) {
+      for (const branch of step.branches) {
+        if (branch.when) {
+          branchWhen.set(branchPredicateKey(step.id, branch.id), parsePredicate(branch.when))
+        }
+      }
+    }
+  }
+  return { when, branchWhen }
+}
+
+/**
+ * Default resolver for a runner with no host-backed revision store: the given
+ * definition is the one and only revision (1). `byRevision` throws for any
+ * other number — in a single-revision world a run can't have been stamped with
+ * a revision that doesn't exist.
+ */
+function singleRevisionResolver(definition: WorkflowDefinition): DefinitionResolver {
+  return {
+    current: () => ({ revision: 1, definition }),
+    byRevision: (revision) => {
+      if (revision !== 1) {
+        throw new WorkflowRevisionError(
+          `revision ${revision} not available (single-revision runner)`,
+          'revision_missing',
+        )
+      }
+      return definition
+    },
+  }
 }

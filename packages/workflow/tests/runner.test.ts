@@ -14,9 +14,11 @@ import type {
 
 import {
   RunStore,
+  WorkflowRevisionError,
   WorkflowRunner,
   parseWorkflow,
   workflowParticipantId,
+  type DefinitionResolver,
   type HubLike,
   type RunState,
   type WorkflowDefinition,
@@ -1186,5 +1188,171 @@ workflow:
     }
     expect(calls).toHaveLength(2)
     expect(calls[1]!.payload).toEqual({ long: 'child output' })
+  })
+})
+
+describe('WorkflowRunner — revision binding (Phase 15)', () => {
+  function oneStepDef(
+    id: string,
+    triggerCap: string,
+    stepCap: string,
+    payload: unknown,
+  ): WorkflowDefinition {
+    return {
+      schema: 'aipehub.workflow/v1',
+      id,
+      trigger: { capability: triggerCap },
+      steps: [
+        { id: 's', dispatch: { strategy: { kind: 'capability', capabilities: [stepCap] }, payload } },
+      ],
+      output: '$s.output',
+    }
+  }
+
+  function fixedResolver(
+    currentRev: number,
+    byRev: Record<number, WorkflowDefinition>,
+  ): DefinitionResolver {
+    return {
+      current: () => ({ revision: currentRev, definition: byRev[currentRev]! }),
+      byRevision: (r) => {
+        const d = byRev[r]
+        if (!d) throw new WorkflowRevisionError(`no revision ${r}`, 'revision_missing')
+        return d
+      },
+    }
+  }
+
+  function runningState(over: Partial<RunState>): RunState {
+    return {
+      runId: 'r1',
+      workflowId: 'wf',
+      triggeredByTaskId: 't',
+      triggerPayload: {},
+      steps: [],
+      startedAt: 1,
+      status: 'running',
+      ...over,
+    }
+  }
+
+  function trigger(cap: string): Task {
+    return {
+      id: 't',
+      from: 'admin',
+      strategy: { kind: 'capability', capabilities: [cap] },
+      payload: {},
+      createdAt: 1,
+    }
+  }
+
+  const firstCap = (c: DispatchCall): unknown =>
+    c.strategy.kind === 'capability' ? c.strategy.capabilities[0] : undefined
+
+  it('a new run stamps definitionRevision from resolver.current()', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'aipehub-rev-stamp-'))
+    try {
+      const def = oneStepDef('wf', 'go', 'do', 'p')
+      const store = new RunStore(tmp)
+      store.ensureDirs()
+      const { hub } = makeStubHub(() => ok(nextTaskId(), 'OUT', 'bot'))
+      const runner = new WorkflowRunner({
+        definition: def,
+        hub,
+        runStore: store,
+        resolver: fixedResolver(7, { 7: def }),
+        idGenerator: () => 'run-stamp',
+      })
+      await runner.handleTask(trigger('go'))
+      const onDisk = JSON.parse(readFileSync(store.pathFor('run-stamp'), 'utf8')) as RunState
+      expect(onDisk.definitionRevision).toBe(7)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('a runner with no resolver stamps revision 1 (single-revision back-compat)', async () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'aipehub-rev-default-'))
+    try {
+      const def = oneStepDef('wf', 'go', 'do', 'p')
+      const store = new RunStore(tmp)
+      store.ensureDirs()
+      const { hub } = makeStubHub(() => ok(nextTaskId(), 'OUT', 'bot'))
+      const runner = new WorkflowRunner({
+        definition: def,
+        hub,
+        runStore: store,
+        idGenerator: () => 'run-default',
+      })
+      await runner.handleTask(trigger('go'))
+      const onDisk = JSON.parse(readFileSync(store.pathFor('run-default'), 'utf8')) as RunState
+      expect(onDisk.definitionRevision).toBe(1)
+    } finally {
+      rmSync(tmp, { recursive: true, force: true })
+    }
+  })
+
+  it('a fresh run binds to the current revision', async () => {
+    const rev1 = oneStepDef('wf', 'go', 'rev1-cap', 'rev1-payload')
+    const rev2 = oneStepDef('wf', 'go', 'rev2-cap', 'rev2-payload')
+    const { hub, calls } = makeStubHub(() => ok(nextTaskId(), 'OUT', 'bot'))
+    const runner = new WorkflowRunner({
+      definition: rev1,
+      hub,
+      resolver: fixedResolver(2, { 1: rev1, 2: rev2 }),
+    })
+    await runner.handleTask(trigger('go'))
+    expect(calls).toHaveLength(1)
+    expect(firstCap(calls[0]!)).toBe('rev2-cap')
+    expect(calls[0]!.payload).toBe('rev2-payload')
+  })
+
+  it('resume executes the revision the run STARTED under, not the current one (no drift)', async () => {
+    const rev1 = oneStepDef('wf', 'go', 'rev1-cap', 'rev1-payload')
+    const rev2 = oneStepDef('wf', 'go', 'rev2-cap', 'rev2-payload')
+    const { hub, calls } = makeStubHub(() => ok(nextTaskId(), 'OUT', 'bot'))
+    // current() is rev2 — but the run below is stamped rev1, so it must run rev1.
+    const runner = new WorkflowRunner({
+      definition: rev2,
+      hub,
+      resolver: fixedResolver(2, { 1: rev1, 2: rev2 }),
+    })
+    await runner.resumeRun(runningState({ definitionRevision: 1, steps: [] }))
+    expect(calls).toHaveLength(1)
+    expect(firstCap(calls[0]!)).toBe('rev1-cap')
+    expect(calls[0]!.payload).toBe('rev1-payload')
+  })
+
+  it('a legacy run with no definitionRevision falls back to the current revision', async () => {
+    const def = oneStepDef('wf', 'go', 'do', 'p')
+    const { hub, calls } = makeStubHub(() => ok(nextTaskId(), 'OUT', 'bot'))
+    const runner = new WorkflowRunner({ definition: def, hub, resolver: fixedResolver(1, { 1: def }) })
+    const out = await runner.resumeRun(runningState({ steps: [] })) // no definitionRevision
+    expect(out).toBe('OUT')
+    expect(calls).toHaveLength(1)
+  })
+
+  it('resume throws WorkflowRevisionError when the stamped revision is gone', async () => {
+    const def = oneStepDef('wf', 'go', 'do', 'p')
+    const { hub } = makeStubHub(() => ok(nextTaskId(), 'OUT', 'bot'))
+    const runner = new WorkflowRunner({ definition: def, hub, resolver: fixedResolver(1, { 1: def }) })
+    await expect(
+      runner.resumeRun(runningState({ definitionRevision: 99, steps: [] })),
+    ).rejects.toBeInstanceOf(WorkflowRevisionError)
+  })
+
+  it('the definition getter reflects the resolver current revision', () => {
+    const rev1 = oneStepDef('wf', 'go', 'rev1-cap', 'p1')
+    const rev2 = oneStepDef('wf', 'go', 'rev2-cap', 'p2')
+    const { hub } = makeStubHub(() => ok('x', 'y', 'b'))
+    const runner = new WorkflowRunner({
+      definition: rev1,
+      hub,
+      resolver: fixedResolver(2, { 1: rev1, 2: rev2 }),
+    })
+    const step0 = runner.definition.steps[0]!
+    const cap =
+      step0.dispatch.strategy.kind === 'capability' ? step0.dispatch.strategy.capabilities[0] : undefined
+    expect(cap).toBe('rev2-cap')
   })
 })
