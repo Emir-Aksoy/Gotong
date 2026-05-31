@@ -86,6 +86,7 @@ import { serveWeb, type WebServerOptions } from '@aipehub/web'
 import { LocalAgentPool } from './local-agent-pool.js'
 import { loadPricingTable } from './pricing.js'
 import { McpProxyHost, fetchPeerSharedMcp } from './mcp-proxy.js'
+import { PeerManifestHost } from './peer-manifest.js'
 import { GrowthReportsAdmin } from './services/growth-reports-admin.js'
 import {
   BINARY_SAFE_PLUGINS,
@@ -888,6 +889,17 @@ async function main(): Promise<void> {
     // registry the admin UI writes; only servers flagged `shared` are
     // ever served to a peer (ACL lives inside respond()).
     mcpProxy = new McpProxyHost({ space, logger: log })
+    const proxyRespond = mcpProxy.respond
+    // Phase 18 A-M1 — peer capability manifest provider, composed with the
+    // MCP proxy onto the single rpcResponder: `mcp.*` → MCP proxy, anything
+    // else → manifest host. `peerWrapperIds` is a thunk so it reflects the
+    // registry's CURRENT peers (each wrapper is registered under the peer's
+    // hub id) — we advertise our own agents, never a neighbour's.
+    const peerManifestHost = new PeerManifestHost({
+      hub,
+      hubId: selfHubId,
+      peerWrapperIds: () => new Set((peerRegistry?.status() ?? []).map((r) => r.peerId)),
+    })
     peerRegistry = new PeerRegistry({
       hub,
       identity,
@@ -897,7 +909,8 @@ async function main(): Promise<void> {
       pollIntervalMs: pollMs,
       inboundRateLimit,
       ...(trustProxy ? { trustProxy: true } : {}),
-      rpcResponder: mcpProxy.respond,
+      rpcResponder: (call) =>
+        call.method.startsWith('mcp.') ? proxyRespond(call) : peerManifestHost.respond(call),
       logger: log,
     })
     peerRegistry.start()
