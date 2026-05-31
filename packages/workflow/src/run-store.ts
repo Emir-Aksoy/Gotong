@@ -114,16 +114,53 @@ export class RunStore {
    * The full per-step output is dropped from each row — pages of 100s of
    * runs would otherwise carry MBs of payload. Use `read(runId)` to
    * fetch the complete `RunState` when the admin clicks one row.
-   *
-   * Files that fail to parse are quietly skipped. A half-written `.tmp`
-   * is filtered out by the `.json` suffix check; an intact-but-corrupt
-   * `.json` would have already failed `read()` so we log to stderr and
-   * move on rather than abort the whole list.
    */
   async listRuns(opts?: {
     workflowId?: string
     limit?: number
   }): Promise<RunSummary[]> {
+    return this.collectSummaries(
+      (state) => !opts?.workflowId || state.workflowId === opts.workflowId,
+      opts?.limit,
+    )
+  }
+
+  /**
+   * List runs initiated by a single user, newest first. Backs the `/me`
+   * member workbench so a member sees only the runs they kicked off.
+   *
+   * "Initiated by" keys on `triggeredByOrigin.userId` — the attribution
+   * `/api/me/dispatch` already stamps (`origin: { orgId: 'local', userId }`),
+   * which the runner persists into every run file. Pre-attribution run
+   * files (no `triggeredByOrigin`) simply never match, so they degrade to
+   * invisible rather than crash — no run-file format change is required.
+   */
+  async listByUser(
+    userId: string,
+    opts?: { workflowId?: string; limit?: number },
+  ): Promise<RunSummary[]> {
+    return this.collectSummaries(
+      (state) =>
+        state.triggeredByOrigin?.userId === userId &&
+        (!opts?.workflowId || state.workflowId === opts.workflowId),
+      opts?.limit,
+    )
+  }
+
+  /**
+   * Shared scan behind `listRuns` / `listByUser`: read every run file, keep
+   * those passing `match`, project to `RunSummary`, sort newest-first, then
+   * apply `limit`.
+   *
+   * Files that fail to parse are quietly skipped. A half-written `.tmp` is
+   * filtered out by the `.json` suffix check in `listRunIds`; an
+   * intact-but-corrupt `.json` would have already failed `read()` so we log
+   * to stderr and move on rather than abort the whole list.
+   */
+  private async collectSummaries(
+    match: (state: RunState) => boolean,
+    limit?: number,
+  ): Promise<RunSummary[]> {
     if (!existsSync(this.runsDir)) return []
     const ids = await this.listRunIds()
     const out: RunSummary[] = []
@@ -136,7 +173,7 @@ export class RunStore {
         continue
       }
       if (!state) continue
-      if (opts?.workflowId && state.workflowId !== opts.workflowId) continue
+      if (!match(state)) continue
       const row: RunSummary = {
         runId: state.runId,
         workflowId: state.workflowId,
@@ -150,8 +187,8 @@ export class RunStore {
       out.push(row)
     }
     out.sort((a, b) => b.startedAt - a.startedAt)
-    if (opts?.limit !== undefined && opts.limit >= 0) {
-      out.length = Math.min(out.length, opts.limit)
+    if (limit !== undefined && limit >= 0) {
+      out.length = Math.min(out.length, limit)
     }
     return out
   }

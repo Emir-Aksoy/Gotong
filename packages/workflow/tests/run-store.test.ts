@@ -99,3 +99,54 @@ describe('RunStore.listRuns', () => {
     expect(await fresh.listRuns()).toEqual([])
   })
 })
+
+describe('RunStore.listByUser', () => {
+  function userRun(
+    runId: string,
+    userId: string | undefined,
+    over: Partial<RunState> & Pick<RunState, 'workflowId' | 'startedAt' | 'status'>,
+  ): RunState {
+    return makeRun({
+      runId,
+      ...(userId ? { triggeredByOrigin: { orgId: 'local', userId } } : {}),
+      ...over,
+    })
+  }
+
+  it('isolates runs by the initiating user (triggeredByOrigin.userId)', async () => {
+    await store.write(userRun('r_alice1', 'alice', { workflowId: 'wf_a', startedAt: 100, status: 'done' }))
+    await store.write(userRun('r_bob1', 'bob', { workflowId: 'wf_a', startedAt: 200, status: 'done' }))
+    await store.write(userRun('r_alice2', 'alice', { workflowId: 'wf_b', startedAt: 300, status: 'running' }))
+
+    const alice = await store.listByUser('alice')
+    expect(alice.map((r) => r.runId)).toEqual(['r_alice2', 'r_alice1'])
+
+    const bob = await store.listByUser('bob')
+    expect(bob.map((r) => r.runId)).toEqual(['r_bob1'])
+  })
+
+  it('degrades (skips) pre-attribution runs with no triggeredByOrigin', async () => {
+    // Old run file written before /me/dispatch stamped origin — must not
+    // crash and must not leak into any user's view.
+    await store.write(userRun('r_legacy', undefined, { workflowId: 'wf_a', startedAt: 100, status: 'done' }))
+    await store.write(userRun('r_alice', 'alice', { workflowId: 'wf_a', startedAt: 200, status: 'done' }))
+
+    expect((await store.listByUser('alice')).map((r) => r.runId)).toEqual(['r_alice'])
+    // The legacy run is invisible to everyone — never matches a userId.
+    expect(await store.listByUser('')).toEqual([])
+  })
+
+  it('respects workflowId filter and limit', async () => {
+    await store.write(userRun('r_a1', 'alice', { workflowId: 'wf_a', startedAt: 100, status: 'done' }))
+    await store.write(userRun('r_b1', 'alice', { workflowId: 'wf_b', startedAt: 200, status: 'done' }))
+    await store.write(userRun('r_a2', 'alice', { workflowId: 'wf_a', startedAt: 300, status: 'done' }))
+
+    expect((await store.listByUser('alice', { workflowId: 'wf_a' })).map((r) => r.runId)).toEqual(['r_a2', 'r_a1'])
+    expect((await store.listByUser('alice', { limit: 1 })).map((r) => r.runId)).toEqual(['r_a2'])
+  })
+
+  it('returns [] when runs dir is missing', async () => {
+    const fresh = new RunStore(join(tmp, 'never-touched'))
+    expect(await fresh.listByUser('alice')).toEqual([])
+  })
+})
