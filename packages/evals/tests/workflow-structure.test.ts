@@ -236,8 +236,9 @@ describe('unknown_capability', () => {
     expect(kinds(r.violations)).toEqual(['unknown_capability'])
   })
 
-  it('passes when AT LEAST ONE listed cap is satisfied', () => {
-    // chat is in inventory; nonexistent isn't — but one match is enough.
+  it('flags when no single agent satisfies every listed cap', () => {
+    // Runtime dispatch uses Registry.byCapabilities(), where one participant
+    // must cover every requested capability. Split / partial matches fail.
     const r = checkWorkflowStructure(
       wf({
         steps: [
@@ -245,6 +246,25 @@ describe('unknown_capability', () => {
             id: 's1',
             dispatch: {
               strategy: { kind: 'capability', capabilities: ['nonexistent', 'chat'] },
+              payload: {},
+            },
+          },
+        ],
+      }),
+      FULL_INVENTORY,
+    )
+    expect(r.ok).toBe(false)
+    expect(kinds(r.violations)).toEqual(['unknown_capability'])
+  })
+
+  it('passes when one agent satisfies every listed cap', () => {
+    const r = checkWorkflowStructure(
+      wf({
+        steps: [
+          {
+            id: 's1',
+            dispatch: {
+              strategy: { kind: 'capability', capabilities: ['draft', 'rewrite'] },
               payload: {},
             },
           },

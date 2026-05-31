@@ -30,6 +30,7 @@ import {
   handleIdentityRoute,
   handlePublicInvitationRoute,
   IDENTITY_COOKIE,
+  resolveV4Auth,
   type IdentitySurface,
   type IdentityPeerReputationDTO,
 } from './identity-routes.js'
@@ -1813,7 +1814,12 @@ async function findAdminFromRequest(
 > {
   const ip = clientIp(ctx, req)
   const bearer = readBearer(req)
-  if (bearer) {
+  let v4AdminChecked = false
+  if (bearer && isV4BearerToken(bearer)) {
+    v4AdminChecked = true
+    const admin = v4AdminFromRequest(ctx, req)
+    if (admin) return { kind: 'admin', admin }
+  } else if (bearer) {
     // Symmetric to the cookie path below (H21). `peek` BEFORE the
     // verify so an attacker can't churn token-lookup IO indefinitely,
     // but `recordFailure` ONLY when verify returns null — otherwise
@@ -1856,7 +1862,27 @@ async function findAdminFromRequest(
     // returned without touching the limiter.
     ctx.adminLoginLimiter.recordFailure(`cookie:${ip}`)
   }
+  if (!v4AdminChecked) {
+    const v4Admin = v4AdminFromRequest(ctx, req)
+    if (v4Admin) return { kind: 'admin', admin: v4Admin }
+  }
   return { kind: 'none' }
+}
+
+function isV4BearerToken(token: string): boolean {
+  return token.startsWith('aipk_') || token.startsWith('adm_')
+}
+
+function v4AdminFromRequest(ctx: HandlerCtx, req: IncomingMessage): AdminRecord | null {
+  if (!ctx.identity) return null
+  const auth = resolveV4Auth(ctx.identity, req)
+  if (!auth.user || (auth.role !== 'owner' && auth.role !== 'admin')) return null
+  return {
+    id: auth.user.id as ParticipantId,
+    displayName: auth.user.displayName ?? auth.user.email,
+    tokenHash: `v4:${auth.source}`,
+    createdAt: new Date(auth.user.createdAt).toISOString(),
+  }
 }
 
 /**

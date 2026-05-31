@@ -132,19 +132,9 @@ export function checkWorkflowStructure(
   const violations: WorkflowStructureViolation[] = []
 
   const inv = inventory ?? {}
+  const agents = inv.agents ?? []
   const agentIds = new Set((inv.agents ?? []).map((a) => a.id))
-  const capToAgents = new Map<string, string[]>()
-  for (const a of inv.agents ?? []) {
-    for (const cap of a.capabilities) {
-      let arr = capToAgents.get(cap)
-      if (!arr) {
-        arr = []
-        capToAgents.set(cap, arr)
-      }
-      arr.push(a.id)
-    }
-  }
-  const haveInventory = (inv.agents ?? []).length > 0
+  const haveInventory = agents.length > 0
 
   // 1. id collision
   if (inv.existingWorkflowIds && inv.existingWorkflowIds.includes(workflow.id)) {
@@ -166,7 +156,7 @@ export function checkWorkflowStructure(
       checkParallelStep(step, path, {
         violations,
         agentIds,
-        capToAgents,
+        agents,
         haveInventory,
         earlierStepIds,
         allStepIds,
@@ -176,7 +166,7 @@ export function checkWorkflowStructure(
       checkSimpleStep(step, path, {
         violations,
         agentIds,
-        capToAgents,
+        agents,
         haveInventory,
         earlierStepIds,
         allStepIds,
@@ -206,7 +196,7 @@ export function checkWorkflowStructure(
 interface StepCtx {
   violations: WorkflowStructureViolation[]
   agentIds: Set<string>
-  capToAgents: Map<string, string[]>
+  agents: ReadonlyArray<{ id: string; capabilities: readonly string[] }>
   haveInventory: boolean
   earlierStepIds: Set<string>
   allStepIds: Set<string>
@@ -273,12 +263,10 @@ function checkDispatch(d: DispatchSpec, path: string, ctx: StepCtx): void {
       })
     }
     if (ctx.haveInventory) {
-      const unmatched = s.capabilities.filter((c) => !ctx.capToAgents.has(c))
-      if (unmatched.length === s.capabilities.length) {
-        // None of the requested caps are satisfied by any agent.
+      if (!hasAgentWithAllCapabilities(ctx.agents, s.capabilities)) {
         ctx.violations.push({
           kind: 'unknown_capability',
-          message: `no agent on this hub satisfies any of: ${s.capabilities.join(', ')}`,
+          message: `no single agent on this hub satisfies all capabilities: ${s.capabilities.join(', ')}`,
           path: `${path}.strategy.capabilities`,
         })
       }
@@ -296,16 +284,22 @@ function checkDispatch(d: DispatchSpec, path: string, ctx: StepCtx): void {
       })
     }
     if (ctx.haveInventory && caps.length > 0) {
-      const unmatched = caps.filter((c) => !ctx.capToAgents.has(c))
-      if (unmatched.length === caps.length) {
+      if (!hasAgentWithAllCapabilities(ctx.agents, caps)) {
         ctx.violations.push({
           kind: 'unknown_capability',
-          message: `no agent on this hub satisfies any of broadcast capabilities: ${caps.join(', ')}`,
+          message: `no single agent on this hub satisfies all broadcast capabilities: ${caps.join(', ')}`,
           path: `${path}.strategy.capabilities`,
         })
       }
     }
   }
+}
+
+function hasAgentWithAllCapabilities(
+  agents: ReadonlyArray<{ capabilities: readonly string[] }>,
+  capabilities: readonly string[],
+): boolean {
+  return agents.some((agent) => capabilities.every((cap) => agent.capabilities.includes(cap)))
 }
 
 /**

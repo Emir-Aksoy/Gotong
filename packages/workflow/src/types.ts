@@ -29,7 +29,7 @@
  *     onFailure?: 'halt' | 'continue'   # default: 'halt'
  */
 
-import type { DispatchStrategy } from '@aipehub/core'
+import type { AncestryNode, DispatchStrategy } from '@aipehub/core'
 
 export const WORKFLOW_SCHEMA_V1 = 'aipehub.workflow/v1'
 
@@ -256,6 +256,12 @@ export interface RunState {
    * `HubLike.dispatch` opts.
    */
   triggeredByOrigin?: { orgId: string; userId: string; userRole?: string; userEmail?: string }
+  /**
+   * Phase 10 interop — ancestry carried by the task that triggered this
+   * workflow. Persisted so crash resume keeps the same dispatch-depth /
+   * cycle boundary on later inner dispatches.
+   */
+  triggeredByAncestry?: AncestryNode[]
   /** Initial payload received from the triggering task. */
   triggerPayload: unknown
   /** Per-step records, in execution order. */
@@ -275,13 +281,19 @@ export interface StepRecord {
   stepId: string
   startedAt: number
   endedAt?: number
-  status: 'running' | 'done' | 'failed' | 'skipped'
+  status: 'running' | 'done' | 'failed' | 'skipped' | 'suspended'
   /**
    * For a simple step: the resolved output.
    * For a parallel step: a `{ branchId → output }` map.
    */
   output?: unknown
   error?: string
+  /** Earliest known wake time when a child dispatch returned `suspended`. */
+  resumeAt?: number
+  /** Child task ids currently parked by the Hub suspend/resume layer. */
+  suspendedTaskIds?: string[]
+  /** For parallel steps, maps branch id → suspended child task id. */
+  suspendedBranchTaskIds?: Record<string, string>
   /** Attempts so far (1 on first try; >1 if retry policy fired). */
   attempts: number
   /** Sub-task ids dispatched for this step — links to the transcript. */

@@ -29,6 +29,8 @@
  * with a helpful message that names the bad ref.
  */
 
+import type { AncestryNode } from '@aipehub/core'
+
 import { WorkflowRefError } from './types.js'
 
 export interface ResolutionContext {
@@ -52,6 +54,10 @@ export interface ResolutionContext {
    * dispatcher's `userId`, not the synthetic workflow runner id.
    */
   triggerOrigin?: { orgId: string; userId: string; userRole?: string; userEmail?: string }
+  /** The Hub task id that started this workflow run. */
+  triggerTaskId?: string
+  /** The ancestry carried by the triggering task, if any. */
+  triggerAncestry?: readonly AncestryNode[]
   /**
    * Map from step id to the *resolved output* of that step.
    * For simple steps, the value is whatever the step returned.

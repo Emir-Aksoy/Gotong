@@ -1,0 +1,69 @@
+# Codex Work Log
+
+Date: 2026-05-31
+
+## Scope
+
+Fixed the four high-priority audit findings from
+`audits/2026-05-31-codex-goal-audit/findings.md`:
+
+1. v4 owner/admin sessions did not authorize legacy operational admin APIs.
+2. Workflow import could bypass self-trigger checks, and WorkflowRunner did not
+   propagate ancestry to child dispatches.
+3. WorkflowRunner treated suspended child tasks as generic failures.
+4. Workflow deepCheck capability semantics did not match runtime
+   `Registry.byCapabilities()`.
+
+## Changes
+
+- Added v4 identity admin fallback to `findAdminFromRequest()`.
+  - `owner` and `admin` roles are mapped to a structural `AdminRecord`.
+  - `member` remains unauthorized for legacy admin APIs.
+  - Added web regression coverage for `/api/admin/agents`.
+
+- Added host-side workflow self-trigger guard.
+  - New `packages/host/src/workflow-guards.ts`.
+  - `WorkflowController.importFromText()` and startup `loadWorkflows()` reject
+    workflows that dispatch to their own trigger capability.
+
+- Updated WorkflowRunner dispatch ancestry and suspend semantics.
+  - Inner dispatches inherit triggering task ancestry and append the current
+    workflow frame.
+  - `RunState` persists triggering ancestry for resume.
+  - Child `TaskResult.kind='suspended'` now parks the workflow through
+    `SuspendTaskError`.
+  - Resume reads the latest child result through `Hub.taskResult(taskId)` and
+    continues from the suspended step.
+  - Parallel suspended branches preserve branch-to-task mapping.
+
+- Aligned workflow deepCheck with scheduler capability matching.
+  - A dispatch with multiple capabilities now requires one agent that satisfies
+    all requested capabilities.
+  - Updated tests and violation messages accordingly.
+
+- Updated audit remediation notes.
+  - Added `audits/2026-05-31-codex-goal-audit/remediation.md`.
+  - Linked remediation from the audit README.
+
+## Verification
+
+Passed:
+
+```bash
+pnpm --filter @aipehub/workflow test -- runner.test.ts
+pnpm --filter @aipehub/evals test -- workflow-structure.test.ts
+pnpm --filter @aipehub/host test -- workflow-controller.test.ts
+pnpm --filter @aipehub/host test -- workflow-loader.test.ts
+pnpm --filter @aipehub/web test -- agents-route.test.ts
+pnpm -r typecheck
+pnpm --filter @aipehub/core test
+pnpm --filter @aipehub/workflow test
+pnpm --filter @aipehub/evals test
+pnpm --filter @aipehub/host test
+pnpm --filter @aipehub/web test
+git diff --check
+```
+
+Note: `@aipehub/host` and `@aipehub/web` tests need local
+`127.0.0.1` listeners, so they were rerun with sandbox escalation after the
+default sandbox rejected listen attempts with `listen EPERM`.

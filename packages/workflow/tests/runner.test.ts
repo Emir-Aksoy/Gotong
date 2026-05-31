@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import type {
+  AncestryNode,
   DispatchStrategy,
   ParticipantId,
   Task,
@@ -28,6 +29,7 @@ interface DispatchCall {
   strategy: DispatchStrategy
   payload: unknown
   title?: string
+  ancestry?: readonly AncestryNode[]
 }
 
 function makeStubHub(
@@ -42,6 +44,7 @@ function makeStubHub(
         payload: opts.payload,
       }
       if (opts.title !== undefined) call.title = opts.title
+      if (opts.ancestry !== undefined) call.ancestry = opts.ancestry
       calls.push(call)
       return dispatcher(call)
     },
@@ -1083,5 +1086,105 @@ workflow:
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
+  })
+})
+
+describe('WorkflowRunner — dispatch ancestry', () => {
+  it('extends the triggering task ancestry onto every inner dispatch', async () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: editorial
+  trigger: { capability: run-editorial }
+  steps:
+    - id: draft
+      dispatch:
+        strategy: { kind: capability, capabilities: [draft] }
+        payload: $trigger.payload
+`
+    const def = parseWorkflow(yaml)
+    const { hub, calls } = makeStubHub(() => ok(nextTaskId(), 'done', 'mock-agent'))
+    const runner = new WorkflowRunner({ definition: def, hub })
+    const task: Task = {
+      ...makeTask({ topic: 'tea' }),
+      ancestry: [{ taskId: 'root-agent-task', by: 'architect' }],
+    }
+
+    await runner.handleTask(task)
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.ancestry).toEqual([
+      { taskId: 'root-agent-task', by: 'architect' },
+      { taskId: 'trigger-task-1', by: 'workflow:editorial' },
+    ])
+  })
+})
+
+describe('WorkflowRunner — suspended child tasks', () => {
+  it('parks the workflow and resumes from the suspended child result', async () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: editorial
+  trigger: { capability: run-editorial }
+  steps:
+    - id: long
+      dispatch:
+        strategy: { kind: capability, capabilities: [long-running] }
+        payload: $trigger.payload
+    - id: finish
+      dispatch:
+        strategy: { kind: capability, capabilities: [finish] }
+        payload: { long: $long.output }
+`
+    const def = parseWorkflow(yaml)
+    const childResults = new Map<string, TaskResult>()
+    const calls: DispatchCall[] = []
+    const hub: HubLike = {
+      async dispatch(opts) {
+        calls.push({
+          from: opts.from,
+          strategy: opts.strategy,
+          payload: opts.payload,
+          ...(opts.ancestry !== undefined ? { ancestry: opts.ancestry } : {}),
+        })
+        if (calls.length === 1) {
+          const suspended: TaskResult = {
+            kind: 'suspended',
+            taskId: 'child-long-1',
+            by: 'long-agent',
+            resumeAt: 1700000005000,
+            ts: 1700000000000,
+          }
+          childResults.set('child-long-1', suspended)
+          return suspended
+        }
+        return ok(nextTaskId(), opts.payload, 'finish-agent')
+      },
+      taskResult(taskId) {
+        return childResults.get(taskId)
+      },
+    }
+    const runner = new WorkflowRunner({ definition: def, hub })
+
+    let suspendedState: unknown
+    try {
+      await runner.onTask(makeTask({ topic: 'tea' }))
+      throw new Error('expected workflow task to suspend')
+    } catch (err) {
+      expect((err as Error).name).toBe('SuspendTaskError')
+      expect((err as { resumeAt: number }).resumeAt).toBe(1700000005000)
+      suspendedState = (err as { state: unknown }).state
+    }
+
+    childResults.set('child-long-1', ok('child-long-1', 'child output', 'long-agent'))
+    const resumed = await runner.onResume(makeTask({ topic: 'tea' }), suspendedState)
+
+    expect(resumed.kind).toBe('ok')
+    if (resumed.kind === 'ok') {
+      expect(resumed.output).toEqual({ long: 'child output' })
+    }
+    expect(calls).toHaveLength(2)
+    expect(calls[1]!.payload).toEqual({ long: 'child output' })
   })
 })

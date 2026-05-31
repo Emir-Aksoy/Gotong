@@ -108,6 +108,24 @@ describe('WorkflowController', () => {
     }
   })
 
+  it('importFromText() rejects workflows that dispatch to their own trigger capability', async () => {
+    const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: loop
+  trigger: { capability: loop:start }
+  steps:
+    - id: again
+      dispatch:
+        strategy: { kind: capability, capabilities: [loop:start] }
+        payload: {}
+`
+    await expect(c.importFromText(yaml)).rejects.toThrow(/self-trigger cycle/i)
+    expect(hub.registry.get('workflow:loop')).toBeUndefined()
+    expect(existsSync(definitionsDir)).toBe(false)
+  })
+
   it('sanitises file name for ids containing colons', async () => {
     const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
     const yaml = SAMPLE.replace('id: editorial', 'id: team:editorial')

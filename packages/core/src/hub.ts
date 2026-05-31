@@ -568,6 +568,16 @@ export class Hub {
   }
 
   /**
+   * Return the latest result envelope for a task id, if one has been
+   * recorded. Suspended tasks later receive a fresh resume result with
+   * the same task id, so callers must read the latest view rather than
+   * the first transcript match.
+   */
+  taskResult(taskId: TaskId): TaskResult | undefined {
+    return this.tasks().find((t) => t.id === taskId)?.result
+  }
+
+  /**
    * Aggregate per-participant contribution scores over a time window.
    *
    * Counted: completed tasks (`status === 'done'`, `result.kind === 'ok'`)

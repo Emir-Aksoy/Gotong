@@ -20,9 +20,12 @@ import { randomUUID } from 'node:crypto'
 
 import {
   AgentParticipant,
+  SuspendTaskError,
+  type AncestryNode,
   type DispatchStrategy,
   type ParticipantId,
   type Task,
+  type TaskId,
   type TaskResult,
 } from '@aipehub/core'
 
@@ -65,7 +68,9 @@ export interface HubLike {
       userRole?: string
       userEmail?: string
     }
+    ancestry?: readonly AncestryNode[]
   }): Promise<TaskResult>
+  taskResult?(taskId: TaskId): TaskResult | undefined
 }
 
 export interface WorkflowRunnerOptions {
@@ -151,6 +156,7 @@ export class WorkflowRunner extends AgentParticipant {
       // The LlmAgent's preCallHook (org quota gate) reads
       // `task.origin.userId` to debit the right user.
       ...(task.origin ? { triggeredByOrigin: task.origin } : {}),
+      ...(task.ancestry ? { triggeredByAncestry: [...task.ancestry] } : {}),
       triggerPayload: task.payload,
       steps: [],
       startedAt: this.now(),
@@ -162,9 +168,18 @@ export class WorkflowRunner extends AgentParticipant {
       triggerPayload: task.payload,
       triggerFrom: task.from,
       ...(task.origin ? { triggerOrigin: task.origin } : {}),
+      triggerTaskId: task.id,
+      ...(task.ancestry ? { triggerAncestry: task.ancestry } : {}),
       stepOutputs: new Map<string, unknown>(),
     }
     return this.executeStartingAt(state, ctx, 0, undefined, { throwOnHaltFailure: true })
+  }
+
+  protected async handleResume(task: Task, state: unknown): Promise<unknown> {
+    if (isWorkflowSuspendState(state)) {
+      return this.resumeRun(state.runState, { throwOnHaltFailure: true })
+    }
+    return this.handleTask(task)
   }
 
   /**
@@ -182,11 +197,15 @@ export class WorkflowRunner extends AgentParticipant {
    *   - Any other step record (`running`, or `failed` under halt) is
    *     dropped from `state.steps` and re-executed.
    *
-   * Returns the final output (same as `handleTask`), but never throws —
-   * there's no caller to reject; a halt-failure on resume just persists
-   * the new failure record.
+   * Returns the final output (same as `handleTask`). By default a
+   * halt-failure on resume just persists the new failure record; callers
+   * that are running inside `AgentParticipant.onResume` can opt into
+   * throwing so the Hub sees a failed resume result.
    */
-  async resumeRun(initial: RunState): Promise<unknown> {
+  async resumeRun(
+    initial: RunState,
+    opts: { throwOnHaltFailure?: boolean } = {},
+  ): Promise<unknown> {
     if (initial.status !== 'running') {
       throw new Error(
         `cannot resume run '${initial.runId}' — status is '${initial.status}', not 'running'`,
@@ -215,6 +234,8 @@ export class WorkflowRunner extends AgentParticipant {
       // (the org quota gate then treats them as unattributed → no
       // debit; the resumed run completes without quota enforcement).
       ...(state.triggeredByOrigin ? { triggerOrigin: state.triggeredByOrigin } : {}),
+      triggerTaskId: state.triggeredByTaskId,
+      ...(state.triggeredByAncestry ? { triggerAncestry: state.triggeredByAncestry } : {}),
       stepOutputs: new Map<string, unknown>(),
     }
     const workflowFailureMode: 'halt' | 'continue' = this.definition.onFailure ?? 'halt'
@@ -236,6 +257,41 @@ export class WorkflowRunner extends AgentParticipant {
       } else if (sr.status === 'failed' && workflowFailureMode === 'continue') {
         keep.push(sr)
         completedOutputs.set(sr.stepId, undefined)
+      } else if (sr.status === 'suspended') {
+        const step = this.definition.steps.find((s) => s.id === sr.stepId)
+        if (!step) {
+          sr.status = 'failed'
+          sr.error = `cannot resume suspended step '${sr.stepId}' — step no longer exists`
+        } else {
+          this.refreshSuspendedStepRecord(sr, step)
+        }
+        const refreshedStatus = sr.status as StepRecord['status']
+        if (refreshedStatus === 'suspended') {
+          keep.push(sr)
+          state.steps = keep
+          await this.persist(state)
+          this.suspendWorkflow(state, sr.resumeAt ?? this.now() + 1_000)
+        }
+        if (refreshedStatus === 'done') {
+          keep.push(sr)
+          completedOutputs.set(sr.stepId, sr.output)
+          replayLastOutput.value = sr.output
+        } else if (refreshedStatus === 'skipped') {
+          keep.push(sr)
+          completedOutputs.set(sr.stepId, undefined)
+        } else if (refreshedStatus === 'failed' && workflowFailureMode === 'continue') {
+          keep.push(sr)
+          completedOutputs.set(sr.stepId, undefined)
+        } else if (refreshedStatus === 'failed') {
+          keep.push(sr)
+          state.steps = keep
+          state.status = 'failed'
+          state.endedAt = this.now()
+          state.error = `step '${sr.stepId}' failed: ${sr.error ?? 'unknown'}`
+          await this.persist(state)
+          if (opts.throwOnHaltFailure) throw new Error(state.error)
+          return undefined
+        }
       }
       // running / failed-under-halt → drop, will be re-run below
     }
@@ -260,7 +316,7 @@ export class WorkflowRunner extends AgentParticipant {
       ctx,
       startIndex,
       replayLastOutput.value,
-      { throwOnHaltFailure: false },
+      { throwOnHaltFailure: opts.throwOnHaltFailure ?? false },
     )
   }
 
@@ -308,6 +364,8 @@ export class WorkflowRunner extends AgentParticipant {
         ctx.stepOutputs.set(step.id, undefined)
       } else if (record.status === 'skipped') {
         ctx.stepOutputs.set(step.id, undefined)
+      } else if (record.status === 'suspended') {
+        this.suspendWorkflow(state, record.resumeAt ?? this.now() + 1_000)
       }
     }
 
@@ -387,6 +445,13 @@ export class WorkflowRunner extends AgentParticipant {
         record.endedAt = this.now()
         return record
       }
+      if (result.kind === 'suspended') {
+        record.status = 'suspended'
+        record.resumeAt = result.resumeAt
+        record.error = describeFailure(result)
+        record.suspendedTaskIds = [result.taskId]
+        return record
+      }
       lastError = describeFailure(result)
     }
 
@@ -416,10 +481,14 @@ export class WorkflowRunner extends AgentParticipant {
 
     const branchOutputs: Record<string, unknown> = {}
     const failures: string[] = []
+    const suspended: SuspendedBranchTracker = { taskIds: {} }
     for (let i = 0; i < step.branches.length; i++) {
       const branch = step.branches[i]!
       const outcome = results[i]!
-      this.applyBranchOutcome(branch, outcome, record, branchOutputs, failures)
+      this.applyBranchOutcome(branch, outcome, record, branchOutputs, failures, suspended)
+    }
+    if (Object.keys(suspended.taskIds).length > 0) {
+      return this.markParallelSuspended(record, branchOutputs, suspended)
     }
     record.endedAt = this.now()
     record.output = branchOutputs
@@ -438,6 +507,7 @@ export class WorkflowRunner extends AgentParticipant {
       while (remaining > 0 && failures.length > 0) {
         remaining -= 1
         record.attempts += 1
+        const retrySuspended: SuspendedBranchTracker = { taskIds: {} }
         const retryResults = await Promise.all(
           step.branches.map((b) => this.runBranch(step.id, b, ctx)),
         )
@@ -445,7 +515,10 @@ export class WorkflowRunner extends AgentParticipant {
         for (let i = 0; i < step.branches.length; i++) {
           const branch = step.branches[i]!
           const outcome = retryResults[i]!
-          this.applyBranchOutcome(branch, outcome, record, branchOutputs, failures)
+          this.applyBranchOutcome(branch, outcome, record, branchOutputs, failures, retrySuspended)
+        }
+        if (Object.keys(retrySuspended.taskIds).length > 0) {
+          return this.markParallelSuspended(record, branchOutputs, retrySuspended)
         }
       }
       if (failures.length === 0) {
@@ -507,6 +580,7 @@ export class WorkflowRunner extends AgentParticipant {
     record: StepRecord,
     branchOutputs: Record<string, unknown>,
     failures: string[],
+    suspended: SuspendedBranchTracker,
   ): void {
     if (outcome.kind === 'skipped') {
       branchOutputs[branch.id] = undefined
@@ -521,10 +595,29 @@ export class WorkflowRunner extends AgentParticipant {
     record.subTaskIds.push(r.taskId)
     if (r.kind === 'ok') {
       branchOutputs[branch.id] = r.output
+    } else if (r.kind === 'suspended') {
+      branchOutputs[branch.id] = undefined
+      suspended.taskIds[branch.id] = r.taskId
+      suspended.resumeAt =
+        suspended.resumeAt === undefined ? r.resumeAt : Math.min(suspended.resumeAt, r.resumeAt)
     } else {
       branchOutputs[branch.id] = undefined
       failures.push(`branch '${branch.id}': ${describeFailure(r)}`)
     }
+  }
+
+  private markParallelSuspended(
+    record: StepRecord,
+    branchOutputs: Record<string, unknown>,
+    suspended: SuspendedBranchTracker,
+  ): StepRecord {
+    record.status = 'suspended'
+    record.output = branchOutputs
+    record.suspendedBranchTaskIds = suspended.taskIds
+    record.suspendedTaskIds = Object.values(suspended.taskIds)
+    if (suspended.resumeAt !== undefined) record.resumeAt = suspended.resumeAt
+    record.error = `parallel step suspended waiting for child task(s): ${record.suspendedTaskIds.join(', ')}`
+    return record
   }
 
   private async dispatchOne(
@@ -546,7 +639,135 @@ export class WorkflowRunner extends AgentParticipant {
     // the only thing on `from`) and the quota gate would treat the
     // call as unattributed → no per-user debit.
     if (ctx.triggerOrigin) opts.origin = ctx.triggerOrigin
+    if (ctx.triggerTaskId) {
+      opts.ancestry = [
+        ...(ctx.triggerAncestry ?? []),
+        { taskId: ctx.triggerTaskId, by: this.id },
+      ]
+    }
     return this.hub.dispatch(opts)
+  }
+
+  private refreshSuspendedStepRecord(record: StepRecord, step: Step): void {
+    if (!this.hub.taskResult) {
+      record.status = 'failed'
+      record.error =
+        `cannot resume suspended step '${record.stepId}' — hub does not expose taskResult()`
+      record.endedAt = this.now()
+      return
+    }
+
+    if ('parallel' in step && step.parallel === true) {
+      this.refreshSuspendedParallelRecord(record, step)
+      return
+    }
+
+    const taskId = record.suspendedTaskIds?.[0] ?? record.subTaskIds.at(-1)
+    if (!taskId) {
+      record.status = 'failed'
+      record.error = `cannot resume suspended step '${record.stepId}' — missing child task id`
+      record.endedAt = this.now()
+      return
+    }
+    const result = this.hub.taskResult(taskId)
+    if (!result || result.kind === 'suspended') {
+      record.status = 'suspended'
+      if (result?.kind === 'suspended') record.resumeAt = result.resumeAt
+      record.suspendedTaskIds = [taskId]
+      return
+    }
+
+    const policy: StepFailurePolicy = step.onFailure ?? { action: 'halt' }
+    this.applyChildResultToRecord(record, result, policy)
+  }
+
+  private refreshSuspendedParallelRecord(record: StepRecord, step: ParallelStep): void {
+    const branchTaskIds = record.suspendedBranchTaskIds ?? {}
+    const branchOutputs = asRecord(record.output)
+    const failures: string[] = []
+    let nextResumeAt: number | undefined
+    const stillSuspended: Record<string, string> = {}
+
+    for (const branch of step.branches) {
+      const taskId = branchTaskIds[branch.id]
+      if (!taskId) continue
+      const result = this.hub.taskResult?.(taskId)
+      if (!result || result.kind === 'suspended') {
+        stillSuspended[branch.id] = taskId
+        if (result?.kind === 'suspended') {
+          nextResumeAt =
+            nextResumeAt === undefined ? result.resumeAt : Math.min(nextResumeAt, result.resumeAt)
+        }
+        continue
+      }
+      if (result.kind === 'ok') {
+        branchOutputs[branch.id] = result.output
+      } else {
+        branchOutputs[branch.id] = undefined
+        failures.push(`branch '${branch.id}': ${describeFailure(result)}`)
+      }
+    }
+
+    if (Object.keys(stillSuspended).length > 0) {
+      record.status = 'suspended'
+      record.output = branchOutputs
+      record.suspendedBranchTaskIds = stillSuspended
+      record.suspendedTaskIds = Object.values(stillSuspended)
+      const resumeAt = nextResumeAt ?? record.resumeAt
+      if (resumeAt !== undefined) record.resumeAt = resumeAt
+      return
+    }
+
+    delete record.resumeAt
+    delete record.suspendedTaskIds
+    delete record.suspendedBranchTaskIds
+    record.endedAt = this.now()
+    record.output = branchOutputs
+    if (failures.length === 0) {
+      record.status = 'done'
+      delete record.error
+      return
+    }
+    const policy: StepFailurePolicy = step.onFailure ?? { action: 'halt' }
+    if (policy.action === 'continue') {
+      record.status = 'skipped'
+      record.error = failures.join('; ')
+      return
+    }
+    record.status = 'failed'
+    record.error = failures.join('; ')
+  }
+
+  private applyChildResultToRecord(
+    record: StepRecord,
+    result: TaskResult,
+    policy: StepFailurePolicy,
+  ): void {
+    delete record.resumeAt
+    delete record.suspendedTaskIds
+    delete record.suspendedBranchTaskIds
+    record.endedAt = this.now()
+    if (result.kind === 'ok') {
+      record.status = 'done'
+      record.output = result.output
+      delete record.error
+      return
+    }
+    const error = describeFailure(result)
+    if (policy.action === 'continue') {
+      record.status = 'skipped'
+      record.error = error
+      return
+    }
+    record.status = 'failed'
+    record.error = error
+  }
+
+  private suspendWorkflow(state: RunState, resumeAt: number): never {
+    throw new SuspendTaskError({
+      resumeAt,
+      state: workflowSuspendState(state),
+    })
   }
 
   // --- persistence wrapper --------------------------------------------------
@@ -562,7 +783,32 @@ function describeFailure(r: TaskResult): string {
   if (r.kind === 'failed') return r.error
   if (r.kind === 'cancelled') return `cancelled: ${r.reason}`
   if (r.kind === 'no_participant') return `no participant: ${r.reason}`
+  if (r.kind === 'suspended') return `suspended until ${new Date(r.resumeAt).toISOString()} by ${r.by}`
   return 'unexpected ok in failure path'
+}
+
+interface WorkflowSuspendState {
+  kind: 'workflow_step_suspended'
+  runState: RunState
+}
+
+function workflowSuspendState(runState: RunState): WorkflowSuspendState {
+  return { kind: 'workflow_step_suspended', runState }
+}
+
+function isWorkflowSuspendState(value: unknown): value is WorkflowSuspendState {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    (value as { kind?: unknown }).kind === 'workflow_step_suspended' &&
+    typeof (value as { runState?: unknown }).runState === 'object' &&
+    (value as { runState?: unknown }).runState !== null
+  )
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
+  return { ...(value as Record<string, unknown>) }
 }
 
 /**
@@ -573,6 +819,11 @@ type BranchOutcome =
   | { kind: 'ran'; result: TaskResult }
   | { kind: 'skipped' }
   | { kind: 'when-error'; error: string }
+
+interface SuspendedBranchTracker {
+  taskIds: Record<string, string>
+  resumeAt?: number
+}
 
 /**
  * Compose the lookup key for a branch's compiled `when` predicate.

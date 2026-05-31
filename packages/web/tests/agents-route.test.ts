@@ -21,6 +21,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Hub, Space } from '@aipehub/core'
+import { loadOrCreateMasterKey, openIdentityStore, type IdentityStore } from '@aipehub/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -31,6 +32,7 @@ interface Boot {
   server: WebServerHandle
   baseUrl: string
   token: string
+  identity?: IdentityStore
 }
 
 async function boot(): Promise<Boot> {
@@ -47,6 +49,7 @@ async function boot(): Promise<Boot> {
 async function teardown(b: Boot): Promise<void> {
   await b.server.close()
   await b.hub.stop()
+  b.identity?.close()
   await rm(b.tmp, { recursive: true, force: true })
 }
 
@@ -122,5 +125,74 @@ describe('agents-route: useMcpServers (#2-M4a)', () => {
     })
     expect(res.status).toBe(400)
     expect((await b.space.agents()).some((a) => a.id === 'bad-mcp')).toBe(false)
+  })
+})
+
+describe('agents-route: v4 identity admin auth', () => {
+  let b: Boot
+  beforeEach(async () => {
+    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-agents-v4-auth-'))
+    const init = await Space.init(tmp, { name: 'agents-v4-auth-test' })
+    const space = init.space
+    const hub = new Hub({ space })
+    await hub.start()
+    const identity = openIdentityStore({
+      dbPath: join(tmp, 'identity.sqlite'),
+      masterKey: loadOrCreateMasterKey(join(tmp, 'identity-master.key')),
+    })
+    const booted = identity.bootstrap({
+      ownerEmail: 'owner@example.test',
+      ownerDisplayName: 'Owner',
+    })
+    identity.setPassword(booted.ownerUserId!, 'TestPass123!')
+    identity.createUser({
+      email: 'member@example.test',
+      displayName: 'Member',
+      password: 'TestPass123!',
+      role: 'member',
+    })
+    const server = await serveWeb(hub, {
+      host: '127.0.0.1',
+      port: 0,
+      identity,
+    })
+    b = { tmp, hub, space, server, baseUrl: server.url, token: '', identity }
+  })
+  afterEach(async () => { await teardown(b) })
+
+  async function login(email: string): Promise<string> {
+    const res = await fetch(`${b.baseUrl}/api/admin/identity/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, password: 'TestPass123!' }),
+    })
+    expect(res.status).toBe(200)
+    const cookie = res.headers.get('set-cookie')?.split(';')[0]
+    expect(cookie).toMatch(/^aipehub_identity=/)
+    return cookie!
+  }
+
+  it('accepts an owner v4 session cookie for legacy agent CRUD routes', async () => {
+    const cookie = await login('owner@example.test')
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...base, id: 'v4-owned' }),
+    })
+    expect(res.status).toBe(200)
+    const body = await res.json()
+    expect(body.ok).toBe(true)
+    expect((await b.space.agents()).some((a) => a.id === 'v4-owned')).toBe(true)
+  })
+
+  it('does not accept a non-admin v4 session cookie for legacy agent CRUD routes', async () => {
+    const cookie = await login('member@example.test')
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...base, id: 'member-owned' }),
+    })
+    expect(res.status).toBe(401)
+    expect((await b.space.agents()).some((a) => a.id === 'member-owned')).toBe(false)
   })
 })

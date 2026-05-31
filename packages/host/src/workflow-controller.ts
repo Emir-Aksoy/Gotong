@@ -48,6 +48,7 @@ import {
 } from '@aipehub/workflow'
 
 import type { LoadReport } from './workflow-loader.js'
+import { assertNoSelfTriggerCycle } from './workflow-guards.js'
 
 export interface WorkflowSummary {
   id: string
@@ -267,6 +268,7 @@ export class WorkflowController {
 
   async importFromText(text: string): Promise<WorkflowSummary> {
     const def = parseWorkflow(text)
+    assertNoSelfTriggerCycle(def)
     if (this.known.has(def.id)) {
       throw new Error(
         `workflow id '${def.id}' is already loaded — delete it first (v0.1 does not support re-import).`,

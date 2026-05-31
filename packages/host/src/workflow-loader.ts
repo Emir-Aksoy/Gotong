@@ -29,6 +29,7 @@ import {
   workflowParticipantId,
   type WorkflowDefinition,
 } from '@aipehub/workflow'
+import { assertNoSelfTriggerCycle } from './workflow-guards.js'
 
 export interface LoadedWorkflow {
   file: string
@@ -122,6 +123,7 @@ export async function loadWorkflows(
     let def: WorkflowDefinition
     try {
       def = parseWorkflow(body)
+      assertNoSelfTriggerCycle(def)
     } catch (err) {
       report.failed.push({
         file: filePath,
