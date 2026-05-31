@@ -34,6 +34,12 @@ export interface A2aSendOptions {
    * for a generic (non-AipeHub) A2A agent.
    */
   peerId?: string
+  /**
+   * Message metadata forwarded on the request. An AipeHub server reads
+   * `metadata.skill` to pick the dispatch capability; set `{ skill: '...' }`
+   * to target a specific remote capability.
+   */
+  metadata?: Record<string, unknown>
   /** Abort signal forwarded to fetch. */
   signal?: AbortSignal
 }
@@ -47,7 +53,11 @@ export async function a2aSend(
   const doFetch = opts.fetchImpl ?? fetch
   const messageId = opts.messageId ?? crypto.randomUUID()
   const requestId = opts.requestId ?? 1
-  const body = buildSendRequest(text, { messageId, requestId })
+  const body = buildSendRequest(text, {
+    messageId,
+    requestId,
+    ...(opts.metadata ? { metadata: opts.metadata } : {}),
+  })
 
   const headers: Record<string, string> = {
     'content-type': 'application/json',

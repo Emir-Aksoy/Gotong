@@ -65,7 +65,7 @@ import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-import { Hub, Space, createLogger, type McpServerSpec, type Participant, type RemoteHubViaLink, type SpaceConfig, type Task, type TranscriptEntry } from '@aipehub/core'
+import { Hub, Space, createLogger, type Logger, type McpServerSpec, type Participant, type RemoteHubViaLink, type SpaceConfig, type Task, type TranscriptEntry } from '@aipehub/core'
 import {
   AUDIT_ACTIONS,
   loadOrCreateMasterKey,
@@ -83,6 +83,7 @@ const log = createLogger('host')
 import { serveWebSocket } from '@aipehub/transport-ws'
 import { PeerRegistry, buildPeerTokenResolver } from './peer-registry.js'
 import { A2aServer } from './a2a-server.js'
+import { A2aRemoteParticipant } from '@aipehub/a2a'
 import { serveWeb, type WebServerOptions } from '@aipehub/web'
 
 /**
@@ -96,6 +97,71 @@ function findOwnerUserId(identity: IdentityStore): string | null {
     if (identity.getMembership(u.id)?.role === 'owner') return u.id
   }
   return null
+}
+
+/**
+ * Phase 18 C-M4 — register outbound A2A agents from AIPE_A2A_AGENTS.
+ *
+ * The env is a JSON array of `{ id, capabilities, url, tokenEnv, peerId?,
+ * targetSkill? }`. Each becomes an `A2aRemoteParticipant` so a capability
+ * dispatch on the local hub is forwarded over A2A `message/send`. The bearer
+ * token is read from `process.env[tokenEnv]` — never inline in the blob — so
+ * credentials stay in the normal env channel. Malformed top-level JSON degrades
+ * to "register nothing" (logged); a per-entry problem (missing field / unset
+ * token) skips just that entry. Returns the count registered.
+ */
+function registerOutboundA2aAgents(hub: Hub, log: Logger): number {
+  const raw = env('AIPE_A2A_AGENTS')
+  if (!raw) return 0
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(raw)
+  } catch (err) {
+    log.error('AIPE_A2A_AGENTS is not valid JSON; no outbound A2A agents registered', {
+      err: err instanceof Error ? err.message : String(err),
+    })
+    return 0
+  }
+  if (!Array.isArray(parsed)) {
+    log.error('AIPE_A2A_AGENTS must be a JSON array; no outbound A2A agents registered')
+    return 0
+  }
+  let registered = 0
+  for (const item of parsed) {
+    const e = (item ?? {}) as Record<string, unknown>
+    const id = typeof e.id === 'string' ? e.id : undefined
+    const url = typeof e.url === 'string' ? e.url : undefined
+    const tokenEnv = typeof e.tokenEnv === 'string' ? e.tokenEnv : undefined
+    const capabilities = Array.isArray(e.capabilities)
+      ? e.capabilities.filter((c): c is string => typeof c === 'string')
+      : []
+    if (!id || !url || !tokenEnv || capabilities.length === 0) {
+      log.warn('skipping malformed AIPE_A2A_AGENTS entry (need id, url, tokenEnv, capabilities[])', {
+        entry: e,
+      })
+      continue
+    }
+    const token = process.env[tokenEnv]
+    if (!token) {
+      log.warn('skipping outbound A2A agent: token env is unset', { id, tokenEnv })
+      continue
+    }
+    const peerId = typeof e.peerId === 'string' ? e.peerId : undefined
+    const targetSkill = typeof e.targetSkill === 'string' ? e.targetSkill : undefined
+    hub.register(
+      new A2aRemoteParticipant({
+        id,
+        capabilities,
+        url,
+        token,
+        ...(peerId ? { peerId } : {}),
+        ...(targetSkill ? { targetSkill } : {}),
+      }),
+    )
+    registered++
+  }
+  if (registered > 0) log.info('outbound A2A agents registered', { count: registered })
+  return registered
 }
 
 import { LocalAgentPool } from './local-agent-pool.js'
@@ -1106,6 +1172,16 @@ async function main(): Promise<void> {
     inboxService = new HostInboxService({ hub, store: inboxStore, identity, logger: log })
     log.info('member task inbox enabled', { capability: HUMAN_CAPABILITY })
   }
+
+  // Phase 18 C-M4 — outbound A2A agents. Each configured external A2A endpoint
+  // becomes a local Participant, so a normal capability dispatch reaches out
+  // over A2A message/send (the mirror of the inbound A2aServer below). Config
+  // is a JSON array in AIPE_A2A_AGENTS:
+  //   [{ id, capabilities: string[], url, tokenEnv, peerId?, targetSkill? }]
+  // The bearer token is read from process.env[tokenEnv] (never inline in the
+  // blob) so secrets stay in the usual env channel. Malformed config degrades
+  // (logged) instead of crashing boot; a bad/missing-token entry skips itself.
+  registerOutboundA2aAgents(hub, log)
 
   // Phase 18 C-M3 — inbound A2A message/send endpoint. OFF by default (it
   // exposes the hub to external A2A callers); enable with

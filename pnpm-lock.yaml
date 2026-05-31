@@ -338,6 +338,10 @@ importers:
         version: 6.38.0(ws@8.20.1)(zod@4.4.3)
 
   packages/a2a:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       vitest:
         specifier: ^3.2.4
