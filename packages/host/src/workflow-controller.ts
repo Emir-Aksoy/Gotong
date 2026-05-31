@@ -65,6 +65,14 @@ export interface WorkflowSummary {
    * (the workflow parser already did).
    */
   payloadSchema?: unknown
+  /**
+   * Pass-through of the workflow definition's `surface.me` block (Phase
+   * 14), when present. The web layer derives the member-facing `/me`
+   * catalog from this — only workflows with `surface.me.enabled` are
+   * runnable by members. `unknown` here so the host stays a dumb pipe
+   * (the workflow parser already validated the shape).
+   */
+  surfaceMe?: unknown
   stepCount: number
   file: string | null
 }
@@ -325,6 +333,9 @@ export class WorkflowController {
     if (w.definition.description) out.description = w.definition.description
     if (w.definition.trigger.payloadSchema) {
       out.payloadSchema = w.definition.trigger.payloadSchema
+    }
+    if (w.definition.surface?.me) {
+      out.surfaceMe = w.definition.surface.me
     }
     return out
   }

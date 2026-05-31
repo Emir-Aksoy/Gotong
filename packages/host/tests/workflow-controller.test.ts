@@ -135,6 +135,34 @@ workflow:
     expect(existsSync(summary.file!)).toBe(true)
   })
 
+  it('toSummary passes through the workflow surface.me block (Phase 14)', async () => {
+    const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+    const withSurface = SAMPLE.replace(
+      'trigger: { capability: run-editorial }',
+      `trigger: { capability: run-editorial }
+  surface:
+    me:
+      enabled: true
+      label: 编辑工作台
+      allowed_roles: [owner, admin, member]
+      user_scope_field: owner_user_id`,
+    )
+    const summary = await c.importFromText(withSurface)
+    expect(summary.surfaceMe).toEqual({
+      enabled: true,
+      label: '编辑工作台',
+      allowedRoles: ['owner', 'admin', 'member'],
+      userScopeField: 'owner_user_id',
+    })
+    expect((await c.list())[0]!.surfaceMe).toBeDefined()
+  })
+
+  it('toSummary omits surfaceMe when the workflow declares no surface', async () => {
+    const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+    const summary = await c.importFromText(SAMPLE)
+    expect(summary.surfaceMe).toBeUndefined()
+  })
+
   describe('remove()', () => {
     it('unregisters the runner and deletes the YAML file', async () => {
       const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
