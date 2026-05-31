@@ -41,6 +41,7 @@ import {
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
 } from '../src/index.js'
+import { openDb } from '../src/db.js'
 
 describe('IdentityStore — peers (D1)', () => {
   let store: IdentityStore
@@ -293,6 +294,150 @@ describe('IdentityStore — peers (D1)', () => {
       try { store.getPeerToken('no_such') } catch (e) { err = e }
       expect(err).toBeInstanceOf(IdentityError)
       expect((err as IdentityError).code).toBe('peer_not_found')
+    })
+  })
+
+  // ---------- Phase 18 B-M1 — cross-org policy ----------
+
+  describe('cross-org policy (Phase 18 B-M1)', () => {
+    it('addPeer without policy fields → safe defaults (compat)', () => {
+      const p = store.addPeer({
+        peerId: 'hub_nopolicy',
+        endpointUrl: 'wss://np.example',
+        peerToken: 'tok-nopolicy-1234',
+      })
+      expect(p.kind).toBe('service')
+      expect(p.acl).toBeNull()
+      expect(p.outboundCaps).toBeNull()
+      expect(p.requireApprovalOutbound).toBe(false)
+    })
+
+    it('addPeer round-trips a full policy (returned shape + fresh read)', () => {
+      const p = store.addPeer({
+        peerId: 'hub_pol',
+        endpointUrl: 'wss://pol.example',
+        peerToken: 'tok-pol-12345678',
+        kind: 'organization',
+        acl: { capabilities: ['review', 'translate'], requireOrigin: true, requireOriginRole: ['admin'] },
+        outboundCaps: ['draft'],
+        requireApprovalOutbound: true,
+      })
+      for (const r of [p, store.getPeerByPeerId('hub_pol')!]) {
+        expect(r.kind).toBe('organization')
+        expect(r.acl).toEqual({
+          capabilities: ['review', 'translate'],
+          requireOrigin: true,
+          requireOriginRole: ['admin'],
+        })
+        expect(r.outboundCaps).toEqual(['draft'])
+        expect(r.requireApprovalOutbound).toBe(true)
+      }
+    })
+
+    it('updatePeer edits policy WITHOUT rotating the token', () => {
+      const p = store.addPeer({
+        peerId: 'hub_pe', endpointUrl: 'wss://pe.example', peerToken: 'tok-pe-original-1',
+      })
+      const tokBefore = store.getPeerToken(p.id)
+      const u = store.updatePeer(p.id, {
+        kind: 'project',
+        acl: { capabilities: ['summarize'] },
+        outboundCaps: ['draft', 'review'],
+        requireApprovalOutbound: true,
+      })
+      expect(u.kind).toBe('project')
+      expect(u.acl).toEqual({ capabilities: ['summarize'] })
+      expect(u.outboundCaps).toEqual(['draft', 'review'])
+      expect(u.requireApprovalOutbound).toBe(true)
+      // token + vault entry untouched by a policy-only update.
+      expect(store.getPeerToken(p.id)).toBe(tokBefore)
+      expect(u.vaultEntryId).toBe(p.vaultEntryId)
+    })
+
+    it('token rotation preserves the existing policy', () => {
+      const p = store.addPeer({
+        peerId: 'hub_rot', endpointUrl: 'wss://rot.example', peerToken: 'tok-rot-1',
+        kind: 'organization', acl: { requireOrigin: true }, outboundCaps: ['x'],
+        requireApprovalOutbound: true,
+      })
+      const rotated = store.updatePeer(p.id, { peerToken: 'tok-rot-2-fresh' })
+      expect(store.getPeerToken(p.id)).toBe('tok-rot-2-fresh')
+      expect(rotated.kind).toBe('organization')
+      expect(rotated.acl).toEqual({ requireOrigin: true })
+      expect(rotated.outboundCaps).toEqual(['x'])
+      expect(rotated.requireApprovalOutbound).toBe(true)
+    })
+
+    it('updatePeer with undefined policy fields preserves them', () => {
+      const p = store.addPeer({
+        peerId: 'hub_pre', endpointUrl: 'wss://pre.example', peerToken: 'tok-pre-1',
+        kind: 'personal', acl: { capabilities: ['a'] }, outboundCaps: ['b'],
+        requireApprovalOutbound: true,
+      })
+      const u = store.updatePeer(p.id, { label: 'just a label' })
+      expect(u.kind).toBe('personal')
+      expect(u.acl).toEqual({ capabilities: ['a'] })
+      expect(u.outboundCaps).toEqual(['b'])
+      expect(u.requireApprovalOutbound).toBe(true)
+    })
+
+    it('updatePeer with explicit null CLEARS acl / outboundCaps', () => {
+      const p = store.addPeer({
+        peerId: 'hub_clr', endpointUrl: 'wss://clr.example', peerToken: 'tok-clr-1',
+        acl: { capabilities: ['a'] }, outboundCaps: ['b'],
+      })
+      const u = store.updatePeer(p.id, { acl: null, outboundCaps: null })
+      expect(u.acl).toBeNull()
+      expect(u.outboundCaps).toBeNull()
+    })
+
+    it('corrupt acl_json degrades to null instead of throwing', async () => {
+      const tmp2 = await mkdtemp(join(tmpdir(), 'aipe-id-peers-corrupt-'))
+      const path = join(tmp2, 'identity.sqlite')
+      const mk = randomBytes(MASTER_KEY_LEN_BYTES)
+      const s1 = openIdentityStore({ dbPath: path, masterKey: mk })
+      s1.addPeer({
+        peerId: 'hub_corrupt', endpointUrl: 'wss://c.example', peerToken: 'tok-c-1',
+        acl: { capabilities: ['a'] },
+      })
+      s1.close()
+      // Hand-mangle the stored JSON via a second connection.
+      const raw = openDb(path)
+      raw.prepare('UPDATE peers SET acl_json = ? WHERE peer_id = ?').run('{ not valid json', 'hub_corrupt')
+      raw.close()
+      const s2 = openIdentityStore({ dbPath: path, masterKey: mk })
+      const p = s2.getPeerByPeerId('hub_corrupt')
+      expect(p).not.toBeNull()
+      expect(p!.acl).toBeNull()       // corrupt → null, did not throw
+      expect(p!.kind).toBe('service') // the rest of the row still loads
+      s2.close()
+      await rm(tmp2, { recursive: true, force: true })
+    })
+
+    it('a legacy-shaped row (no policy columns) reads back as v12 defaults', async () => {
+      const tmp2 = await mkdtemp(join(tmpdir(), 'aipe-id-peers-legacy-'))
+      const path = join(tmp2, 'identity.sqlite')
+      const mk = randomBytes(MASTER_KEY_LEN_BYTES)
+      // First open runs migrations (incl. v12 ADD COLUMN ... DEFAULT).
+      openIdentityStore({ dbPath: path, masterKey: mk }).close()
+      // Insert a row using ONLY the pre-B-M1 columns, so SQLite fills the
+      // policy columns from their v12 DEFAULTs — exactly what an existing
+      // peers row gets after the migration runs.
+      const now = Date.now()
+      const raw = openDb(path)
+      raw.prepare(
+        `INSERT INTO peers(id, peer_id, endpoint_url, label, enabled, vault_entry_id, created_at, updated_at)
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run('row_legacy', 'hub_legacy', 'wss://legacy.example', null, 1, 'vault_fake', now, now)
+      raw.close()
+      const s = openIdentityStore({ dbPath: path, masterKey: mk })
+      const p = s.getPeerByPeerId('hub_legacy')!
+      expect(p.kind).toBe('service')
+      expect(p.acl).toBeNull()
+      expect(p.outboundCaps).toBeNull()
+      expect(p.requireApprovalOutbound).toBe(false)
+      s.close()
+      await rm(tmp2, { recursive: true, force: true })
     })
   })
 })

@@ -26,6 +26,8 @@ import type { VaultStore } from './vault-store.js'
 import {
   type AddPeerInput,
   type ListPeersQuery,
+  type PeerInboundAcl,
+  type PeerKind,
   type PeerRegistration,
   type UpdatePeerInput,
 } from './types.js'
@@ -39,6 +41,11 @@ interface PeerRow {
   vault_entry_id: string
   created_at: number
   updated_at: number
+  // Phase 18 B-M1 — cross-org policy columns (schema v12).
+  kind: string
+  acl_json: string | null
+  outbound_caps_json: string | null
+  require_approval_outbound: number
 }
 
 export class PeerStore {
@@ -104,6 +111,12 @@ export class PeerStore {
           vaultRow.id,
           now,
           now,
+          // Phase 18 B-M1 policy — omitted fields fall back to the same
+          // values the v12 column DEFAULTs would give an un-migrated row.
+          input.kind ?? 'service',
+          input.acl != null ? JSON.stringify(input.acl) : null,
+          input.outboundCaps != null ? JSON.stringify(input.outboundCaps) : null,
+          input.requireApprovalOutbound ? 1 : 0,
         )
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -176,11 +189,38 @@ export class PeerStore {
         typeof input.endpointUrl === 'string' && input.endpointUrl.length > 0
           ? input.endpointUrl
           : existing.endpoint_url
+      // Phase 18 B-M1 policy fields — undefined preserves the stored value;
+      // for acl / outboundCaps an explicit null CLEARS it (back to
+      // accept-all / send-all), which is why we test `!== undefined`
+      // rather than truthiness.
+      const kind = input.kind !== undefined ? input.kind : existing.kind
+      const aclJson =
+        input.acl !== undefined
+          ? input.acl === null
+            ? null
+            : JSON.stringify(input.acl)
+          : existing.acl_json
+      const outboundCapsJson =
+        input.outboundCaps !== undefined
+          ? input.outboundCaps === null
+            ? null
+            : JSON.stringify(input.outboundCaps)
+          : existing.outbound_caps_json
+      const requireApprovalOutbound =
+        input.requireApprovalOutbound !== undefined
+          ? input.requireApprovalOutbound
+            ? 1
+            : 0
+          : existing.require_approval_outbound
       this.stmtPeerUpdate.run(
         endpointUrl,
         label,
         enabled,
         vaultEntryId,
+        kind,
+        aclJson,
+        outboundCapsJson,
+        requireApprovalOutbound,
         Date.now(),
         id,
       )
@@ -226,8 +266,9 @@ export class PeerStore {
     return (this._stmtPeerInsert ??= this.db.prepare(
       `INSERT INTO peers(
          id, peer_id, endpoint_url, label, enabled, vault_entry_id,
-         created_at, updated_at
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?)`,
+         created_at, updated_at,
+         kind, acl_json, outbound_caps_json, require_approval_outbound
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ))
   }
   private get stmtPeerById(): SqliteStmt {
@@ -254,7 +295,8 @@ export class PeerStore {
     return (this._stmtPeerUpdate ??= this.db.prepare(
       `UPDATE peers
          SET endpoint_url = ?, label = ?, enabled = ?, vault_entry_id = ?,
-             updated_at = ?
+             kind = ?, acl_json = ?, outbound_caps_json = ?,
+             require_approval_outbound = ?, updated_at = ?
        WHERE id = ?`,
     ))
   }
@@ -290,5 +332,29 @@ function rowToPeerRegistration(r: PeerRow): PeerRegistration {
     vaultEntryId: r.vault_entry_id,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    // Phase 18 B-M1 policy projection.
+    kind: ((r.kind as PeerKind) || 'service'),
+    acl: parsePolicyJson<PeerInboundAcl>(r.acl_json),
+    outboundCaps: parsePolicyJson<string[]>(r.outbound_caps_json),
+    requireApprovalOutbound: r.require_approval_outbound !== 0,
+  }
+}
+
+/**
+ * Parse a stored policy JSON column. Corrupt JSON degrades to null — the
+ * same accept-all / send-all default a NULL column carries — instead of
+ * throwing, so one hand-mangled row can't break the whole peer-list load
+ * (same "don't let a bad row poison the read" rule as the suspended-task
+ * corrupt-json drop). We only ever write these via JSON.stringify, so
+ * corruption means external DB tampering, against which this buys
+ * resilience, not security (the tamperer could just store NULL anyway).
+ */
+function parsePolicyJson<T>(raw: string | null): T | null {
+  if (raw == null) return null
+  try {
+    const v = JSON.parse(raw)
+    return v == null ? null : (v as T)
+  } catch {
+    return null
   }
 }

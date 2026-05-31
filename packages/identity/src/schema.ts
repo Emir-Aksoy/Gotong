@@ -531,6 +531,35 @@ const MIGRATIONS: Migration[] = [
         ON usage_ledger(model, ts DESC);
     `,
   },
+  {
+    // Phase 18 (Sprint 5) B-M1 — per-peer cross-org policy. Four additive
+    // columns on the existing peers table (v6), each nullable or defaulted
+    // so an un-migrated row keeps today's behaviour: kind='service', no
+    // inbound ACL (accept all), no outbound allowlist (send all), approval
+    // off. Policy is 1:1 with a peer and read on the same PeerRegistry tick
+    // that reads the row, so it lives ON the row — a side table joined every
+    // 5s would buy nothing. The migration framework runs each version
+    // exactly once, so ALTER ... ADD COLUMN (SQLite has no IF NOT EXISTS for
+    // columns) is safe here.
+    //
+    //   kind                      personal|organization|project|service —
+    //                             admin's label for what's on the far end.
+    //   acl_json                  inbound PeerLinkAcl as JSON; NULL = accept
+    //                             all (legacy). What we ACCEPT from the peer.
+    //   outbound_caps_json        outbound capability allowlist (string[]);
+    //                             NULL = send all. What we may SEND to it.
+    //   require_approval_outbound 0/1 — when 1, an outbound cross-org task
+    //                             parks in the member inbox (Phase 16) until
+    //                             a human approves it (B-M3).
+    version: 12,
+    name: 'peer-policy',
+    sql: `
+      ALTER TABLE peers ADD COLUMN kind TEXT NOT NULL DEFAULT 'service';
+      ALTER TABLE peers ADD COLUMN acl_json TEXT;
+      ALTER TABLE peers ADD COLUMN outbound_caps_json TEXT;
+      ALTER TABLE peers ADD COLUMN require_approval_outbound INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {

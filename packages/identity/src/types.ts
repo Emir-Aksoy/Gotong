@@ -716,6 +716,30 @@ export interface LedgerAggregateRow {
 // ---------------------------------------------------------------------------
 
 /**
+ * What's on the far end of a federation link (Phase 18 B-M1). An admin
+ * label, persisted verbatim; the admin UI uses it to frame trust and it
+ * leaves room for kind-specific defaults later. `'service'` is the
+ * conservative default a pre-policy (un-migrated) peer row carries.
+ */
+export type PeerKind = 'personal' | 'organization' | 'project' | 'service'
+
+/**
+ * Inbound trust contract — what this host ACCEPTS from a peer (Phase 18
+ * B-M1). A structural mirror of core's `PeerLinkAcl` so identity stays
+ * core-free; the host maps it straight onto `installPeerLink({acl})`.
+ * All fields undefined (or a NULL `acl_json` row) = accept-all, the
+ * legacy behaviour. Empty `capabilities` = deny all.
+ */
+export interface PeerInboundAcl {
+  /** Capability allowlist; undefined = no check, [] = deny all. */
+  capabilities?: string[]
+  /** Refuse tasks without an `origin` claim. */
+  requireOrigin?: boolean
+  /** Restrict to these `origin.userRole` values; undefined/[] = no check. */
+  requireOriginRole?: string[]
+}
+
+/**
  * One row in the `peers` table. The shared HELLO secret is NOT in this
  * shape — it lives in vault.id = `vaultEntryId`, decrypted on demand
  * via `getPeerToken()`. `enabled=false` keeps the row + token around
@@ -737,6 +761,16 @@ export interface PeerRegistration {
   vaultEntryId: string
   createdAt: number
   updatedAt: number
+  // ---- Phase 18 B-M1 — cross-org policy (always present; defaults for
+  //      a pre-policy row come from the v12 column DEFAULTs / NULL). ----
+  /** What's on the far end. Default 'service'. */
+  kind: PeerKind
+  /** Inbound ACL — what we ACCEPT from this peer. null = accept all. */
+  acl: PeerInboundAcl | null
+  /** Outbound capability allowlist — what we may SEND. null = send all. */
+  outboundCaps: string[] | null
+  /** Gate outbound cross-org tasks through the member inbox for approval. */
+  requireApprovalOutbound: boolean
 }
 
 export interface AddPeerInput {
@@ -752,6 +786,12 @@ export interface AddPeerInput {
    * with a fresh `peerToken`.
    */
   peerToken: string
+  // ---- Phase 18 B-M1 — optional cross-org policy (omitted → column
+  //      DEFAULTs: kind='service', no ACL, no allowlist, approval off). ----
+  kind?: PeerKind
+  acl?: PeerInboundAcl | null
+  outboundCaps?: string[] | null
+  requireApprovalOutbound?: boolean
 }
 
 export interface UpdatePeerInput {
@@ -765,6 +805,13 @@ export interface UpdatePeerInput {
    * mutable — that's a different peer, use addPeer/removePeer.
    */
   endpointUrl?: string
+  // ---- Phase 18 B-M1 — cross-org policy. undefined = preserve existing.
+  //      For acl / outboundCaps, an explicit `null` CLEARS the policy
+  //      (back to accept-all / send-all), distinct from undefined. ----
+  kind?: PeerKind
+  acl?: PeerInboundAcl | null
+  outboundCaps?: string[] | null
+  requireApprovalOutbound?: boolean
 }
 
 export interface ListPeersQuery {
