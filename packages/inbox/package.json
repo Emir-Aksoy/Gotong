@@ -1,0 +1,30 @@
+{
+  "name": "@aipehub/inbox",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AipeHub member task inbox — file-first InboxStore + HumanInboxParticipant broker that turns a workflow's human-in-the-loop step into a parked Task a person resolves from /me.",
+  "license": "MIT",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}
