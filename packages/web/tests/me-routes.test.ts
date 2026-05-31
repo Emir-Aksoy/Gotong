@@ -79,6 +79,9 @@ class StubWorkflowSurface implements WorkflowSurface {
   async list(): Promise<WorkflowSummary[]> {
     return this.summaries
   }
+  async listAll(): Promise<WorkflowSummary[]> {
+    return this.summaries
+  }
   async importFromText(): Promise<WorkflowSummary> {
     throw new Error('stub: importFromText not supported')
   }

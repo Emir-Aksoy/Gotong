@@ -76,6 +76,35 @@ describe('WorkflowController', () => {
     expect(hub.registry.get('workflow:editorial')).toBeDefined()
   })
 
+  it('listAll() includes drafts + archived (live → authoring → archived); list() stays live-only', async () => {
+    const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+    // A live published workflow.
+    await c.importFromText(SAMPLE)
+    // A saved draft whose id sorts BEFORE 'editorial' — proves the state rank,
+    // not the id, drives the ordering (running workflows stay on top).
+    await c.saveDraft(
+      SAMPLE.replace('id: editorial', 'id: aaa-draft').replace('run-editorial', 'run-aaa'),
+    )
+    // An archived tombstone (published → deprecated → archived is the legal path).
+    await c.importFromText(
+      SAMPLE.replace('id: editorial', 'id: mmm-arch').replace('run-editorial', 'run-mmm'),
+    )
+    await c.deprecate('mmm-arch')
+    await c.archive('mmm-arch')
+
+    // list() — live only: the draft + the archived tombstone are absent.
+    expect((await c.list()).map((w) => w.id)).toEqual(['editorial'])
+
+    // listAll() — every state, running-first then authoring then archived.
+    const all = await c.listAll()
+    expect(all.map((w) => w.id)).toEqual(['editorial', 'aaa-draft', 'mmm-arch'])
+    expect(all.map((w) => w.state)).toEqual(['published', 'draft', 'archived'])
+    // A draft surfaces its head content but has no published-revision pointer.
+    const draft = all.find((w) => w.id === 'aaa-draft')!
+    expect(draft.currentRevision).toBeUndefined()
+    expect(draft.stepCount).toBe(2)
+  })
+
   it('importFromText() writes to disk and registers a runner', async () => {
     const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
     const summary = await c.importFromText(SAMPLE)

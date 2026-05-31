@@ -169,6 +169,36 @@ export class WorkflowController {
   }
 
   /**
+   * Every known workflow — live AND non-live (draft / review / archived) —
+   * projected into the UI summary shape. This is the admin operator's full
+   * view: unlike {@link list} (live only), it's what makes a saved draft
+   * discoverable + publishable and keeps an archived tombstone inspectable
+   * (its revision history survives). Ordered running-first → authoring →
+   * archived, then by id, so the workflows actually serving traffic stay on top.
+   *
+   * The `/me` member surface never calls this — it keeps the live-only `list`.
+   */
+  async listAll(): Promise<WorkflowSummary[]> {
+    const out: WorkflowSummary[] = []
+    for (const [id, { file }] of this.known) {
+      let view: WorkflowLifecycleView
+      try {
+        view = await this.versioning.getState(id)
+      } catch {
+        // Record vanished out from under us (concurrent remove) — skip.
+        continue
+      }
+      out.push(this.summaryFromView(id, file, view))
+    }
+    out.sort((a, b) => {
+      const ra = STATE_RANK[a.state] ?? 99
+      const rb = STATE_RANK[b.state] ?? 99
+      return ra !== rb ? ra - rb : a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+    })
+    return out
+  }
+
+  /**
    * List recorded workflow runs from disk. Pass `workflowId` to filter to one
    * workflow; pass `limit` to cap the result count (newest first).
    */
@@ -415,6 +445,19 @@ export class WorkflowController {
     if (def.surface?.me) out.surfaceMe = def.surface.me
     return out
   }
+}
+
+/**
+ * Admin list ordering for {@link WorkflowController.listAll}: workflows that
+ * actually serve traffic first, then in-progress authoring (review ahead of
+ * draft), then archived tombstones at the bottom.
+ */
+const STATE_RANK: Record<LifecycleState, number> = {
+  published: 0,
+  deprecated: 1,
+  review: 2,
+  draft: 3,
+  archived: 4,
 }
 
 /**

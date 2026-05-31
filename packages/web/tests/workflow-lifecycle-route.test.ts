@@ -69,6 +69,7 @@ function makeStub(): Stub {
   }
   const surface: WorkflowSurface = {
     async list() { rec('list'); return [summary()] },
+    async listAll() { rec('listAll'); return [summary()] },
     async importFromText(t) { rec('importFromText', t); return summary() },
     async remove(id) { rec('remove', id) },
     async listRuns(o) { rec('listRuns', o); return [] },
@@ -170,6 +171,18 @@ describe('workflow lifecycle routes', () => {
       expect(call!.args[1]).toEqual({ by: b.adminId })
     })
   }
+
+  it('GET /api/admin/workflows → listAll() (the admin panel shows drafts, not just live)', async () => {
+    b = await boot()
+    const r = await authed(b, 'GET', '/api/admin/workflows')
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(Array.isArray(j.workflows)).toBe(true)
+    // The operator's full view comes from `listAll`, NOT the live-only `list`
+    // (which still backs the /me member catalog).
+    expect(b.stub.calls.find((c) => c.method === 'listAll')).toBeDefined()
+    expect(b.stub.calls.find((c) => c.method === 'list')).toBeUndefined()
+  })
 
   it('POST /:id/publish with a { text } body → publish(id, { text, by })', async () => {
     b = await boot()

@@ -15,7 +15,7 @@
  *
  * # Route inventory
  *
- *   GET    /api/admin/workflows                      — list registered workflows
+ *   GET    /api/admin/workflows                      — list all (incl. drafts)
  *   POST   /api/admin/workflows/import               — YAML/JSON → register
  *   POST   /api/admin/workflows/assist               — Phase 13 M3 AI draft
  *   GET    /api/admin/workflows/runs                 — list recorded runs
@@ -83,7 +83,9 @@ export async function handleWorkflowRoute(
   path: string,
   url: URL,
 ): Promise<boolean> {
-  // GET /api/admin/workflows — list
+  // GET /api/admin/workflows — list ALL workflows (incl. draft / review /
+  // archived). The admin panel is the operator's full view; the /me member
+  // catalog uses a separate live-only surface.
   if (method === 'GET' && path === '/api/admin/workflows') {
     const admin = await ctx.requireAdmin(req, res)
     if (!admin) return true
@@ -92,7 +94,7 @@ export async function handleWorkflowRoute(
       return true
     }
     try {
-      const list = await ctx.workflows.list()
+      const list = await ctx.workflows.listAll()
       sendJson(res, { workflows: list })
     } catch (err) {
       sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)

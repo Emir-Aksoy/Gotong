@@ -416,6 +416,12 @@ export interface UploadSurface {
 export interface WorkflowSurface {
   list(): Promise<WorkflowSummary[]>
   /**
+   * Like {@link list}, but also includes non-live workflows (draft / review /
+   * archived) — the admin operator's full view, so a saved draft is
+   * discoverable + publishable. The `/me` member surface never calls this.
+   */
+  listAll(): Promise<WorkflowSummary[]>
+  /**
    * Parse the supplied YAML / JSON, write it to the on-disk definitions
    * directory, and register a live `WorkflowRunner` on the Hub. Returns
    * the summary of the newly-loaded workflow.
