@@ -346,6 +346,29 @@ export class PeerRegistry {
   }
 
   /**
+   * Re-apply a peer's policy by tearing down its live link, then forcing a
+   * reconcile so the next dial re-installs with the fresh row.
+   *
+   * Why this exists separately from `invalidate()`: `tick()` does
+   * `if (existing) continue` for an already-connected, still-enabled peer
+   * — it never re-installs a live link. So an ACL (or endpoint) edit on a
+   * CURRENTLY-CONNECTED peer would silently not take effect until the next
+   * disconnect. The admin peer-edit route calls this (instead of
+   * `invalidate`) when policy fields changed, so "I saved a stricter ACL"
+   * re-gates the link within milliseconds rather than at some later drop.
+   *
+   * For a peer that isn't connected right now this degrades to a plain
+   * `invalidate()` — the next dial reads the fresh row regardless.
+   */
+  refreshPolicy(peerRowId: string): void {
+    if (this.installed.has(peerRowId)) {
+      this.log('info', 'peer policy changed; re-installing link', { peerRowId })
+      this.teardown(peerRowId, 'policy_changed')
+    }
+    this.invalidate()
+  }
+
+  /**
    * D2 — look up a live HubLink by the remote hub's wire id. Returns
    * null when the peer is configured-but-not-connected, the peer row
    * has been disabled, or the id was never in our registry.
@@ -446,6 +469,10 @@ export class PeerRegistry {
         link,
         selfHubId: this.opts.selfHubId,
         ...(this.opts.rpcResponder ? { rpcResponder: this.opts.rpcResponder } : {}),
+        // Phase 18 B-M2 — apply the peer's persisted inbound trust contract.
+        // A null acl (legacy / unset row) leaves the gate off (accept-all),
+        // exactly the pre-B-M2 behaviour.
+        ...(row.acl ? { acl: row.acl } : {}),
       })
       this.installed.set(row.id, { row, link, install })
       this.backoff.delete(row.id)
@@ -508,6 +535,9 @@ export class PeerRegistry {
       link,
       selfHubId: this.opts.selfHubId,
       ...(this.opts.rpcResponder ? { rpcResponder: this.opts.rpcResponder } : {}),
+      // Phase 18 B-M2 — receiver-side ACL from the peer row (inbound is the
+      // direction the ACL actually guards). null → accept-all, as before.
+      ...(row.acl ? { acl: row.acl } : {}),
     })
     this.installed.set(row.id, { row, link, install })
     this.backoff.delete(row.id)
@@ -522,14 +552,14 @@ export class PeerRegistry {
     })
   }
 
-  private teardown(peerRowId: string): void {
+  private teardown(peerRowId: string, reason = 'removed_or_disabled'): void {
     const state = this.installed.get(peerRowId)
     if (!state) return
     try { state.install.uninstall() } catch { /* */ }
     void state.link.close().catch(() => { /* */ })
     this.installed.delete(peerRowId)
     this.writeAudit('peer_disconnect', state.row, {
-      reason: 'removed_or_disabled',
+      reason,
     })
   }
 
