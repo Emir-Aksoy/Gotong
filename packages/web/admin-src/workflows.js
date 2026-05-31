@@ -67,6 +67,14 @@ export function createWorkflows({ wf }) {
       const name = w.name ? escapeHtml(w.name) : escapeHtml(w.id)
       const desc = w.description ? `<p class="hint">${escapeHtml(w.description)}</p>` : ''
       const file = w.file ? `<small class="hint">${escapeHtml(w.file)}</small>` : ''
+      // Phase 15 — lifecycle state badge + current revision. list() only
+      // returns *live* workflows (published / deprecated), so the gated
+      // buttons below cover exactly those two states.
+      const state = w.state || 'published'
+      const stateBadge = `<span class="wf-state wf-state-${escapeHtml(state)}">${escapeHtml(t.workflowStateLabel(state))}</span>`
+      const revTag = w.currentRevision
+        ? `<span class="wf-rev-tag">${escapeHtml(t.workflowRevTag(w.currentRevision))}</span>`
+        : ''
       // "开始" button: primary action — opens a payload-schema-driven
       // form modal so users don't have to write JSON by hand. For
       // workflows without a schema, the button opens the generic
@@ -75,12 +83,14 @@ export function createWorkflows({ wf }) {
         <header>
           <strong>${name}</strong>
           <code>${escapeHtml(w.participantId)}</code>
+          ${stateBadge}${revTag}
           <button type="button" class="ma-btn"
                   data-act="start-workflow"
                   data-id="${escapeHtml(w.id)}">开始</button>
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="open-workflow-runs"
                   data-id="${escapeHtml(w.id)}">${escapeHtml(t.workflowRunsBtn)}</button>
+          ${lifecycleButtons(w.id, state)}
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="remove-workflow"
                   data-id="${escapeHtml(w.id)}">${escapeHtml(t.workflowRemoveBtn)}</button>
@@ -109,6 +119,162 @@ export function createWorkflows({ wf }) {
       await refreshWorkflows()
     } catch (err) {
       alert(t.failedAlert(err.message || String(err)))
+    }
+  }
+
+  // --- lifecycle (Phase 15) ----------------------------------------------
+  //
+  // The card list only ever shows *live* workflows: `published` (the import
+  // default) and `deprecated` (still runnable, hidden from /me). The gated
+  // buttons cover the legal transitions out of each:
+  //   published  → 弃用 (deprecate)
+  //   deprecated → 重新发布 (publish, un-deprecate) + 归档 (archive)
+  //   both       → 修订历史 (revision list + rollback)
+
+  function lifecycleButtons(id, state) {
+    const idAttr = escapeHtml(id)
+    const btn = (act, label) =>
+      `<button type="button" class="ma-btn ma-btn-secondary"
+               data-act="${act}" data-id="${idAttr}">${escapeHtml(label)}</button>`
+    const revisions = btn('open-workflow-revisions', t.workflowRevisionsBtn)
+    if (state === 'deprecated') {
+      return btn('republish-workflow', t.workflowRepublishBtn) +
+        btn('archive-workflow', t.workflowArchiveBtn) + revisions
+    }
+    // published (the only other live state in the list)
+    return btn('deprecate-workflow', t.workflowDeprecateBtn) + revisions
+  }
+
+  // POST /api/admin/workflows/:id/{deprecate|publish|archive}. `publish`
+  // with no body re-publishes the head revision (un-deprecate). The card
+  // re-renders from the refreshed list afterward.
+  async function lifecycleAction(id, action) {
+    const ask = {
+      deprecate: t.confirmDeprecateWorkflow,
+      publish: t.confirmRepublishWorkflow,
+      archive: t.confirmArchiveWorkflow,
+    }[action]
+    if (ask && !confirm(ask(id))) return
+    try {
+      const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/${action}`, {
+        method: 'POST',
+      })
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        alert(t.failedAlert(body.error || `${r.status}`))
+        return
+      }
+      await refreshWorkflows()
+    } catch (err) {
+      alert(t.failedAlert(err.message || String(err)))
+    }
+  }
+
+  // --- revision history / rollback ---------------------------------------
+
+  let revWorkflowId = null
+  let revRows = []
+
+  async function openWorkflowRevisionsModal(id) {
+    revWorkflowId = id
+    revRows = []
+    if (dom.wfRevTarget) dom.wfRevTarget.textContent = id
+    if (dom.wfRevMsg) {
+      dom.wfRevMsg.textContent = ''
+      dom.wfRevMsg.classList.remove('ok', 'err')
+    }
+    if (dom.wfRevEmpty) dom.wfRevEmpty.hidden = true
+    if (dom.wfRevList) dom.wfRevList.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
+    if (dom.wfRevModal) dom.wfRevModal.hidden = false
+    try {
+      const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/revisions`)
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        if (dom.wfRevList) dom.wfRevList.innerHTML = ''
+        if (dom.wfRevMsg) {
+          dom.wfRevMsg.textContent = t.failedAlert(body.error || `${r.status}`)
+          dom.wfRevMsg.classList.add('err')
+        }
+        return
+      }
+      const body = await r.json()
+      revRows = body.revisions || []
+      // Current revision comes off the already-loaded card summary — no
+      // extra round-trip needed.
+      const w = wf.workflows.find((x) => x.id === id)
+      renderRevisions(w?.currentRevision ?? null)
+    } catch (err) {
+      if (dom.wfRevList) dom.wfRevList.innerHTML = ''
+      if (dom.wfRevMsg) {
+        dom.wfRevMsg.textContent = t.failedAlert(err.message || String(err))
+        dom.wfRevMsg.classList.add('err')
+      }
+    }
+  }
+
+  function closeWorkflowRevisionsModal() {
+    if (dom.wfRevModal) dom.wfRevModal.hidden = true
+  }
+
+  function renderRevisions(current) {
+    if (!dom.wfRevList) return
+    if (revRows.length === 0) {
+      dom.wfRevList.innerHTML = ''
+      if (dom.wfRevEmpty) dom.wfRevEmpty.hidden = false
+      return
+    }
+    if (dom.wfRevEmpty) dom.wfRevEmpty.hidden = true
+    // Newest revision first.
+    const rows = [...revRows].sort((a, b) => b.revision - a.revision)
+    dom.wfRevList.innerHTML = rows.map((rev) => {
+      const isCurrent = rev.revision === current
+      const when = rev.createdAt ? new Date(rev.createdAt).toLocaleString() : ''
+      const rolledFrom = rev.rolledBackFrom ? ` ← rev ${rev.rolledBackFrom}` : ''
+      const hash = rev.contentHash
+        ? `<code>${escapeHtml(String(rev.contentHash).slice(0, 10))}</code>`
+        : ''
+      const right = isCurrent
+        ? `<span class="wf-state wf-state-published">${escapeHtml(t.workflowRevCurrent)}</span>`
+        : `<button type="button" class="ma-btn ma-btn-secondary"
+                   data-act="rollback-revision" data-id="${escapeHtml(revWorkflowId)}"
+                   data-rev="${rev.revision}">${escapeHtml(t.workflowRevRollbackBtn)}</button>`
+      return `<div class="wf-rev-row${isCurrent ? ' wf-rev-current' : ''}">
+        <span class="wf-rev-tag">${escapeHtml(t.workflowRevTag(rev.revision))}</span>
+        <span>
+          <span class="wf-rev-origin">${escapeHtml(t.workflowRevOrigin(rev.origin || ''))}${escapeHtml(rolledFrom)}</span>
+          ${hash}
+          <small class="hint">${escapeHtml(when)}</small>
+        </span>
+        ${right}
+      </div>`
+    }).join('')
+  }
+
+  // POST /api/admin/workflows/:id/rollback { targetRevision }. Append-only:
+  // clones the target as a new head revision and re-points current to it.
+  async function rollbackTo(id, rev) {
+    if (!confirm(t.confirmRollback(id, rev))) return
+    try {
+      const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/rollback`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ targetRevision: rev }),
+      })
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        if (dom.wfRevMsg) {
+          dom.wfRevMsg.textContent = t.failedAlert(body.error || `${r.status}`)
+          dom.wfRevMsg.classList.add('err')
+        }
+        return
+      }
+      await refreshWorkflows() // card now shows the new currentRevision
+      await openWorkflowRevisionsModal(id) // re-render with the appended revision
+    } catch (err) {
+      if (dom.wfRevMsg) {
+        dom.wfRevMsg.textContent = t.failedAlert(err.message || String(err))
+        dom.wfRevMsg.classList.add('err')
+      }
     }
   }
 
@@ -295,6 +461,10 @@ export function createWorkflows({ wf }) {
     refreshWorkflows,
     renderWorkflows,
     removeWorkflow,
+    lifecycleAction,
+    openWorkflowRevisionsModal,
+    closeWorkflowRevisionsModal,
+    rollbackTo,
     openWorkflowImportModal,
     closeWorkflowImportModal,
     submitWorkflowImport,

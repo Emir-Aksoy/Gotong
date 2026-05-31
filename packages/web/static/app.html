@@ -454,6 +454,26 @@
         </div>
       </div>
 
+      <!-- Phase 15 — 修订历史 / 回滚。每行一个不可变修订；点"回滚到此"
+           把当前发布重新指到该修订内容(追加 append-only 新修订)。 -->
+      <div id="wf-rev-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card" role="dialog" aria-modal="true" style="max-width: 40rem;">
+          <header class="modal-head">
+            <h3>
+              <span data-i18n="workflowRevisionsTitle">修订历史</span>
+              <span id="wf-rev-target" class="lb-summary"></span>
+            </h3>
+            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+          </header>
+          <div class="dispatch-form">
+            <div id="wf-rev-list"></div>
+            <p id="wf-rev-empty" class="hint" hidden data-i18n="workflowRevisionsEmpty">还没有任何修订。</p>
+            <p id="wf-rev-msg" class="form-msg"></p>
+          </div>
+        </div>
+      </div>
+
       <!-- Phase 13 M3 — AI 助手对话框: 自然语言 → workflow YAML 草稿 -->
       <div id="wf-assist-modal" class="modal" hidden>
         <div class="modal-backdrop" data-act="close-modal"></div>

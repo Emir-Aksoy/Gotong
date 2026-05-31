@@ -1007,16 +1007,21 @@
         const name = w.name ? escapeHtml4(w.name) : escapeHtml4(w.id);
         const desc = w.description ? `<p class="hint">${escapeHtml4(w.description)}</p>` : "";
         const file = w.file ? `<small class="hint">${escapeHtml4(w.file)}</small>` : "";
+        const state = w.state || "published";
+        const stateBadge = `<span class="wf-state wf-state-${escapeHtml4(state)}">${escapeHtml4(t4.workflowStateLabel(state))}</span>`;
+        const revTag = w.currentRevision ? `<span class="wf-rev-tag">${escapeHtml4(t4.workflowRevTag(w.currentRevision))}</span>` : "";
         return `<article class="ma-card">
         <header>
           <strong>${name}</strong>
           <code>${escapeHtml4(w.participantId)}</code>
+          ${stateBadge}${revTag}
           <button type="button" class="ma-btn"
                   data-act="start-workflow"
                   data-id="${escapeHtml4(w.id)}">开始</button>
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="open-workflow-runs"
                   data-id="${escapeHtml4(w.id)}">${escapeHtml4(t4.workflowRunsBtn)}</button>
+          ${lifecycleButtons(w.id, state)}
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="remove-workflow"
                   data-id="${escapeHtml4(w.id)}">${escapeHtml4(t4.workflowRemoveBtn)}</button>
@@ -1044,6 +1049,129 @@
         await refreshWorkflows();
       } catch (err) {
         alert(t4.failedAlert(err.message || String(err)));
+      }
+    }
+    function lifecycleButtons(id, state) {
+      const idAttr = escapeHtml4(id);
+      const btn = (act, label) => `<button type="button" class="ma-btn ma-btn-secondary"
+               data-act="${act}" data-id="${idAttr}">${escapeHtml4(label)}</button>`;
+      const revisions = btn("open-workflow-revisions", t4.workflowRevisionsBtn);
+      if (state === "deprecated") {
+        return btn("republish-workflow", t4.workflowRepublishBtn) + btn("archive-workflow", t4.workflowArchiveBtn) + revisions;
+      }
+      return btn("deprecate-workflow", t4.workflowDeprecateBtn) + revisions;
+    }
+    async function lifecycleAction(id, action) {
+      const ask = {
+        deprecate: t4.confirmDeprecateWorkflow,
+        publish: t4.confirmRepublishWorkflow,
+        archive: t4.confirmArchiveWorkflow
+      }[action];
+      if (ask && !confirm(ask(id))) return;
+      try {
+        const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/${action}`, {
+          method: "POST"
+        });
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          alert(t4.failedAlert(body.error || `${r.status}`));
+          return;
+        }
+        await refreshWorkflows();
+      } catch (err) {
+        alert(t4.failedAlert(err.message || String(err)));
+      }
+    }
+    let revWorkflowId = null;
+    let revRows = [];
+    async function openWorkflowRevisionsModal(id) {
+      revWorkflowId = id;
+      revRows = [];
+      if (dom.wfRevTarget) dom.wfRevTarget.textContent = id;
+      if (dom.wfRevMsg) {
+        dom.wfRevMsg.textContent = "";
+        dom.wfRevMsg.classList.remove("ok", "err");
+      }
+      if (dom.wfRevEmpty) dom.wfRevEmpty.hidden = true;
+      if (dom.wfRevList) dom.wfRevList.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      if (dom.wfRevModal) dom.wfRevModal.hidden = false;
+      try {
+        const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/revisions`);
+        if (!r.ok) {
+          const body2 = await r.json().catch(() => ({}));
+          if (dom.wfRevList) dom.wfRevList.innerHTML = "";
+          if (dom.wfRevMsg) {
+            dom.wfRevMsg.textContent = t4.failedAlert(body2.error || `${r.status}`);
+            dom.wfRevMsg.classList.add("err");
+          }
+          return;
+        }
+        const body = await r.json();
+        revRows = body.revisions || [];
+        const w = wf.workflows.find((x) => x.id === id);
+        renderRevisions(w?.currentRevision ?? null);
+      } catch (err) {
+        if (dom.wfRevList) dom.wfRevList.innerHTML = "";
+        if (dom.wfRevMsg) {
+          dom.wfRevMsg.textContent = t4.failedAlert(err.message || String(err));
+          dom.wfRevMsg.classList.add("err");
+        }
+      }
+    }
+    function closeWorkflowRevisionsModal() {
+      if (dom.wfRevModal) dom.wfRevModal.hidden = true;
+    }
+    function renderRevisions(current) {
+      if (!dom.wfRevList) return;
+      if (revRows.length === 0) {
+        dom.wfRevList.innerHTML = "";
+        if (dom.wfRevEmpty) dom.wfRevEmpty.hidden = false;
+        return;
+      }
+      if (dom.wfRevEmpty) dom.wfRevEmpty.hidden = true;
+      const rows = [...revRows].sort((a, b) => b.revision - a.revision);
+      dom.wfRevList.innerHTML = rows.map((rev) => {
+        const isCurrent = rev.revision === current;
+        const when = rev.createdAt ? new Date(rev.createdAt).toLocaleString() : "";
+        const rolledFrom = rev.rolledBackFrom ? ` ← rev ${rev.rolledBackFrom}` : "";
+        const hash = rev.contentHash ? `<code>${escapeHtml4(String(rev.contentHash).slice(0, 10))}</code>` : "";
+        const right = isCurrent ? `<span class="wf-state wf-state-published">${escapeHtml4(t4.workflowRevCurrent)}</span>` : `<button type="button" class="ma-btn ma-btn-secondary"
+                   data-act="rollback-revision" data-id="${escapeHtml4(revWorkflowId)}"
+                   data-rev="${rev.revision}">${escapeHtml4(t4.workflowRevRollbackBtn)}</button>`;
+        return `<div class="wf-rev-row${isCurrent ? " wf-rev-current" : ""}">
+        <span class="wf-rev-tag">${escapeHtml4(t4.workflowRevTag(rev.revision))}</span>
+        <span>
+          <span class="wf-rev-origin">${escapeHtml4(t4.workflowRevOrigin(rev.origin || ""))}${escapeHtml4(rolledFrom)}</span>
+          ${hash}
+          <small class="hint">${escapeHtml4(when)}</small>
+        </span>
+        ${right}
+      </div>`;
+      }).join("");
+    }
+    async function rollbackTo(id, rev) {
+      if (!confirm(t4.confirmRollback(id, rev))) return;
+      try {
+        const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/rollback`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ targetRevision: rev })
+        });
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          if (dom.wfRevMsg) {
+            dom.wfRevMsg.textContent = t4.failedAlert(body.error || `${r.status}`);
+            dom.wfRevMsg.classList.add("err");
+          }
+          return;
+        }
+        await refreshWorkflows();
+        await openWorkflowRevisionsModal(id);
+      } catch (err) {
+        if (dom.wfRevMsg) {
+          dom.wfRevMsg.textContent = t4.failedAlert(err.message || String(err));
+          dom.wfRevMsg.classList.add("err");
+        }
       }
     }
     function openWorkflowImportModal() {
@@ -1199,6 +1327,10 @@
       refreshWorkflows,
       renderWorkflows,
       removeWorkflow,
+      lifecycleAction,
+      openWorkflowRevisionsModal,
+      closeWorkflowRevisionsModal,
+      rollbackTo,
       openWorkflowImportModal,
       closeWorkflowImportModal,
       submitWorkflowImport,
@@ -1442,6 +1574,12 @@
         wfRunsEmpty: $("wf-runs-empty"),
         wfRunDetail: $("wf-run-detail"),
         wfRunsMsg: $("wf-runs-msg"),
+        // Revision history / rollback modal (Phase 15)
+        wfRevModal: $("wf-rev-modal"),
+        wfRevTarget: $("wf-rev-target"),
+        wfRevList: $("wf-rev-list"),
+        wfRevEmpty: $("wf-rev-empty"),
+        wfRevMsg: $("wf-rev-msg"),
         // Room health banner (v2.1+)
         hToday: $("health-today-tasks"),
         hOnline: $("health-online"),
@@ -2715,6 +2853,7 @@
           if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal();
           if (dom.wfAssistModal && !dom.wfAssistModal.hidden) closeWorkflowAssistModal();
           if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal();
+          if (dom.wfRevModal && !dom.wfRevModal.hidden) workflows.closeWorkflowRevisionsModal();
           if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal();
           if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart();
           if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport();
@@ -2748,6 +2887,17 @@
         } else if (act === "open-workflow-run") {
           const runId = target.dataset.runId;
           if (runId) workflows.openWorkflowRunDetail(runId);
+        } else if (act === "deprecate-workflow") {
+          workflows.lifecycleAction(id, "deprecate");
+        } else if (act === "republish-workflow") {
+          workflows.lifecycleAction(id, "publish");
+        } else if (act === "archive-workflow") {
+          workflows.lifecycleAction(id, "archive");
+        } else if (act === "open-workflow-revisions") {
+          workflows.openWorkflowRevisionsModal(id);
+        } else if (act === "rollback-revision") {
+          const rev = Number(target.dataset.rev);
+          if (Number.isInteger(rev)) workflows.rollbackTo(id, rev);
         } else if (act === "start-workflow") {
           openWorkflowStart(id);
         } else if (act === "view-growth-report") {
@@ -2764,6 +2914,7 @@
         if (!dom.maKeysModal.hidden) managedAgents.closeKeysModal();
         if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal();
         if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal();
+        if (dom.wfRevModal && !dom.wfRevModal.hidden) workflows.closeWorkflowRevisionsModal();
         if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal();
         if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart();
         if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport();

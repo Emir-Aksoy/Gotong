@@ -263,6 +263,12 @@ import { createWorkflows } from './workflows.js'
       wfRunsEmpty: $('wf-runs-empty'),
       wfRunDetail: $('wf-run-detail'),
       wfRunsMsg: $('wf-runs-msg'),
+      // Revision history / rollback modal (Phase 15)
+      wfRevModal: $('wf-rev-modal'),
+      wfRevTarget: $('wf-rev-target'),
+      wfRevList: $('wf-rev-list'),
+      wfRevEmpty: $('wf-rev-empty'),
+      wfRevMsg: $('wf-rev-msg'),
       // Room health banner (v2.1+)
       hToday: $('health-today-tasks'),
       hOnline: $('health-online'),
@@ -2061,6 +2067,7 @@ import { createWorkflows } from './workflows.js'
         if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal()
         if (dom.wfAssistModal && !dom.wfAssistModal.hidden) closeWorkflowAssistModal()
         if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal()
+        if (dom.wfRevModal && !dom.wfRevModal.hidden) workflows.closeWorkflowRevisionsModal()
         if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal()
         if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart()
         if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport()
@@ -2096,6 +2103,17 @@ import { createWorkflows } from './workflows.js'
       } else if (act === 'open-workflow-run') {
         const runId = target.dataset.runId
         if (runId) workflows.openWorkflowRunDetail(runId)
+      } else if (act === 'deprecate-workflow') {
+        workflows.lifecycleAction(id, 'deprecate')
+      } else if (act === 'republish-workflow') {
+        workflows.lifecycleAction(id, 'publish')
+      } else if (act === 'archive-workflow') {
+        workflows.lifecycleAction(id, 'archive')
+      } else if (act === 'open-workflow-revisions') {
+        workflows.openWorkflowRevisionsModal(id)
+      } else if (act === 'rollback-revision') {
+        const rev = Number(target.dataset.rev)
+        if (Number.isInteger(rev)) workflows.rollbackTo(id, rev)
       } else if (act === 'start-workflow') {
         openWorkflowStart(id)
       } else if (act === 'view-growth-report') {
@@ -2113,6 +2131,7 @@ import { createWorkflows } from './workflows.js'
       if (!dom.maKeysModal.hidden) managedAgents.closeKeysModal()
       if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal()
       if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal()
+      if (dom.wfRevModal && !dom.wfRevModal.hidden) workflows.closeWorkflowRevisionsModal()
       if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal()
       if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart()
       if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport()

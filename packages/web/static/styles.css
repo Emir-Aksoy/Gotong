@@ -1629,6 +1629,39 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .wf-run-failed { background: #f5d3d3; color: #8b2a2a; }
 .wf-run-skipped { background: #e9e9e9; color: #888; }
 .wf-run-cancelled { background: #e9e9e9; color: #888; }
+.wf-run-suspended { background: #e2e0fb; color: #50469a; }
+
+/* Phase 15 — workflow lifecycle state badge (on cards) + revision rows.
+   Same chip shape as .wf-run-status; one colour per lifecycle state. */
+.wf-state {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+  background: #eee;
+  color: #555;
+  white-space: nowrap;
+}
+.wf-state-published { background: #d6ecdb; color: #1a6a3a; }
+.wf-state-deprecated { background: #fde9cf; color: #9a5b13; }
+.wf-state-draft { background: #e3e8ef; color: #51637a; }
+.wf-state-review { background: #e2e0fb; color: #50469a; }
+.wf-state-archived { background: #e9e9e9; color: #888; }
+.wf-rev-tag { font-size: 0.66rem; color: #888; white-space: nowrap; }
+
+.wf-rev-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.45rem 0.5rem;
+  border-bottom: 1px solid #f0f0f0;
+}
+.wf-rev-row code { font-size: 0.7rem; color: #888; }
+.wf-rev-row .wf-rev-origin { font-size: 0.66rem; color: #777; }
+.wf-rev-current { background: #eef6f0; border-radius: 4px; }
 
 .wf-run-detail {
   border: 1px solid #eee;
