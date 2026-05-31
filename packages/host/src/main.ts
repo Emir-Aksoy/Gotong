@@ -84,6 +84,7 @@ import { PeerRegistry } from './peer-registry.js'
 import { serveWeb, type WebServerOptions } from '@aipehub/web'
 
 import { LocalAgentPool } from './local-agent-pool.js'
+import { loadPricingTable } from './pricing.js'
 import { McpProxyHost, fetchPeerSharedMcp } from './mcp-proxy.js'
 import { GrowthReportsAdmin } from './services/growth-reports-admin.js'
 import {
@@ -746,11 +747,18 @@ async function main(): Promise<void> {
   // get their handles attached at spawn time (PR-8). When services
   // failed to bootstrap, agents without `uses:` still spawn normally;
   // agents with `uses:` fail loudly with a clear log line.
+  // Phase 17 — effective model price table for the usage/cost ledger.
+  // Defaults built-in; an operator drops `<AIPE_SPACE>/pricing.json` to
+  // override per-model. A malformed file throws here (fail loud at boot
+  // rather than silently bill at the wrong rate).
+  const pricingTable = loadPricingTable(join(SPACE_DIR, 'pricing.json'))
+
   const localAgents = new LocalAgentPool({
     hub,
     space,
     services,
     orgApiPool,
+    pricingTable,
     // Phase 6 #2 — when present, LocalAgentPool wires an onAuthFailure
     // hook for LLM agents whose key came from the vault. A 401 from
     // the provider revokes that vault entry + writes audit + flushes

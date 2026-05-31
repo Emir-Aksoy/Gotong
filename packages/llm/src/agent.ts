@@ -166,6 +166,34 @@ export interface LlmAgentOptions extends AgentOptions {
    * stream and returns an aggregated `LlmResponse` exactly as before.
    */
   onStreamChunk?: (chunk: LlmStreamChunk, task: Task) => void | Promise<void>
+  /**
+   * Phase 17 (Sprint 4) — usage sink. Fired best-effort once per
+   * provider response that carries token usage — so EVERY round of the
+   * tool-use loop, not just the first. The host wires this to compute
+   * cost (via the model price table) and append a `usage_ledger` row,
+   * attributing the spend from `task.origin` / `task.ancestry`.
+   *
+   * Best-effort exactly like {@link onStreamChunk}: a throw is caught +
+   * logged and never aborts the task. Billing telemetry must not be able
+   * to fail an LLM call.
+   *
+   * Absent → no ledger recording (the SDK / test default).
+   */
+  usageSink?: (
+    task: Task,
+    usage: LlmUsage,
+    meta: LlmUsageSinkMeta,
+  ) => void | Promise<void>
+}
+
+/** Context handed to a {@link LlmAgentOptions.usageSink} alongside usage. */
+export interface LlmUsageSinkMeta {
+  /** Effective model id (per-request override ?? agent default). */
+  model: string
+  /** Provider name, e.g. 'anthropic'. */
+  provider: string
+  /** Stop reason of this particular response. */
+  stopReason: LlmStopReason
 }
 
 /**
@@ -252,6 +280,16 @@ export class LlmAgent extends AgentParticipant {
     chunk: LlmStreamChunk,
     task: Task,
   ) => void | Promise<void>
+  /**
+   * Phase 17 — see LlmAgentOptions.usageSink doc. Captured on spawn;
+   * called best-effort from streamWithAuthHook after the stream closes,
+   * once per response that reported usage.
+   */
+  protected readonly usageSink?: (
+    task: Task,
+    usage: LlmUsage,
+    meta: LlmUsageSinkMeta,
+  ) => void | Promise<void>
 
   constructor(opts: LlmAgentOptions) {
     super({ id: opts.id, capabilities: opts.capabilities })
@@ -268,6 +306,7 @@ export class LlmAgent extends AgentParticipant {
     this.preCallHook = opts.preCallHook
     this.onAuthFailure = opts.onAuthFailure
     this.onStreamChunk = opts.onStreamChunk
+    this.usageSink = opts.usageSink
   }
 
   /**
@@ -373,7 +412,25 @@ export class LlmAgent extends AgentParticipant {
     if (errorAppend) text = text ? `${text}\n\n${errorAppend}` : errorAppend
     const out: LlmResponse = { text, stopReason }
     if (toolUses.length > 0) out.toolUses = toolUses
-    if (usage) out.usage = usage
+    if (usage) {
+      out.usage = usage
+      // Phase 17 — usage sink, best-effort. Fired only when the provider
+      // reported usage; a throw here must never mask a good response (so
+      // a ledger-write fault can't fail the LLM call). Mirrors the
+      // onStreamChunk error discipline.
+      if (this.usageSink) {
+        try {
+          await this.usageSink(task, usage, {
+            model: req.model ?? this.defaults.model ?? 'unknown',
+            provider: this.provider.name,
+            stopReason,
+          })
+        } catch (sinkErr) {
+          // eslint-disable-next-line no-console
+          console.error('[llm-agent] usageSink hook threw', sinkErr)
+        }
+      }
+    }
     return out
   }
 

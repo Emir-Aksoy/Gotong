@@ -42,6 +42,7 @@ export {
   type LlmAgentOptions,
   type LlmTaskOutput,
   type LlmTaskPayload,
+  type LlmUsageSinkMeta,
 } from './agent.js'
 export {
   MockLlmProvider,

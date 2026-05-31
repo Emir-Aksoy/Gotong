@@ -19,8 +19,15 @@ import {
   MockLlmProvider,
   type LlmAgentToolset,
   type LlmProvider,
+  type LlmUsage,
+  type LlmUsageSinkMeta,
 } from '@aipehub/llm'
 import { PersonalGrowthAgent } from './agents/personal-growth-agent.js'
+import {
+  DEFAULT_PRICING,
+  estimateCostMicros,
+  type PricingTable,
+} from './pricing.js'
 import { AnthropicProvider } from '@aipehub/llm-anthropic'
 import { OpenAIProvider } from '@aipehub/llm-openai'
 import { McpToolset, type McpServerConfig } from '@aipehub/mcp-client'
@@ -51,6 +58,34 @@ import {
 } from '@aipehub/identity'
 
 const log = createLogger('local-agents')
+
+/**
+ * Phase 17 — derive usage-ledger attribution from a task. `origin`
+ * carries the acting user + org (stamped by /me dispatch and re-stamped
+ * by the workflow runner; absent for admin/system-triggered tasks → both
+ * null). The closest `workflow:<id>` ancestor (scanning ancestry from the
+ * end) names the workflow that drove this LLM call, if any.
+ */
+function deriveLedgerAttribution(task: Task): {
+  orgId: string | null
+  userId: string | null
+  workflowId: string | null
+} {
+  const userId = task.origin?.userId ?? null
+  const orgId = task.origin?.orgId ?? null
+  let workflowId: string | null = null
+  const anc = task.ancestry
+  if (Array.isArray(anc)) {
+    for (let i = anc.length - 1; i >= 0; i--) {
+      const by = anc[i]?.by
+      if (typeof by === 'string' && by.startsWith('workflow:')) {
+        workflowId = by.slice('workflow:'.length)
+        break
+      }
+    }
+  }
+  return { orgId, userId, workflowId }
+}
 
 /**
  * Phase 6 #2 — discriminates which tier of the priority chain
@@ -192,6 +227,13 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   private readonly identity?: IdentityStore
   /** #2-M3 — peer hub id → live HubLink, for cross-hub MCP refs. */
   private readonly peerLinkResolver?: (peerId: string) => HubLink | null
+  /**
+   * Phase 17 — effective model price table. Used by the usage sink to
+   * resolve `cost_micros` before appending a ledger row. Defaults to the
+   * built-in {@link DEFAULT_PRICING}; the host loads any
+   * `<AIPE_SPACE>/pricing.json` override and passes it in.
+   */
+  private readonly pricingTable: PricingTable
 
   constructor(opts: {
     hub: Hub
@@ -213,6 +255,11 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
      * (empty tool list) instead of erroring the spawn.
      */
     peerLinkResolver?: (peerId: string) => HubLink | null
+    /**
+     * Phase 17 — model price table for the usage/cost ledger. Omit → the
+     * built-in defaults. The host wires `loadPricingTable(...)`.
+     */
+    pricingTable?: PricingTable
   }) {
     this.hub = opts.hub
     this.space = opts.space
@@ -220,6 +267,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     this.orgApiPool = opts.orgApiPool
     this.identity = opts.identity
     this.peerLinkResolver = opts.peerLinkResolver
+    this.pricingTable = opts.pricingTable ?? DEFAULT_PRICING
     // Built once: the gate is a stateless closure over `identity`,
     // shared by every managed LlmAgent. Settings (metric/period) are
     // hardcoded here in B2.2.2; C2 will surface them in admin UI.
@@ -672,6 +720,52 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       }
     }
 
+    // Phase 17 — usage/cost ledger sink. Fires once per provider response
+    // that carried usage (so every tool-use round too). Records a
+    // `usage_ledger` row attributed from `task.origin` (user/org) +
+    // `task.ancestry` (the workflow ancestor). Unlike the quota gate we
+    // do NOT skip the mock provider: the ledger is observability, and a
+    // mock call lands as an `unpriced` $0 row (its model isn't in the
+    // price table) — harmless, and it keeps the audit trail complete.
+    // Self-contained try/catch so a DB fault is logged here and never
+    // bubbles into the (already best-effort) agent sink wrapper.
+    const identityForLedger = this.identity
+    const pricingTable = this.pricingTable
+    const usageSink = identityForLedger
+      ? (task: Task, usage: LlmUsage, meta: LlmUsageSinkMeta): void => {
+          try {
+            const attr = deriveLedgerAttribution(task)
+            const { costMicros, unpriced } = estimateCostMicros(
+              usage,
+              meta.model,
+              pricingTable,
+            )
+            identityForLedger.appendLedger({
+              orgId: attr.orgId,
+              userId: attr.userId,
+              agentId: agentIdRef,
+              workflowId: attr.workflowId,
+              taskId: task.id,
+              model: meta.model,
+              provider: meta.provider,
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              cacheCreationTokens: usage.cacheCreationTokens ?? 0,
+              cacheReadTokens: usage.cacheReadTokens ?? 0,
+              costMicros,
+              unpriced,
+              meta: { stopReason: meta.stopReason },
+            })
+          } catch (err) {
+            log.warn('usage ledger append failed', {
+              agentId: agentIdRef,
+              taskId: task.id,
+              err: err instanceof Error ? err.message : String(err),
+            })
+          }
+        }
+      : undefined
+
     // Pick the agent class by `managed.kind`. v2.4 added
     // `'personal-growth'` as the first non-base kind; the switch is
     // structured so a future `'custom'` kind that names a package
@@ -688,6 +782,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       ...(preCallHook ? { preCallHook } : {}),
       ...(onAuthFailure ? { onAuthFailure } : {}),
       onStreamChunk,
+      ...(usageSink ? { usageSink } : {}),
     }
     let agent: LlmAgent
     switch (record.managed.kind) {
