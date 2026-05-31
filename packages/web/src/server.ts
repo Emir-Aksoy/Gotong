@@ -530,6 +530,13 @@ export interface WorkflowSummary {
    * `unknown` here to avoid a runtime dep on the workflow package.
    */
   payloadSchema?: unknown
+  /**
+   * Phase 14 — pass-through of the workflow's `surface.me` block when
+   * present. Structurally mirrors `MeSurfaceSpec` in `@aipehub/workflow`
+   * (kept `unknown` to avoid a runtime dep). `me-routes.ts` reads it to
+   * derive the member-facing `/me` catalog.
+   */
+  surfaceMe?: unknown
   stepCount: number
   /**
    * Absolute path of the YAML file backing this workflow on disk, or
@@ -1286,6 +1293,11 @@ async function handle(
         // me-reports:<userId>) don't collide with the IP-keyed login
         // limiter under the same instance.
         loginLimiter: ctx.adminLoginLimiter,
+        // Phase 14 — the member-facing /me catalog is DERIVED from the
+        // live workflow list (only those declaring surface.me.enabled),
+        // not a hardcoded allowlist. Undefined when the host wired no
+        // workflow surface; /me workflow routes then degrade to empty.
+        workflows: ctx.workflows,
       },
       req,
       res,

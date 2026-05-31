@@ -106,6 +106,28 @@ function parseCaseIdFromReportPath(path: string): string | null {
 // Dispatcher
 // ---------------------------------------------------------------------------
 
+/**
+ * Minimal structural projection of the host's workflow surface that /me
+ * needs — just enough to derive the member-facing catalog. Kept narrow
+ * (not the full `WorkflowSurface` from server.ts) so this module reads no
+ * more than it depends on; the host's real surface satisfies it
+ * structurally.
+ */
+export interface MeWorkflowSummaryLike {
+  id: string
+  name?: string
+  description?: string
+  triggerCapability: string
+  /** `surface.me` block (Phase 14) — structurally `MeSurfaceSpec`. */
+  surfaceMe?: unknown
+  /** Fallback dispatch-form fields when `surface.me.inputSchema` is absent. */
+  payloadSchema?: unknown
+}
+
+export interface MeWorkflowSurface {
+  list(): Promise<MeWorkflowSummaryLike[]>
+}
+
 export interface HandleMeRouteCtx {
   identity: IdentitySurface
   hub: Hub
@@ -124,6 +146,13 @@ export interface HandleMeRouteCtx {
    * Required. The host wires its existing `adminLoginLimiter`.
    */
   loginLimiter: LoginRateLimiterLike
+  /**
+   * Phase 14 — live workflow list, used to DERIVE the member-facing
+   * catalog (only workflows declaring `surface.me.enabled`) instead of a
+   * hardcoded allowlist. Undefined when the host wired no workflow
+   * surface; the /me workflow routes then degrade to an empty catalog.
+   */
+  workflows: MeWorkflowSurface | undefined
 }
 
 export async function handleMeRoute(
