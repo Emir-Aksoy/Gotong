@@ -31,6 +31,25 @@ export type {
 
 export { parseWorkflow } from './schema.js'
 
+// Phase 15 — workflow lifecycle + revision model.
+export {
+  transition,
+  isLiveState,
+  legalActions,
+  WorkflowLifecycleError,
+  WorkflowRevisionError,
+} from './lifecycle.js'
+export type {
+  LifecycleState,
+  LifecycleAction,
+  RevisionOrigin,
+  RevisionMeta,
+  WorkflowRevision,
+  TransitionLog,
+  LifecycleRecord,
+  TransitionInput,
+} from './lifecycle.js'
+
 export { resolveRefs, lookupRef } from './resolver.js'
 export type { ResolutionContext } from './resolver.js'
 

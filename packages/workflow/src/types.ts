@@ -298,6 +298,16 @@ export interface RunState {
   runId: string
   /** The workflow definition id (what was triggered). */
   workflowId: string
+  /**
+   * Phase 15 — the immutable revision number this run is bound to (stamped at
+   * run start from the workflow's current published revision). Resume resolves
+   * the definition by THIS number, not the live/current one, so re-publishing
+   * a new revision never drifts an in-flight run onto new step logic. Optional
+   * for back-compat with pre-Phase-15 run files; the runner treats an absent
+   * value as `currentRevision ?? 1` (which equals today's behavior, since
+   * boot-adoption makes every existing workflow rev 1).
+   */
+  definitionRevision?: number
   /** The Hub task id that triggered this run (so admins can correlate). */
   triggeredByTaskId: string
   /**
