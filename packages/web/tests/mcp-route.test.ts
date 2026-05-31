@@ -25,6 +25,8 @@ import { Hub, Space, type HubMcpServerRecord, type McpServerSpec } from '@aipehu
 import {
   serveWeb,
   type McpRegistrySurface,
+  type McpFederationSurface,
+  type PeerSharedMcp,
   type WebServerHandle,
 } from '../src/server.js'
 
@@ -38,10 +40,13 @@ interface Boot {
   uninstallCalls: string[]
   servers: HubMcpServerRecord[]
   uninstallResult: boolean
+  peerShared: PeerSharedMcp[]
+  federationThrows: boolean
 }
 
-async function boot(opts: { withRegistry?: boolean } = {}): Promise<Boot> {
+async function boot(opts: { withRegistry?: boolean; withFederation?: boolean } = {}): Promise<Boot> {
   const withRegistry = opts.withRegistry ?? true
+  const withFederation = opts.withFederation ?? true
   const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-mcp-'))
   const init = await Space.init(tmp, { name: 'mcp-route-test' })
   const hub = new Hub({ space: init.space })
@@ -57,6 +62,8 @@ async function boot(opts: { withRegistry?: boolean } = {}): Promise<Boot> {
     uninstallCalls: [],
     servers: [],
     uninstallResult: true,
+    peerShared: [],
+    federationThrows: false,
   }
 
   const stub: McpRegistrySurface = {
@@ -83,10 +90,18 @@ async function boot(opts: { withRegistry?: boolean } = {}): Promise<Boot> {
     },
   }
 
+  const fedStub: McpFederationSurface = {
+    async listPeerShared() {
+      if (out.federationThrows) throw new Error('boom')
+      return out.peerShared
+    },
+  }
+
   out.server = await serveWeb(hub, {
     host: '127.0.0.1',
     port: 0,
     ...(withRegistry ? { mcpRegistry: stub } : {}),
+    ...(withFederation ? { mcpFederation: fedStub } : {}),
   })
   out.baseUrl = out.server.url
   return out
@@ -239,5 +254,54 @@ describe('/api/admin/mcp-servers (#2-M2)', () => {
       headers: auth(b),
     })
     expect(r.status).toBe(405)
+  })
+})
+
+describe('/api/admin/mcp-shared (#2-M3.4b)', () => {
+  let b: Boot
+  afterEach(async () => { await teardown(b) })
+
+  it('503 when the federation surface is not wired (peers off)', async () => {
+    b = await boot({ withFederation: false })
+    const r = await fetch(`${b.baseUrl}/api/admin/mcp-shared`, { headers: auth(b) })
+    expect(r.status).toBe(503)
+  })
+
+  it('401 when unauthenticated', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}/api/admin/mcp-shared`)
+    expect(r.status).toBe(401)
+  })
+
+  it('GET returns the peer federation rows', async () => {
+    b = await boot()
+    b.peerShared = [
+      {
+        peer: 'hub_a1b2c3d4',
+        label: 'Partner A',
+        online: true,
+        servers: [{ name: 'fs' }, { name: 'docs', description: 'docs search' }],
+      },
+      { peer: 'hub_offline0', label: null, online: false, servers: [] },
+    ]
+    const r = await fetch(`${b.baseUrl}/api/admin/mcp-shared`, { headers: auth(b) })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.peers).toHaveLength(2)
+    expect(j.peers[0].servers.map((s: { name: string }) => s.name)).toEqual(['fs', 'docs'])
+    expect(j.peers[1].online).toBe(false)
+  })
+
+  it('405 on a non-GET method', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}/api/admin/mcp-shared`, { method: 'POST', headers: auth(b) })
+    expect(r.status).toBe(405)
+  })
+
+  it('500 when the surface throws', async () => {
+    b = await boot()
+    b.federationThrows = true
+    const r = await fetch(`${b.baseUrl}/api/admin/mcp-shared`, { headers: auth(b) })
+    expect(r.status).toBe(500)
   })
 })

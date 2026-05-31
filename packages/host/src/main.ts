@@ -81,10 +81,10 @@ import { buildAgentCard } from './agent-card.js'
 const log = createLogger('host')
 import { serveWebSocket } from '@aipehub/transport-ws'
 import { PeerRegistry } from './peer-registry.js'
-import { serveWeb } from '@aipehub/web'
+import { serveWeb, type WebServerOptions } from '@aipehub/web'
 
 import { LocalAgentPool } from './local-agent-pool.js'
-import { McpProxyHost } from './mcp-proxy.js'
+import { McpProxyHost, fetchPeerSharedMcp } from './mcp-proxy.js'
 import { GrowthReportsAdmin } from './services/growth-reports-admin.js'
 import {
   BINARY_SAFE_PLUGINS,
@@ -854,6 +854,11 @@ async function main(): Promise<void> {
   // link. Built only when peers are enabled (it's wired as the registry's
   // rpcResponder). `close()` runs on shutdown.
   let mcpProxy: McpProxyHost | undefined
+  // #2-M3.4b — consumer-side discovery surface for the admin UI: aggregate
+  // each connected peer's shared servers (via the mcp.listShared rpc) so an
+  // agent's `useMcpServers` can be filled by browsing, not typing. Wired
+  // only when peers are on (same block as the registry / proxy).
+  let mcpFederation: WebServerOptions['mcpFederation']
   if (identity && process.env.AIPE_PEERS_DISABLED !== '1') {
     const spaceMeta = await space.meta()
     const selfHubId = spaceMeta.hubId ?? 'self'
@@ -893,6 +898,36 @@ async function main(): Promise<void> {
     // target isn't local + whose task.origin points at a connected peer
     // will be forwarded over the live HubLink.
     peerRegistryRef = peerRegistry
+    // Bind the federation discovery surface to this registry. Each call
+    // asks every connected peer what it shares; an offline peer or a
+    // listShared that throws (e.g. an older peer without the method)
+    // degrades to `online:false` / empty rather than failing the whole
+    // list — the UI shows the peer with no servers.
+    const fedRegistry = peerRegistry
+    mcpFederation = {
+      listPeerShared: async () => {
+        const rows = fedRegistry.status()
+        const out = await Promise.all(
+          rows.map(async (row) => {
+            const link = row.connected ? fedRegistry.linkForHub(row.peerId) : null
+            if (!link) {
+              return { peer: row.peerId, label: row.label, online: false, servers: [] }
+            }
+            try {
+              const servers = await fetchPeerSharedMcp(link)
+              return { peer: row.peerId, label: row.label, online: true, servers }
+            } catch (err) {
+              log.warn('mcp federation: listShared failed', {
+                peer: row.peerId,
+                err: err instanceof Error ? err.message : String(err),
+              })
+              return { peer: row.peerId, label: row.label, online: true, servers: [] }
+            }
+          }),
+        )
+        return out
+      },
+    }
     // Phase 6 #4 — per-peer resolver is auto-wired by PeerRegistry
     // when identity is present (it is here — we only enter this block
     // when identity is wired). The shared token remains as fallback
@@ -965,6 +1000,7 @@ async function main(): Promise<void> {
     cookieSecure: config.cookieSecure,
     lifecycle: localAgents,
     mcpRegistry,
+    mcpFederation,
     workflows: workflowController,
     // Phase 13 M3 — null when no API key / disabled. Web responds 503
     // on /api/admin/workflows/assist in that case so the UI can hide
