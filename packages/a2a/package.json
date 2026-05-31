@@ -1,0 +1,30 @@
+{
+  "name": "@aipehub/a2a",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AipeHub A2A (Agent2Agent) interop — blocking message/send wire types + a tiny injectable client, shared by the inbound A2A server (host) and the outbound A2aRemoteParticipant.",
+  "license": "MIT",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}
