@@ -289,7 +289,7 @@
   async function renderHome() {
     if (!SIGNED_IN) return
     await renderWhoami()
-    await loadAllowedWorkflows()
+    await loadMyWorkflows()
     await loadMyReports()
     document.getElementById('me-dispatch-btn')?.addEventListener('click', submitDispatch)
     document.getElementById('me-refresh-reports-btn')?.addEventListener('click', loadMyReports)
@@ -314,27 +314,33 @@
     }
   }
 
-  let __allowedWorkflows = []
-  async function loadAllowedWorkflows() {
+  // Member-facing workflow catalog (Phase 14). DERIVED server-side from
+  // workflows declaring surface.me.enabled for this caller's role — the
+  // generic replacement for the old hardcoded allowlist. Each entry is
+  // the PUBLIC projection: { id, label, description?, inputSchema } —
+  // capability / userScopeField are deliberately NOT exposed.
+  let __myWorkflows = []
+  async function loadMyWorkflows() {
     const sel = document.getElementById('me-wf-select')
     const fields = document.getElementById('me-wf-form-fields')
     if (!sel || !fields) return
     sel.innerHTML = '<option>加载中…</option>'
     try {
-      const r = await fetch('/api/me/allowed-workflows')
+      const r = await fetch('/api/me/workflows')
       if (!r.ok) {
-        sel.innerHTML = '<option>无可用工作流</option>'
+        sel.innerHTML = '<option value="">无可用工作流</option>'
         fields.innerHTML = ''
         return
       }
       const j = await r.json()
-      __allowedWorkflows = Array.isArray(j?.workflows) ? j.workflows : []
-      if (__allowedWorkflows.length === 0) {
-        sel.innerHTML = '<option>暂无 owner 分配的工作流</option>'
-        fields.innerHTML = ''
+      __myWorkflows = Array.isArray(j?.workflows) ? j.workflows : []
+      if (__myWorkflows.length === 0) {
+        sel.innerHTML = '<option value="">暂无可用工作流</option>'
+        fields.innerHTML =
+          '<p class="me-meta">还没有面向成员的工作流 — 管理员可在工作流定义里开启 <code>surface.me</code>。</p>'
         return
       }
-      sel.innerHTML = __allowedWorkflows
+      sel.innerHTML = __myWorkflows
         .map((w) => `<option value="${escape(w.id)}">${escape(w.label || w.id)}</option>`)
         .join('')
       sel.addEventListener('change', renderWorkflowFields)
@@ -348,19 +354,52 @@
     const sel = document.getElementById('me-wf-select')
     const fields = document.getElementById('me-wf-form-fields')
     if (!sel || !fields) return
-    const wf = __allowedWorkflows.find((w) => w.id === sel.value)
-    if (!wf || !Array.isArray(wf.payloadFields) || wf.payloadFields.length === 0) {
-      fields.innerHTML = '<p class="me-meta">该工作流不需要额外字段。</p>'
+    const wf = __myWorkflows.find((w) => w.id === sel.value)
+    const schema = wf && Array.isArray(wf.inputSchema) ? wf.inputSchema : []
+    const desc = wf && wf.description ? `<p class="me-meta">${escape(wf.description)}</p>` : ''
+    if (schema.length === 0) {
+      fields.innerHTML = desc + '<p class="me-meta">该工作流不需要额外字段。</p>'
       return
     }
-    fields.innerHTML = wf.payloadFields
-      .map(
-        (f) => `
-          <label>${escape(f.label || f.name)}${f.required ? ' *' : ''}
-            <textarea name="${escape(f.name)}" placeholder="${escape(f.placeholder || '')}"${f.required ? ' required' : ''}></textarea>
-          </label>`,
-      )
-      .join('')
+    fields.innerHTML = desc + schema.map(renderField).join('')
+  }
+
+  // Render one PayloadFieldSpec (the surface.me.inputSchema element shape)
+  // as a labelled control. The payload key is `f.id` — NOT `f.name`; the
+  // scope key is never in this list (forced server-side), so a member can
+  // only ever run for themselves. `data-type` is read back at submit so
+  // numbers go out as numbers.
+  function renderField(f) {
+    const id = f && f.id
+    if (!id) return ''
+    const idAttr = escape(id)
+    const req = f.required ? ' *' : ''
+    const reqAttr = f.required ? ' required' : ''
+    const ph = escape(f.placeholder || '')
+    const hint = f.hint ? `<small class="me-meta">${escape(f.hint)}</small>` : ''
+    let control
+    switch (f.type) {
+      case 'textarea':
+        control = `<textarea name="${idAttr}" data-type="textarea" rows="${Number(f.rows) || 4}" placeholder="${ph}"${reqAttr}></textarea>`
+        break
+      case 'number':
+        control = `<input type="number" name="${idAttr}" data-type="number" placeholder="${ph}"${reqAttr}>`
+        break
+      case 'select': {
+        const opts = Array.isArray(f.options) ? f.options : []
+        control = `<select name="${idAttr}" data-type="select"${reqAttr}>${opts
+          .map((o) => `<option value="${escape(o.value)}">${escape(o.label || o.value)}</option>`)
+          .join('')}</select>`
+        break
+      }
+      case 'file':
+        // The member workbench doesn't wire the Phase 9 upload flow yet.
+        control = `<input type="text" name="${idAttr}" data-type="text" placeholder="${ph}"${reqAttr}><small class="me-meta">（此入口暂不支持文件上传）</small>`
+        break
+      default: // 'text'
+        control = `<input type="text" name="${idAttr}" data-type="text" placeholder="${ph}"${reqAttr}>`
+    }
+    return `<label>${escape(f.label || id)}${req}\n${control}\n${hint}</label>`
   }
 
   async function submitDispatch() {
@@ -374,8 +413,15 @@
       return
     }
     const payload = {}
-    fields.querySelectorAll('textarea[name]').forEach((ta) => {
-      payload[ta.name] = ta.value
+    fields.querySelectorAll('[name]').forEach((el) => {
+      const key = el.getAttribute('name')
+      if (!key) return
+      if (el.getAttribute('data-type') === 'number') {
+        if (el.value === '') return // leave unset rather than send NaN
+        payload[key] = Number(el.value)
+        return
+      }
+      payload[key] = el.value
     })
     status.className = 'me-status'
     status.textContent = '提交中…'

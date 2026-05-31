@@ -126,7 +126,7 @@
     <!-- Home tab — visible to every signed-in role. For owner / admin
          it's a "what would my members see" preview; for member / viewer
          it's the primary daily surface (formerly /me). All fetches go
-         to the /api/me/* routes which already enforce caseId=userId
+         to the /api/me/* routes which force payload[userScopeField]=userId
          scoping server-side, so admins peeking at the home tab still
          only see their own dispatches and reports. -->
     <section id="home-panel" class="managed-agents" data-tab="home" data-roles="owner,admin,member,viewer" hidden>
@@ -137,7 +137,7 @@
 
       <div class="me-dispatch">
         <h2>触发新一次工作流</h2>
-        <p class="me-meta"><code>case_id</code> 自动绑定到你的 userId,你不能填写它 — 不同用户的对话历史互不可见。</p>
+        <p class="me-meta">你只能为自己发起:归属字段由系统自动绑定到你的 userId,你看不到也改不了 — 不同用户的记录互不可见。</p>
         <label>选择工作流
           <select id="me-wf-select"></select>
         </label>
