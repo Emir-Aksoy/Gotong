@@ -293,3 +293,64 @@ GitHub MCP）—— 是另一条独立路径,见 [`RAG-VIA-MCP.md`](./RAG-VIA-MC
 `LocalAgentPool.spawn` 会拉起子进程并把它的工具暴露给 agent 的
 tool-use loop。`scripts/personal-growth-prompts.mjs` 里的 5 个 coach
 agent 已经用这条路接 Brave Search 做实时搜索。
+
+这是 **per-agent 内联** 写法。把 MCP server 注册到 **hub 级**、让任意 agent
+按名 opt-in、还能跨 hub 共享给 peer —— 见下面第 7 节。
+
+## 7. Hub 级 MCP 集成 + 跨 hub 联邦（#2）
+
+第 6 节是单个 agent record 内联 `mcpServers`。**更进一步**:把 MCP server
+注册到 **hub 级注册表**,任意 agent 按名 opt-in,还能 **跨 hub 共享** 给 peer。
+
+### 7a. 装进 hub 注册表
+
+admin UI「MCP」标签页,或:
+
+```
+POST /api/admin/mcp-servers
+{ "spec": { "name": "filesystem", "command": "npx",
+            "args": ["-y", "@modelcontextprotocol/server-filesystem", "/data"] },
+  "description": "本地文件检索" }
+```
+
+凭证用 `${ENV}` 引用,别填明文(见第 2a 节)。装好后存进 hub 注册表,对运行中
+的 agent 即时生效(无需重启;靠 R5 的 `addServer` / `removeServer`)。
+
+### 7b. agent 按名 opt-in
+
+agent「编辑」表单里勾选要用的 server,或 record 里写
+`useMcpServers: ["filesystem"]`。spawn 时按名解析,把工具并进 agent 的
+tool-use loop。删 server → 勾了它的运行中 agent 即时失去其工具。
+
+### 7c. 跨 hub 共享（代理转发）
+
+把 hub A 的某个 server 共享给 peer hub B,让 **B 的 agent 调用物理上跑在 A 上
+的工具** —— 凭证 / 子进程 **始终留在 A**(凭证各归各家)。
+
+**在 A(提供方)**:MCP 标签页勾选该 server 的「共享给 peer」开关(或
+`POST /api/admin/mcp-servers` 带 `"shared": true`)。
+
+**在 B(消费方)**:agent 编辑表单的「来自 peer 的共享 server」分区会列出所有
+已连接 peer 共享的 server,勾选即可。它写成 `useMcpServers` 里的
+`<peer>:<server>` ref,如 `hub_a1b2c3d4:filesystem`(也可手填)。
+
+数据流:
+
+```
+B.agent tool-use loop
+  → RemoteMcpToolset.listTools / callTool
+    → 联邦链路 rpc: mcp.listTools / mcp.callTool
+      → A.McpProxyHost  (每次调用校验 shared===true)
+        → A 本地 McpToolset = 真子进程 + 真凭证
+        ← 工具结果原样回传
+```
+
+**边界**:
+
+- A 只暴露 `shared===true` 的 server;**每次调用都重新校验 ACL**,运行时把
+  开关改回 `false` 立即生效(已 spawn 的远程引用下一次调用即被拒)。
+- spec / 命令 / 凭证 **永不过线**,B 只看到 server 名 + 描述。
+- peer 离线 → `listTools` 返回 `[]`、`callTool` 返回 isError,任务不崩溃;B 的
+  表单里该 ref 显示「(当前不可达)」但保持勾选,编辑时不会被静默丢掉。
+- 发现端点 `GET /api/admin/mcp-shared` 列出各 peer 共享了什么(就是浏览 UI 的
+  后端;peer 全关时返回 503,UI 自然不显示联邦分区)。
