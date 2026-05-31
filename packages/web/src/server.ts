@@ -48,6 +48,13 @@ import {
   type McpFederationSurface,
 } from './mcp-routes.js'
 
+import {
+  handlePeerManifestRoute,
+  type PeerManifestFederationSurface,
+} from './peer-routes.js'
+
+export type { PeerManifestFederationSurface, PeerManifestRow } from './peer-routes.js'
+
 export type {
   IdentitySurface,
   IdentityRole,
@@ -357,6 +364,14 @@ export interface WebServerOptions {
    * over the peer registry + the `mcp.listShared` rpc.
    */
   mcpFederation?: McpFederationSurface
+  /**
+   * Phase 18 A-M2 — host-injected cross-hub peer capability manifest surface.
+   * When wired, `GET /api/admin/peer-manifests` lists each connected peer's
+   * advertised capabilities (cached) and `POST .../refresh` refetches them.
+   * Absent (peers disabled) → those routes 503. The host implements it over
+   * the peer registry + the `peer.manifest` rpc + an in-process cache.
+   */
+  peerManifests?: PeerManifestFederationSurface
 }
 
 /**
@@ -725,6 +740,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     agentCard: opts.agentCard,
     mcpRegistry: opts.mcpRegistry,
     mcpFederation: opts.mcpFederation,
+    peerManifests: opts.peerManifests,
     httpStats: new HttpStats(),
   }
 
@@ -856,6 +872,8 @@ interface HandlerCtx {
   mcpRegistry: McpRegistrySurface | undefined
   /** #2-M3.4b — see WebServerOptions.mcpFederation doc above. */
   mcpFederation: McpFederationSurface | undefined
+  /** Phase 18 A-M2 — see WebServerOptions.peerManifests doc above. */
+  peerManifests: PeerManifestFederationSurface | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -1579,6 +1597,18 @@ async function handle(
     const handled = await handleMcpFederationRoute(
       {
         mcpFederation: ctx.mcpFederation,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // Phase 18 A-M2 — cross-hub peer capability manifest browse + refresh.
+  if (path === '/api/admin/peer-manifests' || path === '/api/admin/peer-manifests/refresh') {
+    const handled = await handlePeerManifestRoute(
+      {
+        peerManifests: ctx.peerManifests,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req, res, method, path,

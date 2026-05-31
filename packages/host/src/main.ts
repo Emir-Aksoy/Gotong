@@ -86,7 +86,11 @@ import { serveWeb, type WebServerOptions } from '@aipehub/web'
 import { LocalAgentPool } from './local-agent-pool.js'
 import { loadPricingTable } from './pricing.js'
 import { McpProxyHost, fetchPeerSharedMcp } from './mcp-proxy.js'
-import { PeerManifestHost } from './peer-manifest.js'
+import {
+  PeerManifestHost,
+  createPeerManifestFederation,
+  type PeerManifestFederation,
+} from './peer-manifest.js'
 import { GrowthReportsAdmin } from './services/growth-reports-admin.js'
 import {
   BINARY_SAFE_PLUGINS,
@@ -868,6 +872,10 @@ async function main(): Promise<void> {
   // agent's `useMcpServers` can be filled by browsing, not typing. Wired
   // only when peers are on (same block as the registry / proxy).
   let mcpFederation: WebServerOptions['mcpFederation']
+  // Phase 18 A-M2 — cross-hub peer capability manifest discovery surface for
+  // the admin UI. In-process cache over the registry; refreshed on demand.
+  // Wired in the same block as the registry / proxy (peers on).
+  let peerFederation: PeerManifestFederation | undefined
   if (identity && process.env.AIPE_PEERS_DISABLED !== '1') {
     const spaceMeta = await space.meta()
     const selfHubId = spaceMeta.hubId ?? 'self'
@@ -949,6 +957,9 @@ async function main(): Promise<void> {
         return out
       },
     }
+    // Phase 18 A-M2 — on-demand peer capability manifest discovery for the
+    // admin UI. In-process cache over the same registry; the admin refreshes.
+    peerFederation = createPeerManifestFederation(fedRegistry, { logger: log })
     // Phase 6 #4 — per-peer resolver is auto-wired by PeerRegistry
     // when identity is present (it is here — we only enter this block
     // when identity is wired). The shared token remains as fallback
@@ -1037,6 +1048,7 @@ async function main(): Promise<void> {
     lifecycle: localAgents,
     mcpRegistry,
     mcpFederation,
+    peerManifests: peerFederation,
     workflows: workflowController,
     // Phase 16 — member task inbox; undefined when identity is unwired, in
     // which case /me/inbox degrades (empty list / 503).

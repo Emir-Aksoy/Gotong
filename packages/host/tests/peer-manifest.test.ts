@@ -18,7 +18,10 @@ import {
   PEER_MANIFEST_VERSION,
   buildLocalManifest,
   fetchPeerManifest,
+  createPeerManifestFederation,
   type ManifestHubView,
+  type ManifestPeerRegistryView,
+  type PeerManifest,
 } from '../src/peer-manifest.js'
 
 /** Minimal Participant fake — buildLocalManifest reads only id + capabilities. */
@@ -143,5 +146,121 @@ describe('peer manifest — end to end over a live link (Phase 18 A-M1)', () => 
       protocolVersion: PEER_MANIFEST_VERSION,
     })
     await a.close()
+  })
+})
+
+describe('createPeerManifestFederation (Phase 18 A-M2)', () => {
+  type Row = { peerId: string; label: string | null; connected: boolean }
+
+  function manifestLink(manifest: PeerManifest | null): HubLink {
+    return { status: 'open', rpc: async () => manifest } as unknown as HubLink
+  }
+  function throwingLink(): HubLink {
+    return {
+      status: 'open',
+      rpc: async () => {
+        throw new Error('link rpc boom')
+      },
+    } as unknown as HubLink
+  }
+
+  /** Stub registry whose rows are mutable so a test can flip connectivity. */
+  function stub(rows: Row[], links: Record<string, HubLink | null>): ManifestPeerRegistryView {
+    return {
+      status: () => rows,
+      linkForHub: (peerId) => links[peerId] ?? null,
+    }
+  }
+
+  const manifest = (caps: string[]): PeerManifest => ({
+    hubId: 'hub_x',
+    capabilities: caps,
+    protocolVersion: '1',
+  })
+
+  it('lists every peer as unknown before any refresh', async () => {
+    const fed = createPeerManifestFederation(
+      stub([{ peerId: 'p1', label: 'Partner', connected: true }], {}),
+    )
+    const rows = await fed.list()
+    expect(rows).toEqual([
+      { peer: 'p1', label: 'Partner', online: true, stale: false, capabilities: [], lastFetchedAt: null },
+    ])
+  })
+
+  it('refresh fetches connected peers and caches caps + timestamp', async () => {
+    const fed = createPeerManifestFederation(
+      stub([{ peerId: 'p1', label: null, connected: true }], { p1: manifestLink(manifest(['a', 'b'])) }),
+      { now: () => 1000 },
+    )
+    await fed.refresh()
+    const rows = await fed.list()
+    expect(rows[0]).toEqual({
+      peer: 'p1',
+      label: null,
+      online: true,
+      stale: false,
+      capabilities: ['a', 'b'],
+      lastFetchedAt: 1000,
+    })
+  })
+
+  it('skips offline peers on refresh (no link, no cache)', async () => {
+    const fed = createPeerManifestFederation(
+      stub([{ peerId: 'p1', label: null, connected: false }], { p1: manifestLink(manifest(['a'])) }),
+    )
+    await fed.refresh()
+    expect((await fed.list())[0]!.capabilities).toEqual([])
+  })
+
+  it('marks a peer stale once it goes offline but keeps its cached caps', async () => {
+    const rows: Row[] = [{ peerId: 'p1', label: null, connected: true }]
+    const fed = createPeerManifestFederation(stub(rows, { p1: manifestLink(manifest(['a'])) }), {
+      now: () => 1000,
+    })
+    await fed.refresh()
+    rows[0]!.connected = false // the peer disconnected since the fetch
+    const row = (await fed.list())[0]!
+    expect(row.online).toBe(false)
+    expect(row.stale).toBe(true)
+    expect(row.capabilities).toEqual(['a']) // last-known caps retained
+    expect(row.lastFetchedAt).toBe(1000)
+  })
+
+  it('refresh(peerId) only refetches the named peer', async () => {
+    const seen: string[] = []
+    const linkFor = (id: string, caps: string[]): HubLink =>
+      ({
+        status: 'open',
+        rpc: async () => {
+          seen.push(id)
+          return manifest(caps)
+        },
+      }) as unknown as HubLink
+    const fed = createPeerManifestFederation(
+      stub(
+        [
+          { peerId: 'p1', label: null, connected: true },
+          { peerId: 'p2', label: null, connected: true },
+        ],
+        { p1: linkFor('p1', ['a']), p2: linkFor('p2', ['b']) },
+      ),
+    )
+    await fed.refresh('p2')
+    expect(seen).toEqual(['p2'])
+    const rows = await fed.list()
+    expect(rows.find((r) => r.peer === 'p1')!.capabilities).toEqual([])
+    expect(rows.find((r) => r.peer === 'p2')!.capabilities).toEqual(['b'])
+  })
+
+  it('keeps the prior cache when a refresh fetch throws', async () => {
+    const links: Record<string, HubLink | null> = { p1: manifestLink(manifest(['a'])) }
+    const fed = createPeerManifestFederation(stub([{ peerId: 'p1', label: null, connected: true }], links), {
+      now: () => 1000,
+    })
+    await fed.refresh() // caches ['a']
+    links.p1 = throwingLink() // next fetch fails
+    await fed.refresh()
+    expect((await fed.list())[0]!.capabilities).toEqual(['a']) // unchanged, not blanked
   })
 })

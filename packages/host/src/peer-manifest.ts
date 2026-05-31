@@ -130,3 +130,92 @@ export async function fetchPeerManifest(link: HubLink): Promise<PeerManifest | n
   const out = await link.rpc(PEER_MANIFEST_METHODS.get, {})
   return (out as PeerManifest) ?? null
 }
+
+// ─── federation surface (host → admin UI, Phase 18 A-M2) ────────────────────
+
+/** The slice of the host `PeerRegistry` the federation surface reads. */
+export interface ManifestPeerRegistryView {
+  status(): Array<{ peerId: ParticipantId; label: string | null; connected: boolean }>
+  linkForHub(peerId: ParticipantId): HubLink | null
+}
+
+/** One peer's manifest row served to the admin UI (web mirrors this shape). */
+export interface PeerManifestRow {
+  /** Peer hub id. */
+  peer: string
+  /** Human label from the peers table, if any. */
+  label: string | null
+  /** Whether the peer link is connected right now. */
+  online: boolean
+  /**
+   * A cached manifest exists but the peer is offline — its capabilities may
+   * be out of date. (Online peers never read stale; an admin who wants the
+   * freshest list clicks refresh.)
+   */
+  stale: boolean
+  /** Advertised capability ids (empty when never fetched / nothing cached). */
+  capabilities: string[]
+  /** Epoch ms of the last successful manifest fetch, or null if never. */
+  lastFetchedAt: number | null
+}
+
+export interface PeerManifestFederation {
+  /** Join the registry's live connection state with the manifest cache. */
+  list(): Promise<PeerManifestRow[]>
+  /** Refetch `peer.manifest` from connected peers (all, or one by id). */
+  refresh(peerId?: string): Promise<void>
+}
+
+/**
+ * Build the on-demand peer manifest federation surface: an in-process cache
+ * (lost on restart BY DESIGN — "unknown until first refresh" is more honest
+ * than serving a stale boot cache) over the peer registry. `list` joins the
+ * registry's live connection state with the cache; `refresh` refetches from
+ * connected peers and updates the cache, keeping the prior entry on a fetch
+ * error so a transient blip doesn't blank the UI.
+ */
+export function createPeerManifestFederation(
+  registry: ManifestPeerRegistryView,
+  opts: {
+    now?: () => number
+    logger?: { warn?: (msg: string, meta?: Record<string, unknown>) => void }
+  } = {},
+): PeerManifestFederation {
+  const now = opts.now ?? (() => Date.now())
+  const cache = new Map<string, { manifest: PeerManifest; lastFetchedAt: number }>()
+  return {
+    async list() {
+      return registry.status().map((row) => {
+        const cached = cache.get(row.peerId)
+        return {
+          peer: row.peerId,
+          label: row.label,
+          online: row.connected,
+          stale: cached ? !row.connected : false,
+          capabilities: cached?.manifest.capabilities ?? [],
+          lastFetchedAt: cached?.lastFetchedAt ?? null,
+        }
+      })
+    },
+    async refresh(peerId?: string) {
+      const rows = registry
+        .status()
+        .filter((r) => r.connected && (peerId === undefined || r.peerId === peerId))
+      await Promise.all(
+        rows.map(async (row) => {
+          const link = registry.linkForHub(row.peerId)
+          if (!link) return
+          try {
+            const manifest = await fetchPeerManifest(link)
+            if (manifest) cache.set(row.peerId, { manifest, lastFetchedAt: now() })
+          } catch (err) {
+            opts.logger?.warn?.('peer manifest: fetch failed', {
+              peer: row.peerId,
+              err: err instanceof Error ? err.message : String(err),
+            })
+          }
+        }),
+      )
+    },
+  }
+}
