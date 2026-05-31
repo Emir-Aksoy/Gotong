@@ -54,6 +54,12 @@ export interface WorkflowDefinition {
    * for best-effort cleanup flows.
    */
   onFailure?: 'halt' | 'continue'
+  /**
+   * Optional UX-surface declarations. The runner ignores this entirely —
+   * it's consumed by the web layer to decide which workflows appear on the
+   * member-facing `/me` workbench. See `WorkflowSurfaceSpec`.
+   */
+  surface?: WorkflowSurfaceSpec
 }
 
 export interface TriggerSpec {
@@ -132,6 +138,64 @@ export interface PayloadFieldSpec {
    * limit (when omitted) is 10MB to mirror the plugin default.
    */
   maxSizeMb?: number
+}
+
+// --- Member-facing surface (Phase 14) --------------------------------------
+
+/**
+ * Role literal for `MeSurfaceSpec.allowedRoles`. Mirrors the identity role
+ * set WITHOUT importing `@aipehub/identity` — the workflow package stays
+ * free of any identity runtime dep (the same posture the web layer takes
+ * with its own role mirror). Kept in sync by convention, not by type.
+ */
+export type WorkflowRole = 'owner' | 'admin' | 'member' | 'viewer'
+
+/**
+ * Optional UX-surface declarations on a workflow. Today only `me` (the
+ * member-facing personal workbench at `/me`); kept as a nested object so a
+ * future surface (e.g. a public intake form) slots in without reshaping the
+ * workflow root.
+ */
+export interface WorkflowSurfaceSpec {
+  me?: MeSurfaceSpec
+}
+
+/**
+ * Declares that a workflow is runnable from the member-facing `/me`
+ * workbench. WHY this lives in the workflow definition rather than a
+ * hardcoded allowlist in the web layer: it moves the member-exposure
+ * decision from a source edit to an import-time review of the YAML —
+ * whoever can import a workflow (admin-gated) decides whether members may
+ * run it.
+ */
+export interface MeSurfaceSpec {
+  /** Master switch — a workflow only appears on `/me` when this is true. */
+  enabled: boolean
+  /** Member-facing label. Falls back to `workflow.name` then `id` in the UI. */
+  label?: string
+  /** Member-facing description. Falls back to `workflow.description`. */
+  description?: string
+  /**
+   * Member-facing input fields — reuses `PayloadFieldSpec` (the exact shape
+   * the admin dispatch form already renders). When omitted, the `/me` form
+   * falls back to `trigger.payloadSchema`; when that's absent too, the form
+   * has no fields.
+   */
+  inputSchema?: PayloadFieldSpec[]
+  /**
+   * Which roles may run this from `/me`. Omitted ⇒ `['owner','admin','member']`
+   * (viewer excluded — viewers are read-only by convention; a workflow can
+   * opt them in explicitly).
+   */
+  allowedRoles?: WorkflowRole[]
+  /**
+   * The single payload key the `/me` dispatch handler force-sets to the
+   * caller's userId, so a member can't act for another user. Which key
+   * depends on the workflow (personal-growth uses `case_id`; another might
+   * use `owner_user_id`). Omitted ⇒ `'case_id'`. The handler drops any
+   * caller-supplied value under this key, then sets it to the userId.
+   */
+  userScopeField?: string
 }
 
 // --- Steps -----------------------------------------------------------------

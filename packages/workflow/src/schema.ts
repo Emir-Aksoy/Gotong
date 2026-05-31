@@ -22,12 +22,15 @@ import {
   WorkflowSchemaError,
   type Branch,
   type DispatchSpec,
+  type MeSurfaceSpec,
   type ParallelStep,
   type PayloadFieldSpec,
   type SimpleStep,
   type Step,
   type StepFailurePolicy,
   type WorkflowDefinition,
+  type WorkflowRole,
+  type WorkflowSurfaceSpec,
 } from './types.js'
 
 const ID_RE = /^[a-zA-Z0-9_.:-]+$/
@@ -138,6 +141,9 @@ function validateWorkflow(w: Record<string, unknown>): WorkflowDefinition {
   if (typeof w.name === 'string') out.name = w.name
   if (typeof w.description === 'string') out.description = w.description
   if (w.output !== undefined) out.output = w.output
+  if (w.surface !== undefined) {
+    out.surface = validateSurfaceSpec(w.surface, 'workflow.surface')
+  }
   return out
 }
 
@@ -464,6 +470,85 @@ function validatePayloadSchema(raw: unknown, path: string): PayloadFieldSpec[] {
       if (spec.rows !== undefined) delete spec.rows
     }
     out.push(spec)
+  }
+  return out
+}
+
+const SURFACE_ROLES: readonly WorkflowRole[] = ['owner', 'admin', 'member', 'viewer']
+
+/**
+ * Validate the optional `workflow.surface` block. Structural only — the
+ * runner never reads it; the web layer uses `surface.me` to decide which
+ * workflows are runnable from the member-facing `/me` workbench. A bad
+ * block fails at import time so the admin sees the error verbatim.
+ */
+function validateSurfaceSpec(raw: unknown, path: string): WorkflowSurfaceSpec {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new WorkflowSchemaError(`${path} must be an object`)
+  }
+  const s = raw as Record<string, unknown>
+  const out: WorkflowSurfaceSpec = {}
+  if (s.me !== undefined) {
+    out.me = validateMeSurface(s.me, `${path}.me`)
+  }
+  return out
+}
+
+function validateMeSurface(raw: unknown, path: string): MeSurfaceSpec {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new WorkflowSchemaError(`${path} must be an object`)
+  }
+  const m = raw as Record<string, unknown>
+  if (typeof m.enabled !== 'boolean') {
+    throw new WorkflowSchemaError(`${path}.enabled is required (boolean)`)
+  }
+  const out: MeSurfaceSpec = { enabled: m.enabled }
+  if (m.label !== undefined) {
+    if (typeof m.label !== 'string' || m.label.length === 0) {
+      throw new WorkflowSchemaError(`${path}.label must be a non-empty string`)
+    }
+    out.label = m.label
+  }
+  if (m.description !== undefined) {
+    if (typeof m.description !== 'string' || m.description.length === 0) {
+      throw new WorkflowSchemaError(`${path}.description must be a non-empty string`)
+    }
+    out.description = m.description
+  }
+  // inputSchema reuses the payload-field validator. Accept snake_case
+  // (`input_schema`, yaml convention) and camelCase (`inputSchema`, json) —
+  // same dual-accept the trigger.payload_schema parse uses.
+  const rawInput = m.input_schema ?? m.inputSchema
+  if (rawInput !== undefined) {
+    out.inputSchema = validatePayloadSchema(rawInput, `${path}.input_schema`)
+  }
+  const rawRoles = m.allowed_roles ?? m.allowedRoles
+  if (rawRoles !== undefined) {
+    if (!Array.isArray(rawRoles) || rawRoles.length === 0) {
+      throw new WorkflowSchemaError(`${path}.allowed_roles must be a non-empty array when set`)
+    }
+    const roles: WorkflowRole[] = []
+    for (const r of rawRoles) {
+      if (typeof r !== 'string' || !SURFACE_ROLES.includes(r as WorkflowRole)) {
+        throw new WorkflowSchemaError(
+          `${path}.allowed_roles entries must be one of ${SURFACE_ROLES.join(' | ')} — got '${String(r)}'`,
+        )
+      }
+      if (!roles.includes(r as WorkflowRole)) roles.push(r as WorkflowRole)
+    }
+    out.allowedRoles = roles
+  }
+  // userScopeField is validated against the payload-field id regex so it can
+  // never be a dangerous key (`__proto__`, `constructor`, …) — the dispatch
+  // handler assigns `payload[userScopeField] = userId` directly.
+  const rawScope = m.user_scope_field ?? m.userScopeField
+  if (rawScope !== undefined) {
+    if (typeof rawScope !== 'string' || !/^[a-zA-Z][a-zA-Z0-9_]*$/.test(rawScope)) {
+      throw new WorkflowSchemaError(
+        `${path}.user_scope_field must match /^[a-zA-Z][a-zA-Z0-9_]*$/ — got '${String(rawScope)}'`,
+      )
+    }
+    out.userScopeField = rawScope
   }
   return out
 }

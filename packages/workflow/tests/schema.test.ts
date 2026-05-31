@@ -501,3 +501,141 @@ workflow:
     expect(() => parseWorkflow(yaml)).toThrow(/'text' \| 'textarea' \| 'number' \| 'select' \| 'file'/)
   })
 })
+
+/**
+ * `surface.me` (Phase 14) — declares a workflow as runnable from the
+ * member-facing `/me` workbench. The runner ignores it; the web layer
+ * derives its allowlist from it, so a bad block must fail loudly at import.
+ */
+describe('surface.me', () => {
+  const SKELETON = (surface: string) => `
+schema: aipehub.workflow/v1
+workflow:
+  id: member-flow
+  name: 成员流程
+  trigger:
+    capability: run-member-flow
+${surface}
+  steps:
+    - id: s
+      dispatch:
+        strategy: { kind: capability, capabilities: [a] }
+        payload: $trigger.payload
+`
+
+  it('parses a full surface.me block', () => {
+    const wf = parseWorkflow(
+      SKELETON(`  surface:
+    me:
+      enabled: true
+      label: 我的流程
+      description: 给成员用的
+      allowed_roles: [owner, admin, member]
+      user_scope_field: owner_user_id
+      input_schema:
+        - { id: topic, label: 主题, type: text, required: true }`),
+    )
+    expect(wf.surface?.me).toBeDefined()
+    const me = wf.surface!.me!
+    expect(me.enabled).toBe(true)
+    expect(me.label).toBe('我的流程')
+    expect(me.description).toBe('给成员用的')
+    expect(me.allowedRoles).toEqual(['owner', 'admin', 'member'])
+    expect(me.userScopeField).toBe('owner_user_id')
+    expect(me.inputSchema).toEqual([
+      { id: 'topic', label: '主题', type: 'text', required: true },
+    ])
+  })
+
+  it('leaves surface undefined when the block is absent (no regression)', () => {
+    const wf = parseWorkflow(SKELETON(''))
+    expect(wf.surface).toBeUndefined()
+  })
+
+  it('parses a minimal block (enabled only) with disabled allowed', () => {
+    const on = parseWorkflow(SKELETON(`  surface:
+    me:
+      enabled: true`))
+    expect(on.surface?.me?.enabled).toBe(true)
+    expect(on.surface?.me?.allowedRoles).toBeUndefined()
+    const off = parseWorkflow(SKELETON(`  surface:
+    me:
+      enabled: false`))
+    expect(off.surface?.me?.enabled).toBe(false)
+  })
+
+  it('accepts camelCase keys too (json convention)', () => {
+    const json = JSON.stringify({
+      schema: WORKFLOW_SCHEMA_V1,
+      workflow: {
+        id: 'member-flow',
+        trigger: { capability: 'run-member-flow' },
+        surface: {
+          me: {
+            enabled: true,
+            allowedRoles: ['member'],
+            userScopeField: 'case_id',
+            inputSchema: [{ id: 'note', label: 'Note', type: 'textarea' }],
+          },
+        },
+        steps: [
+          { id: 's', dispatch: { strategy: { kind: 'capability', capabilities: ['a'] }, payload: 1 } },
+        ],
+      },
+    })
+    const wf = parseWorkflow(json)
+    expect(wf.surface?.me?.allowedRoles).toEqual(['member'])
+    expect(wf.surface?.me?.userScopeField).toBe('case_id')
+    expect(wf.surface?.me?.inputSchema).toHaveLength(1)
+  })
+
+  it('dedupes allowed_roles', () => {
+    const wf = parseWorkflow(SKELETON(`  surface:
+    me:
+      enabled: true
+      allowed_roles: [member, member, owner]`))
+    expect(wf.surface?.me?.allowedRoles).toEqual(['member', 'owner'])
+  })
+
+  it('requires me.enabled', () => {
+    expect(() =>
+      parseWorkflow(SKELETON(`  surface:
+    me:
+      label: 没开关`)),
+    ).toThrow(/me\.enabled is required/)
+  })
+
+  it('rejects an unknown role', () => {
+    expect(() =>
+      parseWorkflow(SKELETON(`  surface:
+    me:
+      enabled: true
+      allowed_roles: [member, superuser]`)),
+    ).toThrow(/allowed_roles entries must be one of/)
+  })
+
+  it('reuses payload-field validation for input_schema', () => {
+    expect(() =>
+      parseWorkflow(SKELETON(`  surface:
+    me:
+      enabled: true
+      input_schema:
+        - { id: f, label: 文件, type: blob }`)),
+    ).toThrow(/'text' \| 'textarea' \| 'number' \| 'select' \| 'file'/)
+  })
+
+  it('rejects a dangerous user_scope_field key', () => {
+    expect(() =>
+      parseWorkflow(SKELETON(`  surface:
+    me:
+      enabled: true
+      user_scope_field: __proto__`)),
+    ).toThrow(/user_scope_field must match/)
+  })
+
+  it('rejects a non-object surface block', () => {
+    expect(() =>
+      parseWorkflow(SKELETON(`  surface: not-an-object`)),
+    ).toThrow(/workflow\.surface must be an object/)
+  })
+})
