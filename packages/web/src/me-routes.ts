@@ -243,6 +243,39 @@ export interface MeWorkflowSurface {
   list(): Promise<MeWorkflowSummaryLike[]>
 }
 
+// ---------------------------------------------------------------------------
+// Member task inbox surface (Phase 16)
+//
+// Duck-typed so the web layer takes no runtime dep on `@aipehub/inbox`; the
+// host's `HostInboxService` satisfies it structurally. `listPending` is already
+// scoped to the caller server-side and returns the PUBLIC item shape (no
+// userId / parent / status — internal). `resolve` runs the two-step
+// suspend/resume and throws an error carrying a `.code` the route maps to an
+// HTTP status (like the workflow lifecycle routes), never an instanceof check.
+// ---------------------------------------------------------------------------
+
+/** Public projection of an inbox item — what the member's client sees. */
+export interface InboxItemView {
+  itemId: string
+  kind: string
+  prompt: string
+  title?: string
+  options?: unknown[]
+  editField?: unknown
+  createdAt: number
+}
+
+export interface InboxSurface {
+  /** Pending items for one user, newest first. Already scoped server-side. */
+  listPending(userId: string): Promise<InboxItemView[]>
+  /**
+   * Resolve one item with the member's decision. Forces `userId` to the
+   * caller. Throws an error with `.code` of `not_found` / `already_resolved`
+   * / `forbidden` / `invalid_decision` (or `invalid_payload`) on failure.
+   */
+  resolve(args: { itemId: string; userId: string; decision: unknown }): Promise<void>
+}
+
 export interface HandleMeRouteCtx {
   identity: IdentitySurface
   hub: Hub
@@ -268,6 +301,11 @@ export interface HandleMeRouteCtx {
    * surface; the /me workflow routes then degrade to an empty catalog.
    */
   workflows: MeWorkflowSurface | undefined
+  /**
+   * Phase 16 — member task inbox. Undefined when the host wired no inbox;
+   * the /me/inbox routes then degrade to an empty list / 503.
+   */
+  inbox: InboxSurface | undefined
 }
 
 export async function handleMeRoute(

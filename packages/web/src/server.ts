@@ -34,7 +34,7 @@ import {
   type IdentitySurface,
   type IdentityPeerReputationDTO,
 } from './identity-routes.js'
-import { handleMeRoute } from './me-routes.js'
+import { handleMeRoute, type InboxSurface } from './me-routes.js'
 import { handleWorkflowRoute } from './workflow-routes.js'
 import { handleAgentsRoute } from './agents-routes.js'
 import { handleServicesRoute } from './services-routes.js'
@@ -246,6 +246,13 @@ export interface WebServerOptions {
    * the surface is plain types in `@aipehub/core`.
    */
   growthReports?: GrowthReportsAdminSurface
+  /**
+   * Phase 16 — optional member task inbox surface. The host wires a
+   * `HostInboxService` here. When absent, `GET /api/me/inbox` returns an
+   * empty list and `POST /api/me/inbox/:id/resolve` returns 503. Web has no
+   * runtime dep on `@aipehub/inbox` — `InboxSurface` is a duck type.
+   */
+  inbox?: InboxSurface
   /**
    * Optional readiness gate. When set, `GET /readyz` returns 200
    * once `isReady()` first returns true, and 503 with a JSON
@@ -703,6 +710,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     workflowAssist: opts.workflowAssist,
     services: opts.services,
     growthReports: opts.growthReports,
+    inbox: opts.inbox,
     readinessGate: opts.readinessGate,
     identity: opts.identity,
     peerRegistry: opts.peerRegistry,
@@ -826,6 +834,8 @@ interface HandlerCtx {
   workflowAssist: WorkflowAssistSurface | undefined
   services: ServicesAdminSurface | undefined
   growthReports: GrowthReportsAdminSurface | undefined
+  /** Phase 16 — see WebServerOptions.inbox doc above. */
+  inbox: InboxSurface | undefined
   readinessGate: { isReady: () => boolean } | undefined
   identity: IdentitySurface | undefined
   /** D1 — see WebServerOptions.peerRegistry doc above. */
@@ -1374,6 +1384,8 @@ async function handle(
         // not a hardcoded allowlist. Undefined when the host wired no
         // workflow surface; /me workflow routes then degrade to empty.
         workflows: ctx.workflows,
+        // Phase 16 — member task inbox; undefined → /me/inbox degrades.
+        inbox: ctx.inbox,
       },
       req,
       res,
