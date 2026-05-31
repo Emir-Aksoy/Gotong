@@ -38,6 +38,21 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readBearer, readCookie, readJsonBody, sendJson } from './http-helpers.js'
+import {
+  parseExportFormat,
+  sendExport,
+  toCsv,
+  toJsonl,
+  type CsvColumn,
+} from './export-format.js'
+import {
+  handleUsageLedgerExport,
+  handleUsageLedgerList,
+  handleUsageSummary,
+  type UsageLedgerAggregateRowDTO,
+  type UsageLedgerEntryDTO,
+  type UsageLedgerGroupBy,
+} from './usage-routes.js'
 
 // Audit #155 — the reputation snapshot row shape is owned by
 // @aipehub/core (where the EWMA store lives). Web extends rather than
@@ -281,6 +296,27 @@ export interface IdentitySurface {
     targetUserId?: string
     success?: boolean
   }): IdentityAuditLogEntryDTO[]
+  // Phase 17 — usage / cost ledger. Optional like the audit methods: a
+  // pre-migration IdentityStore lacks them, so the routes degrade to an
+  // empty result instead of 500.
+  queryLedger?(query: {
+    orgId?: string
+    userId?: string
+    agentId?: string
+    workflowId?: string
+    model?: string
+    since?: number
+    until?: number
+    limit?: number
+    offset?: number
+  }): UsageLedgerEntryDTO[]
+  aggregateLedger?(query: {
+    groupBy: UsageLedgerGroupBy
+    since?: number
+    until?: number
+    orgId?: string
+    userId?: string
+  }): UsageLedgerAggregateRowDTO[]
   // Phase 3 — invitation flow. Optional on the structural type for the
   // same reason as the audit-log methods above: a pre-migration host's
   // IdentityStore still typechecks; the routes refuse with 503 at runtime
@@ -686,6 +722,31 @@ export async function handleIdentityRoute(
       `http://${req.headers.host ?? 'localhost'}`,
     )
     handleListAuditLog(ctx, url, res)
+    return
+  }
+  // Phase 17 — audit export (CSV / JSONL attachment). Same owner gate.
+  if (method === 'GET' && path === '/api/admin/identity/audit/export') {
+    const url = new URL(
+      req.url ?? path,
+      `http://${req.headers.host ?? 'localhost'}`,
+    )
+    handleAuditExport(ctx, url, res)
+    return
+  }
+  // Phase 17 — usage / cost ledger (owner-only billing data). Exact
+  // matches, so the more-specific `/ledger/export` is unambiguous against
+  // `/ledger`. Delegated to usage-routes; ctx.identity satisfies the
+  // duck-typed UsageLedgerSurface structurally.
+  if (method === 'GET' && path === '/api/admin/identity/usage/ledger/export') {
+    handleUsageLedgerExport(ctx.identity, identityUrl(req, path), res)
+    return
+  }
+  if (method === 'GET' && path === '/api/admin/identity/usage/ledger') {
+    handleUsageLedgerList(ctx.identity, identityUrl(req, path), res)
+    return
+  }
+  if (method === 'GET' && path === '/api/admin/identity/usage/summary') {
+    handleUsageSummary(ctx.identity, identityUrl(req, path), res)
     return
   }
   if (method === 'POST' && path === '/api/admin/identity/users') {
@@ -1695,6 +1756,69 @@ function handleListAuditLog(
   try {
     const entries = ctx.identity.listAuditLog(q)
     sendJson(res, { entries })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+/** Build a URL object from the request for query-string parsing. */
+function identityUrl(req: IncomingMessage, path: string): URL {
+  return new URL(req.url ?? path, `http://${req.headers.host ?? 'localhost'}`)
+}
+
+/** Phase 17 — CSV columns for an audit-log export row. */
+const AUDIT_EXPORT_COLUMNS: ReadonlyArray<CsvColumn<IdentityAuditLogEntryDTO>> = [
+  { header: 'id', value: (r) => r.id },
+  { header: 'ts', value: (r) => r.ts },
+  { header: 'iso_ts', value: (r) => new Date(r.ts).toISOString() },
+  { header: 'action', value: (r) => r.action },
+  { header: 'actor_user_id', value: (r) => r.actorUserId },
+  { header: 'actor_source', value: (r) => r.actorSource },
+  { header: 'target_user_id', value: (r) => r.targetUserId },
+  { header: 'target_credential_id', value: (r) => r.targetCredentialId },
+  { header: 'ip', value: (r) => r.ip },
+  { header: 'user_agent', value: (r) => r.userAgent },
+  { header: 'success', value: (r) => (r.success ? 1 : 0) },
+  { header: 'metadata_json', value: (r) => r.metadata },
+]
+
+/** Max audit rows an export pulls in one shot. */
+const AUDIT_EXPORT_LIMIT = 10_000
+
+/**
+ * Phase 17 — audit-log export as a CSV / JSONL attachment. Reuses the
+ * same `listAuditLog` filters as the JSON list route but pulls up to
+ * {@link AUDIT_EXPORT_LIMIT} rows for the download.
+ */
+function handleAuditExport(
+  ctx: HandleIdentityRouteCtx,
+  url: URL,
+  res: ServerResponse,
+): void {
+  if (typeof ctx.identity.listAuditLog !== 'function') {
+    sendJson(res, { error: 'audit log unavailable on this host' }, 503)
+    return
+  }
+  const q: {
+    limit?: number
+    offset?: number
+    action?: string
+    targetUserId?: string
+    success?: boolean
+  } = { limit: AUDIT_EXPORT_LIMIT, offset: 0 }
+  const action = url.searchParams.get('action')
+  if (action) q.action = action
+  const targetUserId = url.searchParams.get('targetUserId')
+  if (targetUserId) q.targetUserId = targetUserId
+  const success = url.searchParams.get('success')
+  if (success === 'true') q.success = true
+  else if (success === 'false') q.success = false
+  const format = parseExportFormat(url.searchParams.get('format'))
+  try {
+    const entries = ctx.identity.listAuditLog(q)
+    const body =
+      format === 'jsonl' ? toJsonl(entries) : toCsv(AUDIT_EXPORT_COLUMNS, entries)
+    sendExport(res, format, 'audit-log', body)
   } catch (err) {
     sendIdentityError(res, err)
   }
