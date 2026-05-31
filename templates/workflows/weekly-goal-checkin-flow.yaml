@@ -1,0 +1,93 @@
+# =============================================================================
+# Workflow: 每周目标复盘(member-facing 示例)
+# Schema: aipehub.workflow/v1
+#
+# 第二个「成员工作台」示例 —— 故意用**替代 scope key** `owner_user_id`
+# (而不是默认的 case_id),演示 surface.me.user_scope_field 的通用性。
+#
+# # 它演示什么(Phase 14)
+#
+# - surface.me.user_scope_field: owner_user_id —— 后端强制
+#   payload.owner_user_id = 调用者 userId(不是 case_id)。同一套
+#   「成员只能为自己跑」的保证,挂在工作流自选的 payload key 上。
+# - 两步:先复盘进展,再据复盘给下周动作 —— 比示例 1 多一步,演示
+#   step ref($review.output)在 member-facing 工作流里照常工作。
+# - surface.me.input_schema 不含 owner_user_id —— 成员表单不暴露 scope key。
+#
+# 需要 capability=review-progress 和 suggest-next-actions 两个 agent 才能
+# 真正出结果。
+# =============================================================================
+
+schema: aipehub.workflow/v1
+
+workflow:
+  id: weekly-goal-checkin-flow
+  name: 每周目标复盘
+  description: 列出本周目标 + 卡点,先复盘进展,再给下周 3 个具体动作
+
+  trigger:
+    capability: weekly-goal-checkin
+    # admin 表单 —— 比成员表单多一个 owner_user_id(可替团队成员各跑一份)。
+    payload_schema:
+      - id: owner_user_id
+        label: 为谁跑(默认你自己)
+        type: text
+        defaultValue: self
+        hint: "字母+数字+_-. 64 字符内。成员从 /me 跑时这个字段被忽略,强制为本人。"
+      - id: goals
+        label: 本周的目标
+        type: textarea
+        rows: 4
+        required: true
+        hint: "你这周想推进的 2-4 个目标,一行一个"
+      - id: blockers
+        label: 卡住你的是什么
+        type: textarea
+        rows: 3
+        hint: "拖慢 / 挡住你的事(可选)"
+
+  # 成员工作台(/me)入口。user_scope_field 显式设为 owner_user_id —— 后端
+  # 强制为本人 userId。input_schema 不含 owner_user_id,成员不暴露 scope key。
+  surface:
+    me:
+      enabled: true
+      label: 每周目标复盘
+      description: 列目标 + 卡点 → 复盘进展 → 下周 3 个具体动作
+      user_scope_field: owner_user_id
+      input_schema:
+        - id: goals
+          label: 本周的目标
+          type: textarea
+          rows: 4
+          required: true
+          hint: "你这周想推进的 2-4 个目标,一行一个"
+        - id: blockers
+          label: 卡住你的是什么
+          type: textarea
+          rows: 3
+          hint: "拖慢 / 挡住你的事(可选)"
+
+  steps:
+    - id: review
+      description: 复盘教练读目标 + 卡点,给一段进展复盘
+      dispatch:
+        strategy: { kind: capability, capabilities: [review-progress] }
+        title: "进展复盘"
+        payload:
+          owner_user_id: $trigger.payload.owner_user_id
+          goals: $trigger.payload.goals
+          blockers: $trigger.payload.blockers
+
+    - id: plan
+      description: 规划教练据复盘给下周 3 个具体动作
+      dispatch:
+        strategy: { kind: capability, capabilities: [suggest-next-actions] }
+        title: "下周动作"
+        payload:
+          owner_user_id: $trigger.payload.owner_user_id
+          review: $review.output
+          goals: $trigger.payload.goals
+
+  output:
+    review: $review.output
+    next_actions: $plan.output

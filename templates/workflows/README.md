@@ -38,9 +38,17 @@ workflows/
                                    intake→research→draft→👤review→finalize
                                    集成 Hub Services（memory/artifact/datastore）
                                    + case-conversation 横切对话面
+
+  # 🙋 member-facing —— 声明 surface.me，任何登录用户从 /me 直接跑
+  personal-growth-flow.yaml        🙋 个人成长发展路径（7 教练，scope=case_id）
+  daily-reflection-flow.yaml       🙋 每日反思（最小 1 步示例，默认 case_id scope）
+  weekly-goal-checkin-flow.yaml    🙋 每周目标复盘（2 步示例，scope=owner_user_id）
 ```
 
 ⭐ = 配套 `templates/teams/` 下同名团队使用。
+🙋 = member-facing：声明 `surface.me.enabled`，出现在 `/me` 成员工作台。
+后端强制 `payload[userScopeField] = 调用者 userId`（默认 `case_id`），
+成员只能为自己跑；`surface.me.input_schema` 不含 scope key（不暴露给成员）。
 🆕 = v2.3：在 v2.2 "Hub Services + 人在回路" 基础上引入 **案主任务管家
 **（`templates/agents/case-manager.yaml`），让案主能在工作流任意时刻
 插话，对话写进 case-memory，下游 step 自动读到。端到端实测见

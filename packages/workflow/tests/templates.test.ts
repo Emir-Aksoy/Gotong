@@ -47,21 +47,43 @@ describe('repo workflows parse cleanly', async () => {
   }
 })
 
-describe('personal-growth-flow declares a member-facing surface.me (Phase 14)', () => {
+describe('member-facing workflow templates declare a valid surface.me (Phase 14)', () => {
   const here = dirname(fileURLToPath(import.meta.url))
   const repoRoot = join(here, '..', '..', '..')
-  const file = join(repoRoot, 'templates', 'workflows', 'personal-growth-flow.yaml')
+  const wfDir = join(repoRoot, 'templates', 'workflows')
 
-  it('parses surface.me with the 4 free-form fields and case_id scope', async () => {
-    const wf = parseWorkflow(await readFile(file, 'utf8'))
-    const me = wf.surface?.me
-    expect(me?.enabled).toBe(true)
-    expect(me?.userScopeField).toBe('case_id')
-    // The member form omits case_id on purpose — it's the scope key, forced
-    // server-side, so a member can only ever run for themselves. (The admin
-    // trigger form DOES expose case_id, via trigger.payloadSchema.)
-    const ids = (me?.inputSchema ?? []).map((f) => f.id)
-    expect(ids).toEqual(['present_state', 'aspirations', 'struggles', 'focus_request'])
-    expect(ids).not.toContain('case_id')
-  })
+  // Each shipped member-facing template, with the contract /me relies on:
+  // the effective scope key (undefined → me-routes defaults it to case_id)
+  // and the member input fields — which must NEVER include the scope key.
+  // The scope key is forced server-side; surfacing it as a member field
+  // would invite spoofing. The admin trigger form may still expose it.
+  const cases = [
+    {
+      file: 'personal-growth-flow.yaml',
+      scopeKey: 'case_id',
+      fields: ['present_state', 'aspirations', 'struggles', 'focus_request'],
+    },
+    {
+      file: 'daily-reflection-flow.yaml',
+      scopeKey: undefined, // omitted → defaults to case_id downstream
+      fields: ['highlights', 'lowlights', 'tomorrow_focus'],
+    },
+    {
+      file: 'weekly-goal-checkin-flow.yaml',
+      scopeKey: 'owner_user_id', // exercises an alternate scope key
+      fields: ['goals', 'blockers'],
+    },
+  ]
+
+  for (const c of cases) {
+    it(`${c.file}: enabled, ${c.fields.length} member fields, scope=${c.scopeKey ?? '(default case_id)'}`, async () => {
+      const wf = parseWorkflow(await readFile(join(wfDir, c.file), 'utf8'))
+      const me = wf.surface?.me
+      expect(me?.enabled).toBe(true)
+      expect(me?.userScopeField).toBe(c.scopeKey)
+      const ids = (me?.inputSchema ?? []).map((f) => f.id)
+      expect(ids).toEqual(c.fields)
+      expect(ids).not.toContain(c.scopeKey ?? 'case_id')
+    })
+  }
 })
