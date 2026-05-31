@@ -23,6 +23,7 @@ import type { HubLink } from './hub-link.js'
 import { RemoteHubViaLink, type OriginResolver } from './participants/remote-hub.js'
 import type {
   DispatchStrategy,
+  Participant,
   ParticipantId,
   Task,
   TaskId,
@@ -185,6 +186,22 @@ export interface InstallPeerLinkOptions {
    * inside the responder — `installPeerLink` only gates Task dispatch.
    */
   rpcResponder?: (call: { method: string; params: unknown }) => Promise<unknown>
+  /**
+   * Phase 18 B-M3 — optionally decorate the outbound wrapper before it's
+   * registered in the local hub. The host uses this to gate cross-org
+   * dispatches behind an approval inbox (the decorator throws
+   * `SuspendTaskError`; a person resolves it later, then the real send
+   * happens). Core stays policy-agnostic — it only knows "wrap a
+   * participant, get a participant back."
+   *
+   * Contract the wrapper MUST honour (else the mesh edge breaks):
+   *   - keep the inner wrapper's `id` — capability dispatch selection,
+   *     `mirrorChannels` subscription, and `uninstall()` all key on it;
+   *   - delegate `capabilities` so the hub still routes the peer's caps
+   *     to it. (`InstalledPeerLink.remotePeer` still returns the INNER
+   *     wrapper so callers' `setCapabilities()` keeps working.)
+   */
+  wrapOutbound?: (inner: RemoteHubViaLink) => Participant
 }
 
 export interface InstalledPeerLink {
@@ -290,7 +307,11 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
     ...(opts.selfHubId !== undefined ? { selfHubId: opts.selfHubId } : {}),
     ...(opts.originResolver !== undefined ? { originResolver: opts.originResolver } : {}),
   })
-  opts.hub.register(remotePeer)
+  // B-M3: an optional host decorator (e.g. outbound approval gate) sits in
+  // front of the wrapper. It must keep `remotePeer.id` so the registry key,
+  // capability routing, and uninstall-by-id all still line up.
+  const outbound: Participant = opts.wrapOutbound ? opts.wrapOutbound(remotePeer) : remotePeer
+  opts.hub.register(outbound)
 
   // Optionally subscribe the wrapper to local channels so local
   // publishes get mirrored over the link.
