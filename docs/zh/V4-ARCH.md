@@ -224,6 +224,34 @@ agent 的角度看,/me/dispatch 跟 owner 手填 case_id 在 /admin/dispatch
 - 没加 `/me/whoami` 别名(目前仍走 `/api/admin/identity/me`,该路由已
   被搬到 owner gate 之上,member 也能调)
 
+### Phase 14 addendum — `/me` 通用化(2026-05-31)
+
+> 上面的 Phase 2 快照按 append-only 约定保留。下面是 Phase 14 对它的更新:
+> 凡涉及「单工作流 / 硬编码 allowlist / `/allowed-workflows`」的描述都已被
+> 通用化取代。
+
+Phase 2 的 `/me` 只对**单一**工作流(`personal-growth-flow`)开放,allowlist
+是 `me-routes.ts` 里硬编码的 `ALLOWED_WORKFLOWS` 表。Phase 14 把它泛化成
+**工作流声明驱动**:
+
+- **删** `GET /api/me/allowed-workflows`(上面那条)、硬编码
+  `ALLOWED_WORKFLOWS`、`listAllowedWorkflowsForMe`。
+- **改** `GET /api/me/workflows` —— 请求时从 `WorkflowSurface.list()` 派生
+  catalog,只保留声明了 `surface.me.enabled` 且 `allowedRoles` 含调用者 role
+  的工作流;只投影 `{id,label,description,inputSchema}`(故意不暴露
+  `capability` / `userScopeField` 等内部强制细节,暴露 = 送探测面)。
+- **泛化** `POST /api/me/dispatch` —— 对**任意** member-facing 工作流生效,
+  归属键不再写死 `case_id`,改用工作流声明的 `surface.me.userScopeField`
+  (缺省仍 `case_id`);`payload[userScopeField] = userId` 强制覆盖逻辑不变。
+- **新安全边界**:没声明 `surface.me.enabled` 的工作流从 `/me` 调用一律 403
+  —— `enabled` 门**就是**安全边界(`resolveMeWorkflow` fail-closed)。授权
+  信任从「改 TS 的提交者」位移到「import YAML 的 admin」(`/api/admin/
+  workflows/import` 本就 admin-gated)。
+
+上面「安全契约」那段(case_id 由后端拍板、报告路径等值校验)**不变**,只是
+「case_id」现在泛化为「`userScopeField`」。growth-reports 的过滤 + 下载 ACL
+完全没碰。详见 `docs/zh/V4-PHASE14-FINAL.md`。
+
 ## 五、Phase 3 + 计划(更远)
 
 - **federation 与 identity 衔接** —— HubLink 跨 org 调用时,带上发起方
