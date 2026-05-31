@@ -36,6 +36,7 @@ import type { AdminRecord, Hub } from '@aipehub/core'
 import type {
   WorkflowAssistSurface,
   WorkflowAssistContextHints,
+  WorkflowSummary,
   WorkflowSurface,
 } from './server.js'
 
@@ -114,6 +115,27 @@ export async function handleWorkflowRoute(
       sendJson(res, { ok: true, workflow: summary })
     } catch (err) {
       sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+    return true
+  }
+
+  // POST /api/admin/workflows/draft — save YAML as a DRAFT (Phase 15).
+  // The opt-in counterpart to /import: creates the workflow but does NOT
+  // make it live (no runner, absent from list() until published).
+  if (method === 'POST' && path === '/api/admin/workflows/draft') {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    if (!ctx.workflows) {
+      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
+      return true
+    }
+    const raw = await readTextBody(req).catch(() => '')
+    if (!raw) { sendJson(res, { error: 'empty body' }, 400); return true }
+    try {
+      const summary = await ctx.workflows.saveDraft(raw, { by: admin.id })
+      sendJson(res, { ok: true, workflow: summary })
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, lifecycleErrorStatus(err))
     }
     return true
   }
@@ -214,6 +236,123 @@ export async function handleWorkflowRoute(
     return true
   }
 
+  // Phase 15 lifecycle transitions — POST /api/admin/workflows/:id/<action>.
+  // Wired before the catch-all DELETE /:id (single-segment) — these all
+  // carry a second path segment so they never collide. `publish` accepts an
+  // optional `{ text }` body (publish an edit); `rollback` requires
+  // `{ targetRevision }`; the rest need no body. The acting admin is stamped
+  // as `by` for the audit log.
+  const lifecycleMatch = path.match(
+    /^\/api\/admin\/workflows\/([^/]+)\/(draft|review|publish|deprecate|archive|rollback)$/,
+  )
+  if (method === 'POST' && lifecycleMatch) {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    if (!ctx.workflows) {
+      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
+      return true
+    }
+    const wf = ctx.workflows
+    const id = decodeURIComponent(lifecycleMatch[1]!)
+    const action = lifecycleMatch[2]!
+    const by = admin.id
+    try {
+      let summary: WorkflowSummary
+      switch (action) {
+        case 'review':
+          summary = await wf.submitReview(id, { by })
+          break
+        case 'draft':
+          summary = await wf.backToDraft(id, { by })
+          break
+        case 'deprecate':
+          summary = await wf.deprecate(id, { by })
+          break
+        case 'archive':
+          summary = await wf.archive(id, { by })
+          break
+        case 'publish': {
+          const body = (await readJsonBody(req).catch(() => undefined)) as
+            | { text?: unknown }
+            | undefined
+          const text = body && typeof body.text === 'string' ? body.text : undefined
+          summary = await wf.publish(id, { ...(text !== undefined ? { text } : {}), by })
+          break
+        }
+        case 'rollback': {
+          const body = (await readJsonBody(req).catch(() => undefined)) as
+            | { targetRevision?: unknown }
+            | undefined
+          const target =
+            body && typeof body.targetRevision === 'number' ? body.targetRevision : NaN
+          if (!Number.isInteger(target)) {
+            sendJson(res, { error: 'targetRevision (integer) is required' }, 400)
+            return true
+          }
+          summary = await wf.rollback(id, { targetRevision: target, by })
+          break
+        }
+        default:
+          sendJson(res, { error: `unknown action '${action}'` }, 400)
+          return true
+      }
+      sendJson(res, { ok: true, workflow: summary })
+    } catch (err) {
+      sendJson(
+        res,
+        { error: err instanceof Error ? err.message : String(err) },
+        lifecycleErrorStatus(err),
+      )
+    }
+    return true
+  }
+
+  // GET /api/admin/workflows/:id/revisions — revision metadata, ascending.
+  const revisionsMatch = path.match(/^\/api\/admin\/workflows\/([^/]+)\/revisions$/)
+  if (method === 'GET' && revisionsMatch) {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    if (!ctx.workflows) {
+      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
+      return true
+    }
+    const id = decodeURIComponent(revisionsMatch[1]!)
+    try {
+      const revisions = await ctx.workflows.listRevisions(id)
+      sendJson(res, { revisions })
+    } catch (err) {
+      sendJson(
+        res,
+        { error: err instanceof Error ? err.message : String(err) },
+        lifecycleErrorStatus(err),
+      )
+    }
+    return true
+  }
+
+  // GET /api/admin/workflows/:id/state — full lifecycle view.
+  const stateMatch = path.match(/^\/api\/admin\/workflows\/([^/]+)\/state$/)
+  if (method === 'GET' && stateMatch) {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    if (!ctx.workflows) {
+      sendJson(res, { error: 'workflows not enabled on this host' }, 404)
+      return true
+    }
+    const id = decodeURIComponent(stateMatch[1]!)
+    try {
+      const lifecycle = await ctx.workflows.getState(id)
+      sendJson(res, { lifecycle })
+    } catch (err) {
+      sendJson(
+        res,
+        { error: err instanceof Error ? err.message : String(err) },
+        lifecycleErrorStatus(err),
+      )
+    }
+    return true
+  }
+
   // DELETE /api/admin/workflows/:id — unregister + delete YAML.
   // Wired LAST so the /runs sub-routes can never get caught here.
   const deleteWorkflowMatch = path.match(/^\/api\/admin\/workflows\/([^/]+)$/)
@@ -238,4 +377,36 @@ export async function handleWorkflowRoute(
   }
 
   return false
+}
+
+/**
+ * Map a lifecycle/revision error to an HTTP status by its duck-typed `code`
+ * (the Web layer never imports the workflow error classes). Unknown codes fall
+ * back to 400 (a malformed request is the common case).
+ *
+ *   unknown_workflow                                  → 404
+ *   revision_missing / rollback_target_required /     → 400
+ *     no_current_revision
+ *   illegal_transition / capability_immutable /       → 409
+ *     stale_head
+ */
+function lifecycleErrorStatus(err: unknown): number {
+  const code =
+    err && typeof err === 'object' && 'code' in err
+      ? String((err as { code: unknown }).code)
+      : ''
+  switch (code) {
+    case 'unknown_workflow':
+      return 404
+    case 'illegal_transition':
+    case 'capability_immutable':
+    case 'stale_head':
+      return 409
+    case 'revision_missing':
+    case 'rollback_target_required':
+    case 'no_current_revision':
+      return 400
+    default:
+      return 400
+  }
 }

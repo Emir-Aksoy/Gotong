@@ -434,6 +434,36 @@ export interface WorkflowSurface {
    * `finalOutput` / `error`. Returns `null` when no such run exists.
    */
   readRun(runId: string): Promise<unknown>
+
+  // --- Phase 15 — workflow lifecycle + revisions -------------------------
+  // All return the updated `WorkflowSummary` (state + currentRevision
+  // reflect the transition). Throw a duck-typed error carrying `code`
+  // (`unknown_workflow` / `illegal_transition` / `capability_immutable` /
+  // `revision_missing` / …) which the route maps to an HTTP status. The
+  // Web layer never imports the workflow error classes — it reads `.code`.
+
+  /** Save a workflow as a DRAFT (not live). New id, or edit an existing draft. */
+  saveDraft(text: string, opts?: { by?: string }): Promise<WorkflowSummary>
+  /**
+   * Publish a workflow. With `text`, publish that edited content as a new
+   * revision; without it, promote the current head (draft/review/deprecated
+   * → published).
+   */
+  publish(id: string, opts?: { text?: string; by?: string }): Promise<WorkflowSummary>
+  /** draft → review. */
+  submitReview(id: string, opts?: { by?: string }): Promise<WorkflowSummary>
+  /** review → draft. */
+  backToDraft(id: string, opts?: { by?: string }): Promise<WorkflowSummary>
+  /** published → deprecated (soft sunset; stays live, hidden from `/me`). */
+  deprecate(id: string, opts?: { by?: string }): Promise<WorkflowSummary>
+  /** deprecated → archived (tombstone; unregistered). */
+  archive(id: string, opts?: { by?: string }): Promise<WorkflowSummary>
+  /** Roll the current published content back to an earlier revision (append-only). */
+  rollback(id: string, opts: { targetRevision: number; by?: string }): Promise<WorkflowSummary>
+  /** Revision metadata for a workflow, ascending. */
+  listRevisions(id: string): Promise<WorkflowRevisionMeta[]>
+  /** Full lifecycle view (state, pointers, revisions, history, legal actions). */
+  getState(id: string): Promise<WorkflowLifecycleView>
 }
 
 /**
@@ -543,6 +573,52 @@ export interface WorkflowSummary {
    * `null` if the runner was registered programmatically (no file).
    */
   file: string | null
+  /** Phase 15 — lifecycle state. Absent only on legacy hosts that predate it. */
+  state?: WorkflowLifecycleState
+  /** Phase 15 — the revision new runs bind to. Absent for a never-published draft. */
+  currentRevision?: number
+}
+
+// --- Phase 15 — lifecycle mirror types -------------------------------------
+// Structural duplicates of `@aipehub/workflow`'s lifecycle shapes, so the Web
+// layer can type the surface + echo the JSON without a runtime dep. Kept loose
+// (`action` / `legalActions` as strings) — the routes only forward these.
+
+export type WorkflowLifecycleState =
+  | 'draft'
+  | 'review'
+  | 'published'
+  | 'deprecated'
+  | 'archived'
+
+export interface WorkflowRevisionMeta {
+  revision: number
+  contentHash: string
+  createdAt: number
+  createdBy?: string
+  origin: 'import' | 'saveDraft' | 'publish' | 'rollback'
+  rolledBackFrom?: number
+}
+
+export interface WorkflowTransitionLog {
+  at: number
+  action: string
+  from: WorkflowLifecycleState
+  to: WorkflowLifecycleState
+  by?: string
+  targetRevision?: number
+}
+
+export interface WorkflowLifecycleView {
+  workflowId: string
+  state: WorkflowLifecycleState
+  currentRevision?: number
+  headRevision: number
+  triggerCapability: string
+  revisions: WorkflowRevisionMeta[]
+  history: WorkflowTransitionLog[]
+  legalActions: string[]
+  registered: boolean
 }
 
 /**
