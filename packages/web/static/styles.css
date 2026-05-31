@@ -562,6 +562,26 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   border-radius: 0;
   background: none;
 }
+/* Cross-hub federation subsection (#2-M3.4b): a group heading, a per-peer
+   label, and indented `peer:server` checkboxes under it. Offline / orphan
+   refs render muted but stay checked so an edit doesn't drop them. */
+.ma-mcp-optin .ma-mcp-group {
+  font-size: 0.7rem;
+  color: #888;
+  font-weight: 600;
+  margin-top: 0.45rem;
+}
+.ma-mcp-optin .ma-mcp-peer {
+  font-size: 0.72rem;
+  color: #666;
+  margin-top: 0.15rem;
+}
+.ma-mcp-optin label.ma-mcp-cb.ma-mcp-cb-peer {
+  padding-left: 0.75rem;
+}
+.ma-mcp-optin label.ma-mcp-cb.ma-mcp-offline span {
+  color: #aaa;
+}
 .form-msg {
   margin: 0;
   font-size: 0.78rem;

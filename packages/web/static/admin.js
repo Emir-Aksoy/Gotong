@@ -574,25 +574,57 @@
       ma._mcpAvailable = true;
       fieldset.hidden = false;
       const sel = new Set(selected || []);
-      if (servers.length === 0) {
-        if (emptyEl) emptyEl.hidden = false;
-        return;
-      }
-      if (emptyEl) emptyEl.hidden = true;
+      const rendered = /* @__PURE__ */ new Set();
+      const addCheckbox = (value, text, checked, extraClass = "") => {
+        const label = document.createElement("label");
+        label.className = extraClass ? `ma-mcp-cb ${extraClass}` : "ma-mcp-cb";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.value = value;
+        cb.checked = checked;
+        const span = document.createElement("span");
+        span.textContent = text;
+        label.append(cb, span);
+        container.appendChild(label);
+        rendered.add(value);
+      };
+      const addHeading = (text, cls) => {
+        const h = document.createElement("div");
+        h.className = cls;
+        h.textContent = text;
+        container.appendChild(h);
+      };
       for (const rec of servers) {
         const name = rec.spec?.name;
         if (!name) continue;
-        const label = document.createElement("label");
-        label.className = "ma-mcp-cb";
-        const cb = document.createElement("input");
-        cb.type = "checkbox";
-        cb.value = name;
-        cb.checked = sel.has(name);
-        const span = document.createElement("span");
-        span.textContent = rec.description ? `${name} — ${rec.description}` : name;
-        label.append(cb, span);
-        container.appendChild(label);
+        addCheckbox(name, rec.description ? `${name} — ${rec.description}` : name, sel.has(name));
       }
+      let peers = [];
+      try {
+        const r2 = await fetch("/api/admin/mcp-shared");
+        if (r2.ok) peers = (await r2.json()).peers || [];
+      } catch (err) {
+        console.warn("agent form: mcp-shared list failed", err);
+      }
+      const online = peers.filter((p) => p && p.online && Array.isArray(p.servers) && p.servers.length > 0);
+      const discovered = /* @__PURE__ */ new Set();
+      for (const p of online) for (const s of p.servers) if (s?.name) discovered.add(`${p.peer}:${s.name}`);
+      const orphans = [...sel].filter((ref) => ref.includes(":") && !discovered.has(ref));
+      if (online.length > 0 || orphans.length > 0) {
+        addHeading(t3.mcpAgentFedHeading, "ma-mcp-group");
+        for (const p of online) {
+          addHeading(p.label || p.peer, "ma-mcp-peer");
+          for (const s of p.servers) {
+            if (!s?.name) continue;
+            const ref = `${p.peer}:${s.name}`;
+            addCheckbox(ref, s.description ? `${s.name} — ${s.description}` : s.name, sel.has(ref), "ma-mcp-cb-peer");
+          }
+        }
+        for (const ref of orphans) {
+          addCheckbox(ref, `${ref} ${t3.mcpAgentOffline}`, true, "ma-mcp-cb-peer ma-mcp-offline");
+        }
+      }
+      if (emptyEl) emptyEl.hidden = container.children.length > 0;
     }
     function openAgentForm(mode, agent) {
       ma.formMode = mode;
