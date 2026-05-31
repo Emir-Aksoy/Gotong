@@ -8,10 +8,10 @@
  *
  * Coverage focus:
  *   - /api/me/* without v4 session → 401
- *   - /api/me/allowed-workflows catalog
- *   - /api/me/dispatch forces case_id = userId (even if member tries to
- *     spoof it), drops payload fields not in the allowlist, and refuses
- *     un-allowlisted workflowIds
+ *   - /api/me/workflows — member-facing catalog DERIVED from surface.me
+ *   - /api/me/dispatch forces payload[userScopeField] = userId (even if
+ *     a member tries to spoof it), drops undeclared fields, and refuses
+ *     any workflow that isn't member-facing for the caller's role
  *   - /api/me/growth-reports filters to caseId === userId
  *   - /api/me/growth-reports/download blocks cross-user paths
  *   - host without growthReports surface → 503 on /growth-reports*
@@ -261,30 +261,6 @@ describe('/api/me/* — auth gate', () => {
   })
 })
 
-describe('/api/me/allowed-workflows', () => {
-  let b: BootResult
-  beforeEach(async () => { b = await boot() })
-  afterEach(async () => { await teardown(b) })
-
-  it('returns the personal-growth-flow allowlist entry', async () => {
-    const r = await fetch(`${b.baseUrl}/api/me/allowed-workflows`, {
-      headers: { cookie: b.memberCookie },
-    })
-    expect(r.status).toBe(200)
-    const body = (await r.json()) as {
-      workflows: Array<{ workflowId: string; capability: string; payloadFields: string[]; label: string }>
-    }
-    const pg = body.workflows.find((w) => w.workflowId === 'personal-growth-flow')
-    expect(pg).toBeTruthy()
-    expect(pg!.capability).toBe('plan-personal-growth')
-    expect(pg!.payloadFields).toEqual(
-      expect.arrayContaining([
-        'present_state', 'aspirations', 'struggles', 'focus_request',
-      ]),
-    )
-  })
-})
-
 describe('/api/me/workflows — member-facing catalog (Phase 14)', () => {
   // A spread of summaries exercising every catalog gate: enabled +
   // default role (visible), disabled (hidden), role-restricted (hidden
@@ -391,89 +367,185 @@ describe('/api/me/workflows — member-facing catalog (Phase 14)', () => {
   })
 })
 
+// Member-facing workflows for the dispatch tests. All target the
+// `plan-personal-growth` capability that boot() registers a stub
+// participant for, so dispatched tasks land in the hub transcript where
+// the spoof tests can inspect the forced scope key.
+const DISPATCH_WORKFLOWS: WorkflowSummary[] = [
+  meWf({
+    id: 'growth',
+    name: 'Growth',
+    triggerCapability: 'plan-personal-growth',
+    surfaceMe: {
+      enabled: true,
+      label: 'Growth',
+      inputSchema: [
+        { id: 'present_state', type: 'textarea' },
+        { id: 'aspirations', type: 'textarea' },
+      ],
+      // userScopeField omitted → defaults to case_id
+    },
+  }),
+  meWf({
+    id: 'owner-scoped',
+    name: 'Owner Scoped',
+    triggerCapability: 'plan-personal-growth',
+    surfaceMe: {
+      enabled: true,
+      label: 'Owner Scoped',
+      inputSchema: [{ id: 'topic', type: 'text' }],
+      userScopeField: 'owner_user_id', // alternate scope key
+    },
+  }),
+  meWf({
+    id: 'disabled',
+    triggerCapability: 'plan-personal-growth',
+    surfaceMe: { enabled: false },
+  }),
+  meWf({
+    id: 'admins-only',
+    triggerCapability: 'plan-personal-growth',
+    surfaceMe: { enabled: true, allowedRoles: ['owner', 'admin'] },
+  }),
+  // A real workflow that simply never opted into /me — must be unrunnable.
+  meWf({ id: 'no-surface', triggerCapability: 'plan-personal-growth' }),
+]
+
 describe('/api/me/dispatch — security contract', () => {
   let b: BootResult
-  beforeEach(async () => { b = await boot() })
+  beforeEach(async () => { b = await boot({ workflows: DISPATCH_WORKFLOWS }) })
   afterEach(async () => { await teardown(b) })
 
-  it('dispatches PG with case_id forced to caller userId', async () => {
+  it('dispatches a member-facing workflow; scope key forced to caller userId', async () => {
     const r = await fetch(`${b.baseUrl}/api/me/dispatch`, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        cookie: b.memberCookie,
-      },
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
       body: JSON.stringify({
-        workflowId: 'personal-growth-flow',
-        payload: { present_state: 'a bit stuck', focus_request: 'next 12 weeks' },
+        workflowId: 'growth',
+        payload: { present_state: 'a bit stuck', aspirations: 'next 12 weeks' },
       }),
     })
     expect(r.status).toBe(200)
-    const body = (await r.json()) as { ok: boolean; caseId: string; workflowId: string }
+    const body = (await r.json()) as { ok: boolean; workflowId: string }
     expect(body.ok).toBe(true)
-    expect(body.caseId).toBe(b.memberUserId) // <-- the security guarantee
-    expect(body.workflowId).toBe('personal-growth-flow')
+    expect(body.workflowId).toBe('growth')
+
+    // The forced scope key (default case_id) lands on the dispatched task.
+    const tasks = b.hub.tasks()
+    const payload = tasks[tasks.length - 1]!.task.payload as Record<string, unknown>
+    expect(payload.case_id).toBe(b.memberUserId) // <-- the security guarantee
+    expect(payload.present_state).toBe('a bit stuck')
   })
 
-  it('refuses to dispatch a workflowId NOT in the allowlist (403)', async () => {
+  it('refuses a workflow that is not member-facing — disabled (403)', async () => {
     const r = await fetch(`${b.baseUrl}/api/me/dispatch`, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        cookie: b.memberCookie,
-      },
-      body: JSON.stringify({ workflowId: 'arbitrary-workflow', payload: {} }),
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+      body: JSON.stringify({ workflowId: 'disabled', payload: {} }),
     })
     expect(r.status).toBe(403)
-    const body = (await r.json()) as { code?: string; allowed?: string[] }
+    const body = (await r.json()) as { code?: string }
     expect(body.code).toBe('workflow_not_allowed')
-    expect(body.allowed).toContain('personal-growth-flow')
   })
 
-  it('strips body.payload.case_id (member cannot spoof another user)', async () => {
-    // Inspect the hub transcript to find the dispatched task and verify
-    // its payload.case_id is the caller's userId, NOT the spoofed value.
+  it('refuses a workflow with no surface.me declaration at all (403)', async () => {
+    // The most important new invariant: opening to /me is opt-IN. A
+    // workflow that never declared surface.me is unrunnable here, even
+    // though it is otherwise a perfectly real, importable workflow.
+    const r = await fetch(`${b.baseUrl}/api/me/dispatch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+      body: JSON.stringify({ workflowId: 'no-surface', payload: {} }),
+    })
+    expect(r.status).toBe(403)
+  })
+
+  it('refuses a workflow whose allowedRoles exclude the caller (403)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/me/dispatch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+      body: JSON.stringify({ workflowId: 'admins-only', payload: {} }),
+    })
+    expect(r.status).toBe(403)
+    const body = (await r.json()) as { code?: string }
+    expect(body.code).toBe('workflow_not_allowed')
+  })
+
+  it('refuses an unknown workflowId (403)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/me/dispatch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+      body: JSON.stringify({ workflowId: 'does-not-exist', payload: {} }),
+    })
+    expect(r.status).toBe(403)
+  })
+
+  it('strips a spoofed case_id and undeclared fields (member cannot spoof)', async () => {
     const spoofed = 'someone-elses-case'
     const r = await fetch(`${b.baseUrl}/api/me/dispatch`, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        cookie: b.memberCookie,
-      },
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
       body: JSON.stringify({
-        workflowId: 'personal-growth-flow',
+        workflowId: 'growth',
         payload: {
           present_state: 'x',
-          case_id: spoofed,
-          // Smuggled field NOT in payloadFields — should also be dropped.
-          arbitrary_extra: 'should-not-survive',
+          case_id: spoofed, // forced to userId regardless
+          arbitrary_extra: 'should-not-survive', // not declared → dropped
         },
       }),
     })
     expect(r.status).toBe(200)
 
-    // Pull the dispatched task back from the hub transcript. The
     // TaskView wraps the Task in `.task` — the payload lives there.
     const tasks = b.hub.tasks()
-    const lastTask = tasks[tasks.length - 1]
-    expect(lastTask).toBeTruthy()
-    const payload = lastTask!.task.payload as Record<string, unknown>
+    const payload = tasks[tasks.length - 1]!.task.payload as Record<string, unknown>
     expect(payload.case_id).toBe(b.memberUserId)
     expect(payload.case_id).not.toBe(spoofed)
     expect(payload.arbitrary_extra).toBeUndefined()
     expect(payload.present_state).toBe('x')
   })
 
+  it('forces an alternate scope key (owner_user_id) and ignores spoofing', async () => {
+    const r = await fetch(`${b.baseUrl}/api/me/dispatch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+      body: JSON.stringify({
+        workflowId: 'owner-scoped',
+        payload: { topic: 'roadmap', owner_user_id: 'someone-else' },
+      }),
+    })
+    expect(r.status).toBe(200)
+
+    const tasks = b.hub.tasks()
+    const payload = tasks[tasks.length - 1]!.task.payload as Record<string, unknown>
+    expect(payload.owner_user_id).toBe(b.memberUserId) // forced on the declared key
+    expect(payload.topic).toBe('roadmap')
+    // The default case_id key is NOT set for a workflow using another scope key.
+    expect(payload.case_id).toBeUndefined()
+  })
+
   it('400 when workflowId is missing', async () => {
     const r = await fetch(`${b.baseUrl}/api/me/dispatch`, {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        cookie: b.memberCookie,
-      },
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
       body: JSON.stringify({ payload: {} }),
     })
     expect(r.status).toBe(400)
+  })
+})
+
+describe('/api/me/dispatch — fail-closed when no workflow surface', () => {
+  let b: BootResult
+  beforeEach(async () => { b = await boot() }) // no workflows wired
+  afterEach(async () => { await teardown(b) })
+
+  it('refuses every dispatch (403) when the host wired no workflow surface', async () => {
+    const r = await fetch(`${b.baseUrl}/api/me/dispatch`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+      body: JSON.stringify({ workflowId: 'growth', payload: {} }),
+    })
+    expect(r.status).toBe(403)
   })
 })
 
@@ -577,7 +649,10 @@ describe('/api/me/dispatch — rate limit (AUDIT-P3-01)', () => {
   beforeEach(async () => {
     // Tight budget so we can prove the cap with a small loop. 2 hits
     // allowed per minute; 3rd should 429.
-    b = await boot({ adminLoginRateLimit: { max: 2, windowSec: 60 } })
+    b = await boot({
+      adminLoginRateLimit: { max: 2, windowSec: 60 },
+      workflows: DISPATCH_WORKFLOWS,
+    })
   })
   afterEach(async () => {
     await teardown(b)
@@ -589,7 +664,7 @@ describe('/api/me/dispatch — rate limit (AUDIT-P3-01)', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie: b.memberCookie },
         body: JSON.stringify({
-          workflowId: 'personal-growth-flow',
+          workflowId: 'growth',
           payload: { present_state: 'p', aspirations: 'a' },
         }),
       })
@@ -604,7 +679,10 @@ describe('/api/me/dispatch — rate limit (AUDIT-P3-01)', () => {
 describe('/api/me/growth-reports — rate limit (AUDIT-P3-02)', () => {
   let b: BootResult
   beforeEach(async () => {
-    b = await boot({ adminLoginRateLimit: { max: 2, windowSec: 60 } })
+    b = await boot({
+      adminLoginRateLimit: { max: 2, windowSec: 60 },
+      workflows: DISPATCH_WORKFLOWS,
+    })
   })
   afterEach(async () => {
     await teardown(b)
@@ -627,7 +705,7 @@ describe('/api/me/growth-reports — rate limit (AUDIT-P3-02)', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie: b.memberCookie },
         body: JSON.stringify({
-          workflowId: 'personal-growth-flow',
+          workflowId: 'growth',
           payload: { present_state: 'p', aspirations: 'a' },
         }),
       })

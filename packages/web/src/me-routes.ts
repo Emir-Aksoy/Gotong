@@ -20,21 +20,25 @@
  * caseId to scope to. v3 admins manage the org via /admin; v4 owners
  * who also want to use the /me surface can — they have a v4 user id.
  *
- * # Workflow allowlist
+ * # Member-facing workflow catalog (Phase 14)
  *
- * Dispatch is limited to a small allowlist (currently just
- * `personal-growth-flow`). The handler maps workflowId → capability +
- * accepted payload fields, then forwards via hub.dispatch with the
- * caller's userId as both `from` and `case_id`. Future workflows
- * that want a /me entry add themselves to `ALLOWED_WORKFLOWS`.
+ * Dispatch is limited to workflows that declare `surface.me.enabled` in
+ * their YAML and whose `allowedRoles` include the caller's role. The
+ * catalog is DERIVED at request time from the live workflow list
+ * (`ctx.workflows.list()`), not a hardcoded table — so opening a
+ * workflow to members is an import-time decision by an admin (who
+ * already gates `/api/admin/workflows/import`), not a source edit here.
  *
- * Why an allowlist instead of a generic "dispatch anything" route:
- * the workflow runner's `from` field is normally a privileged admin
- * id (or 'system' for in-process demos). Letting an arbitrary v4 user
- * trigger an arbitrary workflow with their userId as `from` would
- * effectively grant them v3 admin's dispatch authority. The allowlist
- * keeps the surface narrow to workflows that have been audited as
- * safe for member-initiated runs.
+ * For an allowed workflow the handler copies only the declared input
+ * fields, forces `payload[userScopeField] = userId` (default `case_id`),
+ * and forwards via hub.dispatch with the caller's userId as `from`.
+ *
+ * Why a gate at all (not a generic "dispatch anything" route): the
+ * workflow runner's `from` field is normally a privileged admin id (or
+ * 'system' for in-process demos). Letting an arbitrary v4 user trigger
+ * an arbitrary workflow with their userId as `from` would effectively
+ * grant them v3 admin's dispatch authority. The `surface.me.enabled`
+ * declaration is the audited boundary that keeps the surface narrow.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -51,37 +55,6 @@ import {
 } from './identity-routes.js'
 
 const log = createLogger('me-routes')
-
-// ---------------------------------------------------------------------------
-// Allowlist
-// ---------------------------------------------------------------------------
-
-interface AllowedWorkflow {
-  /** Capability the workflow runner listens on. */
-  capability: string
-  /**
-   * Whitelisted payload field names. Anything else in the request body
-   * is dropped before dispatch — defence-in-depth so a member can't
-   * smuggle extra fields the workflow might consume in unexpected ways.
-   * `case_id` is forced server-side and never sourced from the body.
-   */
-  payloadFields: readonly string[]
-  /** Human-readable label used by the /me page. */
-  label: string
-}
-
-const ALLOWED_WORKFLOWS: Record<string, AllowedWorkflow> = {
-  'personal-growth-flow': {
-    capability: 'plan-personal-growth',
-    payloadFields: [
-      'present_state',
-      'aspirations',
-      'struggles',
-      'focus_request',
-    ],
-    label: 'Personal Growth (7-coach team)',
-  },
-}
 
 // ---------------------------------------------------------------------------
 // Helpers — kept private to this module to mirror identity-routes.ts.
@@ -208,6 +181,31 @@ function evaluateMeSurface(
   return out
 }
 
+/**
+ * Look up one workflow by id in the live catalog and resolve it for the
+ * caller's role. Returns null when the workflow surface is unwired, the
+ * id isn't found, or it isn't member-facing for this role — all of which
+ * the dispatch handler turns into a 403. Fail-closed: a list() error also
+ * resolves to null (deny rather than dispatch on incomplete info).
+ */
+async function resolveMeWorkflow(
+  ctx: HandleMeRouteCtx,
+  workflowId: string,
+  role: string,
+): Promise<ResolvedMeWorkflow | null> {
+  if (!ctx.workflows) return null
+  let summaries: MeWorkflowSummaryLike[]
+  try {
+    summaries = await ctx.workflows.list()
+  } catch (err) {
+    log.error('me dispatch: workflow list failed; denying', { err })
+    return null
+  }
+  const summary = summaries.find((s) => s.id === workflowId)
+  if (!summary) return null
+  return evaluateMeSurface(summary, role)
+}
+
 // ---------------------------------------------------------------------------
 // Dispatcher
 // ---------------------------------------------------------------------------
@@ -286,14 +284,9 @@ export async function handleMeRoute(
   }
   const userId = v4.user.id
 
-  if (method === 'GET' && path === '/api/me/allowed-workflows') {
-    sendJson(res, { workflows: listAllowedWorkflowsForMe() })
-    return
-  }
   // Phase 14 — member-facing workflow catalog, DERIVED from the live
   // workflow list (only those declaring surface.me.enabled and allowing
-  // the caller's role). Supersedes the hardcoded /allowed-workflows above
-  // (which M5 removes once dispatch is generalized).
+  // the caller's role).
   if (method === 'GET' && path === '/api/me/workflows') {
     await handleMeListWorkflows(ctx, res, v4.role)
     return
@@ -316,7 +309,7 @@ export async function handleMeRoute(
     return
   }
   if (method === 'POST' && path === '/api/me/dispatch') {
-    await handleMeDispatch(ctx, req, res, userId)
+    await handleMeDispatch(ctx, req, res, userId, v4.role)
     return
   }
   if (method === 'GET' && path === '/api/me/growth-reports') {
@@ -340,9 +333,10 @@ async function handleMeDispatch(
   req: IncomingMessage,
   res: ServerResponse,
   userId: string,
+  role: string,
 ): Promise<void> {
   // AUDIT-P3-01: rate-limit per-user. Each dispatch triggers a
-  // personal-growth workflow (7 LLM agents). Without this, a single
+  // workflow that may fan out to several LLM agents. Without this, a single
   // invitee (legitimate, low-privilege member) can loop POST and burn
   // the host's API quota / agent-pool capacity. Key on userId not IP so
   // a NAT'd corp office isn't punished collectively. Default budget
@@ -376,19 +370,21 @@ async function handleMeDispatch(
   if (typeof b.workflowId !== 'string') {
     sendJson(
       res,
-      { error: 'workflowId must be a string (see /api/me/allowed-workflows)' },
+      { error: 'workflowId must be a string (see GET /api/me/workflows)' },
       400,
     )
     return
   }
-  const wf = ALLOWED_WORKFLOWS[b.workflowId]
+  // Resolve against the live catalog: the workflow must declare
+  // surface.me.enabled AND allow this caller's role. Resolution is the
+  // single security gate — there's no hardcoded allowlist any more.
+  const wf = await resolveMeWorkflow(ctx, b.workflowId, role)
   if (!wf) {
     sendJson(
       res,
       {
         error: `workflowId '${b.workflowId}' is not enabled on the /me surface`,
         code: 'workflow_not_allowed',
-        allowed: Object.keys(ALLOWED_WORKFLOWS),
       },
       403,
     )
@@ -398,17 +394,18 @@ async function handleMeDispatch(
     b.payload && typeof b.payload === 'object' && !Array.isArray(b.payload)
       ? (b.payload as Record<string, unknown>)
       : {}
-  // Build a payload from the allowlist's accepted fields ONLY. Drop
-  // any caller-supplied extras (including case_id — we force that
-  // ourselves below to userId, no exceptions).
+  // Build a payload from the declared input fields ONLY. Drop any
+  // caller-supplied extras (including the scope key — it's excluded from
+  // inputFieldIds, and we force it ourselves below to userId).
   const payload: Record<string, unknown> = {}
-  for (const field of wf.payloadFields) {
+  for (const field of wf.inputFieldIds) {
     if (field in payloadIn) payload[field] = payloadIn[field]
   }
-  // Force the scoping fields server-side. The agent's pickCaseId
-  // reads `payload.case_id`; any value the member tried to pass under
-  // that key was already dropped (case_id is not in payloadFields).
-  payload.case_id = userId
+  // Force the scope key server-side. Any value the member tried to pass
+  // under it was already dropped above (it's not in inputFieldIds), so a
+  // member can never act on another user's behalf. Default key is
+  // `case_id`; a workflow may declare its own via surface.me.userScopeField.
+  payload[wf.userScopeField] = userId
 
   // Fire-and-forget: hub.dispatch returns a promise that only resolves
   // when the assigned participant produces a result, which for human
@@ -437,10 +434,12 @@ async function handleMeDispatch(
         // Re-throwing here would unhandled-promise the process.
         log.error('dispatch failed', { err })
       })
+    // Don't echo the scope field/value: the caller knows their own id,
+    // and the scope key name is an internal enforcement detail (kept off
+    // the catalog too).
     sendJson(res, {
       ok: true,
       workflowId: b.workflowId,
-      caseId: userId,
     })
   } catch (err) {
     // Synchronous throw from dispatch (eg. bad strategy shape) — the
@@ -597,24 +596,4 @@ async function handleMeDownloadReport(
     // either way the caller has no business knowing more than "not found".
     sendJson(res, { error: 'not found' }, 404)
   }
-}
-
-// ---------------------------------------------------------------------------
-// Public catalogue — exported so the /me HTML page (or future API users)
-// can render the allowlist without hardcoding the workflowId list. Kept
-// as a function so the constant above stays the single source of truth.
-// ---------------------------------------------------------------------------
-
-function listAllowedWorkflowsForMe(): ReadonlyArray<{
-  workflowId: string
-  capability: string
-  payloadFields: readonly string[]
-  label: string
-}> {
-  return Object.entries(ALLOWED_WORKFLOWS).map(([workflowId, wf]) => ({
-    workflowId,
-    capability: wf.capability,
-    payloadFields: wf.payloadFields,
-    label: wf.label,
-  }))
 }
