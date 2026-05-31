@@ -468,6 +468,69 @@ const MIGRATIONS: Migration[] = [
         ON im_binding_codes(expires_at);
     `,
   },
+  {
+    // Phase 17 (Sprint 4) — usage/cost ledger. One row per LLM provider
+    // call (a tool-use loop writes one row PER ROUND, not per task) so
+    // cost can be attributed and exported per user / agent / workflow /
+    // model / day. This is the raw line-item layer UNDER the existing
+    // usage_counters (which only counts aggregate ticks): the counters
+    // answer "is this user over their daily cap" on the hot path; the
+    // ledger answers "show me exactly what was spent and on what".
+    //
+    // Design notes:
+    //   - INTEGER PK AUTOINCREMENT: append-only, monotonic, gives a
+    //     stable export/pagination cursor (id DESC == newest-first).
+    //   - NO foreign keys (mirrors audit_log V4-AUDIT-06): a billing row
+    //     MUST outlive the user / agent it bills — deleting a user can't
+    //     be allowed to erase last month's cost forensics.
+    //   - org_id / user_id / workflow_id / task_id / provider are
+    //     NULLABLE: unattributed local dispatches (no task.origin) still
+    //     record tokens for cost visibility — they just aren't billed to
+    //     anyone. agent_id + model are always present on an LLM call.
+    //   - cost_micros is INTEGER micro-USD (1e-6 USD). Integer math only
+    //     — never store float dollars (drift across millions of rows).
+    //   - unpriced (0/1): the model had no price entry, so cost_micros is
+    //     0 by convention but tokens are real. Surfaced so a dashboard can
+    //     flag "tokens counted, cost unknown" rather than silently $0.
+    //   - meta_json: small escape hatch (stopReason / toolRounds / etc).
+    //
+    // Indices back the four query/aggregate axes (by user / agent /
+    // workflow / model), each paired with ts DESC for the common
+    // "recent activity for X" scan; idx_ledger_ts backs the unfiltered
+    // newest-first list + export.
+    version: 11,
+    name: 'usage-ledger',
+    sql: `
+      CREATE TABLE IF NOT EXISTS usage_ledger (
+        id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts                     INTEGER NOT NULL,
+        org_id                 TEXT,
+        user_id                TEXT,
+        agent_id               TEXT NOT NULL,
+        workflow_id            TEXT,
+        task_id                TEXT,
+        model                  TEXT NOT NULL,
+        provider               TEXT,
+        input_tokens           INTEGER NOT NULL DEFAULT 0,
+        output_tokens          INTEGER NOT NULL DEFAULT 0,
+        cache_creation_tokens  INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens      INTEGER NOT NULL DEFAULT 0,
+        cost_micros            INTEGER NOT NULL DEFAULT 0,
+        unpriced               INTEGER NOT NULL DEFAULT 0,
+        meta_json              TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_ledger_ts
+        ON usage_ledger(ts DESC);
+      CREATE INDEX IF NOT EXISTS idx_ledger_user
+        ON usage_ledger(user_id, ts DESC);
+      CREATE INDEX IF NOT EXISTS idx_ledger_agent
+        ON usage_ledger(agent_id, ts DESC);
+      CREATE INDEX IF NOT EXISTS idx_ledger_workflow
+        ON usage_ledger(workflow_id, ts DESC);
+      CREATE INDEX IF NOT EXISTS idx_ledger_model
+        ON usage_ledger(model, ts DESC);
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {

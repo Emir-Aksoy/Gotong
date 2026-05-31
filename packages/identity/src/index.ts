@@ -65,6 +65,13 @@ export type {
   OrgQuotaState,
   SetOrgQuotaInput,
   CheckOrgQuotaResult,
+  // Usage / cost ledger (Phase 17 — Sprint 4)
+  LedgerEntry,
+  LedgerAppendInput,
+  LedgerQuery,
+  LedgerGroupBy,
+  LedgerAggregateQuery,
+  LedgerAggregateRow,
   // Phase 11 M2 — Suspended tasks (long-running agent park/resume)
   SuspendedTask,
   PersistSuspendedTaskInput,

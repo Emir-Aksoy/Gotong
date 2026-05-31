@@ -583,6 +583,135 @@ export interface SweepUsageResult {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 17 (Sprint 4) — Usage / cost ledger
+//
+// The ledger is the raw line-item layer UNDER usage_counters: one row per
+// LLM provider call, recording the full token breakdown + an attributed,
+// pre-computed cost. `usage_counters` answers the hot-path quota question
+// ("is this user over their cap"); the ledger answers the forensic /
+// billing question ("show me exactly what was spent, by whom, on what").
+// Cost is computed by the host (which owns the model price table) and
+// handed in already-resolved — identity stays model-agnostic.
+// ---------------------------------------------------------------------------
+
+/**
+ * One persisted ledger row. Nullable attribution fields (`orgId`,
+ * `userId`, `workflowId`, `taskId`, `provider`) are `null` for
+ * unattributed local dispatches — tokens are still recorded for cost
+ * visibility, they're just not billed to anyone. `agentId` + `model`
+ * are always present on a real LLM call.
+ */
+export interface LedgerEntry {
+  /** Monotonic rowid (autoincrement). Stable export/pagination cursor. */
+  id: number
+  /** ms since epoch of the provider call. */
+  ts: number
+  orgId: string | null
+  userId: string | null
+  agentId: string
+  workflowId: string | null
+  taskId: string | null
+  model: string
+  provider: string | null
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+  /** Integer micro-USD (1e-6 USD). Never a float. */
+  costMicros: number
+  /** True when the model had no price entry — tokens real, cost is 0. */
+  unpriced: boolean
+  /** Small escape hatch (stopReason / toolRounds / …). `null` if absent. */
+  meta: Record<string, unknown> | null
+}
+
+/**
+ * Append shape. `ts` defaults to `Date.now()`. Cost is supplied
+ * pre-computed by the caller (the host pricing layer). Optional
+ * attribution / cache / meta fields default to null / 0 / false.
+ */
+export interface LedgerAppendInput {
+  ts?: number
+  orgId?: string | null
+  userId?: string | null
+  agentId: string
+  workflowId?: string | null
+  taskId?: string | null
+  model: string
+  provider?: string | null
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens?: number
+  cacheReadTokens?: number
+  costMicros: number
+  unpriced?: boolean
+  meta?: Record<string, unknown> | null
+}
+
+/**
+ * Row-level query. Every filter is optional and ANDed. `since` is
+ * inclusive, `until` exclusive (half-open `[since, until)` window, the
+ * standard for time-bucket reporting). Results are newest-first
+ * (`id DESC`). `limit` defaults to 100, clamped to {@link LEDGER_QUERY_MAX_LIMIT};
+ * `offset` for pagination.
+ */
+export interface LedgerQuery {
+  orgId?: string
+  userId?: string
+  agentId?: string
+  workflowId?: string
+  model?: string
+  since?: number
+  until?: number
+  limit?: number
+  offset?: number
+}
+
+/** The axis a ledger aggregate rolls up by. */
+export type LedgerGroupBy = 'user' | 'agent' | 'workflow' | 'model' | 'day'
+
+export const LEDGER_GROUP_BY: readonly LedgerGroupBy[] = [
+  'user',
+  'agent',
+  'workflow',
+  'model',
+  'day',
+] as const
+
+/** Default / max row count for {@link LedgerQuery}. */
+export const LEDGER_QUERY_DEFAULT_LIMIT = 100
+export const LEDGER_QUERY_MAX_LIMIT = 10_000
+
+/**
+ * Aggregate query — GROUP BY one axis, SUM tokens + cost, COUNT calls.
+ * Same half-open `[since, until)` window + optional org / user scoping
+ * as {@link LedgerQuery}.
+ */
+export interface LedgerAggregateQuery {
+  groupBy: LedgerGroupBy
+  since?: number
+  until?: number
+  orgId?: string
+  userId?: string
+}
+
+/**
+ * One aggregate bucket. `key` is the grouped value: a userId / agentId /
+ * workflowId / model string, or a `'YYYY-MM-DD'` UTC day for
+ * `groupBy='day'`. NULL group values (e.g. unattributed userId) collapse
+ * to the literal `'(none)'` so the bucket is still visible.
+ */
+export interface LedgerAggregateRow {
+  key: string
+  calls: number
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+  costMicros: number
+}
+
+// ---------------------------------------------------------------------------
 // D1 (v4 Phase 5) — Peer Registry
 // ---------------------------------------------------------------------------
 

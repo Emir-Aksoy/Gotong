@@ -49,6 +49,7 @@ import {
 import { IdentityError } from './errors.js'
 import { VaultStore, type VaultMutationReason } from './vault-store.js'
 import { SuspendedTaskStore } from './suspended-task-store.js'
+import { LedgerStore } from './ledger-store.js'
 import { PeerStore } from './peer-store.js'
 import { QuotaStore } from './quota-store.js'
 import {
@@ -93,6 +94,12 @@ import {
   type OrgQuota,
   type OrgQuotaState,
   type SetOrgQuotaInput,
+  // Phase 17 (Sprint 4) — usage / cost ledger.
+  type LedgerAppendInput,
+  type LedgerEntry,
+  type LedgerQuery,
+  type LedgerAggregateQuery,
+  type LedgerAggregateRow,
   type User,
   type VaultEntry,
   type VaultKind,
@@ -414,6 +421,10 @@ export class IdentityStore {
   // below is NOT part of it: that kv is cross-cutting (bootstrap +
   // mode-switch + upgrade), so it stays in the facade.
   private readonly quota: QuotaStore
+  // Phase 17 (Sprint 4) — usage / cost ledger (raw per-call line items
+  // under the quota counters). Append on the post-LLM-call path; scan on
+  // dashboard aggregate + CSV/JSONL export. Owns its own statements.
+  private readonly ledger: LedgerStore
   // Phase 7 M4 — org_meta kv (org_mode lives here).
   private readonly stmtOrgMetaGet: SqliteStmt
   private readonly stmtOrgMetaUpsert: SqliteStmt
@@ -450,6 +461,9 @@ export class IdentityStore {
     // its 15 statements eagerly (checkAndIncrement is the agent-spawn hot
     // path; orgQuotaSweep ticks on a host timer).
     this.quota = new QuotaStore(db)
+    // Phase 17 — usage / cost ledger. Constructed after quota (same
+    // billing domain, but its own table). Eager INSERT + get-by-id.
+    this.ledger = new LedgerStore(db)
 
     this.stmtUserById = db.prepare('SELECT * FROM users WHERE id = ?')
     this.stmtUserByEmail = db.prepare('SELECT * FROM users WHERE email = ?')
@@ -2045,6 +2059,24 @@ export class IdentityStore {
     now: number = Date.now(),
   ): CheckOrgQuotaResult {
     return this.quota.checkOrgQuotaThreshold(metric, period, now)
+  }
+
+  // =====================================================================
+  // Phase 17 (Sprint 4) — Usage / cost ledger. Delegated to LedgerStore.
+  // append on the post-LLM-call path; query / aggregate back the admin
+  // usage dashboard + CSV/JSONL export.
+  // =====================================================================
+
+  appendLedger(input: LedgerAppendInput): LedgerEntry {
+    return this.ledger.append(input)
+  }
+
+  queryLedger(query: LedgerQuery = {}): LedgerEntry[] {
+    return this.ledger.query(query)
+  }
+
+  aggregateLedger(query: LedgerAggregateQuery): LedgerAggregateRow[] {
+    return this.ledger.aggregate(query)
   }
 
   // =====================================================================
