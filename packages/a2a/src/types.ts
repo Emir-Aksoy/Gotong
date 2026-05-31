@@ -41,6 +41,12 @@ export interface A2AMessage {
   /** Set when the message is associated with a task (we don't create tasks). */
   taskId?: string
   contextId?: string
+  /**
+   * Free-form metadata. The host A2A server reads `metadata.skill` (a string)
+   * to pick the dispatch capability when present, else falls back to the
+   * server's configured default capability.
+   */
+  metadata?: Record<string, unknown>
 }
 
 /** `params` of a `message/send` call. */
@@ -108,8 +114,14 @@ export function messageText(message: A2AMessage): string {
 }
 
 /** Build a `user`-role message carrying a single text part. */
-export function userMessage(text: string, messageId: string): A2AMessage {
-  return { role: 'user', parts: [textPart(text)], messageId, kind: 'message' }
+export function userMessage(
+  text: string,
+  messageId: string,
+  metadata?: Record<string, unknown>,
+): A2AMessage {
+  const m: A2AMessage = { role: 'user', parts: [textPart(text)], messageId, kind: 'message' }
+  if (metadata) m.metadata = metadata
+  return m
 }
 
 /** Build an `agent`-role reply carrying a single text part. */
@@ -120,12 +132,12 @@ export function agentMessage(text: string, messageId: string): A2AMessage {
 /** Build a full JSON-RPC `message/send` request from text. */
 export function buildSendRequest(
   text: string,
-  opts: { messageId: string; requestId: string | number },
+  opts: { messageId: string; requestId: string | number; metadata?: Record<string, unknown> },
 ): A2ARequest {
   return {
     jsonrpc: JSONRPC_VERSION,
     id: opts.requestId,
     method: A2A_METHOD_MESSAGE_SEND,
-    params: { message: userMessage(text, opts.messageId) },
+    params: { message: userMessage(text, opts.messageId, opts.metadata) },
   }
 }

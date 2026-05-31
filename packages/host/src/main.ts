@@ -81,7 +81,8 @@ import { buildAgentCard } from './agent-card.js'
 
 const log = createLogger('host')
 import { serveWebSocket } from '@aipehub/transport-ws'
-import { PeerRegistry } from './peer-registry.js'
+import { PeerRegistry, buildPeerTokenResolver } from './peer-registry.js'
+import { A2aServer } from './a2a-server.js'
 import { serveWeb, type WebServerOptions } from '@aipehub/web'
 
 /**
@@ -1106,6 +1107,25 @@ async function main(): Promise<void> {
     log.info('member task inbox enabled', { capability: HUMAN_CAPABILITY })
   }
 
+  // Phase 18 C-M3 — inbound A2A message/send endpoint. OFF by default (it
+  // exposes the hub to external A2A callers); enable with
+  // AIPE_A2A_INBOUND_ENABLED. Auth reuses the per-peer vault token via
+  // buildPeerTokenResolver; AIPE_A2A_INBOUND_CAPABILITY is the fallback
+  // dispatch capability for messages without an explicit metadata.skill.
+  let a2aServer: A2aServer | undefined
+  if (identity && envBool('AIPE_A2A_INBOUND_ENABLED', false)) {
+    const a2aDefaultCap = env('AIPE_A2A_INBOUND_CAPABILITY')
+    a2aServer = new A2aServer({
+      hub,
+      resolvePeerToken: buildPeerTokenResolver(identity, (level, msg, c) =>
+        log[level](msg, c as Record<string, unknown> | undefined),
+      ),
+      ...(a2aDefaultCap ? { defaultCapability: a2aDefaultCap } : {}),
+      logger: log,
+    })
+    log.info('inbound A2A server enabled', { defaultCapability: a2aDefaultCap ?? '(none)' })
+  }
+
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
@@ -1131,6 +1151,8 @@ async function main(): Promise<void> {
     growthReports,
     // R3 — A2A Agent Card discovery (public /.well-known/agent-card.json).
     agentCard,
+    // Phase 18 C-M3 — inbound A2A message/send (undefined → /a2a 404s).
+    ...(a2aServer ? { a2aServer } : {}),
     ...(allowedHosts ? { allowedHosts } : {}),
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },
     readinessGate: { isReady: () => bootReady },

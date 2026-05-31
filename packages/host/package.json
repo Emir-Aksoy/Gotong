@@ -48,6 +48,7 @@
     "prepack": "node scripts/build-version.mjs && tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@aipehub/a2a": "workspace:*",
     "@aipehub/core": "workspace:*",
     "@aipehub/identity": "workspace:*",
     "@aipehub/inbox": "workspace:*",

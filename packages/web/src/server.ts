@@ -349,6 +349,12 @@ export interface WebServerOptions {
    */
   agentCard?: AgentCardSurface
   /**
+   * Phase 18 C-M3 — host-injected inbound A2A server. When wired, `POST /a2a`
+   * accepts an A2A `message/send` and dispatches into the Hub (own bearer
+   * domain — see `A2aServerSurface`). When absent, `/a2a` 404s.
+   */
+  a2aServer?: A2aServerSurface
+  /**
    * #2-M2 — host-injected hub MCP registry surface. When wired, the
    * `/api/admin/mcp-servers` routes install / list / uninstall MCP
    * servers at hub scope, with live propagation to running agents. When
@@ -383,6 +389,19 @@ export interface WebServerOptions {
 export interface AgentCardSurface {
   /** Render the Agent Card as a JSON string for the given public base URL. */
   json(baseUrl: string): string
+}
+
+/**
+ * Phase 18 C-M3 — host-injected inbound A2A server. When wired, `POST /a2a`
+ * (and `/a2a/message`) accepts an A2A `message/send` JSON-RPC call, dispatches
+ * it into the Hub by capability, and replies with the result. It owns its OWN
+ * bearer-auth domain (X-Aipe-Peer-Id + peer token), so the route sits OUTSIDE
+ * the admin session / CSRF model. When absent, those routes 404. The host
+ * implements it over hub + identity (see `packages/host/src/a2a-server.ts`).
+ */
+export interface A2aServerSurface {
+  /** Authenticate, parse, dispatch, and write the full A2A/JSON-RPC response. */
+  handle(req: IncomingMessage, res: ServerResponse): Promise<void>
 }
 
 /**
@@ -738,6 +757,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     reputation: opts.reputation,
     uploads: opts.uploads,
     agentCard: opts.agentCard,
+    a2aServer: opts.a2aServer,
     mcpRegistry: opts.mcpRegistry,
     mcpFederation: opts.mcpFederation,
     peerManifests: opts.peerManifests,
@@ -868,6 +888,8 @@ interface HandlerCtx {
   uploads: UploadSurface | undefined
   /** R3 — see WebServerOptions.agentCard doc above. */
   agentCard: AgentCardSurface | undefined
+  /** Phase 18 C-M3 — see WebServerOptions.a2aServer doc above. */
+  a2aServer: A2aServerSurface | undefined
   /** #2-M2 — see WebServerOptions.mcpRegistry doc above. */
   mcpRegistry: McpRegistrySurface | undefined
   /** #2-M3.4b — see WebServerOptions.mcpFederation doc above. */
@@ -1159,6 +1181,21 @@ async function handle(
       'cache-control': 'public, max-age=300',
     })
     res.end(ctx.agentCard.json(baseUrl))
+    return
+  }
+
+  // --- Inbound A2A (Phase 18 C-M3) --------------------------------------
+  // BEFORE the CSRF gate and OUTSIDE requireAdmin: A2A is its own bearer-auth
+  // domain (X-Aipe-Peer-Id + peer token), not a browser session, so the CSRF
+  // Origin check (which a server-to-server caller can't satisfy) must not run.
+  // The host A2aServer owns all auth + dispatch; 404 when not wired.
+  if (path === '/a2a' || path === '/a2a/message') {
+    if (!ctx.a2aServer) {
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'a2a not enabled' }))
+      return
+    }
+    await ctx.a2aServer.handle(req, res)
     return
   }
 

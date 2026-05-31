@@ -390,6 +390,9 @@ importers:
 
   packages/host:
     dependencies:
+      '@aipehub/a2a':
+        specifier: workspace:*
+        version: link:../a2a
       '@aipehub/core':
         specifier: workspace:*
         version: link:../core
