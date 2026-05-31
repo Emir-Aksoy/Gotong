@@ -67,26 +67,27 @@ export function createWorkflows({ wf }) {
       const name = w.name ? escapeHtml(w.name) : escapeHtml(w.id)
       const desc = w.description ? `<p class="hint">${escapeHtml(w.description)}</p>` : ''
       const file = w.file ? `<small class="hint">${escapeHtml(w.file)}</small>` : ''
-      // Phase 15 — lifecycle state badge + current revision. list() only
-      // returns *live* workflows (published / deprecated), so the gated
-      // buttons below cover exactly those two states.
+      // Phase 15 — lifecycle state badge + current revision. The list now
+      // includes non-live workflows too (draft / review / archived), so the
+      // gated buttons + the "开始" run button below switch on `state`.
       const state = w.state || 'published'
+      const isLive = state === 'published' || state === 'deprecated'
       const stateBadge = `<span class="wf-state wf-state-${escapeHtml(state)}">${escapeHtml(t.workflowStateLabel(state))}</span>`
       const revTag = w.currentRevision
         ? `<span class="wf-rev-tag">${escapeHtml(t.workflowRevTag(w.currentRevision))}</span>`
         : ''
-      // "开始" button: primary action — opens a payload-schema-driven
-      // form modal so users don't have to write JSON by hand. For
-      // workflows without a schema, the button opens the generic
-      // dispatch form pre-filled with the trigger capability.
+      // "开始" runs the workflow — only meaningful for a live (registered)
+      // workflow. A draft / review / archived one has no runner on the Hub,
+      // so the run button is hidden; publishing it first is the path to a run.
+      const startBtn = isLive
+        ? `<button type="button" class="ma-btn" data-act="start-workflow" data-id="${escapeHtml(w.id)}">开始</button>`
+        : ''
       return `<article class="ma-card">
         <header>
           <strong>${name}</strong>
           <code>${escapeHtml(w.participantId)}</code>
           ${stateBadge}${revTag}
-          <button type="button" class="ma-btn"
-                  data-act="start-workflow"
-                  data-id="${escapeHtml(w.id)}">开始</button>
+          ${startBtn}
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="open-workflow-runs"
                   data-id="${escapeHtml(w.id)}">${escapeHtml(t.workflowRunsBtn)}</button>
@@ -124,12 +125,14 @@ export function createWorkflows({ wf }) {
 
   // --- lifecycle (Phase 15) ----------------------------------------------
   //
-  // The card list only ever shows *live* workflows: `published` (the import
-  // default) and `deprecated` (still runnable, hidden from /me). The gated
-  // buttons cover the legal transitions out of each:
+  // The list shows every state now. Each card's buttons are exactly the legal
+  // transitions out of its state (mirrors the host lifecycle state machine):
+  //   draft      → 提交审核 (review) + 发布 (publish)
+  //   review     → 发布 (publish) + 退回草稿 (backToDraft)
   //   published  → 弃用 (deprecate)
   //   deprecated → 重新发布 (publish, un-deprecate) + 归档 (archive)
-  //   both       → 修订历史 (revision list + rollback)
+  //   archived   → (terminal — revision history only)
+  //   all        → 修订历史 (revision list + rollback)
 
   function lifecycleButtons(id, state) {
     const idAttr = escapeHtml(id)
@@ -137,21 +140,36 @@ export function createWorkflows({ wf }) {
       `<button type="button" class="ma-btn ma-btn-secondary"
                data-act="${act}" data-id="${idAttr}">${escapeHtml(label)}</button>`
     const revisions = btn('open-workflow-revisions', t.workflowRevisionsBtn)
+    if (state === 'draft') {
+      return btn('submit-review-workflow', t.workflowSubmitReviewBtn) +
+        btn('publish-workflow', t.workflowPublishBtn) + revisions
+    }
+    if (state === 'review') {
+      return btn('publish-workflow', t.workflowPublishBtn) +
+        btn('back-to-draft-workflow', t.workflowBackToDraftBtn) + revisions
+    }
+    if (state === 'archived') {
+      // Terminal: only the revision history stays inspectable.
+      return revisions
+    }
     if (state === 'deprecated') {
       return btn('republish-workflow', t.workflowRepublishBtn) +
         btn('archive-workflow', t.workflowArchiveBtn) + revisions
     }
-    // published (the only other live state in the list)
+    // published (the import default)
     return btn('deprecate-workflow', t.workflowDeprecateBtn) + revisions
   }
 
-  // POST /api/admin/workflows/:id/{deprecate|publish|archive}. `publish`
-  // with no body re-publishes the head revision (un-deprecate). The card
-  // re-renders from the refreshed list afterward.
+  // POST /api/admin/workflows/:id/{review|draft|publish|deprecate|archive}.
+  // `publish` with no body promotes the head revision (a draft/review goes
+  // live, or a deprecated one un-deprecates). The card re-renders from the
+  // refreshed list afterward.
   async function lifecycleAction(id, action) {
     const ask = {
+      review: t.confirmSubmitReview,
+      draft: t.confirmBackToDraft,
       deprecate: t.confirmDeprecateWorkflow,
-      publish: t.confirmRepublishWorkflow,
+      publish: t.confirmPublishWorkflow,
       archive: t.confirmArchiveWorkflow,
     }[action]
     if (ask && !confirm(ask(id))) return

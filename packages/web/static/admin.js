@@ -1008,16 +1008,16 @@
         const desc = w.description ? `<p class="hint">${escapeHtml4(w.description)}</p>` : "";
         const file = w.file ? `<small class="hint">${escapeHtml4(w.file)}</small>` : "";
         const state = w.state || "published";
+        const isLive = state === "published" || state === "deprecated";
         const stateBadge = `<span class="wf-state wf-state-${escapeHtml4(state)}">${escapeHtml4(t4.workflowStateLabel(state))}</span>`;
         const revTag = w.currentRevision ? `<span class="wf-rev-tag">${escapeHtml4(t4.workflowRevTag(w.currentRevision))}</span>` : "";
+        const startBtn = isLive ? `<button type="button" class="ma-btn" data-act="start-workflow" data-id="${escapeHtml4(w.id)}">开始</button>` : "";
         return `<article class="ma-card">
         <header>
           <strong>${name}</strong>
           <code>${escapeHtml4(w.participantId)}</code>
           ${stateBadge}${revTag}
-          <button type="button" class="ma-btn"
-                  data-act="start-workflow"
-                  data-id="${escapeHtml4(w.id)}">开始</button>
+          ${startBtn}
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="open-workflow-runs"
                   data-id="${escapeHtml4(w.id)}">${escapeHtml4(t4.workflowRunsBtn)}</button>
@@ -1056,6 +1056,15 @@
       const btn = (act, label) => `<button type="button" class="ma-btn ma-btn-secondary"
                data-act="${act}" data-id="${idAttr}">${escapeHtml4(label)}</button>`;
       const revisions = btn("open-workflow-revisions", t4.workflowRevisionsBtn);
+      if (state === "draft") {
+        return btn("submit-review-workflow", t4.workflowSubmitReviewBtn) + btn("publish-workflow", t4.workflowPublishBtn) + revisions;
+      }
+      if (state === "review") {
+        return btn("publish-workflow", t4.workflowPublishBtn) + btn("back-to-draft-workflow", t4.workflowBackToDraftBtn) + revisions;
+      }
+      if (state === "archived") {
+        return revisions;
+      }
       if (state === "deprecated") {
         return btn("republish-workflow", t4.workflowRepublishBtn) + btn("archive-workflow", t4.workflowArchiveBtn) + revisions;
       }
@@ -1063,8 +1072,10 @@
     }
     async function lifecycleAction(id, action) {
       const ask = {
+        review: t4.confirmSubmitReview,
+        draft: t4.confirmBackToDraft,
         deprecate: t4.confirmDeprecateWorkflow,
-        publish: t4.confirmRepublishWorkflow,
+        publish: t4.confirmPublishWorkflow,
         archive: t4.confirmArchiveWorkflow
       }[action];
       if (ask && !confirm(ask(id))) return;
@@ -2891,6 +2902,12 @@
           workflows.lifecycleAction(id, "deprecate");
         } else if (act === "republish-workflow") {
           workflows.lifecycleAction(id, "publish");
+        } else if (act === "publish-workflow") {
+          workflows.lifecycleAction(id, "publish");
+        } else if (act === "submit-review-workflow") {
+          workflows.lifecycleAction(id, "review");
+        } else if (act === "back-to-draft-workflow") {
+          workflows.lifecycleAction(id, "draft");
         } else if (act === "archive-workflow") {
           workflows.lifecycleAction(id, "archive");
         } else if (act === "open-workflow-revisions") {

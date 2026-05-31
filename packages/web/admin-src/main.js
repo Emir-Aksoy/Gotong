@@ -2107,6 +2107,12 @@ import { createWorkflows } from './workflows.js'
         workflows.lifecycleAction(id, 'deprecate')
       } else if (act === 'republish-workflow') {
         workflows.lifecycleAction(id, 'publish')
+      } else if (act === 'publish-workflow') {
+        workflows.lifecycleAction(id, 'publish')
+      } else if (act === 'submit-review-workflow') {
+        workflows.lifecycleAction(id, 'review')
+      } else if (act === 'back-to-draft-workflow') {
+        workflows.lifecycleAction(id, 'draft')
       } else if (act === 'archive-workflow') {
         workflows.lifecycleAction(id, 'archive')
       } else if (act === 'open-workflow-revisions') {

@@ -250,11 +250,18 @@
       workflowRepublishBtn: '重新发布',
       workflowArchiveBtn: '归档',
       workflowRevisionsBtn: '修订历史',
+      workflowSubmitReviewBtn: '提交审核',
+      workflowBackToDraftBtn: '退回草稿',
+      workflowPublishBtn: '发布',
       confirmDeprecateWorkflow: (id) =>
         `把 "${id}" 标记为已弃用？/me 成员入口会立刻隐藏它，但在跑的任务和 admin 重跑不受影响。`,
       confirmArchiveWorkflow: (id) =>
         `归档 "${id}"？runner 会下线、不再可跑（修订历史保留，可重新导入）。`,
-      confirmRepublishWorkflow: (id) => `重新发布 "${id}"？会解除弃用，/me 成员入口恢复可见。`,
+      confirmPublishWorkflow: (id) =>
+        `发布工作流「${id}」？发布后立即上线，/me 成员入口可见。`,
+      confirmSubmitReview: (id) =>
+        `把「${id}」提交审核？会把当前草稿冻结为候选，仍未上线。`,
+      confirmBackToDraft: (id) => `把「${id}」退回草稿继续编辑？`,
       confirmRollback: (id, rev) =>
         `把 "${id}" 回滚到 rev ${rev} 的内容？会追加一个克隆自 rev ${rev} 的新修订并设为当前发布。在跑 / 挂起的任务仍按各自原修订跑完。`,
       workflowRevisionsTitle: '修订历史',
@@ -594,11 +601,18 @@
       workflowRepublishBtn: 'Re-publish',
       workflowArchiveBtn: 'Archive',
       workflowRevisionsBtn: 'Revisions',
+      workflowSubmitReviewBtn: 'Submit for review',
+      workflowBackToDraftBtn: 'Back to draft',
+      workflowPublishBtn: 'Publish',
       confirmDeprecateWorkflow: (id) =>
         `Mark "${id}" as deprecated? It disappears from the /me member surface immediately, but in-flight tasks and admin re-runs are unaffected.`,
       confirmArchiveWorkflow: (id) =>
         `Archive "${id}"? The runner goes offline and it can no longer run (revision history is kept; you can re-import).`,
-      confirmRepublishWorkflow: (id) => `Re-publish "${id}"? Clears the deprecation; the /me member surface shows it again.`,
+      confirmPublishWorkflow: (id) =>
+        `Publish "${id}"? It goes live immediately and shows on the /me member surface.`,
+      confirmSubmitReview: (id) =>
+        `Submit "${id}" for review? Freezes the current draft as a candidate; still not live.`,
+      confirmBackToDraft: (id) => `Send "${id}" back to draft for more editing?`,
       confirmRollback: (id, rev) =>
         `Roll "${id}" back to the content of rev ${rev}? A new revision cloned from rev ${rev} is appended and set as current. In-flight / suspended tasks keep running their own original revision.`,
       workflowRevisionsTitle: 'Revision history',
