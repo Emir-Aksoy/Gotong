@@ -46,6 +46,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/llm
 
+  examples/cross-hub-mcp:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/host':
+        specifier: workspace:*
+        version: link:../../packages/host
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+
   examples/cross-org-rfp:
     dependencies:
       '@aipehub/core':

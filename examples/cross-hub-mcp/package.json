@@ -1,0 +1,16 @@
+{
+  "name": "@aipehub/example-cross-hub-mcp",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Cross-hub MCP federation (代理转发) demo — two hubs in one process. Hub A shares an MCP server; an agent on hub B calls its tools over the federation link, with the tool's subprocess + credentials staying on A.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/llm": "workspace:*",
+    "@aipehub/host": "workspace:*"
+  }
+}

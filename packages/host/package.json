@@ -25,6 +25,10 @@
     "./services": {
       "types": "./dist/services/index.d.ts",
       "import": "./dist/services/index.js"
+    },
+    "./mcp-proxy": {
+      "types": "./dist/mcp-proxy.d.ts",
+      "import": "./dist/mcp-proxy.js"
     }
   },
   "files": [
