@@ -3,7 +3,7 @@
 # Single source of truth: scripts/personal-growth-prompts.mjs (team)
 #                        templates/workflows/personal-growth-flow.yaml (workflow)
 # DO NOT EDIT BY HAND. Re-run the generator instead.
-# Last regenerated: 2026-05-24T03:40:58.273Z
+# Last regenerated: 2026-05-31T03:31:36.440Z
 # ─────────────────────────────────────────────────────────────────────────────
 # 个人成长 bundle (1 团队 + 1 工作流 + UI 引导)
 # Schema: aipehub.bundle/v1
@@ -806,6 +806,40 @@ bundle:
           rows: 3
           hint: 30-100 字 — 综合规划师会把这条当成"路径优先级"的指南针
           placeholder: 例:接下来 12 周到底应该先做哪一件事 — 先动身体、先理顺夫妻关系、还是先动副业?
+    surface:
+      me:
+        enabled: true
+        label: 个人成长发展路径
+        description: 4 段自述 → 五维度教练(身体 / 心理 / 目标 / 资源 / 关系)→ 12 周可执行路径
+        user_scope_field: case_id
+        input_schema:
+          - id: present_state
+            label: 你最近半年的生活样貌
+            type: textarea
+            rows: 7
+            required: true
+            hint: 200-500 字 — 工作 / 睡眠 / 身体 / 关系状态; 越具体越好
+            placeholder: 例:34 岁,产品经理,每天工作 10 小时左右,1 点睡 7 点起...
+          - id: aspirations
+            label: 你想往哪儿走
+            type: textarea
+            rows: 6
+            required: true
+            hint: 150-300 字 — 一年 / 三年 / 十年 想活成什么样
+            placeholder: 例:一年内每周三次运动、睡眠提前到 12 点;三年内转去做产品咨询...
+          - id: struggles
+            label: 你被什么牵绊
+            type: textarea
+            rows: 5
+            required: true
+            hint: 100-300 字 — 想做但做不到的事 / 一直绕不开的卡点
+            placeholder: 例:想运动想睡早,每次到点又拖;副业想了一年多了,怕辞职后扛不住...
+          - id: focus_request
+            label: 这次最想想清楚什么(可选)
+            type: textarea
+            rows: 3
+            hint: 30-100 字 — 综合规划师会把这条当成"路径优先级"的指南针
+            placeholder: 例:接下来 12 周到底应该先做哪一件事?
     steps:
       - id: portrait
         description: 访谈师读懂用户自述,生成画像 + 5 个跨维度挖深问题

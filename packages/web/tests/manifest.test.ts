@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
+import { parse as parseYaml } from 'yaml'
 
 import {
   AGENT_SCHEMA_V1,
   ManifestError,
   TEAM_SCHEMA_V1,
+  parseBundle,
   parseManifest,
   renderAgentManifest,
 } from '../src/manifest.js'
@@ -815,4 +817,39 @@ describe('repo templates parse cleanly', async () => {
       }
     }
   }
+})
+
+/**
+ * The personal-growth bundle is the artifact admins actually import to
+ * get the 7-coach team + workflow. Phase 14 added a member-facing
+ * surface.me to the workflow; this confirms the bundle pipeline
+ * (generator → parseBundle re-wrap) preserves it, so the imported
+ * workflow lands member-facing. Also the repo's first builtin-bundle
+ * smoke test — guards against a future generator regression.
+ */
+describe('builtin personal-growth bundle round-trips surface.me (Phase 14)', async () => {
+  const { readFile } = await import('node:fs/promises')
+  const { join, dirname } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
+  const here = dirname(fileURLToPath(import.meta.url))
+  const bundleFile = join(here, '..', 'static', 'builtin-bundles', 'personal-growth.yaml')
+
+  it('parseBundle preserves the workflow surface.me through the re-wrap', async () => {
+    const parsed = parseBundle(await readFile(bundleFile, 'utf8'))
+    expect(parsed.workflowYaml).toBeDefined()
+    // workflowYaml is the re-wrapped (JSON-serialized) workflow the importer
+    // feeds to parseWorkflow — keys stay snake_case as authored.
+    const wfDoc = parseYaml(parsed.workflowYaml!) as {
+      workflow?: {
+        surface?: {
+          me?: { enabled?: boolean; user_scope_field?: string; input_schema?: Array<{ id?: string }> }
+        }
+      }
+    }
+    const me = wfDoc.workflow?.surface?.me
+    expect(me?.enabled).toBe(true)
+    expect(me?.user_scope_field).toBe('case_id')
+    const ids = (me?.input_schema ?? []).map((f) => f.id)
+    expect(ids).toEqual(['present_state', 'aspirations', 'struggles', 'focus_request'])
+  })
 })
