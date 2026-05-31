@@ -6,15 +6,17 @@
  * to authenticate to it — the value R1's `PeerAuthScheme` unlocks. The
  * card follows the A2A Agent Card shape (a2a-protocol.org).
  *
- * Conservative by deliberate operator choice: the card advertises
- * identity + auth scheme but NO skills — it never enumerates the hub's
- * participants / managed-agent capabilities on a public, unauthenticated
- * endpoint. Skill advertisement is a future explicit opt-in.
+ * Conservative by default: the card advertises identity + auth scheme and
+ * NO skills unless the operator explicitly opts in (C-M1 — host gates skill
+ * advertisement behind `AIPE_A2A_ADVERTISE_SKILLS`, off by default, because
+ * this endpoint is public + unauthenticated). It never auto-enumerates the
+ * hub's participants / managed-agent capabilities.
  *
- * The `capabilities` flags are all `false` because the hub does not yet
- * serve the A2A message API (its federation transport is the AipeHub ws
- * mesh, not A2A JSON-RPC). They flip when A2A method serving lands — the
- * card is honest about what it serves today.
+ * The `capabilities` flags are all `false` on purpose: the hub serves only
+ * the blocking `message/send` A2A method (C-M3), not streaming /
+ * push-notifications / state-transition history. They stay honest about
+ * exactly what is served — false here means "we do not stream", and that is
+ * true even with the message endpoint live.
  */
 
 /** OpenAPI-style security scheme — the subset A2A uses for HTTP bearer. */
@@ -30,6 +32,18 @@ export interface AgentCardCapabilities {
   stateTransitionHistory: boolean
 }
 
+/**
+ * A2A `AgentSkill` (0.2.5) — the minimal subset we emit. `id` doubles as the
+ * dispatch capability an inbound `message/send` targets (see the A2A server),
+ * so it is the public, stable handle for a thing this hub can do.
+ */
+export interface AgentCardSkill {
+  id: string
+  name: string
+  description?: string
+  tags?: string[]
+}
+
 /** The A2A Agent Card document (subset we emit). */
 export interface AgentCard {
   name: string
@@ -41,8 +55,11 @@ export interface AgentCard {
   capabilities: AgentCardCapabilities
   defaultInputModes: string[]
   defaultOutputModes: string[]
-  /** Always `[]` in the conservative card (no public capability enumeration). */
-  skills: unknown[]
+  /**
+   * `[]` unless the operator explicitly opts into skill advertisement (see
+   * `BuildAgentCardOpts.skills`). Never auto-enumerated.
+   */
+  skills: AgentCardSkill[]
   securitySchemes?: Record<string, AgentCardSecurityScheme>
   security?: Array<Record<string, string[]>>
 }
@@ -62,6 +79,14 @@ export interface BuildAgentCardOpts {
    * no auth advertised (open hub / federation disabled).
    */
   authSchemes?: readonly string[]
+  /**
+   * C-M1 — skills to advertise. DEFAULTS TO `[]`: the card never enumerates
+   * the hub's capabilities unless the operator explicitly passes them (an
+   * opt-in, because this endpoint is public + unauthenticated). The host
+   * derives these from its local capability manifest only when
+   * `AIPE_A2A_ADVERTISE_SKILLS` is on.
+   */
+  skills?: readonly AgentCardSkill[]
 }
 
 /**
@@ -94,9 +119,9 @@ export function buildAgentCard(opts: BuildAgentCardOpts): AgentCard {
     },
     defaultInputModes: ['text/plain'],
     defaultOutputModes: ['text/plain'],
-    // Conservative: never enumerate participant capabilities on a public
-    // endpoint. Skill advertisement is a future explicit opt-in.
-    skills: [],
+    // Conservative: `[]` unless the caller explicitly opts in. The host gates
+    // that behind AIPE_A2A_ADVERTISE_SKILLS — this endpoint is public.
+    skills: opts.skills ? [...opts.skills] : [],
   }
 
   // R1 — declare the bearer scheme so an A2A peer knows it must present a

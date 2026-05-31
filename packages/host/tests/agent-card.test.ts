@@ -84,4 +84,43 @@ describe('buildAgentCard (R3)', () => {
     expect(round.securitySchemes.bearer.scheme).toBe('bearer')
     expect(round.skills).toEqual([])
   })
+
+  // C-M1 — skill advertisement is an explicit opt-in (host gates it behind
+  // AIPE_A2A_ADVERTISE_SKILLS). The card never auto-enumerates.
+  describe('skills opt-in (Phase 18 C-M1)', () => {
+    it('defaults to no skills when none are passed', () => {
+      expect(buildAgentCard(base).skills).toEqual([])
+    })
+
+    it('advertises the skills it is explicitly given', () => {
+      const card = buildAgentCard({
+        ...base,
+        skills: [
+          { id: 'translate', name: 'translate' },
+          { id: 'summarize', name: 'Summarize', description: 'condense text', tags: ['nlp'] },
+        ],
+      })
+      expect(card.skills).toEqual([
+        { id: 'translate', name: 'translate' },
+        { id: 'summarize', name: 'Summarize', description: 'condense text', tags: ['nlp'] },
+      ])
+    })
+
+    it('keeps every capability flag false even with skills advertised', () => {
+      // We serve only blocking message/send — no streaming / push / history.
+      const card = buildAgentCard({ ...base, skills: [{ id: 'chat', name: 'chat' }] })
+      expect(card.capabilities).toEqual({
+        streaming: false,
+        pushNotifications: false,
+        stateTransitionHistory: false,
+      })
+    })
+
+    it('copies the skills array (caller mutation does not leak in)', () => {
+      const skills = [{ id: 'a', name: 'a' }]
+      const card = buildAgentCard({ ...base, skills })
+      skills.push({ id: 'b', name: 'b' })
+      expect(card.skills).toEqual([{ id: 'a', name: 'a' }])
+    })
+  })
 })

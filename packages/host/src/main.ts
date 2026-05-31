@@ -102,6 +102,7 @@ import { loadPricingTable } from './pricing.js'
 import { McpProxyHost, fetchPeerSharedMcp } from './mcp-proxy.js'
 import {
   PeerManifestHost,
+  buildLocalManifest,
   createPeerManifestFederation,
   type PeerManifestFederation,
 } from './peer-manifest.js'
@@ -1037,19 +1038,34 @@ async function main(): Promise<void> {
   // public at /.well-known/agent-card.json. Bearer is advertised whenever
   // inbound peer auth is active (peer registry on).
   const cardMeta = await space.meta()
+  // C-M1 — skill advertisement is OFF by default. When on, the card enumerates
+  // this hub's local capabilities (peer wrappers excluded) as A2A skills, each
+  // skill id == the capability an inbound message/send targets. Public endpoint,
+  // so opting in is a deliberate operator act.
+  const advertiseSkills = envBool('AIPE_A2A_ADVERTISE_SKILLS', false)
+  const selfHubIdForCard = cardMeta.hubId ?? 'self'
   const agentCard = {
-    json: (baseUrl: string): string =>
-      JSON.stringify(
+    json: (baseUrl: string): string => {
+      const skills = advertiseSkills
+        ? buildLocalManifest(
+            hub,
+            selfHubIdForCard,
+            new Set((peerRegistry?.status() ?? []).map((r) => r.peerId)),
+          ).capabilities.map((cap) => ({ id: cap, name: cap }))
+        : []
+      return JSON.stringify(
         buildAgentCard({
           name: cardMeta.name || cardMeta.hubId || 'AipeHub',
           version: BAKED_VERSION,
           url: baseUrl,
           description: cardMeta.description,
           authSchemes: peerRegistry ? ['bearer'] : [],
+          ...(skills.length > 0 ? { skills } : {}),
         }),
         null,
         2,
-      ),
+      )
+    },
   }
 
   // #2-M2 — hub MCP server registry surface: persist to the Space +
