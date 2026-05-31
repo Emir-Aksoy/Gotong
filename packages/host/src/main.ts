@@ -65,12 +65,13 @@ import { readFileSync } from 'node:fs'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 
-import { Hub, Space, createLogger, type McpServerSpec, type SpaceConfig, type Task, type TranscriptEntry } from '@aipehub/core'
+import { Hub, Space, createLogger, type McpServerSpec, type Participant, type RemoteHubViaLink, type SpaceConfig, type Task, type TranscriptEntry } from '@aipehub/core'
 import {
   AUDIT_ACTIONS,
   loadOrCreateMasterKey,
   openIdentityStore,
   type IdentityStore,
+  type PeerRegistration,
 } from '@aipehub/identity'
 
 import { OrgApiPool } from './org-api-pool.js'
@@ -82,6 +83,19 @@ const log = createLogger('host')
 import { serveWebSocket } from '@aipehub/transport-ws'
 import { PeerRegistry } from './peer-registry.js'
 import { serveWeb, type WebServerOptions } from '@aipehub/web'
+
+/**
+ * Phase 18 B-M3 — resolve the org owner's user id (the default approver for
+ * outbound cross-org sends). Scans memberships; a bootstrapped hub has exactly
+ * one owner. Returns null only on an unbootstrapped / owner-less store, in
+ * which case the approval gate stays unwired (logged where it's consumed).
+ */
+function findOwnerUserId(identity: IdentityStore): string | null {
+  for (const u of identity.listUsers()) {
+    if (identity.getMembership(u.id)?.role === 'owner') return u.id
+  }
+  return null
+}
 
 import { LocalAgentPool } from './local-agent-pool.js'
 import { loadPricingTable } from './pricing.js'
@@ -103,6 +117,7 @@ import { createUploadSurface } from './uploads.js'
 import { createWorkflowController } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 import { HostInboxService } from './inbox-service.js'
+import { ApprovalGatedParticipant } from './outbound-approval.js'
 import { FileInboxStore, HumanInboxParticipant, HUMAN_CAPABILITY } from '@aipehub/inbox'
 import {
   createWorkflowAssistAgent,
@@ -876,6 +891,15 @@ async function main(): Promise<void> {
   // the admin UI. In-process cache over the registry; refreshed on demand.
   // Wired in the same block as the registry / proxy (peers on).
   let peerFederation: PeerManifestFederation | undefined
+  // Phase 16/18 — the member task inbox store is built HERE (ahead of the peers
+  // block) so the Phase 18 outbound approval gate and the human-step broker
+  // (registered further down) share the EXACT same store. Only with identity
+  // wired — durable parking (suspended_tasks) and /me both require a v4 user.
+  let inboxStore: FileInboxStore | undefined
+  if (identity) {
+    inboxStore = new FileInboxStore(SPACE_DIR)
+    inboxStore.ensureDirs()
+  }
   if (identity && process.env.AIPE_PEERS_DISABLED !== '1') {
     const spaceMeta = await space.meta()
     const selfHubId = spaceMeta.hubId ?? 'self'
@@ -908,6 +932,30 @@ async function main(): Promise<void> {
       hubId: selfHubId,
       peerWrapperIds: () => new Set((peerRegistry?.status() ?? []).map((r) => r.peerId)),
     })
+    // Phase 18 B-M3 — outbound cross-org approval gate. A peer row flagged
+    // `requireApprovalOutbound` has its outbound sender wrapped so a task parks
+    // as an approval item in the owner's /me inbox and only crosses the org
+    // boundary once approved. Approver = the org owner resolved at boot (MVP; a
+    // later node can make it per-peer configurable). Wired only when both the
+    // inbox store and an owner exist; otherwise the registry logs + stays
+    // ungated (loud, not a silent fail-open).
+    const approverUserId = findOwnerUserId(identity)
+    let outboundApprovalGate:
+      | ((inner: RemoteHubViaLink, row: PeerRegistration) => Participant)
+      | undefined
+    if (inboxStore && approverUserId) {
+      const store = inboxStore
+      const approver = approverUserId
+      outboundApprovalGate = (inner, row) =>
+        new ApprovalGatedParticipant({
+          inner,
+          store,
+          approver,
+          peerLabel: row.label ?? row.peerId,
+        })
+    } else if (inboxStore) {
+      log.warn('outbound approval gate not wired: no org owner resolved')
+    }
     peerRegistry = new PeerRegistry({
       hub,
       identity,
@@ -919,6 +967,7 @@ async function main(): Promise<void> {
       ...(trustProxy ? { trustProxy: true } : {}),
       rpcResponder: (call) =>
         call.method.startsWith('mcp.') ? proxyRespond(call) : peerManifestHost.respond(call),
+      ...(outboundApprovalGate ? { outboundApprovalGate } : {}),
       logger: log,
     })
     peerRegistry.start()
@@ -1032,10 +1081,10 @@ async function main(): Promise<void> {
   // runs the two-step resume (child broker → parent workflow run). Gated on
   // identity: durable parking lives in suspended_tasks (identity SQLite), and
   // /me itself requires a v4 user — so without identity there is no inbox.
+  // The store itself was built earlier (so the Phase 18 approval gate could
+  // share it); here we register the human-step broker + the resume service.
   let inboxService: HostInboxService | undefined
-  if (identity) {
-    const inboxStore = new FileInboxStore(SPACE_DIR)
-    inboxStore.ensureDirs()
+  if (identity && inboxStore) {
     hub.register(new HumanInboxParticipant({ store: inboxStore }))
     inboxService = new HostInboxService({ hub, store: inboxStore, identity, logger: log })
     log.info('member task inbox enabled', { capability: HUMAN_CAPABILITY })

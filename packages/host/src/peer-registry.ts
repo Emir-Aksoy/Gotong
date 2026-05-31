@@ -24,7 +24,14 @@
  *     peer doesn't burn CPU on every tick.
  */
 
-import type { Hub, HubLink, Logger, ParticipantId } from '@aipehub/core'
+import type {
+  Hub,
+  HubLink,
+  Logger,
+  Participant,
+  ParticipantId,
+  RemoteHubViaLink,
+} from '@aipehub/core'
 import { installPeerLink, type InstalledPeerLink } from '@aipehub/core'
 import type { IdentityStore, PeerRegistration } from '@aipehub/identity'
 import { acceptHubLinks, bearerAuth, connectHubLink } from '@aipehub/transport-ws'
@@ -101,6 +108,20 @@ export interface PeerRegistryOptions {
    * serves servers flagged `shared`).
    */
   rpcResponder?: (call: { method: string; params: unknown }) => Promise<unknown>
+  /**
+   * Phase 18 B-M3 — factory for the outbound approval decorator. Invoked at
+   * install time (both the outbound dial AND the inbound-accepted link) ONLY
+   * for peers whose row has `requireApprovalOutbound`. It returns the
+   * participant registered in place of the plain `RemoteHubViaLink` wrapper
+   * (which MUST keep `inner.id` so capability routing + uninstall still key on
+   * it). `main.ts` supplies one closing over the inbox store + approver.
+   *
+   * When omitted, a `requireApprovalOutbound` peer is sent to UNGATED — logged
+   * at warn so the misconfiguration is loud rather than a silent fail-open. In
+   * a bootstrapped hub the gate is always wired (owner + inbox both exist), so
+   * that path is a canary, not a normal route.
+   */
+  outboundApprovalGate?: (inner: RemoteHubViaLink, row: PeerRegistration) => Participant
 }
 
 interface InstalledState {
@@ -369,6 +390,28 @@ export class PeerRegistry {
   }
 
   /**
+   * Phase 18 B-M3 — the `wrapOutbound` slice of `installPeerLink` options for a
+   * given peer row. Empty (no decorator) unless the row opts into
+   * `requireApprovalOutbound`; when it does but no gate factory is wired, emit
+   * a loud warn and stay ungated rather than silently dropping the policy.
+   * Shared by both the outbound dial and the inbound-accept install paths so
+   * the gate applies to EVERY wrapper that can send to the peer.
+   */
+  private outboundWrap(
+    row: PeerRegistration,
+  ): { wrapOutbound?: (inner: RemoteHubViaLink) => Participant } {
+    if (!row.requireApprovalOutbound) return {}
+    const gate = this.opts.outboundApprovalGate
+    if (!gate) {
+      this.log('warn', 'peer requires outbound approval but no approval gate is wired; outbound sent UNGATED', {
+        peerId: row.peerId,
+      })
+      return {}
+    }
+    return { wrapOutbound: (inner) => gate(inner, row) }
+  }
+
+  /**
    * D2 — look up a live HubLink by the remote hub's wire id. Returns
    * null when the peer is configured-but-not-connected, the peer row
    * has been disabled, or the id was never in our registry.
@@ -473,6 +516,9 @@ export class PeerRegistry {
         // A null acl (legacy / unset row) leaves the gate off (accept-all),
         // exactly the pre-B-M2 behaviour.
         ...(row.acl ? { acl: row.acl } : {}),
+        // Phase 18 B-M3 — gate OUTBOUND sends behind an approval inbox when the
+        // row opts in. Empty otherwise (no behaviour change).
+        ...this.outboundWrap(row),
       })
       this.installed.set(row.id, { row, link, install })
       this.backoff.delete(row.id)
@@ -538,6 +584,10 @@ export class PeerRegistry {
       // Phase 18 B-M2 — receiver-side ACL from the peer row (inbound is the
       // direction the ACL actually guards). null → accept-all, as before.
       ...(row.acl ? { acl: row.acl } : {}),
+      // Phase 18 B-M3 — the same outbound approval gate applies to a wrapper
+      // installed off an inbound-accepted link (we can still dispatch TO this
+      // peer through it).
+      ...this.outboundWrap(row),
     })
     this.installed.set(row.id, { row, link, install })
     this.backoff.delete(row.id)
