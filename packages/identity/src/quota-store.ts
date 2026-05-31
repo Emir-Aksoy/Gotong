@@ -387,6 +387,85 @@ export class QuotaStore {
   }
 
   /**
+   * Phase 17 — UNGATED monotonic increment for recording actual usage
+   * (the LLM tokens / cost the provider reported AFTER the call). Unlike
+   * {@link checkAndIncrement}, this NEVER refuses: `used += amount`
+   * always commits, so a counter CAN exceed its quota — and that
+   * overshoot is the whole point.
+   *
+   * The pre-call budget peek (org-api-pool gate) refuses the NEXT call
+   * once `used >= quota`. That can only become true if recording is
+   * allowed to cross the cap. Recording via the gated `checkAndIncrement`
+   * (the original M3/M4 wiring) freezes `used` just BELOW the quota — the
+   * over-cap increment is silently dropped — so the peek never fires and
+   * the budget is fail-OPEN. Recording ungated here is what makes the
+   * token / cost budgets actually fail-closed.
+   *
+   * Still rolls an expired period (used resets to 0 at the boundary
+   * before applying `amount`). Quota is preserved (only setQuota writes it).
+   */
+  recordUsage(input: CheckAndIncrementInput): UsageCounter {
+    assertNonEmptyId(input?.userId, 'userId')
+    assertUsageMetric(input?.metric)
+    assertUsagePeriod(input?.period)
+    const amount = input.amount ?? 1
+    if (
+      typeof amount !== 'number' ||
+      !Number.isFinite(amount) ||
+      !Number.isInteger(amount) ||
+      amount < 0
+    ) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `recordUsage: amount must be a non-negative integer; got ${amount}`,
+      })
+    }
+    const now = input.now ?? Date.now()
+    const expectedStart = periodStartFor(input.period, now)
+
+    return transaction(this.db, () => {
+      const existing = this.stmtUsageGet.get(
+        input.userId,
+        input.metric,
+        input.period,
+      ) as UsageCounterRow | undefined
+
+      // Roll an expired period to 0 before applying the amount.
+      const currentUsed =
+        existing && existing.period_start === expectedStart ? existing.used : 0
+      const finalUsed = currentUsed + amount
+
+      if (!existing) {
+        this.stmtUsageUpsert.run(
+          input.userId,
+          input.metric,
+          input.period,
+          expectedStart,
+          finalUsed,
+          null,
+          now,
+        )
+      } else {
+        this.stmtUsageUpdate.run(
+          finalUsed,
+          expectedStart,
+          now,
+          input.userId,
+          input.metric,
+          input.period,
+        )
+      }
+
+      const row = this.stmtUsageGet.get(
+        input.userId,
+        input.metric,
+        input.period,
+      ) as UsageCounterRow
+      return rowToUsageCounter(row)
+    })
+  }
+
+  /**
    * Manually zero the counter and start a fresh period. Useful for
    * admin "give this user their day back" / "they got hit by a runaway
    * loop, refund the usage" actions. Returns `null` when no row

@@ -779,16 +779,22 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
               meta: { stopReason: meta.stopReason },
             })
             // Budget counters — only for attributed, non-mock calls.
+            // recordUsage (NOT checkAndIncrement): recording actual
+            // consumption must be UNGATED so `used` can cross the cap.
+            // The pre-call gate peek refuses the next call once
+            // `used >= quota`; with the gated checkAndIncrement the
+            // over-cap increment was silently dropped and `used` froze
+            // just below the cap → the peek never fired → fail-OPEN.
             if (attr.userId && !recordIsMock) {
               const tokens =
                 (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
-              identityForLedger.checkAndIncrement({
+              identityForLedger.recordUsage({
                 userId: attr.userId,
                 metric: LLM_TOKENS_METRIC,
                 period: BUDGET_PERIOD,
                 amount: tokens,
               })
-              identityForLedger.checkAndIncrement({
+              identityForLedger.recordUsage({
                 userId: attr.userId,
                 metric: LLM_COST_MICROS_METRIC,
                 period: BUDGET_PERIOD,

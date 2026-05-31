@@ -2021,6 +2021,16 @@ export class IdentityStore {
     return this.quota.checkAndIncrement(input)
   }
 
+  /**
+   * Phase 17 — ungated monotonic usage recording (post-call token / cost
+   * consumption). See {@link QuotaStore.recordUsage}: unlike
+   * checkAndIncrement it always commits the increment so the budget peek
+   * can fail-closed once the cap is crossed.
+   */
+  recordUsage(input: CheckAndIncrementInput): UsageCounter {
+    return this.quota.recordUsage(input)
+  }
+
   resetUsage(input: ResetUsageInput): UsageCounter | null {
     return this.quota.resetUsage(input)
   }

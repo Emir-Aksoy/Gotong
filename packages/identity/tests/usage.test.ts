@@ -399,6 +399,107 @@ describe('IdentityStore — usage counters (B2.1)', () => {
     })
   })
 
+  // ---------- recordUsage (Phase 17 — ungated monotonic record) ----------
+
+  describe('recordUsage', () => {
+    it('creates a row on first call (used=amount, quota null)', () => {
+      const c = store.recordUsage({
+        userId,
+        metric: 'llm_tokens',
+        period: 'daily',
+        amount: 42,
+        now: NOW,
+      })
+      expect(c.used).toBe(42)
+      expect(c.quota).toBeNull()
+      expect(c.periodStart).toBe(DAY_START)
+    })
+
+    it('records PAST the cap — the increment is never refused (vs checkAndIncrement)', () => {
+      store.setQuota(
+        { userId, metric: 'llm_tokens', period: 'daily', quota: 10 },
+        NOW,
+      )
+      expect(
+        store.recordUsage({
+          userId,
+          metric: 'llm_tokens',
+          period: 'daily',
+          amount: 8,
+          now: NOW,
+        }).used,
+      ).toBe(8)
+      // 8 + 5 = 13 > cap 10. checkAndIncrement would freeze used at 8
+      // (see the "does NOT commit used" test above); recordUsage commits 13.
+      const over = store.recordUsage({
+        userId,
+        metric: 'llm_tokens',
+        period: 'daily',
+        amount: 5,
+        now: NOW + 1,
+      })
+      expect(over.used).toBe(13)
+      expect(over.quota).toBe(10) // cap preserved, just exceeded
+    })
+
+    it('crossing the cap makes the pre-call peek fail-closed (the whole point)', () => {
+      store.setQuota(
+        { userId, metric: 'llm_tokens', period: 'daily', quota: 100 },
+        NOW,
+      )
+      // A single 250-token call overshoots the 100 cap in one go.
+      store.recordUsage({
+        userId,
+        metric: 'llm_tokens',
+        period: 'daily',
+        amount: 250,
+        now: NOW,
+      })
+      // The gate peeks with amount=0; used (250) >= quota (100) → refuse next.
+      const peek = store.checkAndIncrement({
+        userId,
+        metric: 'llm_tokens',
+        period: 'daily',
+        amount: 0,
+        now: NOW + 1,
+      })
+      expect(peek.counter.used).toBe(250)
+      expect(peek.counter.used >= (peek.counter.quota ?? 0)).toBe(true)
+    })
+
+    it('rolls an expired period (used resets to 0 before applying amount)', () => {
+      store.recordUsage({
+        userId,
+        metric: 'llm_tokens',
+        period: 'daily',
+        amount: 30,
+        now: NOW,
+      })
+      const NEXT_DAY = DAY_START + 86_400_000 + 8 * 3_600_000
+      const rolled = store.recordUsage({
+        userId,
+        metric: 'llm_tokens',
+        period: 'daily',
+        amount: 5,
+        now: NEXT_DAY,
+      })
+      expect(rolled.used).toBe(5) // not 35 — prior period rolled to 0 first
+      expect(rolled.periodStart).toBe(DAY_START + 86_400_000)
+    })
+
+    it('rejects a negative amount', () => {
+      expect(() =>
+        store.recordUsage({
+          userId,
+          metric: 'llm_tokens',
+          period: 'daily',
+          amount: -1,
+          now: NOW,
+        }),
+      ).toThrow(/non-negative integer/)
+    })
+  })
+
   // ---------- resetUsage ----------
 
   describe('resetUsage', () => {

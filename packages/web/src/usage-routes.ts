@@ -150,7 +150,7 @@ function parseLedgerQuery(url: URL): {
 // CSV column specs
 // ---------------------------------------------------------------------------
 
-const LEDGER_COLUMNS: ReadonlyArray<CsvColumn<UsageLedgerEntryDTO>> = [
+export const LEDGER_COLUMNS: ReadonlyArray<CsvColumn<UsageLedgerEntryDTO>> = [
   { header: 'id', value: (r) => r.id },
   { header: 'ts', value: (r) => r.ts },
   { header: 'iso_ts', value: (r) => new Date(r.ts).toISOString() },
