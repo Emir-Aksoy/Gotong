@@ -372,6 +372,33 @@ export class WorkflowVersioning {
     return this.entries.get(id)?.resolver ?? null
   }
 
+  /** Whether a lifecycle record exists for `id` (in memory or on disk). */
+  async has(id: string): Promise<boolean> {
+    if (this.entries.has(id)) return true
+    return (await this.lifecycle.read(id)) !== null
+  }
+
+  /**
+   * Fully remove a workflow: unregister its runner, delete the lifecycle record
+   * AND every revision snapshot, and drop the in-memory entry. A clean slate so
+   * the id can be re-imported from a fresh rev1.
+   *
+   * This deletes revision history on purpose — `removeWorkflow` is end-of-life,
+   * distinct from the append-only immutability that holds WHILE a workflow
+   * lives. A suspended run of a removed workflow can no longer resume (its
+   * runner is gone); the controller's resume sweep already closes such runs out
+   * as failed. No-op-safe if `id` was never adopted.
+   */
+  async removeWorkflow(id: string): Promise<void> {
+    const entry = await this.ensureLoaded(id)
+    if (entry?.participantId) {
+      this.hub.unregister(entry.participantId)
+    }
+    this.entries.delete(id)
+    await this.lifecycle.remove(id)
+    await this.revisions.removeAll(id)
+  }
+
   // --- Internals -----------------------------------------------------------
 
   /**

@@ -4,40 +4,28 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage } from '@aipehub/core'
-
 import { formatLoadReport, loadWorkflows } from '../src/workflow-loader.js'
 
 describe('workflow-loader', () => {
   let tmp: string
   let dir: string
-  let hub: Hub
 
-  beforeEach(async () => {
+  beforeEach(() => {
     tmp = mkdtempSync(join(tmpdir(), 'host-wf-loader-'))
     dir = join(tmp, 'definitions')
-    // We don't need a real space — just a hub for registration. Use the
-    // explicit InMemoryStorage path so we don't have to create a Space dir.
-    hub = new Hub({ storage: new InMemoryStorage() })
-    await hub.start()
   })
-  afterEach(async () => {
-    await hub.stop()
+  afterEach(() => {
     rmSync(tmp, { recursive: true, force: true })
   })
 
   it("silently no-ops when the directory doesn't exist", async () => {
-    const report = await loadWorkflows({
-      hub,
-      dir: join(tmp, 'does-not-exist'),
-      spaceRoot: tmp,
-    })
+    const report = await loadWorkflows({ dir: join(tmp, 'does-not-exist') })
     expect(report.loaded).toEqual([])
     expect(report.failed).toEqual([])
     expect(formatLoadReport(report)).toBe('')
   })
 
-  it('loads a single valid workflow file', async () => {
+  it('parses a single valid workflow file (no registration — versioning does that)', async () => {
     mkdirSync(dir, { recursive: true })
     writeFileSync(
       join(dir, 'editorial.yaml'),
@@ -53,23 +41,18 @@ workflow:
         payload: $trigger.payload
 `,
     )
-    const report = await loadWorkflows({ hub, dir, spaceRoot: tmp })
+    const report = await loadWorkflows({ dir })
     expect(report.loaded).toHaveLength(1)
     expect(report.failed).toEqual([])
     expect(report.loaded[0]!.participantId).toBe('workflow:ed')
     expect(report.loaded[0]!.definition.id).toBe('ed')
-
-    // Verify the runner was registered on the hub.
-    const p = hub.registry.get('workflow:ed')
-    expect(p).toBeDefined()
-    expect(p?.capabilities).toEqual(['run-editorial'])
   })
 
   it('skips dotfiles and non-yaml/json files', async () => {
     mkdirSync(dir, { recursive: true })
     writeFileSync(join(dir, '.hidden.yaml'), 'irrelevant')
     writeFileSync(join(dir, 'readme.txt'), 'docs only')
-    const report = await loadWorkflows({ hub, dir, spaceRoot: tmp })
+    const report = await loadWorkflows({ dir })
     expect(report.loaded).toHaveLength(0)
     expect(report.failed).toHaveLength(0)
   })
@@ -91,14 +74,14 @@ workflow:
         payload: hi
 `,
     )
-    const report = await loadWorkflows({ hub, dir, spaceRoot: tmp })
+    const report = await loadWorkflows({ dir })
     expect(report.loaded).toHaveLength(1)
     expect(report.loaded[0]!.definition.id).toBe('ok')
     expect(report.failed).toHaveLength(1)
     expect(report.failed[0]!.error).toMatch(/parse failed/)
   })
 
-  it('rejects a duplicate workflow id (second file fails register)', async () => {
+  it('rejects a duplicate workflow id (second file fails dedup)', async () => {
     mkdirSync(dir, { recursive: true })
     const sameId = `
 schema: aipehub.workflow/v1
@@ -113,11 +96,11 @@ workflow:
 `
     writeFileSync(join(dir, 'a-first.yaml'), sameId)
     writeFileSync(join(dir, 'b-second.yaml'), sameId)
-    const report = await loadWorkflows({ hub, dir, spaceRoot: tmp })
+    const report = await loadWorkflows({ dir })
     expect(report.loaded).toHaveLength(1) // alphabetical sort -> 'a-first' wins
     expect(report.loaded[0]!.file).toMatch(/a-first\.yaml$/)
     expect(report.failed).toHaveLength(1)
-    expect(report.failed[0]!.error).toMatch(/register failed/)
+    expect(report.failed[0]!.error).toMatch(/duplicate workflow id/)
   })
 
   it('formatLoadReport produces a readable summary line', async () => {
@@ -141,7 +124,7 @@ workflow:
 `,
     )
     writeFileSync(join(dir, 'broken.yaml'), '{ this is not parseable workflow }')
-    const report = await loadWorkflows({ hub, dir, spaceRoot: tmp })
+    const report = await loadWorkflows({ dir })
     const out = formatLoadReport(report)
     expect(out).toMatch(/loaded 1/)
     expect(out).toMatch(/workflow:one/)

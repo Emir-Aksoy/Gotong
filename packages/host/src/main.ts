@@ -793,16 +793,14 @@ async function main(): Promise<void> {
   // Workflow runners. Optional — the loader silently no-ops when the
   // directory doesn't exist, so users who aren't using workflows see no
   // extra log output. Errors are reported per-file; one bad workflow
-  // never blocks host boot.
+  // never blocks host boot. The loader only parses; the controller adopts
+  // each definition through the versioning service, which registers the
+  // resolver-backed runner (Phase 15).
   const workflowsDir = env('AIPE_WORKFLOWS_DIR', join(SPACE_DIR, 'workflows', 'definitions'))!
-  const workflowReport = await loadWorkflows({
-    hub,
-    dir: workflowsDir,
-    spaceRoot: SPACE_DIR,
-  })
+  const workflowReport = await loadWorkflows({ dir: workflowsDir })
   const wfMsg = formatLoadReport(workflowReport)
   if (wfMsg) log.info('workflow loader', { report: wfMsg })
-  const workflowController = createWorkflowController(
+  const workflowController = await createWorkflowController(
     { hub, definitionsDir: workflowsDir, spaceRoot: SPACE_DIR },
     workflowReport,
   )

@@ -1,33 +1,26 @@
 /**
- * `WorkflowController` — bridge between `@aipehub/web`'s admin HTTP API
- * and `@aipehub/workflow`'s in-process runners.
+ * `WorkflowController` — bridge between `@aipehub/web`'s admin HTTP API and the
+ * `@aipehub/workflow` runtime, now mediated by {@link WorkflowVersioning}.
  *
- * Implements the `WorkflowSurface` duck type the Web layer declares so
- * the Web package itself doesn't take a runtime dep on the workflow
- * runtime. We can drop a different controller in front of it (mock,
- * remote-only, no-import-allowed for read-only deployments, …) without
- * touching the Web code.
+ * Implements the `WorkflowSurface` duck type the Web layer declares so the Web
+ * package itself doesn't take a runtime dep on the workflow runtime.
  *
- * Two behaviors:
+ * Since Phase 15 the controller does NOT construct or register runners itself —
+ * `WorkflowVersioning` is the single authority that owns each workflow's
+ * lifecycle state + immutable revisions and keeps the right resolver-backed
+ * runner registered on the Hub. The controller's remaining jobs are:
  *
- *   - `list()` returns the live set of workflows currently registered on
- *     the Hub via `WorkflowRunner` participants. We track them in-memory
- *     here (keyed by participant id) so disk drift between
- *     `definitions/*.yaml` and the in-process registrations stays
- *     observable (the registry is the source of truth).
+ *   - persist the editable YAML mirror under `definitions/<id>.yaml`
+ *   - drive lifecycle transitions (import / saveDraft / publish / deprecate /
+ *     archive / rollback …) by delegating to the versioning service
+ *   - project the versioning state + the current revision's definition into the
+ *     `WorkflowSummary` shape the admin UI consumes
+ *   - the run-history read endpoints (a thin wrapper over `RunStore`)
  *
- *   - `importFromText(yaml)` parses, writes to disk **atomically**, and
- *     registers a fresh runner. Atomic semantics:
- *       1. parseWorkflow(yaml)  → reject early on bad schema
- *       2. fail if id already loaded (prevents overwrite surprises)
- *       3. mkdir + write `<def>.yaml.tmp` + rename
- *       4. WorkflowRunner construct + hub.register
- *     If step 4 fails after disk write, we delete the file we just wrote
- *     so the on-disk state matches the in-memory state.
- *
- * File names: `<workflowId>.yaml`. We use the workflow id (sanitised) so
- * a re-import overwrites cleanly and a directory `ls` matches the live
- * registry.
+ * `importFromText` keeps the Model-B semantics "import = immediately live": it
+ * writes the YAML atomically and `adopt`s the definition as a published rev1.
+ * `list()` returns only the LIVE (published/deprecated) workflows — a saved
+ * draft is intentionally absent until it's published.
  */
 
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs'
@@ -42,6 +35,8 @@ import {
   WorkflowRunner,
   parseWorkflow,
   workflowParticipantId,
+  type LifecycleState,
+  type RevisionMeta,
   type RunState,
   type RunSummary,
   type WorkflowDefinition,
@@ -49,6 +44,10 @@ import {
 
 import type { LoadReport } from './workflow-loader.js'
 import { assertNoSelfTriggerCycle } from './workflow-guards.js'
+import {
+  WorkflowVersioning,
+  type WorkflowLifecycleView,
+} from './workflow-versioning.js'
 
 export interface WorkflowSummary {
   id: string
@@ -59,136 +58,144 @@ export interface WorkflowSummary {
   /**
    * Optional UI form schema, lifted from the workflow definition's
    * `trigger.payloadSchema`. When present, the admin UI renders a
-   * workflow-specific dispatch form instead of the generic JSON
-   * textarea. Absent for legacy workflows — they fall back to the
-   * generic form. Pass-through; the host doesn't enforce shape
-   * (the workflow parser already did).
+   * workflow-specific dispatch form instead of the generic JSON textarea.
+   * Pass-through; the host doesn't enforce shape (the parser already did).
    */
   payloadSchema?: unknown
   /**
-   * Pass-through of the workflow definition's `surface.me` block (Phase
-   * 14), when present. The web layer derives the member-facing `/me`
-   * catalog from this — only workflows with `surface.me.enabled` are
-   * runnable by members. `unknown` here so the host stays a dumb pipe
-   * (the workflow parser already validated the shape).
+   * Pass-through of the workflow definition's `surface.me` block (Phase 14),
+   * when present. The web layer derives the member-facing `/me` catalog from
+   * this. `unknown` here so the host stays a dumb pipe.
    */
   surfaceMe?: unknown
   stepCount: number
   file: string | null
+  /** Phase 15 — lifecycle state of this workflow. */
+  state: LifecycleState
+  /**
+   * Phase 15 — the revision NEW runs bind to. Absent only for a workflow that
+   * has never been published (a pure draft).
+   */
+  currentRevision?: number
 }
 
 export interface WorkflowControllerOptions {
   hub: Hub
   /**
-   * Directory where uploaded workflows are persisted. Same place the
-   * boot-time loader scans, so a restart re-loads everything the admin
-   * imported through the UI.
+   * Directory where uploaded workflows are persisted (the editable YAML
+   * mirror). Same place the boot-time loader scans, so a restart re-adopts
+   * everything the admin imported through the UI.
    */
   definitionsDir: string
   /**
-   * Space root path. Used to construct `RunStore` instances for each
-   * runner so workflow runs land under
-   * `<spaceRoot>/workflows/runs/<runId>.json`.
+   * Space root path. Backs the shared `RunStore` and (by default) the
+   * `WorkflowVersioning` stores under `<spaceRoot>/workflows/`.
    */
   spaceRoot: string
+  /** Injectable versioning service. Default: file-backed over `spaceRoot`. */
+  versioning?: WorkflowVersioning
 }
 
 /**
- * Build a controller and pre-populate it with whatever the boot-time
- * loader registered. After this, the controller becomes the source of
- * truth for "what workflows are live in this Hub right now".
+ * Build a controller and adopt whatever the boot-time loader parsed. After this
+ * the controller (via its versioning service) is the source of truth for "what
+ * workflows are live in this Hub right now".
+ *
+ * Adoption is idempotent: a workflow that already has a persisted lifecycle
+ * record (a normal restart) keeps its state (a draft stays a draft, an archived
+ * one stays archived); a brand-new YAML with no record is published as rev1.
  */
-export function createWorkflowController(
+export async function createWorkflowController(
   opts: WorkflowControllerOptions,
   bootReport: LoadReport,
-): WorkflowController {
+): Promise<WorkflowController> {
   const c = new WorkflowController(opts)
   for (const w of bootReport.loaded) {
-    c.indexRegistered(w.participantId, w.definition, w.file)
+    await c.adoptAtBoot(w.definition, w.file)
   }
   return c
 }
 
 export class WorkflowController {
+  readonly versioning: WorkflowVersioning
   private readonly hub: Hub
   private readonly definitionsDir: string
   private readonly spaceRoot: string
   /**
-   * Shared `RunStore` for read-side endpoints (history list / detail).
-   * Writes still happen through each `WorkflowRunner`'s own store, but
-   * they all point at the same directory under `spaceRoot/workflows/`,
-   * so one shared reader sees everything.
+   * Shared `RunStore` for the read-side endpoints (history list / detail).
+   * Writes happen through each runner's own store, but they all point at the
+   * same directory, so one shared reader sees everything.
    */
   private readonly runStore: RunStore
   /**
-   * id → metadata for live runners we know about. The Hub's registry is
-   * authoritative on participant existence; this map carries the
-   * additional info (file path, definition summary) the UI needs.
+   * id → the editable YAML mirror path. The versioning service owns lifecycle
+   * truth; this map only carries the file path the UI shows / `remove` deletes.
    */
-  private readonly known = new Map<
-    string,
-    { participantId: string; definition: WorkflowDefinition; file: string | null }
-  >()
+  private readonly known = new Map<string, { file: string | null }>()
 
   constructor(opts: WorkflowControllerOptions) {
     this.hub = opts.hub
     this.definitionsDir = opts.definitionsDir
     this.spaceRoot = opts.spaceRoot
     this.runStore = new RunStore(opts.spaceRoot)
+    this.versioning =
+      opts.versioning ??
+      new WorkflowVersioning({ hub: opts.hub, spaceRoot: opts.spaceRoot })
   }
 
-  /** Called by `createWorkflowController` for each boot-time loaded workflow. */
-  indexRegistered(
-    participantId: string,
-    definition: WorkflowDefinition,
-    file: string | null,
-  ): void {
-    this.known.set(definition.id, { participantId, definition, file })
+  /** Called by `createWorkflowController` for each boot-time parsed workflow. */
+  async adoptAtBoot(definition: WorkflowDefinition, file: string | null): Promise<void> {
+    await this.versioning.adopt(definition)
+    this.known.set(definition.id, { file })
   }
 
+  /** The LIVE (registered) workflows, projected into the UI summary shape. */
   async list(): Promise<WorkflowSummary[]> {
     const out: WorkflowSummary[] = []
-    for (const w of this.known.values()) {
-      // Skip rows whose participant is no longer on the hub (paranoid
-      // resync — usually only matters in tests / weird unregisters).
-      if (!this.hub.registry.get(w.participantId)) continue
-      out.push(this.toSummary(w))
+    for (const [id, { file }] of this.known) {
+      let view: WorkflowLifecycleView
+      try {
+        view = await this.versioning.getState(id)
+      } catch {
+        // Record vanished out from under us (e.g. a concurrent remove) — skip.
+        continue
+      }
+      // Drafts / review / archived aren't live → not in the workflow list.
+      if (!view.registered) continue
+      out.push(this.summaryFromView(id, file, view))
     }
-    // stable sort by id
     out.sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
     return out
   }
 
   /**
-   * List recorded workflow runs from disk. Pass `workflowId` to filter
-   * to one workflow; pass `limit` to cap the result count (newest first).
+   * List recorded workflow runs from disk. Pass `workflowId` to filter to one
+   * workflow; pass `limit` to cap the result count (newest first).
    */
   async listRuns(opts?: { workflowId?: string; limit?: number }): Promise<RunSummary[]> {
     return this.runStore.listRuns(opts)
   }
 
-  /**
-   * Load the full `RunState` for one run, or `null` if no such run is
-   * recorded on disk.
-   */
+  /** Load the full `RunState` for one run, or `null` if no such run is recorded. */
   async readRun(runId: string): Promise<RunState | null> {
     return this.runStore.read(runId)
   }
 
   /**
-   * Scan the on-disk run history and resume any run whose recorded
-   * status is still `'running'`. Typical use: called once during host
-   * boot, right after `loadWorkflows` registers the runners. A normal
-   * shutdown leaves no `'running'` files behind; one that's still there
+   * Scan the on-disk run history and resume any run whose recorded status is
+   * still `'running'`. Typical use: called once during host boot, right after
+   * the controller adopts (and the versioning service registers) the runners. A
+   * normal shutdown leaves no `'running'` files behind; one that's still there
    * is the trace of a crash / kill-9 / power loss.
    *
    * For each crashed run:
-   *   - if the matching workflow runner is still loaded, kick off
-   *     `runner.resumeRun(state)` (fire-and-forget so a long resume
-   *     doesn't block boot)
-   *   - if the workflow has since been removed, mark the run as
-   *     `'failed'` with a clear reason and persist it back so the admin
-   *     history view stops showing a stale "running" forever
+   *   - if the matching runner is live on the Hub, kick off `resumeRun(state)`
+   *     (fire-and-forget so a long resume doesn't block boot). The runner is
+   *     resolver-backed, so it resumes on the EXACT revision the run started
+   *     under (`state.definitionRevision`) — no drift onto newer logic.
+   *   - if the workflow is no longer live (removed / archived), mark the run
+   *     `'failed'` and persist it so the history view stops showing a stale
+   *     "running" forever.
    *
    * Returns the count of runs resumed, plus the count abandoned.
    */
@@ -198,12 +205,12 @@ export class WorkflowController {
     let abandoned = 0
     for (const summary of all) {
       if (summary.status !== 'running') continue
-      const known = this.known.get(summary.workflowId)
       const state = await this.runStore.read(summary.runId)
       if (!state) continue
-      if (!known) {
-        // Workflow no longer loaded — close out the run so it doesn't
-        // sit in history forever pretending to still be running.
+      const participant = this.hub.registry.get(workflowParticipantId(summary.workflowId))
+      if (!participant || !(participant instanceof WorkflowRunner)) {
+        // Workflow no longer live — close out the run so it doesn't sit in
+        // history forever pretending to still be running.
         state.status = 'failed'
         state.endedAt = Date.now()
         state.error =
@@ -213,17 +220,8 @@ export class WorkflowController {
         abandoned++
         continue
       }
-      // Found the live runner — kick off resume. We do NOT await: a
-      // long-tail resume shouldn't block the host's boot sequence.
-      // Errors are logged because there's no caller to bubble them to.
-      const participant = this.hub.registry.get(known.participantId)
-      if (!participant || !(participant instanceof WorkflowRunner)) {
-        log.warn('resume: workflow indexed but not registered; skipping run', {
-          workflowId: summary.workflowId,
-          runId: summary.runId,
-        })
-        continue
-      }
+      // We do NOT await: a long-tail resume shouldn't block boot. Errors are
+      // logged because there's no caller to bubble them to.
       participant.resumeRun(state).catch((err) => {
         log.error('resume of run threw', { runId: summary.runId, err })
       })
@@ -233,57 +231,140 @@ export class WorkflowController {
   }
 
   /**
-   * Unregister a workflow runner and delete its backing YAML file.
-   *
-   * Three-step removal, each step best-effort but ordered so a partial
-   * failure leaves the most sensible state:
-   *
-   *   1. unregister the participant from the Hub (so no new task lands)
-   *   2. delete the on-disk file (so a restart doesn't re-load it)
-   *   3. drop from the in-memory index
-   *
-   * If step 1 fails (workflow doesn't exist), we throw and don't touch
-   * disk. If step 2 fails (file already gone, permissions), we still
-   * complete step 3 — the user clearly wants this workflow gone, and
-   * the participant is already off the Hub.
-   *
-   * In-flight tasks already dispatched to this runner are NOT cancelled;
-   * the Hub's normal flow lets them finish. Future invocations of the
-   * trigger capability will get `no_participant`.
+   * Fully remove a workflow: unregister its runner, delete its lifecycle record
+   * + revision snapshots, and delete the YAML mirror. In-flight tasks already
+   * dispatched are NOT cancelled (the Hub lets them finish); future invocations
+   * of the trigger capability get `no_participant`.
    */
   async remove(id: string): Promise<void> {
-    const w = this.known.get(id)
-    if (!w) {
+    const entry = this.known.get(id)
+    if (!entry) {
       throw new Error(`workflow '${id}' is not loaded`)
     }
-    const removed = this.hub.unregister(w.participantId)
-    if (!removed) {
-      // Out-of-sync: known map says it's there but Hub doesn't agree.
-      // Drop the bookkeeping anyway and try to clean the file too.
-      this.known.delete(id)
-      if (w.file) {
-        try { unlinkSync(w.file) } catch { /* ignore */ }
-      }
-      throw new Error(
-        `workflow '${id}' was not on the Hub — in-memory index has been resynced. Try again.`,
-      )
-    }
-    if (w.file) {
-      try { unlinkSync(w.file) } catch { /* the user can rm it manually if needed */ }
+    await this.versioning.removeWorkflow(id)
+    if (entry.file) {
+      try { unlinkSync(entry.file) } catch { /* the user can rm it manually */ }
     }
     this.known.delete(id)
   }
 
+  // --- import / lifecycle drivers -----------------------------------------
+
+  /**
+   * Model-B import: parse, write the YAML atomically, and `adopt` as a published
+   * rev1 (immediately live). Rejects a duplicate id — delete it first.
+   */
   async importFromText(text: string): Promise<WorkflowSummary> {
     const def = parseWorkflow(text)
     assertNoSelfTriggerCycle(def)
-    if (this.known.has(def.id)) {
+    if (await this.versioning.has(def.id)) {
       throw new Error(
         `workflow id '${def.id}' is already loaded — delete it first (v0.1 does not support re-import).`,
       )
     }
-    // Don't create the directory until we have something valid to put
-    // in it. Saves the operator a confusing empty `definitions/`.
+    const filePath = await this.writeDefinitionFile(def, text)
+    try {
+      await this.versioning.adopt(def)
+    } catch (err) {
+      try { unlinkSync(filePath) } catch { /* ignore */ }
+      throw err
+    }
+    this.known.set(def.id, { file: filePath })
+    return this.summary(def.id)
+  }
+
+  /**
+   * Save a workflow as a DRAFT (explicit opt-in; not live). Legal for a new id
+   * or an existing draft (the versioning service rejects saving a draft over a
+   * published workflow — publish an edit instead).
+   */
+  async saveDraft(text: string, opts: { by?: string } = {}): Promise<WorkflowSummary> {
+    const def = parseWorkflow(text)
+    assertNoSelfTriggerCycle(def)
+    const existed = await this.versioning.has(def.id)
+    const filePath = await this.writeDefinitionFile(def, text)
+    try {
+      await this.versioning.saveDraft(def, opts)
+    } catch (err) {
+      // Only clean up a file we just created; an existing workflow's mirror stays.
+      if (!existed) {
+        try { unlinkSync(filePath) } catch { /* ignore */ }
+      }
+      throw err
+    }
+    this.known.set(def.id, { file: filePath })
+    return this.summary(def.id)
+  }
+
+  /**
+   * Publish a workflow. With `text`, publish that edited content as a new
+   * revision (and refresh the YAML mirror); without it, promote the current
+   * head (draft/review/deprecated → published).
+   */
+  async publish(
+    id: string,
+    opts: { text?: string; by?: string } = {},
+  ): Promise<WorkflowSummary> {
+    if (opts.text !== undefined) {
+      const def = parseWorkflow(opts.text)
+      assertNoSelfTriggerCycle(def)
+      if (def.id !== id) {
+        throw new Error(`workflow id mismatch: body declares '${def.id}', expected '${id}'`)
+      }
+      await this.writeDefinitionFile(def, opts.text)
+      await this.versioning.publish(id, {
+        definition: def,
+        ...(opts.by !== undefined ? { by: opts.by } : {}),
+      })
+      this.known.set(id, { file: join(this.definitionsDir, `${sanitiseFileBase(id)}.yaml`) })
+    } else {
+      await this.versioning.publish(id, opts.by !== undefined ? { by: opts.by } : {})
+    }
+    return this.summary(id)
+  }
+
+  async submitReview(id: string, opts: { by?: string } = {}): Promise<WorkflowSummary> {
+    await this.versioning.submitReview(id, opts)
+    return this.summary(id)
+  }
+
+  async backToDraft(id: string, opts: { by?: string } = {}): Promise<WorkflowSummary> {
+    await this.versioning.backToDraft(id, opts)
+    return this.summary(id)
+  }
+
+  async deprecate(id: string, opts: { by?: string } = {}): Promise<WorkflowSummary> {
+    await this.versioning.deprecate(id, opts)
+    return this.summary(id)
+  }
+
+  async archive(id: string, opts: { by?: string } = {}): Promise<WorkflowSummary> {
+    await this.versioning.archive(id, opts)
+    return this.summary(id)
+  }
+
+  async rollback(
+    id: string,
+    opts: { targetRevision: number; by?: string },
+  ): Promise<WorkflowSummary> {
+    await this.versioning.rollback(id, opts)
+    return this.summary(id)
+  }
+
+  /** Revision metadata for one workflow, ascending. */
+  async listRevisions(id: string): Promise<RevisionMeta[]> {
+    return this.versioning.listRevisions(id)
+  }
+
+  /** Full lifecycle view for one workflow. */
+  async getState(id: string): Promise<WorkflowLifecycleView> {
+    return this.versioning.getState(id)
+  }
+
+  // --- internals -----------------------------------------------------------
+
+  private async writeDefinitionFile(def: WorkflowDefinition, text: string): Promise<string> {
+    // Don't create the directory until we have something valid to put in it.
     if (!existsSync(this.definitionsDir)) {
       mkdirSync(this.definitionsDir, { recursive: true })
     }
@@ -293,59 +374,54 @@ export class WorkflowController {
     try {
       await rename(tmp, filePath)
     } catch (err) {
-      // best-effort cleanup of the .tmp
       try { unlinkSync(tmp) } catch { /* ignore */ }
       throw err
     }
-
-    // Register the runner. If this fails (Hub registry rejects), delete
-    // the file we just wrote so the on-disk state matches "not loaded".
-    const participantId = workflowParticipantId(def.id)
-    const runner = new WorkflowRunner({
-      definition: def,
-      hub: this.hub,
-      runStore: new RunStore(this.spaceRoot),
-    })
-    try {
-      this.hub.register(runner)
-    } catch (err) {
-      try { unlinkSync(filePath) } catch { /* ignore */ }
-      throw err
-    }
-
-    this.known.set(def.id, { participantId, definition: def, file: filePath })
-    return this.toSummary({ participantId, definition: def, file: filePath })
+    return filePath
   }
 
-  private toSummary(w: {
-    participantId: string
-    definition: WorkflowDefinition
-    file: string | null
-  }): WorkflowSummary {
+  private async summary(id: string): Promise<WorkflowSummary> {
+    const view = await this.versioning.getState(id)
+    const file = this.known.get(id)?.file ?? null
+    return this.summaryFromView(id, file, view)
+  }
+
+  /** Project a lifecycle view + the relevant revision's definition into a summary. */
+  private summaryFromView(
+    id: string,
+    file: string | null,
+    view: WorkflowLifecycleView,
+  ): WorkflowSummary {
+    // Use the current (published) revision when there is one, else the head —
+    // so a draft still surfaces its latest edited content.
+    const rev = view.currentRevision ?? view.headRevision
+    const resolver = this.versioning.getResolver(id)
+    if (!resolver) {
+      throw new Error(`workflow '${id}' has no resolver — not loaded`)
+    }
+    const def = resolver.byRevision(rev)
     const out: WorkflowSummary = {
-      id: w.definition.id,
-      participantId: w.participantId,
-      triggerCapability: w.definition.trigger.capability,
-      stepCount: w.definition.steps.length,
-      file: w.file,
+      id: def.id,
+      participantId: workflowParticipantId(id),
+      triggerCapability: view.triggerCapability,
+      stepCount: def.steps.length,
+      state: view.state,
+      file,
     }
-    if (w.definition.name) out.name = w.definition.name
-    if (w.definition.description) out.description = w.definition.description
-    if (w.definition.trigger.payloadSchema) {
-      out.payloadSchema = w.definition.trigger.payloadSchema
-    }
-    if (w.definition.surface?.me) {
-      out.surfaceMe = w.definition.surface.me
-    }
+    if (view.currentRevision !== undefined) out.currentRevision = view.currentRevision
+    if (def.name) out.name = def.name
+    if (def.description) out.description = def.description
+    if (def.trigger.payloadSchema) out.payloadSchema = def.trigger.payloadSchema
+    if (def.surface?.me) out.surfaceMe = def.surface.me
     return out
   }
 }
 
 /**
  * Convert a workflow id into a safe file base. The id schema is already
- * url-/json-safe (letters / digits / _ . : -), but `:` is allowed inside
- * ids and macOS/Linux tolerates it while Windows does not. Replace it
- * with `__` so the filename works everywhere.
+ * url-/json-safe (letters / digits / _ . : -), but `:` is allowed inside ids
+ * and macOS/Linux tolerates it while Windows does not. Replace it with `__` so
+ * the filename works everywhere.
  */
 function sanitiseFileBase(id: string): string {
   return id.replace(/:/g, '__')

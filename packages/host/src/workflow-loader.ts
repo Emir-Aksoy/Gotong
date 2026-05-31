@@ -1,10 +1,14 @@
 /**
- * `workflow-loader` — scans a directory for `aipehub.workflow/v1` files,
- * parses each one, and registers a `WorkflowRunner` on the Hub for it.
+ * `workflow-loader` — scans a directory for `aipehub.workflow/v1` files and
+ * parses each one into a `WorkflowDefinition`. It does NOT register runners:
+ * since Phase 15 the `WorkflowVersioning` service is the single authority that
+ * adopts a definition (allocating its revision + lifecycle record) and registers
+ * the resolver-backed runner. The loader's only job is "turn the files on disk
+ * into parsed definitions, robustly".
  *
- * Triggered from the host's startup. Stays out of the Hub's hot path — if
- * a workflow file is malformed, we log a warning and skip it; the host
- * boot continues.
+ * Triggered from the host's startup. Stays out of the Hub's hot path — if a
+ * workflow file is malformed, we log a warning and skip it; the host boot
+ * continues.
  *
  * Conventions:
  *   - Default directory: `<spaceRoot>/workflows/definitions/` (mirrors how
@@ -12,19 +16,18 @@
  *   - File patterns: `*.yaml`, `*.yml`, `*.json`.
  *   - Hidden / dotfile names are skipped.
  *   - Duplicate workflow ids inside the same directory are rejected — the
- *     second one fails its register; the first one wins (alphabetical order).
+ *     second one fails (alphabetical order; the first one wins).
  *
- * The loader returns a report so `main.ts` can print a one-line summary.
+ * The loader returns a report so `main.ts` can print a one-line summary and the
+ * controller can adopt each parsed definition through the versioning service.
  */
 
 import { existsSync } from 'node:fs'
 import { readFile, readdir } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { Hub, ParticipantId } from '@aipehub/core'
+import type { ParticipantId } from '@aipehub/core'
 import {
-  RunStore,
-  WorkflowRunner,
   parseWorkflow,
   workflowParticipantId,
   type WorkflowDefinition,
@@ -45,34 +48,24 @@ export interface LoadFailure {
 export interface LoadReport {
   /** Directory that was scanned. */
   dir: string
-  /** Successfully registered runners. */
+  /** Successfully parsed definitions. */
   loaded: LoadedWorkflow[]
-  /** Files that failed to parse or register. */
+  /** Files that failed to parse (or collided on id). */
   failed: LoadFailure[]
 }
 
 export interface LoadWorkflowsOptions {
-  /** Hub the runners attach to. Required. */
-  hub: Hub
   /** Directory to scan for `*.yaml` / `*.json` workflow files. */
   dir: string
-  /**
-   * Space root for `RunStore` persistence (each runner writes its
-   * `RunState` files under `<spaceRoot>/workflows/runs/`). Pass `null`
-   * to disable on-disk run state (mostly for tests).
-   */
-  spaceRoot: string | null
 }
 
 /**
- * Walk `opts.dir`, parse every workflow file, and `hub.register` a runner
- * for each successful one. Logs progress to stdout/stderr; never throws —
- * a bad file becomes a `LoadFailure` row in the returned report.
+ * Walk `opts.dir` and parse every workflow file. Logs nothing itself; never
+ * throws — a bad file becomes a `LoadFailure` row in the returned report.
  *
- * If `opts.dir` doesn't exist, the loader logs a single "no workflows
- * directory found" line and returns an empty report. Treating "no dir"
- * as a silent no-op keeps the default host boot quiet for users who
- * aren't using workflows yet.
+ * If `opts.dir` doesn't exist, the loader returns an empty report. Treating "no
+ * dir" as a silent no-op keeps the default host boot quiet for users who aren't
+ * using workflows yet.
  */
 export async function loadWorkflows(
   opts: LoadWorkflowsOptions,
@@ -105,7 +98,9 @@ export async function loadWorkflows(
     )
     .sort()
 
-  const runStore = opts.spaceRoot ? new RunStore(opts.spaceRoot) : null
+  // Dedupe ids within the directory ourselves — the loader no longer registers,
+  // so it can't lean on `hub.register` throwing on a collision.
+  const seenIds = new Set<string>()
 
   for (const f of files) {
     const filePath = join(opts.dir, f)
@@ -132,23 +127,19 @@ export async function loadWorkflows(
       continue
     }
 
-    const participantId = workflowParticipantId(def.id)
-    // Hub.register throws on id collision — catch it and log so other
-    // workflows can still load.
-    try {
-      const runner = new WorkflowRunner({
-        definition: def,
-        hub: opts.hub,
-        runStore,
-      })
-      opts.hub.register(runner)
-      report.loaded.push({ file: filePath, participantId, definition: def })
-    } catch (err) {
+    if (seenIds.has(def.id)) {
       report.failed.push({
         file: filePath,
-        error: `register failed: ${err instanceof Error ? err.message : String(err)}`,
+        error: `duplicate workflow id '${def.id}' — already loaded from an earlier file`,
       })
+      continue
     }
+    seenIds.add(def.id)
+    report.loaded.push({
+      file: filePath,
+      participantId: workflowParticipantId(def.id),
+      definition: def,
+    })
   }
 
   return report

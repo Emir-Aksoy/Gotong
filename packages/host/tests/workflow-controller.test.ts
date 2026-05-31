@@ -49,13 +49,13 @@ describe('WorkflowController', () => {
     expect(await c.list()).toEqual([])
   })
 
-  it('createWorkflowController pre-populates from a boot report', async () => {
+  it('createWorkflowController adopts a boot report as published rev1', async () => {
     // Drive the loader through a fake boot.
     mkdirSync(definitionsDir, { recursive: true })
     writeFileSync(join(definitionsDir, 'editorial.yaml'), SAMPLE)
-    const report = await loadWorkflows({ hub, dir: definitionsDir, spaceRoot: tmp })
+    const report = await loadWorkflows({ dir: definitionsDir })
     expect(report.loaded).toHaveLength(1)
-    const c = createWorkflowController(
+    const c = await createWorkflowController(
       { hub, definitionsDir, spaceRoot: tmp },
       report,
     )
@@ -68,8 +68,12 @@ describe('WorkflowController', () => {
       stepCount: 2,
       name: '中文编辑',
       description: 'writer → reviewer',
+      state: 'published',
+      currentRevision: 1,
     })
     expect(list[0]!.file).toMatch(/editorial\.yaml$/)
+    // The versioning service registered a runner for it.
+    expect(hub.registry.get('workflow:editorial')).toBeDefined()
   })
 
   it('importFromText() writes to disk and registers a runner', async () => {
@@ -161,6 +165,76 @@ workflow:
     const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
     const summary = await c.importFromText(SAMPLE)
     expect(summary.surfaceMe).toBeUndefined()
+  })
+
+  describe('lifecycle (Phase 15)', () => {
+    it('importFromText adopts as published rev1', async () => {
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      const summary = await c.importFromText(SAMPLE)
+      expect(summary.state).toBe('published')
+      expect(summary.currentRevision).toBe(1)
+      const view = await c.getState('editorial')
+      expect(view).toMatchObject({ state: 'published', currentRevision: 1, headRevision: 1 })
+      expect(view.registered).toBe(true)
+    })
+
+    it('saveDraft creates a draft that is NOT registered and NOT in list()', async () => {
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      const summary = await c.saveDraft(SAMPLE)
+      expect(summary.state).toBe('draft')
+      expect(summary.currentRevision).toBeUndefined()
+      // Not live → no runner, absent from the workflow list.
+      expect(hub.registry.get('workflow:editorial')).toBeUndefined()
+      expect(await c.list()).toEqual([])
+      // But its YAML mirror is on disk and getState sees it.
+      expect(existsSync(join(definitionsDir, 'editorial.yaml'))).toBe(true)
+      expect((await c.getState('editorial')).state).toBe('draft')
+    })
+
+    it('publish promotes a draft → registered + in list()', async () => {
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      await c.saveDraft(SAMPLE)
+      const summary = await c.publish('editorial')
+      expect(summary.state).toBe('published')
+      expect(summary.currentRevision).toBe(1)
+      expect(hub.registry.get('workflow:editorial')).toBeDefined()
+      const list = await c.list()
+      expect(list.map((w) => w.id)).toEqual(['editorial'])
+    })
+
+    it('publish an edit appends rev2 and refreshes the YAML mirror', async () => {
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      await c.importFromText(SAMPLE)
+      const edited = SAMPLE.replace('name: 中文编辑', 'name: 编辑 v2')
+      const summary = await c.publish('editorial', { text: edited })
+      expect(summary.currentRevision).toBe(2)
+      expect(summary.name).toBe('编辑 v2')
+      // The on-disk mirror now reflects the published edit.
+      expect(readFileSync(join(definitionsDir, 'editorial.yaml'), 'utf8')).toBe(edited)
+      const revs = await c.listRevisions('editorial')
+      expect(revs.map((r) => r.revision)).toEqual([1, 2])
+    })
+
+    it('deprecate stays in list(); archive drops out of list()', async () => {
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      await c.importFromText(SAMPLE)
+      await c.deprecate('editorial')
+      expect((await c.list()).map((w) => w.id)).toEqual(['editorial']) // deprecated is live
+      expect((await c.list())[0]!.state).toBe('deprecated')
+      await c.archive('editorial')
+      expect(await c.list()).toEqual([]) // archived → not live
+      expect(hub.registry.get('workflow:editorial')).toBeUndefined()
+    })
+
+    it('rollback re-points current to an earlier revision', async () => {
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      await c.importFromText(SAMPLE) // rev1
+      await c.publish('editorial', { text: SAMPLE.replace('中文编辑', 'v2') }) // rev2
+      const summary = await c.rollback('editorial', { targetRevision: 1 })
+      expect(summary.currentRevision).toBe(3) // append-only clone of rev1
+      expect(summary.name).toBe('中文编辑') // back to rev1 content
+      expect(summary.state).toBe('published')
+    })
   })
 
   describe('remove()', () => {

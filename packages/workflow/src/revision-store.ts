@@ -26,7 +26,7 @@
 
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
-import { readFile, readdir, rename, writeFile } from 'node:fs/promises'
+import { readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { WorkflowRevisionError, type RevisionMeta, type WorkflowRevision } from './lifecycle.js'
@@ -77,6 +77,14 @@ export interface RevisionStore {
   list(workflowId: string): Promise<RevisionMeta[]>
   /** The next free revision number for `workflowId` (1 if none exist yet). */
   nextRevisionNumber(workflowId: string): Promise<number>
+  /**
+   * Delete ALL revisions of `workflowId` (no-op if none). Used only when a
+   * workflow is fully removed — a clean slate so the id can be re-imported from
+   * a fresh rev1. This is end-of-life cleanup, NOT a mutation of a live
+   * workflow's history (the write-once immutability guarantee is about never
+   * overwriting an existing revision while the workflow exists).
+   */
+  removeAll(workflowId: string): Promise<void>
 }
 
 /** File-backed {@link RevisionStore}. */
@@ -163,5 +171,10 @@ export class FileRevisionStore implements RevisionStore {
       if (Number.isInteger(n) && n > max) max = n
     }
     return max + 1
+  }
+
+  async removeAll(workflowId: string): Promise<void> {
+    const dir = this.dirFor(workflowId)
+    if (existsSync(dir)) await rm(dir, { recursive: true, force: true })
   }
 }
