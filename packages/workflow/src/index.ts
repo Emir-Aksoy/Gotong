@@ -55,6 +55,14 @@ export type { ResolutionContext } from './resolver.js'
 
 export { RunStore } from './run-store.js'
 
+// Phase 15 — file-first revision + lifecycle stores (interface-gated so a
+// SQLite backend can slot in later).
+export { sanitiseFileBase } from './paths.js'
+export { FileRevisionStore, hashDefinition } from './revision-store.js'
+export type { RevisionStore } from './revision-store.js'
+export { FileLifecycleStore } from './lifecycle-store.js'
+export type { LifecycleStore } from './lifecycle-store.js'
+
 export { WorkflowRunner, workflowParticipantId } from './runner.js'
 export type { WorkflowRunnerOptions, HubLike } from './runner.js'
 
