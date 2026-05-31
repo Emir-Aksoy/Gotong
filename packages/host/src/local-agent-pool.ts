@@ -59,6 +59,15 @@ import {
 
 const log = createLogger('local-agents')
 
+// Phase 17 — budget metric names shared by the pre-call gate (which
+// PEEKS them, refusing when a cap is hit) and the post-call usage sink
+// (which RECORDS actual consumption). 'daily' matches the call-count
+// gate's window. Admins enforce a token / cost budget by setting a quota
+// on these via `identity.setQuota`; no quota → no enforcement.
+const LLM_TOKENS_METRIC = 'llm_tokens'
+const LLM_COST_MICROS_METRIC = 'llm_cost_micros'
+const BUDGET_PERIOD = 'daily' as const
+
 /**
  * Phase 17 — derive usage-ledger attribution from a task. `origin`
  * carries the acting user + org (stamped by /me dispatch and re-stamped
@@ -275,6 +284,13 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       this.llmQuotaGate = this.orgApiPool.makeLlmQuotaGate({
         metric: 'llm_requests',
         period: 'daily',
+        // Phase 17 — also peek token + cost budgets pre-call. Their
+        // consumption is recorded post-call by the usage sink, so this
+        // refuses the NEXT call once a budget is spent (fail-closed).
+        budgetPeeks: [
+          { metric: LLM_TOKENS_METRIC, period: BUDGET_PERIOD },
+          { metric: LLM_COST_MICROS_METRIC, period: BUDGET_PERIOD },
+        ],
       })
     }
   }
@@ -720,17 +736,23 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       }
     }
 
-    // Phase 17 — usage/cost ledger sink. Fires once per provider response
-    // that carried usage (so every tool-use round too). Records a
-    // `usage_ledger` row attributed from `task.origin` (user/org) +
-    // `task.ancestry` (the workflow ancestor). Unlike the quota gate we
-    // do NOT skip the mock provider: the ledger is observability, and a
-    // mock call lands as an `unpriced` $0 row (its model isn't in the
-    // price table) — harmless, and it keeps the audit trail complete.
+    // Phase 17 — usage/cost ledger + budget sink. Fires once per provider
+    // response that carried usage (so every tool-use round too). Two
+    // post-call accounting jobs:
+    //   1. LEDGER (always, all providers): append a `usage_ledger` row
+    //      attributed from `task.origin` (user/org) + `task.ancestry`
+    //      (workflow ancestor). The ledger is observability — a mock call
+    //      lands as an `unpriced` $0 row, harmless, keeps the trail whole.
+    //   2. BUDGET COUNTERS (attributed, non-mock only): debit `llm_tokens`
+    //      + `llm_cost_micros` so the pre-call gate's peek refuses the
+    //      NEXT call once a cap is hit. Mock is skipped for the SAME reason
+    //      the call-count gate skips it — a demo mustn't burn a real
+    //      token/cost budget shared across the user's other agents.
     // Self-contained try/catch so a DB fault is logged here and never
     // bubbles into the (already best-effort) agent sink wrapper.
     const identityForLedger = this.identity
     const pricingTable = this.pricingTable
+    const recordIsMock = record.managed.provider === 'mock'
     const usageSink = identityForLedger
       ? (task: Task, usage: LlmUsage, meta: LlmUsageSinkMeta): void => {
           try {
@@ -756,6 +778,23 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
               unpriced,
               meta: { stopReason: meta.stopReason },
             })
+            // Budget counters — only for attributed, non-mock calls.
+            if (attr.userId && !recordIsMock) {
+              const tokens =
+                (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+              identityForLedger.checkAndIncrement({
+                userId: attr.userId,
+                metric: LLM_TOKENS_METRIC,
+                period: BUDGET_PERIOD,
+                amount: tokens,
+              })
+              identityForLedger.checkAndIncrement({
+                userId: attr.userId,
+                metric: LLM_COST_MICROS_METRIC,
+                period: BUDGET_PERIOD,
+                amount: costMicros,
+              })
+            }
           } catch (err) {
             log.warn('usage ledger append failed', {
               agentId: agentIdRef,

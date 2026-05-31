@@ -85,12 +85,21 @@ export interface QuotaSubject {
 export type QuotaGate = (subject: QuotaSubject | undefined) => void
 
 export interface MakeLlmQuotaGateOpts {
-  /** Counter id, e.g. `'llm_requests'`. Required. */
+  /** Counter id, e.g. `'llm_requests'`. Required. Debited per call. */
   metric: string
   /** Rolling window. Required. */
   period: UsagePeriod
   /** Units to debit per call. Defaults to 1. */
   amount?: number
+  /**
+   * Phase 17 — additional budget metrics PEEKED (never debited) before
+   * the call; refuse if any is already at/over its cap. Their actual
+   * consumption is recorded POST-call by the usage sink (tokens / cost
+   * aren't known until the provider responds), so enforcement is
+   * "fail-closed on the NEXT call once the budget is spent". A metric
+   * with no quota configured (`quota=null`) never refuses.
+   */
+  budgetPeeks?: Array<{ metric: string; period: UsagePeriod }>
 }
 
 /**
@@ -114,6 +123,58 @@ export class QuotaExceededError extends Error {
     )
     this.name = 'QuotaExceededError'
   }
+}
+
+/**
+ * Write the `api_quota_denied` audit row (best-effort) then throw
+ * QuotaExceededError. Shared by the call-count debit path and the
+ * Phase 17 budget-peek path. The audit write NEVER masks the throw — a
+ * denied call must surface even if the audit insert itself fails.
+ */
+function denyQuota(
+  identity: IdentityStore,
+  orgIdForAudit: string | null,
+  d: {
+    userId: string
+    metric: string
+    period: UsagePeriod
+    used: number
+    quota: number
+    exceededBy: number
+    amount?: number
+  },
+): never {
+  try {
+    identity.writeAuditLog({
+      action: 'api_quota_denied',
+      actorSource: 'system',
+      actorUserId: d.userId,
+      targetUserId: d.userId,
+      targetCredentialId: null,
+      ip: null,
+      userAgent: null,
+      metadata: {
+        metric: d.metric,
+        period: d.period,
+        amount: d.amount ?? 0,
+        used: d.used,
+        quota: d.quota,
+        exceededBy: d.exceededBy,
+        orgId: orgIdForAudit,
+      },
+      success: false,
+    })
+  } catch {
+    // Best effort — never let an audit fault swallow the gate decision.
+  }
+  throw new QuotaExceededError(
+    d.userId,
+    d.metric,
+    d.period,
+    d.used,
+    d.quota,
+    d.exceededBy,
+  )
 }
 
 export class OrgApiPool {
@@ -315,59 +376,52 @@ export class OrgApiPool {
         `makeLlmQuotaGate: amount must be a non-negative integer; got ${amount}`,
       )
     }
+    const budgetPeeks = opts.budgetPeeks ?? []
     const identity = this.identity
     const orgIdForAudit = this.orgId
     return function quotaGate(subject: QuotaSubject | undefined): void {
       const userId = subject?.userId
       if (!userId) return // unattributed call → unconstrained (by design)
-      const result = identity.checkAndIncrement({
-        userId,
-        metric,
-        period,
-        amount,
-      })
-      if (!result.allowed) {
-        const quota = result.counter.quota ?? 0
-        // Audit #151 — the API_QUOTA_DENIED vocabulary is defined in
-        // AUDIT_ACTIONS but until now nothing wrote it. Operators
-        // could see per-user counters at the cap but not the "this
-        // many calls were rejected in the last hour" series they need
-        // to size a quota raise. Write best-effort: if the audit row
-        // fails (DB busy, etc.) we still throw QuotaExceededError so
-        // the caller knows the request was denied — never let an
-        // audit-side fault swallow the gate decision.
-        try {
-          identity.writeAuditLog({
-            action: 'api_quota_denied',
-            actorSource: 'system',
-            actorUserId: userId,
-            targetUserId: userId,
-            targetCredentialId: null,
-            ip: null,
-            userAgent: null,
-            metadata: {
-              metric,
-              period,
-              amount,
-              used: result.counter.used,
-              quota,
-              exceededBy: result.exceededBy ?? 0,
-              orgId: orgIdForAudit,
-            },
-            success: false,
+
+      // Phase 17 — budget peeks FIRST (amount=0 → peek-and-roll, never
+      // debits). Refuse if a token / cost budget is already spent. Done
+      // before the call-count debit so a budget-refused call doesn't
+      // consume a request unit. A metric with no cap (quota=null) is a
+      // no-op here.
+      for (const b of budgetPeeks) {
+        const peek = identity.checkAndIncrement({
+          userId,
+          metric: b.metric,
+          period: b.period,
+          amount: 0,
+        })
+        const q = peek.counter.quota
+        if (q !== null && peek.counter.used >= q) {
+          denyQuota(identity, orgIdForAudit, {
+            userId,
+            metric: b.metric,
+            period: b.period,
+            used: peek.counter.used,
+            quota: q,
+            exceededBy: peek.counter.used - q,
           })
-        } catch {
-          // Best effort — see comment above. The gate decision is
-          // already committed (checkAndIncrement is atomic).
         }
-        throw new QuotaExceededError(
+      }
+
+      // Call-count debit (fail-closed) LAST. Audit #151 — api_quota_denied
+      // is written by denyQuota so operators get the "N calls rejected"
+      // series they need to size a quota raise.
+      const result = identity.checkAndIncrement({ userId, metric, period, amount })
+      if (!result.allowed) {
+        denyQuota(identity, orgIdForAudit, {
           userId,
           metric,
           period,
-          result.counter.used,
-          quota,
-          result.exceededBy ?? 0,
-        )
+          amount,
+          used: result.counter.used,
+          quota: result.counter.quota ?? 0,
+          exceededBy: result.exceededBy ?? 0,
+        })
       }
     }
   }
