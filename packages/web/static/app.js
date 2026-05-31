@@ -290,9 +290,13 @@
     if (!SIGNED_IN) return
     await renderWhoami()
     await loadMyWorkflows()
+    await loadMyInbox()
     await loadMyReports()
     document.getElementById('me-dispatch-btn')?.addEventListener('click', submitDispatch)
     document.getElementById('me-refresh-reports-btn')?.addEventListener('click', loadMyReports)
+    document.getElementById('me-inbox-refresh-btn')?.addEventListener('click', loadMyInbox)
+    // Delegated: the list is re-rendered, but #me-inbox-list is stable.
+    document.getElementById('me-inbox-list')?.addEventListener('click', onInboxClick)
   }
 
   async function renderWhoami() {
@@ -445,6 +449,117 @@
     } catch (err) {
       status.className = 'me-status error'
       status.textContent = `派发失败: ${err?.message || err}`
+    }
+  }
+
+  // Member task inbox (Phase 16). Lists the caller's pending human-in-the-loop
+  // steps; resolving one POSTs the decision and the parked workflow resumes.
+  async function loadMyInbox() {
+    const list = document.getElementById('me-inbox-list')
+    const count = document.getElementById('me-inbox-count')
+    if (!list) return
+    list.innerHTML = '<p class="me-meta">加载中…</p>'
+    try {
+      const r = await fetch('/api/me/inbox')
+      if (!r.ok) {
+        list.innerHTML = `<p class="me-meta">加载失败 (HTTP ${r.status})</p>`
+        if (count) count.textContent = ''
+        return
+      }
+      const j = await r.json()
+      const items = Array.isArray(j?.items) ? j.items : []
+      if (count) count.textContent = items.length ? String(items.length) : ''
+      if (items.length === 0) {
+        list.innerHTML = '<p class="me-meta">暂无待处理任务。</p>'
+        return
+      }
+      list.innerHTML = items.map(renderInboxItem).join('')
+    } catch (err) {
+      list.innerHTML = `<p class="me-meta">加载失败: ${escape(err?.message || String(err))}</p>`
+    }
+  }
+
+  // Render one pending item with controls keyed to its kind. The decision shape
+  // is validated server-side against the item's kind; `data-*` carry the ids.
+  function renderInboxItem(item) {
+    const id = escape(item.itemId || '')
+    const heading = item.title ? `<strong>${escape(item.title)}</strong>` : ''
+    const prompt = `<p class="me-inbox-prompt">${escape(item.prompt || '')}</p>`
+    let controls = ''
+    if (item.kind === 'approval') {
+      controls = `
+        <div class="me-inbox-actions">
+          <button type="button" class="me-primary-btn" data-inbox-approve="${id}">批准</button>
+          <button type="button" class="me-secondary-btn" data-inbox-reject="${id}">拒绝</button>
+        </div>`
+    } else if (item.kind === 'choice') {
+      const opts = Array.isArray(item.options) ? item.options : []
+      controls = `<div class="me-inbox-actions">${opts
+        .map(
+          (o) =>
+            `<button type="button" class="me-secondary-btn" data-inbox-choice="${id}" data-value="${escape(o.value)}">${escape(o.label || o.value)}</button>`,
+        )
+        .join('')}</div>`
+    } else if (item.kind === 'edit') {
+      const ef = item.editField || {}
+      const def = escape(ef.defaultValue || '')
+      const ph = escape(ef.placeholder || '')
+      const control = ef.multiline
+        ? `<textarea data-inbox-edit-field rows="4" placeholder="${ph}">${def}</textarea>`
+        : `<input type="text" data-inbox-edit-field placeholder="${ph}" value="${def}">`
+      controls = `<div class="me-inbox-edit">${control}<button type="button" class="me-primary-btn" data-inbox-edit="${id}">提交</button></div>`
+    }
+    return `
+      <div class="me-inbox-item" data-inbox-item="${id}">
+        ${heading}${prompt}${controls}
+        <div class="me-status" data-inbox-status></div>
+      </div>`
+  }
+
+  function onInboxClick(ev) {
+    const t = ev.target
+    if (!t || !t.getAttribute) return
+    const approve = t.getAttribute('data-inbox-approve')
+    if (approve) return resolveInbox(approve, { kind: 'approval', approved: true }, t)
+    const reject = t.getAttribute('data-inbox-reject')
+    if (reject) return resolveInbox(reject, { kind: 'approval', approved: false }, t)
+    const choice = t.getAttribute('data-inbox-choice')
+    if (choice) {
+      return resolveInbox(choice, { kind: 'choice', value: t.getAttribute('data-value') || '' }, t)
+    }
+    const edit = t.getAttribute('data-inbox-edit')
+    if (edit) {
+      const item = t.closest('.me-inbox-item')
+      const field = item ? item.querySelector('[data-inbox-edit-field]') : null
+      return resolveInbox(edit, { kind: 'edit', value: field ? field.value : '' }, t)
+    }
+  }
+
+  async function resolveInbox(itemId, decision, fromEl) {
+    const itemEl = fromEl && fromEl.closest ? fromEl.closest('.me-inbox-item') : null
+    const statusEl = itemEl ? itemEl.querySelector('[data-inbox-status]') : null
+    const setButtons = (disabled) => {
+      if (itemEl) itemEl.querySelectorAll('button').forEach((b) => { b.disabled = disabled })
+    }
+    if (statusEl) { statusEl.className = 'me-status'; statusEl.textContent = '提交中…' }
+    setButtons(true) // guard against a double-submit while in flight
+    try {
+      const r = await fetch(`/api/me/inbox/${encodeURIComponent(itemId)}/resolve`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ decision }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = j?.error || `处理失败 (HTTP ${r.status})` }
+        setButtons(false)
+        return
+      }
+      // Resolved — refresh the list (updates count + empty state).
+      await loadMyInbox()
+    } catch (err) {
+      if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = `处理失败: ${err?.message || err}` }
+      setButtons(false)
     }
   }
 

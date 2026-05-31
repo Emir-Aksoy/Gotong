@@ -1941,7 +1941,7 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   max-width: 48rem;
   padding: 1rem 1.25rem 1.5rem;
 }
-.me-whoami, .me-dispatch, .me-reports, .settings-actions, .settings-form {
+.me-whoami, .me-dispatch, .me-inbox, .me-reports, .settings-actions, .settings-form {
   margin-bottom: 1.5rem;
 }
 #home-panel h2, #settings-panel h2 {
@@ -1970,6 +1970,22 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .me-status.ok { color: #27ae60; }
 .me-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-top: 0.4rem; }
 .me-table th, .me-table td { text-align: left; border-bottom: 1px solid #eee; padding: 0.4rem 0.5rem; }
+/* Phase 16 — member task inbox */
+.me-inbox-list { margin-top: 0.5rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.me-inbox-item {
+  border: 1px solid #e2e2e2; border-left: 3px solid #1f6feb;
+  border-radius: 6px; padding: 0.7rem 0.85rem; background: #fafbfc;
+}
+.me-inbox-prompt { margin: 0.15rem 0 0.55rem; color: #333; font-size: 0.92rem; }
+.me-inbox-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
+.me-inbox-actions .me-primary-btn, .me-inbox-actions .me-secondary-btn { margin-top: 0; }
+.me-inbox-edit { display: flex; flex-direction: column; gap: 0.4rem; }
+.me-inbox-edit .me-primary-btn { margin-top: 0; align-self: flex-start; }
+.me-badge {
+  display: inline-block; min-width: 1.2em; padding: 0 0.4em; font-size: 0.75rem;
+  line-height: 1.5; text-align: center; color: #fff; background: #1f6feb; border-radius: 999px;
+}
+.me-badge:empty { display: none; }
 .settings-form { display: block; max-width: 24rem; }
 
 /* C2 — org quota management panel */
