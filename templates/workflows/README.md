@@ -43,6 +43,10 @@ workflows/
   personal-growth-flow.yaml        🙋 个人成长发展路径（7 教练，scope=case_id）
   daily-reflection-flow.yaml       🙋 每日反思（最小 1 步示例，默认 case_id scope）
   weekly-goal-checkin-flow.yaml    🙋 每周目标复盘（2 步示例，scope=owner_user_id）
+
+  # 🏭 行业模板（Phase 19 P5）—— 声明 governance 风险元数据，mock provider E2E 跑通
+  contract-review-flow.yaml        🏭 合同审阅 + 法务复核
+                                   (extract→assess→👤法务签字→memo；HITL approve)
 ```
 
 ⭐ = 配套 `templates/teams/` 下同名团队使用。
@@ -54,6 +58,13 @@ workflows/
 插话，对话写进 case-memory，下游 step 自动读到。端到端实测见
 `examples/industry-consultation-deepseek/`（真实 DeepSeek API），单元
 测试见 `packages/host/tests/case-context.test.ts` + `industry-consultation-flow.test.ts`。
+
+🏭 = 行业模板（Phase 19 P5）：声明 **`governance`** 风险元数据（数据敏感级 /
+需要的 key / 预估成本 / 需哪些真人角色 / 触达哪些外部系统），admin import/publish
+前在风险摘要里看得见（schema 见 `packages/workflow` 的 `governance` 块）。每个都有
+mock-provider 端到端测试（`packages/workflow/tests/templates-e2e.test.ts`），不接真
+LLM 也能在 CI 跑通。`contract-review-flow` 还演示 Phase 16 `human:` 步——第 3 步是真
+人法务在 `/me` 收件箱签字，工作流挂起等他。
 
 ## YAML 速查
 

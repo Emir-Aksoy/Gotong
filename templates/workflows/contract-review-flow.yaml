@@ -1,0 +1,94 @@
+# =============================================================================
+# Workflow: 合同审阅 + 法务复核 (contract review with human sign-off)
+# Schema: aipehub.workflow/v1
+#
+# 行业模板 #1 (Phase 19 P5-M5). 演示 P5 想讲的「AI 起草 + 人拍板」闭环:
+#   1) AI 抽取合同关键条款 / 义务 / 期限
+#   2) AI 标注高风险条款并打分
+#   3) **法务真人复核** AI 的评估并签字 (HITL approve, 走 Phase 16 inbox)
+#   4) 综合 AI 评估 + 法务决定, 出最终审阅备忘录
+#
+# 吃两块 v4 能力:
+#   - P5-M8a `governance` 块: import 前就把「碰机密数据 / 要 anthropic key /
+#     需法务签字」摆在管理员面前 (admin UI 风险摘要, P5-M8b)。
+#   - Phase 16 `human:` 步: 第 3 步是真人节点, 不是 request_human_input tool。
+#     法务在 `/me` 收件箱里 approve/reject, 工作流挂起等他, 签了才继续。
+#
+# 派发: admin (或法务团队) 派一个 capability=review-contract 的任务, 携带
+#   { contract_text, counterparty, reviewer_id }。
+# 配套 agents 需提供 capability: contract-extract / contract-assess /
+#   contract-memo (任意 LlmAgent 即可; 见 examples/ 里的 provider 接线)。
+# =============================================================================
+
+schema: aipehub.workflow/v1
+
+workflow:
+  id: contract-review-flow
+  name: 合同审阅 + 法务复核
+  description: AI 抽取条款 + 风险评估 → 法务人工签字 → 出审阅备忘录
+
+  # --- 治理 / 风险元数据 (P5-M8a) — admin import/publish 前看得见 ---------------
+  governance:
+    data_sensitivity: confidential
+    required_credentials: [anthropic]
+    expected_cost_usd: 0.08
+    required_human_roles: [法务复核 (legal counsel)]
+    notes: 合同正文可能含个人数据与商业机密; 终稿必须经法务 approve 才返回; 无外部系统。
+
+  trigger:
+    capability: review-contract
+    payload_schema:
+      - id: contract_text
+        label: 合同正文
+        type: textarea
+        rows: 12
+        required: true
+      - id: counterparty
+        label: 对方主体
+        type: text
+      - id: reviewer_id
+        label: 指派法务 (userId)
+        type: text
+        required: true
+
+  steps:
+    - id: extract
+      description: 抽取关键条款 / 义务 / 期限
+      dispatch:
+        strategy: { kind: capability, capabilities: [contract-extract] }
+        title: "抽取条款: $trigger.payload.counterparty"
+        payload:
+          contract_text: $trigger.payload.contract_text
+
+    - id: assess
+      description: 标注高风险条款 + 给整体风险评分
+      dispatch:
+        strategy: { kind: capability, capabilities: [contract-assess] }
+        title: 风险评估
+        payload:
+          clauses: $extract.output
+          counterparty: $trigger.payload.counterparty
+
+    - id: legal-signoff
+      description: 法务复核 AI 评估并签字 (HITL approve)
+      human:
+        assignee: $trigger.payload.reviewer_id
+        kind: approval
+        prompt: 请复核 AI 的合同风险评估并决定是否放行签署。
+        title: 合同法务复核
+
+    - id: memo
+      description: 综合 AI 评估 + 法务决定, 出最终审阅备忘录
+      dispatch:
+        strategy: { kind: capability, capabilities: [contract-memo] }
+        title: 出审阅备忘录
+        payload:
+          assessment: $assess.output
+          legal_decision: $legal-signoff.output
+          counterparty: $trigger.payload.counterparty
+
+  output:
+    counterparty: $trigger.payload.counterparty
+    assessment: $assess.output
+    legal_decision: $legal-signoff.output
+    memo: $memo.output
