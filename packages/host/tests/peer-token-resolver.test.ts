@@ -75,6 +75,32 @@ describe('buildPeerTokenResolver (Audit #154)', () => {
     expect((logs[0]!.ctx as { rowId: string }).rowId).toBe('row-xyz')
   })
 
+  it('revoked peer: returns null + debug log (Phase 19 P4-M4)', () => {
+    // A revoked link is refused at the wire — the earliest of the three
+    // revocation gates, so the link is never even allocated.
+    const { resolve, logs } = makeResolver({
+      getPeerByPeerId: () =>
+        ({
+          id: 'row-xyz',
+          peerHubId: 'hubA',
+          endpoint: 'wss://x',
+          label: null,
+          enabled: true,
+          revocationState: 'revoked',
+          createdAt: 0,
+          updatedAt: 0,
+        }) as unknown as ReturnType<PeerTokenResolverIdentity['getPeerByPeerId']>,
+      getPeerToken: () => {
+        throw new Error('should not be called')
+      },
+    } as IdentityStub)
+    expect(resolve('hubA')).toBeNull()
+    expect(logs).toHaveLength(1)
+    expect(logs[0]!.level).toBe('debug')
+    expect(logs[0]!.msg).toContain('peer revoked')
+    expect((logs[0]!.ctx as { rowId: string }).rowId).toBe('row-xyz')
+  })
+
   it('no token vaulted: returns null + warn log (operator action needed)', () => {
     const { resolve, logs } = makeResolver({
       getPeerByPeerId: () =>

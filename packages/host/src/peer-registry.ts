@@ -31,6 +31,7 @@ import type {
   Participant,
   ParticipantId,
   RemoteHubViaLink,
+  Task,
 } from '@aipehub/core'
 import { installPeerLink, type InstalledPeerLink } from '@aipehub/core'
 import type { IdentityStore, PeerRegistration } from '@aipehub/identity'
@@ -122,6 +123,13 @@ export interface PeerRegistryOptions {
    * that path is a canary, not a normal route.
    */
   outboundApprovalGate?: (inner: RemoteHubViaLink, row: PeerRegistration) => Participant
+  /**
+   * Phase 19 P4-M4 — fixed window (ms) for the per-link inbound quota counter
+   * (`PeerRegistration.perLinkQuotaBudget` tasks per window). Default 60_000.
+   * The counter is in-memory and resets on restart — same ephemeral, fail-
+   * closed posture as the inbound HELLO rate limiter, not a billing ledger.
+   */
+  perLinkQuotaWindowMs?: number
 }
 
 interface InstalledState {
@@ -246,6 +254,14 @@ export class PeerRegistry {
   private tickInFlight = false
   /** Phase 6 #12 — inbound rate limiter; built in start(). */
   private inboundLimiter: FixedWindowLimiter | undefined
+  /**
+   * Phase 19 P4-M4 — per-link inbound quota counters, keyed by peer row id.
+   * One `FixedWindowLimiter` per peer (the per-IP HELLO limiter is shared; this
+   * is per-link, fail-closed). Kept across reconnects so a peer can't reset its
+   * budget by dropping + redialing; rebuilt only when the operator changes the
+   * budget value (tracked alongside). Dropped on teardown when the row vanishes.
+   */
+  private linkQuota = new Map<string, { limiter: FixedWindowLimiter; budget: number }>()
 
   constructor(opts: PeerRegistryOptions) {
     this.opts = { pollIntervalMs: 5_000, ...opts }
@@ -412,6 +428,45 @@ export class PeerRegistry {
   }
 
   /**
+   * Phase 19 P4-M4 — the `inboundGate` slice of `installPeerLink` options for a
+   * given peer row. Empty unless the row sets `perLinkQuotaBudget > 0`; when it
+   * does, returns a gate backed by a per-link fixed-window counter. Shared by
+   * both install paths so the budget caps inbound tasks regardless of which
+   * direction the link was established.
+   *
+   * The counter survives reconnects (kept in `linkQuota` by row id, so dropping
+   * + redialing can't reset the budget) and is rebuilt only when the operator
+   * changes the budget value. Over budget → fail-closed `per_link_quota_exceeded`
+   * which `installPeerLink` surfaces as `cross_org_policy_denied`.
+   */
+  private inboundQuotaGate(
+    row: PeerRegistration,
+  ): { inboundGate?: (task: Task) => { ok: true } | { ok: false; reason: string } } {
+    const budget = row.perLinkQuotaBudget
+    if (!budget || budget <= 0) {
+      // No budget (or cleared) → drop any stale counter so a later re-add of a
+      // budget starts fresh, and leave the gate off (accept-all, legacy).
+      this.linkQuota.delete(row.id)
+      return {}
+    }
+    const existing = this.linkQuota.get(row.id)
+    let limiter: FixedWindowLimiter
+    if (existing && existing.budget === budget) {
+      limiter = existing.limiter
+    } else {
+      limiter = new FixedWindowLimiter(budget, this.opts.perLinkQuotaWindowMs ?? 60_000)
+      this.linkQuota.set(row.id, { limiter, budget })
+    }
+    const rowId = row.id
+    return {
+      inboundGate: () =>
+        limiter.attempt(rowId)
+          ? { ok: true }
+          : { ok: false, reason: 'per_link_quota_exceeded' },
+    }
+  }
+
+  /**
    * D2 — look up a live HubLink by the remote hub's wire id. Returns
    * null when the peer is configured-but-not-connected, the peer row
    * has been disabled, or the id was never in our registry.
@@ -463,10 +518,16 @@ export class PeerRegistry {
       for (const row of rows) {
         liveRowIds.add(row.id)
         const existing = this.installed.get(row.id)
-        if (!row.enabled) {
+        // Phase 19 P4-M4 — a revoked link is treated exactly like a disabled
+        // one: no dial, and any live link is torn down on this tick. Admin
+        // revoke calls `invalidate()` so the teardown lands within ms.
+        const revoked = row.revocationState === 'revoked'
+        if (!row.enabled || revoked) {
           if (existing) {
-            this.log('info', 'peer disabled; tearing down link', { peerId: row.peerId })
-            this.teardown(row.id)
+            this.log('info', revoked ? 'peer revoked; tearing down link' : 'peer disabled; tearing down link', {
+              peerId: row.peerId,
+            })
+            this.teardown(row.id, revoked ? 'revoked' : 'removed_or_disabled')
           }
           continue
         }
@@ -481,6 +542,9 @@ export class PeerRegistry {
             peerRowId: id,
           })
           this.teardown(id)
+          // The row is gone for good — drop its per-link quota counter too (a
+          // policy_changed teardown deliberately keeps it; a vanished row can't).
+          this.linkQuota.delete(id)
         }
       }
     } finally {
@@ -519,6 +583,12 @@ export class PeerRegistry {
         // Phase 19 P4-M1 — apply the persisted OUTBOUND capability allowlist.
         // null (unset row) → omitted → send-anything (legacy); `[]` → lockdown.
         ...(row.outboundCaps ? { outboundCaps: row.outboundCaps } : {}),
+        // Phase 19 P4-M4 — OUTBOUND data-class contract: a task declaring a
+        // class outside this set is refused before the wire. null → unset.
+        ...(row.allowedDataClasses ? { allowedDataClasses: row.allowedDataClasses } : {}),
+        // Phase 19 P4-M4 — INBOUND per-link quota: fail-closed once the budget
+        // is spent for the window. Empty when the row sets no budget.
+        ...this.inboundQuotaGate(row),
         // Phase 18 B-M3 — gate OUTBOUND sends behind an approval inbox when the
         // row opts in. Empty otherwise (no behaviour change).
         ...this.outboundWrap(row),
@@ -562,8 +632,11 @@ export class PeerRegistry {
       return
     }
     const row = this.opts.identity.getPeerByPeerId(peerId)
-    if (!row || !row.enabled) {
-      this.log('warn', 'inbound peer rejected (not in registry or disabled)', {
+    // Phase 19 P4-M4 — a revoked peer is refused inbound just like a disabled
+    // one (the HELLO token resolver already rejects most revoked dials at the
+    // wire; this is the install-time backstop for an in-flight link).
+    if (!row || !row.enabled || row.revocationState === 'revoked') {
+      this.log('warn', 'inbound peer rejected (not in registry, disabled, or revoked)', {
         claimedPeerId: peerId,
       })
       void link.close().catch(() => { /* */ })
@@ -590,6 +663,10 @@ export class PeerRegistry {
       // Phase 19 P4-M1 — the same outbound allowlist guards a wrapper installed
       // off an inbound-accepted link (we can still dispatch TO this peer).
       ...(row.outboundCaps ? { outboundCaps: row.outboundCaps } : {}),
+      // Phase 19 P4-M4 — same data-class contract + per-link quota apply to a
+      // wrapper installed off an inbound-accepted link.
+      ...(row.allowedDataClasses ? { allowedDataClasses: row.allowedDataClasses } : {}),
+      ...this.inboundQuotaGate(row),
       // Phase 18 B-M3 — the same outbound approval gate applies to a wrapper
       // installed off an inbound-accepted link (we can still dispatch TO this
       // peer through it).
@@ -705,6 +782,15 @@ export function buildPeerTokenResolver(
       }
       if (row.enabled === false) {
         log('debug', 'peer-registry resolver: peer disabled', {
+          claimedPeerId,
+          rowId: row.id,
+        })
+        return null
+      }
+      // Phase 19 P4-M4 — a revoked peer's HELLO is rejected at the wire, the
+      // earliest possible chokepoint: the link never even gets allocated.
+      if (row.revocationState === 'revoked') {
+        log('debug', 'peer-registry resolver: peer revoked', {
           claimedPeerId,
           rowId: row.id,
         })

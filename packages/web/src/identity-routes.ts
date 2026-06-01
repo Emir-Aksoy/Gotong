@@ -147,6 +147,10 @@ export type IdentityInvitationStatus =
 // the identity types; web keeps zero identity runtime dep).
 export type PeerKind = 'personal' | 'organization' | 'project' | 'service'
 export const PEER_KINDS: readonly PeerKind[] = ['personal', 'organization', 'project', 'service']
+// Phase 19 P4-M4 — per-link revocation. A revoked peer is refused at every
+// connection gate (no dial, inbound HELLO rejected, live link torn down).
+export type PeerRevocationState = 'active' | 'revoked'
+export const PEER_REVOCATION_STATES: readonly PeerRevocationState[] = ['active', 'revoked']
 export interface PeerInboundAcl {
   capabilities?: string[]
   requireOrigin?: boolean
@@ -167,6 +171,10 @@ export interface IdentityPeerDTO {
   acl: PeerInboundAcl | null
   outboundCaps: string[] | null
   requireApprovalOutbound: boolean
+  // Phase 19 P4-M4 per-link trust contract (always present from a v15 store).
+  revocationState: PeerRevocationState
+  perLinkQuotaBudget: number | null
+  allowedDataClasses: string[] | null
 }
 
 export interface IdentityOrgQuotaDTO {
@@ -257,6 +265,9 @@ export interface IdentitySurface {
     acl?: PeerInboundAcl | null
     outboundCaps?: string[] | null
     requireApprovalOutbound?: boolean
+    revocationState?: PeerRevocationState
+    perLinkQuotaBudget?: number | null
+    allowedDataClasses?: string[] | null
   }): IdentityPeerDTO
   listPeers?(): IdentityPeerDTO[]
   updatePeer?(
@@ -270,6 +281,9 @@ export interface IdentitySurface {
       acl?: PeerInboundAcl | null
       outboundCaps?: string[] | null
       requireApprovalOutbound?: boolean
+      revocationState?: PeerRevocationState
+      perLinkQuotaBudget?: number | null
+      allowedDataClasses?: string[] | null
     },
   ): IdentityPeerDTO
   removePeer?(id: string): boolean
@@ -1995,11 +2009,15 @@ function isStringArray(v: unknown): v is string[] {
 }
 
 // Phase 18 B-M2 — normalized policy fields shared by add + patch.
+// Phase 19 P4-M4 added the per-link trust-contract trio.
 interface PeerPolicyFields {
   kind?: PeerKind
   acl?: PeerInboundAcl | null
   outboundCaps?: string[] | null
   requireApprovalOutbound?: boolean
+  revocationState?: PeerRevocationState
+  perLinkQuotaBudget?: number | null
+  allowedDataClasses?: string[] | null
 }
 
 /**
@@ -2043,6 +2061,9 @@ function parsePeerPolicyFields(b: {
   acl?: unknown
   outboundCaps?: unknown
   requireApprovalOutbound?: unknown
+  revocationState?: unknown
+  perLinkQuotaBudget?: unknown
+  allowedDataClasses?: unknown
 }): { ok: true; value: PeerPolicyFields } | { ok: false; error: string } {
   const value: PeerPolicyFields = {}
   if (b.kind !== undefined) {
@@ -2064,6 +2085,35 @@ function parsePeerPolicyFields(b: {
       return { ok: false, error: 'requireApprovalOutbound must be a boolean' }
     }
     value.requireApprovalOutbound = b.requireApprovalOutbound
+  }
+  // Phase 19 P4-M4 — the per-link trust contract. revocationState is never
+  // cleared to null (it's always active|revoked); the budget + data-class
+  // allowlist accept null as an explicit "back to unlimited / all-allowed".
+  if (b.revocationState !== undefined) {
+    if (
+      typeof b.revocationState !== 'string' ||
+      !PEER_REVOCATION_STATES.includes(b.revocationState as PeerRevocationState)
+    ) {
+      return { ok: false, error: `revocationState must be one of: ${PEER_REVOCATION_STATES.join(', ')}` }
+    }
+    value.revocationState = b.revocationState as PeerRevocationState
+  }
+  if (b.perLinkQuotaBudget !== undefined) {
+    if (b.perLinkQuotaBudget === null) value.perLinkQuotaBudget = null
+    else if (
+      typeof b.perLinkQuotaBudget === 'number' &&
+      Number.isInteger(b.perLinkQuotaBudget) &&
+      b.perLinkQuotaBudget >= 0
+    ) {
+      value.perLinkQuotaBudget = b.perLinkQuotaBudget
+    } else {
+      return { ok: false, error: 'perLinkQuotaBudget must be a non-negative integer or null' }
+    }
+  }
+  if (b.allowedDataClasses !== undefined) {
+    if (b.allowedDataClasses === null) value.allowedDataClasses = null
+    else if (isStringArray(b.allowedDataClasses)) value.allowedDataClasses = b.allowedDataClasses
+    else return { ok: false, error: 'allowedDataClasses must be a string array or null' }
   }
   return { ok: true, value }
 }
@@ -2116,6 +2166,9 @@ async function handleAddPeer(
     acl?: unknown
     outboundCaps?: unknown
     requireApprovalOutbound?: unknown
+    revocationState?: unknown
+    perLinkQuotaBudget?: unknown
+    allowedDataClasses?: unknown
   }
   if (typeof b.peerId !== 'string' || b.peerId.length === 0) {
     sendJson(res, { error: 'peerId required (non-empty string)' }, 400)
@@ -2180,6 +2233,9 @@ async function handlePatchPeer(
     acl?: unknown
     outboundCaps?: unknown
     requireApprovalOutbound?: unknown
+    revocationState?: unknown
+    perLinkQuotaBudget?: unknown
+    allowedDataClasses?: unknown
   }
   const input: {
     label?: string | null

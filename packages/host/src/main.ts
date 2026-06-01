@@ -985,6 +985,10 @@ async function main(): Promise<void> {
     const rateLimitMax = envInt('AIPE_PEER_INBOUND_RATE_MAX', 60)
     const rateLimitWindowMs = envInt('AIPE_PEER_INBOUND_RATE_WINDOW_MS', 60_000)
     const inboundRateLimit = { max: rateLimitMax, windowMs: rateLimitWindowMs }
+    // Phase 19 P4-M4 — fixed window for the per-link inbound quota counter
+    // (`perLinkQuotaBudget` tasks per window). Default 60s; in-memory, resets
+    // on restart (a fail-closed safety cap, not a billing ledger).
+    const linkQuotaWindowMs = envInt('AIPE_PEER_LINK_QUOTA_WINDOW_MS', 60_000)
     // Provider side of the cross-hub MCP proxy. Reads the same hub
     // registry the admin UI writes; only servers flagged `shared` are
     // ever served to a peer (ACL lives inside respond()).
@@ -1032,6 +1036,7 @@ async function main(): Promise<void> {
       ...(inboundToken ? { sharedInboundPeerToken: inboundToken } : {}),
       pollIntervalMs: pollMs,
       inboundRateLimit,
+      perLinkQuotaWindowMs: linkQuotaWindowMs,
       ...(trustProxy ? { trustProxy: true } : {}),
       rpcResponder: (call) =>
         call.method.startsWith('mcp.') ? proxyRespond(call) : peerManifestHost.respond(call),

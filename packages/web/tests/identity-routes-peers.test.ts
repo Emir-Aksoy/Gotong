@@ -521,3 +521,147 @@ describe('peer policy fields (Phase 18 B-M2)', () => {
     expect(b.identity.getPeer(id)!.acl).toBeNull()
   })
 })
+
+// Phase 19 P4-M4 — the per-link trust-contract trio (revocationState /
+// perLinkQuotaBudget / allowedDataClasses) over the same CRUD routes. The host
+// ENFORCEMENT is pinned in host/tests/peer-isolation-e2e.test.ts +
+// peer-token-resolver.test.ts; what these pin is the WEB seam: the three fields
+// validate, persist, round-trip, and a revoke/quota/class edit kicks
+// refreshPolicy() (a policy change must re-gate a CONNECTED peer).
+describe('peer per-link trust contract (Phase 19 P4-M4)', () => {
+  let b: BootResult
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  it('POST persists the contract trio + round-trips via getPeer', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_contract',
+        endpointUrl: 'wss://contract.example',
+        peerToken: 'tok-contract-1234',
+        revocationState: 'revoked',
+        perLinkQuotaBudget: 42,
+        allowedDataClasses: ['public', 'internal'],
+      }),
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as {
+      peer: {
+        id: string
+        revocationState: string
+        perLinkQuotaBudget: number | null
+        allowedDataClasses: string[] | null
+      }
+    }
+    expect(j.peer.revocationState).toBe('revoked')
+    expect(j.peer.perLinkQuotaBudget).toBe(42)
+    expect(j.peer.allowedDataClasses).toEqual(['public', 'internal'])
+    const stored = b.identity.getPeer(j.peer.id)!
+    expect(stored.revocationState).toBe('revoked')
+    expect(stored.perLinkQuotaBudget).toBe(42)
+    expect(stored.allowedDataClasses).toEqual(['public', 'internal'])
+  })
+
+  it('POST without the trio → defaults (active / null / null)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_contract_default',
+        endpointUrl: 'wss://cd.example',
+        peerToken: 'tok-cd-12345678',
+      }),
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as {
+      peer: {
+        revocationState: string
+        perLinkQuotaBudget: number | null
+        allowedDataClasses: string[] | null
+      }
+    }
+    expect(j.peer.revocationState).toBe('active')
+    expect(j.peer.perLinkQuotaBudget).toBeNull()
+    expect(j.peer.allowedDataClasses).toBeNull()
+  })
+
+  it('POST invalid revocationState → 400', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_badrev',
+        endpointUrl: 'wss://x.example',
+        peerToken: 'tok-badrev-1234',
+        revocationState: 'paused',
+      }),
+    })
+    expect(r.status).toBe(400)
+  })
+
+  it('POST negative perLinkQuotaBudget → 400', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_badbudget',
+        endpointUrl: 'wss://x.example',
+        peerToken: 'tok-badbudget-12',
+        perLinkQuotaBudget: -1,
+      }),
+    })
+    expect(r.status).toBe(400)
+  })
+
+  it('POST allowedDataClasses not an array → 400', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_badclass',
+        endpointUrl: 'wss://x.example',
+        peerToken: 'tok-badclass-123',
+        allowedDataClasses: 'public',
+      }),
+    })
+    expect(r.status).toBe(400)
+  })
+
+  it('PATCH revocationState=revoked re-gates via refreshPolicy (not invalidate)', async () => {
+    const id = b.identity.addPeer({
+      peerId: 'hub_revoke',
+      endpointUrl: 'wss://revoke.example',
+      peerToken: 'tok-revoke-1234',
+    }).id
+    const inv = b.invalidateCount.n
+    const rp = b.refreshPolicyCount.n
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ revocationState: 'revoked' }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.refreshPolicyCount.n).toBe(rp + 1)
+    expect(b.invalidateCount.n).toBe(inv) // policy edit supersedes plain reconcile
+    expect(b.identity.getPeer(id)!.revocationState).toBe('revoked')
+  })
+
+  it('PATCH perLinkQuotaBudget:null clears a previously set budget', async () => {
+    const id = b.identity.addPeer({
+      peerId: 'hub_clearbudget',
+      endpointUrl: 'wss://cb.example',
+      peerToken: 'tok-cb-12345678',
+      perLinkQuotaBudget: 10,
+    }).id
+    expect(b.identity.getPeer(id)!.perLinkQuotaBudget).toBe(10)
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ perLinkQuotaBudget: null }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.identity.getPeer(id)!.perLinkQuotaBudget).toBeNull()
+  })
+})
