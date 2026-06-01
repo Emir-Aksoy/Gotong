@@ -1372,3 +1372,103 @@ describe('/api/invites/:token/accept — weak_password error mapping (AUDIT-P3-0
     expect(body.error || '').toMatch(/at least 8/)
   })
 })
+
+describe('/api/admin/identity/audit/workflows — workflow governance audit (P2-M3)', () => {
+  let b: BootResult
+  beforeEach(async () => {
+    b = await boot()
+    // Seed: 3 workflow rows (2 for wf-a, 1 for wf-b) + 1 non-workflow row
+    // that must never leak into the workflow-scoped view.
+    const id = b.identity!
+    id.writeAuditLog({
+      action: 'workflow_import',
+      actorSource: 'v4-session',
+      actorUserId: b.ownerUserId,
+      metadata: { workflowId: 'wf-a', revision: 1 },
+    })
+    id.writeAuditLog({
+      action: 'workflow_publish',
+      actorSource: 'v4-session',
+      actorUserId: b.ownerUserId,
+      metadata: { workflowId: 'wf-a', revision: 2 },
+    })
+    id.writeAuditLog({
+      action: 'workflow_publish',
+      actorSource: 'v4-session',
+      actorUserId: b.ownerUserId,
+      metadata: { workflowId: 'wf-b', revision: 1 },
+    })
+    id.writeAuditLog({
+      action: 'login_success',
+      actorSource: 'v4-session',
+      actorUserId: b.ownerUserId,
+    })
+  })
+  afterEach(async () => { await teardown(b) })
+
+  const get = (path: string): Promise<Response> =>
+    fetch(`${b.baseUrl}${path}`, { headers: { cookie: b.ownerCookie } })
+
+  it('lists only the workflow_* rows (never non-workflow audit rows)', async () => {
+    const r = await get('/api/admin/identity/audit/workflows')
+    expect(r.status).toBe(200)
+    const { entries } = (await r.json()) as { entries: Array<{ action: string }> }
+    expect(entries.length).toBe(3)
+    expect(entries.every((e) => e.action.startsWith('workflow_'))).toBe(true)
+  })
+
+  it('?workflowId= scopes via metadata json_extract', async () => {
+    const r = await get('/api/admin/identity/audit/workflows?workflowId=wf-a')
+    const { entries } = (await r.json()) as {
+      entries: Array<{ action: string; metadata: { workflowId: string } }>
+    }
+    expect(entries.length).toBe(2)
+    expect(entries.every((e) => e.metadata.workflowId === 'wf-a')).toBe(true)
+  })
+
+  it('?action= narrows to a single workflow action', async () => {
+    const r = await get('/api/admin/identity/audit/workflows?action=workflow_publish')
+    const { entries } = (await r.json()) as { entries: Array<{ action: string }> }
+    expect(entries.length).toBe(2)
+    expect(entries.every((e) => e.action === 'workflow_publish')).toBe(true)
+  })
+
+  it('?action= ignores a non-workflow action (never leaks via the filter)', async () => {
+    const r = await get('/api/admin/identity/audit/workflows?action=login_success')
+    const { entries } = (await r.json()) as { entries: Array<{ action: string }> }
+    expect(entries.length).toBe(3)
+    expect(entries.every((e) => e.action.startsWith('workflow_'))).toBe(true)
+  })
+
+  it('owner gate: 403 without the owner cookie', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/audit/workflows`)
+    expect(r.status).toBe(403)
+  })
+
+  it('CSV export → attachment with the workflow rows, no non-workflow rows', async () => {
+    const r = await get('/api/admin/identity/audit/workflows/export?format=csv')
+    expect(r.status).toBe(200)
+    expect(r.headers.get('content-type')).toMatch(/text\/csv/)
+    expect(r.headers.get('content-disposition')).toMatch(/workflow-audit\.csv/)
+    const body = await r.text()
+    expect(body.split('\n')[0]).toContain('action') // header row
+    expect(body).toContain('workflow_publish')
+    expect(body).not.toContain('login_success')
+  })
+
+  it('JSONL export → ndjson, scoped by workflowId', async () => {
+    const r = await get(
+      '/api/admin/identity/audit/workflows/export?format=jsonl&workflowId=wf-b',
+    )
+    expect(r.status).toBe(200)
+    expect(r.headers.get('content-type')).toMatch(/x-ndjson/)
+    const lines = (await r.text()).trim().split('\n').filter(Boolean)
+    expect(lines.length).toBe(1)
+    const row = JSON.parse(lines[0]!) as {
+      action: string
+      metadata: { workflowId: string }
+    }
+    expect(row.action).toBe('workflow_publish')
+    expect(row.metadata.workflowId).toBe('wf-b')
+  })
+})

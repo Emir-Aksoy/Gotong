@@ -316,8 +316,15 @@ export interface IdentitySurface {
     limit?: number
     offset?: number
     action?: string
+    // P2-M3 — generic audit filters (mirror @aipehub/identity's
+    // ListAuditLogQuery). Used by the workflow-audit view to pull all five
+    // workflow actions in a bounded time window, scoped to one workflowId.
+    actions?: string[]
     targetUserId?: string
     success?: boolean
+    since?: number
+    until?: number
+    metadataEquals?: { path: string; value: string }
   }): IdentityAuditLogEntryDTO[]
   // Phase 17 — usage / cost ledger. Optional like the audit methods: a
   // pre-migration IdentityStore lacks them, so the routes degrade to an
@@ -763,6 +770,20 @@ export async function handleIdentityRoute(
       `http://${req.headers.host ?? 'localhost'}`,
     )
     handleAuditExport(ctx, url, res)
+    return
+  }
+  // Phase 19 P2-M3 — workflow-governance audit, a filtered view of the same
+  // audit_log scoped to the five workflow_* actions. Co-located with the
+  // identity audit endpoints (same owner gate, same store, same exporter)
+  // rather than a separate /api/admin/audit/* namespace, so it needs zero new
+  // auth wiring. Exact-match paths; `/workflows/export` is unambiguous against
+  // `/workflows`. The more-specific export path is listed first for clarity.
+  if (method === 'GET' && path === '/api/admin/identity/audit/workflows/export') {
+    handleWorkflowAuditExport(ctx, identityUrl(req, path), res)
+    return
+  }
+  if (method === 'GET' && path === '/api/admin/identity/audit/workflows') {
+    handleListWorkflowAudit(ctx, identityUrl(req, path), res)
     return
   }
   // Phase 17 — usage / cost ledger (owner-only billing data). Exact
@@ -1851,6 +1872,115 @@ function handleAuditExport(
     const body =
       format === 'jsonl' ? toJsonl(entries) : toCsv(AUDIT_EXPORT_COLUMNS, entries)
     sendExport(res, format, 'audit-log', body)
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 19 P2-M3 — workflow-governance audit (a filtered view of audit_log)
+// ---------------------------------------------------------------------------
+
+/**
+ * The five workflow lifecycle actions. Mirrors `AUDIT_ACTIONS.WORKFLOW_*`
+ * from `@aipehub/identity` as string literals (web has no identity runtime
+ * dep — same pattern as the audit-vocab mirrors elsewhere in this file).
+ */
+const WORKFLOW_AUDIT_ACTIONS: readonly string[] = [
+  'workflow_import',
+  'workflow_publish',
+  'workflow_deprecate',
+  'workflow_archive',
+  'workflow_rollback',
+]
+
+type WorkflowAuditQuery = {
+  limit?: number
+  offset?: number
+  actions?: string[]
+  since?: number
+  until?: number
+  metadataEquals?: { path: string; value: string }
+}
+
+/**
+ * Build the `listAuditLog` query from the shared workflow-audit params
+ * (`?workflowId=&action=&since=&until=&limit=&offset=`). `actions` is ALWAYS
+ * constrained to the workflow set — a single recognised `action` narrows it,
+ * anything else falls back to all five — so this view can never surface a
+ * non-workflow row. `since`/`until` are epoch-ms; `workflowId` becomes a
+ * `json_extract(metadata,'$.workflowId')` equality at the SQL layer (correct
+ * pagination, unlike a post-fetch filter).
+ */
+function buildWorkflowAuditQuery(
+  url: URL,
+  defaults: { limit: number; maxLimit: number },
+): WorkflowAuditQuery {
+  const q: WorkflowAuditQuery = {}
+  const action = url.searchParams.get('action')
+  q.actions =
+    action && WORKFLOW_AUDIT_ACTIONS.includes(action)
+      ? [action]
+      : [...WORKFLOW_AUDIT_ACTIONS]
+  const workflowId = url.searchParams.get('workflowId')
+  if (workflowId) q.metadataEquals = { path: '$.workflowId', value: workflowId }
+  const since = Number(url.searchParams.get('since'))
+  if (Number.isFinite(since) && since > 0) q.since = Math.floor(since)
+  const until = Number(url.searchParams.get('until'))
+  if (Number.isFinite(until) && until > 0) q.until = Math.floor(until)
+  const limRaw = url.searchParams.get('limit')
+  const lim = Number(limRaw)
+  q.limit =
+    limRaw !== null && Number.isFinite(lim) && lim > 0
+      ? Math.min(defaults.maxLimit, Math.floor(lim))
+      : defaults.limit
+  const offRaw = url.searchParams.get('offset')
+  const off = Number(offRaw)
+  if (offRaw !== null && Number.isFinite(off) && off >= 0) q.offset = Math.floor(off)
+  return q
+}
+
+/** GET /api/admin/identity/audit/workflows — JSON list, owner-gated. */
+function handleListWorkflowAudit(
+  ctx: HandleIdentityRouteCtx,
+  url: URL,
+  res: ServerResponse,
+): void {
+  if (typeof ctx.identity.listAuditLog !== 'function') {
+    sendJson(res, { entries: [], note: 'audit log unavailable on this host' })
+    return
+  }
+  const q = buildWorkflowAuditQuery(url, { limit: 100, maxLimit: 1000 })
+  try {
+    const entries = ctx.identity.listAuditLog(q)
+    sendJson(res, { entries })
+  } catch (err) {
+    sendIdentityError(res, err)
+  }
+}
+
+/** GET /api/admin/identity/audit/workflows/export — CSV/JSONL attachment. */
+function handleWorkflowAuditExport(
+  ctx: HandleIdentityRouteCtx,
+  url: URL,
+  res: ServerResponse,
+): void {
+  if (typeof ctx.identity.listAuditLog !== 'function') {
+    sendJson(res, { error: 'audit log unavailable on this host' }, 503)
+    return
+  }
+  // The store clamps limit to ≤1000, so the export caps there too (same as
+  // the sibling /audit/export). Plenty for governance volume; documented.
+  const q = buildWorkflowAuditQuery(url, {
+    limit: AUDIT_EXPORT_LIMIT,
+    maxLimit: AUDIT_EXPORT_LIMIT,
+  })
+  const format = parseExportFormat(url.searchParams.get('format'))
+  try {
+    const entries = ctx.identity.listAuditLog(q)
+    const body =
+      format === 'jsonl' ? toJsonl(entries) : toCsv(AUDIT_EXPORT_COLUMNS, entries)
+    sendExport(res, format, 'workflow-audit', body)
   } catch (err) {
     sendIdentityError(res, err)
   }

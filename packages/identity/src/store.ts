@@ -1406,6 +1406,12 @@ export class IdentityStore {
       where.push('action = ?')
       params.push(query.action)
     }
+    if (query.actions !== undefined && query.actions.length > 0) {
+      // action IN (?,?,...) — placeholders count is fixed by the array
+      // length; every value is bound, not interpolated.
+      where.push(`action IN (${query.actions.map(() => '?').join(',')})`)
+      params.push(...query.actions)
+    }
     if (query.targetUserId !== undefined) {
       where.push('target_user_id = ?')
       params.push(query.targetUserId)
@@ -1413,6 +1419,22 @@ export class IdentityStore {
     if (query.success !== undefined) {
       where.push('success = ?')
       params.push(query.success ? 1 : 0)
+    }
+    if (query.since !== undefined) {
+      where.push('ts >= ?')
+      params.push(query.since)
+    }
+    if (query.until !== undefined) {
+      where.push('ts <= ?')
+      params.push(query.until)
+    }
+    if (query.metadataEquals !== undefined) {
+      // json_extract(metadata, '$.field') = value — BOTH the path and the
+      // value are bound parameters, so no user input ever reaches the SQL
+      // text. Rows whose metadata is NULL / lacks the field json_extract to
+      // NULL and are excluded (the desired behaviour for an equality scope).
+      where.push('json_extract(metadata, ?) = ?')
+      params.push(query.metadataEquals.path, query.metadataEquals.value)
     }
     const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''
     // Note on injection: every fragment of `whereSql` is a static string

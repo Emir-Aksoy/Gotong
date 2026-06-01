@@ -580,6 +580,69 @@ describe('IdentityStore', () => {
       expect(store.listAuditLog({ limit: 10, offset: 2 }).length).toBe(1)
     })
 
+    // P2-M3 — generic filters added for the workflow-governance audit view.
+    it('P2-M3: filters by actions[] / since / until (using stamped ts)', async () => {
+      const e1 = store.writeAuditLog({
+        action: 'workflow_import',
+        actorSource: 'v4-session',
+        metadata: { workflowId: 'wf-a' },
+      })
+      // strict ms gap so e2.ts > e1.ts on ms-resolution clocks
+      await new Promise((r) => setTimeout(r, 3))
+      const e2 = store.writeAuditLog({
+        action: 'workflow_publish',
+        actorSource: 'v4-session',
+        metadata: { workflowId: 'wf-a' },
+      })
+      store.writeAuditLog({
+        action: 'workflow_publish',
+        actorSource: 'v4-session',
+        metadata: { workflowId: 'wf-b' },
+      })
+      // a non-workflow row that an actions[]-scoped query must never surface
+      store.writeAuditLog({ action: 'login_success', actorSource: 'v4-session' })
+
+      const ALL = [
+        'workflow_import',
+        'workflow_publish',
+        'workflow_deprecate',
+        'workflow_archive',
+        'workflow_rollback',
+      ]
+      // actions[] IN-set → the three workflow rows, never login_success
+      const wf = store.listAuditLog({ actions: ALL })
+      expect(wf.map((e) => e.action).sort()).toEqual([
+        'workflow_import',
+        'workflow_publish',
+        'workflow_publish',
+      ])
+      // since = e2.ts → e2 + the later publish; e1 (earlier) excluded
+      expect(store.listAuditLog({ actions: ALL, since: e2.ts }).length).toBe(2)
+      // until = e2.ts - 1 → only e1
+      const early = store.listAuditLog({ actions: ALL, until: e2.ts - 1 })
+      expect(early.map((e) => e.action)).toEqual(['workflow_import'])
+    })
+
+    it('P2-M3: metadataEquals scopes via json_extract, excluding missing-field rows', () => {
+      store.writeAuditLog({
+        action: 'workflow_publish',
+        actorSource: 'v4-session',
+        metadata: { workflowId: 'wf-x' },
+      })
+      store.writeAuditLog({
+        action: 'workflow_publish',
+        actorSource: 'v4-session',
+        metadata: { workflowId: 'wf-y' },
+      })
+      // no metadata at all → json_extract(...) IS NULL, never equals the value
+      store.writeAuditLog({ action: 'workflow_publish', actorSource: 'v4-session' })
+      const scoped = store.listAuditLog({
+        metadataEquals: { path: '$.workflowId', value: 'wf-x' },
+      })
+      expect(scoped.length).toBe(1)
+      expect((scoped[0]!.metadata as Record<string, unknown>).workflowId).toBe('wf-x')
+    })
+
     it('rejects invalid actorSource / oversize metadata / non-string action', () => {
       expect(() =>
         // eslint-disable-next-line @typescript-eslint/no-explicit-any

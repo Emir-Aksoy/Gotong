@@ -181,10 +181,29 @@ export interface ListAuditLogQuery {
   offset?: number
   /** Filter by exact action verb. */
   action?: string
+  /**
+   * Filter by action-set membership (`action IN (...)`). Phase 19 P2-M3 —
+   * lets a caller pull "all workflow lifecycle rows" in one query without
+   * five round-trips. Combines with `action` via AND if both are set
+   * (callers use one or the other). Empty array is ignored.
+   */
+  actions?: string[]
   /** Filter by target user id. */
   targetUserId?: string
   /** Filter by success / failure. Unset returns both. */
   success?: boolean
+  /** P2-M3 — inclusive lower bound on `ts` (epoch ms). */
+  since?: number
+  /** P2-M3 — inclusive upper bound on `ts` (epoch ms). */
+  until?: number
+  /**
+   * P2-M3 — equality filter on a single JSON field inside `metadata`,
+   * via SQLite `json_extract(metadata, path) = value`. The path is bound
+   * as a parameter (never interpolated), so it is injection-safe. Used to
+   * scope workflow-audit queries to one `workflowId` without teaching the
+   * generic audit store anything workflow-specific.
+   */
+  metadataEquals?: { path: string; value: string }
 }
 
 /**
