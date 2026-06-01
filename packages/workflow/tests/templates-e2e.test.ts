@@ -185,3 +185,49 @@ describe('industry template E2E — lead-qualification-flow (P5-M6)', () => {
     expect(crmCall.payload.outreach).toBeUndefined()
   })
 })
+
+describe('industry template E2E — issue-triage-flow (P5-M7)', () => {
+  it('classifies, fans out 3 parallel analyses, then assigns from all of them', async () => {
+    const { result, calls } = await runTemplate(
+      'issue-triage-flow.yaml',
+      'triage-issue',
+      { title: 'crash on save', body: 'NPE when the doc is empty' },
+      {
+        'issue-classify': (p) => {
+          expect(p.title).toBe('crash on save')
+          return { type: 'bug', component: 'editor' }
+        },
+        'issue-severity': (p) => {
+          expect((p.classification as { type: string }).type).toBe('bug')
+          return { severity: 'high', priority: 'P1' }
+        },
+        'issue-dedupe': () => ({ duplicates: ['#412'] }),
+        'issue-label': () => ({ labels: ['bug', 'editor', 'P1'] }),
+        'issue-assign': (p) => {
+          // the assign step saw all three parallel branch outputs
+          expect((p.severity as { severity: string }).severity).toBe('high')
+          expect((p.duplicates as { duplicates: string[] }).duplicates).toEqual(['#412'])
+          expect((p.labels as { labels: string[] }).labels).toContain('editor')
+          return { assignee: 'dev-2', reason: 'owns the editor component' }
+        },
+      },
+    )
+
+    expect(result.kind).toBe('ok')
+    if (result.kind !== 'ok') throw new Error('expected ok')
+    const out = result.output as {
+      severity: { severity: string }
+      duplicates: { duplicates: string[] }
+      assignment: { assignee: string }
+    }
+    expect(out.severity.severity).toBe('high')
+    expect(out.duplicates.duplicates).toEqual(['#412'])
+    expect(out.assignment.assignee).toBe('dev-2')
+
+    // classify first, assign last; the 3 parallel analyses run in between
+    const caps = calls.map((c) => c.cap)
+    expect(caps[0]).toBe('issue-classify')
+    expect(caps[caps.length - 1]).toBe('issue-assign')
+    expect(caps.slice(1, 4).sort()).toEqual(['issue-dedupe', 'issue-label', 'issue-severity'])
+  })
+})

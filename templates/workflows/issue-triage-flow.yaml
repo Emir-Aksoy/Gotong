@@ -1,0 +1,101 @@
+# =============================================================================
+# Workflow: 研发 issue 分诊 (R&D issue triage with parallel analysis)
+# Schema: aipehub.workflow/v1
+#
+# 行业模板 #3 (Phase 19 P5-M7). 演示「分类 → 并行多面分析 → 汇总建议」:
+#   1) 分类 issue (bug / feature / question, 组件, 初判)
+#   2) **并行**三路同时分析 (parallel 扇出):
+#        - 评严重度 / 优先级
+#        - 查重复 issue
+#        - 建议标签
+#   3) 综合分类 + 三路结果, 给指派建议 + 分诊报告
+#
+# 吃的 v4 能力:
+#   - P5-M8a `governance`: data_sensitivity=internal (内部 issue 文本),
+#     纯分析无外部写入 (external_systems 省略 = 无)。
+#   - workflow `parallel:` 真并行 — 三个独立分析一把扇出去同时跑, 不串行等。
+#
+# 派发: 研发 / 平台团队派 capability=triage-issue, 携带 issue 标题 + 正文。
+# 配套 agents 需提供: issue-classify / issue-severity / issue-dedupe /
+#   issue-label / issue-assign (都可以是 LlmAgent)。回写 GitHub 是可选扩展
+#   (另接一个 github-mcp agent, 见 examples/rag-mcp 的 MCP 桥思路)。
+# =============================================================================
+
+schema: aipehub.workflow/v1
+
+workflow:
+  id: issue-triage-flow
+  name: 研发 issue 分诊
+  description: 分类 → 并行(严重度/查重/标签) → 汇总指派建议
+
+  governance:
+    data_sensitivity: internal
+    required_credentials: [anthropic]
+    expected_cost_usd: 0.02
+    notes: 处理内部 issue 文本; 纯分析产出建议, 不直接回写仓库 (回写需另接 github-mcp)。
+
+  trigger:
+    capability: triage-issue
+    payload_schema:
+      - id: title
+        label: Issue 标题
+        type: text
+        required: true
+      - id: body
+        label: Issue 正文
+        type: textarea
+        rows: 8
+        required: true
+
+  steps:
+    - id: classify
+      description: 分类 issue — 类型 / 组件 / 初判
+      dispatch:
+        strategy: { kind: capability, capabilities: [issue-classify] }
+        title: "分类: $trigger.payload.title"
+        payload:
+          title: $trigger.payload.title
+          body: $trigger.payload.body
+
+    - id: analyze
+      description: 并行三路分析 — 严重度 / 查重 / 标签
+      parallel: true
+      branches:
+        - id: severity
+          dispatch:
+            strategy: { kind: capability, capabilities: [issue-severity] }
+            title: 评严重度
+            payload:
+              classification: $classify.output
+              body: $trigger.payload.body
+        - id: dedupe
+          dispatch:
+            strategy: { kind: capability, capabilities: [issue-dedupe] }
+            title: 查重复
+            payload:
+              title: $trigger.payload.title
+              classification: $classify.output
+        - id: labels
+          dispatch:
+            strategy: { kind: capability, capabilities: [issue-label] }
+            title: 建议标签
+            payload:
+              classification: $classify.output
+
+    - id: assign
+      description: 综合分类 + 三路分析, 给指派建议
+      dispatch:
+        strategy: { kind: capability, capabilities: [issue-assign] }
+        title: 指派建议
+        payload:
+          classification: $classify.output
+          severity: $analyze.severity.output
+          duplicates: $analyze.dedupe.output
+          labels: $analyze.labels.output
+
+  output:
+    classification: $classify.output
+    severity: $analyze.severity.output
+    duplicates: $analyze.dedupe.output
+    labels: $analyze.labels.output
+    assignment: $assign.output

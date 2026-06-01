@@ -49,6 +49,8 @@ workflows/
                                    (extract→assess→👤法务签字→memo；HITL approve)
   lead-qualification-flow.yaml     🏭 销售线索资格审查 + CRM 回写
                                    (enrich→score→[合格才]outreach→crm-sync；when 条件)
+  issue-triage-flow.yaml           🏭 研发 issue 分诊
+                                   (classify→[并行: 严重度/查重/标签]→assign；parallel)
 ```
 
 ⭐ = 配套 `templates/teams/` 下同名团队使用。
