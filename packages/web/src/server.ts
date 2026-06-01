@@ -20,6 +20,10 @@ import {
   type WorkerRecord,
 } from '@aipehub/core'
 import { HttpStats, renderMetrics } from './metrics.js'
+import {
+  collectBusinessMetrics,
+  type MetricsIdentitySource,
+} from './business-metrics.js'
 
 const log = createLogger('web')
 
@@ -1745,7 +1749,18 @@ async function handle(
     // restart are expected and handled by Prometheus's rate().
     const admin = await requireAdmin(ctx, req, res)
     if (!admin) return
-    const text = renderMetrics(ctx.hub, { httpStats: ctx.httpStats })
+    // P3-M1 — gather the business-metrics snapshot from the host surfaces
+    // (workflow runs + identity ledger/suspended). All best-effort: a wholly
+    // absent/erroring source yields {} and only the hub metrics render. The
+    // `.catch` is belt-and-suspenders — collectBusinessMetrics swallows its
+    // own per-family errors, but a scrape must never 500.
+    const business = await collectBusinessMetrics({
+      workflows: ctx.workflows,
+      // ctx.identity structurally carries countSuspendedTasks + aggregateLedger
+      // on a current host; the narrow MetricsIdentitySource models just those.
+      identity: ctx.identity as unknown as MetricsIdentitySource | undefined,
+    }).catch(() => ({}))
+    const text = renderMetrics(ctx.hub, { httpStats: ctx.httpStats, business })
     res.writeHead(200, {
       // OpenMetrics content-type so Prometheus's scraper does the right thing.
       'content-type': 'text/plain; version=0.0.4; charset=utf-8',

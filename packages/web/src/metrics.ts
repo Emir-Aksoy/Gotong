@@ -51,6 +51,28 @@ export class HttpStats {
 // Prometheus histogram — a trailing `+Inf` slot is appended at render time.
 const SERVICE_CALL_BUCKETS_MS = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000] as const
 
+/**
+ * Phase 19 P3-M1 — business-metrics snapshot. A plain, already-gathered data
+ * struct (see `collectBusinessMetrics` in business-metrics.ts); `renderMetrics`
+ * only formats it. Every field is optional: a source the host didn't wire (or
+ * that errored during collection) is simply omitted from the exposition, so
+ * the hub-derived metrics above always render regardless.
+ */
+export interface BusinessMetrics {
+  /** Workflow run records by status (running/done/failed/cancelled). */
+  workflowRuns?: Record<string, number>
+  /**
+   * True when the run-file scan hit its cap, so the `workflowRuns` tally is a
+   * sample of the most-recent N rather than a full count. Surfaced as a
+   * separate gauge so a dashboard can tell "0 because none" from "capped".
+   */
+  workflowRunsCapped?: boolean
+  /** Currently-parked (suspended) task count. */
+  suspendedTasks?: number
+  /** Per-model LLM usage from the append-only usage ledger. */
+  llmByModel?: Array<{ model: string; calls: number; tokens: number; costMicros: number }>
+}
+
 /** Options recognised by {@link renderMetrics}. */
 export interface RenderMetricsOptions {
   /**
@@ -61,6 +83,13 @@ export interface RenderMetricsOptions {
    * HTTP-related output).
    */
   httpStats?: HttpStats
+  /**
+   * Phase 19 P3-M1 — business-metrics snapshot (workflow runs / suspended
+   * tasks / LLM usage). Gathered by the caller from host surfaces and passed
+   * in pre-computed so this function stays pure + synchronous. Omitted ⇒ only
+   * the hub/HTTP metrics render.
+   */
+  business?: BusinessMetrics
 }
 
 /**
@@ -298,9 +327,89 @@ export function renderMetrics(hub: Hub, opts: RenderMetricsOptions = {}): string
       }
     }
   }
+
+  // --- business metrics (Phase 19 P3-M1) -------------------------------------
+  // Pre-gathered by the caller (collectBusinessMetrics). Each family renders
+  // only when present, so a host that didn't wire workflows / identity simply
+  // omits them — the hub metrics above are unaffected.
+  if (opts.business) renderBusinessMetrics(w, opts.business)
+
   // Trailing newline — Prometheus accepts both with/without, but the
   // de-facto convention is one.
   return lines.join('\n') + '\n'
+}
+
+/**
+ * Emit the business-metrics families. `w` is renderMetrics's line-writer; this
+ * helper shares its `escapeLabel` for label values.
+ *
+ * Series:
+ *   - aipehub_workflow_runs{status}        gauge   (run records on disk by status)
+ *   - aipehub_workflow_runs_scan_capped    gauge   (1 iff the tally is a sample)
+ *   - aipehub_suspended_tasks              gauge   (currently-parked tasks)
+ *   - aipehub_llm_calls_total{model}       counter (ledger is append-only)
+ *   - aipehub_llm_tokens_total{model}      counter
+ *   - aipehub_llm_cost_micros_total{model} counter (integer micro-USD, 1e6=$1)
+ */
+function renderBusinessMetrics(w: (...ls: string[]) => void, b: BusinessMetrics): void {
+  if (b.workflowRuns) {
+    w(
+      '# HELP aipehub_workflow_runs Workflow run records on disk, by status.',
+      '# TYPE aipehub_workflow_runs gauge',
+    )
+    const entries = Object.entries(b.workflowRuns)
+    if (entries.length === 0) {
+      w('aipehub_workflow_runs 0')
+    } else {
+      for (const [status, n] of entries) {
+        w(`aipehub_workflow_runs{status="${escapeLabel(status)}"} ${n}`)
+      }
+    }
+    w(
+      '# HELP aipehub_workflow_runs_scan_capped 1 iff the workflow_runs tally hit its scan cap (a sample, not a full count).',
+      '# TYPE aipehub_workflow_runs_scan_capped gauge',
+      `aipehub_workflow_runs_scan_capped ${b.workflowRunsCapped ? 1 : 0}`,
+      '',
+    )
+  }
+
+  if (typeof b.suspendedTasks === 'number') {
+    w(
+      '# HELP aipehub_suspended_tasks Tasks currently parked (suspended), awaiting resume.',
+      '# TYPE aipehub_suspended_tasks gauge',
+      `aipehub_suspended_tasks ${b.suspendedTasks}`,
+      '',
+    )
+  }
+
+  if (b.llmByModel) {
+    w(
+      '# HELP aipehub_llm_calls_total LLM calls recorded in the usage ledger, by model.',
+      '# TYPE aipehub_llm_calls_total counter',
+    )
+    if (b.llmByModel.length === 0) {
+      w('aipehub_llm_calls_total 0')
+    } else {
+      for (const r of b.llmByModel) {
+        w(`aipehub_llm_calls_total{model="${escapeLabel(r.model)}"} ${r.calls}`)
+      }
+    }
+    w(
+      '# HELP aipehub_llm_tokens_total Total LLM tokens (input+output+cache) recorded in the usage ledger, by model.',
+      '# TYPE aipehub_llm_tokens_total counter',
+    )
+    for (const r of b.llmByModel) {
+      w(`aipehub_llm_tokens_total{model="${escapeLabel(r.model)}"} ${r.tokens}`)
+    }
+    w(
+      '# HELP aipehub_llm_cost_micros_total LLM cost in micro-USD (1e6 = $1) recorded in the usage ledger, by model.',
+      '# TYPE aipehub_llm_cost_micros_total counter',
+    )
+    for (const r of b.llmByModel) {
+      w(`aipehub_llm_cost_micros_total{model="${escapeLabel(r.model)}"} ${r.costMicros}`)
+    }
+    w('')
+  }
 }
 
 // Prometheus label values: backslash, double-quote, and newline are

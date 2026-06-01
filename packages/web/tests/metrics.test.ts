@@ -291,4 +291,108 @@ describe('renderMetrics', () => {
     expect(text).toMatch(/aipehub_http_responses_total\{class="2xx"\} 1/)
     expect(text).toMatch(/aipehub_http_responses_total\{class="other"\} 3/)
   })
+
+  // --- business metrics rendering (Phase 19 P3-M1) -------------------------
+
+  it('renders the workflow_runs / suspended / llm series from a business snapshot', () => {
+    const text = renderMetrics(hub, {
+      business: {
+        workflowRuns: { running: 2, done: 5, failed: 1, cancelled: 0 },
+        workflowRunsCapped: false,
+        suspendedTasks: 3,
+        llmByModel: [
+          { model: 'deepseek-chat', calls: 10, tokens: 12345, costMicros: 6789 },
+          { model: 'gpt-4o', calls: 2, tokens: 500, costMicros: 100 },
+        ],
+      },
+    })
+    expect(text).toContain('# TYPE aipehub_workflow_runs gauge')
+    expect(text).toMatch(/aipehub_workflow_runs\{status="running"\} 2/)
+    expect(text).toMatch(/aipehub_workflow_runs\{status="done"\} 5/)
+    expect(text).toMatch(/aipehub_workflow_runs_scan_capped 0/)
+    expect(text).toMatch(/# TYPE aipehub_suspended_tasks gauge/)
+    expect(text).toMatch(/aipehub_suspended_tasks 3/)
+    expect(text).toMatch(/aipehub_llm_calls_total\{model="deepseek-chat"\} 10/)
+    expect(text).toMatch(/aipehub_llm_tokens_total\{model="deepseek-chat"\} 12345/)
+    expect(text).toMatch(/aipehub_llm_cost_micros_total\{model="gpt-4o"\} 100/)
+  })
+
+  it('omits business series entirely when no snapshot is supplied', () => {
+    const text = renderMetrics(hub)
+    expect(text).not.toContain('aipehub_workflow_runs')
+    expect(text).not.toContain('aipehub_suspended_tasks')
+    expect(text).not.toContain('aipehub_llm_calls_total')
+  })
+
+  it('flags a capped run scan and emits a zero llm series when the ledger is empty', () => {
+    const text = renderMetrics(hub, {
+      business: { workflowRuns: { running: 0, done: 0, failed: 0, cancelled: 0 }, workflowRunsCapped: true, llmByModel: [] },
+    })
+    expect(text).toMatch(/aipehub_workflow_runs_scan_capped 1/)
+    expect(text).toMatch(/aipehub_llm_calls_total 0/)
+  })
+})
+
+describe('collectBusinessMetrics (Phase 19 P3-M1)', () => {
+  it('tallies workflow runs by status, maps ledger rows, reads suspended count', async () => {
+    const { collectBusinessMetrics } = await import('../src/business-metrics.js')
+    const snap = await collectBusinessMetrics({
+      workflows: {
+        async listRuns() {
+          return [
+            { status: 'running' },
+            { status: 'done' },
+            { status: 'done' },
+            { status: 'failed' },
+          ]
+        },
+      },
+      identity: {
+        countSuspendedTasks: () => 4,
+        aggregateLedger: () => [
+          {
+            key: 'deepseek-chat',
+            calls: 3,
+            inputTokens: 100,
+            outputTokens: 50,
+            cacheCreationTokens: 10,
+            cacheReadTokens: 5,
+            costMicros: 999,
+          },
+        ],
+      },
+    })
+    expect(snap.workflowRuns).toEqual({ running: 1, done: 2, failed: 1, cancelled: 0 })
+    expect(snap.workflowRunsCapped).toBe(false)
+    expect(snap.suspendedTasks).toBe(4)
+    expect(snap.llmByModel).toEqual([
+      { model: 'deepseek-chat', calls: 3, tokens: 165, costMicros: 999 },
+    ])
+  })
+
+  it('omits a family whose source throws — never rejects', async () => {
+    const { collectBusinessMetrics } = await import('../src/business-metrics.js')
+    const snap = await collectBusinessMetrics({
+      workflows: {
+        async listRuns() {
+          throw new Error('disk gone')
+        },
+      },
+      identity: {
+        countSuspendedTasks: () => {
+          throw new Error('db locked')
+        },
+        // aggregateLedger present + healthy → that family still appears
+        aggregateLedger: () => [],
+      },
+    })
+    expect(snap.workflowRuns).toBeUndefined()
+    expect(snap.suspendedTasks).toBeUndefined()
+    expect(snap.llmByModel).toEqual([])
+  })
+
+  it('returns {} when no sources are wired', async () => {
+    const { collectBusinessMetrics } = await import('../src/business-metrics.js')
+    expect(await collectBusinessMetrics({})).toEqual({})
+  })
 })

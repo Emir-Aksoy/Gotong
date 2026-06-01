@@ -2182,6 +2182,11 @@ export class IdentityStore {
     return this.suspendedTasks.listSuspendedTasksByAgent(agentId)
   }
 
+  /** Phase 19 P3-M1 — total parked-task count for the `/metrics` gauge. */
+  countSuspendedTasks(): number {
+    return this.suspendedTasks.countSuspendedTasks()
+  }
+
   // =====================================================================
   // Phase 12 M1 — IM bindings.
   // =====================================================================

@@ -360,4 +360,19 @@ describe('IdentityStore — suspended_tasks (Phase 11 M2)', () => {
     expect(due.find((r) => r.taskId === 'bad')!.corrupt).toBe(true)
     expect(due.find((r) => r.taskId === 'good')!.corrupt).toBeUndefined()
   })
+
+  // --- countSuspendedTasks (Phase 19 P3-M1, /metrics gauge) -----------------
+
+  it('countSuspendedTasks tallies all parked rows, including never-resume ones', () => {
+    expect(store.countSuspendedTasks()).toBe(0)
+    store.persistSuspendedTask({ taskId: 's1', agentId: 'a', resumeAt: 100, state: null, taskJson: '{}' })
+    // NEVER_RESUME_AT-style row (human inbox) must still count.
+    store.persistSuspendedTask({ taskId: 's2', agentId: 'a', resumeAt: 9_999_999_999_000, state: null, taskJson: '{}' })
+    expect(store.countSuspendedTasks()).toBe(2)
+    // replace (suspend-again) keeps it at one row for that taskId
+    store.persistSuspendedTask({ taskId: 's1', agentId: 'a', resumeAt: 200, state: { x: 1 }, taskJson: '{}' })
+    expect(store.countSuspendedTasks()).toBe(2)
+    store.removeSuspendedTask('s1')
+    expect(store.countSuspendedTasks()).toBe(1)
+  })
 })

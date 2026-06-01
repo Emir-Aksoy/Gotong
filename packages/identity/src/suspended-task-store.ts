@@ -43,6 +43,7 @@ export class SuspendedTaskStore {
   private readonly stmtSuspendGetById: SqliteStmt
   private readonly stmtSuspendListDue: SqliteStmt
   private readonly stmtSuspendListByAgent: SqliteStmt
+  private readonly stmtSuspendCount: SqliteStmt
 
   constructor(db: SqliteDb) {
     // Phase 11 M2 — suspended_tasks. `INSERT OR REPLACE` covers the
@@ -72,6 +73,12 @@ export class SuspendedTaskStore {
       `SELECT * FROM suspended_tasks
          WHERE agent_id = ?
        ORDER BY resume_at ASC`,
+    )
+    // Phase 19 P3-M1 — a cheap COUNT(*) for the /metrics gauge. Counts ALL
+    // parked rows regardless of resume_at (the never-resume human-inbox rows
+    // at NEVER_RESUME_AT included) — "how much work is currently suspended".
+    this.stmtSuspendCount = db.prepare(
+      `SELECT COUNT(*) AS c FROM suspended_tasks`,
     )
   }
 
@@ -187,6 +194,16 @@ export class SuspendedTaskStore {
     if (typeof agentId !== 'string' || agentId.length === 0) return []
     const rows = this.stmtSuspendListByAgent.all(agentId) as SuspendedTaskRow[]
     return rows.map(rowToSuspendedTask)
+  }
+
+  /**
+   * Phase 19 P3-M1 — total parked-task count for the `/metrics` gauge.
+   * O(1)-ish COUNT(*); never loads task_json. Counts every row including
+   * the never-resume human-inbox rows.
+   */
+  countSuspendedTasks(): number {
+    const row = this.stmtSuspendCount.get() as { c: number }
+    return row.c
   }
 }
 
