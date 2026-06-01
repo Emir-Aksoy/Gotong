@@ -613,10 +613,17 @@
       : ''
     let controls = ''
     if (item.kind === 'approval') {
+      // inbox-gov M3 — three outcomes. The comment is optional for approve /
+      // reject but REQUIRED for "退回修改" (request changes), validated both
+      // client- and server-side.
       controls = `
-        <div class="me-inbox-actions">
-          <button type="button" class="me-primary-btn" data-inbox-approve="${id}">批准</button>
-          <button type="button" class="me-secondary-btn" data-inbox-reject="${id}">拒绝</button>
+        <div class="me-inbox-approval">
+          <textarea data-inbox-approval-comment rows="2" placeholder="意见（退回修改时必填）"></textarea>
+          <div class="me-inbox-actions">
+            <button type="button" class="me-primary-btn" data-inbox-approve="${id}">批准</button>
+            <button type="button" class="me-secondary-btn" data-inbox-changes="${id}">退回修改</button>
+            <button type="button" class="me-secondary-btn" data-inbox-reject="${id}">拒绝</button>
+          </div>
         </div>`
     } else if (item.kind === 'choice') {
       const opts = Array.isArray(item.options) ? item.options : []
@@ -656,10 +663,37 @@
   function onInboxClick(ev) {
     const t = ev.target
     if (!t || !t.getAttribute) return
+    // inbox-gov M3 — approval comment (shared by approve / reject / changes).
+    const approvalComment = (id) => {
+      const item = t.closest('.me-inbox-item')
+      const field = item ? item.querySelector('[data-inbox-approval-comment]') : null
+      return field ? field.value.trim() : ''
+    }
     const approve = t.getAttribute('data-inbox-approve')
-    if (approve) return resolveInbox(approve, { kind: 'approval', approved: true }, t)
+    if (approve) {
+      const c = approvalComment(approve)
+      const d = { kind: 'approval', approved: true }
+      if (c) d.comment = c
+      return resolveInbox(approve, d, t)
+    }
     const reject = t.getAttribute('data-inbox-reject')
-    if (reject) return resolveInbox(reject, { kind: 'approval', approved: false }, t)
+    if (reject) {
+      const c = approvalComment(reject)
+      const d = { kind: 'approval', approved: false }
+      if (c) d.comment = c
+      return resolveInbox(reject, d, t)
+    }
+    const changes = t.getAttribute('data-inbox-changes')
+    if (changes) {
+      const c = approvalComment(changes)
+      if (!c) {
+        const item = t.closest('.me-inbox-item')
+        const statusEl = item ? item.querySelector('[data-inbox-status]') : null
+        if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = '退回修改需要填写意见' }
+        return
+      }
+      return resolveInbox(changes, { kind: 'approval', approved: false, changesRequested: true, comment: c }, t)
+    }
     const choice = t.getAttribute('data-inbox-choice')
     if (choice) {
       return resolveInbox(choice, { kind: 'choice', value: t.getAttribute('data-value') || '' }, t)

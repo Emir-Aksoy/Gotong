@@ -56,7 +56,13 @@ export interface HumanTaskPayload {
  * `kind` discriminant so a resolve handler can check it matches the item.
  */
 export type InboxDecision =
-  | { kind: 'approval'; approved: boolean; comment?: string }
+  // inbox-gov M3 — three outcomes on one approval axis. `changesRequested` is
+  // ADDITIVE (the binary `approved` contract is unchanged, so existing
+  // workflows / `$gate.output.approved` refs keep working): approve →
+  // {approved:true}; request changes → {approved:false, changesRequested:true,
+  // comment}; reject → {approved:false}. Authors branch with
+  // `when: $gate.output.changesRequested == true` to loop back to a revise step.
+  | { kind: 'approval'; approved: boolean; changesRequested?: boolean; comment?: string }
   | { kind: 'choice'; value: string }
   | { kind: 'edit'; value: string }
 

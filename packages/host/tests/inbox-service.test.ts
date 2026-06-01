@@ -195,6 +195,50 @@ describe('HostInboxService — two-step resume', () => {
     expect(JSON.stringify(edRow!.metadata)).not.toContain('secret correction')
   })
 
+  it('resolves with "request changes" — outcome changes_requested, decision flows to output (inbox-gov M3)', async () => {
+    const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+    parkParent()
+    const decision = {
+      kind: 'approval',
+      approved: false,
+      changesRequested: true,
+      comment: 'fix section 3',
+    }
+    await service.resolve({ itemId: childId, userId: 'user-a', decision })
+
+    // The child task's ok output IS the validated decision, so a workflow
+    // `when: $gate.output.changesRequested == true` can loop back to a revise step.
+    const childResult = hub.taskResult(childId)
+    expect(childResult?.kind === 'ok' && childResult.output).toEqual(decision)
+    // Audited as a distinct outcome (not 'rejected').
+    const rows = identity.listAuditLog({ action: 'inbox_resolve' })
+    expect(rows.find((r) => r.metadata?.itemId === childId)?.metadata?.outcome).toBe(
+      'changes_requested',
+    )
+  })
+
+  it('rejects an incoherent / unsubstantiated request-changes decision (inbox-gov M3)', async () => {
+    const a = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+    // approve + request-changes at once is incoherent
+    await expect(
+      service.resolve({
+        itemId: a,
+        userId: 'user-a',
+        decision: { kind: 'approval', approved: true, changesRequested: true, comment: 'x' },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_decision' })
+    // request-changes with no comment gives the revise step nothing to act on
+    await expect(
+      service.resolve({
+        itemId: a,
+        userId: 'user-a',
+        decision: { kind: 'approval', approved: false, changesRequested: true },
+      }),
+    ).rejects.toMatchObject({ code: 'invalid_decision' })
+    // Item untouched — a rejected decision never flips it out of pending.
+    expect((await store.get(a))!.status).toBe('pending')
+  })
+
   it('delegates a pending item to another user by email + audits it (inbox-gov M2)', async () => {
     const bob = identity.createUser({
       email: 'bob@team.test',

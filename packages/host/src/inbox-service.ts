@@ -290,7 +290,10 @@ export class HostInboxService {
  * (the column is for small facts, not blobs) — just `'edited'`.
  */
 function outcomeOf(decision: InboxDecision): string {
-  if (decision.kind === 'approval') return decision.approved ? 'approved' : 'rejected'
+  if (decision.kind === 'approval') {
+    if (decision.changesRequested) return 'changes_requested'
+    return decision.approved ? 'approved' : 'rejected'
+  }
   if (decision.kind === 'choice') return decision.value
   return 'edited'
 }
@@ -337,6 +340,24 @@ function validateDecision(item: InboxItem, raw: unknown): InboxDecision {
       throw new InboxError('invalid_decision', "approval decision requires a boolean 'approved'")
     }
     const out: InboxDecision = { kind: 'approval', approved: d.approved }
+    // inbox-gov M3 — "request changes" is approved=false PLUS an explicit flag,
+    // and (unlike a bare reject) MUST carry a comment so the revise step has
+    // something to act on. Reject "approve + request changes" as incoherent.
+    if (d.changesRequested === true) {
+      if (d.approved) {
+        throw new InboxError(
+          'invalid_decision',
+          'cannot approve and request changes in the same decision',
+        )
+      }
+      if (typeof d.comment !== 'string' || d.comment.trim().length === 0) {
+        throw new InboxError(
+          'invalid_decision',
+          'requesting changes requires a comment describing what to change',
+        )
+      }
+      out.changesRequested = true
+    }
     if (typeof d.comment === 'string') out.comment = d.comment
     return out
   }

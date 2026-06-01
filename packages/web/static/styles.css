@@ -2070,6 +2070,12 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .me-inbox-actions .me-primary-btn, .me-inbox-actions .me-secondary-btn { margin-top: 0; }
 .me-inbox-edit { display: flex; flex-direction: column; gap: 0.4rem; }
 .me-inbox-edit .me-primary-btn { margin-top: 0; align-self: flex-start; }
+/* inbox-gov M3 — approval block with an optional comment (required to request changes). */
+.me-inbox-approval { display: flex; flex-direction: column; gap: 0.45rem; }
+.me-inbox-approval textarea {
+  width: 100%; box-sizing: border-box; padding: 0.4rem 0.5rem;
+  border: 1px solid #ccc; border-radius: 5px; font-size: 0.88rem; resize: vertical;
+}
 /* inbox-gov M2 — handoff context shown to the new assignee + the delegate form. */
 .me-inbox-handoff {
   margin: 0.1rem 0 0.5rem; padding: 0.35rem 0.55rem; font-size: 0.85rem; color: #5a4b16;
