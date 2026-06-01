@@ -48,6 +48,32 @@ asyncio.run(main())
 
 Subclass `AgentParticipant`, give it an `id` + `capabilities`, override `handle_task`. Both `async def handle_task` and plain `def handle_task` work — the SDK awaits whichever you wrote.
 
+## Adapters — bring your own agent framework
+
+`aipehub.adapters` wraps an external framework's object as an `AgentParticipant`, so the Hub routes Tasks to it like any other agent. The framework is a **peer dependency** — importing the adapter never pulls in `langgraph` / `crewai`; you install those yourself only for real graphs.
+
+```python
+from langgraph.graph import StateGraph
+from aipehub import connect
+from aipehub.adapters import langgraph_participant
+
+graph = build_graph().compile()          # any compiled StateGraph
+
+agent = langgraph_participant(
+    graph,
+    id="researcher-lg",
+    capabilities=["research"],
+    # map the AipeHub task <-> the graph's state dict (defaults pass the
+    # payload straight through and return the whole final state)
+    to_state=lambda task: {"question": task["payload"]["question"]},
+    from_state=lambda state: {"answer": state["answer"]},
+)
+
+await connect(url="ws://127.0.0.1:4000", agents=[agent])
+```
+
+The graph is duck-typed (anything with `.invoke(state)`), `.ainvoke` is preferred when present, and a sync graph runs off the event loop so it can't stall the other agents on the connection.
+
 ## What the SDK does
 
 - Opens a WebSocket to the Hub
