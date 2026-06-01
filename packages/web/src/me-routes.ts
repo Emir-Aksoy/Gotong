@@ -244,6 +244,34 @@ export interface MeWorkflowSurface {
 }
 
 // ---------------------------------------------------------------------------
+// Member run history surface (Phase 19 P1-M2)
+//
+// Duck-typed so the web layer takes no runtime dep on `@aipehub/workflow`. The
+// host's workflow surface satisfies it structurally: its `listRunsByUser`
+// returns the wider `WorkflowRunSummary`, assignable to the narrow `MeRunView`.
+// `listRunsByUser` is already scoped to the caller server-side (keyed on the
+// run's `triggeredByOrigin.userId`), so a member only ever sees their own runs.
+// ---------------------------------------------------------------------------
+
+/** Public projection of a workflow run — what the member's client sees. */
+export interface MeRunView {
+  runId: string
+  workflowId: string
+  status: string
+  startedAt: number
+  endedAt?: number
+  error?: string
+}
+
+export interface MeRunSurface {
+  /** Runs initiated by one user, newest first. Already scoped server-side. */
+  listRunsByUser(
+    userId: string,
+    opts?: { limit?: number; workflowId?: string },
+  ): Promise<MeRunView[]>
+}
+
+// ---------------------------------------------------------------------------
 // Member task inbox surface (Phase 16)
 //
 // Duck-typed so the web layer takes no runtime dep on `@aipehub/inbox`; the
@@ -302,6 +330,12 @@ export interface HandleMeRouteCtx {
    */
   workflows: MeWorkflowSurface | undefined
   /**
+   * Phase 19 P1-M2 — member run history. Undefined when the host wired no
+   * workflow surface; `/api/me/runs` then degrades to an empty list and the
+   * catalog omits `latestStatus`. Usually the same object as `workflows`.
+   */
+  runs: MeRunSurface | undefined
+  /**
    * Phase 16 — member task inbox. Undefined when the host wired no inbox;
    * the /me/inbox routes then degrade to an empty list / 503.
    */
@@ -337,7 +371,13 @@ export async function handleMeRoute(
   // workflow list (only those declaring surface.me.enabled and allowing
   // the caller's role).
   if (method === 'GET' && path === '/api/me/workflows') {
-    await handleMeListWorkflows(ctx, res, v4.role)
+    await handleMeListWorkflows(ctx, res, userId, v4.role)
+    return
+  }
+  // Phase 19 P1-M2 — "my recent runs". Server-scoped to the caller; a member
+  // can never read another user's run history.
+  if (method === 'GET' && path === '/api/me/runs') {
+    await handleMeListRuns(ctx, res, userId)
     return
   }
   // Phase 7 M5 — org mode for the SPA shell. Every signed-in user can
@@ -604,9 +644,21 @@ async function handleMeResolveInbox(
 // GET /api/me/workflows — member-facing catalog (Phase 14)
 // ---------------------------------------------------------------------------
 
+interface MeCatalogEntry {
+  id: string
+  label: string
+  description?: string
+  inputSchema: unknown[]
+  /** Phase 19 P1-M2 — status of the caller's newest run of this workflow. */
+  latestStatus?: string
+  /** When that newest run started (ms since epoch). */
+  lastRunAt?: number
+}
+
 async function handleMeListWorkflows(
   ctx: HandleMeRouteCtx,
   res: ServerResponse,
+  userId: string,
   role: string,
 ): Promise<void> {
   if (!ctx.workflows) {
@@ -620,27 +672,80 @@ async function handleMeListWorkflows(
     sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
     return
   }
-  // Project to the PUBLIC shape only: id / label / description / inputSchema.
-  // `capability` and `userScopeField` are internal enforcement details —
-  // never surfaced, so a member can't probe the dispatch internals.
-  const workflows: Array<{
-    id: string
-    label: string
-    description?: string
-    inputSchema: unknown[]
-  }> = []
+  // Phase 19 P1-M2 — fetch the caller's runs ONCE (newest first), then index
+  // the newest per workflow. Best-effort: a runs-surface failure must not sink
+  // the catalog, so we degrade to "no status" rather than 500.
+  const newestByWorkflow = new Map<string, MeRunView>()
+  if (ctx.runs) {
+    try {
+      for (const r of await ctx.runs.listRunsByUser(userId)) {
+        if (!newestByWorkflow.has(r.workflowId)) newestByWorkflow.set(r.workflowId, r)
+      }
+    } catch (err) {
+      log.error('me catalog: run enrichment failed; omitting status', { err })
+    }
+  }
+  // Project to the PUBLIC shape only: id / label / description / inputSchema
+  // (+ the caller's own run status). `capability` and `userScopeField` are
+  // internal enforcement details — never surfaced, so a member can't probe
+  // the dispatch internals.
+  const workflows: MeCatalogEntry[] = []
   for (const s of summaries) {
     const resolved = evaluateMeSurface(s, role)
     if (!resolved) continue
-    const entry: { id: string; label: string; description?: string; inputSchema: unknown[] } = {
+    const entry: MeCatalogEntry = {
       id: resolved.workflowId,
       label: resolved.label,
       inputSchema: resolved.inputSchema,
     }
     if (resolved.description !== undefined) entry.description = resolved.description
+    const last = newestByWorkflow.get(resolved.workflowId)
+    if (last) {
+      entry.latestStatus = last.status
+      entry.lastRunAt = last.startedAt
+    }
     workflows.push(entry)
   }
   sendJson(res, { workflows })
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/me/runs — the caller's own recent runs (Phase 19 P1-M2)
+// ---------------------------------------------------------------------------
+
+async function handleMeListRuns(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.runs) {
+    // No workflow/runs surface wired → empty list (mirrors the catalog
+    // degradation), so the client renders an empty panel rather than erroring.
+    sendJson(res, { runs: [] })
+    return
+  }
+  let rows: MeRunView[]
+  try {
+    rows = await ctx.runs.listRunsByUser(userId, { limit: 50 })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
+    return
+  }
+  // Re-project to the public run view: drop any extra fields the wider host
+  // summary may carry (eg. triggeredByTaskId / stepCount), keep only what the
+  // member needs to render a run row.
+  const runs = rows.map((r) => {
+    const out: MeRunView = {
+      runId: r.runId,
+      workflowId: r.workflowId,
+      status: r.status,
+      startedAt: r.startedAt,
+    }
+    if (r.endedAt !== undefined) out.endedAt = r.endedAt
+    if (r.error !== undefined) out.error = r.error
+    return out
+  })
+  sendJson(res, { runs })
 }
 
 // ---------------------------------------------------------------------------

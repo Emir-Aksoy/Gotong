@@ -477,6 +477,13 @@ export interface WorkflowSurface {
    */
   listRuns(opts?: { workflowId?: string; limit?: number }): Promise<WorkflowRunSummary[]>
   /**
+   * Like {@link listRuns}, but scoped to runs initiated by one user
+   * (`triggeredByOrigin.userId`). Backs the `/me` member workbench so a
+   * member sees only their own runs. Newest first. The same host workflow
+   * surface structurally satisfies me-routes' narrow `MeRunSurface`.
+   */
+  listRunsByUser(userId: string, opts?: { workflowId?: string; limit?: number }): Promise<WorkflowRunSummary[]>
+  /**
    * Full run record for a given runId, including per-step output and
    * `finalOutput` / `error`. Returns `null` when no such run exists.
    */
@@ -1445,6 +1452,10 @@ async function handle(
         // not a hardcoded allowlist. Undefined when the host wired no
         // workflow surface; /me workflow routes then degrade to empty.
         workflows: ctx.workflows,
+        // Phase 19 P1-M2 — same workflow surface, used for "my recent runs".
+        // WorkflowSurface structurally satisfies the narrow MeRunSurface
+        // (its listRunsByUser returns the wider WorkflowRunSummary).
+        runs: ctx.workflows,
         // Phase 16 — member task inbox; undefined → /me/inbox degrades.
         inbox: ctx.inbox,
       },

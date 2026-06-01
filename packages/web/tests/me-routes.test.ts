@@ -37,6 +37,7 @@ import {
   type WebServerHandle,
   type WorkflowSummary,
   type WorkflowSurface,
+  type WorkflowRunSummary,
 } from '../src/server.js'
 
 interface BootResult {
@@ -51,6 +52,8 @@ interface BootResult {
   memberUserId: string
   memberCookie: string
   growthReports: StubGrowthReports
+  /** Phase 19 P1-M2 — present when boot() was given `workflows`; seed runs here. */
+  workflowSurface: StubWorkflowSurface | undefined
 }
 
 class StubGrowthReports implements GrowthReportsAdminSurface {
@@ -75,6 +78,12 @@ class StubGrowthReports implements GrowthReportsAdminSurface {
  * a real WorkflowController. Write-side methods throw (unused here).
  */
 class StubWorkflowSurface implements WorkflowSurface {
+  /**
+   * Phase 19 P1-M2 — seedable per-user run history. Tests push runs keyed by
+   * the member's userId AFTER boot (the id is minted inside boot()), then hit
+   * `/api/me/runs` / `/api/me/workflows` to verify scoping + catalog status.
+   */
+  readonly runsByUser: Record<string, WorkflowRunSummary[]> = {}
   constructor(private readonly summaries: WorkflowSummary[]) {}
   async list(): Promise<WorkflowSummary[]> {
     return this.summaries
@@ -90,6 +99,15 @@ class StubWorkflowSurface implements WorkflowSurface {
   }
   async listRuns(): Promise<[]> {
     return []
+  }
+  async listRunsByUser(
+    userId: string,
+    opts?: { workflowId?: string; limit?: number },
+  ): Promise<WorkflowRunSummary[]> {
+    let rows = (this.runsByUser[userId] ?? []).slice().sort((a, b) => b.startedAt - a.startedAt)
+    if (opts?.workflowId) rows = rows.filter((r) => r.workflowId === opts.workflowId)
+    if (opts?.limit !== undefined) rows = rows.slice(0, opts.limit)
+    return rows
   }
   async readRun(): Promise<null> {
     return null
@@ -167,13 +185,14 @@ async function boot(
   const memberUserId = member.id
 
   const growthReports = new StubGrowthReports()
+  const workflowSurface = opts.workflows ? new StubWorkflowSurface(opts.workflows) : undefined
 
   const server = await serveWeb(hub, {
     host: '127.0.0.1',
     port: 0,
     identity,
     ...(withGrowthReports ? { growthReports } : {}),
-    ...(opts.workflows ? { workflows: new StubWorkflowSurface(opts.workflows) } : {}),
+    ...(workflowSurface ? { workflows: workflowSurface } : {}),
     ...(opts.adminLoginRateLimit
       ? { adminLoginRateLimit: opts.adminLoginRateLimit }
       : {}),
@@ -212,6 +231,7 @@ async function boot(
     memberUserId,
     memberCookie,
     growthReports,
+    workflowSurface,
   }
 }
 
@@ -377,6 +397,75 @@ describe('/api/me/workflows — member-facing catalog (Phase 14)', () => {
   it('requires a v4 session (anonymous → 401)', async () => {
     const r = await fetch(`${b.baseUrl}/api/me/workflows`)
     expect(r.status).toBe(401)
+  })
+})
+
+describe('/api/me/runs — member run history (Phase 19 P1-M2)', () => {
+  const WORKFLOWS: WorkflowSummary[] = [
+    meWf({ id: 'open-flow', name: 'Open Flow', triggerCapability: 'cap-open', surfaceMe: { enabled: true, label: '开放流程', inputSchema: [{ id: 'topic', type: 'text' }] } }),
+  ]
+  const run = (over: Partial<WorkflowRunSummary> & { runId: string; workflowId: string; startedAt: number }): WorkflowRunSummary => ({
+    triggeredByTaskId: `t-${over.runId}`,
+    status: 'done',
+    stepCount: 1,
+    ...over,
+  })
+
+  let b: BootResult
+  beforeEach(async () => { b = await boot({ workflows: WORKFLOWS }) })
+  afterEach(async () => { await teardown(b) })
+
+  it('returns only the caller\'s own runs, newest first', async () => {
+    b.workflowSurface!.runsByUser[b.memberUserId] = [
+      run({ runId: 'r1', workflowId: 'open-flow', startedAt: 100, status: 'done' }),
+      run({ runId: 'r2', workflowId: 'open-flow', startedAt: 300, status: 'running' }),
+    ]
+    // Another user's run must never leak into the member's view.
+    b.workflowSurface!.runsByUser[b.ownerUserId] = [
+      run({ runId: 'r-owner', workflowId: 'open-flow', startedAt: 999 }),
+    ]
+    const r = await fetch(`${b.baseUrl}/api/me/runs`, { headers: { cookie: b.memberCookie } })
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { runs: Array<{ runId: string; status: string; triggeredByTaskId?: string }> }
+    expect(body.runs.map((x) => x.runId)).toEqual(['r2', 'r1'])
+    // Public projection only — internal correlation id is dropped.
+    expect('triggeredByTaskId' in body.runs[0]!).toBe(false)
+  })
+
+  it('enriches the catalog with the caller\'s latestStatus + lastRunAt', async () => {
+    b.workflowSurface!.runsByUser[b.memberUserId] = [
+      run({ runId: 'r1', workflowId: 'open-flow', startedAt: 100, status: 'done' }),
+      run({ runId: 'r2', workflowId: 'open-flow', startedAt: 300, status: 'failed', error: 'boom' }),
+    ]
+    const r = await fetch(`${b.baseUrl}/api/me/workflows`, { headers: { cookie: b.memberCookie } })
+    const body = (await r.json()) as { workflows: Array<{ id: string; latestStatus?: string; lastRunAt?: number }> }
+    const open = body.workflows.find((w) => w.id === 'open-flow')!
+    expect(open.latestStatus).toBe('failed') // newest (startedAt 300) wins
+    expect(open.lastRunAt).toBe(300)
+  })
+
+  it('omits run status when the caller has no runs', async () => {
+    const r = await fetch(`${b.baseUrl}/api/me/workflows`, { headers: { cookie: b.memberCookie } })
+    const body = (await r.json()) as { workflows: Array<{ id: string; latestStatus?: string }> }
+    expect(body.workflows.find((w) => w.id === 'open-flow')!.latestStatus).toBeUndefined()
+  })
+
+  it('empty list + anonymous 401', async () => {
+    const empty = await fetch(`${b.baseUrl}/api/me/runs`, { headers: { cookie: b.memberCookie } })
+    expect((await empty.json() as { runs: unknown[] }).runs).toEqual([])
+    const anon = await fetch(`${b.baseUrl}/api/me/runs`)
+    expect(anon.status).toBe(401)
+  })
+
+  it('returns an empty list when the host wired no workflow surface', async () => {
+    const b2 = await boot() // no workflows → ctx.runs undefined
+    try {
+      const r = await fetch(`${b2.baseUrl}/api/me/runs`, { headers: { cookie: b2.memberCookie } })
+      expect(r.status).toBe(200)
+      expect((await r.json() as { runs: unknown[] }).runs).toEqual([])
+    } finally {
+      await teardown(b2)
+    }
   })
 })
 

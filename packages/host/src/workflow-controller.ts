@@ -206,6 +206,19 @@ export class WorkflowController {
     return this.runStore.listRuns(opts)
   }
 
+  /**
+   * List runs initiated by one user (newest first) — backs the `/me` member
+   * workbench's "my recent runs". Same projection as {@link listRuns} but
+   * scoped to `triggeredByOrigin.userId` (the attribution `/api/me/dispatch`
+   * stamps), so a member sees only the runs they kicked off.
+   */
+  async listRunsByUser(
+    userId: string,
+    opts?: { workflowId?: string; limit?: number },
+  ): Promise<RunSummary[]> {
+    return this.runStore.listByUser(userId, opts)
+  }
+
   /** Load the full `RunState` for one run, or `null` if no such run is recorded. */
   async readRun(runId: string): Promise<RunState | null> {
     return this.runStore.read(runId)
