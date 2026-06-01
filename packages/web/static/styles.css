@@ -1941,7 +1941,7 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   max-width: 48rem;
   padding: 1rem 1.25rem 1.5rem;
 }
-.me-whoami, .me-dispatch, .me-inbox, .me-reports, .settings-actions, .settings-form {
+.me-whoami, .me-dispatch, .me-runs, .me-inbox, .me-reports, .me-agents, .settings-actions, .settings-form {
   margin-bottom: 1.5rem;
 }
 #home-panel h2, #settings-panel h2 {
@@ -1986,6 +1986,33 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   line-height: 1.5; text-align: center; color: #fff; background: #1f6feb; border-radius: 999px;
 }
 .me-badge:empty { display: none; }
+/* Phase 19 P1-M5 — member recent runs (status pill) + my AI helpers + uploader */
+.me-run-status {
+  display: inline-block; padding: 0 0.5em; font-size: 0.78rem; line-height: 1.7;
+  border-radius: 999px; color: #fff; background: #888;
+}
+.me-run-running { background: #1f6feb; }
+.me-run-done { background: #27ae60; }
+.me-run-failed { background: #c0392b; }
+.me-run-cancelled { background: #999; }
+.me-run-suspended { background: #d29922; }
+.me-agents-list { margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.6rem; }
+.me-agent-card {
+  border: 1px solid #e2e2e2; border-radius: 6px; padding: 0.6rem 0.75rem;
+  background: #fafbfc; flex: 1 1 14rem; min-width: 12rem;
+}
+.me-agent-head { display: flex; align-items: center; gap: 0.4rem; }
+.me-agent-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; flex: none; }
+.me-agent-online { background: #27ae60; }
+.me-agent-offline { background: #bbb; }
+.me-agent-caps { margin-top: 0.4rem; display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.me-cap-chip {
+  display: inline-block; padding: 0.05rem 0.45rem; font-size: 0.74rem;
+  background: #eef2f7; color: #345; border-radius: 4px;
+}
+.me-upload-status { display: block; margin-top: 0.2rem; }
+.me-upload-status.ok { color: #27ae60; }
+.me-upload-status.error { color: #c0392b; }
 .settings-form { display: block; max-width: 24rem; }
 
 /* C2 — org quota management panel */

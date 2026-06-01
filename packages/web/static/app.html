@@ -148,6 +148,20 @@
         <div id="me-dispatch-status" class="me-status"></div>
       </div>
 
+      <div class="me-runs">
+        <h2>最近运行</h2>
+        <p class="me-meta">你最近发起的工作流运行,只显示你自己的记录。</p>
+        <button id="me-runs-refresh-btn" type="button" class="me-secondary-btn">刷新</button>
+        <table class="me-table">
+          <thead>
+            <tr><th>工作流</th><th>状态</th><th>开始</th><th>结束</th></tr>
+          </thead>
+          <tbody id="me-runs-tbody">
+            <tr><td colspan="4" class="me-meta">尚未加载</td></tr>
+          </tbody>
+        </table>
+      </div>
+
       <div class="me-inbox">
         <h2>待处理任务 <span id="me-inbox-count" class="me-badge"></span></h2>
         <p class="me-meta">工作流在某一步需要你拍板时,会出现在这里。处理后工作流会带着你的决定继续往下走。</p>
@@ -166,6 +180,13 @@
             <tr><td colspan="4" class="me-meta">尚未加载</td></tr>
           </tbody>
         </table>
+      </div>
+
+      <div class="me-agents">
+        <h2>我的 AI 助手</h2>
+        <p class="me-meta">管理员配置好、你可以通过上面的工作流间接调用的智能体。系统提示词 / 密钥等敏感配置不会展示。</p>
+        <button id="me-agents-refresh-btn" type="button" class="me-secondary-btn">刷新</button>
+        <div id="me-agents-list" class="me-agents-list"></div>
       </div>
     </section>
 

@@ -290,10 +290,14 @@
     if (!SIGNED_IN) return
     await renderWhoami()
     await loadMyWorkflows()
+    await loadMyRuns()
     await loadMyInbox()
     await loadMyReports()
+    await loadMyAgents()
     document.getElementById('me-dispatch-btn')?.addEventListener('click', submitDispatch)
     document.getElementById('me-refresh-reports-btn')?.addEventListener('click', loadMyReports)
+    document.getElementById('me-runs-refresh-btn')?.addEventListener('click', loadMyRuns)
+    document.getElementById('me-agents-refresh-btn')?.addEventListener('click', loadMyAgents)
     document.getElementById('me-inbox-refresh-btn')?.addEventListener('click', loadMyInbox)
     // Delegated: the list is re-rendered, but #me-inbox-list is stable.
     document.getElementById('me-inbox-list')?.addEventListener('click', onInboxClick)
@@ -396,10 +400,16 @@
           .join('')}</select>`
         break
       }
-      case 'file':
-        // The member workbench doesn't wire the Phase 9 upload flow yet.
-        control = `<input type="text" name="${idAttr}" data-type="text" placeholder="${ph}"${reqAttr}><small class="me-meta">（此入口暂不支持文件上传）</small>`
+      case 'file': {
+        // Phase 19 P1-M5 — real uploader. The file is read at submit time
+        // (submitDispatch uploads to /api/me/uploads → sends a file_ref block),
+        // mirroring the admin wf-start form, so a file picked but never
+        // submitted leaves no orphan artifact.
+        const accept = f.accept ? ` accept="${escape(f.accept)}"` : ''
+        const cap = typeof f.maxSizeMb === 'number' ? `<small class="me-meta">（≤ ${escape(String(f.maxSizeMb))} MB）</small>` : ''
+        control = `<input type="file" name="${idAttr}" data-type="file"${accept}${reqAttr}>${cap}<small class="me-upload-status" data-upload-status></small>`
         break
+      }
       default: // 'text'
         control = `<input type="text" name="${idAttr}" data-type="text" placeholder="${ph}"${reqAttr}>`
     }
@@ -417,18 +427,26 @@
       return
     }
     const payload = {}
-    fields.querySelectorAll('[name]').forEach((el) => {
-      const key = el.getAttribute('name')
-      if (!key) return
-      if (el.getAttribute('data-type') === 'number') {
-        if (el.value === '') return // leave unset rather than send NaN
-        payload[key] = Number(el.value)
-        return
-      }
-      payload[key] = el.value
-    })
     status.className = 'me-status'
     status.textContent = '提交中…'
+    // File fields upload at submit time (→ file_ref block), so we can't use a
+    // sync forEach: a failed/required-missing upload aborts the whole dispatch.
+    for (const el of fields.querySelectorAll('[name]')) {
+      const key = el.getAttribute('name')
+      if (!key) continue
+      const dtype = el.getAttribute('data-type')
+      if (dtype === 'file') {
+        const ok = await collectFileField(el, key, payload, status)
+        if (!ok) return // upload failed / required missing — message already set
+        continue
+      }
+      if (dtype === 'number') {
+        if (el.value === '') continue // leave unset rather than send NaN
+        payload[key] = Number(el.value)
+        continue
+      }
+      payload[key] = el.value
+    }
     try {
       const r = await fetch('/api/me/dispatch', {
         method: 'POST',
@@ -445,11 +463,115 @@
       status.textContent = `已派发,运行 id: ${j?.runId || j?.taskId || 'ok'}`
       // Refresh reports — the new run might already have produced an artifact
       // for fast workflows; for slow ones the user can hit refresh later.
+      // Also refresh the runs list so the just-triggered run shows up.
       setTimeout(loadMyReports, 800)
+      setTimeout(loadMyRuns, 800)
     } catch (err) {
       status.className = 'me-status error'
       status.textContent = `派发失败: ${err?.message || err}`
     }
+  }
+
+  // Upload a file-type field's selected file to /api/me/uploads and stash the
+  // resulting file_ref block into `payload[key]`. Returns false (with a status
+  // message set) when a required file is missing or the upload fails, so the
+  // caller aborts the dispatch. Mirrors the admin wf-start file contract.
+  async function collectFileField(el, key, payload, status) {
+    const files = el.files
+    const label = el.closest('label')
+    const statusEl = label ? label.querySelector('[data-upload-status]') : null
+    const setUpload = (cls, text) => {
+      if (!statusEl) return
+      statusEl.className = `me-upload-status${cls ? ` ${cls}` : ''}`
+      statusEl.textContent = text
+    }
+    if (!files || files.length === 0) {
+      if (el.hasAttribute('required')) {
+        status.className = 'me-status error'
+        status.textContent = `请为「${key}」选择一个文件`
+        return false
+      }
+      return true // optional + empty → leave the field unset
+    }
+    const file = files[0]
+    try {
+      setUpload('', '上传中…')
+      const ref = await uploadMyFile(file)
+      setUpload('ok', `已上传:${file.name}(${formatBytes(ref.size)})`)
+      payload[key] = { type: 'file_ref', artifactId: ref.artifactId, mime: ref.mime }
+      return true
+    } catch (err) {
+      setUpload('error', `上传失败:${err?.message || err}`)
+      status.className = 'me-status error'
+      status.textContent = `文件上传失败:${err?.message || err}`
+      return false
+    }
+  }
+
+  // POST one File to /api/me/uploads (scoped to me/<userId> server-side) →
+  // { artifactId, mime, size }. Mirrors admin uploadOneFile but on the member
+  // route: don't set content-type explicitly so the browser fills it from
+  // File.type (the server reads ?mime first, then the header).
+  async function uploadMyFile(file) {
+    const params = new URLSearchParams()
+    params.set('filename', file.name)
+    if (file.type) params.set('mime', file.type)
+    const r = await fetch(`/api/me/uploads?${params.toString()}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      body: file,
+    })
+    if (!r.ok) {
+      let msg = `HTTP ${r.status}`
+      try { const j = await r.json(); if (j?.error) msg = j.error } catch { /* keep HTTP msg */ }
+      throw new Error(msg)
+    }
+    return r.json()
+  }
+
+  // Member recent runs (Phase 19 P1-M2). Lists the caller's own workflow runs,
+  // newest first — server-scoped, so a member never sees another user's runs.
+  async function loadMyRuns() {
+    const tbody = document.getElementById('me-runs-tbody')
+    if (!tbody) return
+    tbody.innerHTML = '<tr><td colspan="4" class="me-meta">加载中…</td></tr>'
+    try {
+      const r = await fetch('/api/me/runs')
+      if (!r.ok) {
+        tbody.innerHTML = `<tr><td colspan="4" class="me-meta">加载失败 (HTTP ${r.status})</td></tr>`
+        return
+      }
+      const j = await r.json()
+      const runs = Array.isArray(j?.runs) ? j.runs : []
+      if (runs.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" class="me-meta">还没有运行记录 — 上面发起一次工作流试试。</td></tr>'
+        return
+      }
+      tbody.innerHTML = runs
+        .map(
+          (run) => `
+            <tr>
+              <td>${escape(run.workflowId || '?')}</td>
+              <td>${renderRunStatus(run.status)}</td>
+              <td>${escape(formatTs(run.startedAt))}</td>
+              <td>${run.endedAt ? escape(formatTs(run.endedAt)) : '<span class="me-meta">进行中</span>'}</td>
+            </tr>`,
+        )
+        .join('')
+    } catch (err) {
+      tbody.innerHTML = `<tr><td colspan="4" class="me-meta">加载失败: ${escape(err?.message || String(err))}</td></tr>`
+    }
+  }
+
+  // Map a RunStatus to a coloured pill. Falls back to the raw status string so a
+  // future status value still renders (just without a dedicated colour).
+  const ME_RUN_STATUS_LABELS = {
+    running: '进行中', done: '已完成', failed: '失败', cancelled: '已取消', suspended: '挂起',
+  }
+  function renderRunStatus(status) {
+    const s = status || 'unknown'
+    const label = ME_RUN_STATUS_LABELS[s] || s
+    return `<span class="me-run-status me-run-${escape(s)}">${escape(label)}</span>`
   }
 
   // Member task inbox (Phase 16). Lists the caller's pending human-in-the-loop
@@ -593,6 +715,50 @@
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="4" class="me-meta">加载失败: ${escape(err?.message || String(err))}</td></tr>`
     }
+  }
+
+  // Member agent directory (Phase 19 P1-M3). Shows the sanitized "my AI helpers"
+  // list — capabilities + online state only; the host already stripped prompts /
+  // keys / model config, so nothing sensitive reaches the client.
+  async function loadMyAgents() {
+    const list = document.getElementById('me-agents-list')
+    if (!list) return
+    list.innerHTML = '<p class="me-meta">加载中…</p>'
+    try {
+      const r = await fetch('/api/me/agents')
+      if (!r.ok) {
+        list.innerHTML = `<p class="me-meta">加载失败 (HTTP ${r.status})</p>`
+        return
+      }
+      const j = await r.json()
+      const agents = Array.isArray(j?.agents) ? j.agents : []
+      if (agents.length === 0) {
+        list.innerHTML = '<p class="me-meta">还没有可用的 AI 助手 — 管理员可在「智能体」里创建。</p>'
+        return
+      }
+      list.innerHTML = agents.map(renderAgentCard).join('')
+    } catch (err) {
+      list.innerHTML = `<p class="me-meta">加载失败: ${escape(err?.message || String(err))}</p>`
+    }
+  }
+
+  function renderAgentCard(a) {
+    const caps = Array.isArray(a.capabilities) ? a.capabilities : []
+    const capChips = caps.length
+      ? caps.map((c) => `<span class="me-cap-chip">${escape(c)}</span>`).join('')
+      : '<span class="me-meta">无</span>'
+    const desc = a.description ? `<p class="me-meta">${escape(a.description)}</p>` : ''
+    const dotCls = a.online ? 'me-agent-online' : 'me-agent-offline'
+    const onlineLabel = a.online ? '在线' : '离线'
+    return `
+      <div class="me-agent-card">
+        <div class="me-agent-head">
+          <span class="me-agent-dot ${dotCls}" title="${onlineLabel}"></span>
+          <strong>${escape(a.label || a.id)}</strong>
+        </div>
+        ${desc}
+        <div class="me-agent-caps">${capChips}</div>
+      </div>`
   }
 
   // ---- Settings tab -----------------------------------------------------
