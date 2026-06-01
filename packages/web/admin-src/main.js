@@ -277,6 +277,13 @@ import { createWorkflows } from './workflows.js'
       wfAuditExport: $('wf-audit-export'),
       wfAuditCsv: $('wf-audit-csv'),
       wfAuditJsonl: $('wf-audit-jsonl'),
+      // Access-control (resource RBAC) sub-section in the revision modal (P2-M5c)
+      wfGrantsList: $('wf-grants-list'),
+      wfGrantsEmpty: $('wf-grants-empty'),
+      wfGrantsAdd: $('wf-grants-add'),
+      wfGrantUser: $('wf-grant-user'),
+      wfGrantPerm: $('wf-grant-perm'),
+      wfGrantsMsg: $('wf-grants-msg'),
       // Room health banner (v2.1+)
       hToday: $('health-today-tasks'),
       hOnline: $('health-online'),
@@ -2132,6 +2139,14 @@ import { createWorkflows } from './workflows.js'
         // Re-query the governance audit sub-section with the chosen action
         // filter. The workflow id is held in the revisions modal's state.
         workflows.refreshWorkflowAudit()
+      } else if (act === 'refresh-workflow-grants') {
+        workflows.refreshWorkflowGrants()
+      } else if (act === 'add-workflow-grant') {
+        workflows.addWorkflowGrant()
+      } else if (act === 'remove-workflow-grant') {
+        // Per-row revoke button; the user id rides on the data attribute.
+        const userId = target.dataset.user
+        if (userId) workflows.removeWorkflowGrant(userId)
       } else if (act === 'start-workflow') {
         openWorkflowStart(id)
       } else if (act === 'view-growth-report') {

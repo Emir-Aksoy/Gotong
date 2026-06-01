@@ -208,6 +208,8 @@ export function createWorkflows({ wf }) {
     // revision fetch (separate endpoint, separate gate), so fire it here and
     // don't let a revision-fetch error path skip it.
     void loadWorkflowAudit(id)
+    // P2-M5c — access-control sub-section is likewise independent + owner-gated.
+    void loadWorkflowGrants(id)
     try {
       const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/revisions`)
       if (!r.ok) {
@@ -400,6 +402,156 @@ export function createWorkflows({ wf }) {
       .join('')
   }
 
+  // --- access control / resource RBAC grants (Phase 19 P2-M5c) -----------
+  //
+  // Co-located in the revision modal, below the audit. Backed by the
+  // owner-gated /api/admin/workflows/:id/grants routes. A non-owner admin
+  // gets 403 → "owner only" notice (no list/form); a host without an
+  // identity store gets 404 → "not enabled" notice. Operators (org owner /
+  // v3 admin) manage by bypass, so the form works for them on any workflow.
+
+  let grantsWorkflowId = null
+
+  function setGrantsNotice(key) {
+    // Hide the list + add form, show one notice line. Used for 403 / 404.
+    if (dom.wfGrantsList) dom.wfGrantsList.innerHTML = ''
+    if (dom.wfGrantsEmpty) dom.wfGrantsEmpty.hidden = true
+    if (dom.wfGrantsAdd) dom.wfGrantsAdd.hidden = true
+    if (dom.wfGrantsMsg) {
+      dom.wfGrantsMsg.textContent = t[key] || ''
+      dom.wfGrantsMsg.classList.remove('ok')
+      dom.wfGrantsMsg.classList.add('err')
+    }
+  }
+
+  async function loadWorkflowGrants(id) {
+    grantsWorkflowId = id
+    if (dom.wfGrantsMsg) {
+      dom.wfGrantsMsg.textContent = ''
+      dom.wfGrantsMsg.classList.remove('ok', 'err')
+    }
+    if (dom.wfGrantsAdd) dom.wfGrantsAdd.hidden = false
+    if (dom.wfGrantsEmpty) dom.wfGrantsEmpty.hidden = true
+    if (dom.wfGrantsList) dom.wfGrantsList.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
+    await fetchWorkflowGrants(id)
+  }
+
+  // Wired to the 刷新 button (data-act="refresh-workflow-grants").
+  async function refreshWorkflowGrants() {
+    if (!grantsWorkflowId) return
+    await loadWorkflowGrants(grantsWorkflowId)
+  }
+
+  async function fetchWorkflowGrants(id) {
+    try {
+      const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/grants`)
+      if (!r.ok) {
+        // 403 = non-owner admin; 404 = host without resource RBAC. The
+        // revisions + audit above still work — degrade this section only.
+        setGrantsNotice(r.status === 403 ? 'workflowGrantsOwnerOnly' : 'workflowGrantsUnavailable')
+        return
+      }
+      const body = await r.json()
+      renderWorkflowGrants(body.grants || [])
+    } catch (err) {
+      if (dom.wfGrantsList) dom.wfGrantsList.innerHTML = ''
+      if (dom.wfGrantsMsg) {
+        dom.wfGrantsMsg.textContent = t.failedAlert(err.message || String(err))
+        dom.wfGrantsMsg.classList.add('err')
+      }
+    }
+  }
+
+  function renderWorkflowGrants(rows) {
+    if (!dom.wfGrantsList) return
+    if (rows.length === 0) {
+      dom.wfGrantsList.innerHTML = ''
+      if (dom.wfGrantsEmpty) dom.wfGrantsEmpty.hidden = false
+      return
+    }
+    if (dom.wfGrantsEmpty) dom.wfGrantsEmpty.hidden = true
+    dom.wfGrantsList.innerHTML = rows
+      .map((g) => {
+        const user = escapeHtml(g.userId)
+        const perm = escapeHtml(g.perm)
+        return `<div class="wf-grant-row">
+          <span class="wf-grant-user-id">${user}</span>
+          <span class="wf-grant-perm-tag wf-grant-perm-${perm}">${perm}</span>
+          <button type="button" class="ma-btn ma-btn-secondary ma-danger wf-grant-remove"
+                  data-act="remove-workflow-grant" data-user="${user}"
+                  >${escapeHtml(t.workflowGrantsRemove)}</button>
+        </div>`
+      })
+      .join('')
+  }
+
+  // Wired to the 授权 button (data-act="add-workflow-grant").
+  async function addWorkflowGrant() {
+    if (!grantsWorkflowId) return
+    const userId = dom.wfGrantUser ? dom.wfGrantUser.value.trim() : ''
+    const perm = dom.wfGrantPerm ? dom.wfGrantPerm.value : 'viewer'
+    if (dom.wfGrantsMsg) {
+      dom.wfGrantsMsg.textContent = ''
+      dom.wfGrantsMsg.classList.remove('ok', 'err')
+    }
+    if (!userId) {
+      if (dom.wfGrantsMsg) {
+        dom.wfGrantsMsg.textContent = t.workflowGrantsNeedUser
+        dom.wfGrantsMsg.classList.add('err')
+      }
+      return
+    }
+    try {
+      const r = await fetch(`/api/admin/workflows/${encodeURIComponent(grantsWorkflowId)}/grants`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId, perm }),
+      })
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        if (dom.wfGrantsMsg) {
+          dom.wfGrantsMsg.textContent = t.failedAlert(body.error || `${r.status}`)
+          dom.wfGrantsMsg.classList.add('err')
+        }
+        return
+      }
+      const body = await r.json()
+      if (dom.wfGrantUser) dom.wfGrantUser.value = ''
+      renderWorkflowGrants(body.grants || [])
+    } catch (err) {
+      if (dom.wfGrantsMsg) {
+        dom.wfGrantsMsg.textContent = t.failedAlert(err.message || String(err))
+        dom.wfGrantsMsg.classList.add('err')
+      }
+    }
+  }
+
+  // Wired to per-row 撤销 buttons (data-act="remove-workflow-grant").
+  async function removeWorkflowGrant(userId) {
+    if (!grantsWorkflowId || !userId) return
+    try {
+      const r = await fetch(
+        `/api/admin/workflows/${encodeURIComponent(grantsWorkflowId)}/grants/${encodeURIComponent(userId)}`,
+        { method: 'DELETE' },
+      )
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        if (dom.wfGrantsMsg) {
+          dom.wfGrantsMsg.textContent = t.failedAlert(body.error || `${r.status}`)
+          dom.wfGrantsMsg.classList.add('err')
+        }
+        return
+      }
+      // Re-pull so the (possibly now-empty) list re-renders consistently.
+      await fetchWorkflowGrants(grantsWorkflowId)
+    } catch (err) {
+      if (dom.wfGrantsMsg) {
+        dom.wfGrantsMsg.textContent = t.failedAlert(err.message || String(err))
+        dom.wfGrantsMsg.classList.add('err')
+      }
+    }
+  }
+
   // --- workflow import (YAML paste / file) -------------------------------
 
   function openWorkflowImportModal() {
@@ -588,6 +740,9 @@ export function createWorkflows({ wf }) {
     closeWorkflowRevisionsModal,
     rollbackTo,
     refreshWorkflowAudit,
+    refreshWorkflowGrants,
+    addWorkflowGrant,
+    removeWorkflowGrant,
     openWorkflowImportModal,
     closeWorkflowImportModal,
     submitWorkflowImport,

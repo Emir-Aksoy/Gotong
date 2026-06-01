@@ -527,6 +527,32 @@
               <a id="wf-audit-jsonl" class="ma-btn ma-btn-secondary" rel="nofollow"
                  href="#" data-i18n="workflowAuditExportJsonl">导出 JSONL</a>
             </div>
+
+            <!-- Phase 19 P2-M5c — access control (resource RBAC grants).
+                 Owner-gated: a non-owner admin sees a notice instead of the
+                 list/form. Operators (org owner / v3 admin) manage by bypass. -->
+            <hr class="wf-grants-sep" />
+            <div class="wf-grants-head">
+              <strong data-i18n="workflowGrantsTitle">访问控制</strong>
+              <button type="button" class="ma-btn ma-btn-secondary"
+                      data-act="refresh-workflow-grants"
+                      data-i18n="workflowGrantsRefresh">刷新</button>
+            </div>
+            <div id="wf-grants-list"></div>
+            <p id="wf-grants-empty" class="hint" hidden data-i18n="workflowGrantsEmpty">还没有授权（仅 owner / 管理员可访问）。</p>
+            <div id="wf-grants-add" class="wf-grants-add">
+              <input id="wf-grant-user" type="text" class="wf-grant-user"
+                     data-i18n-placeholder="workflowGrantsUserPh" placeholder="用户 ID" />
+              <select id="wf-grant-perm" class="wf-grant-perm" aria-label="perm">
+                <option value="viewer">viewer</option>
+                <option value="editor">editor</option>
+                <option value="owner">owner</option>
+              </select>
+              <button type="button" class="ma-btn ma-btn-primary"
+                      data-act="add-workflow-grant"
+                      data-i18n="workflowGrantsAdd">授权</button>
+            </div>
+            <p id="wf-grants-msg" class="form-msg"></p>
           </div>
         </div>
       </div>

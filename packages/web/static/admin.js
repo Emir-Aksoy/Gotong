@@ -1107,6 +1107,7 @@
       if (dom.wfRevList) dom.wfRevList.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
       if (dom.wfRevModal) dom.wfRevModal.hidden = false;
       void loadWorkflowAudit(id);
+      void loadWorkflowGrants(id);
       try {
         const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/revisions`);
         if (!r.ok) {
@@ -1264,6 +1265,131 @@
           <small class="hint">${escapeHtml4(when)}</small>
         </div>`;
       }).join("");
+    }
+    let grantsWorkflowId = null;
+    function setGrantsNotice(key) {
+      if (dom.wfGrantsList) dom.wfGrantsList.innerHTML = "";
+      if (dom.wfGrantsEmpty) dom.wfGrantsEmpty.hidden = true;
+      if (dom.wfGrantsAdd) dom.wfGrantsAdd.hidden = true;
+      if (dom.wfGrantsMsg) {
+        dom.wfGrantsMsg.textContent = t4[key] || "";
+        dom.wfGrantsMsg.classList.remove("ok");
+        dom.wfGrantsMsg.classList.add("err");
+      }
+    }
+    async function loadWorkflowGrants(id) {
+      grantsWorkflowId = id;
+      if (dom.wfGrantsMsg) {
+        dom.wfGrantsMsg.textContent = "";
+        dom.wfGrantsMsg.classList.remove("ok", "err");
+      }
+      if (dom.wfGrantsAdd) dom.wfGrantsAdd.hidden = false;
+      if (dom.wfGrantsEmpty) dom.wfGrantsEmpty.hidden = true;
+      if (dom.wfGrantsList) dom.wfGrantsList.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      await fetchWorkflowGrants(id);
+    }
+    async function refreshWorkflowGrants() {
+      if (!grantsWorkflowId) return;
+      await loadWorkflowGrants(grantsWorkflowId);
+    }
+    async function fetchWorkflowGrants(id) {
+      try {
+        const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/grants`);
+        if (!r.ok) {
+          setGrantsNotice(r.status === 403 ? "workflowGrantsOwnerOnly" : "workflowGrantsUnavailable");
+          return;
+        }
+        const body = await r.json();
+        renderWorkflowGrants(body.grants || []);
+      } catch (err) {
+        if (dom.wfGrantsList) dom.wfGrantsList.innerHTML = "";
+        if (dom.wfGrantsMsg) {
+          dom.wfGrantsMsg.textContent = t4.failedAlert(err.message || String(err));
+          dom.wfGrantsMsg.classList.add("err");
+        }
+      }
+    }
+    function renderWorkflowGrants(rows) {
+      if (!dom.wfGrantsList) return;
+      if (rows.length === 0) {
+        dom.wfGrantsList.innerHTML = "";
+        if (dom.wfGrantsEmpty) dom.wfGrantsEmpty.hidden = false;
+        return;
+      }
+      if (dom.wfGrantsEmpty) dom.wfGrantsEmpty.hidden = true;
+      dom.wfGrantsList.innerHTML = rows.map((g) => {
+        const user = escapeHtml4(g.userId);
+        const perm = escapeHtml4(g.perm);
+        return `<div class="wf-grant-row">
+          <span class="wf-grant-user-id">${user}</span>
+          <span class="wf-grant-perm-tag wf-grant-perm-${perm}">${perm}</span>
+          <button type="button" class="ma-btn ma-btn-secondary ma-danger wf-grant-remove"
+                  data-act="remove-workflow-grant" data-user="${user}"
+                  >${escapeHtml4(t4.workflowGrantsRemove)}</button>
+        </div>`;
+      }).join("");
+    }
+    async function addWorkflowGrant() {
+      if (!grantsWorkflowId) return;
+      const userId = dom.wfGrantUser ? dom.wfGrantUser.value.trim() : "";
+      const perm = dom.wfGrantPerm ? dom.wfGrantPerm.value : "viewer";
+      if (dom.wfGrantsMsg) {
+        dom.wfGrantsMsg.textContent = "";
+        dom.wfGrantsMsg.classList.remove("ok", "err");
+      }
+      if (!userId) {
+        if (dom.wfGrantsMsg) {
+          dom.wfGrantsMsg.textContent = t4.workflowGrantsNeedUser;
+          dom.wfGrantsMsg.classList.add("err");
+        }
+        return;
+      }
+      try {
+        const r = await fetch(`/api/admin/workflows/${encodeURIComponent(grantsWorkflowId)}/grants`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ userId, perm })
+        });
+        if (!r.ok) {
+          const body2 = await r.json().catch(() => ({}));
+          if (dom.wfGrantsMsg) {
+            dom.wfGrantsMsg.textContent = t4.failedAlert(body2.error || `${r.status}`);
+            dom.wfGrantsMsg.classList.add("err");
+          }
+          return;
+        }
+        const body = await r.json();
+        if (dom.wfGrantUser) dom.wfGrantUser.value = "";
+        renderWorkflowGrants(body.grants || []);
+      } catch (err) {
+        if (dom.wfGrantsMsg) {
+          dom.wfGrantsMsg.textContent = t4.failedAlert(err.message || String(err));
+          dom.wfGrantsMsg.classList.add("err");
+        }
+      }
+    }
+    async function removeWorkflowGrant(userId) {
+      if (!grantsWorkflowId || !userId) return;
+      try {
+        const r = await fetch(
+          `/api/admin/workflows/${encodeURIComponent(grantsWorkflowId)}/grants/${encodeURIComponent(userId)}`,
+          { method: "DELETE" }
+        );
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          if (dom.wfGrantsMsg) {
+            dom.wfGrantsMsg.textContent = t4.failedAlert(body.error || `${r.status}`);
+            dom.wfGrantsMsg.classList.add("err");
+          }
+          return;
+        }
+        await fetchWorkflowGrants(grantsWorkflowId);
+      } catch (err) {
+        if (dom.wfGrantsMsg) {
+          dom.wfGrantsMsg.textContent = t4.failedAlert(err.message || String(err));
+          dom.wfGrantsMsg.classList.add("err");
+        }
+      }
     }
     function openWorkflowImportModal() {
       dom.wfImportText.value = "";
@@ -1423,6 +1549,9 @@
       closeWorkflowRevisionsModal,
       rollbackTo,
       refreshWorkflowAudit,
+      refreshWorkflowGrants,
+      addWorkflowGrant,
+      removeWorkflowGrant,
       openWorkflowImportModal,
       closeWorkflowImportModal,
       submitWorkflowImport,
@@ -1680,6 +1809,13 @@
         wfAuditExport: $("wf-audit-export"),
         wfAuditCsv: $("wf-audit-csv"),
         wfAuditJsonl: $("wf-audit-jsonl"),
+        // Access-control (resource RBAC) sub-section in the revision modal (P2-M5c)
+        wfGrantsList: $("wf-grants-list"),
+        wfGrantsEmpty: $("wf-grants-empty"),
+        wfGrantsAdd: $("wf-grants-add"),
+        wfGrantUser: $("wf-grant-user"),
+        wfGrantPerm: $("wf-grant-perm"),
+        wfGrantsMsg: $("wf-grants-msg"),
         // Room health banner (v2.1+)
         hToday: $("health-today-tasks"),
         hOnline: $("health-online"),
@@ -3006,6 +3142,13 @@
           if (Number.isInteger(rev)) workflows.rollbackTo(id, rev);
         } else if (act === "refresh-workflow-audit") {
           workflows.refreshWorkflowAudit();
+        } else if (act === "refresh-workflow-grants") {
+          workflows.refreshWorkflowGrants();
+        } else if (act === "add-workflow-grant") {
+          workflows.addWorkflowGrant();
+        } else if (act === "remove-workflow-grant") {
+          const userId = target.dataset.user;
+          if (userId) workflows.removeWorkflowGrant(userId);
         } else if (act === "start-workflow") {
           openWorkflowStart(id);
         } else if (act === "view-growth-report") {

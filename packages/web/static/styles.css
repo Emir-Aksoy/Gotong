@@ -1684,6 +1684,31 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .wf-audit-row .hint { text-align: right; }
 .wf-audit-export { display: flex; gap: 0.5rem; margin-top: 0.6rem; }
 
+/* Phase 19 P2-M5c — access control (resource RBAC grants) */
+.wf-grants-sep { border: none; border-top: 1px solid #eee; margin: 0.9rem 0 0.6rem; }
+.wf-grants-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+.wf-grants-head strong { margin-right: auto; }
+.wf-grant-row {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid #f0f0f0;
+}
+.wf-grant-user-id { font-size: 0.78rem; color: #333; word-break: break-all; }
+.wf-grant-perm-tag {
+  font-size: 0.7rem; font-weight: 600; white-space: nowrap;
+  padding: 0.05rem 0.4rem; border-radius: 3px;
+}
+.wf-grant-perm-owner { color: #b5651d; background: #fbf0e4; }
+.wf-grant-perm-editor { color: #3a5; background: #eaf5ee; }
+.wf-grant-perm-viewer { color: #777; background: #f2f2f2; }
+.wf-grant-remove { padding: 0.1rem 0.45rem; font-size: 0.72rem; }
+.wf-grants-add { display: flex; gap: 0.5rem; margin-top: 0.6rem; align-items: center; }
+.wf-grants-add .wf-grant-user { flex: 1; }
+.wf-grant-perm { font-size: 0.78rem; padding: 0.15rem 0.3rem; }
+
 .wf-run-detail {
   border: 1px solid #eee;
   border-radius: 6px;
