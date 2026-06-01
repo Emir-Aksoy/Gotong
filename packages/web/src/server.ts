@@ -35,7 +35,10 @@ import {
   type IdentityPeerReputationDTO,
 } from './identity-routes.js'
 import { handleMeRoute, type InboxSurface, type MeAgentListSurface } from './me-routes.js'
-import { handleWorkflowRoute } from './workflow-routes.js'
+import {
+  handleWorkflowRoute,
+  type WorkflowGrantSink,
+} from './workflow-routes.js'
 import { handleAgentsRoute } from './agents-routes.js'
 import { handleServicesRoute } from './services-routes.js'
 import { handleUploadsRoute } from './uploads-routes.js'
@@ -1596,6 +1599,17 @@ async function handle(
   // `requireAdmin` closure so the v3 admin auth machinery (cookies,
   // sessions, rate limiter) stays here in server.ts.
   if (path.startsWith('/api/admin/workflows')) {
+    // P2-M5b — workflow RBAC is ON only when the identity store actually
+    // carries the grant methods (a current @aipehub/identity); otherwise the
+    // routes see `grants: undefined` and skip RBAC (back-compat). The web
+    // IdentitySurface intentionally doesn't model identity's full API, so we
+    // runtime-check + cast rather than widen the structural type.
+    const wfGrants: WorkflowGrantSink | undefined =
+      ctx.identity &&
+      typeof (ctx.identity as { hasWorkflowGrant?: unknown }).hasWorkflowGrant ===
+        'function'
+        ? (ctx.identity as unknown as WorkflowGrantSink)
+        : undefined
     const handled = await handleWorkflowRoute(
       {
         hub: ctx.hub,
@@ -1605,6 +1619,19 @@ async function handle(
         // (writeAuditLog is optional on both). Governance-significant
         // lifecycle transitions write one audit row through it.
         audit: ctx.identity,
+        // P2-M5b — resource RBAC. `resolveActor` derives the acting admin's
+        // RBAC identity: a v4 owner/admin → that user (operator iff owner); a
+        // v3 Space-admin (requireAdmin passed but no v4 user) → operator bypass.
+        grants: wfGrants,
+        resolveActor: (rq) => {
+          if (ctx.identity) {
+            const auth = resolveV4Auth(ctx.identity, rq)
+            if (auth.user && auth.role) {
+              return { userId: auth.user.id, isOperator: auth.role === 'owner' }
+            }
+          }
+          return { userId: null, isOperator: true }
+        },
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req,

@@ -68,6 +68,47 @@ export interface WorkflowAuditSink {
   }): unknown
 }
 
+// P2-M5b — resource-level RBAC (workflow ownership). The grant sink is
+// structurally satisfied by the host IdentityStore; web keeps zero identity
+// runtime dep. Perm literals mirror @aipehub/identity's WorkflowPerm.
+export type WorkflowPermLiteral = 'owner' | 'editor' | 'viewer'
+
+export interface WorkflowGrantRow {
+  workflowId: string
+  userId: string
+  perm: string
+  grantedBy: string | null
+  grantedAt: number
+}
+
+export interface WorkflowGrantSink {
+  setWorkflowGrant(input: {
+    workflowId: string
+    userId: string
+    perm: WorkflowPermLiteral
+    grantedBy?: string | null
+  }): unknown
+  hasWorkflowGrant(
+    workflowId: string,
+    userId: string,
+    min: WorkflowPermLiteral,
+  ): boolean
+  listWorkflowGrants(workflowId: string): WorkflowGrantRow[]
+  removeWorkflowGrant(workflowId: string, userId: string): boolean
+  removeAllWorkflowGrants(workflowId: string): number
+}
+
+/**
+ * The acting admin's RBAC identity for one request. `isOperator` (org owner
+ * or v3 Space-admin) BYPASSES grants entirely — so personal mode and the
+ * legacy admin-token path keep working with zero behaviour change. A
+ * non-operator must carry a `userId` (v4 user) checked against the grants.
+ */
+export interface WorkflowActor {
+  userId: string | null
+  isOperator: boolean
+}
+
 export interface WorkflowRoutesCtx {
   hub: Hub
   workflows: WorkflowSurface | undefined
@@ -77,6 +118,16 @@ export interface WorkflowRoutesCtx {
    * governance-significant lifecycle transitions write one row through it.
    */
   audit?: WorkflowAuditSink
+  /**
+   * P2-M5b — workflow grant store (IdentityStore satisfies it). Absent →
+   * RBAC disabled (embedded / older host): every admin passes, no owner seed.
+   */
+  grants?: WorkflowGrantSink
+  /**
+   * P2-M5b — resolve the acting admin's RBAC identity. Absent → treat every
+   * admin as an operator (no RBAC). Paired with `grants`: both present = RBAC on.
+   */
+  resolveActor?(req: IncomingMessage): WorkflowActor
   /**
    * The parent's admin gate. On rejection (401 / 429) this closure
    * writes the response itself and returns `null`; on success it
@@ -141,6 +192,8 @@ export async function handleWorkflowRoute(
     if (!raw) { sendJson(res, { error: 'empty body' }, 400); return true }
     try {
       const summary = await ctx.workflows.importFromText(raw)
+      // P2-M5b — the importer becomes the workflow's owner (RBAC seed).
+      seedWorkflowOwner(ctx, req, summary.id)
       auditWorkflowTransition(ctx, admin, 'workflow_import', summary)
       sendJson(res, { ok: true, workflow: summary })
     } catch (err) {
@@ -165,6 +218,8 @@ export async function handleWorkflowRoute(
     if (!raw) { sendJson(res, { error: 'empty body' }, 400); return true }
     try {
       const summary = await ctx.workflows.saveDraft(raw, { by: admin.id })
+      // P2-M5b — drafting a new workflow makes you its owner (RBAC seed).
+      seedWorkflowOwner(ctx, req, summary.id)
       sendJson(res, { ok: true, workflow: summary })
     } catch (err) {
       sendJson(res, lifecycleErrorBody(err), lifecycleErrorStatus(err))
@@ -287,6 +342,9 @@ export async function handleWorkflowRoute(
     const wf = ctx.workflows
     const id = decodeURIComponent(lifecycleMatch[1]!)
     const action = lifecycleMatch[2]!
+    // P2-M5b — every lifecycle transition needs editor+ on this workflow.
+    // Operators (org owner / v3 admin) bypass; RBAC-off hosts pass through.
+    if (denyIfNoWorkflowPerm(ctx, req, res, id, 'editor')) return true
     const by = admin.id
     try {
       let summary: WorkflowSummary
@@ -386,6 +444,67 @@ export async function handleWorkflowRoute(
     return true
   }
 
+  // P2-M5b — workflow grant management (resource RBAC). Owner-gated; operators
+  // (org owner / v3 admin) bypass. Wired before the catch-all DELETE /:id; the
+  // extra /grants segment(s) keep these unambiguous. When RBAC is off (no
+  // grants sink) → 404 so the admin UI hides the panel.
+  const grantsMatch = path.match(/^\/api\/admin\/workflows\/([^/]+)\/grants$/)
+  if (grantsMatch && (method === 'GET' || method === 'POST')) {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    if (!ctx.grants) {
+      sendJson(res, { error: 'workflow RBAC not enabled on this host' }, 404)
+      return true
+    }
+    const id = decodeURIComponent(grantsMatch[1]!)
+    // Managing (and viewing) the access list is an owner concern.
+    if (denyIfNoWorkflowPerm(ctx, req, res, id, 'owner')) return true
+    if (method === 'GET') {
+      sendJson(res, { grants: ctx.grants.listWorkflowGrants(id) })
+      return true
+    }
+    const body = (await readJsonBody(req).catch(() => undefined)) as
+      | { userId?: unknown; perm?: unknown }
+      | undefined
+    const userId =
+      body && typeof body.userId === 'string' ? body.userId.trim() : ''
+    const perm = body && typeof body.perm === 'string' ? body.perm : ''
+    if (!userId) {
+      sendJson(res, { error: 'userId is required' }, 400)
+      return true
+    }
+    if (perm !== 'owner' && perm !== 'editor' && perm !== 'viewer') {
+      sendJson(res, { error: "perm must be 'owner' | 'editor' | 'viewer'" }, 400)
+      return true
+    }
+    try {
+      ctx.grants.setWorkflowGrant({ workflowId: id, userId, perm, grantedBy: admin.id })
+      sendJson(res, { ok: true, grants: ctx.grants.listWorkflowGrants(id) })
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+    return true
+  }
+
+  // DELETE /api/admin/workflows/:id/grants/:userId — revoke one grant.
+  const grantDeleteMatch = path.match(
+    /^\/api\/admin\/workflows\/([^/]+)\/grants\/([^/]+)$/,
+  )
+  if (method === 'DELETE' && grantDeleteMatch) {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    if (!ctx.grants) {
+      sendJson(res, { error: 'workflow RBAC not enabled on this host' }, 404)
+      return true
+    }
+    const id = decodeURIComponent(grantDeleteMatch[1]!)
+    const userId = decodeURIComponent(grantDeleteMatch[2]!)
+    if (denyIfNoWorkflowPerm(ctx, req, res, id, 'owner')) return true
+    const removed = ctx.grants.removeWorkflowGrant(id, userId)
+    sendJson(res, { ok: true, removed })
+    return true
+  }
+
   // DELETE /api/admin/workflows/:id — unregister + delete YAML.
   // Wired LAST so the /runs sub-routes can never get caught here.
   const deleteWorkflowMatch = path.match(/^\/api\/admin\/workflows\/([^/]+)$/)
@@ -397,8 +516,12 @@ export async function handleWorkflowRoute(
       return true
     }
     const id = decodeURIComponent(deleteWorkflowMatch[1]!)
+    // P2-M5b — deleting a workflow needs owner on it (operators bypass).
+    if (denyIfNoWorkflowPerm(ctx, req, res, id, 'owner')) return true
     try {
       await ctx.workflows.remove(id)
+      // Drop the workflow's grants so a re-import with the same id starts clean.
+      ctx.grants?.removeAllWorkflowGrants(id)
       sendJson(res, { ok: true })
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -462,6 +585,62 @@ function lifecycleErrorBody(err: unknown): Record<string, unknown> {
     if (Array.isArray(violations)) body.violations = violations
   }
   return body
+}
+
+/**
+ * P2-M5b — workflow RBAC gate. Returns true (and writes 403) iff the acting
+ * admin LACKS `min` permission on the workflow; false = allowed, continue.
+ *
+ * RBAC is OFF when the host didn't wire BOTH `grants` and `resolveActor`
+ * (embedded / test / pre-migration host) — then every admin passes, so
+ * existing deployments are unaffected. Operators (org owner / v3 Space admin)
+ * always bypass; a non-operator needs a `userId` with a grant ≥ `min`.
+ */
+function denyIfNoWorkflowPerm(
+  ctx: WorkflowRoutesCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  id: string,
+  min: WorkflowPermLiteral,
+): boolean {
+  if (!ctx.grants || !ctx.resolveActor) return false
+  const actor = ctx.resolveActor(req)
+  if (actor.isOperator) return false
+  if (actor.userId && ctx.grants.hasWorkflowGrant(id, actor.userId, min)) {
+    return false
+  }
+  sendJson(
+    res,
+    { error: `workflow '${id}' requires ${min} permission`, code: 'workflow_forbidden' },
+    403,
+  )
+  return true
+}
+
+/**
+ * P2-M5b — seed the creator as the workflow's owner after import / draft.
+ * Only when RBAC is wired AND the actor is a v4 user: a v3-admin operator has
+ * no user row to own it (operators manage by bypass, not by grant). Best-effort
+ * — a grant-seed hiccup must never fail the create that already succeeded.
+ */
+function seedWorkflowOwner(
+  ctx: WorkflowRoutesCtx,
+  req: IncomingMessage,
+  workflowId: string,
+): void {
+  if (!ctx.grants || !ctx.resolveActor) return
+  const actor = ctx.resolveActor(req)
+  if (!actor.userId) return
+  try {
+    ctx.grants.setWorkflowGrant({
+      workflowId,
+      userId: actor.userId,
+      perm: 'owner',
+      grantedBy: actor.userId,
+    })
+  } catch {
+    // best-effort — see jsdoc.
+  }
 }
 
 /**
