@@ -43,9 +43,10 @@ export function extractRequiredCapabilities(
 }
 
 /** Verdict on whether a task may leave this hub toward a peer. */
-export type OutboundCapabilityVerdict =
-  | { ok: true }
-  | { ok: false; reason: string }
+export type OutboundVerdict = { ok: true } | { ok: false; reason: string }
+
+/** @deprecated Phase 19 P4-M4 generalised this to {@link OutboundVerdict}. */
+export type OutboundCapabilityVerdict = OutboundVerdict
 
 /**
  * Outbound allowlist gate — symmetric to inbound `evaluateAcl`'s capability
@@ -65,7 +66,7 @@ export type OutboundCapabilityVerdict =
 export function checkOutboundCapabilities(
   task: Task,
   outboundCaps: readonly string[] | null | undefined,
-): OutboundCapabilityVerdict {
+): OutboundVerdict {
   if (outboundCaps === null || outboundCaps === undefined) return { ok: true }
   const required = extractRequiredCapabilities(task.strategy)
   if (required === null) {
@@ -74,6 +75,34 @@ export function checkOutboundCapabilities(
   const allowed = new Set(outboundCaps)
   for (const c of required) {
     if (!allowed.has(c)) return { ok: false, reason: c }
+  }
+  return { ok: true }
+}
+
+/**
+ * Phase 19 P4-M4 — outbound DATA-CLASS gate. The peer's trust contract lists
+ * which data classes it's cleared to receive; a task that declares a class
+ * outside that set is refused before it crosses the boundary.
+ *
+ *   - `allowed === null | undefined` → no data-class contract → send anything.
+ *   - task declares no classes (`undefined` / `[]`) → nothing to restrict → ok.
+ *   - otherwise → every declared class must be in the allowlist; the first
+ *     that isn't fails with that class as the reason.
+ *
+ * This is a gate, not redaction — the payload is never rewritten. A
+ * redaction hook (strip the offending fields and send a reduced payload)
+ * is a deferred seam; until then the safe default is refuse, not leak.
+ */
+export function checkOutboundDataClasses(
+  task: Task,
+  allowed: readonly string[] | null | undefined,
+): OutboundVerdict {
+  if (allowed === null || allowed === undefined) return { ok: true }
+  const declared = task.dataClasses
+  if (!declared || declared.length === 0) return { ok: true }
+  const ok = new Set(allowed)
+  for (const c of declared) {
+    if (!ok.has(c)) return { ok: false, reason: c }
   }
   return { ok: true }
 }

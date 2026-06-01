@@ -945,6 +945,12 @@ export class Hub {
      * task_result with a structured error code.
      */
     ancestry?: readonly AncestryNode[]
+    /**
+     * Phase 19 P4-M4 — data classification tags for the payload. Carried on
+     * the task so the outbound per-link data-class allowlist can refuse a
+     * cross-org send of data a peer isn't cleared for. Omitted = no classes.
+     */
+    dataClasses?: readonly string[]
   }): Promise<TaskResult> {
     // Phase 10 M2 gate. Evaluated BEFORE id allocation so the task id
     // sequence isn't burned by rejected attempts — but we still write
@@ -969,6 +975,11 @@ export class Hub {
       // Phase 10 M2: only attach ancestry when non-empty for the same
       // reason — root dispatches (the common case) stay byte-identical.
       ...(ancestry.length > 0 ? { ancestry } : {}),
+      // Phase 19 P4-M4: attach data classes only when declared, so legacy
+      // tasks stay byte-identical in the transcript.
+      ...(opts.dataClasses && opts.dataClasses.length > 0
+        ? { dataClasses: opts.dataClasses }
+        : {}),
       createdAt: this.now(),
     }
     this.transcript.append({ ts: task.createdAt, kind: 'task', data: task })

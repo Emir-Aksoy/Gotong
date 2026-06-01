@@ -168,6 +168,22 @@ export interface InstallPeerLinkOptions {
    */
   outboundCaps?: readonly string[] | null
   /**
+   * Phase 19 P4-M4 — OUTBOUND data-class allowlist, passed into the wrapper
+   * (`outbound_data_class_denied`). `undefined`/`null` = no data-class
+   * contract. See `RemoteHubViaLinkOptions.allowedDataClasses`.
+   */
+  allowedDataClasses?: readonly string[] | null
+  /**
+   * Phase 19 P4-M4 — INBOUND policy gate, evaluated AFTER the ACL and BEFORE
+   * the task is dispatched into the local hub. Returns `{ok:false, reason}` to
+   * refuse a task (→ `failed` with `cross_org_policy_denied (<reason>)`,
+   * never reaching a participant). The host wires this to a per-link quota
+   * counter; unset = no extra inbound gate. Kept separate from `acl` so a
+   * stateful counter (which mutates on each call) isn't confused with the
+   * pure ACL predicate.
+   */
+  inboundGate?: (task: Task) => { ok: true } | { ok: false; reason: string }
+  /**
    * #2-M3 — responder for inbound `rpc(method, params)` calls from the
    * peer (the generic HubLink RPC seam). When set, it's wired as the
    * link's single `'rpc'` handler; its return value is sent back to the
@@ -255,6 +271,21 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
         }
       }
     }
+    // Phase 19 P4-M4 — stateful inbound policy gate (e.g. per-link quota),
+    // checked after the pure ACL. Fail-closed: a refused task never reaches
+    // a participant, never spends scheduler time.
+    if (opts.inboundGate) {
+      const verdict = opts.inboundGate(task)
+      if (!verdict.ok) {
+        return {
+          kind: 'failed',
+          taskId: task.id,
+          by: aclRefusalBy,
+          error: `cross_org_policy_denied (${verdict.reason})`,
+          ts: Date.now(),
+        }
+      }
+    }
     const result = await opts.hub.dispatch({
       from: task.from,
       strategy: task.strategy,
@@ -301,6 +332,10 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
     ...(opts.originResolver !== undefined ? { originResolver: opts.originResolver } : {}),
     // Phase 19 P4-M1: outbound capability allowlist enforced inside the wrapper.
     ...(opts.outboundCaps !== undefined ? { outboundCaps: opts.outboundCaps } : {}),
+    // Phase 19 P4-M4: outbound data-class allowlist enforced inside the wrapper.
+    ...(opts.allowedDataClasses !== undefined
+      ? { allowedDataClasses: opts.allowedDataClasses }
+      : {}),
   })
   // B-M3: an optional host decorator (e.g. outbound approval gate) sits in
   // front of the wrapper. It must keep `remotePeer.id` so the registry key,

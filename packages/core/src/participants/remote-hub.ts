@@ -19,7 +19,7 @@
  */
 
 import type { HubLink } from '../hub-link.js'
-import { checkOutboundCapabilities } from '../peer-acl.js'
+import { checkOutboundCapabilities, checkOutboundDataClasses } from '../peer-acl.js'
 import type {
   Message,
   Participant,
@@ -114,6 +114,14 @@ export interface RemoteHubViaLinkOptions {
    * regardless of any decorator (e.g. the approval gate) wrapped around it.
    */
   outboundCaps?: readonly string[] | null
+  /**
+   * Phase 19 P4-M4 — OUTBOUND data-class allowlist. A task that declares
+   * data classes (`task.dataClasses`) not all in this set is refused
+   * (`outbound_data_class_denied`) before it crosses the wire. `undefined`
+   * / `null` → no data-class contract → send anything; a task that declares
+   * no classes always passes. See `checkOutboundDataClasses`.
+   */
+  allowedDataClasses?: readonly string[] | null
 }
 
 export class RemoteHubViaLink implements Participant {
@@ -127,6 +135,8 @@ export class RemoteHubViaLink implements Participant {
   private readonly originResolver?: OriginResolver
   /** Phase 19 P4-M1 — see `RemoteHubViaLinkOptions.outboundCaps`. */
   private readonly outboundCaps?: readonly string[] | null
+  /** Phase 19 P4-M4 — see `RemoteHubViaLinkOptions.allowedDataClasses`. */
+  private readonly allowedDataClasses?: readonly string[] | null
 
   constructor(opts: RemoteHubViaLinkOptions) {
     this.id = opts.id
@@ -135,6 +145,7 @@ export class RemoteHubViaLink implements Participant {
     if (opts.selfHubId !== undefined) this.selfHubId = opts.selfHubId
     if (opts.originResolver !== undefined) this.originResolver = opts.originResolver
     if (opts.outboundCaps !== undefined) this.outboundCaps = opts.outboundCaps
+    if (opts.allowedDataClasses !== undefined) this.allowedDataClasses = opts.allowedDataClasses
   }
 
   get capabilities(): readonly string[] {
@@ -162,6 +173,19 @@ export class RemoteHubViaLink implements Participant {
         taskId: task.id,
         by: this.id,
         error: `outbound_capability_denied:${allow.reason}`,
+        ts: Date.now(),
+      }
+    }
+
+    // Phase 19 P4-M4 — OUTBOUND data-class gate, same chokepoint: a task
+    // carrying a data class the peer isn't cleared for never leaves.
+    const dataOk = checkOutboundDataClasses(task, this.allowedDataClasses)
+    if (!dataOk.ok) {
+      return {
+        kind: 'failed',
+        taskId: task.id,
+        by: this.id,
+        error: `outbound_data_class_denied:${dataOk.reason}`,
         ts: Date.now(),
       }
     }

@@ -20,7 +20,7 @@ import { describe, expect, it } from 'vitest'
 
 import { Hub } from '../src/hub.js'
 import { createInprocHubLinkPair } from '../src/hub-link.js'
-import { checkOutboundCapabilities } from '../src/peer-acl.js'
+import { checkOutboundCapabilities, checkOutboundDataClasses } from '../src/peer-acl.js'
 import { installPeerLink } from '../src/peer-link-install.js'
 import { AgentParticipant } from '../src/participants/agent.js'
 import type { DispatchStrategy, Task } from '../src/types.js'
@@ -162,6 +162,129 @@ describe('installPeerLink — outbound allowlist enforcement (mesh edge)', () =>
     })
     expect(res.kind).toBe('ok')
     expect(bAgent.invocations).toBe(1)
+
+    await hubA.stop()
+    await hubB.stop()
+  })
+})
+
+describe('checkOutboundDataClasses — pure verdict (Phase 19 P4-M4)', () => {
+  const withClasses = (classes?: string[]): Task => ({
+    ...makeTask({ kind: 'capability', capabilities: ['draft'] }),
+    ...(classes ? { dataClasses: classes } : {}),
+  })
+
+  it('no contract (undefined / null) → send anything', () => {
+    expect(checkOutboundDataClasses(withClasses(['pii']), undefined).ok).toBe(true)
+    expect(checkOutboundDataClasses(withClasses(['pii']), null).ok).toBe(true)
+  })
+
+  it('task declares no classes → nothing to restrict → ok', () => {
+    expect(checkOutboundDataClasses(withClasses(), ['public']).ok).toBe(true)
+    expect(checkOutboundDataClasses(withClasses([]), ['public']).ok).toBe(true)
+  })
+
+  it('declared classes ⊆ allowlist → ok', () => {
+    expect(checkOutboundDataClasses(withClasses(['public']), ['public', 'internal']).ok).toBe(true)
+  })
+
+  it('a declared class outside the allowlist → denied, reason names the class', () => {
+    expect(checkOutboundDataClasses(withClasses(['pii']), ['public'])).toEqual({
+      ok: false,
+      reason: 'pii',
+    })
+  })
+})
+
+describe('installPeerLink — outbound data-class enforcement (mesh edge)', () => {
+  it('a task carrying a disallowed data class never leaves to the peer', async () => {
+    const hubA = Hub.inMemory()
+    const hubB = Hub.inMemory()
+    await Promise.all([hubA.start(), hubB.start()])
+
+    const bAgent = new CountingEcho('b-agent', ['draft'])
+    hubB.register(bAgent)
+
+    const { a: linkAtoB, b: linkBtoA } = createInprocHubLinkPair({
+      aPeerId: 'hubB',
+      bPeerId: 'hubA',
+    })
+    // The peer is cleared for 'public' data only.
+    installPeerLink({
+      hub: hubA,
+      link: linkAtoB,
+      remoteCapabilities: ['draft'],
+      allowedDataClasses: ['public'],
+    })
+    installPeerLink({ hub: hubB, link: linkBtoA, remoteCapabilities: [] })
+
+    // A 'public' task is fine.
+    const okRes = await hubA.dispatch({
+      from: 'system',
+      strategy: { kind: 'capability', capabilities: ['draft'] },
+      payload: { topic: 'ok' },
+      dataClasses: ['public'],
+    })
+    expect(okRes.kind).toBe('ok')
+    expect(bAgent.invocations).toBe(1)
+
+    // A 'pii' task is refused before the wire.
+    const denied = await hubA.dispatch({
+      from: 'system',
+      strategy: { kind: 'capability', capabilities: ['draft'] },
+      payload: { ssn: '...' },
+      dataClasses: ['pii'],
+    })
+    expect(denied.kind).toBe('failed')
+    if (denied.kind === 'failed') expect(denied.error).toContain('outbound_data_class_denied:pii')
+    expect(bAgent.invocations).toBe(1) // remote never saw the pii task
+
+    await hubA.stop()
+    await hubB.stop()
+  })
+})
+
+describe('installPeerLink — inbound policy gate (Phase 19 P4-M4)', () => {
+  it('a rejecting inboundGate refuses the inbound task fail-closed; agent never runs', async () => {
+    const hubA = Hub.inMemory()
+    const hubB = Hub.inMemory()
+    await Promise.all([hubA.start(), hubB.start()])
+
+    const bAgent = new CountingEcho('b-agent', ['draft'])
+    hubB.register(bAgent)
+
+    const { a: linkAtoB, b: linkBtoA } = createInprocHubLinkPair({
+      aPeerId: 'hubB',
+      bPeerId: 'hubA',
+    })
+    installPeerLink({ hub: hubA, link: linkAtoB, remoteCapabilities: ['draft'] })
+    // hubB gates inbound: the first task passes, the rest are over-quota.
+    let seen = 0
+    installPeerLink({
+      hub: hubB,
+      link: linkBtoA,
+      remoteCapabilities: [],
+      inboundGate: () => (seen++ < 1 ? { ok: true } : { ok: false, reason: 'quota_exceeded' }),
+    })
+
+    const first = await hubA.dispatch({
+      from: 'system',
+      strategy: { kind: 'capability', capabilities: ['draft'] },
+      payload: {},
+    })
+    expect(first.kind).toBe('ok')
+    expect(bAgent.invocations).toBe(1)
+
+    const second = await hubA.dispatch({
+      from: 'system',
+      strategy: { kind: 'capability', capabilities: ['draft'] },
+      payload: {},
+    })
+    expect(second.kind).toBe('failed')
+    if (second.kind === 'failed') {
+      expect(second.error).toContain('cross_org_policy_denied (quota_exceeded)')
+    }
+    expect(bAgent.invocations).toBe(1) // the gated task never reached the agent
 
     await hubA.stop()
     await hubB.stop()

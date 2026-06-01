@@ -162,6 +162,14 @@ export interface Task {
    * be a way to also opt out of "I appear when I do work."
    */
   countContribution?: boolean
+  /**
+   * Phase 19 P4-M4 — data classification tags the task's payload carries
+   * (e.g. 'pii', 'financial', 'public'). The outbound per-link data-class
+   * allowlist refuses a task whose classes aren't all permitted by a peer's
+   * trust contract, before it crosses the org boundary. Absent / empty = the
+   * task declares no classes (unrestricted).
+   */
+  dataClasses?: readonly string[]
   createdAt: number
 }
 
