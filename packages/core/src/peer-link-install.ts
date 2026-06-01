@@ -21,8 +21,8 @@
 import type { Hub } from './hub.js'
 import type { HubLink } from './hub-link.js'
 import { RemoteHubViaLink, type OriginResolver } from './participants/remote-hub.js'
+import { extractRequiredCapabilities } from './peer-acl.js'
 import type {
-  DispatchStrategy,
   Participant,
   ParticipantId,
   Task,
@@ -82,6 +82,9 @@ function evaluateAcl(
     }
   }
   if (acl.capabilities !== undefined) {
+    // Phase 19 P4-M1 — `extractRequiredCapabilities` now lives in `peer-acl.ts`
+    // so the inbound (here) and outbound (`remote-hub`) gates share one notion
+    // of "which capabilities does this task ask for" and can't drift.
     const required = extractRequiredCapabilities(task.strategy)
     if (required === null) {
       return { ok: false, reason: 'strategy_not_allowlisted' }
@@ -94,25 +97,6 @@ function evaluateAcl(
     }
   }
   return { ok: true }
-}
-
-function extractRequiredCapabilities(
-  strategy: DispatchStrategy,
-): readonly string[] | null {
-  switch (strategy.kind) {
-    case 'capability':
-      return strategy.capabilities
-    case 'broadcast':
-      // A broadcast with no capability filter is "everyone you've got."
-      // We treat that as un-allowlistable across orgs — peer must
-      // narrow the broadcast to specific capabilities to pass ACL.
-      return strategy.capabilities ?? null
-    case 'explicit':
-      // Cross-org dispatch to a specific local participant id requires
-      // the sender to know our internal naming, which leaks structure.
-      // Denied at the ACL level. (Callers wanting this can omit ACL.)
-      return null
-  }
 }
 
 export interface InstallPeerLinkOptions {
@@ -174,6 +158,15 @@ export interface InstallPeerLinkOptions {
    * See `PeerLinkAcl` for the policy fields.
    */
   acl?: PeerLinkAcl
+  /**
+   * Phase 19 P4-M1 — OUTBOUND capability allowlist, the sending-edge mirror
+   * of `acl.capabilities`. Passed straight into the `RemoteHubViaLink`
+   * wrapper, which refuses any task whose required capabilities aren't all
+   * listed (`outbound_capability_denied`) before it touches the wire.
+   * `undefined`/`null` = no allowlist (send anything). See
+   * `RemoteHubViaLinkOptions.outboundCaps`.
+   */
+  outboundCaps?: readonly string[] | null
   /**
    * #2-M3 — responder for inbound `rpc(method, params)` calls from the
    * peer (the generic HubLink RPC seam). When set, it's wired as the
@@ -306,6 +299,8 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
     // carry the actor's org+user when leaving this hub.
     ...(opts.selfHubId !== undefined ? { selfHubId: opts.selfHubId } : {}),
     ...(opts.originResolver !== undefined ? { originResolver: opts.originResolver } : {}),
+    // Phase 19 P4-M1: outbound capability allowlist enforced inside the wrapper.
+    ...(opts.outboundCaps !== undefined ? { outboundCaps: opts.outboundCaps } : {}),
   })
   // B-M3: an optional host decorator (e.g. outbound approval gate) sits in
   // front of the wrapper. It must keep `remotePeer.id` so the registry key,

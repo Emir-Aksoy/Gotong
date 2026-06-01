@@ -19,6 +19,7 @@
  */
 
 import type { HubLink } from '../hub-link.js'
+import { checkOutboundCapabilities } from '../peer-acl.js'
 import type {
   Message,
   Participant,
@@ -98,6 +99,21 @@ export interface RemoteHubViaLinkOptions {
    * The receiver's ACL decides whether to accept such tasks.
    */
   originResolver?: OriginResolver
+  /**
+   * Phase 19 P4-M1 — OUTBOUND capability allowlist. Symmetric to the
+   * receiver-side `PeerLinkAcl.capabilities` but applied on the SENDING
+   * edge: a task whose required capabilities aren't all in this list is
+   * refused locally and never crosses the wire (`outbound_capability_denied`).
+   *
+   *   - `undefined` / `null` → no allowlist → send anything (legacy default;
+   *     an unset peer row keeps pre-P4 behaviour).
+   *   - `[]`                 → send NOTHING (explicit lockdown).
+   *   - `['draft', …]`       → only these capabilities may leave to the peer.
+   *
+   * This is the last chokepoint before the link, so the guarantee holds
+   * regardless of any decorator (e.g. the approval gate) wrapped around it.
+   */
+  outboundCaps?: readonly string[] | null
 }
 
 export class RemoteHubViaLink implements Participant {
@@ -109,6 +125,8 @@ export class RemoteHubViaLink implements Participant {
   private readonly selfHubId?: ParticipantId
   /** FED-M2 — see `RemoteHubViaLinkOptions.originResolver`. */
   private readonly originResolver?: OriginResolver
+  /** Phase 19 P4-M1 — see `RemoteHubViaLinkOptions.outboundCaps`. */
+  private readonly outboundCaps?: readonly string[] | null
 
   constructor(opts: RemoteHubViaLinkOptions) {
     this.id = opts.id
@@ -116,6 +134,7 @@ export class RemoteHubViaLink implements Participant {
     this._capabilities = opts.capabilities ?? []
     if (opts.selfHubId !== undefined) this.selfHubId = opts.selfHubId
     if (opts.originResolver !== undefined) this.originResolver = opts.originResolver
+    if (opts.outboundCaps !== undefined) this.outboundCaps = opts.outboundCaps
   }
 
   get capabilities(): readonly string[] {
@@ -131,6 +150,22 @@ export class RemoteHubViaLink implements Participant {
   }
 
   async onTask(task: Task): Promise<TaskResult> {
+    // Phase 19 P4-M1 — OUTBOUND allowlist. Check BEFORE origin-stamping or
+    // any link traffic: a denied task must do zero work and leave nothing on
+    // the wire. `outboundCaps` unset → accept-all (legacy). This is the final
+    // chokepoint before the transport, so the guarantee survives any decorator
+    // (the approval gate calls `inner.onTask` = this method on resume).
+    const allow = checkOutboundCapabilities(task, this.outboundCaps)
+    if (!allow.ok) {
+      return {
+        kind: 'failed',
+        taskId: task.id,
+        by: this.id,
+        error: `outbound_capability_denied:${allow.reason}`,
+        ts: Date.now(),
+      }
+    }
+
     // FED-M2 — stamp `origin` before forwarding so the receiver knows
     // the actor's org + user. Three cases:
     //   1. Task already has `origin` (multi-hop forward) → pass through

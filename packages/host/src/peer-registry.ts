@@ -516,6 +516,9 @@ export class PeerRegistry {
         // A null acl (legacy / unset row) leaves the gate off (accept-all),
         // exactly the pre-B-M2 behaviour.
         ...(row.acl ? { acl: row.acl } : {}),
+        // Phase 19 P4-M1 — apply the persisted OUTBOUND capability allowlist.
+        // null (unset row) → omitted → send-anything (legacy); `[]` → lockdown.
+        ...(row.outboundCaps ? { outboundCaps: row.outboundCaps } : {}),
         // Phase 18 B-M3 — gate OUTBOUND sends behind an approval inbox when the
         // row opts in. Empty otherwise (no behaviour change).
         ...this.outboundWrap(row),
@@ -584,6 +587,9 @@ export class PeerRegistry {
       // Phase 18 B-M2 — receiver-side ACL from the peer row (inbound is the
       // direction the ACL actually guards). null → accept-all, as before.
       ...(row.acl ? { acl: row.acl } : {}),
+      // Phase 19 P4-M1 — the same outbound allowlist guards a wrapper installed
+      // off an inbound-accepted link (we can still dispatch TO this peer).
+      ...(row.outboundCaps ? { outboundCaps: row.outboundCaps } : {}),
       // Phase 18 B-M3 — the same outbound approval gate applies to a wrapper
       // installed off an inbound-accepted link (we can still dispatch TO this
       // peer through it).
