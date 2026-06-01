@@ -354,6 +354,8 @@ export interface InboxItemView {
   options?: unknown[]
   editField?: unknown
   createdAt: number
+  /** inbox-gov M2 — the most recent handoff note, shown to the new assignee. */
+  handoffNote?: string
 }
 
 export interface InboxSurface {

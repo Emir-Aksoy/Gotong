@@ -220,6 +220,12 @@ describe('HostInboxService — two-step resume', () => {
     // The new assignee sees it; the old one no longer does.
     expect((await store.listPending(bob.id)).map((i) => i.itemId)).toEqual([childId])
     expect(await store.listPending('user-a')).toEqual([])
+    // …and the recipient's PUBLIC view carries the handoff context (the note),
+    // but never the delegator's user id.
+    const view = await service.listPending(bob.id)
+    expect(view).toHaveLength(1)
+    expect(view[0]!.handoffNote).toBe('you own this now')
+    expect(JSON.stringify(view[0])).not.toContain('user-a')
 
     const rows = identity.listAuditLog({ action: 'inbox_delegate' })
     expect(rows).toHaveLength(1)

@@ -607,6 +607,10 @@
     const id = escape(item.itemId || '')
     const heading = item.title ? `<strong>${escape(item.title)}</strong>` : ''
     const prompt = `<p class="me-inbox-prompt">${escape(item.prompt || '')}</p>`
+    // inbox-gov M2 — if this was handed off, show the context the delegator left.
+    const handoff = item.handoffNote
+      ? `<p class="me-inbox-handoff">📨 交接说明：${escape(item.handoffNote)}</p>`
+      : ''
     let controls = ''
     if (item.kind === 'approval') {
       controls = `
@@ -631,9 +635,20 @@
         : `<input type="text" data-inbox-edit-field placeholder="${ph}" value="${def}">`
       controls = `<div class="me-inbox-edit">${control}<button type="button" class="me-primary-btn" data-inbox-edit="${id}">提交</button></div>`
     }
+    // inbox-gov M2 — every pending item can be handed off to another member by
+    // email (a toggle keeps the form out of the way until needed).
+    const delegate = `
+      <div class="me-inbox-delegate">
+        <button type="button" class="me-link-btn" data-inbox-delegate-toggle="${id}">转派给他人…</button>
+        <div class="me-inbox-delegate-form" data-inbox-delegate-form hidden>
+          <input type="email" data-inbox-delegate-email placeholder="对方邮箱" autocomplete="off">
+          <input type="text" data-inbox-delegate-note placeholder="交接说明（可选）">
+          <button type="button" class="me-secondary-btn" data-inbox-delegate-submit="${id}">确认转派</button>
+        </div>
+      </div>`
     return `
       <div class="me-inbox-item" data-inbox-item="${id}">
-        ${heading}${prompt}${controls}
+        ${heading}${handoff}${prompt}${controls}${delegate}
         <div class="me-status" data-inbox-status></div>
       </div>`
   }
@@ -654,6 +669,21 @@
       const item = t.closest('.me-inbox-item')
       const field = item ? item.querySelector('[data-inbox-edit-field]') : null
       return resolveInbox(edit, { kind: 'edit', value: field ? field.value : '' }, t)
+    }
+    // inbox-gov M2 — toggle the delegate form, or submit a handoff.
+    const delegToggle = t.getAttribute('data-inbox-delegate-toggle')
+    if (delegToggle) {
+      const item = t.closest('.me-inbox-item')
+      const form = item ? item.querySelector('[data-inbox-delegate-form]') : null
+      if (form) form.hidden = !form.hidden
+      return
+    }
+    const delegSubmit = t.getAttribute('data-inbox-delegate-submit')
+    if (delegSubmit) {
+      const item = t.closest('.me-inbox-item')
+      const emailEl = item ? item.querySelector('[data-inbox-delegate-email]') : null
+      const noteEl = item ? item.querySelector('[data-inbox-delegate-note]') : null
+      return delegateInbox(delegSubmit, emailEl ? emailEl.value : '', noteEl ? noteEl.value : '', t)
     }
   }
 
@@ -681,6 +711,45 @@
       await loadMyInbox()
     } catch (err) {
       if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = `处理失败: ${err?.message || err}` }
+      setButtons(false)
+    }
+  }
+
+  // inbox-gov M2 — hand a pending item off to another member by email. On
+  // success the item leaves the caller's list (re-fetched), landing in the
+  // target's inbox with the note as its handoff context.
+  async function delegateInbox(itemId, toEmail, note, fromEl) {
+    const itemEl = fromEl && fromEl.closest ? fromEl.closest('.me-inbox-item') : null
+    const statusEl = itemEl ? itemEl.querySelector('[data-inbox-status]') : null
+    const email = (toEmail || '').trim()
+    if (!email) {
+      if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = '请填写对方邮箱' }
+      return
+    }
+    const setButtons = (disabled) => {
+      if (itemEl) itemEl.querySelectorAll('button').forEach((b) => { b.disabled = disabled })
+    }
+    if (statusEl) { statusEl.className = 'me-status'; statusEl.textContent = '转派中…' }
+    setButtons(true)
+    try {
+      const body = { toEmail: email }
+      const trimmedNote = (note || '').trim()
+      if (trimmedNote) body.note = trimmedNote
+      const r = await fetch(`/api/me/inbox/${encodeURIComponent(itemId)}/delegate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = j?.error || `转派失败 (HTTP ${r.status})` }
+        setButtons(false)
+        return
+      }
+      // Handed off — it's no longer mine; refresh updates count + empty state.
+      await loadMyInbox()
+    } catch (err) {
+      if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = `转派失败: ${err?.message || err}` }
       setButtons(false)
     }
   }

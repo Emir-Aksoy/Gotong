@@ -70,6 +70,12 @@ interface InboxItemView {
   options?: unknown[]
   editField?: unknown
   createdAt: number
+  /**
+   * inbox-gov M2 — the note from the most recent handoff, so the new assignee
+   * sees WHY this landed in their inbox ("handed off with context"). Only the
+   * note text is surfaced — never the delegator's user id (no directory leak).
+   */
+  handoffNote?: string
 }
 
 export class HostInboxService {
@@ -299,6 +305,14 @@ function toView(item: InboxItem): InboxItemView {
   if (item.title !== undefined) v.title = item.title
   if (item.options !== undefined) v.options = item.options
   if (item.editField !== undefined) v.editField = item.editField
+  // Surface the latest handoff note (if any) so the recipient sees the context.
+  for (let i = (item.history?.length ?? 0) - 1; i >= 0; i--) {
+    const e = item.history![i]!
+    if (e.type === 'delegated') {
+      if (typeof e.note === 'string' && e.note.length > 0) v.handoffNote = e.note
+      break
+    }
+  }
   return v
 }
 

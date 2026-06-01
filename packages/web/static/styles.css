@@ -2070,6 +2070,24 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .me-inbox-actions .me-primary-btn, .me-inbox-actions .me-secondary-btn { margin-top: 0; }
 .me-inbox-edit { display: flex; flex-direction: column; gap: 0.4rem; }
 .me-inbox-edit .me-primary-btn { margin-top: 0; align-self: flex-start; }
+/* inbox-gov M2 — handoff context shown to the new assignee + the delegate form. */
+.me-inbox-handoff {
+  margin: 0.1rem 0 0.5rem; padding: 0.35rem 0.55rem; font-size: 0.85rem; color: #5a4b16;
+  background: #fff8e1; border: 1px solid #f1e2a6; border-radius: 5px;
+}
+.me-inbox-delegate { margin-top: 0.55rem; }
+.me-link-btn {
+  background: none; border: none; padding: 0; color: #1f6feb; cursor: pointer;
+  font-size: 0.82rem; text-decoration: underline;
+}
+.me-link-btn:hover { color: #1a5fce; }
+.me-inbox-delegate-form { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.45rem; }
+.me-inbox-delegate-form input {
+  flex: 1 1 12rem; min-width: 10rem; padding: 0.35rem 0.5rem;
+  border: 1px solid #ccc; border-radius: 5px; font-size: 0.88rem;
+}
+.me-inbox-delegate-form .me-secondary-btn { margin-top: 0; flex: 0 0 auto; }
+.me-inbox-delegate-form[hidden] { display: none; }
 .me-badge {
   display: inline-block; min-width: 1.2em; padding: 0 0.4em; font-size: 0.75rem;
   line-height: 1.5; text-align: center; color: #fff; background: #1f6feb; border-radius: 999px;
