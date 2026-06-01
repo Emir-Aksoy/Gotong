@@ -176,6 +176,42 @@ describe('createUploadSurface (unit)', () => {
     expect(c.artifactId).toBe('uploads/2026-05-26/333333333333')
   })
 
+  it('Phase 19 P1-M4 — writes under a scope prefix when given one', async () => {
+    const calls: FakeHandleCalls = { writes: [] }
+    const uploads = await createUploadSurface({
+      services: makeFakeServices(calls),
+      logger,
+      now: () => new Date(Date.UTC(2026, 4, 26)),
+      randomHex: () => 'cccccccccccc',
+    })
+    const out = await uploads.put({
+      bytes: new Uint8Array([1]),
+      declaredMime: 'text/plain',
+      filename: 'note.txt',
+      by: 'user-42',
+      scope: 'me/user-42',
+    })
+    expect(out.artifactId).toBe('uploads/me/user-42/2026-05-26/cccccccccccc.txt')
+    expect(calls.writes[0]!.path).toBe('uploads/me/user-42/2026-05-26/cccccccccccc.txt')
+  })
+
+  it('Phase 19 P1-M4 — rejects a path-unsafe scope (traversal / separators)', async () => {
+    const calls: FakeHandleCalls = { writes: [] }
+    const uploads = await createUploadSurface({
+      services: makeFakeServices(calls),
+      logger,
+      now: () => new Date(Date.UTC(2026, 4, 26)),
+      randomHex: () => 'dddddddddddd',
+    })
+    for (const bad of ['me/../admin', 'me/a b', 'me/a;rm', '..']) {
+      await expect(
+        uploads.put({ bytes: new Uint8Array([1]), declaredMime: 'text/plain', by: 'x', scope: bad }),
+      ).rejects.toThrow(/path-safe/)
+    }
+    // None of the rejected uploads wrote anything.
+    expect(calls.writes).toHaveLength(0)
+  })
+
   it('UPLOADS_OWNER_REF is the shared/uploads owner', () => {
     const expected: Owner = { kind: 'shared', id: 'uploads' }
     expect(UPLOADS_OWNER_REF).toEqual(expected)

@@ -54,6 +54,8 @@ interface BootResult {
   growthReports: StubGrowthReports
   /** Phase 19 P1-M2 — present when boot() was given `workflows`; seed runs here. */
   workflowSurface: StubWorkflowSurface | undefined
+  /** Phase 19 P1-M4 — present when boot() was given `withUploads`. */
+  uploads: StubUploads | undefined
 }
 
 class StubGrowthReports implements GrowthReportsAdminSurface {
@@ -124,6 +126,27 @@ class StubWorkflowSurface implements WorkflowSurface {
   async getState(): Promise<never> { throw new Error('stub: getState') }
 }
 
+/**
+ * In-memory upload backing (Phase 19 P1-M4). Mirrors the host UploadSurface:
+ * `put` writes the artifact under the optional `scope` prefix; `get` reads it
+ * back or throws an ENOENT-shaped error the route maps to 404.
+ */
+class StubUploads {
+  readonly store = new Map<string, { bytes: Uint8Array; mime: string }>()
+  private seq = 0
+  async put(params: { bytes: Uint8Array; declaredMime: string; filename?: string; by: string; scope?: string }) {
+    const scopePart = params.scope ? `${params.scope}/` : ''
+    const artifactId = `uploads/${scopePart}2026-06-01/${this.seq++}`
+    this.store.set(artifactId, { bytes: params.bytes, mime: params.declaredMime })
+    return { artifactId, mime: params.declaredMime, size: params.bytes.byteLength }
+  }
+  async get(artifactId: string): Promise<{ bytes: Uint8Array; mime: string }> {
+    const hit = this.store.get(artifactId)
+    if (!hit) throw new Error('ENOENT: no such file')
+    return hit
+  }
+}
+
 /** Build a WorkflowSummary with sensible defaults; override what a test needs. */
 function meWf(over: Partial<WorkflowSummary> & { id: string }): WorkflowSummary {
   return {
@@ -143,6 +166,8 @@ async function boot(
     workflows?: WorkflowSummary[]
     /** Phase 19 P1-M3 — sanitized agent directory for /api/me/agents. */
     meAgents?: Array<{ id: string; label: string; capabilities: string[]; online: boolean; description?: string }>
+    /** Phase 19 P1-M4 — wire an in-memory upload backing for /api/me/uploads. */
+    withUploads?: boolean
   } = {},
 ): Promise<BootResult> {
   const withGrowthReports = opts.withGrowthReports ?? true
@@ -188,6 +213,7 @@ async function boot(
 
   const growthReports = new StubGrowthReports()
   const workflowSurface = opts.workflows ? new StubWorkflowSurface(opts.workflows) : undefined
+  const uploads = opts.withUploads ? new StubUploads() : undefined
 
   const server = await serveWeb(hub, {
     host: '127.0.0.1',
@@ -196,6 +222,7 @@ async function boot(
     ...(withGrowthReports ? { growthReports } : {}),
     ...(workflowSurface ? { workflows: workflowSurface } : {}),
     ...(opts.meAgents ? { meAgents: { listForMembers: async () => opts.meAgents! } } : {}),
+    ...(uploads ? { uploads } : {}),
     ...(opts.adminLoginRateLimit
       ? { adminLoginRateLimit: opts.adminLoginRateLimit }
       : {}),
@@ -235,6 +262,7 @@ async function boot(
     memberCookie,
     growthReports,
     workflowSurface,
+    uploads,
   }
 }
 
@@ -508,6 +536,71 @@ describe('/api/me/agents — sanitized agent directory (Phase 19 P1-M3)', () => 
       const r = await fetch(`${b2.baseUrl}/api/me/agents`, { headers: { cookie: b2.memberCookie } })
       expect(r.status).toBe(200)
       expect((await r.json() as { agents: unknown[] }).agents).toEqual([])
+    } finally {
+      await teardown(b2)
+    }
+  })
+})
+
+describe('/api/me/uploads — member file uploads (Phase 19 P1-M4)', () => {
+  let b: BootResult
+  beforeEach(async () => { b = await boot({ withUploads: true }) })
+  afterEach(async () => { await teardown(b) })
+
+  async function upload(body: string, headers: Record<string, string> = {}) {
+    return fetch(`${b.baseUrl}/api/me/uploads?filename=note.txt`, {
+      method: 'POST',
+      headers: { cookie: b.memberCookie, 'content-type': 'text/plain', ...headers },
+      body,
+    })
+  }
+
+  it('uploads under the caller\'s own scope and rounds-trips the download', async () => {
+    const r = await upload('hello member')
+    expect(r.status).toBe(200)
+    const put = (await r.json()) as { artifactId: string; mime: string; size: number }
+    // Scoped under the member's userId — not the flat admin namespace.
+    expect(put.artifactId.startsWith(`uploads/me/${b.memberUserId}/`)).toBe(true)
+    expect(put.size).toBe('hello member'.length)
+
+    const dl = await fetch(`${b.baseUrl}/api/me/uploads?id=${encodeURIComponent(put.artifactId)}`, {
+      headers: { cookie: b.memberCookie },
+    })
+    expect(dl.status).toBe(200)
+    expect(await dl.text()).toBe('hello member')
+  })
+
+  it('refuses to download another user\'s artifact (isolation → 404)', async () => {
+    // Seed an artifact under a DIFFERENT user's scope directly in the store.
+    b.uploads!.store.set('uploads/me/someone-else/2026-06-01/0', {
+      bytes: new TextEncoder().encode('secret'),
+      mime: 'text/plain',
+    })
+    const dl = await fetch(`${b.baseUrl}/api/me/uploads?id=${encodeURIComponent('uploads/me/someone-else/2026-06-01/0')}`, {
+      headers: { cookie: b.memberCookie },
+    })
+    expect(dl.status).toBe(404)
+    // And the bytes never went out.
+    expect(await dl.text()).not.toContain('secret')
+  })
+
+  it('rejects an empty body with 400', async () => {
+    const r = await upload('')
+    expect(r.status).toBe(400)
+  })
+
+  it('requires a v4 session (anonymous → 401)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/me/uploads`, { method: 'POST', body: 'x' })
+    expect(r.status).toBe(401)
+  })
+
+  it('503 when the host wired no upload backing', async () => {
+    const b2 = await boot() // no withUploads → ctx.uploads undefined
+    try {
+      const r = await fetch(`${b2.baseUrl}/api/me/uploads`, {
+        method: 'POST', headers: { cookie: b2.memberCookie }, body: 'x',
+      })
+      expect(r.status).toBe(503)
     } finally {
       await teardown(b2)
     }

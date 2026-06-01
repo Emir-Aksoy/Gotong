@@ -35,7 +35,7 @@ export interface UploadsRoutesCtx {
 
 // -- HTTP helpers ---------------------------------------------------------
 
-function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
+export function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let total = 0

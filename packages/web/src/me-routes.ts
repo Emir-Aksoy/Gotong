@@ -43,6 +43,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readJsonBody, sendJson } from './http-helpers.js'
+import { readRawBody } from './uploads-routes.js'
 
 import type { Hub } from '@aipehub/core'
 import type { GrowthReportsAdminSurface } from '@aipehub/core'
@@ -303,6 +304,37 @@ export interface MeAgentListSurface {
 }
 
 // ---------------------------------------------------------------------------
+// Member upload surface (Phase 19 P1-M4)
+//
+// Same host UploadSurface the admin route uses (`WorkflowSurface`-style duck
+// type), but member uploads are written under a per-user scope (`me/<userId>`)
+// so a member can only download their OWN artifacts. The route forces both the
+// upload scope and the download prefix from the SESSION userId — never a
+// client-supplied value — so isolation can't be spoofed.
+// ---------------------------------------------------------------------------
+
+export interface MeUploadSurface {
+  put(params: {
+    bytes: Uint8Array
+    declaredMime: string
+    filename?: string
+    by: string
+    scope?: string
+  }): Promise<{ artifactId: string; mime: string; size: number }>
+  get(artifactId: string): Promise<{ bytes: Uint8Array; mime: string }>
+}
+
+/**
+ * Per-user uploads scope. Member artifacts live under `uploads/<scope>/…`.
+ * userId is identity-minted, but we never trust it raw into a path — collapse
+ * anything outside `[A-Za-z0-9_-]`. Both the upload (scope) and the download
+ * (prefix) sides call this, so they always agree.
+ */
+function memberUploadScope(userId: string): string {
+  return `me/${userId.replace(/[^A-Za-z0-9_-]/g, '_')}`
+}
+
+// ---------------------------------------------------------------------------
 // Member task inbox surface (Phase 16)
 //
 // Duck-typed so the web layer takes no runtime dep on `@aipehub/inbox`; the
@@ -372,6 +404,11 @@ export interface HandleMeRouteCtx {
    */
   meAgents: MeAgentListSurface | undefined
   /**
+   * Phase 19 P1-M4 — member file uploads. Undefined when the host wired no
+   * upload backing; `/api/me/uploads` then returns 503.
+   */
+  uploads: MeUploadSurface | undefined
+  /**
    * Phase 16 — member task inbox. Undefined when the host wired no inbox;
    * the /me/inbox routes then degrade to an empty list / 503.
    */
@@ -420,6 +457,14 @@ export async function handleMeRoute(
   // for every member; the host already stripped prompts / keys / config.
   if (method === 'GET' && path === '/api/me/agents') {
     await handleMeListAgents(ctx, res)
+    return
+  }
+  // Phase 19 P1-M4 — member file uploads. POST writes under the caller's
+  // per-user scope; GET serves back ONLY artifacts under that scope (a member
+  // can't read another user's upload). Both derive the scope from the session
+  // userId, never a client value.
+  if (path === '/api/me/uploads' && (method === 'POST' || method === 'GET')) {
+    await handleMeUploads(ctx, req, res, userId, method)
     return
   }
   // Phase 7 M5 — org mode for the SPA shell. Every signed-in user can
@@ -813,6 +858,115 @@ async function handleMeListAgents(
   // The host already sanitized — pass through verbatim (no prompt / key /
   // config to strip here).
   sendJson(res, { agents })
+}
+
+// ---------------------------------------------------------------------------
+// GET / POST /api/me/uploads — member file uploads (Phase 19 P1-M4)
+// ---------------------------------------------------------------------------
+
+const ME_UPLOAD_CEILING_BYTES = 50 * 1024 * 1024
+
+async function handleMeUploads(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  method: string,
+): Promise<void> {
+  if (!ctx.uploads) {
+    sendJson(res, { error: 'uploads not enabled on this host' }, 503)
+    return
+  }
+  const scope = memberUploadScope(userId)
+  const prefix = `uploads/${scope}/`
+
+  // --- download: own artifacts only ---
+  if (method === 'GET') {
+    const u = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+    const id = u.searchParams.get('id')
+    if (!id) {
+      sendJson(res, { error: 'missing ?id=<artifactId>' }, 400)
+      return
+    }
+    // Isolation: a member may only read artifacts under their OWN scope.
+    // Anything else → 404 (don't reveal whether it exists for someone else).
+    if (!id.startsWith(prefix)) {
+      sendJson(res, { error: 'not found' }, 404)
+      return
+    }
+    try {
+      const { bytes, mime } = await ctx.uploads.get(id)
+      const filename = id.split('/').pop() ?? 'artifact'
+      const safeFilename = filename.replace(/[^A-Za-z0-9._-]/g, '_')
+      res.writeHead(200, {
+        'content-type': mime || 'application/octet-stream',
+        'content-length': String(bytes.byteLength),
+        'content-disposition': `inline; filename="${safeFilename}"`,
+        'cache-control': 'private, max-age=300',
+      })
+      res.end(Buffer.from(bytes))
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const lower = msg.toLowerCase()
+      const code = lower.includes('enoent') || lower.includes('no such file') ? 404 : 500
+      sendJson(res, { error: code === 404 ? 'not found' : msg }, code)
+    }
+    return
+  }
+
+  // --- upload (POST) ---
+  // Rate-limit per user (same budget machinery as /me/dispatch) so a member
+  // can't loop-upload to exhaust disk.
+  if (!ctx.loginLimiter.check(`me-upload:${userId}`)) {
+    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+    res.end('too many uploads; try again in a minute')
+    return
+  }
+  const u = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
+  const filename = u.searchParams.get('filename') || undefined
+  const declaredMime =
+    u.searchParams.get('mime')
+    || (typeof req.headers['content-type'] === 'string'
+        ? req.headers['content-type']!.split(';')[0]!.trim()
+        : '')
+    || 'application/octet-stream'
+  const declaredLen = Number.parseInt(
+    typeof req.headers['content-length'] === 'string' ? req.headers['content-length'] : '',
+    10,
+  )
+  if (Number.isFinite(declaredLen) && declaredLen > ME_UPLOAD_CEILING_BYTES) {
+    sendJson(res, { error: `body too large (limit ${ME_UPLOAD_CEILING_BYTES} bytes)` }, 413)
+    req.resume()
+    return
+  }
+  let bytes: Buffer
+  try {
+    bytes = await readRawBody(req, ME_UPLOAD_CEILING_BYTES)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    sendJson(res, { error: msg }, msg.startsWith('body too large') ? 413 : 400)
+    return
+  }
+  if (bytes.length === 0) {
+    sendJson(res, { error: 'empty body (no file content)' }, 400)
+    return
+  }
+  try {
+    const put = await ctx.uploads.put({
+      bytes,
+      declaredMime,
+      ...(filename ? { filename } : {}),
+      by: userId,
+      // Per-user isolation: forced from the SESSION userId, never a client value.
+      scope,
+    })
+    sendJson(res, put)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    log.warn('me upload rejected', { by: userId, mime: declaredMime, size: bytes.length, err: msg })
+    const isClientError = /mime|exceeds maxBytes|traversal|relative|null byte|path-safe/.test(msg)
+    sendJson(res, { error: msg }, isClientError ? 400 : 500)
+  }
 }
 
 // ---------------------------------------------------------------------------

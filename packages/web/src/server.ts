@@ -434,6 +434,14 @@ export interface UploadSurface {
     filename?: string
     /** Who's uploading — used for audit + filename scoping. */
     by: ParticipantId
+    /**
+     * Phase 19 P1-M4 — optional path scope segment(s) under the uploads
+     * namespace. Member uploads pass `me/<userId>` so they land under
+     * `uploads/me/<userId>/...`, giving per-user isolation a member download
+     * route can enforce by prefix. Admin uploads omit it (flat namespace).
+     * Must be `[A-Za-z0-9_/-]+` with no `..`; the host rejects otherwise.
+     */
+    scope?: string
   }): Promise<{ artifactId: string; mime: string; size: number }>
   /**
    * Phase 9 M5 — read back an uploaded artifact. Used by the admin
@@ -1468,6 +1476,9 @@ async function handle(
         runs: ctx.workflows,
         // Phase 19 P1-M3 — sanitized agent directory; undefined → empty list.
         meAgents: ctx.meAgents,
+        // Phase 19 P1-M4 — member file uploads (same UploadSurface as admin,
+        // member route scopes by userId); undefined → /api/me/uploads 503.
+        uploads: ctx.uploads,
         // Phase 16 — member task inbox; undefined → /me/inbox degrades.
         inbox: ctx.inbox,
       },

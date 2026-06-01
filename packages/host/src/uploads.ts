@@ -86,7 +86,12 @@ export async function createUploadSurface(
       // any realistic concern, and `writeFile` would clobber rather
       // than corrupt anyway.
       const rand = randomHex(6)
-      const artifactId = `uploads/${datePart}/${rand}${ext}`
+      // Phase 19 P1-M4 — optional scope prefix (e.g. `me/<userId>`) for
+      // per-user isolation. Validate path-safety here too (defence in depth;
+      // handle.write also re-sanitises) and reject anything that could
+      // traverse or smuggle separators.
+      const scopePart = scopePrefix(params.scope)
+      const artifactId = `uploads/${scopePart}${datePart}/${rand}${ext}`
       const ref = await handle.write(artifactId, params.bytes, {
         mime: params.declaredMime,
       })
@@ -131,6 +136,22 @@ function formatDate(d: Date): string {
   // YYYY-MM-DD in UTC. A reboot that crosses local midnight in
   // different timezones won't split the directory tree.
   return d.toISOString().slice(0, 10)
+}
+
+/**
+ * Phase 19 P1-M4 — turn an optional `scope` (e.g. `me/<userId>`) into a
+ * trailing-slash path prefix, or `''` when absent. Rejects anything that
+ * isn't a clean `[A-Za-z0-9_/-]` path with no `..` segment, so a hostile
+ * scope can't traverse out of the uploads namespace. The artifact handle
+ * re-sanitises the full path on write; this is defence in depth + a clear
+ * early error.
+ */
+function scopePrefix(scope: string | undefined): string {
+  if (!scope) return ''
+  if (!/^[A-Za-z0-9_/-]+$/.test(scope) || scope.split('/').includes('..')) {
+    throw new Error(`upload scope is not path-safe: ${scope}`)
+  }
+  return `${scope.replace(/^\/+|\/+$/g, '')}/`
 }
 
 /**
