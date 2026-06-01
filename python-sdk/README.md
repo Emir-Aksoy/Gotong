@@ -74,6 +74,22 @@ await connect(url="ws://127.0.0.1:4000", agents=[agent])
 
 The graph is duck-typed (anything with `.invoke(state)`), `.ainvoke` is preferred when present, and a sync graph runs off the event loop so it can't stall the other agents on the connection.
 
+A **CrewAI** crew wraps the same way — duck-typed on `.kickoff(inputs)`, `.kickoff_async` preferred:
+
+```python
+from crewai import Crew
+from aipehub.adapters import crewai_participant
+
+crew = Crew(agents=[...], tasks=[...])
+agent = crewai_participant(
+    crew,
+    id="market-research-crew",
+    capabilities=["market-research"],
+    to_inputs=lambda task: {"topic": task["payload"]["topic"]},
+    from_output=lambda out: {"report": out.raw},   # default: {"text": out.raw}
+)
+```
+
 ## What the SDK does
 
 - Opens a WebSocket to the Hub

@@ -8,9 +8,12 @@ in langgraph / crewai, which keeps the core SDK install light and lets the
 adapters be unit-tested against trivial fakes.
 """
 
+from .crewai import CrewParticipant, crewai_participant
 from .langgraph import LangGraphParticipant, langgraph_participant
 
 __all__ = [
+    "CrewParticipant",
     "LangGraphParticipant",
+    "crewai_participant",
     "langgraph_participant",
 ]
