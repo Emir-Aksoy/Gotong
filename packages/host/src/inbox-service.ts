@@ -25,13 +25,21 @@
 
 import type { Hub, Task } from '@aipehub/core'
 import { InboxError, type InboxDecision, type InboxItem, type InboxStore } from '@aipehub/inbox'
+import { AUDIT_ACTIONS, type WriteAuditLogInput } from '@aipehub/identity'
 
-/** What HostInboxService needs from the identity suspended-task store. */
+/** What HostInboxService needs from the identity store. */
 export interface SuspendedTaskLookup {
   getSuspendedTask(
     taskId: string,
   ): { agentId: string; state: unknown; taskJson: string; corrupt?: boolean } | null
   removeSuspendedTask(taskId: string): number
+  /**
+   * inbox-gov M1 — optional governance audit sink. The real IdentityStore
+   * satisfies it; tests can omit it. Resolve writes one `inbox_resolve` row so
+   * the generic audit query/export surfaces "who decided this human step". An
+   * audit fault must NEVER fail an already-committed decision (best-effort).
+   */
+  writeAuditLog?(input: WriteAuditLogInput): unknown
 }
 
 /** Minimal logger shape — the host's structured logger satisfies it. */
@@ -93,9 +101,39 @@ export class HostInboxService {
     // touches the hub.
     await this.store.markResolved(itemId, validated)
 
+    // Governance audit (inbox-gov M1) — record the committed decision right
+    // after the race guard, BEFORE resume mechanics, so the row faithfully
+    // reflects "this member made this decision" regardless of downstream
+    // resume outcome. Best-effort: never fail a committed decision.
+    this.recordResolveAudit(item, validated, userId)
+
     // Two-step resume — child strictly before parent.
     const resumedChild = await this.resumeChild(item, validated)
     if (resumedChild) await this.resumeParent(item)
+  }
+
+  /** inbox-gov M1 — write one `inbox_resolve` audit row (best-effort). */
+  private recordResolveAudit(item: InboxItem, decision: InboxDecision, userId: string): void {
+    if (typeof this.identity.writeAuditLog !== 'function') return
+    try {
+      this.identity.writeAuditLog({
+        action: AUDIT_ACTIONS.INBOX_RESOLVE,
+        actorSource: 'v4-session',
+        actorUserId: userId,
+        metadata: {
+          itemId: item.itemId,
+          kind: item.kind,
+          parentKind: item.parentKind,
+          outcome: outcomeOf(decision),
+        },
+        success: true,
+      })
+    } catch (err) {
+      this.log?.warn('inbox resolve: audit write failed; decision already committed', {
+        itemId: item.itemId,
+        err,
+      })
+    }
   }
 
   /**
@@ -160,6 +198,18 @@ export class HostInboxService {
     // REPLACE) — removing it here would lose that parking.
     if (result.kind !== 'suspended') this.identity.removeSuspendedTask(parent.taskId)
   }
+}
+
+/**
+ * inbox-gov M1 — a SHORT outcome label for the audit row. Approval → the
+ * verdict; choice → the picked option (already short, validated against the
+ * offered set). Edit free-text is deliberately NOT put in the audit metadata
+ * (the column is for small facts, not blobs) — just `'edited'`.
+ */
+function outcomeOf(decision: InboxDecision): string {
+  if (decision.kind === 'approval') return decision.approved ? 'approved' : 'rejected'
+  if (decision.kind === 'choice') return decision.value
+  return 'edited'
 }
 
 function toView(item: InboxItem): InboxItemView {

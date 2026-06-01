@@ -137,6 +137,64 @@ describe('HostInboxService — two-step resume', () => {
     expect((await store.get(childId))!.status).toBe('resolved')
   })
 
+  it('writes an inbox_resolve audit row + item history on resolve (inbox-gov M1)', async () => {
+    const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+    parkParent()
+    await service.resolve({
+      itemId: childId,
+      userId: 'user-a',
+      decision: { kind: 'approval', approved: true, comment: 'lgtm' },
+    })
+
+    // The generic audit query surfaces it by action — no inbox-specific route.
+    const rows = identity.listAuditLog({ action: 'inbox_resolve' })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      action: 'inbox_resolve',
+      actorUserId: 'user-a',
+      actorSource: 'v4-session',
+      success: true,
+    })
+    expect(rows[0]!.metadata).toEqual({
+      itemId: childId,
+      kind: 'approval',
+      parentKind: 'workflow',
+      outcome: 'approved',
+    })
+
+    // The item carries its own action trail (the comment becomes the note).
+    const item = await store.get(childId)
+    expect(item!.history).toEqual([
+      { type: 'resolved', actor: 'user-a', note: 'lgtm', at: expect.any(Number) },
+    ])
+  })
+
+  it('audit outcome reflects the decision; edit free-text never enters metadata', async () => {
+    // Rejected approval → outcome 'rejected'.
+    const rej = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+    await service.resolve({
+      itemId: rej,
+      userId: 'user-a',
+      decision: { kind: 'approval', approved: false },
+    })
+    // Edit → outcome 'edited', the free text is NOT copied into the audit blob.
+    const ed = await park({ assignee: 'user-b', kind: 'edit', prompt: 'fix' }, [
+      { taskId: 'agent-task', by: 'some-agent' },
+    ])
+    await service.resolve({
+      itemId: ed,
+      userId: 'user-b',
+      decision: { kind: 'edit', value: 'a long secret correction the audit must not store' },
+    })
+
+    const rows = identity.listAuditLog({ action: 'inbox_resolve' })
+    const byItem = new Map(rows.map((r) => [r.metadata?.itemId, r.metadata?.outcome]))
+    expect(byItem.get(rej)).toBe('rejected')
+    expect(byItem.get(ed)).toBe('edited')
+    const edRow = rows.find((r) => r.metadata?.itemId === ed)
+    expect(JSON.stringify(edRow!.metadata)).not.toContain('secret correction')
+  })
+
   it('a second resolve is rejected (already_resolved) without a second resume', async () => {
     const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
     parkParent()

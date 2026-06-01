@@ -71,6 +71,22 @@ export interface InboxParent {
 }
 
 /**
+ * One entry in an item's action trail (inbox-gov M1+). The `audit_log` table
+ * is the authoritative by-identity record; this lives ON the item so the
+ * `/me` panel can show a self-contained history ("resolved by you", later
+ * "delegated to …") without a cross-table join. Append-only.
+ */
+export interface InboxEvent {
+  /** What happened. Extended by later inbox-gov milestones (delegate / claim). */
+  type: 'resolved'
+  /** The user who performed the action (the assignee, for a resolve). */
+  actor?: string
+  /** Optional free-text note (an approval comment, later a handoff reason). */
+  note?: string
+  at: number
+}
+
+/**
  * One inbox item — persisted as `<spaceRoot>/inbox/<itemId>.json`. `itemId`
  * IS the suspended human Task's id, so `resolve` can look up the parked
  * `suspended_tasks` row by it directly.
@@ -96,6 +112,13 @@ export interface InboxItem {
   status: 'pending' | 'resolved'
   /** Set once resolved — the decision the member submitted. */
   decision?: InboxDecision
+  /**
+   * Append-only action trail (inbox-gov M1+). Absent on items created before
+   * this field existed; `markResolved` seeds the `resolved` entry. Distinct
+   * from the `audit_log` table — that is the org-wide by-identity record; this
+   * is the per-item timeline the member sees in `/me`.
+   */
+  history?: InboxEvent[]
   createdAt: number
   resolvedAt?: number
 }

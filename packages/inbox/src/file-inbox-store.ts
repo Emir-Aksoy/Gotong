@@ -17,7 +17,13 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { InboxError, type InboxDecision, type InboxItem, type InboxStore } from './types.js'
+import {
+  InboxError,
+  type InboxDecision,
+  type InboxEvent,
+  type InboxItem,
+  type InboxStore,
+} from './types.js'
 
 /**
  * Make an item id safe as a filename. Item ids are Task ids (UUID-shaped, so
@@ -116,7 +122,20 @@ export class FileInboxStore implements InboxStore {
         `inbox item '${itemId}' is already ${item.status}`,
       )
     }
-    const resolved: InboxItem = { ...item, status: 'resolved', decision, resolvedAt: now }
+    // Seed the action trail (inbox-gov M1). The resolver is the assignee —
+    // resolve() forces actor === item.userId before we get here. A `comment`
+    // on an approval decision rides along as the note for a richer /me history.
+    const event: InboxEvent = { type: 'resolved', actor: item.userId, at: now }
+    if (decision.kind === 'approval' && typeof decision.comment === 'string') {
+      event.note = decision.comment
+    }
+    const resolved: InboxItem = {
+      ...item,
+      status: 'resolved',
+      decision,
+      resolvedAt: now,
+      history: [...(item.history ?? []), event],
+    }
     await this.write(resolved)
     return resolved
   }

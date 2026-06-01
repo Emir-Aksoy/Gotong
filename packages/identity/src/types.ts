@@ -280,6 +280,12 @@ export const AUDIT_ACTIONS = {
   WORKFLOW_DEPRECATE: 'workflow_deprecate',
   WORKFLOW_ARCHIVE: 'workflow_archive',
   WORKFLOW_ROLLBACK: 'workflow_rollback',
+  // Inbox governance (HITL) — member actions on human-task inbox items, so
+  // operators can answer "who decided / handed off this human step, and how".
+  // The host's HostInboxService writes one row per member action; the generic
+  // audit query/export surfaces them by `?action=inbox_*`. Delegate / claim
+  // verbs join here as later inbox-gov milestones land.
+  INBOX_RESOLVE: 'inbox_resolve',
 } as const
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS]

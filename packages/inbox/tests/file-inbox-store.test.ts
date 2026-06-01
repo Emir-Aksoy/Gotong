@@ -78,10 +78,23 @@ describe('FileInboxStore', () => {
     expect(resolved.status).toBe('resolved')
     expect(resolved.resolvedAt).toBe(4242)
     expect(resolved.decision).toEqual({ kind: 'approval', approved: true, comment: 'lgtm' })
+    // inbox-gov M1 — the action trail is seeded with the resolve event; the
+    // approval comment rides along as the note, the assignee is the actor.
+    expect(resolved.history).toEqual([
+      { type: 'resolved', actor: 'user-a', note: 'lgtm', at: 4242 },
+    ])
     // Persisted, and no longer pending.
     const onDisk = await store.get('task-r')
     expect(onDisk!.status).toBe('resolved')
+    expect(onDisk!.history).toHaveLength(1)
     expect(await store.listPending('user-a')).toEqual([])
+  })
+
+  it('markResolved seeds history without a note when the decision carries none', async () => {
+    await store.write(item({ itemId: 'task-c', kind: 'choice', userId: 'user-a' }))
+    const resolved = await store.markResolved('task-c', { kind: 'choice', value: 'b' }, 7)
+    // No approval comment → the event has no `note` key at all (not `note: undefined`).
+    expect(resolved.history).toEqual([{ type: 'resolved', actor: 'user-a', at: 7 }])
   })
 
   it('markResolved on an already-resolved item throws (the race guard)', async () => {
