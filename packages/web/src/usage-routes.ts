@@ -32,6 +32,8 @@ export interface UsageLedgerEntryDTO {
   ts: number
   orgId: string | null
   userId: string | null
+  /** Phase 19 P4-M2 — local peer-registry row id for federated usage; null local. */
+  peerId: string | null
   agentId: string
   workflowId: string | null
   taskId: string | null
@@ -57,7 +59,7 @@ export interface UsageLedgerAggregateRowDTO {
   costMicros: number
 }
 
-export type UsageLedgerGroupBy = 'user' | 'agent' | 'workflow' | 'model' | 'day'
+export type UsageLedgerGroupBy = 'user' | 'agent' | 'workflow' | 'model' | 'day' | 'peer'
 
 const GROUP_BY_VALUES: readonly UsageLedgerGroupBy[] = [
   'user',
@@ -65,6 +67,7 @@ const GROUP_BY_VALUES: readonly UsageLedgerGroupBy[] = [
   'workflow',
   'model',
   'day',
+  'peer',
 ]
 
 /**
@@ -76,6 +79,7 @@ export interface UsageLedgerSurface {
   queryLedger?(query: {
     orgId?: string
     userId?: string
+    peerId?: string
     agentId?: string
     workflowId?: string
     model?: string
@@ -90,6 +94,7 @@ export interface UsageLedgerSurface {
     until?: number
     orgId?: string
     userId?: string
+    peerId?: string
   }): UsageLedgerAggregateRowDTO[]
 }
 
@@ -116,6 +121,7 @@ function readInt(url: URL, key: string): number | undefined {
 function parseLedgerQuery(url: URL): {
   orgId?: string
   userId?: string
+  peerId?: string
   agentId?: string
   workflowId?: string
   model?: string
@@ -129,6 +135,8 @@ function parseLedgerQuery(url: URL): {
   if (orgId !== undefined) q.orgId = orgId
   const userId = readStr(url, 'userId')
   if (userId !== undefined) q.userId = userId
+  const peerId = readStr(url, 'peerId')
+  if (peerId !== undefined) q.peerId = peerId
   const agentId = readStr(url, 'agentId')
   if (agentId !== undefined) q.agentId = agentId
   const workflowId = readStr(url, 'workflowId')
@@ -156,6 +164,7 @@ export const LEDGER_COLUMNS: ReadonlyArray<CsvColumn<UsageLedgerEntryDTO>> = [
   { header: 'iso_ts', value: (r) => new Date(r.ts).toISOString() },
   { header: 'org_id', value: (r) => r.orgId },
   { header: 'user_id', value: (r) => r.userId },
+  { header: 'peer_id', value: (r) => r.peerId },
   { header: 'agent_id', value: (r) => r.agentId },
   { header: 'workflow_id', value: (r) => r.workflowId },
   { header: 'task_id', value: (r) => r.taskId },
@@ -246,6 +255,8 @@ export function handleUsageSummary(
   if (orgId !== undefined) query.orgId = orgId
   const userId = readStr(url, 'userId')
   if (userId !== undefined) query.userId = userId
+  const peerId = readStr(url, 'peerId')
+  if (peerId !== undefined) query.peerId = peerId
   try {
     const rows = surface.aggregateLedger(query)
     sendJson(res, { groupBy: query.groupBy, rows })

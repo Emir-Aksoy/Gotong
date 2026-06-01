@@ -25,6 +25,8 @@
     { value: 'workflow', label: '工作流' },
     { value: 'model', label: '模型' },
     { value: 'day', label: '按天' },
+    // Phase 19 P4-M2 — federated-peer dimension. '(none)' bucket = local usage.
+    { value: 'peer', label: '联邦对端' },
   ]
 
   function $(sel, root) {

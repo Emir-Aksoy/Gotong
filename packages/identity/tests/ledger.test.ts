@@ -241,3 +241,59 @@ describe('IdentityStore — usage/cost ledger (Phase 17)', () => {
     })
   })
 })
+
+describe('IdentityStore — ledger peer attribution (Phase 19 P4-M2)', () => {
+  let store: IdentityStore
+
+  beforeEach(() => {
+    store = openIdentityStore({ dbPath: ':memory:' })
+  })
+
+  it('round-trips peerId and defaults it to null when omitted (local usage)', () => {
+    const fed = store.appendLedger({
+      orgId: 'remote-org',
+      userId: 'remote-user',
+      peerId: 'peer-row-1',
+      agentId: 'agent-x',
+      model: 'm',
+      inputTokens: 10,
+      outputTokens: 5,
+      costMicros: 100,
+    })
+    expect(fed.peerId).toBe('peer-row-1')
+
+    const local = store.appendLedger({
+      userId: 'local-user',
+      agentId: 'agent-y',
+      model: 'm',
+      inputTokens: 1,
+      outputTokens: 1,
+      costMicros: 0,
+    })
+    expect(local.peerId).toBeNull()
+  })
+
+  it('filters rows by peerId (cross-org usage isolation)', () => {
+    store.appendLedger({ peerId: 'peer-a', agentId: 'a', model: 'm', inputTokens: 1, outputTokens: 1, costMicros: 10 })
+    store.appendLedger({ peerId: 'peer-b', agentId: 'a', model: 'm', inputTokens: 1, outputTokens: 1, costMicros: 20 })
+    store.appendLedger({ agentId: 'a', model: 'm', inputTokens: 1, outputTokens: 1, costMicros: 30 }) // local
+
+    const onlyA = store.queryLedger({ peerId: 'peer-a' })
+    expect(onlyA).toHaveLength(1)
+    expect(onlyA[0].peerId).toBe('peer-a')
+    expect(onlyA[0].costMicros).toBe(10)
+  })
+
+  it('aggregates by peer, collapsing local usage to the (none) bucket', () => {
+    store.appendLedger({ peerId: 'peer-a', agentId: 'a', model: 'm', inputTokens: 0, outputTokens: 0, costMicros: 10 })
+    store.appendLedger({ peerId: 'peer-a', agentId: 'a', model: 'm', inputTokens: 0, outputTokens: 0, costMicros: 5 })
+    store.appendLedger({ agentId: 'a', model: 'm', inputTokens: 0, outputTokens: 0, costMicros: 7 }) // local → null
+
+    const rows = store.aggregateLedger({ groupBy: 'peer' })
+    const byKey = Object.fromEntries(rows.map((r) => [r.key, r]))
+    expect(byKey['peer-a'].calls).toBe(2)
+    expect(byKey['peer-a'].costMicros).toBe(15)
+    expect(byKey['(none)'].calls).toBe(1)
+    expect(byKey['(none)'].costMicros).toBe(7)
+  })
+})

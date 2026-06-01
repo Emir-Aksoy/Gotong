@@ -593,6 +593,22 @@ const MIGRATIONS: Migration[] = [
         ON workflow_grants(user_id);
     `,
   },
+  {
+    // Phase 19 P4-M2 — peer-aware usage accounting. One additive nullable
+    // column: `peer_id` is the LOCAL peer-registry row id a federated LLM
+    // call came in through (NULL for local usage). org_id / user_id already
+    // carry the wire-claimed origin org / user, so we add ONLY the trustworthy
+    // local peer handle (decided 2026-06-01: no redundant origin_* columns,
+    // no link_id since links aren't persistently identified apart from the
+    // peer row). `WHERE peer_id IS NOT NULL` cleanly isolates cross-org usage.
+    version: 14,
+    name: 'ledger-peer-id',
+    sql: `
+      ALTER TABLE usage_ledger ADD COLUMN peer_id TEXT;
+      CREATE INDEX IF NOT EXISTS idx_ledger_peer
+        ON usage_ledger(peer_id, ts DESC);
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {

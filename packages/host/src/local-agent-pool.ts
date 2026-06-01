@@ -96,6 +96,30 @@ function deriveLedgerAttribution(task: Task): {
   return { orgId, userId, workflowId }
 }
 
+/** The slice of identity the peer-id resolver needs (one indexed lookup). */
+interface LedgerPeerLookup {
+  getPeerByPeerId(peerId: string): { id: string } | null
+}
+
+/**
+ * Phase 19 P4-M2 — resolve the LOCAL peer-registry row id a federated LLM
+ * call came in through, for peer-aware accounting. The task's
+ * `origin.orgId` is the SENDER's wire id, which the receiving hub registered
+ * as a peer's `peerId`; map it back to the trustworthy local row id. Returns
+ * `null` for local usage (origin absent, or an org that isn't a registered
+ * peer — e.g. the `'local'` self-origin). A lookup fault degrades to `null`
+ * so accounting never blocks a provider response.
+ */
+function resolveLedgerPeerId(identity: LedgerPeerLookup, task: Task): string | null {
+  const orgId = task.origin?.orgId
+  if (!orgId) return null
+  try {
+    return identity.getPeerByPeerId(orgId)?.id ?? null
+  } catch {
+    return null
+  }
+}
+
 /**
  * Phase 6 #2 — discriminates which tier of the priority chain
  * delivered the resolved LLM key. The host wires different recovery
@@ -757,6 +781,8 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       ? (task: Task, usage: LlmUsage, meta: LlmUsageSinkMeta): void => {
           try {
             const attr = deriveLedgerAttribution(task)
+            // Phase 19 P4-M2 — peer attribution for federated usage (null local).
+            const peerId = resolveLedgerPeerId(identityForLedger, task)
             const { costMicros, unpriced } = estimateCostMicros(
               usage,
               meta.model,
@@ -765,6 +791,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
             identityForLedger.appendLedger({
               orgId: attr.orgId,
               userId: attr.userId,
+              peerId,
               agentId: agentIdRef,
               workflowId: attr.workflowId,
               taskId: task.id,

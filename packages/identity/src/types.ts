@@ -637,6 +637,14 @@ export interface LedgerEntry {
   ts: number
   orgId: string | null
   userId: string | null
+  /**
+   * Phase 19 P4-M2 — the LOCAL peer-registry row id this LLM call came in
+   * through when the task federated from another hub; `null` for local usage.
+   * Distinct from `orgId` (the wire-CLAIMED origin org): `peerId` is the
+   * trustworthy local handle, so `WHERE peer_id IS NOT NULL` isolates
+   * cross-org usage and by-peer roll-ups bill the right link.
+   */
+  peerId: string | null
   agentId: string
   workflowId: string | null
   taskId: string | null
@@ -663,6 +671,8 @@ export interface LedgerAppendInput {
   ts?: number
   orgId?: string | null
   userId?: string | null
+  /** Phase 19 P4-M2 — local peer-registry row id for federated usage; null for local. */
+  peerId?: string | null
   agentId: string
   workflowId?: string | null
   taskId?: string | null
@@ -687,6 +697,8 @@ export interface LedgerAppendInput {
 export interface LedgerQuery {
   orgId?: string
   userId?: string
+  /** Phase 19 P4-M2 — filter to one federated peer's usage. */
+  peerId?: string
   agentId?: string
   workflowId?: string
   model?: string
@@ -697,7 +709,7 @@ export interface LedgerQuery {
 }
 
 /** The axis a ledger aggregate rolls up by. */
-export type LedgerGroupBy = 'user' | 'agent' | 'workflow' | 'model' | 'day'
+export type LedgerGroupBy = 'user' | 'agent' | 'workflow' | 'model' | 'day' | 'peer'
 
 export const LEDGER_GROUP_BY: readonly LedgerGroupBy[] = [
   'user',
@@ -705,6 +717,7 @@ export const LEDGER_GROUP_BY: readonly LedgerGroupBy[] = [
   'workflow',
   'model',
   'day',
+  'peer',
 ] as const
 
 /** Default / max row count for {@link LedgerQuery}. */
@@ -722,6 +735,8 @@ export interface LedgerAggregateQuery {
   until?: number
   orgId?: string
   userId?: string
+  /** Phase 19 P4-M2 — scope the roll-up to one federated peer. */
+  peerId?: string
 }
 
 /**

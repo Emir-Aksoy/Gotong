@@ -43,6 +43,7 @@ interface LedgerRow {
   ts: number
   org_id: string | null
   user_id: string | null
+  peer_id: string | null
   agent_id: string
   workflow_id: string | null
   task_id: string | null
@@ -79,6 +80,7 @@ const GROUP_BY_SQL: Record<LedgerGroupBy, string> = {
   agent: 'agent_id',
   workflow: 'workflow_id',
   model: 'model',
+  peer: 'peer_id',
   // ts is ms; sqlite's 'unixepoch' modifier wants seconds.
   day: `strftime('%Y-%m-%d', ts / 1000, 'unixepoch')`,
 }
@@ -95,10 +97,10 @@ export class LedgerStore {
     this.db = db
     this.stmtInsert = db.prepare(
       `INSERT INTO usage_ledger
-         (ts, org_id, user_id, agent_id, workflow_id, task_id, model,
+         (ts, org_id, user_id, peer_id, agent_id, workflow_id, task_id, model,
           provider, input_tokens, output_tokens, cache_creation_tokens,
           cache_read_tokens, cost_micros, unpriced, meta_json)
-       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     this.stmtGetById = db.prepare('SELECT * FROM usage_ledger WHERE id = ?')
   }
@@ -138,6 +140,7 @@ export class LedgerStore {
       ts,
       input.orgId ?? null,
       input.userId ?? null,
+      input.peerId ?? null,
       input.agentId,
       input.workflowId ?? null,
       input.taskId ?? null,
@@ -204,6 +207,7 @@ export class LedgerStore {
     const { where, params } = buildWhere({
       orgId: q.orgId,
       userId: q.userId,
+      peerId: q.peerId,
       since: q.since,
       until: q.until,
     })
@@ -238,6 +242,7 @@ export class LedgerStore {
 function buildWhere(q: {
   orgId?: string
   userId?: string
+  peerId?: string
   agentId?: string
   workflowId?: string
   model?: string
@@ -253,6 +258,10 @@ function buildWhere(q: {
   if (q.userId !== undefined) {
     clauses.push('user_id = ?')
     params.push(q.userId)
+  }
+  if (q.peerId !== undefined) {
+    clauses.push('peer_id = ?')
+    params.push(q.peerId)
   }
   if (q.agentId !== undefined) {
     clauses.push('agent_id = ?')
@@ -340,6 +349,7 @@ function rowToEntry(r: LedgerRow): LedgerEntry {
     ts: r.ts,
     orgId: r.org_id,
     userId: r.user_id,
+    peerId: r.peer_id,
     agentId: r.agent_id,
     workflowId: r.workflow_id,
     taskId: r.task_id,
