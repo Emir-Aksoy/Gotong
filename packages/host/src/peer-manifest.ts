@@ -36,17 +36,75 @@ export const PEER_MANIFEST_METHODS = {
  * The manifest schema version. Bumps when `PeerManifest` changes shape so a
  * consumer can reason about an older peer's reply. Independent of the A2A
  * protocol version — this is the AipeHub mesh's own discovery contract.
+ *
+ * `'2'` (Phase 19 P4-M3): `capabilities` became rich descriptors
+ * (`PeerCapability[]`) instead of bare `string[]`. The consumer normalises
+ * BOTH, so a `'1'` peer (string list) still parses.
  */
-export const PEER_MANIFEST_VERSION = '1'
+export const PEER_MANIFEST_VERSION = '2'
+
+/**
+ * Phase 19 P4-M3 — one advertised capability as a rich descriptor. Only `id`
+ * is guaranteed; the rest are optional metadata a hub MAY publish so a peer can
+ * reason about WHAT a capability does, not just its name. `buildLocalManifest`
+ * emits `{ id }` today (participants expose only capability strings); the richer
+ * fields fill in as sources appear — e.g. P4-M4's data-class config populates
+ * `dataClasses`, and workflow trigger schemas can later supply `inputSchema`.
+ */
+export interface PeerCapability {
+  /** Capability id — the dispatch key. Always present. */
+  id: string
+  /** Optional semantic version of the capability's contract. */
+  version?: string
+  /** Optional descriptor of the expected task payload (JSON-schema-ish). */
+  inputSchema?: unknown
+  /** Optional descriptor of the result shape. */
+  outputSchema?: unknown
+  /** Optional free-form cost hint (e.g. `'low'`, `'~$0.01/call'`). */
+  costHint?: string
+  /** Optional data classes this capability handles (see P4-M4). */
+  dataClasses?: string[]
+}
 
 /** A peer's advertised capabilities — the public face of a hub on the mesh. */
 export interface PeerManifest {
   /** The advertising hub's self id (== `orgId` on the federation wire). */
   hubId: string
-  /** Deduped, sorted capability ids this hub's local participants serve. */
-  capabilities: string[]
+  /** Rich capability descriptors this hub's local participants serve (sorted by id). */
+  capabilities: PeerCapability[]
   /** `PEER_MANIFEST_VERSION` at emit time. */
   protocolVersion: string
+}
+
+/**
+ * Phase 19 P4-M3 — normalise a peer's advertised capabilities into rich
+ * descriptors, accepting BOTH the new `PeerCapability[]` and a legacy `string[]`
+ * (a `'1'`-manifest peer). Unknown / malformed entries are dropped; defensive
+ * field typing keeps a hostile peer from injecting non-string ids or classes.
+ */
+export function normalizePeerCapabilities(raw: unknown): PeerCapability[] {
+  if (!Array.isArray(raw)) return []
+  const out: PeerCapability[] = []
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      out.push({ id: item })
+      continue
+    }
+    if (item && typeof item === 'object' && typeof (item as { id?: unknown }).id === 'string') {
+      const o = item as Record<string, unknown>
+      const cap: PeerCapability = { id: o.id as string }
+      if (typeof o.version === 'string') cap.version = o.version
+      if (o.inputSchema !== undefined) cap.inputSchema = o.inputSchema
+      if (o.outputSchema !== undefined) cap.outputSchema = o.outputSchema
+      if (typeof o.costHint === 'string') cap.costHint = o.costHint
+      if (Array.isArray(o.dataClasses)) {
+        cap.dataClasses = o.dataClasses.filter((d): d is string => typeof d === 'string')
+      }
+      out.push(cap)
+    }
+    // else: drop a malformed entry rather than poison the whole manifest.
+  }
+  return out
 }
 
 /** The slice of `Hub` that `buildLocalManifest` reads (tests inject a stub). */
@@ -70,9 +128,11 @@ export function buildLocalManifest(
     if (peerWrapperIds.has(p.id)) continue
     for (const c of p.capabilities) caps.add(c)
   }
+  // Emit `{ id }` descriptors — the data participants actually expose. Richer
+  // fields (version / schema / cost / dataClasses) fill in as sources appear.
   return {
     hubId,
-    capabilities: [...caps].sort(),
+    capabilities: [...caps].sort().map((id) => ({ id })),
     protocolVersion: PEER_MANIFEST_VERSION,
   }
 }
@@ -128,7 +188,16 @@ export class PeerManifestHost {
  */
 export async function fetchPeerManifest(link: HubLink): Promise<PeerManifest | null> {
   const out = await link.rpc(PEER_MANIFEST_METHODS.get, {})
-  return (out as PeerManifest) ?? null
+  if (!out || typeof out !== 'object') return null
+  // Normalise defensively: a `'1'` peer sends `capabilities: string[]`, a `'2'`
+  // peer sends `PeerCapability[]`; both land as rich descriptors here.
+  const raw = out as { hubId?: unknown; capabilities?: unknown; protocolVersion?: unknown }
+  return {
+    hubId: typeof raw.hubId === 'string' ? raw.hubId : '',
+    capabilities: normalizePeerCapabilities(raw.capabilities),
+    protocolVersion:
+      typeof raw.protocolVersion === 'string' ? raw.protocolVersion : PEER_MANIFEST_VERSION,
+  }
 }
 
 // ─── federation surface (host → admin UI, Phase 18 A-M2) ────────────────────
@@ -153,8 +222,8 @@ export interface PeerManifestRow {
    * freshest list clicks refresh.)
    */
   stale: boolean
-  /** Advertised capability ids (empty when never fetched / nothing cached). */
-  capabilities: string[]
+  /** Advertised capability descriptors (empty when never fetched / nothing cached). */
+  capabilities: PeerCapability[]
   /** Epoch ms of the last successful manifest fetch, or null if never. */
   lastFetchedAt: number | null
 }

@@ -22,6 +22,21 @@ import { readJsonBody, sendJson } from './http-helpers.js'
 const log = createLogger('peer-routes')
 
 /**
+ * Phase 19 P4-M3 — rich capability descriptor (duck-typed mirror of the host's
+ * `PeerCapability`). Only `id` is guaranteed; the rest are optional metadata a
+ * peer MAY advertise. Web echoes whatever the surface returns — it neither
+ * reads nor validates the optional fields, just forwards them to the admin UI.
+ */
+export interface PeerCapability {
+  id: string
+  version?: string
+  inputSchema?: unknown
+  outputSchema?: unknown
+  costHint?: string
+  dataClasses?: string[]
+}
+
+/**
  * One peer's manifest row (duck-typed mirror of the host's `PeerManifestRow`
  * — web has no host dep). `stale` flags a cached-but-offline peer; an empty
  * `capabilities` + null `lastFetchedAt` means "never fetched" (unknown).
@@ -31,7 +46,7 @@ export interface PeerManifestRow {
   label: string | null
   online: boolean
   stale: boolean
-  capabilities: string[]
+  capabilities: PeerCapability[]
   lastFetchedAt: number | null
 }
 

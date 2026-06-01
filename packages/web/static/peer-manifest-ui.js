@@ -96,6 +96,25 @@
     )
   }
 
+  // Phase 19 P4-M3 — a capability is now a rich descriptor {id, version?,
+  // costHint?, dataClasses?, …}. Render the id chip + any present metadata as
+  // small inline text. Tolerate a bare string in case an older peer sneaks one
+  // past the host's normaliser.
+  function renderCap(c) {
+    if (typeof c === 'string') c = { id: c }
+    if (!c || typeof c.id !== 'string') return ''
+    const bits = []
+    if (c.version) bits.push('v' + c.version)
+    if (c.costHint) bits.push('成本:' + c.costHint)
+    if (Array.isArray(c.dataClasses) && c.dataClasses.length) {
+      bits.push('数据:' + c.dataClasses.join('/'))
+    }
+    const meta = bits.length
+      ? ' <small class="pf-cap-meta">' + escHtml(bits.join(' · ')) + '</small>'
+      : ''
+    return '<span class="pf-cap">' + escHtml(c.id) + meta + '</span>'
+  }
+
   // ---- render -----------------------------------------------------------
 
   function buildUi(root) {
@@ -139,7 +158,7 @@
         : '<code class="pf-id">' + escHtml(row.peer) + '</code>'
       const caps = row.capabilities || []
       const capCell = caps.length
-        ? caps.map(function (c) { return '<span class="pf-cap">' + escHtml(c) + '</span>' }).join('')
+        ? caps.map(renderCap).join('')
         : '<span class="pf-cap-empty">未知(点刷新)</span>'
       const tr = document.createElement('tr')
       tr.innerHTML =

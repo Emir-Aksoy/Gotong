@@ -18,15 +18,22 @@ import {
   PEER_MANIFEST_VERSION,
   buildLocalManifest,
   fetchPeerManifest,
+  normalizePeerCapabilities,
   createPeerManifestFederation,
   type ManifestHubView,
   type ManifestPeerRegistryView,
+  type PeerCapability,
   type PeerManifest,
 } from '../src/peer-manifest.js'
 
 /** Minimal Participant fake — buildLocalManifest reads only id + capabilities. */
 function fakeParticipant(id: string, capabilities: string[]): Participant {
   return { id, kind: 'agent', capabilities } as unknown as Participant
+}
+
+/** Phase 19 P4-M3 — capabilities are rich `{ id }` descriptors now. */
+function richCaps(...ids: string[]): PeerCapability[] {
+  return ids.map((id) => ({ id }))
 }
 
 function hubWith(participants: Participant[]): ManifestHubView {
@@ -40,7 +47,7 @@ describe('buildLocalManifest (Phase 18 A-M1)', () => {
       fakeParticipant('planner', ['plan', 'review']), // 'review' duplicated
     ])
     const m = buildLocalManifest(hub, 'hub_self', new Set())
-    expect(m.capabilities).toEqual(['draft', 'plan', 'review'])
+    expect(m.capabilities).toEqual(richCaps('draft', 'plan', 'review'))
     expect(m.hubId).toBe('hub_self')
     expect(m.protocolVersion).toBe(PEER_MANIFEST_VERSION)
   })
@@ -51,13 +58,44 @@ describe('buildLocalManifest (Phase 18 A-M1)', () => {
       fakeParticipant('hub_neighbour', ['vendor-quote', 'remote-only']), // a wrapper
     ])
     const m = buildLocalManifest(hub, 'hub_self', new Set(['hub_neighbour']))
-    expect(m.capabilities).toEqual(['draft'])
+    expect(m.capabilities).toEqual(richCaps('draft'))
   })
 
   it('returns an empty list when no local participant serves anything', () => {
     const hub = hubWith([fakeParticipant('hub_neighbour', ['x'])])
     const m = buildLocalManifest(hub, 'hub_self', new Set(['hub_neighbour']))
     expect(m.capabilities).toEqual([])
+  })
+})
+
+describe('normalizePeerCapabilities (Phase 19 P4-M3 backward-compat)', () => {
+  it('maps a legacy string[] (a v1 peer) to rich descriptors', () => {
+    expect(normalizePeerCapabilities(['draft', 'review'])).toEqual(richCaps('draft', 'review'))
+  })
+
+  it('passes rich descriptors through, keeping known optional fields', () => {
+    const rich = [
+      { id: 'quote', version: '1.2', costHint: 'low', dataClasses: ['pii', 'financial'] },
+    ]
+    expect(normalizePeerCapabilities(rich)).toEqual(rich)
+  })
+
+  it('drops malformed entries (no string id) and coerces dataClasses to strings', () => {
+    const raw = [
+      'ok',
+      { id: 42 }, // bad id → dropped
+      { id: 'mixed', dataClasses: ['a', 7, 'b'] }, // 7 filtered out
+      null,
+    ]
+    expect(normalizePeerCapabilities(raw)).toEqual([
+      { id: 'ok' },
+      { id: 'mixed', dataClasses: ['a', 'b'] },
+    ])
+  })
+
+  it('returns [] for a non-array', () => {
+    expect(normalizePeerCapabilities(undefined)).toEqual([])
+    expect(normalizePeerCapabilities('draft')).toEqual([])
   })
 })
 
@@ -75,7 +113,7 @@ describe('PeerManifestHost.respond (Phase 18 A-M1)', () => {
     const out = await host.respond({ method: PEER_MANIFEST_METHODS.get, params: {} })
     expect(out).toEqual({
       hubId: 'hub_provider',
-      capabilities: ['cap-a', 'cap-b'],
+      capabilities: richCaps('cap-a', 'cap-b'),
       protocolVersion: PEER_MANIFEST_VERSION,
     })
   })
@@ -88,14 +126,14 @@ describe('PeerManifestHost.respond (Phase 18 A-M1)', () => {
       peerWrapperIds: () => new Set(wrappers),
     })
     const before = (await host.respond({ method: PEER_MANIFEST_METHODS.get, params: {} })) as {
-      capabilities: string[]
+      capabilities: PeerCapability[]
     }
-    expect(before.capabilities).toEqual(['x', 'y'])
+    expect(before.capabilities.map((c) => c.id)).toEqual(['x', 'y'])
     wrappers = ['hub_n'] // a peer connected since the first call
     const after = (await host.respond({ method: PEER_MANIFEST_METHODS.get, params: {} })) as {
-      capabilities: string[]
+      capabilities: PeerCapability[]
     }
-    expect(after.capabilities).toEqual(['x'])
+    expect(after.capabilities.map((c) => c.id)).toEqual(['x'])
   })
 
   it('rejects an unknown method', async () => {
@@ -107,17 +145,18 @@ describe('PeerManifestHost.respond (Phase 18 A-M1)', () => {
 })
 
 describe('fetchPeerManifest (Phase 18 A-M1, consumer)', () => {
-  it('forwards the peer.manifest rpc and returns the manifest', async () => {
+  it('forwards the peer.manifest rpc and normalises a legacy v1 reply', async () => {
     const seen: Array<{ method: string; params: unknown }> = []
     const link = {
       status: 'open' as const,
       rpc: async (method: string, params: unknown) => {
         seen.push({ method, params })
+        // A v1 peer answers with bare string capabilities.
         return { hubId: 'hub_x', capabilities: ['a'], protocolVersion: '1' }
       },
     } as unknown as HubLink
     const out = await fetchPeerManifest(link)
-    expect(out).toEqual({ hubId: 'hub_x', capabilities: ['a'], protocolVersion: '1' })
+    expect(out).toEqual({ hubId: 'hub_x', capabilities: richCaps('a'), protocolVersion: '1' })
     expect(seen).toEqual([{ method: PEER_MANIFEST_METHODS.get, params: {} }])
   })
 
@@ -142,7 +181,7 @@ describe('peer manifest — end to end over a live link (Phase 18 A-M1)', () => 
     const manifest = await fetchPeerManifest(b)
     expect(manifest).toEqual({
       hubId: 'provider',
-      capabilities: ['draft', 'review'],
+      capabilities: richCaps('draft', 'review'),
       protocolVersion: PEER_MANIFEST_VERSION,
     })
     await a.close()
@@ -200,7 +239,7 @@ describe('createPeerManifestFederation (Phase 18 A-M2)', () => {
       label: null,
       online: true,
       stale: false,
-      capabilities: ['a', 'b'],
+      capabilities: richCaps('a', 'b'),
       lastFetchedAt: 1000,
     })
   })
@@ -223,7 +262,7 @@ describe('createPeerManifestFederation (Phase 18 A-M2)', () => {
     const row = (await fed.list())[0]!
     expect(row.online).toBe(false)
     expect(row.stale).toBe(true)
-    expect(row.capabilities).toEqual(['a']) // last-known caps retained
+    expect(row.capabilities).toEqual(richCaps('a')) // last-known caps retained
     expect(row.lastFetchedAt).toBe(1000)
   })
 
@@ -250,7 +289,7 @@ describe('createPeerManifestFederation (Phase 18 A-M2)', () => {
     expect(seen).toEqual(['p2'])
     const rows = await fed.list()
     expect(rows.find((r) => r.peer === 'p1')!.capabilities).toEqual([])
-    expect(rows.find((r) => r.peer === 'p2')!.capabilities).toEqual(['b'])
+    expect(rows.find((r) => r.peer === 'p2')!.capabilities).toEqual(richCaps('b'))
   })
 
   it('keeps the prior cache when a refresh fetch throws', async () => {
@@ -261,6 +300,6 @@ describe('createPeerManifestFederation (Phase 18 A-M2)', () => {
     await fed.refresh() // caches ['a']
     links.p1 = throwingLink() // next fetch fails
     await fed.refresh()
-    expect((await fed.list())[0]!.capabilities).toEqual(['a']) // unchanged, not blanked
+    expect((await fed.list())[0]!.capabilities).toEqual(richCaps('a')) // unchanged, not blanked
   })
 })

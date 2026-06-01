@@ -1118,7 +1118,7 @@ async function main(): Promise<void> {
             hub,
             selfHubIdForCard,
             new Set((peerRegistry?.status() ?? []).map((r) => r.peerId)),
-          ).capabilities.map((cap) => ({ id: cap, name: cap }))
+          ).capabilities.map((cap) => ({ id: cap.id, name: cap.id }))
         : []
       return JSON.stringify(
         buildAgentCard({
