@@ -1092,3 +1092,43 @@ export interface ListImBindingsQuery {
   /** Filter by platform; omit for "all platforms". */
   platform?: string
 }
+
+// ---------------------------------------------------------------------------
+// Workflow grants (Phase 19 P2-M5 — resource-level RBAC, ownership MVP)
+//
+// One grant row per (workflowId, userId). The OWNER is just the grant with
+// perm='owner' — ownership and sharing use the one model. Perms form a ladder
+// owner > editor > viewer compared by {@link WORKFLOW_PERM_RANK}.
+// ---------------------------------------------------------------------------
+
+/** Workflow permission levels, lowest → highest. */
+export const WORKFLOW_PERMS = ['viewer', 'editor', 'owner'] as const
+export type WorkflowPerm = (typeof WORKFLOW_PERMS)[number]
+
+/**
+ * Rank for hierarchy checks — a grant satisfies a required perm iff its rank
+ * is ≥ the requirement's. owner(3) ⊇ editor(2) ⊇ viewer(1).
+ */
+export const WORKFLOW_PERM_RANK: Record<WorkflowPerm, number> = {
+  viewer: 1,
+  editor: 2,
+  owner: 3,
+}
+
+export interface WorkflowGrant {
+  workflowId: string
+  userId: string
+  perm: WorkflowPerm
+  /** user_id that wrote the grant; null = system (e.g. the import owner seed). */
+  grantedBy: string | null
+  grantedAt: number
+}
+
+export interface SetWorkflowGrantInput {
+  workflowId: string
+  userId: string
+  perm: WorkflowPerm
+  grantedBy?: string | null
+  /** Defaults to Date.now(). */
+  grantedAt?: number
+}

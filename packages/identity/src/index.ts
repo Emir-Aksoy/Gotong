@@ -83,6 +83,9 @@ export type {
   ClaimImBindingCodeInput,
   ClaimImBindingResult,
   ListImBindingsQuery,
+  WorkflowGrant,
+  SetWorkflowGrantInput,
+  WorkflowPerm,
 } from './types.js'
 export {
   AUDIT_ACTIONS,
@@ -92,6 +95,8 @@ export {
   USAGE_PERIODS,
   USAGE_METRIC_MAX_LEN,
   ORG_QUOTA_STATES,
+  WORKFLOW_PERMS,
+  WORKFLOW_PERM_RANK,
 } from './types.js'
 // A1 — exported so hosts can wire the workspace .key file into
 // openIdentityStore. crypto primitives (encryptSecret / decryptSecret)

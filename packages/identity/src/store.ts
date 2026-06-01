@@ -50,6 +50,7 @@ import { IdentityError } from './errors.js'
 import { VaultStore, type VaultMutationReason } from './vault-store.js'
 import { SuspendedTaskStore } from './suspended-task-store.js'
 import { LedgerStore } from './ledger-store.js'
+import { WorkflowGrantStore } from './workflow-grant-store.js'
 import { PeerStore } from './peer-store.js'
 import { QuotaStore } from './quota-store.js'
 import {
@@ -115,6 +116,10 @@ import {
   type ClaimImBindingCodeInput,
   type ClaimImBindingResult,
   type ListImBindingsQuery,
+  // Phase 19 P2-M5 — workflow grants (resource RBAC).
+  type SetWorkflowGrantInput,
+  type WorkflowGrant,
+  type WorkflowPerm,
 } from './types.js'
 import { randomInt } from 'node:crypto'
 
@@ -425,6 +430,8 @@ export class IdentityStore {
   // under the quota counters). Append on the post-LLM-call path; scan on
   // dashboard aggregate + CSV/JSONL export. Owns its own statements.
   private readonly ledger: LedgerStore
+  // Phase 19 P2-M5 — workflow grants (resource-level RBAC). Owner-as-grant.
+  private readonly workflowGrants: WorkflowGrantStore
   // Phase 7 M4 — org_meta kv (org_mode lives here).
   private readonly stmtOrgMetaGet: SqliteStmt
   private readonly stmtOrgMetaUpsert: SqliteStmt
@@ -464,6 +471,8 @@ export class IdentityStore {
     // Phase 17 — usage / cost ledger. Constructed after quota (same
     // billing domain, but its own table). Eager INSERT + get-by-id.
     this.ledger = new LedgerStore(db)
+    // Phase 19 P2-M5 — workflow grants (resource RBAC). Eager statements.
+    this.workflowGrants = new WorkflowGrantStore(db)
 
     this.stmtUserById = db.prepare('SELECT * FROM users WHERE id = ?')
     this.stmtUserByEmail = db.prepare('SELECT * FROM users WHERE email = ?')
@@ -2109,6 +2118,44 @@ export class IdentityStore {
 
   aggregateLedger(query: LedgerAggregateQuery): LedgerAggregateRow[] {
     return this.ledger.aggregate(query)
+  }
+
+  // =====================================================================
+  // Phase 19 P2-M5 — workflow grants (resource-level RBAC, ownership MVP).
+  // Owner-as-grant: the owner is the perm='owner' row. Delegated to
+  // WorkflowGrantStore. `hasWorkflowGrant` is the hot-path enforcement check.
+  // =====================================================================
+
+  setWorkflowGrant(input: SetWorkflowGrantInput): WorkflowGrant {
+    return this.workflowGrants.set(input)
+  }
+
+  getWorkflowGrant(workflowId: string, userId: string): WorkflowGrant | null {
+    return this.workflowGrants.get(workflowId, userId)
+  }
+
+  hasWorkflowGrant(
+    workflowId: string,
+    userId: string,
+    min: WorkflowPerm,
+  ): boolean {
+    return this.workflowGrants.has(workflowId, userId, min)
+  }
+
+  listWorkflowGrants(workflowId: string): WorkflowGrant[] {
+    return this.workflowGrants.listForWorkflow(workflowId)
+  }
+
+  listUserWorkflowGrants(userId: string): WorkflowGrant[] {
+    return this.workflowGrants.listForUser(userId)
+  }
+
+  removeWorkflowGrant(workflowId: string, userId: string): boolean {
+    return this.workflowGrants.remove(workflowId, userId)
+  }
+
+  removeAllWorkflowGrants(workflowId: string): number {
+    return this.workflowGrants.removeAllForWorkflow(workflowId)
   }
 
   // =====================================================================

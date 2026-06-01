@@ -560,6 +560,39 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE peers ADD COLUMN require_approval_outbound INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    // Phase 19 P2-M5 — resource-level RBAC for workflows (ownership MVP).
+    // One grant row per (workflow, user). The OWNER is just the grant with
+    // perm='owner' — no separate owner column, so ownership + sharing share
+    // one model and one store. Perm ladder owner > editor > viewer is compared
+    // by rank in the store (no SQL CHECK, so it can extend without a migration).
+    // No FK to users: a deleted user's grant simply dangles (prunable) — the
+    // same append-friendly posture as audit_log. The composite PK gives
+    // upsert-on-regrant and exactly one perm per user per workflow.
+    //
+    //   workflow_id  stable workflow id (matches WorkflowDefinition.id)
+    //   user_id      v4 identity user id the grant is for
+    //   perm         'owner' | 'editor' | 'viewer'
+    //   granted_by   user_id that wrote the grant; NULL = system (import seed)
+    //   granted_at   epoch ms
+    //
+    // idx_wf_grants_user backs "what workflows may this user touch"; the PK
+    // already backs "who may touch workflow X".
+    version: 13,
+    name: 'workflow-grants',
+    sql: `
+      CREATE TABLE IF NOT EXISTS workflow_grants (
+        workflow_id  TEXT NOT NULL,
+        user_id      TEXT NOT NULL,
+        perm         TEXT NOT NULL,
+        granted_by   TEXT,
+        granted_at   INTEGER NOT NULL,
+        PRIMARY KEY (workflow_id, user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_wf_grants_user
+        ON workflow_grants(user_id);
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {
