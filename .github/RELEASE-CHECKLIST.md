@@ -8,11 +8,17 @@ list keeps the checklist honest.
 
 ## Security contact
 
-- [ ] **Activate `security@aipehub.dev` mailbox** — DNS MX, autoresponder
-      pointing reporters to the GitHub advisory URL, on-call routing.
-      Appears in:
-  - [`SECURITY.md`](../SECURITY.md) → "Backup — email"
-  - [`.well-known/security.txt`](../.well-known/security.txt) → `Contact: mailto:` line
+> **Decided 2026-06-01 (Phase 19 P3-M3):** no email channel pre-1.0.
+> GitHub Private Vulnerability Reporting is the **sole** disclosure
+> channel. The `security@aipehub.dev` placeholder has been removed from
+> the advertised contacts (`SECURITY.md` → "No email channel",
+> `security.txt` → no `mailto:` line) rather than dangle a dead address.
+> Standing up a real mailbox stays a 1.0 *option*, not a blocker.
+
+- [ ] **(Optional, post-1.0) Activate a security mailbox** — only if a
+      non-GitHub channel proves necessary. Would need DNS MX, an
+      autoresponder pointing at the advisory URL, and on-call routing,
+      then re-adding the `mailto:` to `SECURITY.md` + `security.txt`.
 - [ ] **Enable Private Vulnerability Reporting** on
       `github.com/Emir-Aksoy/AipeHub` (Settings → Security & analysis).
       Without this the `/security/advisories/new` URL returns 404 for
@@ -37,6 +43,12 @@ list keeps the checklist honest.
 The "publish to npmjs.com + pypi.org" plan was **descoped from the
 v1.0 critical path** in v2.1 (see CHANGELOG → Unreleased v2.1 →
 Distribution). Source-only + Docker now cover both Quick-start paths.
+
+> **Reaffirmed 2026-06-01 (Phase 19 P3-M3):** Docker + source stay the
+> primary (and only *supported*) distribution. A JS registry, PyPI, and
+> pre-built binaries remain independent post-1.0 options — any can stay
+> "no" indefinitely without blocking a release.
+
 Three open decisions remain — each is independent and any of them
 can stay "no" indefinitely:
 
@@ -112,8 +124,11 @@ can stay "no" indefinitely:
 
 - [ ] Pick a CVE numbering authority arrangement — GitHub Security
       Advisories can request CVEs on your behalf; confirm the workflow.
-- [ ] Decide a "supported versions" policy concrete enough to put in
-      `SECURITY.md` (currently "current `main` branch only").
+- [x] Decide a "supported versions" policy concrete enough to put in
+      `SECURITY.md`. **Decided 2026-06-01 (Phase 19 P3-M3):** current
+      `main` only, no LTS branch — already the stated policy in
+      `SECURITY.md` → "Supported versions". Revisit if/when a 1.0 tag
+      creates a stable line worth backporting to.
 - [ ] Run one tabletop exercise of "high-severity report comes in at
       Friday 19:00" to validate the 72-hour ack target.
 
@@ -122,4 +137,4 @@ can stay "no" indefinitely:
 Once every box is checked, delete this file. Its absence == "we shipped
 the placeholder cleanup".
 
-Last reviewed: 2026-05-17.
+Last reviewed: 2026-06-01.

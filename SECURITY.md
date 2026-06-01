@@ -20,26 +20,32 @@ GitHub's built-in form gives you:
 This is the channel we read first and answer fastest. You'll need a
 free GitHub account; that's the only prerequisite.
 
-### Backup — email (during the v0.x period)
+### No email channel (pre-1.0)
 
-If you cannot use GitHub for some reason, email:
+There is deliberately **no security email** during the v0.x period.
+`security@aipehub.dev` appears in older revisions of this repo as an
+*aspirational* address — the domain isn't registered and the mailbox
+isn't activated, so mail to it goes nowhere. We've stopped advertising
+it as a fallback rather than dangle a dead contact someone might trust
+with a real report.
 
-> **`security@aipehub.dev`** *(see status note below)*
+GitHub Private Vulnerability Reporting (above) is the **sole** channel
+today: free, private, and the one we read first. Whether a real mailbox
+is worth standing up is a [release-checklist](.github/RELEASE-CHECKLIST.md#security-contact)
+decision deferred to the 1.0 run-up; until then, please use the advisory
+form.
 
-with the following:
+If you genuinely cannot use GitHub, open a **non-security** GitHub
+Discussion asking a maintainer to reach out — without any vulnerability
+detail — and we'll arrange a private channel for that one report.
+
+Include in your advisory:
 
 - a description of the issue
 - precise reproduction steps
 - the commit hash you tested against (`git rev-parse HEAD`)
 - (optional) a proposed fix or patch
 - (optional) the name / handle you want credited in the advisory
-
-> ⚠️ **Status note (as of 2026-05-12)**: `security@aipehub.dev` is a
-> **placeholder address** — the project is pre-1.0 and the mailbox is
-> not yet activated. Until the [release checklist](.github/RELEASE-CHECKLIST.md#security-contact)
-> item is closed, the GitHub Private Vulnerability Reporting channel
-> above is the only **active** channel. We mention the email here so
-> the link rots in only one place when activation lands.
 
 ### What about PGP?
 

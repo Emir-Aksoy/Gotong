@@ -12,7 +12,6 @@
 # find it from your hub URL.
 
 Contact: https://github.com/Emir-Aksoy/AipeHub/security/advisories/new
-Contact: mailto:security@aipehub.dev
 Expires: 2027-05-12T00:00:00.000Z
 Preferred-Languages: en, zh
 Policy: https://github.com/Emir-Aksoy/AipeHub/blob/main/SECURITY.md
@@ -20,9 +19,10 @@ Acknowledgments: https://github.com/Emir-Aksoy/AipeHub/security/advisories
 Canonical: https://github.com/Emir-Aksoy/AipeHub/.well-known/security.txt
 
 # Notes for operators:
-# 1. The mailto: line points at an alias that is NOT yet activated as of
-#    2026-05-12 — see SECURITY.md "Status note". GitHub Private
-#    Vulnerability Reporting is the active channel until then.
+# 1. GitHub Private Vulnerability Reporting is the SOLE channel pre-1.0.
+#    There is deliberately no `Contact: mailto:` line — the project has no
+#    activated security mailbox, and listing a dead address here would only
+#    misdirect automated scanners. See SECURITY.md "No email channel".
 # 2. `Expires` must be < 1 year out per RFC 9116; renew this file each
 #    spring (or earlier if the contact info changes).
 # 3. We deliberately do not publish a PGP key — GitHub's private
