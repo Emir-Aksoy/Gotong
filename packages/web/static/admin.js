@@ -1106,6 +1106,7 @@
       if (dom.wfRevEmpty) dom.wfRevEmpty.hidden = true;
       if (dom.wfRevList) dom.wfRevList.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
       if (dom.wfRevModal) dom.wfRevModal.hidden = false;
+      void loadWorkflowAudit(id);
       try {
         const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/revisions`);
         if (!r.ok) {
@@ -1184,6 +1185,85 @@
           dom.wfRevMsg.classList.add("err");
         }
       }
+    }
+    let auditWorkflowId = null;
+    function setAuditExportLinks(id, action) {
+      if (!dom.wfAuditCsv || !dom.wfAuditJsonl) return;
+      const base = `/api/admin/identity/audit/workflows/export?workflowId=${encodeURIComponent(id)}`;
+      const actionQs = action ? `&action=${encodeURIComponent(action)}` : "";
+      dom.wfAuditCsv.href = `${base}&format=csv${actionQs}`;
+      dom.wfAuditJsonl.href = `${base}&format=jsonl${actionQs}`;
+    }
+    async function loadWorkflowAudit(id) {
+      auditWorkflowId = id;
+      if (dom.wfAuditAction) dom.wfAuditAction.value = "";
+      if (dom.wfAuditMsg) {
+        dom.wfAuditMsg.textContent = "";
+        dom.wfAuditMsg.classList.remove("ok", "err");
+      }
+      if (dom.wfAuditEmpty) dom.wfAuditEmpty.hidden = true;
+      if (dom.wfAuditExport) dom.wfAuditExport.hidden = true;
+      if (dom.wfAuditList) dom.wfAuditList.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      await fetchWorkflowAudit(id, "");
+    }
+    async function refreshWorkflowAudit() {
+      if (!auditWorkflowId) return;
+      if (dom.wfAuditMsg) {
+        dom.wfAuditMsg.textContent = "";
+        dom.wfAuditMsg.classList.remove("ok", "err");
+      }
+      if (dom.wfAuditList) dom.wfAuditList.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      await fetchWorkflowAudit(auditWorkflowId, dom.wfAuditAction ? dom.wfAuditAction.value : "");
+    }
+    async function fetchWorkflowAudit(id, action) {
+      const qs = action ? `&action=${encodeURIComponent(action)}` : "";
+      try {
+        const r = await fetch(
+          `/api/admin/identity/audit/workflows?workflowId=${encodeURIComponent(id)}${qs}`
+        );
+        if (!r.ok) {
+          if (dom.wfAuditList) dom.wfAuditList.innerHTML = "";
+          if (dom.wfAuditExport) dom.wfAuditExport.hidden = true;
+          if (dom.wfAuditMsg) {
+            dom.wfAuditMsg.textContent = r.status === 403 ? t4.workflowAuditOwnerOnly : t4.workflowAuditUnavailable;
+            dom.wfAuditMsg.classList.add("err");
+          }
+          return;
+        }
+        const body = await r.json();
+        const entries = body.entries || [];
+        renderWorkflowAudit(entries);
+        setAuditExportLinks(id, action);
+        if (dom.wfAuditExport) dom.wfAuditExport.hidden = entries.length === 0;
+      } catch (err) {
+        if (dom.wfAuditList) dom.wfAuditList.innerHTML = "";
+        if (dom.wfAuditMsg) {
+          dom.wfAuditMsg.textContent = t4.failedAlert(err.message || String(err));
+          dom.wfAuditMsg.classList.add("err");
+        }
+      }
+    }
+    function renderWorkflowAudit(rows) {
+      if (!dom.wfAuditList) return;
+      if (rows.length === 0) {
+        dom.wfAuditList.innerHTML = "";
+        if (dom.wfAuditEmpty) dom.wfAuditEmpty.hidden = false;
+        return;
+      }
+      if (dom.wfAuditEmpty) dom.wfAuditEmpty.hidden = true;
+      dom.wfAuditList.innerHTML = rows.map((e) => {
+        const when = e.ts ? new Date(e.ts).toLocaleString() : "";
+        const actor = e.actorUserId ? escapeHtml4(e.actorUserId) : "—";
+        const meta = e.metadata || {};
+        const rev = meta.revision != null ? `rev ${escapeHtml4(String(meta.revision))}` : "";
+        const actionShort = escapeHtml4(String(e.action || "").replace(/^workflow_/, ""));
+        return `<div class="wf-audit-row">
+          <span class="wf-audit-action-tag">${actionShort}</span>
+          <span class="wf-audit-actor">${actor}</span>
+          <span class="wf-audit-rev">${rev}</span>
+          <small class="hint">${escapeHtml4(when)}</small>
+        </div>`;
+      }).join("");
     }
     function openWorkflowImportModal() {
       dom.wfImportText.value = "";
@@ -1342,6 +1422,7 @@
       openWorkflowRevisionsModal,
       closeWorkflowRevisionsModal,
       rollbackTo,
+      refreshWorkflowAudit,
       openWorkflowImportModal,
       closeWorkflowImportModal,
       submitWorkflowImport,
@@ -1591,6 +1672,14 @@
         wfRevList: $("wf-rev-list"),
         wfRevEmpty: $("wf-rev-empty"),
         wfRevMsg: $("wf-rev-msg"),
+        // Governance audit sub-section inside the revision modal (Phase 19 P2-M4)
+        wfAuditAction: $("wf-audit-action"),
+        wfAuditList: $("wf-audit-list"),
+        wfAuditEmpty: $("wf-audit-empty"),
+        wfAuditMsg: $("wf-audit-msg"),
+        wfAuditExport: $("wf-audit-export"),
+        wfAuditCsv: $("wf-audit-csv"),
+        wfAuditJsonl: $("wf-audit-jsonl"),
         // Room health banner (v2.1+)
         hToday: $("health-today-tasks"),
         hOnline: $("health-online"),
@@ -2915,6 +3004,8 @@
         } else if (act === "rollback-revision") {
           const rev = Number(target.dataset.rev);
           if (Number.isInteger(rev)) workflows.rollbackTo(id, rev);
+        } else if (act === "refresh-workflow-audit") {
+          workflows.refreshWorkflowAudit();
         } else if (act === "start-workflow") {
           openWorkflowStart(id);
         } else if (act === "view-growth-report") {

@@ -500,6 +500,33 @@
             <div id="wf-rev-list"></div>
             <p id="wf-rev-empty" class="hint" hidden data-i18n="workflowRevisionsEmpty">还没有任何修订。</p>
             <p id="wf-rev-msg" class="form-msg"></p>
+
+            <!-- Phase 19 P2-M4 — governance audit (filtered audit_log view).
+                 Owner-gated: a non-owner admin sees a notice instead. -->
+            <hr class="wf-audit-sep" />
+            <div class="wf-audit-head">
+              <strong data-i18n="workflowAuditTitle">治理审计</strong>
+              <select id="wf-audit-action" class="wf-audit-action" aria-label="action">
+                <option value="" data-i18n="workflowAuditActionAll">全部动作</option>
+                <option value="workflow_import">import</option>
+                <option value="workflow_publish">publish</option>
+                <option value="workflow_deprecate">deprecate</option>
+                <option value="workflow_archive">archive</option>
+                <option value="workflow_rollback">rollback</option>
+              </select>
+              <button type="button" class="ma-btn ma-btn-secondary"
+                      data-act="refresh-workflow-audit"
+                      data-i18n="workflowAuditRefresh">查询</button>
+            </div>
+            <div id="wf-audit-list"></div>
+            <p id="wf-audit-empty" class="hint" hidden data-i18n="workflowAuditEmpty">没有审计记录。</p>
+            <p id="wf-audit-msg" class="form-msg"></p>
+            <div id="wf-audit-export" class="wf-audit-export" hidden>
+              <a id="wf-audit-csv" class="ma-btn ma-btn-secondary" rel="nofollow"
+                 href="#" data-i18n="workflowAuditExportCsv">导出 CSV</a>
+              <a id="wf-audit-jsonl" class="ma-btn ma-btn-secondary" rel="nofollow"
+                 href="#" data-i18n="workflowAuditExportJsonl">导出 JSONL</a>
+            </div>
           </div>
         </div>
       </div>

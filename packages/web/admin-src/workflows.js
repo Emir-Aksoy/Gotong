@@ -204,6 +204,10 @@ export function createWorkflows({ wf }) {
     if (dom.wfRevEmpty) dom.wfRevEmpty.hidden = true
     if (dom.wfRevList) dom.wfRevList.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
     if (dom.wfRevModal) dom.wfRevModal.hidden = false
+    // P2-M4 — the governance audit sub-section loads independently of the
+    // revision fetch (separate endpoint, separate gate), so fire it here and
+    // don't let a revision-fetch error path skip it.
+    void loadWorkflowAudit(id)
     try {
       const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/revisions`)
       if (!r.ok) {
@@ -294,6 +298,106 @@ export function createWorkflows({ wf }) {
         dom.wfRevMsg.classList.add('err')
       }
     }
+  }
+
+  // --- governance audit (Phase 19 P2-M4) ---------------------------------
+  //
+  // Co-located in the revision modal: "this workflow's history" = revisions
+  // (WHAT changed) + audit (WHO changed it, WHEN). Backed by the owner-gated
+  // /api/admin/identity/audit/workflows route, so a non-owner admin gets a
+  // graceful "owner only" notice rather than rows. The action <select> +
+  // 查询 button re-query; the export links carry the same filters.
+
+  let auditWorkflowId = null
+
+  function setAuditExportLinks(id, action) {
+    if (!dom.wfAuditCsv || !dom.wfAuditJsonl) return
+    const base = `/api/admin/identity/audit/workflows/export?workflowId=${encodeURIComponent(id)}`
+    const actionQs = action ? `&action=${encodeURIComponent(action)}` : ''
+    dom.wfAuditCsv.href = `${base}&format=csv${actionQs}`
+    dom.wfAuditJsonl.href = `${base}&format=jsonl${actionQs}`
+  }
+
+  async function loadWorkflowAudit(id) {
+    auditWorkflowId = id
+    if (dom.wfAuditAction) dom.wfAuditAction.value = '' // reset filter on open
+    if (dom.wfAuditMsg) {
+      dom.wfAuditMsg.textContent = ''
+      dom.wfAuditMsg.classList.remove('ok', 'err')
+    }
+    if (dom.wfAuditEmpty) dom.wfAuditEmpty.hidden = true
+    if (dom.wfAuditExport) dom.wfAuditExport.hidden = true
+    if (dom.wfAuditList) dom.wfAuditList.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
+    await fetchWorkflowAudit(id, '')
+  }
+
+  // Wired to the 查询 button (data-act="refresh-workflow-audit") — re-pulls
+  // with whatever the action <select> currently holds.
+  async function refreshWorkflowAudit() {
+    if (!auditWorkflowId) return
+    if (dom.wfAuditMsg) {
+      dom.wfAuditMsg.textContent = ''
+      dom.wfAuditMsg.classList.remove('ok', 'err')
+    }
+    if (dom.wfAuditList) dom.wfAuditList.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
+    await fetchWorkflowAudit(auditWorkflowId, dom.wfAuditAction ? dom.wfAuditAction.value : '')
+  }
+
+  async function fetchWorkflowAudit(id, action) {
+    const qs = action ? `&action=${encodeURIComponent(action)}` : ''
+    try {
+      const r = await fetch(
+        `/api/admin/identity/audit/workflows?workflowId=${encodeURIComponent(id)}${qs}`,
+      )
+      if (!r.ok) {
+        // 403 = non-owner admin; 503 = host without an identity store. Either
+        // way the revisions above still work — degrade this section only.
+        if (dom.wfAuditList) dom.wfAuditList.innerHTML = ''
+        if (dom.wfAuditExport) dom.wfAuditExport.hidden = true
+        if (dom.wfAuditMsg) {
+          dom.wfAuditMsg.textContent =
+            r.status === 403 ? t.workflowAuditOwnerOnly : t.workflowAuditUnavailable
+          dom.wfAuditMsg.classList.add('err')
+        }
+        return
+      }
+      const body = await r.json()
+      const entries = body.entries || []
+      renderWorkflowAudit(entries)
+      setAuditExportLinks(id, action)
+      if (dom.wfAuditExport) dom.wfAuditExport.hidden = entries.length === 0
+    } catch (err) {
+      if (dom.wfAuditList) dom.wfAuditList.innerHTML = ''
+      if (dom.wfAuditMsg) {
+        dom.wfAuditMsg.textContent = t.failedAlert(err.message || String(err))
+        dom.wfAuditMsg.classList.add('err')
+      }
+    }
+  }
+
+  function renderWorkflowAudit(rows) {
+    if (!dom.wfAuditList) return
+    if (rows.length === 0) {
+      dom.wfAuditList.innerHTML = ''
+      if (dom.wfAuditEmpty) dom.wfAuditEmpty.hidden = false
+      return
+    }
+    if (dom.wfAuditEmpty) dom.wfAuditEmpty.hidden = true
+    dom.wfAuditList.innerHTML = rows
+      .map((e) => {
+        const when = e.ts ? new Date(e.ts).toLocaleString() : ''
+        const actor = e.actorUserId ? escapeHtml(e.actorUserId) : '—'
+        const meta = e.metadata || {}
+        const rev = meta.revision != null ? `rev ${escapeHtml(String(meta.revision))}` : ''
+        const actionShort = escapeHtml(String(e.action || '').replace(/^workflow_/, ''))
+        return `<div class="wf-audit-row">
+          <span class="wf-audit-action-tag">${actionShort}</span>
+          <span class="wf-audit-actor">${actor}</span>
+          <span class="wf-audit-rev">${rev}</span>
+          <small class="hint">${escapeHtml(when)}</small>
+        </div>`
+      })
+      .join('')
   }
 
   // --- workflow import (YAML paste / file) -------------------------------
@@ -483,6 +587,7 @@ export function createWorkflows({ wf }) {
     openWorkflowRevisionsModal,
     closeWorkflowRevisionsModal,
     rollbackTo,
+    refreshWorkflowAudit,
     openWorkflowImportModal,
     closeWorkflowImportModal,
     submitWorkflowImport,

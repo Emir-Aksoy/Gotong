@@ -269,6 +269,14 @@ import { createWorkflows } from './workflows.js'
       wfRevList: $('wf-rev-list'),
       wfRevEmpty: $('wf-rev-empty'),
       wfRevMsg: $('wf-rev-msg'),
+      // Governance audit sub-section inside the revision modal (Phase 19 P2-M4)
+      wfAuditAction: $('wf-audit-action'),
+      wfAuditList: $('wf-audit-list'),
+      wfAuditEmpty: $('wf-audit-empty'),
+      wfAuditMsg: $('wf-audit-msg'),
+      wfAuditExport: $('wf-audit-export'),
+      wfAuditCsv: $('wf-audit-csv'),
+      wfAuditJsonl: $('wf-audit-jsonl'),
       // Room health banner (v2.1+)
       hToday: $('health-today-tasks'),
       hOnline: $('health-online'),
@@ -2120,6 +2128,10 @@ import { createWorkflows } from './workflows.js'
       } else if (act === 'rollback-revision') {
         const rev = Number(target.dataset.rev)
         if (Number.isInteger(rev)) workflows.rollbackTo(id, rev)
+      } else if (act === 'refresh-workflow-audit') {
+        // Re-query the governance audit sub-section with the chosen action
+        // filter. The workflow id is held in the revisions modal's state.
+        workflows.refreshWorkflowAudit()
       } else if (act === 'start-workflow') {
         openWorkflowStart(id)
       } else if (act === 'view-growth-report') {
