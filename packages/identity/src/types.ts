@@ -251,6 +251,16 @@ export const AUDIT_ACTIONS = {
   ORG_QUOTA_OVER: 'org_quota_over',
   /** Aggregate org usage fell back below warn_pct (period roll or manual reset). */
   ORG_QUOTA_RECOVER: 'org_quota_recover',
+  // Phase 19 P2-M2 — workflow lifecycle governance. One row per
+  // interactive (admin-triggered) governance-significant transition, so
+  // operators can answer "who promoted / retired this workflow, and to
+  // which revision". Boot adoption (`adoptAtBoot`) bypasses HTTP and is
+  // intentionally NOT audited; draft/review authoring churn is omitted too.
+  WORKFLOW_IMPORT: 'workflow_import',
+  WORKFLOW_PUBLISH: 'workflow_publish',
+  WORKFLOW_DEPRECATE: 'workflow_deprecate',
+  WORKFLOW_ARCHIVE: 'workflow_archive',
+  WORKFLOW_ROLLBACK: 'workflow_rollback',
 } as const
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS]

@@ -1601,6 +1601,10 @@ async function handle(
         hub: ctx.hub,
         workflows: ctx.workflows,
         workflowAssist: ctx.workflowAssist,
+        // P2-M2 — the IdentityStore structurally satisfies WorkflowAuditSink
+        // (writeAuditLog is optional on both). Governance-significant
+        // lifecycle transitions write one audit row through it.
+        audit: ctx.identity,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req,

@@ -23,6 +23,7 @@ import { Hub, Space } from '@aipehub/core'
 
 import {
   serveWeb,
+  type IdentitySurface,
   type WebServerHandle,
   type WorkflowSummary,
   type WorkflowSurface,
@@ -103,6 +104,42 @@ function makeStub(): Stub {
   return { surface, calls, throwOn: (m, e) => throwers.set(m, e) }
 }
 
+// --- audit capture (P2-M2) -------------------------------------------------
+// A minimal `writeAuditLog` sink that records the rows the workflow routes
+// emit. Cast to IdentitySurface at the serveWeb boundary; the routes only
+// ever call writeAuditLog, so nothing else needs stubbing.
+
+interface AuditRow {
+  action: string
+  actorSource: string
+  actorUserId?: string | null
+  metadata?: Record<string, unknown> | null
+  success?: boolean
+}
+
+interface AuditCapture {
+  rows: AuditRow[]
+  surface: { writeAuditLog(input: AuditRow): unknown }
+}
+
+function makeAuditCapture(opts: { throwOnce?: boolean } = {}): AuditCapture {
+  const rows: AuditRow[] = []
+  let pendingThrow = opts.throwOnce ?? false
+  return {
+    rows,
+    surface: {
+      writeAuditLog(input: AuditRow) {
+        if (pendingThrow) {
+          pendingThrow = false
+          throw new Error('audit insert failed')
+        }
+        rows.push(input)
+        return { id: 'audit-row', ts: 0 }
+      },
+    },
+  }
+}
+
 interface BootResult {
   tmp: string
   hub: Hub
@@ -113,7 +150,9 @@ interface BootResult {
   stub: Stub
 }
 
-async function boot(opts: { withWorkflows?: boolean } = {}): Promise<BootResult> {
+async function boot(
+  opts: { withWorkflows?: boolean; audit?: AuditCapture } = {},
+): Promise<BootResult> {
   const withWorkflows = opts.withWorkflows ?? true
   const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-wflc-'))
   const init = await Space.init(tmp, { name: 'wflc-test' })
@@ -125,6 +164,10 @@ async function boot(opts: { withWorkflows?: boolean } = {}): Promise<BootResult>
     host: '127.0.0.1',
     port: 0,
     ...(withWorkflows ? { workflows: stub.surface } : {}),
+    // P2-M2 — the workflow routes source their audit sink from `ctx.identity`
+    // (writeAuditLog is the only method they touch). The v3 Space-admin Bearer
+    // resolves before any v4 identity method, so this partial stub is safe.
+    ...(opts.audit ? { identity: opts.audit.surface as unknown as IdentitySurface } : {}),
   })
   return { tmp, hub, server, baseUrl: server.url, adminToken, adminId: admin.id, stub }
 }
@@ -305,5 +348,71 @@ describe('workflow lifecycle routes', () => {
     const r = await authed(b, 'POST', '/api/admin/workflows/wf/publish')
     expect(r.status).toBe(404)
     expect((await r.json()).error).toMatch(/not enabled/i)
+  })
+})
+
+describe('workflow lifecycle audit (P2-M2)', () => {
+  let b: BootResult
+  afterEach(async () => { await teardown(b) })
+
+  it('publish writes one governance row (actor + workflowId + revision)', async () => {
+    const audit = makeAuditCapture()
+    b = await boot({ audit })
+    const r = await authed(b, 'POST', '/api/admin/workflows/wf/publish')
+    expect(r.status).toBe(200)
+    expect(audit.rows).toHaveLength(1)
+    const row = audit.rows[0]!
+    expect(row.action).toBe('workflow_publish')
+    expect(row.actorSource).toBe('v4-session')
+    expect(row.actorUserId).toBe(b.adminId)
+    expect(row.metadata).toMatchObject({ workflowId: 'wf', revision: 1 })
+    expect(row.success).toBe(true)
+  })
+
+  it('import writes a workflow_import row', async () => {
+    const audit = makeAuditCapture()
+    b = await boot({ audit })
+    const r = await fetch(`${b.baseUrl}/api/admin/workflows/import`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${b.adminToken}`, 'content-type': 'text/plain' },
+      body: 'schema: aipehub.workflow/v1',
+    })
+    expect(r.status).toBe(200)
+    expect(audit.rows.map((x) => x.action)).toEqual(['workflow_import'])
+    expect(audit.rows[0]!.metadata).toMatchObject({ workflowId: 'wf' })
+  })
+
+  it('rollback row records the revision it rolled to', async () => {
+    const audit = makeAuditCapture()
+    b = await boot({ audit })
+    const r = await authed(b, 'POST', '/api/admin/workflows/wf/rollback', { targetRevision: 1 })
+    expect(r.status).toBe(200)
+    expect(audit.rows).toHaveLength(1)
+    expect(audit.rows[0]!.action).toBe('workflow_rollback')
+    // stub.rollback returns summary({ currentRevision: 3 }) — the audit row
+    // must pin the revision new runs now bind to, not the rollback target.
+    expect(audit.rows[0]!.metadata).toMatchObject({ workflowId: 'wf', revision: 3 })
+  })
+
+  it('authoring churn (review / draft) writes NO audit row', async () => {
+    const audit = makeAuditCapture()
+    b = await boot({ audit })
+    await authed(b, 'POST', '/api/admin/workflows/wf/review')
+    await authed(b, 'POST', '/api/admin/workflows/wf/draft')
+    expect(audit.rows).toHaveLength(0)
+  })
+
+  it('a failing audit sink never fails the transition', async () => {
+    const audit = makeAuditCapture({ throwOnce: true })
+    b = await boot({ audit })
+    const r = await authed(b, 'POST', '/api/admin/workflows/wf/publish')
+    expect(r.status).toBe(200) // transition succeeded before the audit attempt
+    expect(audit.rows).toHaveLength(0) // the throw prevented the row
+  })
+
+  it('no audit sink wired → transition still 200 (unaudited)', async () => {
+    b = await boot() // no identity surface
+    const r = await authed(b, 'POST', '/api/admin/workflows/wf/publish')
+    expect(r.status).toBe(200)
   })
 })

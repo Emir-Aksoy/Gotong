@@ -46,10 +46,37 @@ import type {
 // to re-export the v3 admin auth internals.
 // ---------------------------------------------------------------------------
 
+/**
+ * P2-M2 — narrow audit-write capability. Structurally satisfied by the
+ * host's `IdentityStore` (its `writeAuditLog` is optional too), so the host
+ * passes its existing `identity` surface here with no extra wiring; web keeps
+ * its zero-identity-runtime-dep posture. Absent (or pre-V4-AUDIT-06) → the
+ * lifecycle transitions still work, just unaudited. The `actorSource` union
+ * mirrors `IdentityAuditActorSource` so `ctx.identity` is assignable verbatim.
+ */
+export interface WorkflowAuditSink {
+  writeAuditLog?(input: {
+    action: string
+    actorSource: 'v4-session' | 'v4-bearer' | 'anonymous' | 'system' | 'federated'
+    actorUserId?: string | null
+    targetUserId?: string | null
+    targetCredentialId?: string | null
+    ip?: string | null
+    userAgent?: string | null
+    metadata?: Record<string, unknown> | null
+    success?: boolean
+  }): unknown
+}
+
 export interface WorkflowRoutesCtx {
   hub: Hub
   workflows: WorkflowSurface | undefined
   workflowAssist: WorkflowAssistSurface | undefined
+  /**
+   * P2-M2 — optional audit sink. The host wires its `identity` surface here;
+   * governance-significant lifecycle transitions write one row through it.
+   */
+  audit?: WorkflowAuditSink
   /**
    * The parent's admin gate. On rejection (401 / 429) this closure
    * writes the response itself and returns `null`; on success it
@@ -114,6 +141,7 @@ export async function handleWorkflowRoute(
     if (!raw) { sendJson(res, { error: 'empty body' }, 400); return true }
     try {
       const summary = await ctx.workflows.importFromText(raw)
+      auditWorkflowTransition(ctx, admin, 'workflow_import', summary)
       sendJson(res, { ok: true, workflow: summary })
     } catch (err) {
       // P2-M1 — a structural rejection (deep-check) carries `code` + `violations`;
@@ -300,6 +328,11 @@ export async function handleWorkflowRoute(
           sendJson(res, { error: `unknown action '${action}'` }, 400)
           return true
       }
+      // Audit only the governance-significant transitions (publish / deprecate /
+      // archive / rollback). review/draft are authoring-internal churn — see
+      // WORKFLOW_AUDIT_ACTION. A null lookup → no row, by design.
+      const auditAction = WORKFLOW_AUDIT_ACTION[action]
+      if (auditAction) auditWorkflowTransition(ctx, admin, auditAction, summary)
       sendJson(res, { ok: true, workflow: summary })
     } catch (err) {
       sendJson(res, lifecycleErrorBody(err), lifecycleErrorStatus(err))
@@ -429,4 +462,51 @@ function lifecycleErrorBody(err: unknown): Record<string, unknown> {
     if (Array.isArray(violations)) body.violations = violations
   }
   return body
+}
+
+/**
+ * P2-M2 — route action → audit action string. Web has no `@aipehub/identity`
+ * runtime dep, so these mirror the `AUDIT_ACTIONS.WORKFLOW_*` literals (same
+ * pattern as setup-routes' `'setup_owner_created'`). Only governance-significant
+ * transitions appear here; `review` / `draft` (back-to-draft) are authoring
+ * churn and deliberately absent → no audit row.
+ */
+const WORKFLOW_AUDIT_ACTION: Readonly<Record<string, string>> = {
+  publish: 'workflow_publish',
+  deprecate: 'workflow_deprecate',
+  archive: 'workflow_archive',
+  rollback: 'workflow_rollback',
+}
+
+/**
+ * P2-M2 — write one governance row for a workflow lifecycle transition.
+ * Best-effort and structurally optional (mirrors identity-routes' `tryAudit`):
+ * a host without an audit sink, or one whose identity surface predates
+ * V4-AUDIT-06, silently skips. The metadata pins the workflow id + the
+ * revision new runs now bind to, so the row answers "what changed to which
+ * revision". Admin actions arrive through the session-backed SPA → actorSource
+ * `'v4-session'`. An audit-insert fault must NEVER fail the transition itself.
+ */
+function auditWorkflowTransition(
+  ctx: WorkflowRoutesCtx,
+  admin: AdminRecord,
+  action: string,
+  summary: WorkflowSummary,
+): void {
+  if (typeof ctx.audit?.writeAuditLog !== 'function') return
+  try {
+    ctx.audit.writeAuditLog({
+      action,
+      actorSource: 'v4-session',
+      actorUserId: admin.id,
+      metadata: {
+        workflowId: summary.id,
+        revision: summary.currentRevision ?? null,
+        state: summary.state ?? null,
+      },
+      success: true,
+    })
+  } catch {
+    // best-effort; see jsdoc — never mask the (already-succeeded) transition.
+  }
 }
