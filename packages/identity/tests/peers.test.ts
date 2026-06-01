@@ -436,8 +436,60 @@ describe('IdentityStore — peers (D1)', () => {
       expect(p.acl).toBeNull()
       expect(p.outboundCaps).toBeNull()
       expect(p.requireApprovalOutbound).toBe(false)
+      // Phase 19 P4-M4 — a legacy row also reads the v15 contract defaults.
+      expect(p.revocationState).toBe('active')
+      expect(p.perLinkQuotaBudget).toBeNull()
+      expect(p.allowedDataClasses).toBeNull()
       s.close()
       await rm(tmp2, { recursive: true, force: true })
+    })
+  })
+
+  // ---------- Phase 19 P4-M4 — per-link trust contract ----------
+
+  describe('per-link trust contract (Phase 19 P4-M4)', () => {
+    it('addPeer without contract fields → safe defaults', () => {
+      const p = store.addPeer({
+        peerId: 'hub_p4def', endpointUrl: 'wss://p4.example', peerToken: 'tok-p4-1',
+      })
+      expect(p.revocationState).toBe('active')
+      expect(p.perLinkQuotaBudget).toBeNull()
+      expect(p.allowedDataClasses).toBeNull()
+    })
+
+    it('addPeer round-trips revocation / quota / data-classes', () => {
+      const p = store.addPeer({
+        peerId: 'hub_p4full', endpointUrl: 'wss://p4f.example', peerToken: 'tok-p4f-1',
+        revocationState: 'revoked',
+        perLinkQuotaBudget: 500,
+        allowedDataClasses: ['public', 'internal'],
+      })
+      for (const r of [p, store.getPeerByPeerId('hub_p4full')!]) {
+        expect(r.revocationState).toBe('revoked')
+        expect(r.perLinkQuotaBudget).toBe(500)
+        expect(r.allowedDataClasses).toEqual(['public', 'internal'])
+      }
+    })
+
+    it('updatePeer sets revocation + preserves untouched contract fields', () => {
+      const p = store.addPeer({
+        peerId: 'hub_p4upd', endpointUrl: 'wss://p4u.example', peerToken: 'tok-p4u-1',
+        perLinkQuotaBudget: 100, allowedDataClasses: ['public'],
+      })
+      const u = store.updatePeer(p.id, { revocationState: 'revoked' })
+      expect(u.revocationState).toBe('revoked')
+      expect(u.perLinkQuotaBudget).toBe(100) // preserved
+      expect(u.allowedDataClasses).toEqual(['public']) // preserved
+    })
+
+    it('updatePeer explicit null CLEARS quota + data-classes', () => {
+      const p = store.addPeer({
+        peerId: 'hub_p4clr', endpointUrl: 'wss://p4c.example', peerToken: 'tok-p4c-1',
+        perLinkQuotaBudget: 100, allowedDataClasses: ['public'],
+      })
+      const u = store.updatePeer(p.id, { perLinkQuotaBudget: null, allowedDataClasses: null })
+      expect(u.perLinkQuotaBudget).toBeNull()
+      expect(u.allowedDataClasses).toBeNull()
     })
   })
 })

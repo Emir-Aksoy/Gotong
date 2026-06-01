@@ -815,7 +815,18 @@ export interface PeerRegistration {
   outboundCaps: string[] | null
   /** Gate outbound cross-org tasks through the member inbox for approval. */
   requireApprovalOutbound: boolean
+  // ---- Phase 19 P4-M4 — per-link trust contract (always present; a
+  //      pre-P4 row reads the v15 column DEFAULTs / NULL). ----
+  /** One-way auditable kill switch. 'revoked' fully disconnects the peer. */
+  revocationState: PeerRevocationState
+  /** Max inbound tasks per budget period; null = unlimited. */
+  perLinkQuotaBudget: number | null
+  /** Outbound data-class allowlist; null = all classes allowed. */
+  allowedDataClasses: string[] | null
 }
+
+/** Phase 19 P4-M4 — a peer link's revocation status. */
+export type PeerRevocationState = 'active' | 'revoked'
 
 export interface AddPeerInput {
   /** Remote hub's wire selfId. Must be unique. */
@@ -836,6 +847,11 @@ export interface AddPeerInput {
   acl?: PeerInboundAcl | null
   outboundCaps?: string[] | null
   requireApprovalOutbound?: boolean
+  // ---- Phase 19 P4-M4 — per-link trust contract (omitted → defaults:
+  //      active, no quota, all data classes). ----
+  revocationState?: PeerRevocationState
+  perLinkQuotaBudget?: number | null
+  allowedDataClasses?: string[] | null
 }
 
 export interface UpdatePeerInput {
@@ -856,6 +872,12 @@ export interface UpdatePeerInput {
   acl?: PeerInboundAcl | null
   outboundCaps?: string[] | null
   requireApprovalOutbound?: boolean
+  // ---- Phase 19 P4-M4 — per-link trust contract. undefined = preserve;
+  //      an explicit null on perLinkQuotaBudget / allowedDataClasses CLEARS
+  //      it (back to unlimited / all-allowed). revocationState has no null. ----
+  revocationState?: PeerRevocationState
+  perLinkQuotaBudget?: number | null
+  allowedDataClasses?: string[] | null
 }
 
 export interface ListPeersQuery {

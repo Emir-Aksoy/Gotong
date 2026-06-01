@@ -609,6 +609,33 @@ const MIGRATIONS: Migration[] = [
         ON usage_ledger(peer_id, ts DESC);
     `,
   },
+  {
+    // Phase 19 P4-M4 — per-link trust contract (the rest of a peer's policy
+    // beyond v12's ACL / allowlist / approval). Three additive columns, each
+    // nullable or defaulted so an un-migrated row keeps today's behaviour:
+    // not revoked, no per-link quota, all data classes allowed.
+    //
+    //   revocation_state          'active' | 'revoked' — a one-way, auditable
+    //                             kill switch distinct from enabled (which is
+    //                             a reversible on/off). A revoked peer is never
+    //                             dialed, inbound is refused, and a live link is
+    //                             torn down.
+    //   per_link_quota_budget     max inbound tasks this peer may dispatch per
+    //                             rolling budget period; NULL / <=0 = unlimited.
+    //                             Enforced fail-closed at the inbound gate,
+    //                             independently per peer (no cross-link bleed).
+    //   allowed_data_classes_json outbound data-class allowlist (string[]);
+    //                             NULL = all classes allowed. A task that
+    //                             declares data classes not in this set is
+    //                             refused before it leaves to the peer.
+    version: 15,
+    name: 'peer-link-contract',
+    sql: `
+      ALTER TABLE peers ADD COLUMN revocation_state TEXT NOT NULL DEFAULT 'active';
+      ALTER TABLE peers ADD COLUMN per_link_quota_budget INTEGER;
+      ALTER TABLE peers ADD COLUMN allowed_data_classes_json TEXT;
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {

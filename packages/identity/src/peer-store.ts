@@ -29,6 +29,7 @@ import {
   type PeerInboundAcl,
   type PeerKind,
   type PeerRegistration,
+  type PeerRevocationState,
   type UpdatePeerInput,
 } from './types.js'
 
@@ -46,6 +47,10 @@ interface PeerRow {
   acl_json: string | null
   outbound_caps_json: string | null
   require_approval_outbound: number
+  // Phase 19 P4-M4 — per-link trust contract columns (schema v15).
+  revocation_state: string
+  per_link_quota_budget: number | null
+  allowed_data_classes_json: string | null
 }
 
 export class PeerStore {
@@ -117,6 +122,12 @@ export class PeerStore {
           input.acl != null ? JSON.stringify(input.acl) : null,
           input.outboundCaps != null ? JSON.stringify(input.outboundCaps) : null,
           input.requireApprovalOutbound ? 1 : 0,
+          // Phase 19 P4-M4 — per-link contract; omitted → v15 column defaults.
+          input.revocationState ?? 'active',
+          input.perLinkQuotaBudget ?? null,
+          input.allowedDataClasses != null
+            ? JSON.stringify(input.allowedDataClasses)
+            : null,
         )
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -212,6 +223,23 @@ export class PeerStore {
             ? 1
             : 0
           : existing.require_approval_outbound
+      // Phase 19 P4-M4 — per-link contract. undefined preserves; explicit null
+      // on quota / data-classes clears (unlimited / all-allowed). revocationState
+      // has no null — omit to preserve, pass 'active'/'revoked' to set.
+      const revocationState =
+        input.revocationState !== undefined
+          ? input.revocationState
+          : existing.revocation_state
+      const perLinkQuotaBudget =
+        input.perLinkQuotaBudget !== undefined
+          ? input.perLinkQuotaBudget
+          : existing.per_link_quota_budget
+      const allowedDataClassesJson =
+        input.allowedDataClasses !== undefined
+          ? input.allowedDataClasses === null
+            ? null
+            : JSON.stringify(input.allowedDataClasses)
+          : existing.allowed_data_classes_json
       this.stmtPeerUpdate.run(
         endpointUrl,
         label,
@@ -221,6 +249,9 @@ export class PeerStore {
         aclJson,
         outboundCapsJson,
         requireApprovalOutbound,
+        revocationState,
+        perLinkQuotaBudget,
+        allowedDataClassesJson,
         Date.now(),
         id,
       )
@@ -267,8 +298,9 @@ export class PeerStore {
       `INSERT INTO peers(
          id, peer_id, endpoint_url, label, enabled, vault_entry_id,
          created_at, updated_at,
-         kind, acl_json, outbound_caps_json, require_approval_outbound
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         kind, acl_json, outbound_caps_json, require_approval_outbound,
+         revocation_state, per_link_quota_budget, allowed_data_classes_json
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ))
   }
   private get stmtPeerById(): SqliteStmt {
@@ -296,7 +328,9 @@ export class PeerStore {
       `UPDATE peers
          SET endpoint_url = ?, label = ?, enabled = ?, vault_entry_id = ?,
              kind = ?, acl_json = ?, outbound_caps_json = ?,
-             require_approval_outbound = ?, updated_at = ?
+             require_approval_outbound = ?,
+             revocation_state = ?, per_link_quota_budget = ?,
+             allowed_data_classes_json = ?, updated_at = ?
        WHERE id = ?`,
     ))
   }
@@ -337,6 +371,11 @@ function rowToPeerRegistration(r: PeerRow): PeerRegistration {
     acl: parsePolicyJson<PeerInboundAcl>(r.acl_json),
     outboundCaps: parsePolicyJson<string[]>(r.outbound_caps_json),
     requireApprovalOutbound: r.require_approval_outbound !== 0,
+    // Phase 19 P4-M4 per-link contract projection.
+    revocationState: r.revocation_state === 'revoked' ? 'revoked' : 'active',
+    perLinkQuotaBudget:
+      typeof r.per_link_quota_budget === 'number' ? r.per_link_quota_budget : null,
+    allowedDataClasses: parsePolicyJson<string[]>(r.allowed_data_classes_json),
   }
 }
 
