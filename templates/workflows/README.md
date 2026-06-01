@@ -47,6 +47,8 @@ workflows/
   # 🏭 行业模板（Phase 19 P5）—— 声明 governance 风险元数据，mock provider E2E 跑通
   contract-review-flow.yaml        🏭 合同审阅 + 法务复核
                                    (extract→assess→👤法务签字→memo；HITL approve)
+  lead-qualification-flow.yaml     🏭 销售线索资格审查 + CRM 回写
+                                   (enrich→score→[合格才]outreach→crm-sync；when 条件)
 ```
 
 ⭐ = 配套 `templates/teams/` 下同名团队使用。

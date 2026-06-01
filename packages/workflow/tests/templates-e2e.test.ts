@@ -133,3 +133,55 @@ describe('industry template E2E — contract-review-flow (P5-M5)', () => {
     ])
   })
 })
+
+describe('industry template E2E — lead-qualification-flow (P5-M6)', () => {
+  const handlers = (qualified: boolean): Record<string, CapHandler> => ({
+    'lead-enrich': (p) => {
+      expect((p.lead as { company: string }).company).toBe('Kopitiam Co')
+      return { company: 'Kopitiam Co', size: 'SMB', industry: 'F&B' }
+    },
+    'lead-score': () => ({ score: qualified ? 85 : 30, qualified, segment: qualified ? 'enterprise' : 'low' }),
+    'lead-outreach': (p) => {
+      expect((p.score as { qualified: boolean }).qualified).toBe(true)
+      return { subject: 'Hello from us', body: '...' }
+    },
+    'crm-upsert': () => ({ crmId: 'crm-123', synced: true }),
+  })
+
+  it('qualified lead → drafts outreach, then syncs CRM (when: true branch)', async () => {
+    const { result, calls } = await runTemplate(
+      'lead-qualification-flow.yaml',
+      'qualify-lead',
+      { name: 'Mei', email: 'mei@example.com', company: 'Kopitiam Co' },
+      handlers(true),
+    )
+    expect(result.kind).toBe('ok')
+    if (result.kind !== 'ok') throw new Error('expected ok')
+    const out = result.output as { outreach?: { subject: string }; crm: { synced: boolean } }
+    expect(out.outreach?.subject).toBe('Hello from us')
+    expect(out.crm.synced).toBe(true)
+    // outreach DID run; crm-sync saw it
+    expect(calls.map((c) => c.cap)).toEqual(['lead-enrich', 'lead-score', 'lead-outreach', 'crm-upsert'])
+    const crmCall = calls.find((c) => c.cap === 'crm-upsert')!
+    expect((crmCall.payload.outreach as { subject: string }).subject).toBe('Hello from us')
+  })
+
+  it('unqualified lead → skips outreach, still syncs CRM (when: false branch)', async () => {
+    const { result, calls } = await runTemplate(
+      'lead-qualification-flow.yaml',
+      'qualify-lead',
+      { name: 'Mei', email: 'mei@example.com', company: 'Kopitiam Co' },
+      handlers(false),
+    )
+    expect(result.kind).toBe('ok')
+    if (result.kind !== 'ok') throw new Error('expected ok')
+    const out = result.output as { outreach?: unknown; crm: { synced: boolean } }
+    // the conditional step was skipped — its $ref resolves to undefined
+    expect(out.outreach).toBeUndefined()
+    expect(out.crm.synced).toBe(true)
+    // lead-outreach was NEVER dispatched
+    expect(calls.map((c) => c.cap)).toEqual(['lead-enrich', 'lead-score', 'crm-upsert'])
+    const crmCall = calls.find((c) => c.cap === 'crm-upsert')!
+    expect(crmCall.payload.outreach).toBeUndefined()
+  })
+})

@@ -1,0 +1,94 @@
+# =============================================================================
+# Workflow: 销售线索资格审查 + CRM 回写 (lead qualification with CRM sync)
+# Schema: aipehub.workflow/v1
+#
+# 行业模板 #2 (Phase 19 P5-M6). 演示「AI 富化 + 条件分流 + 回写外部系统」:
+#   1) AI 富化原始线索 (推断公司规模 / 行业 / 意向)
+#   2) AI 打分 + 分层, 给一个 qualified 布尔
+#   3) **条件步**: 只有 qualified 的线索才起草个性化触达邮件 (when: 谓词)
+#   4) 把线索 + 评分 (+ 触达稿) 回写 CRM (外部系统)
+#
+# 吃两块 v4 能力:
+#   - P5-M8a `governance`: data_sensitivity=pii (线索含联系方式),
+#     external_systems=[crm-api] (回写外部), 风险摘要 import 前可见。
+#   - workflow `when:` 条件执行: 不合格的线索跳过触达, 省 token 省骚扰。
+#
+# 派发: admin / 销售团队派 capability=qualify-lead, 携带原始线索字段。
+# 配套 agents 需提供: lead-enrich / lead-score / lead-outreach (LlmAgent)
+#   + crm-upsert (一个写 CRM 的 agent / MCP 工具桥, 见 examples/rag-mcp 思路)。
+# =============================================================================
+
+schema: aipehub.workflow/v1
+
+workflow:
+  id: lead-qualification-flow
+  name: 销售线索资格审查 + CRM 回写
+  description: AI 富化 + 打分 → 合格才起草触达 → 回写 CRM
+
+  governance:
+    data_sensitivity: pii
+    required_credentials: [anthropic, crm-api]
+    expected_cost_usd: 0.03
+    external_systems: [crm-api]
+    notes: 线索含姓名 / 邮箱 / 电话 (PII); 评分与触达稿回写 CRM, 注意数据出境合规。
+
+  trigger:
+    capability: qualify-lead
+    payload_schema:
+      - id: name
+        label: 联系人
+        type: text
+        required: true
+      - id: email
+        label: 邮箱
+        type: text
+      - id: company
+        label: 公司
+        type: text
+      - id: note
+        label: 来源备注
+        type: textarea
+        rows: 3
+
+  steps:
+    - id: enrich
+      description: 富化线索 — 推断公司规模 / 行业 / 意向
+      dispatch:
+        strategy: { kind: capability, capabilities: [lead-enrich] }
+        title: "富化线索: $trigger.payload.company"
+        payload:
+          lead: $trigger.payload
+
+    - id: score
+      description: 打分 + 分层, 给 qualified 布尔
+      dispatch:
+        strategy: { kind: capability, capabilities: [lead-score] }
+        title: 线索打分
+        payload:
+          enriched: $enrich.output
+
+    - id: outreach
+      description: 仅合格线索起草个性化触达邮件 (条件步)
+      when: $score.output.qualified == true
+      dispatch:
+        strategy: { kind: capability, capabilities: [lead-outreach] }
+        title: 起草触达邮件
+        payload:
+          lead: $enrich.output
+          score: $score.output
+
+    - id: crm-sync
+      description: 把线索 + 评分 (+ 触达稿) 回写 CRM
+      dispatch:
+        strategy: { kind: capability, capabilities: [crm-upsert] }
+        title: 回写 CRM
+        payload:
+          lead: $enrich.output
+          score: $score.output
+          outreach: $outreach.output
+
+  output:
+    enrichment: $enrich.output
+    score: $score.output
+    outreach: $outreach.output
+    crm: $crm-sync.output
