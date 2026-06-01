@@ -1211,6 +1211,22 @@ async function main(): Promise<void> {
     mcpFederation,
     peerManifests: peerFederation,
     workflows: workflowController,
+    // Phase 19 P1-M3 — sanitized agent directory for /api/me/agents. Project
+    // the managed-agent roster to {id,label,capabilities,online}; the system
+    // prompt / model / provider config / per-agent key never leave the host,
+    // so a member's "my AI helpers" view can't read another agent's config.
+    meAgents: {
+      async listForMembers() {
+        const recs = await space.agents()
+        const liveIds = new Set(hub.participants().map((p) => p.id))
+        return recs.map((a) => ({
+          id: a.id,
+          label: a.displayName ?? a.id,
+          capabilities: [...a.allowedCapabilities],
+          online: liveIds.has(a.id),
+        }))
+      },
+    },
     // Phase 16 — member task inbox; undefined when identity is unwired, in
     // which case /me/inbox degrades (empty list / 503).
     ...(inboxService ? { inbox: inboxService } : {}),

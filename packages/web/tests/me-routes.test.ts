@@ -141,6 +141,8 @@ async function boot(
     adminLoginRateLimit?: { max: number; windowSec: number }
     /** Phase 14 — member-facing workflow catalog source. */
     workflows?: WorkflowSummary[]
+    /** Phase 19 P1-M3 — sanitized agent directory for /api/me/agents. */
+    meAgents?: Array<{ id: string; label: string; capabilities: string[]; online: boolean; description?: string }>
   } = {},
 ): Promise<BootResult> {
   const withGrowthReports = opts.withGrowthReports ?? true
@@ -193,6 +195,7 @@ async function boot(
     identity,
     ...(withGrowthReports ? { growthReports } : {}),
     ...(workflowSurface ? { workflows: workflowSurface } : {}),
+    ...(opts.meAgents ? { meAgents: { listForMembers: async () => opts.meAgents! } } : {}),
     ...(opts.adminLoginRateLimit
       ? { adminLoginRateLimit: opts.adminLoginRateLimit }
       : {}),
@@ -463,6 +466,48 @@ describe('/api/me/runs — member run history (Phase 19 P1-M2)', () => {
       const r = await fetch(`${b2.baseUrl}/api/me/runs`, { headers: { cookie: b2.memberCookie } })
       expect(r.status).toBe(200)
       expect((await r.json() as { runs: unknown[] }).runs).toEqual([])
+    } finally {
+      await teardown(b2)
+    }
+  })
+})
+
+describe('/api/me/agents — sanitized agent directory (Phase 19 P1-M3)', () => {
+  const AGENTS = [
+    { id: 'writer-zh', label: '中文写作助手', capabilities: ['write-zh', 'summarize'], online: true },
+    { id: 'tester', label: 'tester', capabilities: ['run-tests'], online: false },
+  ]
+
+  let b: BootResult
+  beforeEach(async () => { b = await boot({ meAgents: AGENTS }) })
+  afterEach(async () => { await teardown(b) })
+
+  it('lists the sanitized agents for a member (label + capabilities + online)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/me/agents`, { headers: { cookie: b.memberCookie } })
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { agents: Array<Record<string, unknown>> }
+    expect(body.agents.map((a) => a.id)).toEqual(['writer-zh', 'tester'])
+    const w = body.agents[0]!
+    expect(w.label).toBe('中文写作助手')
+    expect(w.capabilities).toEqual(['write-zh', 'summarize'])
+    expect(w.online).toBe(true)
+    // Critical: no sensitive fields ever leak to a member.
+    for (const key of ['managed', 'system', 'systemPrompt', 'apiKey', 'apiKeyHash', 'baseURL', 'model']) {
+      expect(key in w).toBe(false)
+    }
+  })
+
+  it('requires a v4 session (anonymous → 401)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/me/agents`)
+    expect(r.status).toBe(401)
+  })
+
+  it('returns an empty list when the host wired no agent surface', async () => {
+    const b2 = await boot() // no meAgents → ctx.meAgents undefined
+    try {
+      const r = await fetch(`${b2.baseUrl}/api/me/agents`, { headers: { cookie: b2.memberCookie } })
+      expect(r.status).toBe(200)
+      expect((await r.json() as { agents: unknown[] }).agents).toEqual([])
     } finally {
       await teardown(b2)
     }

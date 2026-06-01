@@ -34,7 +34,7 @@ import {
   type IdentitySurface,
   type IdentityPeerReputationDTO,
 } from './identity-routes.js'
-import { handleMeRoute, type InboxSurface } from './me-routes.js'
+import { handleMeRoute, type InboxSurface, type MeAgentListSurface } from './me-routes.js'
 import { handleWorkflowRoute } from './workflow-routes.js'
 import { handleAgentsRoute } from './agents-routes.js'
 import { handleServicesRoute } from './services-routes.js'
@@ -227,6 +227,13 @@ export interface WebServerOptions {
    * runner. When absent, the workflow API endpoints return 404.
    */
   workflows?: WorkflowSurface
+  /**
+   * Phase 19 P1-M3 — optional sanitized agent directory for `/api/me/agents`.
+   * The host wires a projection of its managed agents that excludes every
+   * sensitive field (system prompt / model / provider config / keys). Absent
+   * → `/api/me/agents` degrades to an empty list.
+   */
+  meAgents?: MeAgentListSurface
   /**
    * Phase 13 M3 — optional workflow assistant surface. The host wires
    * `createWorkflowAssistAgent(...)` here when a built-in
@@ -754,6 +761,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     workerCreateLimiter,
     lifecycle: opts.lifecycle,
     workflows: opts.workflows,
+    meAgents: opts.meAgents,
     workflowAssist: opts.workflowAssist,
     services: opts.services,
     growthReports: opts.growthReports,
@@ -879,6 +887,8 @@ interface HandlerCtx {
   workerCreateLimiter: RateLimiter
   lifecycle: ManagedAgentLifecycle | undefined
   workflows: WorkflowSurface | undefined
+  /** Phase 19 P1-M3 — see WebServerOptions.meAgents doc above. */
+  meAgents: MeAgentListSurface | undefined
   /** Phase 13 M3 — see WebServerOptions.workflowAssist doc above. */
   workflowAssist: WorkflowAssistSurface | undefined
   services: ServicesAdminSurface | undefined
@@ -1456,6 +1466,8 @@ async function handle(
         // WorkflowSurface structurally satisfies the narrow MeRunSurface
         // (its listRunsByUser returns the wider WorkflowRunSummary).
         runs: ctx.workflows,
+        // Phase 19 P1-M3 — sanitized agent directory; undefined → empty list.
+        meAgents: ctx.meAgents,
         // Phase 16 — member task inbox; undefined → /me/inbox degrades.
         inbox: ctx.inbox,
       },

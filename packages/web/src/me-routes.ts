@@ -272,6 +272,37 @@ export interface MeRunSurface {
 }
 
 // ---------------------------------------------------------------------------
+// Member agent directory surface (Phase 19 P1-M3)
+//
+// Duck-typed; the HOST does the sanitization and hands the web layer ONLY the
+// safe projection (`MeAgentView`). The raw `AgentRecord.managed` block — system
+// prompt, model, provider baseURL, any per-agent key — never crosses into the
+// web layer, so a member can never read another participant's prompt or config.
+// Capabilities ARE surfaced: they're functional "what can this helper do"
+// labels, not secrets.
+// ---------------------------------------------------------------------------
+
+/** Sanitized projection of a managed agent — what a member's client sees. */
+export interface MeAgentView {
+  id: string
+  label: string
+  capabilities: string[]
+  /** Whether the agent is currently registered on the Hub. */
+  online: boolean
+  /**
+   * Reserved for a short, non-sensitive human description. NOT populated from
+   * the system prompt (that's deliberately excluded). Optional until the agent
+   * model carries a safe description field.
+   */
+  description?: string
+}
+
+export interface MeAgentListSurface {
+  /** All host-managed agents, sanitized. Same view for every member. */
+  listForMembers(): Promise<MeAgentView[]>
+}
+
+// ---------------------------------------------------------------------------
 // Member task inbox surface (Phase 16)
 //
 // Duck-typed so the web layer takes no runtime dep on `@aipehub/inbox`; the
@@ -336,6 +367,11 @@ export interface HandleMeRouteCtx {
    */
   runs: MeRunSurface | undefined
   /**
+   * Phase 19 P1-M3 — sanitized agent directory. Undefined when the host wired
+   * no agent surface; `/api/me/agents` then degrades to an empty list.
+   */
+  meAgents: MeAgentListSurface | undefined
+  /**
    * Phase 16 — member task inbox. Undefined when the host wired no inbox;
    * the /me/inbox routes then degrade to an empty list / 503.
    */
@@ -378,6 +414,12 @@ export async function handleMeRoute(
   // can never read another user's run history.
   if (method === 'GET' && path === '/api/me/runs') {
     await handleMeListRuns(ctx, res, userId)
+    return
+  }
+  // Phase 19 P1-M3 — sanitized agent directory ("my AI helpers"). Same view
+  // for every member; the host already stripped prompts / keys / config.
+  if (method === 'GET' && path === '/api/me/agents') {
+    await handleMeListAgents(ctx, res)
     return
   }
   // Phase 7 M5 — org mode for the SPA shell. Every signed-in user can
@@ -746,6 +788,31 @@ async function handleMeListRuns(
     return out
   })
   sendJson(res, { runs })
+}
+
+// ---------------------------------------------------------------------------
+// GET /api/me/agents — sanitized agent directory (Phase 19 P1-M3)
+// ---------------------------------------------------------------------------
+
+async function handleMeListAgents(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+): Promise<void> {
+  if (!ctx.meAgents) {
+    // No agent surface wired → empty list (mirrors the catalog degradation).
+    sendJson(res, { agents: [] })
+    return
+  }
+  let agents: MeAgentView[]
+  try {
+    agents = await ctx.meAgents.listForMembers()
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
+    return
+  }
+  // The host already sanitized — pass through verbatim (no prompt / key /
+  // config to strip here).
+  sendJson(res, { agents })
 }
 
 // ---------------------------------------------------------------------------
