@@ -400,6 +400,9 @@ importers:
       '@aipehub/core':
         specifier: workspace:*
         version: link:../core
+      '@aipehub/evals':
+        specifier: workspace:*
+        version: link:../evals
       '@aipehub/identity':
         specifier: workspace:*
         version: link:../identity

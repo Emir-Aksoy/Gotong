@@ -50,6 +50,7 @@
   "dependencies": {
     "@aipehub/a2a": "workspace:*",
     "@aipehub/core": "workspace:*",
+    "@aipehub/evals": "workspace:*",
     "@aipehub/identity": "workspace:*",
     "@aipehub/inbox": "workspace:*",
     "@aipehub/llm": "workspace:*",

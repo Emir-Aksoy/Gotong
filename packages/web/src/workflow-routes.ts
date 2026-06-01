@@ -116,7 +116,9 @@ export async function handleWorkflowRoute(
       const summary = await ctx.workflows.importFromText(raw)
       sendJson(res, { ok: true, workflow: summary })
     } catch (err) {
-      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
+      // P2-M1 — a structural rejection (deep-check) carries `code` + `violations`;
+      // lifecycleErrorStatus maps unknown codes to 400 (same as before).
+      sendJson(res, lifecycleErrorBody(err), lifecycleErrorStatus(err))
     }
     return true
   }
@@ -137,7 +139,7 @@ export async function handleWorkflowRoute(
       const summary = await ctx.workflows.saveDraft(raw, { by: admin.id })
       sendJson(res, { ok: true, workflow: summary })
     } catch (err) {
-      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, lifecycleErrorStatus(err))
+      sendJson(res, lifecycleErrorBody(err), lifecycleErrorStatus(err))
     }
     return true
   }
@@ -300,11 +302,7 @@ export async function handleWorkflowRoute(
       }
       sendJson(res, { ok: true, workflow: summary })
     } catch (err) {
-      sendJson(
-        res,
-        { error: err instanceof Error ? err.message : String(err) },
-        lifecycleErrorStatus(err),
-      )
+      sendJson(res, lifecycleErrorBody(err), lifecycleErrorStatus(err))
     }
     return true
   }
@@ -411,4 +409,24 @@ function lifecycleErrorStatus(err: unknown): number {
     default:
       return 400
   }
+}
+
+/**
+ * Build the JSON error body for a workflow lifecycle / structural failure.
+ * Always carries `error` (message); adds `code` + `violations` when the thrown
+ * error carries them — P2-M1 attaches the deep-check `violations` array to a
+ * `structure_check_failed` error so the admin UI can render the offending
+ * fields, not just a flat string.
+ */
+function lifecycleErrorBody(err: unknown): Record<string, unknown> {
+  const body: Record<string, unknown> = {
+    error: err instanceof Error ? err.message : String(err),
+  }
+  if (err && typeof err === 'object') {
+    const code = (err as { code?: unknown }).code
+    if (typeof code === 'string') body.code = code
+    const violations = (err as { violations?: unknown }).violations
+    if (Array.isArray(violations)) body.violations = violations
+  }
+  return body
 }

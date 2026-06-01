@@ -33,6 +33,7 @@ const log = createLogger('workflow-ctl')
 import {
   RunStore,
   WorkflowRunner,
+  WorkflowLifecycleError,
   parseWorkflow,
   workflowParticipantId,
   type LifecycleState,
@@ -41,6 +42,11 @@ import {
   type RunSummary,
   type WorkflowDefinition,
 } from '@aipehub/workflow'
+import {
+  checkWorkflowStructure,
+  type WorkflowInventory,
+  type WorkflowStructureViolation,
+} from '@aipehub/evals/checkers/workflow-structure'
 
 import type { LoadReport } from './workflow-loader.js'
 import { assertNoSelfTriggerCycle } from './workflow-guards.js'
@@ -294,12 +300,66 @@ export class WorkflowController {
   // --- import / lifecycle drivers -----------------------------------------
 
   /**
+   * P2-M1 — runtime-aware structural gate. Runs `checkWorkflowStructure` against
+   * a live inventory (every registered participant's capabilities) and throws on
+   * violations that would break the workflow. The complement to
+   * `assertNoSelfTriggerCycle` (self-trigger only): this also catches bad/forward
+   * step `$ref`s and explicit dispatch at agents that don't exist — things
+   * `parseWorkflow` accepts but the runner would choke on.
+   *
+   * Grading (see {@link isBlockingViolation}):
+   *   🔴 HARD — pure structural bugs no later agent registration can fix; reject
+   *      on EVERY write path (import / draft / publish):
+   *      `bad_ref` / `forward_ref` / `self_trigger_cycle` / `id_collision`.
+   *   🟡 `unknown_agent` — explicit `strategy.to` at an unregistered id. Likely a
+   *      typo but might be cross-hub → block a deliberate go-live (`blockWarnings`
+   *      = import / publish), tolerate on a draft.
+   *   ⚪ `unknown_capability` — ADVISORY only, never throws: importing a workflow
+   *      before its agents exist is a legitimate ordering (the bundle path; the
+   *      "no_participant until an agent registers" runtime self-heals). It still
+   *      rides along in the deep-check result the web layer surfaces.
+   *
+   * NOT called from `adoptAtBoot`: boot agent-registration order is undefined, so
+   * a boot-time check would false-fail on a workflow whose agents merely haven't
+   * registered yet. Interactive-write-only.
+   *
+   * `id_collision` is not surfaced here — `importFromText` rejects a duplicate id
+   * up front and publish/saveDraft act on an existing id — so no
+   * `existingWorkflowIds` is passed (it would self-collide on every re-save).
+   */
+  private assertStructurallySound(
+    def: WorkflowDefinition,
+    opts: { blockWarnings: boolean },
+  ): void {
+    const inventory: WorkflowInventory = {
+      agents: this.hub.participants().map((p) => ({
+        id: p.id,
+        capabilities: [...p.capabilities],
+      })),
+    }
+    const { violations } = checkWorkflowStructure(def, inventory)
+    const blocking = violations.filter((v) => isBlockingViolation(v.kind, opts.blockWarnings))
+    if (blocking.length === 0) return
+    const detail = blocking.map((v) => `${v.kind} @ ${v.path}: ${v.message}`).join('; ')
+    const err = new WorkflowLifecycleError(
+      `workflow '${def.id}' failed structural check — ${detail}`,
+      'structure_check_failed',
+    )
+    // Attach the structured violations so the web layer can echo them to the
+    // admin UI deep-check panel instead of only a flat message string.
+    ;(err as { violations?: WorkflowStructureViolation[] }).violations = blocking
+    throw err
+  }
+
+  /**
    * Model-B import: parse, write the YAML atomically, and `adopt` as a published
    * rev1 (immediately live). Rejects a duplicate id — delete it first.
    */
   async importFromText(text: string): Promise<WorkflowSummary> {
     const def = parseWorkflow(text)
     assertNoSelfTriggerCycle(def)
+    // Import = go live → block hard violations AND warnings (unknown_agent).
+    this.assertStructurallySound(def, { blockWarnings: true })
     if (await this.versioning.has(def.id)) {
       throw new Error(
         `workflow id '${def.id}' is already loaded — delete it first (v0.1 does not support re-import).`,
@@ -324,6 +384,9 @@ export class WorkflowController {
   async saveDraft(text: string, opts: { by?: string } = {}): Promise<WorkflowSummary> {
     const def = parseWorkflow(text)
     assertNoSelfTriggerCycle(def)
+    // Draft = not live → block hard violations but TOLERATE `unknown_agent`
+    // (the author may add the agent before publishing). Publish re-checks.
+    this.assertStructurallySound(def, { blockWarnings: false })
     const existed = await this.versioning.has(def.id)
     const filePath = await this.writeDefinitionFile(def, text)
     try {
@@ -354,6 +417,8 @@ export class WorkflowController {
       if (def.id !== id) {
         throw new Error(`workflow id mismatch: body declares '${def.id}', expected '${id}'`)
       }
+      // Publish = go live → block hard violations AND warnings.
+      this.assertStructurallySound(def, { blockWarnings: true })
       await this.writeDefinitionFile(def, opts.text)
       await this.versioning.publish(id, {
         definition: def,
@@ -361,6 +426,11 @@ export class WorkflowController {
       })
       this.known.set(id, { file: join(this.definitionsDir, `${sanitiseFileBase(id)}.yaml`) })
     } else {
+      // No new text — promoting the current head to live. Deep-check the head
+      // definition too: a draft may have been saved WITH an `unknown_agent`
+      // warning (allowed), but going live must still block it.
+      const headDef = await this.versioning.headDefinition(id)
+      this.assertStructurallySound(headDef, { blockWarnings: true })
       await this.versioning.publish(id, opts.by !== undefined ? { by: opts.by } : {})
     }
     return this.summary(id)
@@ -471,6 +541,30 @@ const STATE_RANK: Record<LifecycleState, number> = {
   review: 2,
   draft: 3,
   archived: 4,
+}
+
+/**
+ * Pure-structural deep-check violations that no later agent registration can
+ * fix — they're bugs in the workflow definition itself, so they block EVERY
+ * write path (import / draft / publish). See `assertStructurallySound`.
+ */
+const HARD_VIOLATION_KINDS: ReadonlySet<string> = new Set([
+  'bad_ref',
+  'forward_ref',
+  'self_trigger_cycle',
+  'id_collision',
+])
+
+/**
+ * Does a deep-check violation BLOCK the write (vs. ride along as advisory)?
+ *   - HARD kinds always block.
+ *   - `unknown_agent` blocks only a deliberate go-live (`blockWarnings`): import
+ *     and publish, never a draft.
+ *   - `unknown_capability` (and anything else) is advisory — surfaced, not thrown.
+ */
+function isBlockingViolation(kind: string, blockWarnings: boolean): boolean {
+  if (HARD_VIOLATION_KINDS.has(kind)) return true
+  return blockWarnings && kind === 'unknown_agent'
 }
 
 /**

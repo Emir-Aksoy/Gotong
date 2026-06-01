@@ -349,6 +349,27 @@ export class WorkflowVersioning {
     return [...entry.record.revisions].sort((a, b) => a.revision - b.revision)
   }
 
+  /**
+   * The definition at the HEAD revision (latest saved content) — what a no-text
+   * `publish` promotes to live. P2-M1: the controller deep-checks this before a
+   * promote-publish, since a draft saved WITH an `unknown_agent` warning (which
+   * is allowed for drafts) must still be blocked from going live. Throws
+   * `unknown_workflow` if absent, `revision_missing` if the snapshot is somehow
+   * not loaded (shouldn't happen after a normal load).
+   */
+  async headDefinition(id: string): Promise<WorkflowDefinition> {
+    const entry = await this.require(id)
+    const rev = entry.record.headRevision
+    const def = entry.defs.get(rev)
+    if (!def) {
+      throw new WorkflowRevisionError(
+        `workflow '${id}' head revision ${rev} is not available`,
+        'revision_missing',
+      )
+    }
+    return def
+  }
+
   /** Full lifecycle view for `id`. Throws `unknown_workflow` if absent. */
   async getState(id: string): Promise<WorkflowLifecycleView> {
     const entry = await this.require(id)

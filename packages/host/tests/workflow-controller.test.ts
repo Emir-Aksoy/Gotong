@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, InMemoryStorage } from '@aipehub/core'
+import { Hub, HumanParticipant, InMemoryStorage } from '@aipehub/core'
 import { RunStore } from '@aipehub/workflow'
 
 import { WorkflowController, createWorkflowController } from '../src/workflow-controller.js'
@@ -425,6 +425,110 @@ workflow:
       expect(got!.finalOutput).toBe('final')
 
       expect(await c.readRun('nope')).toBeNull()
+    })
+  })
+
+  // P2-M1 — runtime-aware structural gate on import / draft / publish.
+  describe('structural deep-check gate (P2-M1)', () => {
+    // bad_ref: a step payload references a step that doesn't exist. Pure
+    // structural → rejected on every path, even with no agents registered.
+    const BAD_REF = `
+schema: aipehub.workflow/v1
+workflow:
+  id: bad-ref-wf
+  trigger: { capability: badref:start }
+  steps:
+    - id: only
+      dispatch:
+        strategy: { kind: capability, capabilities: [whatever] }
+        payload: { x: $ghost.output }
+`
+    // forward_ref: 'first' references 'second.output', but 'second' runs later.
+    const FORWARD_REF = `
+schema: aipehub.workflow/v1
+workflow:
+  id: fwd-ref-wf
+  trigger: { capability: fwd:start }
+  steps:
+    - id: first
+      dispatch:
+        strategy: { kind: capability, capabilities: [a] }
+        payload: { x: $second.output }
+    - id: second
+      dispatch:
+        strategy: { kind: capability, capabilities: [b] }
+        payload: {}
+`
+    // unknown_agent: explicit dispatch at an id that isn't registered.
+    const NEEDS_GHOST = `
+schema: aipehub.workflow/v1
+workflow:
+  id: needs-ghost
+  trigger: { capability: ghost:start }
+  steps:
+    - id: only
+      dispatch:
+        strategy: { kind: explicit, to: ghost-agent }
+        payload: $trigger.payload
+`
+
+    it('rejects a bad_ref workflow at import, carrying code + violations', async () => {
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      let caught: unknown
+      await c.importFromText(BAD_REF).catch((e) => {
+        caught = e
+      })
+      expect(caught).toBeInstanceOf(Error)
+      expect((caught as { code?: string }).code).toBe('structure_check_failed')
+      // Structured violations ride along so the web layer can surface them.
+      const violations = (caught as { violations?: Array<{ kind: string }> }).violations
+      expect(Array.isArray(violations)).toBe(true)
+      expect(violations!.some((v) => v.kind === 'bad_ref')).toBe(true)
+      // Nothing registered / written on a rejected import.
+      expect(hub.registry.get('workflow:bad-ref-wf')).toBeUndefined()
+    })
+
+    it('rejects a forward_ref workflow at import (hard)', async () => {
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      await expect(c.importFromText(FORWARD_REF)).rejects.toMatchObject({
+        code: 'structure_check_failed',
+      })
+      expect(hub.registry.get('workflow:fwd-ref-wf')).toBeUndefined()
+    })
+
+    it('unknown_capability is advisory — import succeeds even when no agent satisfies the cap', async () => {
+      // A registered participant makes the inventory non-empty (haveInventory),
+      // so the checker DOES evaluate capability satisfaction — yet it must not
+      // block: importing a workflow before its agents exist is legitimate.
+      hub.register(new HumanParticipant({ id: 'helper', capabilities: ['help'] }))
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      // SAMPLE dispatches [draft]/[review] — neither satisfied by 'helper'.
+      const summary = await c.importFromText(SAMPLE)
+      expect(summary.id).toBe('editorial')
+      expect(hub.registry.get('workflow:editorial')).toBeDefined()
+    })
+
+    it('unknown_agent: a draft may carry it, but publish (go-live) is blocked', async () => {
+      // haveInventory true so the explicit-target check actually runs.
+      hub.register(new HumanParticipant({ id: 'helper', capabilities: ['help'] }))
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+
+      // Draft tolerates the unknown_agent warning → saved.
+      const draft = await c.saveDraft(NEEDS_GHOST)
+      expect(draft.state).toBe('draft')
+      expect((await c.getState('needs-ghost')).state).toBe('draft')
+
+      // Promoting it to live re-checks the head definition and blocks.
+      let caught: unknown
+      await c.publish('needs-ghost').catch((e) => {
+        caught = e
+      })
+      expect((caught as { code?: string }).code).toBe('structure_check_failed')
+      const violations = (caught as { violations?: Array<{ kind: string }> }).violations
+      expect(violations!.some((v) => v.kind === 'unknown_agent')).toBe(true)
+      // The failed publish left it a draft, unregistered.
+      expect((await c.getState('needs-ghost')).state).toBe('draft')
+      expect(hub.registry.get('workflow:needs-ghost')).toBeUndefined()
     })
   })
 })
