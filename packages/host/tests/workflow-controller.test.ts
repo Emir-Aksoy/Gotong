@@ -196,6 +196,33 @@ workflow:
     expect(summary.surfaceMe).toBeUndefined()
   })
 
+  it('toSummary passes through the workflow governance block (Phase 19 P5)', async () => {
+    const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+    const withGov = SAMPLE.replace(
+      'trigger: { capability: run-editorial }',
+      `trigger: { capability: run-editorial }
+  governance:
+    data_sensitivity: confidential
+    required_credentials: [anthropic]
+    expected_cost_usd: 0.05
+    external_systems: [chroma-mcp]`,
+    )
+    const summary = await c.importFromText(withGov)
+    expect(summary.governance).toEqual({
+      dataSensitivity: 'confidential',
+      requiredCredentials: ['anthropic'],
+      expectedCostUsd: 0.05,
+      externalSystems: ['chroma-mcp'],
+    })
+    expect((await c.list())[0]!.governance).toBeDefined()
+  })
+
+  it('toSummary omits governance when the workflow declares none', async () => {
+    const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+    const summary = await c.importFromText(SAMPLE)
+    expect(summary.governance).toBeUndefined()
+  })
+
   describe('lifecycle (Phase 15)', () => {
     it('importFromText adopts as published rev1', async () => {
       const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })

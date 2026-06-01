@@ -639,3 +639,119 @@ ${surface}
     ).toThrow(/workflow\.surface must be an object/)
   })
 })
+
+/**
+ * `governance` (Phase 19 P5) — declarative risk metadata. The runner ignores
+ * it; the web layer renders a risk summary before import/publish, so a bad
+ * block must fail loudly at import rather than ship malformed metadata.
+ */
+describe('governance', () => {
+  const SKELETON = (governance: string) => `
+schema: aipehub.workflow/v1
+workflow:
+  id: gov-flow
+  trigger:
+    capability: run-gov-flow
+${governance}
+  steps:
+    - id: s
+      dispatch:
+        strategy: { kind: capability, capabilities: [a] }
+        payload: $trigger.payload
+`
+
+  it('parses a full governance block', () => {
+    const wf = parseWorkflow(
+      SKELETON(`  governance:
+    data_sensitivity: pii
+    required_credentials: [anthropic, crm-api]
+    expected_cost_usd: 0.12
+    required_human_roles: [legal counsel, senior consultant]
+    external_systems: [chroma-mcp, windmill]
+    notes: 处理客户合同, 含个人数据`),
+    )
+    expect(wf.governance).toBeDefined()
+    const g = wf.governance!
+    expect(g.dataSensitivity).toBe('pii')
+    expect(g.requiredCredentials).toEqual(['anthropic', 'crm-api'])
+    expect(g.expectedCostUsd).toBe(0.12)
+    expect(g.requiredHumanRoles).toEqual(['legal counsel', 'senior consultant'])
+    expect(g.externalSystems).toEqual(['chroma-mcp', 'windmill'])
+    expect(g.notes).toBe('处理客户合同, 含个人数据')
+  })
+
+  it('leaves governance undefined when absent (no regression)', () => {
+    const wf = parseWorkflow(SKELETON(''))
+    expect(wf.governance).toBeUndefined()
+  })
+
+  it('parses a partial block (any subset of fields)', () => {
+    const wf = parseWorkflow(SKELETON(`  governance:
+    data_sensitivity: internal`))
+    expect(wf.governance?.dataSensitivity).toBe('internal')
+    expect(wf.governance?.requiredCredentials).toBeUndefined()
+  })
+
+  it('accepts camelCase keys too (json convention)', () => {
+    const json = JSON.stringify({
+      schema: WORKFLOW_SCHEMA_V1,
+      workflow: {
+        id: 'gov-flow',
+        trigger: { capability: 'run-gov-flow' },
+        governance: {
+          dataSensitivity: 'confidential',
+          requiredCredentials: ['openai'],
+          expectedCostUsd: 1,
+          externalSystems: ['peer:legal-org'],
+        },
+        steps: [
+          { id: 's', dispatch: { strategy: { kind: 'capability', capabilities: ['a'] }, payload: 1 } },
+        ],
+      },
+    })
+    const wf = parseWorkflow(json)
+    expect(wf.governance?.dataSensitivity).toBe('confidential')
+    expect(wf.governance?.requiredCredentials).toEqual(['openai'])
+    expect(wf.governance?.externalSystems).toEqual(['peer:legal-org'])
+  })
+
+  it('dedupes string-list fields', () => {
+    const wf = parseWorkflow(SKELETON(`  governance:
+    required_credentials: [anthropic, anthropic, openai]`))
+    expect(wf.governance?.requiredCredentials).toEqual(['anthropic', 'openai'])
+  })
+
+  it('rejects an unknown data_sensitivity', () => {
+    expect(() =>
+      parseWorkflow(SKELETON(`  governance:
+    data_sensitivity: top-secret`)),
+    ).toThrow(/data_sensitivity must be one of/)
+  })
+
+  it('rejects a negative expected_cost_usd', () => {
+    expect(() =>
+      parseWorkflow(SKELETON(`  governance:
+    expected_cost_usd: -1`)),
+    ).toThrow(/expected_cost_usd must be a finite number/)
+  })
+
+  it('rejects a non-string entry in a string list', () => {
+    expect(() =>
+      parseWorkflow(SKELETON(`  governance:
+    required_credentials: [anthropic, 42]`)),
+    ).toThrow(/required_credentials entries must be non-empty strings/)
+  })
+
+  it('rejects an empty string list', () => {
+    expect(() =>
+      parseWorkflow(SKELETON(`  governance:
+    external_systems: []`)),
+    ).toThrow(/external_systems must be a non-empty array/)
+  })
+
+  it('rejects a non-object governance block', () => {
+    expect(() =>
+      parseWorkflow(SKELETON(`  governance: not-an-object`)),
+    ).toThrow(/workflow\.governance must be an object/)
+  })
+})

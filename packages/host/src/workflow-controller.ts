@@ -74,6 +74,12 @@ export interface WorkflowSummary {
    * this. `unknown` here so the host stays a dumb pipe.
    */
   surfaceMe?: unknown
+  /**
+   * Pass-through of the workflow definition's `governance` block (Phase 19 P5),
+   * when present. The web layer renders it as a risk summary before import /
+   * publish. `unknown` here so the host stays a dumb pipe.
+   */
+  governance?: unknown
   stepCount: number
   file: string | null
   /** Phase 15 — lifecycle state of this workflow. */
@@ -526,6 +532,7 @@ export class WorkflowController {
     if (def.description) out.description = def.description
     if (def.trigger.payloadSchema) out.payloadSchema = def.trigger.payloadSchema
     if (def.surface?.me) out.surfaceMe = def.surface.me
+    if (def.governance) out.governance = def.governance
     return out
   }
 }

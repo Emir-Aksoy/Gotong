@@ -21,6 +21,7 @@ import {
   WORKFLOW_SCHEMA_V1,
   WorkflowSchemaError,
   type Branch,
+  type DataSensitivity,
   type DispatchSpec,
   type MeSurfaceSpec,
   type ParallelStep,
@@ -29,6 +30,7 @@ import {
   type Step,
   type StepFailurePolicy,
   type WorkflowDefinition,
+  type WorkflowGovernanceSpec,
   type WorkflowRole,
   type WorkflowSurfaceSpec,
 } from './types.js'
@@ -150,6 +152,9 @@ function validateWorkflow(w: Record<string, unknown>): WorkflowDefinition {
   if (w.output !== undefined) out.output = w.output
   if (w.surface !== undefined) {
     out.surface = validateSurfaceSpec(w.surface, 'workflow.surface')
+  }
+  if (w.governance !== undefined) {
+    out.governance = validateGovernanceSpec(w.governance, 'workflow.governance')
   }
   return out
 }
@@ -609,6 +614,73 @@ function validateMeSurface(raw: unknown, path: string): MeSurfaceSpec {
       )
     }
     out.userScopeField = rawScope
+  }
+  return out
+}
+
+const DATA_SENSITIVITIES: readonly DataSensitivity[] = ['public', 'internal', 'confidential', 'pii']
+
+/**
+ * Validate the optional `workflow.governance` block. Structural only — the
+ * runner never reads it; the web layer renders it as a risk summary before
+ * import/publish. Snake_case (yaml) and camelCase (json) keys both accepted,
+ * matching the rest of this parser. A bad block fails at import time so the
+ * admin sees the reason verbatim rather than shipping malformed metadata.
+ */
+function validateGovernanceSpec(raw: unknown, path: string): WorkflowGovernanceSpec {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new WorkflowSchemaError(`${path} must be an object`)
+  }
+  const g = raw as Record<string, unknown>
+  const out: WorkflowGovernanceSpec = {}
+
+  const rawSensitivity = g.data_sensitivity ?? g.dataSensitivity
+  if (rawSensitivity !== undefined) {
+    if (typeof rawSensitivity !== 'string' || !DATA_SENSITIVITIES.includes(rawSensitivity as DataSensitivity)) {
+      throw new WorkflowSchemaError(
+        `${path}.data_sensitivity must be one of ${DATA_SENSITIVITIES.join(' | ')} — got '${String(rawSensitivity)}'`,
+      )
+    }
+    out.dataSensitivity = rawSensitivity as DataSensitivity
+  }
+
+  const rawCreds = g.required_credentials ?? g.requiredCredentials
+  if (rawCreds !== undefined) out.requiredCredentials = validateStringArray(rawCreds, `${path}.required_credentials`)
+
+  const rawCost = g.expected_cost_usd ?? g.expectedCostUsd
+  if (rawCost !== undefined) {
+    if (typeof rawCost !== 'number' || !Number.isFinite(rawCost) || rawCost < 0) {
+      throw new WorkflowSchemaError(`${path}.expected_cost_usd must be a finite number >= 0 — got '${String(rawCost)}'`)
+    }
+    out.expectedCostUsd = rawCost
+  }
+
+  const rawRoles = g.required_human_roles ?? g.requiredHumanRoles
+  if (rawRoles !== undefined) out.requiredHumanRoles = validateStringArray(rawRoles, `${path}.required_human_roles`)
+
+  const rawSystems = g.external_systems ?? g.externalSystems
+  if (rawSystems !== undefined) out.externalSystems = validateStringArray(rawSystems, `${path}.external_systems`)
+
+  if (g.notes !== undefined) {
+    if (typeof g.notes !== 'string' || g.notes.length === 0) {
+      throw new WorkflowSchemaError(`${path}.notes must be a non-empty string`)
+    }
+    out.notes = g.notes
+  }
+  return out
+}
+
+/** Shared check for governance's string-list fields — non-empty array of non-empty strings. */
+function validateStringArray(raw: unknown, path: string): string[] {
+  if (!Array.isArray(raw) || raw.length === 0) {
+    throw new WorkflowSchemaError(`${path} must be a non-empty array of strings when set`)
+  }
+  const out: string[] = []
+  for (const v of raw) {
+    if (typeof v !== 'string' || v.length === 0) {
+      throw new WorkflowSchemaError(`${path} entries must be non-empty strings — got '${String(v)}'`)
+    }
+    if (!out.includes(v)) out.push(v)
   }
   return out
 }

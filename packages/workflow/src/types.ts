@@ -60,6 +60,15 @@ export interface WorkflowDefinition {
    * member-facing `/me` workbench. See `WorkflowSurfaceSpec`.
    */
   surface?: WorkflowSurfaceSpec
+  /**
+   * Optional governance / risk metadata. The runner ignores this entirely —
+   * it's consumed by the web layer to show a risk summary BEFORE an admin
+   * imports or publishes the workflow ("what keys does it need, what data does
+   * it touch, who has to sign off, what does it cost"). Declarative only; it
+   * does not gate execution (the P2 RBAC + structure checks do that). See
+   * `WorkflowGovernanceSpec`.
+   */
+  governance?: WorkflowGovernanceSpec
 }
 
 export interface TriggerSpec {
@@ -196,6 +205,51 @@ export interface MeSurfaceSpec {
    * caller-supplied value under this key, then sets it to the userId.
    */
   userScopeField?: string
+}
+
+// --- Governance / risk metadata (Phase 19 P5) ------------------------------
+
+/**
+ * Coarse data-sensitivity band a workflow handles, worst-case. Ordered
+ * least→most sensitive. A local literal (no `@aipehub/identity` dep) like
+ * `WorkflowRole` — the workflow package stays identity-free.
+ */
+export type DataSensitivity = 'public' | 'internal' | 'confidential' | 'pii'
+
+/**
+ * Optional governance / risk metadata on a workflow. Purely declarative — the
+ * runner never reads it. The web layer renders it as a risk summary before an
+ * admin imports or publishes, so "what will this thing touch, cost, and need a
+ * human for" is visible at decision time instead of buried in the steps.
+ *
+ * It is NOT an enforcement boundary: P2's RBAC + structure checks gate what
+ * actually runs. Think of this as the nutrition label, not the lock.
+ */
+export interface WorkflowGovernanceSpec {
+  /** Worst-case data-sensitivity band a run touches. */
+  dataSensitivity?: DataSensitivity
+  /**
+   * Credentials / API keys a run needs, by logical name (e.g. `anthropic`,
+   * `windmill`, `crm-api`). Names, never secret values — this is a checklist
+   * of "make sure these are in the vault", not the secrets themselves.
+   */
+  requiredCredentials?: string[]
+  /** Rough expected LLM/API cost per run in USD (operator estimate). */
+  expectedCostUsd?: number
+  /**
+   * Human roles that must act for a run to complete (HITL approvers), as
+   * free-text job descriptions — e.g. `legal counsel`, `senior consultant`.
+   * Free-text (not the RBAC role enum) because the meaningful unit here is the
+   * real-world sign-off role, not the hub permission level.
+   */
+  requiredHumanRoles?: string[]
+  /**
+   * External systems a run reaches — MCP servers, peer hubs, automation
+   * platforms, SaaS APIs (e.g. `chroma-mcp`, `peer:legal-org`, `windmill`).
+   */
+  externalSystems?: string[]
+  /** Free-text note shown verbatim in the risk summary. */
+  notes?: string
 }
 
 // --- Steps -----------------------------------------------------------------
