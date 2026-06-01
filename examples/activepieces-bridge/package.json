@@ -1,0 +1,14 @@
+{
+  "name": "@aipehub/example-activepieces-bridge",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Phase 19 P5-M3 demo — bridge an inbound automation webhook (Activepieces / n8n / Make / Zapier) into Hub.dispatch with shared-secret auth + capability-only routing.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*"
+  }
+}
