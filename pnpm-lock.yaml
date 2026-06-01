@@ -313,6 +313,12 @@ importers:
         specifier: workspace:*
         version: link:../../packages/web
 
+  examples/windmill-bridge:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
   examples/workflow-assistant:
     dependencies:
       '@aipehub/core':
