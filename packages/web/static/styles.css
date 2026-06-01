@@ -1651,6 +1651,49 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .wf-state-archived { background: #e9e9e9; color: #888; }
 .wf-rev-tag { font-size: 0.66rem; color: #888; white-space: nowrap; }
 
+/* Phase 19 P5-M8b — governance / risk summary panel on workflow cards. */
+.wf-gov {
+  margin-top: 8px;
+  border: 1px solid #f0d9b8;
+  border-radius: 5px;
+  background: #fffaf2;
+  padding: 4px 8px;
+}
+.wf-gov > summary {
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #9a5b13;
+  user-select: none;
+}
+.wf-gov[open] > summary { margin-bottom: 4px; }
+.wf-gov .ma-meta { margin: 0; }
+.wf-gov-notes { color: #6b5a44; font-size: 0.72rem; }
+.wf-gov-chip {
+  display: inline-block;
+  font-size: 0.66rem;
+  padding: 1px 6px;
+  margin: 1px 2px 1px 0;
+  border-radius: 3px;
+  background: #eef1f5;
+  color: #51637a;
+  white-space: nowrap;
+}
+.wf-gov-sens {
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-weight: 700;
+  background: #eee;
+  color: #555;
+}
+.wf-gov-sens-public { background: #d6ecdb; color: #1a6a3a; }
+.wf-gov-sens-internal { background: #e3e8ef; color: #51637a; }
+.wf-gov-sens-confidential { background: #fde9cf; color: #9a5b13; }
+.wf-gov-sens-pii { background: #fbdcdc; color: #9a1f1f; }
+
 .wf-rev-row {
   display: grid;
   grid-template-columns: auto 1fr auto;

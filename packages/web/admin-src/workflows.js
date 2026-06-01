@@ -101,9 +101,47 @@ export function createWorkflows({ wf }) {
           <li><span class="ma-label">${escapeHtml(t.workflowTriggerLabel)}:</span> <code>${escapeHtml(w.triggerCapability)}</code></li>
           <li>${escapeHtml(t.workflowStepsLabel(w.stepCount))}</li>
         </ul>
+        ${governancePanel(w.governance)}
         ${file}
       </article>`
     }).join('')
+  }
+
+  // Phase 19 P5-M8b — risk summary panel from the workflow's `governance`
+  // block. Rendered on the card so the risk ("touches PII, needs this key,
+  // costs ~$X, needs a human sign-off") is visible at review/publish decision
+  // time — not buried in the YAML. Declarative only; it gates nothing.
+  function govChips(arr) {
+    return arr.map((x) => `<span class="wf-gov-chip">${escapeHtml(String(x))}</span>`).join(' ')
+  }
+  function governancePanel(g) {
+    if (!g || typeof g !== 'object') return ''
+    const rows = []
+    if (g.dataSensitivity) {
+      rows.push(
+        `<li><span class="ma-label">${escapeHtml(t.workflowGovSensitivity)}:</span> ` +
+          `<span class="wf-gov-sens wf-gov-sens-${escapeHtml(g.dataSensitivity)}">` +
+          `${escapeHtml(t.workflowGovSensitivityLabel(g.dataSensitivity))}</span></li>`,
+      )
+    }
+    if (Array.isArray(g.requiredCredentials) && g.requiredCredentials.length) {
+      rows.push(`<li><span class="ma-label">${escapeHtml(t.workflowGovCredentials)}:</span> ${govChips(g.requiredCredentials)}</li>`)
+    }
+    if (typeof g.expectedCostUsd === 'number') {
+      rows.push(`<li><span class="ma-label">${escapeHtml(t.workflowGovCost)}:</span> <code>$${escapeHtml(String(g.expectedCostUsd))}</code></li>`)
+    }
+    if (Array.isArray(g.requiredHumanRoles) && g.requiredHumanRoles.length) {
+      rows.push(`<li><span class="ma-label">${escapeHtml(t.workflowGovHumanRoles)}:</span> ${govChips(g.requiredHumanRoles)}</li>`)
+    }
+    if (Array.isArray(g.externalSystems) && g.externalSystems.length) {
+      rows.push(`<li><span class="ma-label">${escapeHtml(t.workflowGovExternal)}:</span> ${govChips(g.externalSystems)}</li>`)
+    }
+    if (g.notes) rows.push(`<li class="wf-gov-notes">${escapeHtml(g.notes)}</li>`)
+    if (!rows.length) return ''
+    return (
+      `<details class="wf-gov"><summary>${escapeHtml(t.workflowGovSummary)}</summary>` +
+      `<ul class="ma-meta">${rows.join('')}</ul></details>`
+    )
   }
 
   async function removeWorkflow(id) {

@@ -1031,9 +1031,37 @@
           <li><span class="ma-label">${escapeHtml4(t4.workflowTriggerLabel)}:</span> <code>${escapeHtml4(w.triggerCapability)}</code></li>
           <li>${escapeHtml4(t4.workflowStepsLabel(w.stepCount))}</li>
         </ul>
+        ${governancePanel(w.governance)}
         ${file}
       </article>`;
       }).join("");
+    }
+    function govChips(arr) {
+      return arr.map((x) => `<span class="wf-gov-chip">${escapeHtml4(String(x))}</span>`).join(" ");
+    }
+    function governancePanel(g) {
+      if (!g || typeof g !== "object") return "";
+      const rows = [];
+      if (g.dataSensitivity) {
+        rows.push(
+          `<li><span class="ma-label">${escapeHtml4(t4.workflowGovSensitivity)}:</span> <span class="wf-gov-sens wf-gov-sens-${escapeHtml4(g.dataSensitivity)}">${escapeHtml4(t4.workflowGovSensitivityLabel(g.dataSensitivity))}</span></li>`
+        );
+      }
+      if (Array.isArray(g.requiredCredentials) && g.requiredCredentials.length) {
+        rows.push(`<li><span class="ma-label">${escapeHtml4(t4.workflowGovCredentials)}:</span> ${govChips(g.requiredCredentials)}</li>`);
+      }
+      if (typeof g.expectedCostUsd === "number") {
+        rows.push(`<li><span class="ma-label">${escapeHtml4(t4.workflowGovCost)}:</span> <code>$${escapeHtml4(String(g.expectedCostUsd))}</code></li>`);
+      }
+      if (Array.isArray(g.requiredHumanRoles) && g.requiredHumanRoles.length) {
+        rows.push(`<li><span class="ma-label">${escapeHtml4(t4.workflowGovHumanRoles)}:</span> ${govChips(g.requiredHumanRoles)}</li>`);
+      }
+      if (Array.isArray(g.externalSystems) && g.externalSystems.length) {
+        rows.push(`<li><span class="ma-label">${escapeHtml4(t4.workflowGovExternal)}:</span> ${govChips(g.externalSystems)}</li>`);
+      }
+      if (g.notes) rows.push(`<li class="wf-gov-notes">${escapeHtml4(g.notes)}</li>`);
+      if (!rows.length) return "";
+      return `<details class="wf-gov"><summary>${escapeHtml4(t4.workflowGovSummary)}</summary><ul class="ma-meta">${rows.join("")}</ul></details>`;
     }
     async function removeWorkflow(id) {
       if (!confirm(t4.confirmRemoveWorkflow(id))) return;

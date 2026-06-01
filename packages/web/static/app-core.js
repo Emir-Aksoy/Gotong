@@ -247,6 +247,15 @@
       workflowStateLabel: (s) =>
         ({ published: '已发布', deprecated: '已弃用', draft: '草稿', review: '待审核', archived: '已归档' }[s] || s),
       workflowRevTag: (n) => `rev ${n}`,
+      // Phase 19 P5 — governance / risk summary on workflow cards
+      workflowGovSummary: '⚠️ 风险摘要',
+      workflowGovSensitivity: '数据敏感级',
+      workflowGovSensitivityLabel: (s) =>
+        ({ public: '公开', internal: '内部', confidential: '机密', pii: '个人数据 (PII)' }[s] || s),
+      workflowGovCredentials: '需要凭证',
+      workflowGovCost: '预估成本/次',
+      workflowGovHumanRoles: '需真人角色',
+      workflowGovExternal: '触达外部系统',
       workflowDeprecateBtn: '弃用',
       workflowRepublishBtn: '重新发布',
       workflowArchiveBtn: '归档',
@@ -618,6 +627,15 @@
       workflowStateLabel: (s) =>
         ({ published: 'Published', deprecated: 'Deprecated', draft: 'Draft', review: 'In review', archived: 'Archived' }[s] || s),
       workflowRevTag: (n) => `rev ${n}`,
+      // Phase 19 P5 — governance / risk summary on workflow cards
+      workflowGovSummary: '⚠️ Risk summary',
+      workflowGovSensitivity: 'Data sensitivity',
+      workflowGovSensitivityLabel: (s) =>
+        ({ public: 'Public', internal: 'Internal', confidential: 'Confidential', pii: 'Personal data (PII)' }[s] || s),
+      workflowGovCredentials: 'Credentials needed',
+      workflowGovCost: 'Est. cost/run',
+      workflowGovHumanRoles: 'Human roles required',
+      workflowGovExternal: 'External systems',
       workflowDeprecateBtn: 'Deprecate',
       workflowRepublishBtn: 'Re-publish',
       workflowArchiveBtn: 'Archive',

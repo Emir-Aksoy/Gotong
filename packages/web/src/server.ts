@@ -643,6 +643,13 @@ export interface WorkflowSummary {
    * derive the member-facing `/me` catalog.
    */
   surfaceMe?: unknown
+  /**
+   * Phase 19 P5 — pass-through of the workflow's `governance` block when
+   * present. Structurally mirrors `WorkflowGovernanceSpec` in
+   * `@aipehub/workflow` (kept `unknown` to avoid a runtime dep). The admin
+   * UI renders it as a risk summary before import/publish.
+   */
+  governance?: unknown
   stepCount: number
   /**
    * Absolute path of the YAML file backing this workflow on disk, or
