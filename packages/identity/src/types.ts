@@ -286,6 +286,8 @@ export const AUDIT_ACTIONS = {
   // audit query/export surfaces them by `?action=inbox_*`. Delegate / claim
   // verbs join here as later inbox-gov milestones land.
   INBOX_RESOLVE: 'inbox_resolve',
+  /** inbox-gov M2 — a member handed a pending item off to another user. */
+  INBOX_DELEGATE: 'inbox_delegate',
 } as const
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS]

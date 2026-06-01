@@ -24,8 +24,16 @@ class FakeInbox implements InboxSurface {
   pending: InboxItemView[] = []
   readonly listPendingCalls: string[] = []
   readonly resolveCalls: Array<{ itemId: string; userId: string; decision: unknown }> = []
+  readonly delegateCalls: Array<{
+    itemId: string
+    userId: string
+    toEmail: string
+    note?: string
+  }> = []
   /** When set, `resolve` throws an error carrying this `.code`. */
   resolveError: { code: string; message: string } | null = null
+  /** When set, `delegate` throws an error carrying this `.code`. */
+  delegateError: { code: string; message: string } | null = null
 
   async listPending(userId: string): Promise<InboxItemView[]> {
     this.listPendingCalls.push(userId)
@@ -36,6 +44,19 @@ class FakeInbox implements InboxSurface {
     if (this.resolveError) {
       const e = new Error(this.resolveError.message) as Error & { code?: string }
       e.code = this.resolveError.code
+      throw e
+    }
+  }
+  async delegate(args: {
+    itemId: string
+    userId: string
+    toEmail: string
+    note?: string
+  }): Promise<void> {
+    this.delegateCalls.push(args)
+    if (this.delegateError) {
+      const e = new Error(this.delegateError.message) as Error & { code?: string }
+      e.code = this.delegateError.code
       throw e
     }
   }
@@ -199,5 +220,65 @@ describe('/api/me/inbox', () => {
       headers: { cookie: b.memberCookie },
     })
     expect(res.status).toBe(404)
+  })
+
+  // --- inbox-gov M2 — delegate ----------------------------------------------
+
+  it('POST delegate forwards itemId + forced userId + toEmail + note, returns 200', async () => {
+    const res = await fetch(`${b.server.url}/api/me/inbox/i1/delegate`, {
+      method: 'POST',
+      headers: { cookie: b.memberCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ toEmail: 'other@team.test', note: 'over to you' }),
+    })
+    expect(res.status).toBe(200)
+    expect((await res.json()) as { ok: boolean }).toMatchObject({ ok: true, itemId: 'i1' })
+    // The delegating userId is the SESSION user, never a client value.
+    expect(b.inbox.delegateCalls).toEqual([
+      { itemId: 'i1', userId: b.memberUserId, toEmail: 'other@team.test', note: 'over to you' },
+    ])
+  })
+
+  it('POST delegate with a missing toEmail → 400 (never calls the surface)', async () => {
+    const res = await fetch(`${b.server.url}/api/me/inbox/i1/delegate`, {
+      method: 'POST',
+      headers: { cookie: b.memberCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ note: 'no target' }),
+    })
+    expect(res.status).toBe(400)
+    expect((await res.json()) as { code?: string }).toMatchObject({ code: 'invalid_target' })
+    expect(b.inbox.delegateCalls).toHaveLength(0)
+  })
+
+  it('POST delegate maps surface error codes to HTTP status', async () => {
+    const cases: Array<[string, number]> = [
+      ['not_found', 404],
+      ['forbidden', 403],
+      ['already_resolved', 409],
+      ['invalid_target', 400],
+    ]
+    for (const [code, status] of cases) {
+      b.inbox.delegateError = { code, message: `${code} boom` }
+      const res = await fetch(`${b.server.url}/api/me/inbox/ix/delegate`, {
+        method: 'POST',
+        headers: { cookie: b.memberCookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ toEmail: 'other@team.test' }),
+      })
+      expect(res.status, code).toBe(status)
+      expect((await res.json()) as { code?: string }).toMatchObject({ code })
+    }
+  })
+
+  it('POST delegate with no inbox wired → 503', async () => {
+    const b2 = await boot({ withInbox: false })
+    try {
+      const res = await fetch(`${b2.server.url}/api/me/inbox/i1/delegate`, {
+        method: 'POST',
+        headers: { cookie: b2.memberCookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ toEmail: 'other@team.test' }),
+      })
+      expect(res.status).toBe(503)
+    } finally {
+      await teardown(b2)
+    }
   })
 })

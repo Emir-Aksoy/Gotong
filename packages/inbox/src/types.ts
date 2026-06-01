@@ -77,11 +77,13 @@ export interface InboxParent {
  * "delegated to …") without a cross-table join. Append-only.
  */
 export interface InboxEvent {
-  /** What happened. Extended by later inbox-gov milestones (delegate / claim). */
-  type: 'resolved'
-  /** The user who performed the action (the assignee, for a resolve). */
+  /** What happened. Extended by later inbox-gov milestones (claim …). */
+  type: 'resolved' | 'delegated'
+  /** The user who performed the action (the assignee resolving; the delegator). */
   actor?: string
-  /** Optional free-text note (an approval comment, later a handoff reason). */
+  /** The new assignee, for a `delegated` event. */
+  to?: string
+  /** Optional free-text note (an approval comment, or a handoff reason). */
   note?: string
   at: number
 }
@@ -144,6 +146,20 @@ export interface InboxStore {
    * updated item.
    */
   markResolved(itemId: string, decision: InboxDecision, now?: number): Promise<InboxItem>
+  /**
+   * inbox-gov M2 — hand a still-`pending` item to a new assignee. Like
+   * {@link markResolved} this is a pending-only guarded transition: it throws
+   * `InboxError('already_resolved')` when the item is not pending (a resolved
+   * item can't be handed off) and `InboxError('not_found')` when missing. It
+   * rewrites `userId` to `toUserId` and appends a `delegated` history event
+   * (`actor` = the delegator, `to` = the new assignee). The item stays pending;
+   * the parked task row is untouched (resume still keys off the item id).
+   */
+  delegate(
+    itemId: string,
+    toUserId: string,
+    opts: { actor: string; note?: string; now?: number },
+  ): Promise<InboxItem>
 }
 
 // --- Errors ----------------------------------------------------------------
@@ -154,6 +170,8 @@ export type InboxErrorCode =
   | 'forbidden'
   | 'invalid_decision'
   | 'invalid_payload'
+  /** inbox-gov M2 — the delegate target is missing, unknown, or the caller itself. */
+  | 'invalid_target'
 
 /** Typed error so callers map `.code` to an HTTP status instead of parsing strings. */
 export class InboxError extends Error {

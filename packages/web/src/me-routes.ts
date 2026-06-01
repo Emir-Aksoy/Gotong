@@ -365,6 +365,17 @@ export interface InboxSurface {
    * / `forbidden` / `invalid_decision` (or `invalid_payload`) on failure.
    */
   resolve(args: { itemId: string; userId: string; decision: unknown }): Promise<void>
+  /**
+   * inbox-gov M2 — hand a pending item off to another member, identified by
+   * email. Forces the delegating `userId` to the caller. Throws an error with
+   * `.code` of `not_found` / `forbidden` / `already_resolved` / `invalid_target`.
+   */
+  delegate(args: {
+    itemId: string
+    userId: string
+    toEmail: string
+    note?: string
+  }): Promise<void>
 }
 
 export interface HandleMeRouteCtx {
@@ -499,6 +510,15 @@ export async function handleMeRoute(
       method === 'POST' ? /^\/api\/me\/inbox\/([^/]+)\/resolve$/.exec(path) : null
     if (m) {
       await handleMeResolveInbox(ctx, req, res, userId, decodeURIComponent(m[1]!))
+      return
+    }
+  }
+  // inbox-gov M2 — hand a pending item off to another member (by email).
+  {
+    const m =
+      method === 'POST' ? /^\/api\/me\/inbox\/([^/]+)\/delegate$/.exec(path) : null
+    if (m) {
+      await handleMeDelegateInbox(ctx, req, res, userId, decodeURIComponent(m[1]!))
       return
     }
   }
@@ -717,6 +737,67 @@ async function handleMeResolveInbox(
           : code === 'already_resolved'
             ? 409
             : code === 'invalid_decision' || code === 'invalid_payload'
+              ? 400
+              : 500
+    const payload: Record<string, unknown> = {
+      error: err instanceof Error ? err.message : String(err),
+    }
+    if (typeof code === 'string') payload.code = code
+    sendJson(res, payload, status)
+  }
+}
+
+/**
+ * inbox-gov M2 — POST /api/me/inbox/:itemId/delegate. Hand a pending item off
+ * to another member, identified by `{ toEmail, note? }`. The delegating user is
+ * forced from the session; the host resolves the email (never a user id) and
+ * fails closed on an unknown / self target.
+ */
+async function handleMeDelegateInbox(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  itemId: string,
+): Promise<void> {
+  if (!ctx.inbox) {
+    sendJson(res, { error: 'inbox not enabled on this host' }, 503)
+    return
+  }
+  // Same per-user budget as resolve — a handoff is cheap, but this bounds a
+  // member churning across many items.
+  if (!ctx.loginLimiter.check(`me-inbox-delegate:${userId}`)) {
+    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
+    res.end('too many inbox delegations; try again in a minute')
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (err) {
+    sendJson(res, { error: (err as Error).message ?? 'bad body' }, 400)
+    return
+  }
+  const b = body && typeof body === 'object' ? (body as Record<string, unknown>) : {}
+  const toEmail = typeof b.toEmail === 'string' ? b.toEmail : ''
+  if (toEmail.length === 0) {
+    sendJson(res, { error: 'body required: {toEmail}', code: 'invalid_target' }, 400)
+    return
+  }
+  const note = typeof b.note === 'string' ? b.note : undefined
+  try {
+    await ctx.inbox.delegate({ itemId, userId, toEmail, note })
+    sendJson(res, { ok: true, itemId })
+  } catch (err) {
+    const code = (err as { code?: unknown }).code
+    const status =
+      code === 'not_found'
+        ? 404
+        : code === 'forbidden'
+          ? 403
+          : code === 'already_resolved'
+            ? 409
+            : code === 'invalid_target'
               ? 400
               : 500
     const payload: Record<string, unknown> = {

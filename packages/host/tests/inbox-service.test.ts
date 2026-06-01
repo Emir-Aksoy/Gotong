@@ -195,6 +195,69 @@ describe('HostInboxService — two-step resume', () => {
     expect(JSON.stringify(edRow!.metadata)).not.toContain('secret correction')
   })
 
+  it('delegates a pending item to another user by email + audits it (inbox-gov M2)', async () => {
+    const bob = identity.createUser({
+      email: 'bob@team.test',
+      displayName: 'Bob',
+      password: 'bob-strong-password',
+      role: 'member',
+    })
+    const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
+
+    await service.delegate({
+      itemId: childId,
+      userId: 'user-a',
+      toEmail: 'bob@team.test',
+      note: 'you own this now',
+    })
+
+    const item = await store.get(childId)
+    expect(item!.status).toBe('pending') // still pending — a handoff, not a resolve
+    expect(item!.userId).toBe(bob.id) // reassigned to the resolved target id
+    expect(item!.history).toEqual([
+      { type: 'delegated', actor: 'user-a', to: bob.id, note: 'you own this now', at: expect.any(Number) },
+    ])
+    // The new assignee sees it; the old one no longer does.
+    expect((await store.listPending(bob.id)).map((i) => i.itemId)).toEqual([childId])
+    expect(await store.listPending('user-a')).toEqual([])
+
+    const rows = identity.listAuditLog({ action: 'inbox_delegate' })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({ actorUserId: 'user-a', success: true })
+    // The handoff REASON stays in the item history, not the audit blob.
+    expect(rows[0]!.metadata).toEqual({
+      itemId: childId,
+      kind: 'approval',
+      from: 'user-a',
+      to: bob.id,
+      hasNote: true,
+    })
+  })
+
+  it('delegate rejects unknown email, self-target, and a non-owner — item untouched', async () => {
+    const alice = identity.createUser({
+      email: 'alice@team.test',
+      displayName: 'Alice',
+      password: 'alice-strong-password',
+      role: 'member',
+    })
+    const childId = await park({ assignee: alice.id, kind: 'approval', prompt: 'ok?' })
+
+    await expect(
+      service.delegate({ itemId: childId, userId: alice.id, toEmail: 'ghost@team.test' }),
+    ).rejects.toMatchObject({ code: 'invalid_target' })
+    await expect(
+      service.delegate({ itemId: childId, userId: alice.id, toEmail: 'alice@team.test' }),
+    ).rejects.toMatchObject({ code: 'invalid_target' })
+    await expect(
+      service.delegate({ itemId: childId, userId: 'someone-else', toEmail: 'alice@team.test' }),
+    ).rejects.toMatchObject({ code: 'forbidden' })
+
+    // No partial mutation, no stray audit rows on any failure.
+    expect((await store.get(childId))!.userId).toBe(alice.id)
+    expect(identity.listAuditLog({ action: 'inbox_delegate' })).toHaveLength(0)
+  })
+
   it('a second resolve is rejected (already_resolved) without a second resume', async () => {
     const childId = await park({ assignee: 'user-a', kind: 'approval', prompt: 'ok?' })
     parkParent()

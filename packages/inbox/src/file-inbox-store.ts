@@ -139,4 +139,34 @@ export class FileInboxStore implements InboxStore {
     await this.write(resolved)
     return resolved
   }
+
+  async delegate(
+    itemId: string,
+    toUserId: string,
+    opts: { actor: string; note?: string; now?: number },
+  ): Promise<InboxItem> {
+    const now = opts.now ?? Date.now()
+    const item = await this.get(itemId)
+    if (!item) {
+      throw new InboxError('not_found', `inbox item '${itemId}' not found`)
+    }
+    // Same guard as markResolved: only a pending item can be handed off.
+    if (item.status !== 'pending') {
+      throw new InboxError(
+        'already_resolved',
+        `inbox item '${itemId}' is already ${item.status}`,
+      )
+    }
+    const event: InboxEvent = { type: 'delegated', actor: opts.actor, to: toUserId, at: now }
+    if (typeof opts.note === 'string' && opts.note.length > 0) event.note = opts.note
+    // Reassign + record the handoff. Stays pending; the parked task row is keyed
+    // by item id, so resume after the new assignee acts is unchanged.
+    const handed: InboxItem = {
+      ...item,
+      userId: toUserId,
+      history: [...(item.history ?? []), event],
+    }
+    await this.write(handed)
+    return handed
+  }
 }

@@ -40,6 +40,12 @@ export interface SuspendedTaskLookup {
    * audit fault must NEVER fail an already-committed decision (best-effort).
    */
   writeAuditLog?(input: WriteAuditLogInput): unknown
+  /**
+   * inbox-gov M2 — resolve a delegate target by email. The member hands a task
+   * off by typing an email (never a user id), so we never expose the directory.
+   * Optional only so tests can supply a fake; the real store always has it.
+   */
+  getUserByEmail?(email: string): { id: string } | null
 }
 
 /** Minimal logger shape — the host's structured logger satisfies it. */
@@ -130,6 +136,77 @@ export class HostInboxService {
       })
     } catch (err) {
       this.log?.warn('inbox resolve: audit write failed; decision already committed', {
+        itemId: item.itemId,
+        err,
+      })
+    }
+  }
+
+  /**
+   * inbox-gov M2 — hand a pending item off to another member, identified by
+   * email (never a user id — the directory is never exposed to members). The
+   * item stays pending under the new assignee; no resume happens. Throws a
+   * typed error (`.code`) the route maps to an HTTP status.
+   */
+  async delegate(args: {
+    itemId: string
+    userId: string
+    toEmail: string
+    note?: string
+  }): Promise<void> {
+    const { itemId, userId, toEmail, note } = args
+    const item = await this.store.get(itemId)
+    if (!item) throw new InboxError('not_found', `inbox item '${itemId}' not found`)
+    if (item.userId !== userId) {
+      throw new InboxError('forbidden', `inbox item '${itemId}' belongs to another user`)
+    }
+    if (item.status !== 'pending') {
+      throw new InboxError('already_resolved', `inbox item '${itemId}' is already ${item.status}`)
+    }
+
+    // Resolve the target by email, fail-closed. A member can only hand off to a
+    // real user, and never to themselves (that would be a no-op handoff).
+    const email = typeof toEmail === 'string' ? toEmail.trim() : ''
+    if (email.length === 0) throw new InboxError('invalid_target', 'a target email is required')
+    const target =
+      typeof this.identity.getUserByEmail === 'function'
+        ? this.identity.getUserByEmail(email)
+        : null
+    if (!target) throw new InboxError('invalid_target', `no user with email '${email}'`)
+    if (target.id === userId) {
+      throw new InboxError('invalid_target', 'cannot delegate an item to yourself')
+    }
+
+    await this.store.delegate(itemId, target.id, { actor: userId, note })
+    this.recordDelegateAudit(item, userId, target.id, note)
+  }
+
+  /** inbox-gov M2 — write one `inbox_delegate` audit row (best-effort). */
+  private recordDelegateAudit(
+    item: InboxItem,
+    fromUserId: string,
+    toUserId: string,
+    note: string | undefined,
+  ): void {
+    if (typeof this.identity.writeAuditLog !== 'function') return
+    try {
+      this.identity.writeAuditLog({
+        action: AUDIT_ACTIONS.INBOX_DELEGATE,
+        actorSource: 'v4-session',
+        actorUserId: fromUserId,
+        // The handoff reason itself stays in the item history (visible to the
+        // two members); the audit row records only that a note was attached.
+        metadata: {
+          itemId: item.itemId,
+          kind: item.kind,
+          from: fromUserId,
+          to: toUserId,
+          hasNote: typeof note === 'string' && note.length > 0,
+        },
+        success: true,
+      })
+    } catch (err) {
+      this.log?.warn('inbox delegate: audit write failed; handoff already committed', {
         itemId: item.itemId,
         err,
       })

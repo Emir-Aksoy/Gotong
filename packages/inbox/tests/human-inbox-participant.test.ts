@@ -29,6 +29,19 @@ class MemStore implements InboxStore {
     this.items.set(itemId, r)
     return r
   }
+  async delegate(
+    itemId: string,
+    toUserId: string,
+    opts: { actor: string; note?: string; now?: number },
+  ): Promise<InboxItem> {
+    const it = this.items.get(itemId)
+    if (!it) throw new InboxError('not_found', 'x')
+    if (it.status !== 'pending') throw new InboxError('already_resolved', 'x')
+    const r: InboxItem = { ...it, userId: toUserId }
+    this.items.set(itemId, r)
+    void opts
+    return r
+  }
 }
 
 function makeTask(over: {

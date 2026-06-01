@@ -43,6 +43,9 @@ class MemInboxStore implements InboxStore {
   async markResolved(): Promise<InboxItem> {
     throw new Error('not used in these tests')
   }
+  async delegate(): Promise<InboxItem> {
+    throw new Error('not used in these tests')
+  }
 }
 
 /** Fake outbound wrapper: records the tasks it was asked to send. */
