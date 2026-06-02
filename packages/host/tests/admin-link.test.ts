@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { writeAdminLinkFile } from '../src/main.js'
+import { writeAdminLinkFile } from '../src/admin-link.js'
 
 const POSIX = process.platform !== 'win32'
 

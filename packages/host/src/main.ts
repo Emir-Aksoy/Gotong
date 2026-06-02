@@ -87,8 +87,7 @@
  */
 
 import { readFileSync } from 'node:fs'
-import { mkdir, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
 
 import { Hub, Space, createLogger, type Logger, type McpServerSpec, type Participant, type RemoteHubViaLink, type SpaceConfig, type Task, type TranscriptEntry } from '@aipehub/core'
 import {
@@ -108,6 +107,7 @@ import { auditBootSecurity, formatBootSecurityReport, isLoopbackHost } from './b
 import { rotateMasterKey } from './rotate-master-key.js'
 import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
+import { writeAdminLinkFile } from './admin-link.js'
 
 const log = createLogger('host')
 import { serveWebSocket } from '@aipehub/transport-ws'
@@ -394,30 +394,6 @@ function rotateMasterKeyCmd(): void {
       `  A running host keeps serving on its cached key; restart it to adopt\n` +
       `  the new key. Back up the new key file with the same care as the db.\n\n`,
   )
-}
-
-/**
- * Persist the one-time admin URL to `runtime/admin-link.txt` with file
- * mode 0o600. Idempotent — overwrites any prior link from a previous
- * run / mint-admin-token invocation. See H20 in AUDIT-v3.3.md.
- *
- * Why a file instead of `console.log`:
- *   - stdout from a daemon process is captured by `journalctl`,
- *     `docker logs`, `pm2 logs`, container log shippers, etc. Any
- *     reader of those logs picks up the token.
- *   - Pre-3.4 also dumped the token into the host's first boot banner,
- *     which is the easiest "search the logs for the admin URL" target
- *     for an attacker who lands a low-priv shell on the box.
- *   - The workspace directory is already protected by `SECURE_DIR_MODE`
- *     (0o700, see core/space.ts). Writing the link inside it with
- *     mode 0o600 puts it under exactly the same trust boundary the
- *     master key already enjoys — no new attack surface.
- */
-export async function writeAdminLinkFile(path: string, url: string): Promise<void> {
-  await mkdir(dirname(path), { recursive: true })
-  // The runtime/ dir was already chmod'd to 0o700 by Space.init; the
-  // file's own 0o600 is the second layer.
-  await writeFile(path, url + '\n', { encoding: 'utf8', mode: 0o600 })
 }
 
 function printUsage(): void {
