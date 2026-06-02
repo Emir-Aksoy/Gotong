@@ -468,6 +468,25 @@ export class PeerRegistry {
   }
 
   /**
+   * Audit A2 — public accessor so the A2A ingress path (`a2a-server.ts`)
+   * shares the SAME per-peer inbound quota budget as the HubLink path.
+   * Resolves the row by wire peerId and returns its quota gate; an unknown
+   * peer or one with no budget yields an always-ok gate (auth has already
+   * gated unknown/disabled peers upstream). Reuses the private
+   * `inboundQuotaGate` so the `FixedWindowLimiter` in `linkQuota` is ONE
+   * shared counter — flooding `/a2a` debits the same budget as the mesh link.
+   */
+  inboundGateForPeer(
+    peerId: string,
+    task: Pick<Task, 'strategy' | 'origin'>,
+  ): { ok: true } | { ok: false; reason: string } {
+    const row = this.opts.identity.getPeerByPeerId(peerId)
+    if (!row) return { ok: true }
+    const gate = this.inboundQuotaGate(row).inboundGate
+    return gate ? gate(task as Task) : { ok: true }
+  }
+
+  /**
    * v5 C-M1 — the `rpcResponder` slice of `installPeerLink` options, gated by
    * the row's callable-knowledge-base allowlist. Shared by both install paths
    * so a peer can only discover + call the named shared MCP servers regardless

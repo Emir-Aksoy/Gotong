@@ -67,11 +67,23 @@ export interface PeerLinkAcl {
   requireOriginRole?: readonly string[]
 }
 
-/** Internal — verdict on a single inbound task. */
-function evaluateAcl(
-  task: Task,
+/** Verdict on a single inbound task against a peer's ACL. */
+export type InboundAclVerdict = { ok: true } | { ok: false; reason: string }
+
+/**
+ * Evaluate a single inbound task against a peer's per-link ACL.
+ *
+ * Exported (P-audit A2) so the A2A ingress path (`host/src/a2a-server.ts`)
+ * runs the EXACT same predicate the HubLink path runs here — federation has
+ * two inbound doors (mesh HubLink + A2A `message/send`) and both must apply
+ * one ACL, or a peer restricted to capability X could invoke any capability
+ * through the unguarded door. Takes only the fields it reads so either
+ * caller can pass a full `Task` or a dispatch input.
+ */
+export function evaluateInboundAcl(
+  task: Pick<Task, 'strategy' | 'origin'>,
   acl: PeerLinkAcl,
-): { ok: true } | { ok: false; reason: string } {
+): InboundAclVerdict {
   if (acl.requireOrigin && !task.origin) {
     return { ok: false, reason: 'origin_required' }
   }
@@ -260,7 +272,7 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
   const aclRefusalBy: ParticipantId = opts.selfHubId ?? wrapperId
   opts.link.on('task', async (task: Task): Promise<TaskResult> => {
     if (opts.acl) {
-      const verdict = evaluateAcl(task, opts.acl)
+      const verdict = evaluateInboundAcl(task, opts.acl)
       if (!verdict.ok) {
         return {
           kind: 'failed',

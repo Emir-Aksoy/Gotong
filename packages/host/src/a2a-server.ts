@@ -30,7 +30,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { timingSafeEqual } from 'node:crypto'
 
-import type { Hub, TaskResult } from '@aipehub/core'
+import type { Hub, PeerLinkAcl, Task, TaskResult } from '@aipehub/core'
+import { evaluateInboundAcl } from '@aipehub/core'
 import {
   A2A_ERROR,
   A2A_METHOD_MESSAGE_SEND,
@@ -54,6 +55,26 @@ export interface A2aServerOptions {
    */
   resolvePeerToken: (peerId: string) => string | null
   /**
+   * Audit A2 — peerId → the per-peer inbound ACL, or null for accept-all
+   * (legacy / no policy). A2A `message/send` is the federation's SECOND
+   * inbound door; without this it would bypass the per-link capability
+   * allowlist the main HubLink path enforces in `installPeerLink`, letting
+   * a peer restricted to capability X invoke ANY capability over `/a2a`.
+   * Wire `(peerId) => identity.getPeerByPeerId(peerId)?.acl ?? null`.
+   */
+  resolvePeerAcl?: (peerId: string) => PeerLinkAcl | null
+  /**
+   * Audit A2 — per-peer inbound quota gate, sharing the SAME fixed-window
+   * budget as the HubLink path so a peer can't sidestep its per-link cap by
+   * flooding `/a2a` instead. Returns `{ok:false}` over budget. Omit → no
+   * extra gate (auth + body-size limits still apply). Wire
+   * `peerRegistry.inboundGateForPeer`.
+   */
+  inboundGate?: (
+    peerId: string,
+    task: Pick<Task, 'strategy' | 'origin'>,
+  ) => { ok: true } | { ok: false; reason: string }
+  /**
    * Capability dispatched to when a message carries no `metadata.skill`. When
    * unset AND the message omits a skill, the call is rejected (invalid_params).
    */
@@ -68,6 +89,15 @@ const MAX_BODY_BYTES = 1_000_000
 export class A2aServer {
   private readonly hub: Pick<Hub, 'dispatch'>
   private readonly resolvePeerToken: (peerId: string) => string | null
+  private readonly resolvePeerAcl:
+    | ((peerId: string) => PeerLinkAcl | null)
+    | undefined
+  private readonly inboundGate:
+    | ((
+        peerId: string,
+        task: Pick<Task, 'strategy' | 'origin'>,
+      ) => { ok: true } | { ok: false; reason: string })
+    | undefined
   private readonly defaultCapability: string | undefined
   private readonly log: A2aLogger | undefined
   private readonly newMessageId: () => string
@@ -75,6 +105,8 @@ export class A2aServer {
   constructor(opts: A2aServerOptions) {
     this.hub = opts.hub
     this.resolvePeerToken = opts.resolvePeerToken
+    this.resolvePeerAcl = opts.resolvePeerAcl
+    this.inboundGate = opts.inboundGate
     this.defaultCapability = opts.defaultCapability
     this.log = opts.logger
     this.newMessageId = opts.newMessageId ?? (() => crypto.randomUUID())
@@ -135,14 +167,47 @@ export class A2aServer {
 
     // --- dispatch (capability strategy, stamped origin) ------------------
     const text = messageText(message.value)
+    const dispatchInput = {
+      from: peerId,
+      strategy: { kind: 'capability' as const, capabilities: [capability] },
+      payload: { text },
+      origin: { orgId: peerId, userId: message.value.messageId },
+    }
+
+    // Audit A2 — enforce the SAME per-peer inbound contract the HubLink path
+    // enforces in `installPeerLink`, BEFORE dispatch. A2A is federation's
+    // second inbound door; skipping these here is the bypass the audit found.
+    //   1. ACL (capability allowlist / requireOrigin[Role]) — `evaluateInboundAcl`
+    //      is the exact predicate the mesh path uses, so they can't drift.
+    const acl = this.resolvePeerAcl?.(peerId)
+    if (acl) {
+      const verdict = evaluateInboundAcl(dispatchInput, acl)
+      if (!verdict.ok) {
+        this.log?.warn('a2a: inbound acl denied', { peerId, reason: verdict.reason })
+        sendRpc(
+          res,
+          rpcError(reqId, A2A_ERROR.INVALID_PARAMS, `cross_org_acl_denied (${verdict.reason})`),
+        )
+        return
+      }
+    }
+    //   2. Per-link quota — shares the HubLink fixed-window budget so `/a2a`
+    //      can't be used to dodge the cap.
+    if (this.inboundGate) {
+      const verdict = this.inboundGate(peerId, dispatchInput)
+      if (!verdict.ok) {
+        this.log?.warn('a2a: inbound quota denied', { peerId, reason: verdict.reason })
+        sendRpc(
+          res,
+          rpcError(reqId, A2A_ERROR.INTERNAL, `cross_org_policy_denied (${verdict.reason})`),
+        )
+        return
+      }
+    }
+
     let result: TaskResult
     try {
-      result = await this.hub.dispatch({
-        from: peerId,
-        strategy: { kind: 'capability', capabilities: [capability] },
-        payload: { text },
-        origin: { orgId: peerId, userId: message.value.messageId },
-      })
+      result = await this.hub.dispatch(dispatchInput)
     } catch (err) {
       this.log?.warn('a2a: dispatch threw', { peerId, err: err instanceof Error ? err.message : String(err) })
       sendRpc(res, rpcError(reqId, A2A_ERROR.INTERNAL, 'dispatch failed'))

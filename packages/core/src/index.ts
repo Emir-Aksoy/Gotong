@@ -112,11 +112,12 @@ export type {
   OriginResolver,
 } from './participants/remote-hub.js'
 
-export { installPeerLink } from './peer-link-install.js'
+export { installPeerLink, evaluateInboundAcl } from './peer-link-install.js'
 export type {
   InstallPeerLinkOptions,
   InstalledPeerLink,
   PeerLinkAcl,
+  InboundAclVerdict,
 } from './peer-link-install.js'
 
 export {

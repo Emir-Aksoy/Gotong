@@ -1308,11 +1308,19 @@ async function main(): Promise<void> {
   let a2aServer: A2aServer | undefined
   if (identity && envBool('AIPE_A2A_INBOUND_ENABLED', false)) {
     const a2aDefaultCap = env('AIPE_A2A_INBOUND_CAPABILITY')
+    const identityForA2a = identity
     a2aServer = new A2aServer({
       hub,
       resolvePeerToken: buildPeerTokenResolver(identity, (level, msg, c) =>
         log[level](msg, c as Record<string, unknown> | undefined),
       ),
+      // Audit A2 — A2A is federation's second inbound door; give it the same
+      // per-peer inbound ACL + quota the HubLink path enforces, or a peer
+      // restricted to capability X could invoke anything over /a2a.
+      resolvePeerAcl: (peerId) => identityForA2a.getPeerByPeerId(peerId)?.acl ?? null,
+      ...(peerRegistry
+        ? { inboundGate: peerRegistry.inboundGateForPeer.bind(peerRegistry) }
+        : {}),
       ...(a2aDefaultCap ? { defaultCapability: a2aDefaultCap } : {}),
       logger: log,
     })
