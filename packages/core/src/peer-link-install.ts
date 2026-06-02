@@ -307,6 +307,15 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
       ...(task.ancestry && task.ancestry.length > 0
         ? { ancestry: task.ancestry }
         : {}),
+      // Audit A4 — preserve data-class labels across the relay hop, exactly
+      // like `ancestry` above. Without this a middle (relay) hub strips the
+      // label, so the NEXT outbound gate (RemoteHubViaLink →
+      // checkOutboundDataClasses) sees `undefined` and the second-hop data
+      // contract silently passes — a `pii` task laundered through a relay
+      // reaches a peer cleared only for `public`.
+      ...(task.dataClasses && task.dataClasses.length > 0
+        ? { dataClasses: task.dataClasses }
+        : {}),
     })
     // The local hub generated a fresh internal task.id; relabel back to
     // the peer's task.id so their pending-dispatch table can match.
