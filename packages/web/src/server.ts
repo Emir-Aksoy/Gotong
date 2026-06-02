@@ -43,6 +43,7 @@ import {
   type InboxSurface,
   type MeAgentListSurface,
   type MeAgentAdminSurface,
+  type MeAgentGrantsSurface,
   type MeCredentialsSurface,
 } from './me-routes.js'
 import {
@@ -261,6 +262,13 @@ export interface WebServerOptions {
    * absent → those routes return 503 (the read-only directory still works).
    */
   meAgentAdmin?: MeAgentAdminSurface
+  /**
+   * v5 A-M4 — optional member agent access-grant surface for
+   * `/api/me/agents/:id/grants` (an owner shares their agent with other
+   * principals). Grants live in identity, so the host wires this only when
+   * identity is present; absent → those routes return 503 (empty list on GET).
+   */
+  meAgentGrants?: MeAgentGrantsSurface
   /**
    * v5 A-M3 — optional member API-credential surface for `/api/me/credentials`
    * ("bring your own key"). Keys live in the identity vault, so the host wires
@@ -812,6 +820,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     workflows: opts.workflows,
     meAgents: opts.meAgents,
     meAgentAdmin: opts.meAgentAdmin,
+    meAgentGrants: opts.meAgentGrants,
     meCredentials: opts.meCredentials,
     workflowAssist: opts.workflowAssist,
     services: opts.services,
@@ -944,6 +953,8 @@ interface HandlerCtx {
   meAgents: MeAgentListSurface | undefined
   /** v5 A-M2 — see WebServerOptions.meAgentAdmin doc above. */
   meAgentAdmin: MeAgentAdminSurface | undefined
+  /** v5 A-M4 — see WebServerOptions.meAgentGrants doc above. */
+  meAgentGrants: MeAgentGrantsSurface | undefined
   /** v5 A-M3 — see WebServerOptions.meCredentials doc above. */
   meCredentials: MeCredentialsSurface | undefined
   /** Phase 13 M3 — see WebServerOptions.workflowAssist doc above. */
@@ -1527,6 +1538,8 @@ async function handle(
         meAgents: ctx.meAgents,
         // v5 A-M2 — member agent ownership + self-service CRUD; undefined → 503.
         meAgentAdmin: ctx.meAgentAdmin,
+        // v5 A-M4 — member agent access-grant sharing; undefined → 503.
+        meAgentGrants: ctx.meAgentGrants,
         // v5 A-M3 — member API-credential management; undefined → 503.
         meCredentials: ctx.meCredentials,
         // Phase 19 P1-M4 — member file uploads (same UploadSurface as admin,

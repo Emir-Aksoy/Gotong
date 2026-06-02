@@ -370,6 +370,55 @@ export interface MeAgentAdminSurface {
 }
 
 // ---------------------------------------------------------------------------
+// Member agent access-grant surface (v5 A-M4)
+//
+// An agent's OWNER shares it with other principals via the unified
+// resource_grants table (A-M1): grant a user / agent / peer-hub viewer /
+// editor / owner. Granting another USER 'owner' is co-ownership — they can
+// then manage the agent from their own /me (the CRUD surface enforces owner).
+// viewer / editor are recorded for when finer agent-level enforcement lands;
+// today only 'owner' is enforced, so 'owner' is the immediately functional
+// level and the others are forward-looking data.
+//
+// Every privileged decision is the host's: the caller must already OWN the
+// agent (else 404, no enumeration), the host parses + validates the principal,
+// and refuses any mutation that would ORPHAN the resource (leave it with zero
+// owners). The web layer only shape-checks the body and maps status-coded
+// errors to HTTP — it never imports identity, so the principal arrives as
+// plain { principalKind, principalId } strings and the host narrows them.
+// ---------------------------------------------------------------------------
+
+/** One access grant on a resource, as a member's client sees it. */
+export interface MeGrantView {
+  principalKind: string
+  principalId: string
+  perm: string
+  /** principalKey ("<kind>:<id>") — the client passes this back verbatim on DELETE. */
+  principalKey: string
+  /** Who wrote the grant (a userId or principalKey); null = system seed. */
+  grantedBy: string | null
+  grantedAt: number
+  /** True when this grant is the calling member's own (the UI marks + protects it). */
+  isSelf: boolean
+}
+
+/** Shape-checked grant-set body. */
+export interface MeGrantInput {
+  principalKind: string
+  principalId: string
+  perm: string
+}
+
+export interface MeAgentGrantsSurface {
+  /** All grants on an agent `userId` owns, oldest-first. Throws (404) if not owned. */
+  list(userId: string, agentId: string): Promise<MeGrantView[]>
+  /** Upsert a grant on an agent `userId` owns. Throws on not-owned / orphan / bad input. */
+  set(userId: string, agentId: string, input: MeGrantInput): Promise<MeGrantView>
+  /** Remove a grant by principalKey. Throws on not-owned / orphan; false if absent. */
+  remove(userId: string, agentId: string, principalKey: string): Promise<boolean>
+}
+
+// ---------------------------------------------------------------------------
 // Member API-credential surface (v5 A-M3)
 //
 // A member manages THEIR OWN LLM API keys ("bring your own key"). Keys live in
@@ -527,6 +576,12 @@ export interface HandleMeRouteCtx {
    */
   meAgentAdmin: MeAgentAdminSurface | undefined
   /**
+   * v5 A-M4 — member agent access-grant management (an owner shares their agent
+   * with other principals). Undefined when the host wired no identity (grants
+   * live in identity); the grant routes then return 503 (empty list on GET).
+   */
+  meAgentGrants: MeAgentGrantsSurface | undefined
+  /**
    * v5 A-M3 — member API-credential ("bring your own key") management.
    * Undefined when the host wired no identity/vault; the credential routes
    * then return 503 (and an empty list on GET).
@@ -611,6 +666,34 @@ export async function handleMeRoute(
     }
     if (m && method === 'DELETE') {
       await handleMeDeleteAgent(ctx, res, userId, decodeURIComponent(m[1]!))
+      return
+    }
+  }
+  // v5 A-M4 — agent access grants: the owner shares their agent with other
+  // principals (user / agent / peer-hub) at viewer / editor / owner. These have
+  // an extra `/grants` segment, so the single-segment CRUD regex above never
+  // swallows them. The DELETE principalKey is URL-encoded (ids may hold colons).
+  {
+    const list = method === 'GET' ? /^\/api\/me\/agents\/([^/]+)\/grants$/.exec(path) : null
+    if (list) {
+      await handleMeListAgentGrants(ctx, res, userId, decodeURIComponent(list[1]!))
+      return
+    }
+    const create = method === 'POST' ? /^\/api\/me\/agents\/([^/]+)\/grants$/.exec(path) : null
+    if (create) {
+      await handleMeSetAgentGrant(ctx, req, res, userId, decodeURIComponent(create[1]!))
+      return
+    }
+    const del =
+      method === 'DELETE' ? /^\/api\/me\/agents\/([^/]+)\/grants\/([^/]+)$/.exec(path) : null
+    if (del) {
+      await handleMeRemoveAgentGrant(
+        ctx,
+        res,
+        userId,
+        decodeURIComponent(del[1]!),
+        decodeURIComponent(del[2]!),
+      )
       return
     }
   }
@@ -1267,6 +1350,93 @@ async function handleMeDeleteAgent(
   }
   try {
     const removed = await ctx.meAgentAdmin.remove(userId, agentId)
+    sendJson(res, { ok: true, removed })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Member agent access grants (v5 A-M4)
+//
+// Shape-check only. The principal-kind / perm allow-lists are stable wire
+// contracts mirrored here so the web layer needs no identity dep; the host
+// re-validates authoritatively against the real Principal / perm enums and
+// owns the owner gate + orphan guard.
+// ---------------------------------------------------------------------------
+
+const GRANT_PRINCIPAL_KINDS = new Set(['hub', 'user', 'agent', 'peer'])
+const GRANT_PERM_LEVELS = new Set(['viewer', 'editor', 'owner'])
+
+/** Parse + shape-check a grant-set body. */
+function parseMeGrantInput(body: Record<string, unknown>): MeGrantInput {
+  if (typeof body.principalKind !== 'string' || !GRANT_PRINCIPAL_KINDS.has(body.principalKind)) {
+    throw httpError(400, `principalKind must be one of ${[...GRANT_PRINCIPAL_KINDS].join(', ')}`)
+  }
+  if (typeof body.principalId !== 'string' || body.principalId.trim().length === 0) {
+    throw httpError(400, 'principalId is required')
+  }
+  if (typeof body.perm !== 'string' || !GRANT_PERM_LEVELS.has(body.perm)) {
+    throw httpError(400, `perm must be one of ${[...GRANT_PERM_LEVELS].join(', ')}`)
+  }
+  return {
+    principalKind: body.principalKind,
+    principalId: body.principalId.trim(),
+    perm: body.perm,
+  }
+}
+
+async function handleMeListAgentGrants(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+  agentId: string,
+): Promise<void> {
+  if (!ctx.meAgentGrants) {
+    sendJson(res, { grants: [] })
+    return
+  }
+  try {
+    sendJson(res, { grants: await ctx.meAgentGrants.list(userId, agentId) })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+async function handleMeSetAgentGrant(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  agentId: string,
+): Promise<void> {
+  if (!ctx.meAgentGrants) {
+    sendJson(res, { error: 'grant management unavailable (identity not wired)' }, 503)
+    return
+  }
+  const body = (await readJsonBody(req).catch(() => ({}))) as Record<string, unknown>
+  try {
+    const input = parseMeGrantInput(body)
+    const grant = await ctx.meAgentGrants.set(userId, agentId, input)
+    sendJson(res, { ok: true, grant }, 201)
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+async function handleMeRemoveAgentGrant(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+  agentId: string,
+  principalKey: string,
+): Promise<void> {
+  if (!ctx.meAgentGrants) {
+    sendJson(res, { error: 'grant management unavailable (identity not wired)' }, 503)
+    return
+  }
+  try {
+    const removed = await ctx.meAgentGrants.remove(userId, agentId, principalKey)
     sendJson(res, { ok: true, removed })
   } catch (err) {
     sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))

@@ -293,6 +293,12 @@ export const AUDIT_ACTIONS = {
   INBOX_RESOLVE: 'inbox_resolve',
   /** inbox-gov M2 — a member handed a pending item off to another user. */
   INBOX_DELEGATE: 'inbox_delegate',
+  // v5 A-M4 — resource access grants (generic resource_grants mutations via the
+  // member/admin authorization surface). One row per grant set / revoke so
+  // operators can answer "who shared resource X with which principal, at what
+  // level". metadata carries { resourceKind, resourceId, principal, perm }.
+  RESOURCE_GRANT_SET: 'resource_grant_set',
+  RESOURCE_GRANT_REVOKE: 'resource_grant_revoke',
 } as const
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS]

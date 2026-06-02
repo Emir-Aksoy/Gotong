@@ -186,6 +186,7 @@ import { createWorkflowController } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 import { HostInboxService } from './inbox-service.js'
 import { HostMeAgentService } from './me-agent-service.js'
+import { HostMeAgentGrantsService } from './me-agent-grants-service.js'
 import { HostMeCredentialsService } from './me-credentials-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
 import {
@@ -1331,6 +1332,14 @@ async function main(): Promise<void> {
     ? new HostMeCredentialsService({ identity })
     : undefined
 
+  // v5 A-M4 — member agent access-grant sharing (an owner shares their agent
+  // with other principals). Grants live in identity's resource_grants table, so
+  // this is wired only when identity is present; /api/me/agents/:id/grants 503s
+  // otherwise.
+  const meAgentGrants = identity
+    ? new HostMeAgentGrantsService({ identity })
+    : undefined
+
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
@@ -1361,6 +1370,8 @@ async function main(): Promise<void> {
     },
     // v5 A-M2 — member agent ownership + self-service CRUD (undefined → 503).
     ...(meAgentAdmin ? { meAgentAdmin } : {}),
+    // v5 A-M4 — member agent access-grant sharing (undefined → 503).
+    ...(meAgentGrants ? { meAgentGrants } : {}),
     // v5 A-M3 — member API-credential management (undefined → 503).
     ...(meCredentials ? { meCredentials } : {}),
     // Phase 16 — member task inbox; undefined when identity is unwired, in
