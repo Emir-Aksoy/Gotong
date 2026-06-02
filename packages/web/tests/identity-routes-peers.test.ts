@@ -665,3 +665,94 @@ describe('peer per-link trust contract (Phase 19 P4-M4)', () => {
     expect(b.identity.getPeer(id)!.perLinkQuotaBudget).toBeNull()
   })
 })
+
+// v5 C-M1 — the callable-knowledge-base allowlist is a fourth per-link contract
+// dimension. The host ENFORCEMENT (a peer only discovers + calls the named
+// shared MCP servers) is pinned in host/tests/peer-kb-gate.test.ts +
+// peer-kb-isolation-e2e.test.ts; what these pin is the WEB seam: the field
+// validates, persists, round-trips, and a PATCH null clears it.
+describe('peer callable-knowledge-base allowlist (v5 C-M1)', () => {
+  let b: BootResult
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  it('POST persists allowedKnowledgeBases + round-trips via getPeer', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_kb',
+        endpointUrl: 'wss://kb.example',
+        peerToken: 'tok-kb-12345678',
+        allowedKnowledgeBases: ['company_kb', 'policies_kb'],
+      }),
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as { peer: { id: string; allowedKnowledgeBases: string[] | null } }
+    expect(j.peer.allowedKnowledgeBases).toEqual(['company_kb', 'policies_kb'])
+    expect(b.identity.getPeer(j.peer.id)!.allowedKnowledgeBases).toEqual(['company_kb', 'policies_kb'])
+  })
+
+  it('POST without the field → null default (all shared servers callable)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_kb_default',
+        endpointUrl: 'wss://kbd.example',
+        peerToken: 'tok-kbd-1234567',
+      }),
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as { peer: { allowedKnowledgeBases: string[] | null } }
+    expect(j.peer.allowedKnowledgeBases).toBeNull()
+  })
+
+  it('POST allowedKnowledgeBases:[] persists a hard lockdown (not coerced to null)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_kb_lockdown',
+        endpointUrl: 'wss://kbl.example',
+        peerToken: 'tok-kbl-1234567',
+        allowedKnowledgeBases: [],
+      }),
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as { peer: { id: string; allowedKnowledgeBases: string[] | null } }
+    expect(j.peer.allowedKnowledgeBases).toEqual([])
+    expect(b.identity.getPeer(j.peer.id)!.allowedKnowledgeBases).toEqual([])
+  })
+
+  it('POST allowedKnowledgeBases not an array → 400', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_kb_bad',
+        endpointUrl: 'wss://x.example',
+        peerToken: 'tok-kbbad-1234',
+        allowedKnowledgeBases: 'company_kb',
+      }),
+    })
+    expect(r.status).toBe(400)
+  })
+
+  it('PATCH allowedKnowledgeBases:null clears a previously set allowlist', async () => {
+    const id = b.identity.addPeer({
+      peerId: 'hub_kb_clear',
+      endpointUrl: 'wss://kbc.example',
+      peerToken: 'tok-kbc-1234567',
+      allowedKnowledgeBases: ['company_kb'],
+    }).id
+    expect(b.identity.getPeer(id)!.allowedKnowledgeBases).toEqual(['company_kb'])
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ allowedKnowledgeBases: null }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.identity.getPeer(id)!.allowedKnowledgeBases).toBeNull()
+  })
+})

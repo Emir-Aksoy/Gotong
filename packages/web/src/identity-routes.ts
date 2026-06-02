@@ -175,6 +175,8 @@ export interface IdentityPeerDTO {
   revocationState: PeerRevocationState
   perLinkQuotaBudget: number | null
   allowedDataClasses: string[] | null
+  // v5 C-M1 callable-knowledge-base allowlist (always present from a v17 store).
+  allowedKnowledgeBases: string[] | null
 }
 
 export interface IdentityOrgQuotaDTO {
@@ -268,6 +270,7 @@ export interface IdentitySurface {
     revocationState?: PeerRevocationState
     perLinkQuotaBudget?: number | null
     allowedDataClasses?: string[] | null
+    allowedKnowledgeBases?: string[] | null
   }): IdentityPeerDTO
   listPeers?(): IdentityPeerDTO[]
   updatePeer?(
@@ -284,6 +287,7 @@ export interface IdentitySurface {
       revocationState?: PeerRevocationState
       perLinkQuotaBudget?: number | null
       allowedDataClasses?: string[] | null
+      allowedKnowledgeBases?: string[] | null
     },
   ): IdentityPeerDTO
   removePeer?(id: string): boolean
@@ -2018,6 +2022,8 @@ interface PeerPolicyFields {
   revocationState?: PeerRevocationState
   perLinkQuotaBudget?: number | null
   allowedDataClasses?: string[] | null
+  // v5 C-M1 — the callable-knowledge-base allowlist (null = all callable).
+  allowedKnowledgeBases?: string[] | null
 }
 
 /**
@@ -2064,6 +2070,7 @@ function parsePeerPolicyFields(b: {
   revocationState?: unknown
   perLinkQuotaBudget?: unknown
   allowedDataClasses?: unknown
+  allowedKnowledgeBases?: unknown
 }): { ok: true; value: PeerPolicyFields } | { ok: false; error: string } {
   const value: PeerPolicyFields = {}
   if (b.kind !== undefined) {
@@ -2114,6 +2121,13 @@ function parsePeerPolicyFields(b: {
     if (b.allowedDataClasses === null) value.allowedDataClasses = null
     else if (isStringArray(b.allowedDataClasses)) value.allowedDataClasses = b.allowedDataClasses
     else return { ok: false, error: 'allowedDataClasses must be a string array or null' }
+  }
+  // v5 C-M1 — callable-knowledge-base allowlist: null = all shared servers
+  // callable (legacy); [] = lockdown; [names] = only those servers.
+  if (b.allowedKnowledgeBases !== undefined) {
+    if (b.allowedKnowledgeBases === null) value.allowedKnowledgeBases = null
+    else if (isStringArray(b.allowedKnowledgeBases)) value.allowedKnowledgeBases = b.allowedKnowledgeBases
+    else return { ok: false, error: 'allowedKnowledgeBases must be a string array or null' }
   }
   return { ok: true, value }
 }
