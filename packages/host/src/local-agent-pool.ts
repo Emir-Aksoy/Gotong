@@ -853,8 +853,18 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
             // peer-aware accounting, but it must never touch a local user's
             // usage_counters day budget.
             if (attr.userId && !recordIsMock && !peerId) {
+              // Count ALL token types the model processed, not just the fresh
+              // input+output slice. With prompt caching on (Anthropic, OpenAI)
+              // `inputTokens` is ONLY the un-cached remainder — a call replaying
+              // a 100k-token cached prompt reports ~0 inputTokens, so summing
+              // input+output alone under-debits the `llm_tokens` budget to near
+              // zero and the pre-call peek never trips → fail-OPEN. Mirror the
+              // four fields the ledger row records (and estimateCostMicros prices).
               const tokens =
-                (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+                (usage.inputTokens ?? 0) +
+                (usage.outputTokens ?? 0) +
+                (usage.cacheCreationTokens ?? 0) +
+                (usage.cacheReadTokens ?? 0)
               identityForLedger.recordUsage({
                 userId: attr.userId,
                 metric: LLM_TOKENS_METRIC,
