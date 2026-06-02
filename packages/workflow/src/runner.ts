@@ -260,11 +260,14 @@ export class WorkflowRunner extends AgentParticipant {
       )
     }
 
-    // Resolve the EXACT revision this run started under. Legacy runs with no
-    // stamped revision fall back to the current one — after boot-adoption that
-    // equals rev 1, identical to pre-Phase-15 behavior. If the revision is gone,
-    // fail loudly rather than silently resume against a different definition.
-    const revision = initial.definitionRevision ?? this.resolver.current().revision
+    // Resolve the EXACT revision this run started under. A legacy run with no
+    // stamped revision predates Phase 15 stamping, so it was executing the
+    // ORIGINAL definition — pin it to revision 1 (boot-adoption makes every
+    // pre-existing workflow rev 1). Falling back to `current()` would silently
+    // drift such a run onto a newer published revision (rev 2+), the very thing
+    // revision-stamping exists to prevent. If the pinned revision is gone, fail
+    // loudly (caught below) rather than resume against a different definition.
+    const revision = initial.definitionRevision ?? 1
     let rd: RunDefn
     try {
       rd = this.runDefnFor(revision, this.resolver.byRevision(revision))

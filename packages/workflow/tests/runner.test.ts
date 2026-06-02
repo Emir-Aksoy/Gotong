@@ -1325,13 +1325,25 @@ describe('WorkflowRunner — revision binding (Phase 15)', () => {
     expect(calls[0]!.payload).toBe('rev1-payload')
   })
 
-  it('a legacy run with no definitionRevision falls back to the current revision', async () => {
-    const def = oneStepDef('wf', 'go', 'do', 'p')
+  it('a legacy run with no definitionRevision pins to revision 1, not current (no drift; audit L12)', async () => {
+    // A run file with no stamped `definitionRevision` predates Phase 15 stamping,
+    // so it was executing the ORIGINAL definition (boot-adoption makes that rev 1).
+    // current() here is rev2 — falling back to it would silently DRIFT the legacy
+    // run onto a newer published revision, the exact thing stamping prevents.
+    const rev1 = oneStepDef('wf', 'go', 'rev1-cap', 'rev1-payload')
+    const rev2 = oneStepDef('wf', 'go', 'rev2-cap', 'rev2-payload')
     const { hub, calls } = makeStubHub(() => ok(nextTaskId(), 'OUT', 'bot'))
-    const runner = new WorkflowRunner({ definition: def, hub, resolver: fixedResolver(1, { 1: def }) })
+    const runner = new WorkflowRunner({
+      definition: rev2,
+      hub,
+      resolver: fixedResolver(2, { 1: rev1, 2: rev2 }),
+    })
     const out = await runner.resumeRun(runningState({ steps: [] })) // no definitionRevision
     expect(out).toBe('OUT')
     expect(calls).toHaveLength(1)
+    // Pinned to rev1's definition, NOT current (rev2). Drift would run rev2-cap.
+    expect(firstCap(calls[0]!)).toBe('rev1-cap')
+    expect(calls[0]!.payload).toBe('rev1-payload')
   })
 
   it('resume throws WorkflowRevisionError when the stamped revision is gone', async () => {
