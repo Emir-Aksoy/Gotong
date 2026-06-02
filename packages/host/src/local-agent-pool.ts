@@ -26,6 +26,7 @@ import { PersonalGrowthAgent } from './agents/personal-growth-agent.js'
 import {
   DEFAULT_PRICING,
   estimateCostMicros,
+  resolveModelPrice,
   type PricingTable,
 } from './pricing.js'
 import { AnthropicProvider } from '@aipehub/llm-anthropic'
@@ -67,6 +68,12 @@ const log = createLogger('local-agents')
 const LLM_TOKENS_METRIC = 'llm_tokens'
 const LLM_COST_MICROS_METRIC = 'llm_cost_micros'
 const BUDGET_PERIOD = 'daily' as const
+
+// M8 — operator override: when set, an unpriced model may run even though a
+// cost cap can't meter it. Default (unset) is fail-closed.
+const ALLOW_UNPRICED_MODELS =
+  process.env.AIPE_ALLOW_UNPRICED_MODELS === '1' ||
+  process.env.AIPE_ALLOW_UNPRICED_MODELS === 'true'
 
 /**
  * Phase 17 — derive usage-ledger attribution from a task. `origin`
@@ -338,8 +345,11 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
         // refuses the NEXT call once a budget is spent (fail-closed).
         budgetPeeks: [
           { metric: LLM_TOKENS_METRIC, period: BUDGET_PERIOD },
-          { metric: LLM_COST_MICROS_METRIC, period: BUDGET_PERIOD },
+          // M8 — the cost peek also fails closed when the model is unpriced
+          // and a cost cap is set (its $0 cost would otherwise dodge the cap).
+          { metric: LLM_COST_MICROS_METRIC, period: BUDGET_PERIOD, denyIfModelUnpriced: true },
         ],
+        allowUnpricedModels: ALLOW_UNPRICED_MODELS,
       })
     }
   }
@@ -754,6 +764,14 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     // by design: admins are the operators, not the consumers.
     const gate = this.llmQuotaGate
     const poolIdentity = this.identity
+    // M8 — classify the agent's model once at spawn. A model with no pricing
+    // entry (or no model at all → we can't know the provider default's price)
+    // is "unpriced": its post-call cost records as $0, so a cost cap can't
+    // meter it. The gate fails closed on that ONLY when a cost cap is set.
+    const modelUnpriced = !resolveModelPrice(
+      record.managed.model ?? '',
+      this.pricingTable,
+    )
     const preCallHook =
       gate && record.managed.provider !== 'mock'
         ? (task: Task): void => {
@@ -764,7 +782,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
             // ids that aren't local users). Federated quota belongs to the
             // per-link contract (P4-M4 inboundGate), not this per-user gate.
             if (poolIdentity && resolveLedgerPeerId(poolIdentity, task) !== null) return
-            gate(task.origin)
+            gate(task.origin, { modelUnpriced })
           }
         : undefined
 

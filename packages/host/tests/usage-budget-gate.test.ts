@@ -29,7 +29,12 @@ import {
   type IdentityStore,
 } from '@aipehub/identity'
 
-import { OrgApiPool, QuotaExceededError, type QuotaGate } from '../src/org-api-pool.js'
+import {
+  OrgApiPool,
+  QuotaExceededError,
+  UnpricedModelDeniedError,
+  type QuotaGate,
+} from '../src/org-api-pool.js'
 
 // The exact gate config LocalAgentPool builds (call-count debit + token /
 // cost budget peeks).
@@ -154,5 +159,55 @@ describe('LLM budget gate — token/cost fail-closed (Phase 17)', () => {
     expect(() => gate({ orgId: 'local', userId })).not.toThrow()
     // Second call hits the call-count cap.
     expect(() => gate({ orgId: 'local', userId })).toThrow(QuotaExceededError)
+  })
+
+  // ── M8 — unpriced model + cost cap fails closed ────────────────────────────
+  // An unpriced model records cost=$0 post-call, so a configured cost cap could
+  // never enforce against it (fail-OPEN). The gate refuses up front when the
+  // cost peek is marked `denyIfModelUnpriced` AND a cost cap is set AND the
+  // call's model is unpriced — unless the operator allowed unpriced models.
+  describe('M8 — unpriced model fail-closed', () => {
+    function buildGate(allowUnpricedModels = false): QuotaGate {
+      return new OrgApiPool({ identity }).makeLlmQuotaGate({
+        metric: 'llm_requests',
+        period: 'daily',
+        budgetPeeks: [
+          { metric: 'llm_tokens', period: 'daily' },
+          { metric: 'llm_cost_micros', period: 'daily', denyIfModelUnpriced: true },
+        ],
+        allowUnpricedModels,
+      })
+    }
+
+    it('refuses an unpriced model when a cost cap is set', () => {
+      identity.setQuota({ userId, metric: 'llm_cost_micros', period: 'daily', quota: 5000 })
+      const gate = buildGate()
+      try {
+        gate({ orgId: 'local', userId }, { modelUnpriced: true })
+        expect.fail('expected unpriced-model refusal')
+      } catch (err) {
+        expect(err).toBeInstanceOf(UnpricedModelDeniedError)
+        expect((err as UnpricedModelDeniedError).metric).toBe('llm_cost_micros')
+      }
+      // A budget-refused call must not have debited the call-count.
+      expect(identity.listUsage({ userId, metric: 'llm_requests', period: 'daily' })).toEqual([])
+    })
+
+    it('allows an unpriced model when NO cost cap is set (cost is moot)', () => {
+      const gate = buildGate()
+      expect(() => gate({ orgId: 'local', userId }, { modelUnpriced: true })).not.toThrow()
+    })
+
+    it('allows a PRICED model even with a cost cap set', () => {
+      identity.setQuota({ userId, metric: 'llm_cost_micros', period: 'daily', quota: 5000 })
+      const gate = buildGate()
+      expect(() => gate({ orgId: 'local', userId }, { modelUnpriced: false })).not.toThrow()
+    })
+
+    it('allows an unpriced model + cost cap when allowUnpricedModels is set', () => {
+      identity.setQuota({ userId, metric: 'llm_cost_micros', period: 'daily', quota: 5000 })
+      const gate = buildGate(true)
+      expect(() => gate({ orgId: 'local', userId }, { modelUnpriced: true })).not.toThrow()
+    })
   })
 })
