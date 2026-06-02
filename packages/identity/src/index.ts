@@ -114,6 +114,14 @@ export {
   principalFromVaultOwner,
   principalToVaultOwner,
 } from './principal.js'
+// v5 Stream 0-M2 — agent-as-owner authority boundary (requires_human gate).
+export type { AgentHumanConfirmAction, AuthorityDecision } from './agent-authority.js'
+export {
+  AGENT_HUMAN_CONFIRM_ACTIONS,
+  isHumanConfirmAction,
+  describeHumanConfirmAction,
+  authorizeAgentAction,
+} from './agent-authority.js'
 // A1 — exported so hosts can wire the workspace .key file into
 // openIdentityStore. crypto primitives (encryptSecret / decryptSecret)
 // are NOT re-exported: callers should only ever touch plaintext via
