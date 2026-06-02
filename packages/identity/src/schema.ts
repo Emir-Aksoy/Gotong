@@ -672,7 +672,34 @@ const MIGRATIONS: Migration[] = [
       DROP TABLE workflow_grants;
     `,
   },
+  {
+    // v5 Stream C-M1 — the callable-knowledge-base dimension of the per-link
+    // trust contract. A peer may only discover + call the shared MCP servers
+    // (knowledge bases) named in this allowlist:
+    //   allowed_knowledge_bases_json  inbound KB allowlist (string[] of shared
+    //                                 MCP server names — for a B-M5 KB template
+    //                                 that's the KB slot name). NULL = every
+    //                                 shared server is callable (legacy / unset,
+    //                                 pre-C behaviour). `[]` = lock the peer out
+    //                                 of every shared KB. Enforced inbound at the
+    //                                 per-link mcp.* responder (listShared is
+    //                                 filtered; callTool/listTools on a server
+    //                                 outside the set is refused).
+    version: 17,
+    name: 'peer-link-knowledge-bases',
+    sql: `
+      ALTER TABLE peers ADD COLUMN allowed_knowledge_bases_json TEXT;
+    `,
+  },
 ]
+
+/**
+ * The full ordered list of migration version numbers. Exported so isolation
+ * tests can mark "every migration except the one under test" as already
+ * applied — keeping those tests immune to later appended migrations (a v16
+ * test must not break the day a v17 ALTER lands on a table it never seeded).
+ */
+export const MIGRATION_VERSIONS: number[] = MIGRATIONS.map((m) => m.version)
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {
   // Bootstrap the migrations table itself. This is the chicken-and-egg

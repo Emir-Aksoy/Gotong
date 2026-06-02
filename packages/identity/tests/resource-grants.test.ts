@@ -28,7 +28,7 @@ import {
   type Principal,
 } from '../src/index.js'
 import { openDb } from '../src/db.js'
-import { applyMigrations } from '../src/schema.js'
+import { applyMigrations, MIGRATION_VERSIONS } from '../src/schema.js'
 
 describe('IdentityStore — resource grants (v5 A-M1)', () => {
   let store: IdentityStore
@@ -202,9 +202,13 @@ describe('IdentityStore — resource grants (v5 A-M1)', () => {
 describe('resource_grants — v16 migration copies + drops workflow_grants', () => {
   it('copies every workflow_grants row to a user: principal then drops the old table', () => {
     const db = openDb(':memory:')
-    // Stand up the schema_migrations ledger and mark v1..v15 as already applied
-    // so applyMigrations runs ONLY v16. (We don't need the real v1..v15 tables;
-    // the v16 SQL only touches workflow_grants + resource_grants.)
+    // Stand up the schema_migrations ledger and mark EVERY migration except
+    // v16 as already applied, so applyMigrations runs ONLY v16. (We don't need
+    // the real tables for those versions; the v16 SQL only touches
+    // workflow_grants + resource_grants.) Marking all-but-16 — rather than a
+    // fixed v1..v15 range — keeps this isolation test immune to later appended
+    // migrations (e.g. v17's ALTER TABLE peers, which would otherwise run here
+    // against a peers table this synthetic db never created).
     db.exec(`
       CREATE TABLE schema_migrations (
         version INTEGER PRIMARY KEY,
@@ -213,7 +217,7 @@ describe('resource_grants — v16 migration copies + drops workflow_grants', () 
       );
     `)
     const seedMig = db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)')
-    for (let v = 1; v <= 15; v++) seedMig.run(v, `seed-${v}`, 0)
+    for (const v of MIGRATION_VERSIONS) if (v !== 16) seedMig.run(v, `seed-${v}`, 0)
 
     // The old (v13) workflow_grants table + a couple of rows.
     db.exec(`

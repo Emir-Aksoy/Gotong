@@ -847,6 +847,14 @@ export interface PeerRegistration {
   perLinkQuotaBudget: number | null
   /** Outbound data-class allowlist; null = all classes allowed. */
   allowedDataClasses: string[] | null
+  // ---- v5 C-M1 — callable-knowledge-base allowlist (always present; a
+  //      pre-C row reads the v17 column NULL). ----
+  /**
+   * Which shared MCP servers (knowledge bases) this peer may discover + call,
+   * by server name (for a B-M5 KB template, the KB slot name). null = every
+   * shared server is callable (legacy); [] = locked out of all of them.
+   */
+  allowedKnowledgeBases: string[] | null
 }
 
 /** Phase 19 P4-M4 — a peer link's revocation status. */
@@ -876,6 +884,8 @@ export interface AddPeerInput {
   revocationState?: PeerRevocationState
   perLinkQuotaBudget?: number | null
   allowedDataClasses?: string[] | null
+  // ---- v5 C-M1 — callable-KB allowlist (omitted → NULL = every shared KB). ----
+  allowedKnowledgeBases?: string[] | null
 }
 
 export interface UpdatePeerInput {
@@ -902,6 +912,9 @@ export interface UpdatePeerInput {
   revocationState?: PeerRevocationState
   perLinkQuotaBudget?: number | null
   allowedDataClasses?: string[] | null
+  // ---- v5 C-M1 — callable-KB allowlist. undefined = preserve; explicit null
+  //      CLEARS it (back to every-shared-KB-callable). ----
+  allowedKnowledgeBases?: string[] | null
 }
 
 export interface ListPeersQuery {

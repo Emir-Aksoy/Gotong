@@ -492,4 +492,51 @@ describe('IdentityStore — peers (D1)', () => {
       expect(u.allowedDataClasses).toBeNull()
     })
   })
+
+  // ---------- v5 C-M1 — callable-knowledge-base allowlist (schema v17) ----------
+
+  describe('callable-knowledge-base allowlist (v5 C-M1)', () => {
+    it('addPeer without the field → null (every shared KB callable)', () => {
+      const p = store.addPeer({
+        peerId: 'hub_cm1def', endpointUrl: 'wss://cm1.example', peerToken: 'tok-cm1-1',
+      })
+      expect(p.allowedKnowledgeBases).toBeNull()
+    })
+
+    it('addPeer round-trips an explicit KB allowlist (incl. [] lockdown)', () => {
+      const p = store.addPeer({
+        peerId: 'hub_cm1full', endpointUrl: 'wss://cm1f.example', peerToken: 'tok-cm1f-1',
+        allowedKnowledgeBases: ['company_kb', 'policy_kb'],
+      })
+      for (const r of [p, store.getPeerByPeerId('hub_cm1full')!]) {
+        expect(r.allowedKnowledgeBases).toEqual(['company_kb', 'policy_kb'])
+      }
+      const locked = store.addPeer({
+        peerId: 'hub_cm1lock', endpointUrl: 'wss://cm1l.example', peerToken: 'tok-cm1l-1',
+        allowedKnowledgeBases: [],
+      })
+      expect(locked.allowedKnowledgeBases).toEqual([]) // [] = no KB callable, distinct from null
+    })
+
+    it('updatePeer preserves the KB allowlist on undefined, clears on null', () => {
+      const p = store.addPeer({
+        peerId: 'hub_cm1upd', endpointUrl: 'wss://cm1u.example', peerToken: 'tok-cm1u-1',
+        allowedKnowledgeBases: ['company_kb'],
+      })
+      const preserved = store.updatePeer(p.id, { label: 'renamed' })
+      expect(preserved.allowedKnowledgeBases).toEqual(['company_kb']) // undefined preserves
+      const cleared = store.updatePeer(p.id, { allowedKnowledgeBases: null })
+      expect(cleared.allowedKnowledgeBases).toBeNull() // explicit null clears
+    })
+
+    it('updatePeer sets the KB allowlist without touching the data-class contract', () => {
+      const p = store.addPeer({
+        peerId: 'hub_cm1iso', endpointUrl: 'wss://cm1i.example', peerToken: 'tok-cm1i-1',
+        allowedDataClasses: ['public'],
+      })
+      const u = store.updatePeer(p.id, { allowedKnowledgeBases: ['company_kb'] })
+      expect(u.allowedKnowledgeBases).toEqual(['company_kb'])
+      expect(u.allowedDataClasses).toEqual(['public']) // untouched
+    })
+  })
 })

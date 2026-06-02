@@ -51,6 +51,8 @@ interface PeerRow {
   revocation_state: string
   per_link_quota_budget: number | null
   allowed_data_classes_json: string | null
+  // v5 C-M1 — callable-knowledge-base allowlist (schema v17).
+  allowed_knowledge_bases_json: string | null
 }
 
 export class PeerStore {
@@ -127,6 +129,10 @@ export class PeerStore {
           input.perLinkQuotaBudget ?? null,
           input.allowedDataClasses != null
             ? JSON.stringify(input.allowedDataClasses)
+            : null,
+          // v5 C-M1 — callable-KB allowlist; omitted → NULL = every shared KB.
+          input.allowedKnowledgeBases != null
+            ? JSON.stringify(input.allowedKnowledgeBases)
             : null,
         )
       } catch (err) {
@@ -240,6 +246,13 @@ export class PeerStore {
             ? null
             : JSON.stringify(input.allowedDataClasses)
           : existing.allowed_data_classes_json
+      // v5 C-M1 — same undefined-preserve / null-clear contract as data classes.
+      const allowedKnowledgeBasesJson =
+        input.allowedKnowledgeBases !== undefined
+          ? input.allowedKnowledgeBases === null
+            ? null
+            : JSON.stringify(input.allowedKnowledgeBases)
+          : existing.allowed_knowledge_bases_json
       this.stmtPeerUpdate.run(
         endpointUrl,
         label,
@@ -252,6 +265,7 @@ export class PeerStore {
         revocationState,
         perLinkQuotaBudget,
         allowedDataClassesJson,
+        allowedKnowledgeBasesJson,
         Date.now(),
         id,
       )
@@ -299,8 +313,9 @@ export class PeerStore {
          id, peer_id, endpoint_url, label, enabled, vault_entry_id,
          created_at, updated_at,
          kind, acl_json, outbound_caps_json, require_approval_outbound,
-         revocation_state, per_link_quota_budget, allowed_data_classes_json
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         revocation_state, per_link_quota_budget, allowed_data_classes_json,
+         allowed_knowledge_bases_json
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ))
   }
   private get stmtPeerById(): SqliteStmt {
@@ -330,7 +345,8 @@ export class PeerStore {
              kind = ?, acl_json = ?, outbound_caps_json = ?,
              require_approval_outbound = ?,
              revocation_state = ?, per_link_quota_budget = ?,
-             allowed_data_classes_json = ?, updated_at = ?
+             allowed_data_classes_json = ?, allowed_knowledge_bases_json = ?,
+             updated_at = ?
        WHERE id = ?`,
     ))
   }
@@ -376,6 +392,8 @@ function rowToPeerRegistration(r: PeerRow): PeerRegistration {
     perLinkQuotaBudget:
       typeof r.per_link_quota_budget === 'number' ? r.per_link_quota_budget : null,
     allowedDataClasses: parsePolicyJson<string[]>(r.allowed_data_classes_json),
+    // v5 C-M1 callable-KB allowlist projection.
+    allowedKnowledgeBases: parsePolicyJson<string[]>(r.allowed_knowledge_bases_json),
   }
 }
 
