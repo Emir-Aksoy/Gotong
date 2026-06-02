@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { Hub, HumanParticipant, InMemoryStorage } from '@aipehub/core'
+import { NEVER_RESUME_AT } from '@aipehub/inbox'
 import { RunStore } from '@aipehub/workflow'
 
 import { WorkflowController, createWorkflowController } from '../src/workflow-controller.js'
@@ -388,7 +389,7 @@ workflow:
 
       const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
       const r = await c.resumeRunningRuns()
-      expect(r).toEqual({ resumed: 0, abandoned: 1 })
+      expect(r).toEqual({ resumed: 0, abandoned: 1, parked: 0 })
 
       const recovered = await c.readRun('r_orphan')
       expect(recovered).not.toBeNull()
@@ -426,7 +427,7 @@ workflow:
 
       const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
       const r = await c.resumeRunningRuns()
-      expect(r).toEqual({ resumed: 0, abandoned: 0 })
+      expect(r).toEqual({ resumed: 0, abandoned: 0, parked: 0 })
 
       const done = await c.readRun('r_done')
       expect(done!.status).toBe('done')
@@ -435,6 +436,60 @@ workflow:
       const failed = await c.readRun('r_failed')
       expect(failed!.status).toBe('failed')
       expect(failed!.error).toBe('original error')
+    })
+
+    it('resumeRunningRuns() skips runs parked on a human-inbox step (NEVER_RESUME_AT)', async () => {
+      // Audit M5 — a run waiting on a human-inbox decision stays `status:
+      // 'running'` (RunStatus has no run-level 'suspended'); its step is
+      // `status: 'suspended', resumeAt: NEVER_RESUME_AT`. Boot must NOT re-drive
+      // it: the inbox-resolve path owns that run via the parked task's own
+      // suspended_tasks row. Re-driving here would re-read the unresolved child
+      // and race the resolve. This pins the skip — both runs target a LIVE
+      // workflow, so WITHOUT the skip the parked run would be resumed too
+      // (resumed: 2, no `parked` field).
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      await c.importFromText(SAMPLE) // registers a live workflow:editorial runner
+
+      const store = new RunStore(tmp)
+      store.ensureDirs()
+      // Parked: a human-inbox step suspended forever.
+      await store.write({
+        runId: 'r_parked',
+        workflowId: 'editorial',
+        triggeredByTaskId: 't_parked',
+        triggerPayload: {},
+        steps: [
+          {
+            stepId: 'review',
+            startedAt: 1,
+            status: 'suspended',
+            resumeAt: NEVER_RESUME_AT,
+            attempts: 1,
+          },
+        ],
+        startedAt: 1,
+        status: 'running',
+      })
+      // A normal running run with no parked step — must still be resumed.
+      await store.write({
+        runId: 'r_live',
+        workflowId: 'editorial',
+        triggeredByTaskId: 't_live',
+        triggerPayload: {},
+        steps: [],
+        startedAt: 1,
+        status: 'running',
+      })
+
+      const r = await c.resumeRunningRuns()
+      // The parked run is counted + skipped; the normal run is resumed.
+      expect(r).toEqual({ resumed: 1, abandoned: 0, parked: 1 })
+
+      // The parked run is untouched: still running, step still suspended forever.
+      const parked = await c.readRun('r_parked')
+      expect(parked!.status).toBe('running')
+      expect(parked!.steps[0]!.status).toBe('suspended')
+      expect(parked!.steps[0]!.resumeAt).toBe(NEVER_RESUME_AT)
     })
 
     it('readRun() returns the full state, or null when missing', async () => {

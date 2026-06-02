@@ -158,4 +158,43 @@ describe('FileInboxStore', () => {
       expect((err as InboxError).code).toBe('not_found')
     }
   })
+
+  // Audit M5 — the race guard is read-check-write, so two resolves issued in
+  // the SAME tick (a double-click, or a request racing the resume sweep) can
+  // both `get()` the pending item before either `write()`s, both pass the
+  // pending check, and both go on to drive `hub.resumeTask` — a double resume.
+  // The per-item serialization makes the read-check-write atomic in-process, so
+  // the second op sees the first's `resolved` write and is rejected. These tests
+  // PIN that: without `serialize()` both settle fulfilled (no `already_resolved`).
+  it('two concurrent markResolved of one item: exactly one wins, one rejects', async () => {
+    await store.write(item({ itemId: 'task-race' }))
+    const results = await Promise.allSettled([
+      store.markResolved('task-race', { kind: 'approval', approved: true }, 1),
+      store.markResolved('task-race', { kind: 'approval', approved: false }, 2),
+    ])
+    const fulfilled = results.filter((r) => r.status === 'fulfilled')
+    const rejected = results.filter((r) => r.status === 'rejected')
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+    const reason = (rejected[0] as PromiseRejectedResult).reason
+    expect(reason).toBeInstanceOf(InboxError)
+    expect((reason as InboxError).code).toBe('already_resolved')
+    // Whichever won, the item ends resolved exactly once (single decision on disk).
+    expect((await store.get('task-race'))!.status).toBe('resolved')
+  })
+
+  it('concurrent markResolved + delegate of one pending item: exactly one wins', async () => {
+    await store.write(item({ itemId: 'task-race2', userId: 'user-a' }))
+    const results = await Promise.allSettled([
+      store.markResolved('task-race2', { kind: 'approval', approved: true }, 1),
+      store.delegate('task-race2', 'user-b', { actor: 'user-a', now: 2 }),
+    ])
+    const fulfilled = results.filter((r) => r.status === 'fulfilled')
+    const rejected = results.filter((r) => r.status === 'rejected')
+    // Both mutations guard on `status === 'pending'`; serialization lets the
+    // second see the first's write, so exactly one settles fulfilled.
+    expect(fulfilled).toHaveLength(1)
+    expect(rejected).toHaveLength(1)
+    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(InboxError)
+  })
 })

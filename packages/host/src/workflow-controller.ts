@@ -28,6 +28,7 @@ import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { createLogger, type Hub } from '@aipehub/core'
+import { NEVER_RESUME_AT } from '@aipehub/inbox'
 
 const log = createLogger('workflow-ctl')
 import {
@@ -254,14 +255,26 @@ export class WorkflowController {
    *
    * Returns the count of runs resumed, plus the count abandoned.
    */
-  async resumeRunningRuns(): Promise<{ resumed: number; abandoned: number }> {
+  async resumeRunningRuns(): Promise<{ resumed: number; abandoned: number; parked: number }> {
     const all = await this.runStore.listRuns()
     let resumed = 0
     let abandoned = 0
+    let parked = 0
     for (const summary of all) {
       if (summary.status !== 'running') continue
       const state = await this.runStore.read(summary.runId)
       if (!state) continue
+      // Audit M5 — a run parked on a human-inbox step is still `status:
+      // 'running'` (RunStatus has no run-level 'suspended'); its suspended
+      // step carries `resumeAt === NEVER_RESUME_AT`. Such a run is resumed
+      // EXCLUSIVELY by the inbox-resolve path (which reads the parked task's
+      // own persistent suspended_tasks row), not by boot. Re-driving it here
+      // would redundantly re-read the unresolved child + re-suspend, and risks
+      // racing the resolve. Leave it parked.
+      if (isParkedIndefinitely(state)) {
+        parked++
+        continue
+      }
       const participant = this.hub.registry.get(workflowParticipantId(summary.workflowId))
       if (!participant || !(participant instanceof WorkflowRunner)) {
         // Workflow no longer live — close out the run so it doesn't sit in
@@ -282,7 +295,7 @@ export class WorkflowController {
       })
       resumed++
     }
-    return { resumed, abandoned }
+    return { resumed, abandoned, parked }
   }
 
   /**
@@ -589,6 +602,19 @@ const HARD_VIOLATION_KINDS: ReadonlySet<string> = new Set([
 function isBlockingViolation(kind: string, blockWarnings: boolean): boolean {
   if (HARD_VIOLATION_KINDS.has(kind)) return true
   return blockWarnings && kind === 'unknown_agent'
+}
+
+/**
+ * Audit M5 — is this run parked indefinitely on an external event (a
+ * human-inbox step), as opposed to a time-based suspend the boot resume
+ * should re-arm? True when any step is suspended at the never-resume
+ * sentinel. The inbox-resolve path owns these runs (it reads the parked
+ * task's own persistent suspended_tasks row), so boot must not re-drive them.
+ */
+function isParkedIndefinitely(state: RunState): boolean {
+  return state.steps.some(
+    (s) => s.status === 'suspended' && s.resumeAt === NEVER_RESUME_AT,
+  )
 }
 
 /**

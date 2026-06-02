@@ -38,11 +38,43 @@ export class FileInboxStore implements InboxStore {
   readonly root: string
 
   /**
+   * Per-item serialization (audit M5). `markResolved` / `delegate` are
+   * read-check-write: `get()` the item, reject if not `pending`, then
+   * `write()`. Two concurrent resolves (a double-click, or a request racing
+   * a delegate) can BOTH read `pending` before either writes, both pass the
+   * guard, and both go on to drive `hub.resumeTask` — a double resume. A
+   * promise chain per item id makes the read-check-write atomic within this
+   * process, so the second op sees the first's written `resolved`/reassigned
+   * state and is rejected by the guard. Single-process best-effort (a SQLite
+   * store would use `UPDATE … WHERE status='pending'`); the host inbox is
+   * single-process, so this closes the real window.
+   */
+  private readonly itemLocks = new Map<string, Promise<unknown>>()
+
+  /**
    * @param spaceRoot The space root directory (e.g. `.aipehub`).
    *                  The store keeps items under `inbox/` beneath it.
    */
   constructor(spaceRoot: string) {
     this.root = join(spaceRoot, 'inbox')
+  }
+
+  /** Run `fn` after any in-flight mutation of the same item id completes. */
+  private serialize<T>(itemId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.itemLocks.get(itemId) ?? Promise.resolve()
+    // Chain regardless of the previous op's outcome (settle, don't propagate).
+    const next = prev.then(fn, fn)
+    const tail = next.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.itemLocks.set(itemId, tail)
+    // Drop the entry once this is the trailing op, so the map can't grow
+    // without bound across many distinct items.
+    void tail.then(() => {
+      if (this.itemLocks.get(itemId) === tail) this.itemLocks.delete(itemId)
+    })
+    return next
   }
 
   ensureDirs(): void {
@@ -108,6 +140,14 @@ export class FileInboxStore implements InboxStore {
     decision: InboxDecision,
     now: number = Date.now(),
   ): Promise<InboxItem> {
+    return this.serialize(itemId, () => this.resolveLocked(itemId, decision, now))
+  }
+
+  private async resolveLocked(
+    itemId: string,
+    decision: InboxDecision,
+    now: number,
+  ): Promise<InboxItem> {
     const item = await this.get(itemId)
     if (!item) {
       throw new InboxError('not_found', `inbox item '${itemId}' not found`)
@@ -141,6 +181,14 @@ export class FileInboxStore implements InboxStore {
   }
 
   async delegate(
+    itemId: string,
+    toUserId: string,
+    opts: { actor: string; note?: string; now?: number },
+  ): Promise<InboxItem> {
+    return this.serialize(itemId, () => this.delegateLocked(itemId, toUserId, opts))
+  }
+
+  private async delegateLocked(
     itemId: string,
     toUserId: string,
     opts: { actor: string; note?: string; now?: number },
