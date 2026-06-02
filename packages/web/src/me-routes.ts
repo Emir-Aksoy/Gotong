@@ -1556,7 +1556,12 @@ async function handleMeUploads(
     }
     // Isolation: a member may only read artifacts under their OWN scope.
     // Anything else → 404 (don't reveal whether it exists for someone else).
-    if (!id.startsWith(prefix)) {
+    // Reject `..` BEFORE the prefix check: the host-side artifact store
+    // normalises the path (folding `../`), so a naive
+    // `uploads/me/<me>/../<other>/…` id satisfies startsWith(prefix) yet
+    // resolves into a sibling member's (or admin's) scope. Refuse traversal up
+    // front — same guard as the report download (parseCaseIdFromReportPath).
+    if (id.includes('..') || !id.startsWith(prefix)) {
       sendJson(res, { error: 'not found' }, 404)
       return
     }

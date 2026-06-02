@@ -21,7 +21,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, posix as posixPath } from 'node:path'
 
 import {
   HumanParticipant,
@@ -141,7 +141,11 @@ class StubUploads {
     return { artifactId, mime: params.declaredMime, size: params.bytes.byteLength }
   }
   async get(artifactId: string): Promise<{ bytes: Uint8Array; mime: string }> {
-    const hit = this.store.get(artifactId)
+    // Mirror the host artifact store, which `normalize`s the path (folding
+    // `../`) before lookup. A traversal id must be refused by the ROUTE before
+    // it reaches here — an exact-match Map would otherwise mask the IDOR by
+    // missing on the un-normalised key.
+    const hit = this.store.get(posixPath.normalize(artifactId))
     if (!hit) throw new Error('ENOENT: no such file')
     return hit
   }
@@ -582,6 +586,23 @@ describe('/api/me/uploads — member file uploads (Phase 19 P1-M4)', () => {
     expect(dl.status).toBe(404)
     // And the bytes never went out.
     expect(await dl.text()).not.toContain('secret')
+  })
+
+  it('refuses a `..` traversal id that startsWith() own scope but normalises into a sibling scope (IDOR)', async () => {
+    // Victim file under a SIBLING member's (already-normalised) scope.
+    b.uploads!.store.set('uploads/me/victim-user/2026-06-01/0', {
+      bytes: new TextEncoder().encode('victim-secret'),
+      mime: 'text/plain',
+    })
+    // Attacker id: startsWith(`uploads/me/<me>/`) is TRUE, yet the host store
+    // folds `../` and would resolve into victim-user's scope. The route must
+    // reject the `..` up front (before the prefix check + before get()).
+    const evil = `uploads/me/${b.memberUserId}/../victim-user/2026-06-01/0`
+    const dl = await fetch(`${b.baseUrl}/api/me/uploads?id=${encodeURIComponent(evil)}`, {
+      headers: { cookie: b.memberCookie },
+    })
+    expect(dl.status).toBe(404)
+    expect(await dl.text()).not.toContain('victim-secret')
   })
 
   it('rejects an empty body with 400', async () => {
