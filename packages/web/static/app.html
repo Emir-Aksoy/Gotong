@@ -229,6 +229,35 @@
         </form>
         <div id="me-own-agents-list" class="me-agents-list"></div>
       </div>
+
+      <!-- v5 A-M3 — members manage THEIR OWN API keys ("bring your own key").
+           Keys live in the vault under ownerKind='user'; the server forces the
+           owner from the session. The helpers above fall back to these when the
+           org configured no key for the provider. The secret is never shown
+           again after saving. -->
+      <div class="me-credentials">
+        <h2>我的 API 密钥</h2>
+        <p class="me-meta">给你自己的助手配一把你自己的模型密钥（自带 key）。当机构没有为该供应商配置密钥时，你的助手会用这把。密钥加密保存，存进去后不再显示；只有你能管理。</p>
+        <form id="me-cred-form" class="me-own-agent-form" autocomplete="off">
+          <div class="me-field">
+            <label for="me-cred-provider">模型供应商</label>
+            <select id="me-cred-provider" name="provider" required></select>
+          </div>
+          <div class="me-field">
+            <label for="me-cred-key">API 密钥</label>
+            <input type="password" id="me-cred-key" name="apiKey" placeholder="sk-..." autocomplete="off" required />
+          </div>
+          <div class="me-field">
+            <label for="me-cred-label">备注（可选）</label>
+            <input type="text" id="me-cred-label" name="label" placeholder="我的个人 key" />
+          </div>
+          <div class="me-own-agent-actions">
+            <button type="submit" id="me-cred-submit" class="me-primary-btn">保存密钥</button>
+            <span id="me-cred-status" class="me-status"></span>
+          </div>
+        </form>
+        <div id="me-cred-list" class="me-agents-list"></div>
+      </div>
     </section>
 
     <!-- Settings tab — visible to every signed-in role. C1a ships only

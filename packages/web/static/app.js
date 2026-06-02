@@ -295,6 +295,7 @@
     await loadMyReports()
     await loadMyAgents()
     await loadMyOwnAgents()
+    await loadMyCredentials()
     document.getElementById('me-dispatch-btn')?.addEventListener('click', submitDispatch)
     document.getElementById('me-refresh-reports-btn')?.addEventListener('click', loadMyReports)
     document.getElementById('me-runs-refresh-btn')?.addEventListener('click', loadMyRuns)
@@ -306,6 +307,9 @@
     document.getElementById('me-own-agent-form')?.addEventListener('submit', submitOwnAgent)
     document.getElementById('me-own-cancel')?.addEventListener('click', resetOwnForm)
     document.getElementById('me-own-agents-list')?.addEventListener('click', onOwnAgentsClick)
+    // v5 A-M3 — my API keys (BYO): create form + delegated delete.
+    document.getElementById('me-cred-form')?.addEventListener('submit', submitCredential)
+    document.getElementById('me-cred-list')?.addEventListener('click', onCredListClick)
   }
 
   async function renderWhoami() {
@@ -1042,6 +1046,111 @@
       } catch (err) {
         alert(`删除失败: ${err?.message || String(err)}`)
       }
+    }
+  }
+
+  // v5 A-M3 — my own API keys ("bring your own key"). The member supplies a
+  // raw key; the server stores it encrypted under their account and never
+  // returns it. List shows metadata + delete only (rotate = delete + re-add).
+  // The helpers above use these as a fallback when the org has no key.
+  let myCredentials = []
+
+  async function loadMyCredentials() {
+    const list = document.getElementById('me-cred-list')
+    if (!list) return
+    list.innerHTML = '<p class="me-meta">加载中…</p>'
+    try {
+      const r = await fetch('/api/me/credentials')
+      if (!r.ok) {
+        list.innerHTML = `<p class="me-meta">加载失败 (HTTP ${r.status})</p>`
+        return
+      }
+      const j = await r.json()
+      myCredentials = Array.isArray(j?.credentials) ? j.credentials : []
+      populateCredProviderSelect(Array.isArray(j?.providers) ? j.providers : [])
+      if (myCredentials.length === 0) {
+        list.innerHTML = '<p class="me-meta">你还没有保存自己的密钥。机构配了密钥的话不需要这步。</p>'
+        return
+      }
+      list.innerHTML = myCredentials.map(renderCredCard).join('')
+    } catch (err) {
+      list.innerHTML = `<p class="me-meta">加载失败: ${escape(err?.message || String(err))}</p>`
+    }
+  }
+
+  function populateCredProviderSelect(providers) {
+    const sel = document.getElementById('me-cred-provider')
+    if (!sel || sel.dataset.loaded === '1') return
+    if (providers.length === 0) {
+      sel.innerHTML = '<option value="">（暂无可选供应商）</option>'
+      return
+    }
+    sel.innerHTML = providers.map((p) => `<option value="${escape(p)}">${escape(p)}</option>`).join('')
+    sel.dataset.loaded = '1'
+  }
+
+  function renderCredCard(c) {
+    const label = c.label ? ` · ${escape(c.label)}` : ''
+    const created = c.createdAt ? new Date(c.createdAt).toLocaleDateString() : ''
+    return `
+      <div class="me-agent-card" data-cred-id="${escape(c.id)}">
+        <div class="me-agent-head">
+          <span class="me-agent-dot me-agent-online" title="已保存"></span>
+          <strong>${escape(c.provider || '')}</strong>
+          <span class="me-meta">${label}${created ? ' · ' + escape(created) : ''}</span>
+        </div>
+        <div class="me-own-agent-row-actions">
+          <button type="button" class="me-secondary-btn me-danger-btn" data-cred-delete="${escape(c.id)}">删除</button>
+        </div>
+      </div>`
+  }
+
+  async function submitCredential(e) {
+    e.preventDefault()
+    const status = document.getElementById('me-cred-status')
+    status.className = 'me-status'
+    status.textContent = '保存中…'
+    const body = {
+      provider: document.getElementById('me-cred-provider').value,
+      apiKey: document.getElementById('me-cred-key').value,
+      label: document.getElementById('me-cred-label').value.trim(),
+    }
+    try {
+      const r = await fetch('/api/me/credentials', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        status.className = 'me-status error'
+        status.textContent = `失败: ${escape(j?.error || `HTTP ${r.status}`)}`
+        return
+      }
+      status.className = 'me-status ok'
+      status.textContent = '已保存'
+      document.getElementById('me-cred-form').reset()
+      await loadMyCredentials()
+    } catch (err) {
+      status.className = 'me-status error'
+      status.textContent = `失败: ${escape(err?.message || String(err))}`
+    }
+  }
+
+  async function onCredListClick(e) {
+    const delId = e.target?.getAttribute?.('data-cred-delete')
+    if (!delId) return
+    if (!confirm('确定删除这把密钥？依赖它的助手会改用机构密钥（如果有）。')) return
+    try {
+      const r = await fetch(`/api/me/credentials/${encodeURIComponent(delId)}`, { method: 'DELETE' })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        alert(`删除失败: ${j?.error || `HTTP ${r.status}`}`)
+        return
+      }
+      await loadMyCredentials()
+    } catch (err) {
+      alert(`删除失败: ${err?.message || String(err)}`)
     }
   }
 
