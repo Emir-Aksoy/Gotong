@@ -27,6 +27,8 @@ export type {
   PersistedPendingApp,
   // Phase 10 M4 — DispatchToolset allow-list declared on the agent spec
   DispatchAllowList,
+  // v5 Stream D — per-agent proactive heartbeat spec
+  HeartbeatSpec,
 } from './space.js'
 
 export type {

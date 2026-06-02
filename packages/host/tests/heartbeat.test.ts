@@ -1,0 +1,248 @@
+/**
+ * v5 Stream D-M1 — heartbeat engine tests.
+ *
+ * Three layers, no host binary / no SQLite:
+ *   1. `parseHeartbeatState` — validation.
+ *   2. `HeartbeatScheduler.reconcile` — idempotent seed + stale prune.
+ *   3. End-to-end self-renewal — a real in-memory Hub + the broker + a
+ *      tiny sweep loop (same shape as host/main.ts) proves the agent is
+ *      woken repeatedly and the single parked row renews itself.
+ */
+
+import { describe, expect, it } from 'vitest'
+
+import {
+  AgentParticipant,
+  Hub,
+  type ParticipantId,
+  type Task,
+  type TaskResult,
+} from '@aipehub/core'
+
+import {
+  HEARTBEAT_BROKER_ID,
+  HEARTBEAT_TASK_PREFIX,
+  HeartbeatParticipant,
+  HeartbeatScheduler,
+  parseHeartbeatState,
+  type HeartbeatStore,
+} from '../src/heartbeat.js'
+
+// --- in-memory suspended-task store, mirroring identity's table shape ------
+
+interface Row {
+  taskId: string
+  agentId: string
+  resumeAt: number
+  state: unknown
+  taskJson: string
+}
+
+class MemStore implements HeartbeatStore {
+  readonly rows = new Map<string, Row>()
+
+  getSuspendedTask(taskId: string): { taskId: string; state: unknown } | null {
+    const r = this.rows.get(taskId)
+    return r ? { taskId: r.taskId, state: r.state } : null
+  }
+
+  persistSuspendedTask(input: {
+    taskId: string
+    agentId: string
+    resumeAt: number
+    state: unknown
+    taskJson: string
+  }): void {
+    this.rows.set(input.taskId, {
+      taskId: input.taskId,
+      agentId: input.agentId,
+      resumeAt: input.resumeAt,
+      state: input.state,
+      taskJson: input.taskJson,
+    })
+  }
+
+  listSuspendedTasksByAgent(agentId: string): Array<{ taskId: string; state: unknown }> {
+    return [...this.rows.values()]
+      .filter((r) => r.agentId === agentId)
+      .map((r) => ({ taskId: r.taskId, state: r.state }))
+  }
+
+  removeSuspendedTask(taskId: string): number {
+    return this.rows.delete(taskId) ? 1 : 0
+  }
+
+  /** Sweep helper — due rows oldest-first, like listDueSuspendedTasks. */
+  listDue(now: number): Row[] {
+    return [...this.rows.values()]
+      .filter((r) => r.resumeAt <= now)
+      .sort((a, b) => a.resumeAt - b.resumeAt)
+  }
+}
+
+// --- a target agent that counts the heartbeat tasks it received ------------
+
+class CountingAgent extends AgentParticipant {
+  readonly fires: Task[] = []
+  constructor(id: string) {
+    super({ id, capabilities: ['demo'] })
+  }
+  protected handleTask(task: Task): unknown {
+    this.fires.push(task)
+    return { ok: true }
+  }
+}
+
+// --- 1. parseHeartbeatState ------------------------------------------------
+
+describe('parseHeartbeatState', () => {
+  it('accepts a minimal valid state', () => {
+    expect(parseHeartbeatState({ targetAgentId: 'a', intervalMs: 5 })).toEqual({
+      targetAgentId: 'a',
+      intervalMs: 5,
+    })
+  })
+
+  it('keeps a checklist string when present', () => {
+    const st = parseHeartbeatState({ targetAgentId: 'a', intervalMs: 5, checklist: 'check inbox' })
+    expect(st.checklist).toBe('check inbox')
+  })
+
+  it('rejects missing target, non-positive interval, and non-objects', () => {
+    expect(() => parseHeartbeatState({ intervalMs: 5 })).toThrow()
+    expect(() => parseHeartbeatState({ targetAgentId: 'a', intervalMs: 0 })).toThrow()
+    expect(() => parseHeartbeatState({ targetAgentId: 'a', intervalMs: -1 })).toThrow()
+    expect(() => parseHeartbeatState(null)).toThrow()
+    expect(() => parseHeartbeatState([])).toThrow()
+  })
+})
+
+// --- 2. HeartbeatScheduler.reconcile ---------------------------------------
+
+describe('HeartbeatScheduler.reconcile', () => {
+  it('seeds one row per enabled agent, idempotently (no clock reset)', async () => {
+    const store = new MemStore()
+    const sched = new HeartbeatScheduler({
+      store,
+      minIntervalMs: 0,
+      now: () => 1_000,
+      listEnabled: () => [
+        { agentId: 'a', intervalMs: 500 },
+        { agentId: 'b', intervalMs: 500, checklist: 'do x' },
+      ],
+    })
+
+    const r1 = await sched.reconcile()
+    expect(r1.seeded.sort()).toEqual(['a', 'b'])
+    expect(store.rows.size).toBe(2)
+
+    const rowA = store.rows.get(HEARTBEAT_TASK_PREFIX + 'a')!
+    expect(rowA.agentId).toBe(HEARTBEAT_BROKER_ID)
+    expect(rowA.resumeAt).toBe(1_500) // now(1000) + interval(500)
+    expect((rowA.state as { targetAgentId: string }).targetAgentId).toBe('a')
+    expect((store.rows.get(HEARTBEAT_TASK_PREFIX + 'b')!.state as { checklist?: string }).checklist).toBe('do x')
+
+    // Re-running is a no-op — never reseeds a live row / resets its clock.
+    const r2 = await sched.reconcile()
+    expect(r2.seeded).toEqual([])
+    expect(store.rows.get(HEARTBEAT_TASK_PREFIX + 'a')!.resumeAt).toBe(1_500)
+  })
+
+  it('clamps interval up to the floor', async () => {
+    const store = new MemStore()
+    const sched = new HeartbeatScheduler({
+      store,
+      minIntervalMs: 1_000,
+      now: () => 0,
+      listEnabled: () => [{ agentId: 'a', intervalMs: 5 }],
+    })
+    await sched.reconcile()
+    expect(store.rows.get(HEARTBEAT_TASK_PREFIX + 'a')!.resumeAt).toBe(1_000) // floored
+  })
+
+  it('prunes rows whose agent is no longer enabled', async () => {
+    const store = new MemStore()
+    let enabled = [{ agentId: 'a', intervalMs: 500 }]
+    const sched = new HeartbeatScheduler({ store, minIntervalMs: 0, listEnabled: () => enabled })
+    await sched.reconcile()
+    expect(store.rows.size).toBe(1)
+
+    enabled = []
+    const r = await sched.reconcile()
+    expect(r.pruned).toEqual(['a'])
+    expect(store.rows.size).toBe(0)
+  })
+})
+
+// --- 3. end-to-end self-renewal --------------------------------------------
+
+describe('heartbeat engine — end-to-end self-renewal', () => {
+  it('wakes the target agent repeatedly and renews the single parked row', async () => {
+    const store = new MemStore()
+    const hub = Hub.inMemory({
+      // Wire the scheduler's suspend signal to the same store the sweep
+      // reads — exactly what the host does with identity.persistSuspendedTask.
+      suspendNotifier: (task, by, suspend) => {
+        store.persistSuspendedTask({
+          taskId: task.id,
+          agentId: by,
+          resumeAt: suspend.resumeAt,
+          state: suspend.state,
+          taskJson: JSON.stringify(task),
+        })
+      },
+    })
+    await hub.start()
+
+    const target = new CountingAgent('demo-agent')
+    hub.register(target)
+
+    const broker = new HeartbeatParticipant({
+      fire: async (st) => {
+        await hub.dispatch({
+          from: HEARTBEAT_BROKER_ID,
+          strategy: { kind: 'explicit', to: st.targetAgentId as ParticipantId },
+          payload: { heartbeat: true },
+          title: 'heartbeat',
+        })
+      },
+    })
+    hub.register(broker)
+
+    const sched = new HeartbeatScheduler({
+      store,
+      minIntervalMs: 0,
+      listEnabled: () => [{ agentId: 'demo-agent', intervalMs: 20 }],
+    })
+    await sched.reconcile()
+    expect(store.rows.size).toBe(1)
+    const taskId = HEARTBEAT_TASK_PREFIX + 'demo-agent'
+
+    // Tiny sweep loop, same shape as host/main.ts's resume sweep.
+    const sweep = async (): Promise<void> => {
+      for (const row of store.listDue(Date.now())) {
+        const result: TaskResult = await hub.resumeTask(
+          row.agentId as ParticipantId,
+          JSON.parse(row.taskJson) as Task,
+          row.state,
+        )
+        if (result.kind !== 'suspended') store.removeSuspendedTask(row.taskId)
+      }
+    }
+
+    for (let i = 0; i < 40 && target.fires.length < 3; i++) {
+      await new Promise((r) => setTimeout(r, 15))
+      await sweep()
+    }
+
+    // Agent woken at least twice (proves recurrence, not a one-shot).
+    expect(target.fires.length).toBeGreaterThanOrEqual(2)
+    // The heartbeat row self-renewed: still exactly one, same id, never removed.
+    expect(store.rows.size).toBe(1)
+    expect(store.getSuspendedTask(taskId)).not.toBeNull()
+    // And its clock advanced past the original seed (it re-parked).
+    expect(store.rows.get(taskId)!.resumeAt).toBeGreaterThan(Date.now() - 1_000)
+
+    await hub.stop()
+  })
+})

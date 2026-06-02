@@ -186,6 +186,13 @@ import { createWorkflowController } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 import { HostInboxService } from './inbox-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
+import {
+  DEFAULT_HEARTBEAT_MIN_MS,
+  HEARTBEAT_BROKER_ID,
+  HeartbeatParticipant,
+  HeartbeatScheduler,
+  type HeartbeatAgentConfig,
+} from './heartbeat.js'
 import { FileInboxStore, HumanInboxParticipant, HUMAN_CAPABILITY } from '@aipehub/inbox'
 import {
   createWorkflowAssistAgent,
@@ -779,6 +786,67 @@ async function main(): Promise<void> {
     resumeSweepTimer = setInterval(() => { void sweepResume() }, sweepIntervalMs)
     resumeSweepTimer.unref?.()
     log.info('resume sweep started', { intervalMs: sweepIntervalMs })
+  }
+
+  // v5 Stream D — proactive heartbeat engine. Reuses the Phase 11
+  // suspend/resume machinery above (no new table, decision v5 #1a): a
+  // singleton broker parks a self-renewing `suspended_tasks` row per
+  // heartbeat-enabled agent; the resume sweep wakes it on cadence; it
+  // dispatches the agent a heartbeat task, then re-parks for the next
+  // interval. Registered ONLY when at least one agent opts in (or stale
+  // rows need pruning) so hubs that never use heartbeat are untouched.
+  if (identity) {
+    const heartbeatStore = identity
+    const minRaw = Number(process.env.AIPE_HEARTBEAT_MIN_MS ?? '')
+    const heartbeatMinMs =
+      Number.isFinite(minRaw) && minRaw >= 0 ? minRaw : DEFAULT_HEARTBEAT_MIN_MS
+    const listEnabledHeartbeats = async (): Promise<HeartbeatAgentConfig[]> => {
+      const recs = await space.agents()
+      const out: HeartbeatAgentConfig[] = []
+      for (const a of recs) {
+        const hb = a.managed?.heartbeat
+        if (!hb || hb.enabled !== true) continue
+        const intervalMs =
+          typeof hb.intervalMs === 'number' && Number.isFinite(hb.intervalMs) && hb.intervalMs > 0
+            ? hb.intervalMs
+            : DEFAULT_HEARTBEAT_MIN_MS
+        const cfg: HeartbeatAgentConfig = { agentId: a.id, intervalMs }
+        if (typeof hb.checklist === 'string') cfg.checklist = hb.checklist
+        out.push(cfg)
+      }
+      return out
+    }
+    const enabledHeartbeats = await listEnabledHeartbeats()
+    const existingHeartbeatRows =
+      heartbeatStore.listSuspendedTasksByAgent(HEARTBEAT_BROKER_ID)
+    if (enabledHeartbeats.length > 0 || existingHeartbeatRows.length > 0) {
+      const broker = new HeartbeatParticipant({
+        fire: async (st) => {
+          // D-M1 fires a bare wake; D-M2 enriches the payload with the
+          // agent's checklist. A failing dispatch is swallowed by the
+          // broker so the cadence never stalls.
+          await hub.dispatch({
+            from: HEARTBEAT_BROKER_ID,
+            strategy: { kind: 'explicit', to: st.targetAgentId },
+            payload: { heartbeat: true },
+            title: 'heartbeat',
+          })
+        },
+      })
+      hub.register(broker)
+      const heartbeatScheduler = new HeartbeatScheduler({
+        store: heartbeatStore,
+        minIntervalMs: heartbeatMinMs,
+        listEnabled: listEnabledHeartbeats,
+      })
+      const r = await heartbeatScheduler.reconcile()
+      log.info('heartbeat engine started', {
+        enabled: enabledHeartbeats.length,
+        seeded: r.seeded.length,
+        pruned: r.pruned.length,
+        minIntervalMs: heartbeatMinMs,
+      })
+    }
   }
 
   // Hub Services (memory / artifact / datastore plugins). Plugin load

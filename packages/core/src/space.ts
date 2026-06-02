@@ -1172,6 +1172,18 @@ export interface ManagedAgentSpec {
    * cross-hub resolver. No `crossHub` knob needed.
    */
   dispatch?: DispatchAllowList
+  /**
+   * v5 Stream D — proactive heartbeat (OpenClaw-style). When `enabled`,
+   * the host's HeartbeatScheduler parks a self-renewing `suspended_tasks`
+   * row that wakes this agent every `intervalMs` and dispatches it a
+   * heartbeat task. The agent runs a full turn and, when nothing needs
+   * attention, returns the HEARTBEAT_OK sentinel which the host suppresses
+   * (D-M3). Reuses Phase 11 suspend/resume wholesale — no new table
+   * (decision v5 #1a).
+   *
+   * Absent → no heartbeat (default); zero cost for agents that don't opt in.
+   */
+  heartbeat?: HeartbeatSpec
 }
 
 /**
@@ -1186,6 +1198,31 @@ export interface DispatchAllowList {
   agents?: string[]
   /** Capability names the agent may dispatch to (via capability strategy). */
   capabilities?: string[]
+}
+
+/**
+ * v5 Stream D — per-agent proactive heartbeat config, nested under
+ * `ManagedAgentSpec.heartbeat`. The host turns an `enabled` spec into a
+ * self-renewing parked task (Phase 11 suspend/resume) that wakes the agent
+ * on an `intervalMs` cadence. The agent needs no heartbeat awareness — it
+ * just receives a normal task.
+ */
+export interface HeartbeatSpec {
+  /** Master switch. Absent spec or `false` → the agent never self-wakes. */
+  enabled: boolean
+  /**
+   * Wake cadence in milliseconds. The host clamps this up to a floor
+   * (`AIPE_HEARTBEAT_MIN_MS`, default 60_000) so a typo can't spin the
+   * agent every millisecond. OpenClaw's default cadence is 30 minutes.
+   */
+  intervalMs: number
+  /**
+   * v5 D-M2 — standing "what to proactively check" instructions (the
+   * OpenClaw `HEARTBEAT.md` analogue). Injected into the heartbeat task
+   * payload so the agent knows what to look at. Free text; absent → the
+   * agent just gets a bare wake with no checklist.
+   */
+  checklist?: string
 }
 
 /**
