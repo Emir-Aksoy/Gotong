@@ -941,8 +941,10 @@
         <div class="me-agent-caps">${capChips}</div>
         <div class="me-own-agent-row-actions">
           <button type="button" class="me-secondary-btn" data-own-edit="${escape(a.id)}">编辑</button>
+          <button type="button" class="me-secondary-btn" data-own-grants="${escape(a.id)}">管理访问</button>
           <button type="button" class="me-secondary-btn me-danger-btn" data-own-delete="${escape(a.id)}">删除</button>
         </div>
+        <div class="me-grants-wrap" data-grants-wrap="${escape(a.id)}" hidden></div>
       </div>`
   }
 
@@ -1046,6 +1048,143 @@
       } catch (err) {
         alert(`删除失败: ${err?.message || String(err)}`)
       }
+      return
+    }
+    // v5 A-M4 — share this agent: toggle the inline access panel, add a grant,
+    // or revoke one. The panel is lazy-loaded into the card on first open.
+    const grantsId = e.target?.getAttribute?.('data-own-grants')
+    if (grantsId) {
+      const card = e.target.closest('.me-agent-card')
+      const wrap = card?.querySelector('[data-grants-wrap]')
+      if (!wrap) return
+      if (wrap.hidden) {
+        wrap.hidden = false
+        e.target.textContent = '收起访问'
+        await loadAgentGrants(grantsId, wrap)
+      } else {
+        wrap.hidden = true
+        e.target.textContent = '管理访问'
+      }
+      return
+    }
+    const addFor = e.target?.getAttribute?.('data-grant-add')
+    if (addFor) {
+      await submitAgentGrant(addFor, e.target.closest('[data-grants-wrap]'))
+      return
+    }
+    const revokeKey = e.target?.getAttribute?.('data-grant-remove')
+    if (revokeKey) {
+      const agentId = e.target.getAttribute('data-grant-agent')
+      if (!confirm('撤销这条访问授权？')) return
+      await removeAgentGrant(agentId, revokeKey, e.target.closest('[data-grants-wrap]'))
+      return
+    }
+  }
+
+  // ---- v5 A-M4 — agent access grants (sharing) --------------------------
+  // An agent's owner shares it with other principals. Co-ownership (grant a
+  // user 'owner') is the functional level today: the grantee then sees + manages
+  // the agent from their own workbench. viewer / editor are recorded for when
+  // finer agent-level enforcement lands. The host owns the owner gate + the
+  // orphan guard (you can't leave an agent with no owner), so the UI just
+  // surfaces its errors.
+  const GRANT_KIND_LABELS = { user: '用户', agent: '助手', peer: '对端 hub', hub: '本 hub' }
+  const GRANT_PERM_LABELS = { viewer: '只读', editor: '可编辑', owner: '共同所有者' }
+
+  async function loadAgentGrants(agentId, wrap) {
+    if (!wrap) return
+    wrap.innerHTML = '<p class="me-meta">加载中…</p>'
+    try {
+      const r = await fetch(`/api/me/agents/${encodeURIComponent(agentId)}/grants`)
+      if (!r.ok) {
+        wrap.innerHTML = `<p class="me-meta">加载失败 (HTTP ${r.status})</p>`
+        return
+      }
+      const j = await r.json()
+      const grants = Array.isArray(j?.grants) ? j.grants : []
+      wrap.innerHTML = renderGrantsPanel(agentId, grants)
+    } catch (err) {
+      wrap.innerHTML = `<p class="me-meta">加载失败: ${escape(err?.message || String(err))}</p>`
+    }
+  }
+
+  function renderGrantsPanel(agentId, grants) {
+    const rows = grants.length
+      ? grants.map((g) => renderGrantRow(agentId, g)).join('')
+      : '<p class="me-meta">还没有共享给任何人。</p>'
+    const kindOpts = Object.entries(GRANT_KIND_LABELS)
+      .filter(([k]) => k !== 'hub') // member sharing targets a user / agent / peer
+      .map(([k, label]) => `<option value="${k}">${escape(label)}</option>`)
+      .join('')
+    const permOpts = Object.entries(GRANT_PERM_LABELS)
+      .map(([p, label]) => `<option value="${p}">${escape(label)}</option>`)
+      .join('')
+    return `
+      <div class="me-grants-list">${rows}</div>
+      <div class="me-grant-add">
+        <select data-grant-kind aria-label="对方类型">${kindOpts}</select>
+        <input type="text" data-grant-pid placeholder="对方 ID" autocomplete="off" />
+        <select data-grant-perm aria-label="权限">${permOpts}</select>
+        <button type="button" class="me-secondary-btn" data-grant-add="${escape(agentId)}">授权</button>
+      </div>
+      <div class="me-status" data-grant-status></div>`
+  }
+
+  function renderGrantRow(agentId, g) {
+    const kindLabel = GRANT_KIND_LABELS[g.principalKind] || g.principalKind
+    const permLabel = GRANT_PERM_LABELS[g.perm] || g.perm
+    const selfTag = g.isSelf ? ' <span class="me-meta">（你）</span>' : ''
+    return `
+      <div class="me-grant-row">
+        <span class="me-cap-chip">${escape(permLabel)}</span>
+        <span class="me-grant-who">${escape(kindLabel)} · <code>${escape(g.principalId)}</code>${selfTag}</span>
+        <button type="button" class="me-secondary-btn me-danger-btn"
+          data-grant-remove="${escape(g.principalKey)}" data-grant-agent="${escape(agentId)}">撤销</button>
+      </div>`
+  }
+
+  async function submitAgentGrant(agentId, wrap) {
+    if (!wrap) return
+    const kind = wrap.querySelector('[data-grant-kind]')?.value
+    const pid = wrap.querySelector('[data-grant-pid]')?.value?.trim()
+    const perm = wrap.querySelector('[data-grant-perm]')?.value
+    const status = wrap.querySelector('[data-grant-status]')
+    if (!pid) {
+      if (status) { status.textContent = '请填写对方 ID'; status.className = 'me-status error' }
+      return
+    }
+    if (status) { status.textContent = '授权中…'; status.className = 'me-status' }
+    try {
+      const r = await fetch(`/api/me/agents/${encodeURIComponent(agentId)}/grants`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ principalKind: kind, principalId: pid, perm }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        if (status) { status.textContent = `失败: ${escape(j?.error || `HTTP ${r.status}`)}`; status.className = 'me-status error' }
+        return
+      }
+      await loadAgentGrants(agentId, wrap) // re-render the panel (stays open)
+    } catch (err) {
+      if (status) { status.textContent = `失败: ${escape(err?.message || String(err))}`; status.className = 'me-status error' }
+    }
+  }
+
+  async function removeAgentGrant(agentId, principalKey, wrap) {
+    try {
+      const r = await fetch(
+        `/api/me/agents/${encodeURIComponent(agentId)}/grants/${encodeURIComponent(principalKey)}`,
+        { method: 'DELETE' },
+      )
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        alert(`撤销失败: ${j?.error || `HTTP ${r.status}`}`)
+        return
+      }
+      await loadAgentGrants(agentId, wrap)
+    } catch (err) {
+      alert(`撤销失败: ${err?.message || String(err)}`)
     }
   }
 

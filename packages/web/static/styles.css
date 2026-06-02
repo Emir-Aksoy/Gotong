@@ -2140,10 +2140,23 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .me-own-agent-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
 .me-own-agent-actions .me-primary-btn, .me-own-agent-actions .me-secondary-btn { margin-top: 0; }
 .me-own-agent-actions .me-status { margin-top: 0; }
-.me-own-agent-row-actions { margin-top: 0.5rem; display: flex; gap: 0.4rem; }
+.me-own-agent-row-actions { margin-top: 0.5rem; display: flex; gap: 0.4rem; flex-wrap: wrap; }
 .me-own-agent-row-actions .me-secondary-btn { margin-top: 0; padding: 0.2rem 0.6rem; font-size: 0.8rem; }
 .me-danger-btn { background: #c0392b; }
 .me-danger-btn:hover { background: #a02d22; }
+
+/* v5 A-M4 — inline "manage access" (share an owned agent) panel */
+.me-grants-wrap { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px dashed #d6dbe0; }
+.me-grants-list { display: flex; flex-direction: column; gap: 0.35rem; }
+.me-grant-row { display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.me-grant-who { flex: 1 1 auto; font-size: 0.84rem; color: #345; }
+.me-grant-row .me-secondary-btn { margin-top: 0; padding: 0.15rem 0.5rem; font-size: 0.76rem; }
+.me-grant-add { margin-top: 0.5rem; display: flex; gap: 0.4rem; flex-wrap: wrap; align-items: center; }
+.me-grant-add select, .me-grant-add input {
+  padding: 0.3rem 0.45rem; border: 1px solid #d0d7de; border-radius: 5px; font: inherit; font-size: 0.84rem;
+}
+.me-grant-add input { flex: 1 1 8rem; min-width: 7rem; }
+.me-grant-add .me-secondary-btn { margin-top: 0; }
 
 /* C2 — org quota management panel */
 .quotas-panel { padding: 1rem; }
