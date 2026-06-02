@@ -20,6 +20,10 @@
  *                           accepted on Host: and Origin: for state-changing
  *                           requests. Example "hub.example.com". Empty
  *                           disables the check (only safe on loopback).
+ *   AIPE_ALLOW_INSECURE     '1' to downgrade the boot security self-check
+ *                           (Route B P0-M6) from fail-closed to a warning.
+ *                           Only for a network-exposed host whose reverse
+ *                           proxy already validates Host and terminates TLS.
  *   AIPE_ADMIN_RATE_MAX     admin login attempts allowed per IP per window
  *                           (default 10; 0 disables).
  *   AIPE_ADMIN_RATE_SEC     window for the rate limit in seconds (default 60).
@@ -79,6 +83,7 @@ import { OrgApiPool } from './org-api-pool.js'
 
 import { BAKED_VERSION } from './version.js'
 import { buildAgentCard } from './agent-card.js'
+import { auditBootSecurity, formatBootSecurityReport, isLoopbackHost } from './boot-security.js'
 
 const log = createLogger('host')
 import { serveWebSocket } from '@aipehub/transport-ws'
@@ -363,6 +368,7 @@ ENVIRONMENT
   AIPE_GATING             'open' | 'admin-approval' (default: admin-approval)
   AIPE_COOKIE_SECURE      '1' to set Secure + SameSite=Strict (default: 0)
   AIPE_ALLOWED_HOSTS      comma list — enforce Host: / Origin: on state-changing requests
+  AIPE_ALLOW_INSECURE     '1' to downgrade the exposed-host boot self-check to a warning
   AIPE_ADMIN_RATE_MAX     admin login attempts per IP per window (default: 10)
   AIPE_ADMIN_RATE_SEC     rate-limit window in seconds (default: 60)
   AIPE_DEFAULT_LANG       'zh' | 'en' (default: zh)
@@ -473,6 +479,33 @@ async function main(): Promise<void> {
     await space.updateConfig(configOverride)
   }
   const config = await space.config()
+
+  // Route B P0-M6 — boot-time security self-check, fail-closed. Runs as early
+  // as possible (config resolved, before any socket is opened or identity is
+  // touched) so an exposed-but-undefended host never reaches the listen call.
+  // Loopback deployments (the default) produce zero violations → no-op.
+  const allowedHosts = envList('AIPE_ALLOWED_HOSTS')
+  {
+    const secViolations = auditBootSecurity({
+      host: config.host,
+      cookieSecure: config.cookieSecure,
+      allowedHosts,
+      allowInsecure: envBool('AIPE_ALLOW_INSECURE', false),
+    })
+    for (const v of secViolations) {
+      if (v.severity === 'warn') {
+        log.warn(`boot security: ${v.code}`, {
+          message: v.message,
+          remediation: v.remediation,
+        })
+      }
+    }
+    const fatals = secViolations.filter((v) => v.severity === 'fatal')
+    if (fatals.length > 0) {
+      console.error(formatBootSecurityReport(fatals, { fatal: true }))
+      process.exit(1)
+    }
+  }
 
   // v4 identity layer. Opens (or creates) `<space>/identity.sqlite` and
   // bootstraps an `owner` user with NO credentials.
@@ -1033,7 +1066,7 @@ async function main(): Promise<void> {
       })
     : null
 
-  const allowedHosts = envList('AIPE_ALLOWED_HOSTS')
+  // allowedHosts is resolved earlier (Route B P0-M6 boot self-check).
   const adminRateMax = envInt('AIPE_ADMIN_RATE_MAX', 10)
   const adminRateSec = envInt('AIPE_ADMIN_RATE_SEC', 60)
 
@@ -1502,7 +1535,15 @@ async function main(): Promise<void> {
   console.log(`WebSocket : ${ws.url}`)
   console.log(`Gating    : ${config.gating}`)
   console.log(`CookieSec : ${config.cookieSecure ? 'on (HTTPS expected)' : 'off (HTTP / dev)'}`)
-  console.log(`HostCheck : ${allowedHosts ? allowedHosts.join(', ') : 'disabled (loopback only is safe)'}`)
+  console.log(
+    `HostCheck : ${
+      allowedHosts
+        ? allowedHosts.join(', ')
+        : isLoopbackHost(config.host)
+          ? 'disabled (loopback only is safe)'
+          : 'DISABLED while network-exposed — AIPE_ALLOW_INSECURE set (see boot warnings)'
+    }`,
+  )
   if (adminToken) {
     const linkPath = join(SPACE_DIR, 'runtime', 'admin-link.txt')
     const adminUrl = `${web.url}/admin?token=${adminToken}`
