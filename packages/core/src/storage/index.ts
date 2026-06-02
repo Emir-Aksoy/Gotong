@@ -42,5 +42,5 @@ export interface Storage {
 }
 
 export { InMemoryStorage } from './memory.js'
-export { FileStorage } from './file.js'
+export { FileStorage, DEFAULT_MAX_SEGMENT_BYTES, type ArchiveOptions } from './file.js'
 export { SqliteStorage, type SqliteStorageOptions } from './sqlite.js'

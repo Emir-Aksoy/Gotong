@@ -82,8 +82,13 @@ export { Transcript } from './transcript.js'
 export { createLogger } from './logger.js'
 export type { Logger, LogLevel, LoggerOptions } from './logger.js'
 
-export { InMemoryStorage, FileStorage, SqliteStorage } from './storage/index.js'
-export type { Storage, SqliteStorageOptions } from './storage/index.js'
+export {
+  InMemoryStorage,
+  FileStorage,
+  SqliteStorage,
+  DEFAULT_MAX_SEGMENT_BYTES,
+} from './storage/index.js'
+export type { Storage, SqliteStorageOptions, ArchiveOptions } from './storage/index.js'
 
 // Route B P0-M1 — tenant/namespace dimension. `DEFAULT_TENANT` resolves to
 // the bare workspace root (zero behaviour change); `tenantRoot` isolates

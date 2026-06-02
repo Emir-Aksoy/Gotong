@@ -38,6 +38,18 @@
  *                           `WorkflowRunner` participant; failed files
  *                           are logged and skipped.
  *
+ *   --- transcript retention (Route B P0-M2; OFF by default) ---
+ *
+ *   AIPE_TRANSCRIPT_KEEP_SEGMENTS  keep this many newest sealed transcript
+ *                           segments in the boot load path; archive older
+ *                           ones into `<AIPE_SPACE>/archive/`. Bounds boot
+ *                           load to O(tail). Unset ⇒ no archiving.
+ *   AIPE_TRANSCRIPT_ARCHIVE_DAYS   archive sealed segments whose newest
+ *                           entry is older than this many days. May be
+ *                           combined with KEEP_SEGMENTS (both must hold).
+ *                           Archived bytes stay on disk for audit/export;
+ *                           a malformed value fails the boot loudly.
+ *
  *   --- structured logging (default ON, see @aipehub/core/logger) ---
  *
  *   AIPE_LOG_LEVEL          'silent' | 'trace' | 'debug' | 'info' | 'warn'
@@ -85,6 +97,7 @@ import { BAKED_VERSION } from './version.js'
 import { buildAgentCard } from './agent-card.js'
 import { auditBootSecurity, formatBootSecurityReport, isLoopbackHost } from './boot-security.js'
 import { rotateMasterKey } from './rotate-master-key.js'
+import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
 
 const log = createLogger('host')
 import { serveWebSocket } from '@aipehub/transport-ws'
@@ -450,6 +463,13 @@ ENVIRONMENT
                           auto-load on boot
                           (default: <AIPE_SPACE>/workflows/definitions)
 
+  AIPE_TRANSCRIPT_KEEP_SEGMENTS  keep N newest sealed transcript segments in
+                          the boot load path; archive older into archive/
+                          (bounds boot load to O(tail); unset = no archiving)
+  AIPE_TRANSCRIPT_ARCHIVE_DAYS   archive sealed segments older than N days
+                          (may combine with KEEP_SEGMENTS; archived bytes
+                          stay on disk for audit; malformed value fails boot)
+
   AIPE_ASSISTANT_PROVIDER 'anthropic' (default) | 'openai' | 'mock' —
                           provider for the host-built-in WorkflowAssistantAgent
                           (Phase 13 M3). Skip registration when no key
@@ -794,6 +814,28 @@ async function main(): Promise<void> {
   // shape but won't survive a process restart). `hubId` is a fixed
   // sentinel for now — multi-hub-per-process is on the roadmap but
   // not a current shape; the row is keyed by task_id alone.
+  // Route B P0-M2 (M3b) — boot-time transcript retention. MUST run before
+  // `new Hub({space})`: the Hub's FileStorage caches its high-water seq at
+  // construction (M3a), so the checkpoint that archiving writes has to be on
+  // disk first. Off by default (no env ⇒ parse returns undefined ⇒ no-op).
+  // A malformed env throws here (loud misconfig); the archive itself is
+  // best-effort so a filesystem hiccup never blocks the boot.
+  const retentionPolicy = parseTranscriptRetention(process.env, Date.now())
+  if (retentionPolicy) {
+    try {
+      const { moved } = await applyTranscriptRetention(space.storage(), retentionPolicy)
+      if (moved.length > 0) {
+        log.info('transcript retention applied', {
+          archived: moved.length,
+          keepLast: retentionPolicy.keepLast,
+          before: retentionPolicy.before,
+        })
+      }
+    } catch (err) {
+      log.warn('transcript retention failed — booting with the full transcript', { err })
+    }
+  }
+
   const identityForSuspend = identity
   const hub = new Hub({
     space,
