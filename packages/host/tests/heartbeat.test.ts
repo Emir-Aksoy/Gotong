@@ -26,6 +26,8 @@ import {
   HeartbeatParticipant,
   HeartbeatScheduler,
   buildHeartbeatPayload,
+  classifyHeartbeatResult,
+  heartbeatResultText,
   parseHeartbeatState,
   type HeartbeatStore,
 } from '../src/heartbeat.js'
@@ -153,6 +155,54 @@ describe('buildHeartbeatPayload', () => {
     expect(p.checklist).toBe('   ')
     // ...but the prompt uses the generic body, not an empty checklist block.
     expect(p.prompt as string).toContain('standing responsibilities')
+  })
+})
+
+// --- 1c. classifyHeartbeatResult / heartbeatResultText (D-M3) --------------
+
+const ok = (output: unknown): TaskResult => ({
+  kind: 'ok',
+  taskId: 't',
+  by: 'demo-agent',
+  output,
+  ts: 0,
+})
+
+describe('heartbeatResultText', () => {
+  it('reads a bare string output and an LlmTaskOutput-style .text', () => {
+    expect(heartbeatResultText(ok('hello'))).toBe('hello')
+    expect(heartbeatResultText(ok({ text: 'hi', stopReason: 'end_turn' }))).toBe('hi')
+  })
+
+  it('returns undefined for non-ok results and opaque objects', () => {
+    expect(heartbeatResultText({ kind: 'failed', taskId: 't', by: 'a', error: 'boom', ts: 0 })).toBeUndefined()
+    expect(heartbeatResultText(ok({ data: 123 }))).toBeUndefined()
+    expect(heartbeatResultText(ok(null))).toBeUndefined()
+  })
+})
+
+describe('classifyHeartbeatResult', () => {
+  it('classifies an exact HEARTBEAT_OK reply as idle (string or .text, trimmed)', () => {
+    expect(classifyHeartbeatResult(ok(HEARTBEAT_OK)).kind).toBe('idle')
+    expect(classifyHeartbeatResult(ok(`  ${HEARTBEAT_OK}\n`)).kind).toBe('idle')
+    expect(classifyHeartbeatResult(ok({ text: HEARTBEAT_OK, stopReason: 'end_turn' })).kind).toBe('idle')
+  })
+
+  it('surfaces a substantive reply as active with a trimmed summary', () => {
+    const d = classifyHeartbeatResult(ok({ text: '  2 deadlines slipped; escalated to inbox.  ' }))
+    expect(d).toEqual({ kind: 'active', summary: '2 deadlines slipped; escalated to inbox.' })
+  })
+
+  it('treats an errored turn as failed (surfaced for operator attention)', () => {
+    const d = classifyHeartbeatResult({ kind: 'failed', taskId: 't', by: 'a', error: 'llm_timeout', ts: 0 })
+    expect(d).toEqual({ kind: 'failed', error: 'llm_timeout' })
+  })
+
+  it('treats empty / parked / unreadable results as idle (nothing to surface)', () => {
+    expect(classifyHeartbeatResult(ok('   ')).kind).toBe('idle') // ok but empty
+    expect(classifyHeartbeatResult(ok({ data: 1 })).kind).toBe('idle') // unreadable
+    expect(classifyHeartbeatResult({ kind: 'suspended', taskId: 't', by: 'a', resumeAt: 9, ts: 0 }).kind).toBe('idle')
+    expect(classifyHeartbeatResult({ kind: 'no_participant', taskId: 't', reason: 'gone', ts: 0 }).kind).toBe('idle')
   })
 })
 

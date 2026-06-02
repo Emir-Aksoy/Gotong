@@ -28,6 +28,7 @@ import {
   SuspendTaskError,
   type ParticipantId,
   type Task,
+  type TaskResult,
 } from '@aipehub/core'
 
 /** Fixed id of the singleton heartbeat broker participant. */
@@ -155,6 +156,55 @@ export function buildHeartbeatPayload(state: HeartbeatState, now: number): Recor
   // noise), matching how `parseHeartbeatState` treats it.
   if (state.checklist !== undefined) payload.checklist = state.checklist
   return payload
+}
+
+/**
+ * The disposition of one heartbeat turn after the "don't bother me when idle"
+ * policy (D-M3). The host surfaces `active`/`failed` and stays quiet on `idle`.
+ */
+export type HeartbeatDisposition =
+  | { kind: 'idle' }
+  | { kind: 'active'; summary: string }
+  | { kind: 'failed'; error: string }
+
+/**
+ * Pull the agent's reply text out of a heartbeat `TaskResult`. Handles the
+ * two real shapes — a bare string output, or an `LlmTaskOutput`-style object
+ * with a `.text` field. Returns undefined when there's no readable text (a
+ * non-ok result, or an opaque object), which the classifier treats as "not
+ * idle" so we never accidentally swallow a result we couldn't read.
+ */
+export function heartbeatResultText(result: TaskResult): string | undefined {
+  if (result.kind !== 'ok') return undefined
+  const out = result.output
+  if (typeof out === 'string') return out
+  if (out && typeof out === 'object' && typeof (out as { text?: unknown }).text === 'string') {
+    return (out as { text: string }).text
+  }
+  return undefined
+}
+
+/**
+ * Classify a heartbeat result under the suppression policy:
+ *   - the agent replied exactly {@link HEARTBEAT_OK} → `idle` (suppress);
+ *   - the turn errored → `failed` (surface for operator attention);
+ *   - anything else with readable text → `active` (the agent has something
+ *     to report / already acted — surface the summary);
+ *   - parked / cancelled / no-participant / unreadable → `idle` (nothing
+ *     actionable to surface; a parked heartbeat resumes on its own).
+ *
+ * The hub still records every heartbeat in the transcript — this policy only
+ * governs notification noise, not the audit trail.
+ */
+export function classifyHeartbeatResult(result: TaskResult): HeartbeatDisposition {
+  if (result.kind === 'failed') return { kind: 'failed', error: result.error }
+  if (result.kind === 'ok') {
+    const text = heartbeatResultText(result)
+    if (text !== undefined && text.trim() === HEARTBEAT_OK) return { kind: 'idle' }
+    if (text !== undefined && text.trim().length > 0) return { kind: 'active', summary: text.trim() }
+    return { kind: 'idle' } // ok but empty/unreadable → nothing to surface
+  }
+  return { kind: 'idle' }
 }
 
 export interface HeartbeatParticipantOptions {

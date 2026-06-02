@@ -192,6 +192,7 @@ import {
   HeartbeatParticipant,
   HeartbeatScheduler,
   buildHeartbeatPayload,
+  classifyHeartbeatResult,
   type HeartbeatAgentConfig,
 } from './heartbeat.js'
 import { FileInboxStore, HumanInboxParticipant, HUMAN_CAPABILITY } from '@aipehub/inbox'
@@ -827,12 +828,30 @@ async function main(): Promise<void> {
           // ready-to-read `prompt` (plus structured `heartbeat`/`checklist`
           // fields). A failing dispatch is swallowed by the broker so the
           // cadence never stalls.
-          await hub.dispatch({
+          const result = await hub.dispatch({
             from: HEARTBEAT_BROKER_ID,
             strategy: { kind: 'explicit', to: st.targetAgentId },
             payload: buildHeartbeatPayload(st, Date.now()),
             title: 'heartbeat',
           })
+          // D-M3 "don't bother me when idle": the hub already recorded this
+          // heartbeat in the transcript (audit trail intact) — here we only
+          // decide whether to make NOISE. An idle HEARTBEAT_OK stays quiet
+          // (debug); a substantive turn or a failure is surfaced.
+          const disp = classifyHeartbeatResult(result)
+          if (disp.kind === 'active') {
+            log.info('heartbeat: agent reported activity', {
+              agent: st.targetAgentId,
+              summary: disp.summary.slice(0, 280),
+            })
+          } else if (disp.kind === 'failed') {
+            log.warn('heartbeat: agent turn failed', {
+              agent: st.targetAgentId,
+              error: disp.error,
+            })
+          } else {
+            log.debug('heartbeat: idle (suppressed)', { agent: st.targetAgentId })
+          }
         },
       })
       hub.register(broker)
