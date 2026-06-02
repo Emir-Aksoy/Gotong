@@ -49,6 +49,15 @@
  *                           combined with KEEP_SEGMENTS (both must hold).
  *                           Archived bytes stay on disk for audit/export;
  *                           a malformed value fails the boot loudly.
+ *   AIPE_RUN_KEEP           keep this many newest TERMINAL workflow runs on
+ *                           the active scan path; archive older ones into
+ *                           `workflows/runs/archive/`. Bounds boot-resume /
+ *                           run-history / metrics scans to O(tail). A
+ *                           `running` run is never archived. Unset ⇒ off.
+ *   AIPE_RUN_ARCHIVE_DAYS   archive terminal runs that ended more than this
+ *                           many days ago. May be combined with AIPE_RUN_KEEP
+ *                           (both must hold). Archived runs stay reachable for
+ *                           audit; a malformed value fails the boot loudly.
  *
  *   --- structured logging (default ON, see @aipehub/core/logger) ---
  *
@@ -97,6 +106,7 @@ import { BAKED_VERSION } from './version.js'
 import { buildAgentCard } from './agent-card.js'
 import { auditBootSecurity, formatBootSecurityReport, isLoopbackHost } from './boot-security.js'
 import { rotateMasterKey } from './rotate-master-key.js'
+import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
 
 const log = createLogger('host')
@@ -469,6 +479,13 @@ ENVIRONMENT
   AIPE_TRANSCRIPT_ARCHIVE_DAYS   archive sealed segments older than N days
                           (may combine with KEEP_SEGMENTS; archived bytes
                           stay on disk for audit; malformed value fails boot)
+  AIPE_RUN_KEEP           keep N newest TERMINAL workflow runs on the active
+                          scan path; archive older into runs/archive/ (bounds
+                          boot-resume/history/metrics to O(tail); running runs
+                          never archived; unset = off)
+  AIPE_RUN_ARCHIVE_DAYS   archive terminal runs that ended more than N days ago
+                          (may combine with AIPE_RUN_KEEP; archived runs stay
+                          reachable for audit; malformed value fails boot)
 
   AIPE_ASSISTANT_PROVIDER 'anthropic' (default) | 'openai' | 'mock' —
                           provider for the host-built-in WorkflowAssistantAgent
@@ -1176,6 +1193,30 @@ async function main(): Promise<void> {
     { hub, definitionsDir: workflowsDir, spaceRoot: SPACE_DIR },
     workflowReport,
   )
+
+  // Route B P0-M3-M2 — boot-time workflow-run retention. Prune old TERMINAL
+  // runs into `runs/archive/` BEFORE the deferred resume scan (and every later
+  // listRuns / metrics walk) so the active scan stays O(tail) instead of O(all
+  // runs ever). OFF by default (no env ⇒ undefined ⇒ skip); a malformed value
+  // throws here so the boot fails loudly. Archiving itself is best-effort: a
+  // failure logs and the host boots with the full (unpruned) run history.
+  // Safe to run now — a `running` run is never archived (M3-M1 invariant), so
+  // this only removes terminal runs the resume scan would skip anyway.
+  const runRetentionPolicy = parseRunRetention(process.env, Date.now())
+  if (runRetentionPolicy) {
+    try {
+      const { archived } = await applyRunRetention(workflowController, runRetentionPolicy)
+      if (archived.length > 0) {
+        log.info('workflow run retention applied', {
+          archived: archived.length,
+          keepLast: runRetentionPolicy.keepLast,
+          before: runRetentionPolicy.before,
+        })
+      }
+    } catch (err) {
+      log.warn('workflow run retention failed — booting with the full run history', { err })
+    }
+  }
 
   // Phase 13 M3 — host-built-in workflow assistant agent. Registers a
   // `WorkflowAssistantAgent` on the hub (cap=`workflow:assist`) and

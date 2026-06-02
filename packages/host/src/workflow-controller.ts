@@ -37,6 +37,7 @@ import {
   WorkflowLifecycleError,
   parseWorkflow,
   workflowParticipantId,
+  type ArchiveRunsOptions,
   type LifecycleState,
   type RevisionMeta,
   type RunState,
@@ -235,6 +236,17 @@ export class WorkflowController {
   /** Load the full `RunState` for one run, or `null` if no such run is recorded. */
   async readRun(runId: string): Promise<RunState | null> {
     return this.runStore.read(runId)
+  }
+
+  /**
+   * Route B P0-M3-M2 — prune old TERMINAL runs into `runs/archive/`, bounding
+   * the active scan that {@link resumeRunningRuns} / {@link listRuns} / metrics
+   * walk. Delegates to the owned `RunStore`; a `running` run is never moved, so
+   * this is safe to call right before the boot resume scan. Returns the run ids
+   * archived this call. Empty options are a no-op.
+   */
+  async archiveRuns(opts: ArchiveRunsOptions): Promise<string[]> {
+    return this.runStore.archiveRuns(opts)
   }
 
   /**
