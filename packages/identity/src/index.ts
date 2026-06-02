@@ -86,6 +86,11 @@ export type {
   WorkflowGrant,
   SetWorkflowGrantInput,
   WorkflowPerm,
+  // v5 A-M1 — unified resource grants.
+  ResourceGrant,
+  SetResourceGrantInput,
+  ResourceKind,
+  GrantPerm,
 } from './types.js'
 export {
   AUDIT_ACTIONS,
@@ -97,6 +102,10 @@ export {
   ORG_QUOTA_STATES,
   WORKFLOW_PERMS,
   WORKFLOW_PERM_RANK,
+  // v5 A-M1 — unified resource grants.
+  RESOURCE_KINDS,
+  GRANT_PERMS,
+  GRANT_PERM_RANK,
 } from './types.js'
 // v5 Stream 0 — unified Principal vocabulary (org→hub convergence).
 export type { PrincipalKind, Principal } from './principal.js'

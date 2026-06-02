@@ -636,6 +636,42 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE peers ADD COLUMN allowed_data_classes_json TEXT;
     `,
   },
+  {
+    // v5 Stream A-M1 — the unified resource_grants table (decision #3). One
+    // grant model for every resource, replacing the user-only workflow_grants
+    // (v13). The principal column holds a principalKey ("<kind>:<id>") so a
+    // single TEXT column carries any of hub/user/agent/peer. The owner is just
+    // the perm='owner' row (owner-as-grant), same as before.
+    //
+    // We MIGRATE the data, then DROP the old table — no row is lost (the
+    // INSERT…SELECT copies every workflow_grants row, mapping user_id → the
+    // 'user:<id>' principal key), and the old table is dropped so there is one
+    // grant table, not two (the whole point of #3). workflow_grants always
+    // exists here (v13 created it before this v16 runs); on a fresh DB the copy
+    // is a no-op over an empty table.
+    version: 16,
+    name: 'resource-grants',
+    sql: `
+      CREATE TABLE IF NOT EXISTS resource_grants (
+        resource_kind TEXT NOT NULL,
+        resource_id   TEXT NOT NULL,
+        principal     TEXT NOT NULL,
+        perm          TEXT NOT NULL,
+        granted_by    TEXT,
+        granted_at    INTEGER NOT NULL,
+        PRIMARY KEY (resource_kind, resource_id, principal)
+      );
+      CREATE INDEX IF NOT EXISTS idx_resource_grants_principal
+        ON resource_grants(principal);
+      CREATE INDEX IF NOT EXISTS idx_resource_grants_resource
+        ON resource_grants(resource_kind, resource_id);
+      INSERT OR IGNORE INTO resource_grants
+        (resource_kind, resource_id, principal, perm, granted_by, granted_at)
+        SELECT 'workflow', workflow_id, 'user:' || user_id, perm, granted_by, granted_at
+        FROM workflow_grants;
+      DROP TABLE workflow_grants;
+    `,
+  },
 ]
 
 export function applyMigrations(db: SqliteDb): { applied: number[] } {

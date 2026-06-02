@@ -50,7 +50,8 @@ import { IdentityError } from './errors.js'
 import { VaultStore, type VaultMutationReason } from './vault-store.js'
 import { SuspendedTaskStore } from './suspended-task-store.js'
 import { LedgerStore } from './ledger-store.js'
-import { WorkflowGrantStore } from './workflow-grant-store.js'
+import { ResourceGrantStore } from './resource-grant-store.js'
+import { userPrincipal, type Principal } from './principal.js'
 import { PeerStore } from './peer-store.js'
 import { QuotaStore } from './quota-store.js'
 import {
@@ -120,6 +121,11 @@ import {
   type SetWorkflowGrantInput,
   type WorkflowGrant,
   type WorkflowPerm,
+  // v5 A-M1 — unified resource grants.
+  type ResourceGrant,
+  type SetResourceGrantInput,
+  type ResourceKind,
+  type GrantPerm,
 } from './types.js'
 import { randomInt } from 'node:crypto'
 
@@ -430,8 +436,10 @@ export class IdentityStore {
   // under the quota counters). Append on the post-LLM-call path; scan on
   // dashboard aggregate + CSV/JSONL export. Owns its own statements.
   private readonly ledger: LedgerStore
-  // Phase 19 P2-M5 — workflow grants (resource-level RBAC). Owner-as-grant.
-  private readonly workflowGrants: WorkflowGrantStore
+  // Phase 19 P2-M5 → v5 A-M1 — resource grants (unified resource-level RBAC,
+  // principal → any resource). Owner-as-grant. Generalizes the old
+  // workflow-only grant store; the workflow facade methods below delegate here.
+  private readonly resourceGrants: ResourceGrantStore
   // Phase 7 M4 — org_meta kv (org_mode lives here).
   private readonly stmtOrgMetaGet: SqliteStmt
   private readonly stmtOrgMetaUpsert: SqliteStmt
@@ -471,8 +479,8 @@ export class IdentityStore {
     // Phase 17 — usage / cost ledger. Constructed after quota (same
     // billing domain, but its own table). Eager INSERT + get-by-id.
     this.ledger = new LedgerStore(db)
-    // Phase 19 P2-M5 — workflow grants (resource RBAC). Eager statements.
-    this.workflowGrants = new WorkflowGrantStore(db)
+    // Phase 19 P2-M5 → v5 A-M1 — unified resource grants. Eager statements.
+    this.resourceGrants = new ResourceGrantStore(db)
 
     this.stmtUserById = db.prepare('SELECT * FROM users WHERE id = ?')
     this.stmtUserByEmail = db.prepare('SELECT * FROM users WHERE email = ?')
@@ -2121,17 +2129,75 @@ export class IdentityStore {
   }
 
   // =====================================================================
-  // Phase 19 P2-M5 — workflow grants (resource-level RBAC, ownership MVP).
-  // Owner-as-grant: the owner is the perm='owner' row. Delegated to
-  // WorkflowGrantStore. `hasWorkflowGrant` is the hot-path enforcement check.
+  // v5 A-M1 — unified resource grants (resource-level RBAC, ownership MVP).
+  // One row per (resourceKind, resourceId, principal); the owner is the
+  // perm='owner' row (owner-as-grant). `hasResourceGrant` is the hot-path
+  // enforcement check. Delegated to ResourceGrantStore.
   // =====================================================================
 
+  setResourceGrant(input: SetResourceGrantInput): ResourceGrant {
+    return this.resourceGrants.set(input)
+  }
+
+  getResourceGrant(
+    resourceKind: ResourceKind,
+    resourceId: string,
+    principal: Principal,
+  ): ResourceGrant | null {
+    return this.resourceGrants.get(resourceKind, resourceId, principal)
+  }
+
+  hasResourceGrant(
+    resourceKind: ResourceKind,
+    resourceId: string,
+    principal: Principal,
+    min: GrantPerm,
+  ): boolean {
+    return this.resourceGrants.has(resourceKind, resourceId, principal, min)
+  }
+
+  listResourceGrants(resourceKind: ResourceKind, resourceId: string): ResourceGrant[] {
+    return this.resourceGrants.listForResource(resourceKind, resourceId)
+  }
+
+  listPrincipalGrants(principal: Principal): ResourceGrant[] {
+    return this.resourceGrants.listForPrincipal(principal)
+  }
+
+  removeResourceGrant(
+    resourceKind: ResourceKind,
+    resourceId: string,
+    principal: Principal,
+  ): boolean {
+    return this.resourceGrants.remove(resourceKind, resourceId, principal)
+  }
+
+  removeAllResourceGrants(resourceKind: ResourceKind, resourceId: string): number {
+    return this.resourceGrants.removeAllForResource(resourceKind, resourceId)
+  }
+
+  // ---------------------------------------------------------------------
+  // Phase 19 P2-M5 workflow-grant compatibility facade. The web RBAC routes
+  // still speak "workflow grant for a user"; here that is just a resource
+  // grant with resourceKind='workflow' and a user principal. Kept as a thin
+  // mapping so callers need not learn the principal codec for the common case.
+  // ---------------------------------------------------------------------
+
   setWorkflowGrant(input: SetWorkflowGrantInput): WorkflowGrant {
-    return this.workflowGrants.set(input)
+    const g = this.resourceGrants.set({
+      resourceKind: 'workflow',
+      resourceId: input.workflowId,
+      principal: userPrincipal(input.userId),
+      perm: input.perm,
+      grantedBy: input.grantedBy,
+      grantedAt: input.grantedAt,
+    })
+    return resourceGrantToWorkflowGrant(g)
   }
 
   getWorkflowGrant(workflowId: string, userId: string): WorkflowGrant | null {
-    return this.workflowGrants.get(workflowId, userId)
+    const g = this.resourceGrants.get('workflow', workflowId, userPrincipal(userId))
+    return g ? resourceGrantToWorkflowGrant(g) : null
   }
 
   hasWorkflowGrant(
@@ -2139,23 +2205,31 @@ export class IdentityStore {
     userId: string,
     min: WorkflowPerm,
   ): boolean {
-    return this.workflowGrants.has(workflowId, userId, min)
+    return this.resourceGrants.has('workflow', workflowId, userPrincipal(userId), min)
   }
 
   listWorkflowGrants(workflowId: string): WorkflowGrant[] {
-    return this.workflowGrants.listForWorkflow(workflowId)
+    // Only user principals carry a userId; a workflow granted to an agent/peer
+    // is invisible to this legacy view (it has no userId to report).
+    return this.resourceGrants
+      .listForResource('workflow', workflowId)
+      .filter((g) => g.principal.kind === 'user')
+      .map(resourceGrantToWorkflowGrant)
   }
 
   listUserWorkflowGrants(userId: string): WorkflowGrant[] {
-    return this.workflowGrants.listForUser(userId)
+    return this.resourceGrants
+      .listForPrincipal(userPrincipal(userId))
+      .filter((g) => g.resourceKind === 'workflow')
+      .map(resourceGrantToWorkflowGrant)
   }
 
   removeWorkflowGrant(workflowId: string, userId: string): boolean {
-    return this.workflowGrants.remove(workflowId, userId)
+    return this.resourceGrants.remove('workflow', workflowId, userPrincipal(userId))
   }
 
   removeAllWorkflowGrants(workflowId: string): number {
-    return this.workflowGrants.removeAllForWorkflow(workflowId)
+    return this.resourceGrants.removeAllForResource('workflow', workflowId)
   }
 
   // =====================================================================
@@ -2488,6 +2562,19 @@ function rowToImBinding(r: ImBindingRow): ImBinding {
     userId: r.user_id,
     displayName: r.display_name,
     createdAt: r.created_at,
+  }
+}
+
+// v5 A-M1 — project a unified ResourceGrant back to the legacy WorkflowGrant
+// shape. Caller has already constrained to resourceKind='workflow' + a user
+// principal, so principal.id is the userId.
+function resourceGrantToWorkflowGrant(g: ResourceGrant): WorkflowGrant {
+  return {
+    workflowId: g.resourceId,
+    userId: g.principal.id,
+    perm: g.perm,
+    grantedBy: g.grantedBy,
+    grantedAt: g.grantedAt,
   }
 }
 

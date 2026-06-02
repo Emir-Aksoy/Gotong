@@ -9,6 +9,11 @@
  *     by caller (use default)".
  */
 
+// Type-only — the unified Principal vocabulary (v5 Stream 0). Type-only import
+// keeps this a compile-time edge (no runtime cycle with principal.ts, which
+// imports OwnerKind from here, also type-only).
+import type { Principal } from './principal.js'
+
 export type Role = 'owner' | 'admin' | 'member' | 'viewer'
 
 /**
@@ -1173,6 +1178,50 @@ export interface SetWorkflowGrantInput {
   workflowId: string
   userId: string
   perm: WorkflowPerm
+  grantedBy?: string | null
+  /** Defaults to Date.now(). */
+  grantedAt?: number
+}
+
+// ---------------------------------------------------------------------------
+// Resource grants (v5 Stream A-M1 — the unified RBAC table, decision #3)
+//
+// Generalizes workflow_grants from "user → workflow" to "principal → any
+// resource". One row per (resourceKind, resourceId, principal); the OWNER is
+// the perm='owner' row, same owner-as-grant model. The principal is the
+// unified {@link Principal} (hub / user / agent / peer), stored as its
+// {@link principalKey}. workflow_grants folded into this in migration v16; the
+// workflow-specific IdentityStore methods are now a thin facade over it.
+// ---------------------------------------------------------------------------
+
+/** Kinds of resource a grant can target. Grows as resources gain ownership. */
+export const RESOURCE_KINDS = ['workflow', 'agent', 'credential'] as const
+export type ResourceKind = (typeof RESOURCE_KINDS)[number]
+
+/**
+ * Generic resource-grant permission ladder — the SAME three levels as
+ * {@link WORKFLOW_PERMS}, named generically now that grants span resources.
+ * `WorkflowPerm` remains an alias; this is its second consumer (A-M1).
+ */
+export const GRANT_PERMS = WORKFLOW_PERMS
+export type GrantPerm = WorkflowPerm
+export const GRANT_PERM_RANK = WORKFLOW_PERM_RANK
+
+export interface ResourceGrant {
+  resourceKind: ResourceKind
+  resourceId: string
+  principal: Principal
+  perm: GrantPerm
+  /** Who wrote the grant — a principalKey or legacy userId; null = system. */
+  grantedBy: string | null
+  grantedAt: number
+}
+
+export interface SetResourceGrantInput {
+  resourceKind: ResourceKind
+  resourceId: string
+  principal: Principal
+  perm: GrantPerm
   grantedBy?: string | null
   /** Defaults to Date.now(). */
   grantedAt?: number
