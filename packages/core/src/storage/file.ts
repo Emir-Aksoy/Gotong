@@ -18,6 +18,22 @@ const log = createLogger('storage/file')
  */
 export const DEFAULT_MAX_SEGMENT_BYTES = 8 * 1024 * 1024
 
+/** Retention policy for {@link FileStorage.archiveSegments}. */
+export interface ArchiveOptions {
+  /**
+   * Keep this many of the most recent sealed segments in the active load path;
+   * archive everything older. This is the primary lever for bounding boot
+   * load. Undefined ⇒ 0 protected (eligible for archive, subject to `before`).
+   */
+  keepLast?: number
+  /**
+   * Only archive segments whose newest entry timestamp is strictly older than
+   * this (epoch ms). Undefined ⇒ no age constraint. Combined with `keepLast`,
+   * both conditions must hold.
+   */
+  before?: number
+}
+
 /**
  * Append-only JSONL transcript, segmented by size (Route B P0-M2).
  *
@@ -49,6 +65,8 @@ export class FileStorage implements Storage {
   readonly namespace: string
 
   private readonly dir: string
+  /** Where archived (pruned-but-retained) segments live; excluded from load. */
+  private readonly archiveDir: string
   /** `transcript` for an active path of `transcript.jsonl`. */
   private readonly base: string
   private readonly maxSegmentBytes: number
@@ -64,6 +82,7 @@ export class FileStorage implements Storage {
   ) {
     this.namespace = normalizeNamespace(namespace)
     this.dir = dirname(path)
+    this.archiveDir = join(this.dir, 'archive')
     this.base = basename(path).replace(/\.jsonl$/, '')
     // A non-positive cap disables rotation (single ever-growing file) — useful
     // for callers that want the legacy behaviour explicitly.
@@ -104,6 +123,82 @@ export class FileStorage implements Storage {
     await this.writeQueue
   }
 
+  // --- archive / prune (Route B P0-M2 M2b) ---------------------------------
+
+  /**
+   * Move old sealed segments into `archive/`, out of the active load path.
+   * This is the "prune" of the plan: audit is never lost (the bytes just move
+   * to a sibling directory that `loadTranscript()` does not scan), but the
+   * boot load shrinks to the retained segments + active file — O(tail).
+   *
+   * A sealed segment is archived iff it is NOT among the `keepLast` highest-
+   * numbered segments AND (when `before` is set) its newest entry is older than
+   * `before`. The active file is never archived. Empty options are a no-op, so
+   * a caller must state a policy explicitly. Returns the moved filenames.
+   *
+   * Moving is a single atomic `rename` per segment (same filesystem), so a
+   * crash leaves each segment wholly in one directory or the other — never
+   * lost, never duplicated.
+   */
+  async archiveSegments(opts: ArchiveOptions = {}): Promise<string[]> {
+    const { keepLast, before } = opts
+    if (keepLast === undefined && before === undefined) return []
+    const sealed = this.sealedSegmentEntries().sort((a, b) => a.n - b.n)
+    const protectCount = keepLast ?? 0
+    const protectedNs = new Set(
+      sealed.slice(sealed.length - protectCount).map((e) => e.n),
+    )
+    const moved: string[] = []
+    for (const seg of sealed) {
+      if (protectedNs.has(seg.n)) continue
+      if (before !== undefined) {
+        const maxTs = await this.segmentMaxTs(join(this.dir, seg.name))
+        // Keep a segment that has any entry at/after `before` (or no readable
+        // ts at all — don't archive what we can't date).
+        if (maxTs === undefined || maxTs >= before) continue
+      }
+      if (!existsSync(this.archiveDir)) mkdirSync(this.archiveDir, { recursive: true })
+      await rename(join(this.dir, seg.name), join(this.archiveDir, seg.name))
+      moved.push(seg.name)
+    }
+    return moved
+  }
+
+  /** Read archived segments (oldest→newest). For audit rebuild / export. */
+  async loadArchivedSegments(): Promise<TranscriptEntry[]> {
+    const out: TranscriptEntry[] = []
+    for (const e of this.archivedSegmentEntries().sort((a, b) => a.n - b.n)) {
+      this.parseInto(out, await readFile(join(this.archiveDir, e.name), 'utf8'), e.name)
+    }
+    return out
+  }
+
+  /**
+   * The full transcript including archived segments, in seq order. Sorting by
+   * the global monotonic `seq` (not by directory or filename) makes the rebuild
+   * correct regardless of how segments were split between active and archive.
+   */
+  async loadAll(): Promise<TranscriptEntry[]> {
+    const merged = [...(await this.loadArchivedSegments()), ...(await this.loadTranscript())]
+    return merged.sort((a, b) => a.seq - b.seq)
+  }
+
+  /** Newest entry ts in a segment file, or undefined if none readable. */
+  private async segmentMaxTs(path: string): Promise<number | undefined> {
+    const raw = await readFile(path, 'utf8')
+    let max: number | undefined
+    for (const line of raw.split('\n')) {
+      if (!line) continue
+      try {
+        const e = JSON.parse(line) as TranscriptEntry
+        if (typeof e.ts === 'number' && (max === undefined || e.ts > max)) max = e.ts
+      } catch {
+        // skip unparseable line
+      }
+    }
+    return max
+  }
+
   // --- segmentation internals ----------------------------------------------
 
   /**
@@ -139,16 +234,30 @@ export class FileStorage implements Storage {
 
   private scanMaxSegmentNo(): number {
     let max = 0
+    // Scan BOTH the active dir and the archive dir so a new seal never reuses
+    // a number that an archived segment already owns — segment numbers stay
+    // globally monotonic even after every active segment has been archived.
     for (const { n } of this.sealedSegmentEntries()) if (n > max) max = n
+    for (const { n } of this.archivedSegmentEntries()) if (n > max) max = n
     return max
   }
 
-  /** Match `<base>-NNNNNN.jsonl` siblings of the active file. */
+  /** Sealed `<base>-NNNNNN.jsonl` files in the active dir (loaded on boot). */
   private sealedSegmentEntries(): Array<{ name: string; n: number }> {
-    if (!this.dir || !existsSync(this.dir)) return []
+    return this.segmentEntriesIn(this.dir)
+  }
+
+  /** Archived segments (excluded from the active load path; audit only). */
+  private archivedSegmentEntries(): Array<{ name: string; n: number }> {
+    return this.segmentEntriesIn(this.archiveDir)
+  }
+
+  /** Match `<base>-NNNNNN.jsonl` files directly inside `dir` (non-recursive). */
+  private segmentEntriesIn(dir: string): Array<{ name: string; n: number }> {
+    if (!dir || !existsSync(dir)) return []
     const re = new RegExp(`^${escapeRegExp(this.base)}-(\\d+)\\.jsonl$`)
     const out: Array<{ name: string; n: number }> = []
-    for (const name of readdirSync(this.dir)) {
+    for (const name of readdirSync(dir)) {
       const m = re.exec(name)
       if (m) out.push({ name, n: Number(m[1]) })
     }
