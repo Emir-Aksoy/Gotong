@@ -54,7 +54,7 @@ export { resolveRefs, lookupRef } from './resolver.js'
 export type { ResolutionContext } from './resolver.js'
 
 export { RunStore } from './run-store.js'
-export type { ArchiveRunsOptions } from './run-store.js'
+export type { ArchiveRunsOptions, RunStatusCounts } from './run-store.js'
 
 // Phase 15 — file-first revision + lifecycle stores (interface-gated so a
 // SQLite backend can slot in later).

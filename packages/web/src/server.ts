@@ -554,6 +554,13 @@ export interface WorkflowSurface {
    * `finalOutput` / `error`. Returns `null` when no such run exists.
    */
   readRun(runId: string): Promise<unknown>
+  /**
+   * Exact count of active runs by status (archived runs excluded), optionally
+   * scoped to one `workflowId`. Backs the `/metrics` workflow-run gauges. The
+   * scan is O(active), which run retention bounds — replacing the old fixed
+   * 2000-row sample. `total` equals the sum of `byStatus`.
+   */
+  countRuns(opts?: { workflowId?: string }): Promise<{ total: number; byStatus: Record<string, number> }>
 
   // --- Phase 15 — workflow lifecycle + revisions -------------------------
   // All return the updated `WorkflowSummary` (state + currentRevision

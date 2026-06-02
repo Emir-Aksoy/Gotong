@@ -41,6 +41,7 @@ import {
   type LifecycleState,
   type RevisionMeta,
   type RunState,
+  type RunStatusCounts,
   type RunSummary,
   type WorkflowDefinition,
 } from '@aipehub/workflow'
@@ -236,6 +237,15 @@ export class WorkflowController {
   /** Load the full `RunState` for one run, or `null` if no such run is recorded. */
   async readRun(runId: string): Promise<RunState | null> {
     return this.runStore.read(runId)
+  }
+
+  /**
+   * Route B P0-M3-M3 — exact count of active runs by status (archived excluded).
+   * Backs the `/metrics` workflow-run gauges with a real tally rather than the
+   * old 2000-row sample; the scan is O(active), which run retention bounds.
+   */
+  async countRuns(opts?: { workflowId?: string }): Promise<RunStatusCounts> {
+    return this.runStore.countRuns(opts)
   }
 
   /**

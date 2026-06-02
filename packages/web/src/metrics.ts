@@ -61,12 +61,6 @@ const SERVICE_CALL_BUCKETS_MS = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000]
 export interface BusinessMetrics {
   /** Workflow run records by status (running/done/failed/cancelled). */
   workflowRuns?: Record<string, number>
-  /**
-   * True when the run-file scan hit its cap, so the `workflowRuns` tally is a
-   * sample of the most-recent N rather than a full count. Surfaced as a
-   * separate gauge so a dashboard can tell "0 because none" from "capped".
-   */
-  workflowRunsCapped?: boolean
   /** Currently-parked (suspended) task count. */
   suspendedTasks?: number
   /** Per-model LLM usage from the append-only usage ledger. */
@@ -345,7 +339,6 @@ export function renderMetrics(hub: Hub, opts: RenderMetricsOptions = {}): string
  *
  * Series:
  *   - aipehub_workflow_runs{status}        gauge   (run records on disk by status)
- *   - aipehub_workflow_runs_scan_capped    gauge   (1 iff the tally is a sample)
  *   - aipehub_suspended_tasks              gauge   (currently-parked tasks)
  *   - aipehub_llm_calls_total{model}       counter (ledger is append-only)
  *   - aipehub_llm_tokens_total{model}      counter
@@ -365,12 +358,7 @@ function renderBusinessMetrics(w: (...ls: string[]) => void, b: BusinessMetrics)
         w(`aipehub_workflow_runs{status="${escapeLabel(status)}"} ${n}`)
       }
     }
-    w(
-      '# HELP aipehub_workflow_runs_scan_capped 1 iff the workflow_runs tally hit its scan cap (a sample, not a full count).',
-      '# TYPE aipehub_workflow_runs_scan_capped gauge',
-      `aipehub_workflow_runs_scan_capped ${b.workflowRunsCapped ? 1 : 0}`,
-      '',
-    )
+    w('')
   }
 
   if (typeof b.suspendedTasks === 'number') {

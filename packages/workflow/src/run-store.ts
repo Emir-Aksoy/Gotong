@@ -43,10 +43,12 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { readFile, readdir, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import type { RunState, RunSummary } from './types.js'
+import type { RunState, RunStatus, RunSummary } from './types.js'
 
 const SUBDIR_RUNS = 'runs'
 const SUBDIR_DEFINITIONS = 'definitions'
+/** The canonical run statuses — seeded so `countRuns` always returns all four. */
+const RUN_STATUSES: RunStatus[] = ['running', 'done', 'failed', 'cancelled']
 /**
  * Pruned terminal runs live one level under `runs/`. Named without a `.json`
  * suffix so `listRunIds`' non-recursive `.json` filter excludes the directory
@@ -75,6 +77,18 @@ export interface ArchiveRunsOptions {
    * older than the cutoff.
    */
   before?: number
+}
+
+/**
+ * Result of {@link RunStore.countRuns} — an exact tally over the ACTIVE run set
+ * (archived runs excluded). `total` equals the sum of `byStatus` (the four
+ * known statuses are always present, seeded to 0). Replaces the metrics layer's
+ * old fixed-cap sampling: the scan is O(active), which run retention bounds to
+ * O(tail), so the count is exact rather than a 2000-row approximation.
+ */
+export interface RunStatusCounts {
+  total: number
+  byStatus: Record<string, number>
 }
 
 /**
@@ -235,6 +249,38 @@ export class RunStore {
       out.length = Math.min(out.length, limit)
     }
     return out
+  }
+
+  /**
+   * Count ACTIVE runs by status (archived runs excluded), optionally filtered to
+   * one `workflowId`. Backs the `/metrics` workflow-run gauges with an exact
+   * tally instead of the old fixed 2000-row sample: the scan reads every active
+   * run file (status lives inside the JSON), which is O(active) — and run
+   * retention (M3-M2) bounds the active set to O(tail). Corrupt files are
+   * skipped (logged) so a single bad file never breaks the count.
+   */
+  async countRuns(opts?: { workflowId?: string }): Promise<RunStatusCounts> {
+    const byStatus: Record<string, number> = {}
+    for (const s of RUN_STATUSES) byStatus[s] = 0 // seed zeros so all four series exist
+    if (!existsSync(this.runsDir)) return { total: 0, byStatus }
+    const ids = await this.listRunIds()
+    let total = 0
+    for (const id of ids) {
+      let state: RunState | null
+      try {
+        state = await this.read(id)
+      } catch (err) {
+        console.error(
+          `[aipehub-workflow] countRuns: skipping unreadable run ${id}: ${err instanceof Error ? err.message : String(err)}`,
+        )
+        continue
+      }
+      if (!state) continue
+      if (opts?.workflowId && state.workflowId !== opts.workflowId) continue
+      total++
+      byStatus[state.status] = (byStatus[state.status] ?? 0) + 1
+    }
+    return { total, byStatus }
   }
 
   // --- archive / prune (Route B P0-M3) -------------------------------------

@@ -15,19 +15,19 @@
  *
  * Collection is read-only: no new bookkeeping, no writes. The ledger numbers
  * come from the append-only usage_ledger (Phase 17); the suspended count from
- * a COUNT(*) (Phase 19 P3-M1); the run tally from a capped run-file scan.
+ * a COUNT(*) (Phase 19 P3-M1); the run tally from an exact by-status count over
+ * the active run set (Route B P0-M3-M3 — replaces the old fixed-cap sample).
  */
 
 import { type BusinessMetrics } from './metrics.js'
 
-/** Narrow projection of a run summary — only the status axis is needed here. */
-export interface MetricsRunSummary {
-  status: string
-}
-
-/** Narrow projection of `WorkflowSurface` — just the run lister. */
+/**
+ * Narrow projection of `WorkflowSurface` — just the exact run counter. The scan
+ * is O(active), which run retention (Route B P0-M3-M2) bounds to O(tail), so
+ * the tally is exact rather than the old 2000-row sample.
+ */
 export interface MetricsWorkflowSource {
-  listRuns(opts?: { workflowId?: string; limit?: number }): Promise<MetricsRunSummary[]>
+  countRuns(opts?: { workflowId?: string }): Promise<{ total: number; byStatus: Record<string, number> }>
 }
 
 /** Narrow projection of one `aggregateLedger` row (mirrors the ledger DTO). */
@@ -51,13 +51,6 @@ export interface MetricsIdentitySource {
   }): MetricsLedgerRow[]
 }
 
-/**
- * Bound the per-scrape run-file walk. `listRuns` reads every matching run file;
- * a host with 100k+ run records would make /metrics slow. We cap the scan and
- * flag `workflowRunsCapped` so a dashboard knows the tally became a sample.
- */
-export const RUN_SCAN_CAP = 2000
-
 /** The canonical workflow run statuses — seeded so a gauge series always exists. */
 const RUN_STATUSES = ['running', 'done', 'failed', 'cancelled'] as const
 
@@ -67,18 +60,15 @@ export async function collectBusinessMetrics(sources: {
 }): Promise<BusinessMetrics> {
   const out: BusinessMetrics = {}
 
-  // --- workflow runs by status (capped scan, best-effort) ------------------
+  // --- workflow runs by status (exact count over active set, best-effort) --
   const wf = sources.workflows
-  if (wf && typeof wf.listRuns === 'function') {
+  if (wf && typeof wf.countRuns === 'function') {
     try {
-      const runs = await wf.listRuns({ limit: RUN_SCAN_CAP })
-      const byStatus: Record<string, number> = {}
-      for (const s of RUN_STATUSES) byStatus[s] = 0 // seed zeros
-      for (const r of runs) {
-        byStatus[r.status] = (byStatus[r.status] ?? 0) + 1
-      }
-      out.workflowRuns = byStatus
-      out.workflowRunsCapped = runs.length >= RUN_SCAN_CAP
+      const { byStatus } = await wf.countRuns()
+      const seeded: Record<string, number> = {}
+      for (const s of RUN_STATUSES) seeded[s] = 0 // ensure all four series exist
+      for (const [status, n] of Object.entries(byStatus)) seeded[status] = n
+      out.workflowRuns = seeded
     } catch {
       // omit the family — a scan error must not fail the whole scrape
     }

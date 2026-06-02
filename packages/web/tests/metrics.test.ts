@@ -298,7 +298,6 @@ describe('renderMetrics', () => {
     const text = renderMetrics(hub, {
       business: {
         workflowRuns: { running: 2, done: 5, failed: 1, cancelled: 0 },
-        workflowRunsCapped: false,
         suspendedTasks: 3,
         llmByModel: [
           { model: 'deepseek-chat', calls: 10, tokens: 12345, costMicros: 6789 },
@@ -309,7 +308,9 @@ describe('renderMetrics', () => {
     expect(text).toContain('# TYPE aipehub_workflow_runs gauge')
     expect(text).toMatch(/aipehub_workflow_runs\{status="running"\} 2/)
     expect(text).toMatch(/aipehub_workflow_runs\{status="done"\} 5/)
-    expect(text).toMatch(/aipehub_workflow_runs_scan_capped 0/)
+    // The old scan-capped sample gauge is retired (Route B P0-M3-M3) — the
+    // run tally is now an exact count, so no such series should exist.
+    expect(text).not.toContain('aipehub_workflow_runs_scan_capped')
     expect(text).toMatch(/# TYPE aipehub_suspended_tasks gauge/)
     expect(text).toMatch(/aipehub_suspended_tasks 3/)
     expect(text).toMatch(/aipehub_llm_calls_total\{model="deepseek-chat"\} 10/)
@@ -324,11 +325,14 @@ describe('renderMetrics', () => {
     expect(text).not.toContain('aipehub_llm_calls_total')
   })
 
-  it('flags a capped run scan and emits a zero llm series when the ledger is empty', () => {
+  it('renders an all-zero run tally and a zero llm series when both are empty', () => {
     const text = renderMetrics(hub, {
-      business: { workflowRuns: { running: 0, done: 0, failed: 0, cancelled: 0 }, workflowRunsCapped: true, llmByModel: [] },
+      business: { workflowRuns: { running: 0, done: 0, failed: 0, cancelled: 0 }, llmByModel: [] },
     })
-    expect(text).toMatch(/aipehub_workflow_runs_scan_capped 1/)
+    // All-zero is still a real exact count — the series renders (a dashboard
+    // tells "0 because none" from a missing source by the series' presence).
+    expect(text).toMatch(/aipehub_workflow_runs\{status="done"\} 0/)
+    expect(text).not.toContain('aipehub_workflow_runs_scan_capped')
     expect(text).toMatch(/aipehub_llm_calls_total 0/)
   })
 })
@@ -338,13 +342,8 @@ describe('collectBusinessMetrics (Phase 19 P3-M1)', () => {
     const { collectBusinessMetrics } = await import('../src/business-metrics.js')
     const snap = await collectBusinessMetrics({
       workflows: {
-        async listRuns() {
-          return [
-            { status: 'running' },
-            { status: 'done' },
-            { status: 'done' },
-            { status: 'failed' },
-          ]
+        async countRuns() {
+          return { total: 4, byStatus: { running: 1, done: 2, failed: 1 } }
         },
       },
       identity: {
@@ -362,8 +361,8 @@ describe('collectBusinessMetrics (Phase 19 P3-M1)', () => {
         ],
       },
     })
+    // `cancelled: 0` is seeded by collect even though countRuns omitted it.
     expect(snap.workflowRuns).toEqual({ running: 1, done: 2, failed: 1, cancelled: 0 })
-    expect(snap.workflowRunsCapped).toBe(false)
     expect(snap.suspendedTasks).toBe(4)
     expect(snap.llmByModel).toEqual([
       { model: 'deepseek-chat', calls: 3, tokens: 165, costMicros: 999 },
@@ -374,7 +373,7 @@ describe('collectBusinessMetrics (Phase 19 P3-M1)', () => {
     const { collectBusinessMetrics } = await import('../src/business-metrics.js')
     const snap = await collectBusinessMetrics({
       workflows: {
-        async listRuns() {
+        async countRuns() {
           throw new Error('disk gone')
         },
       },
