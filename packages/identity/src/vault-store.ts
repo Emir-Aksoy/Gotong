@@ -25,10 +25,16 @@
  *     vs internal — the caller has that context.
  */
 
-import { type SqliteDb, type SqliteStmt } from './db.js'
+import { transactionImmediate, type SqliteDb, type SqliteStmt } from './db.js'
 import { newId } from './tokens.js'
 import { IdentityError } from './errors.js'
-import { decryptSecret, encryptSecret } from './crypto.js'
+import {
+  decryptSecret,
+  encryptSecret,
+  generateDataKey,
+  unwrapDataKey,
+  wrapDataKey,
+} from './crypto.js'
 import {
   OWNER_KINDS,
   VAULT_KINDS,
@@ -44,6 +50,12 @@ import {
  * AFTER a successful create / revoke commits.
  */
 export type VaultMutationReason = 'create' | 'revoke'
+
+/**
+ * Route B P0-M4b — the vault_meta row that holds the wrapped data key.
+ * Versioned in the key so a future DEK format change can coexist.
+ */
+const VAULT_DEK_META_KEY = 'vault.dek.v1'
 
 interface VaultRow {
   id: string
@@ -67,6 +79,15 @@ export class VaultStore {
    * uniformly via a single `requireMasterKey()` helper.
    */
   private readonly masterKey?: Buffer
+  /**
+   * Route B P0-M4b — the unwrapped data key (DEK), memoised after the
+   * first vault operation. Every secret row is encrypted with THIS, not
+   * the master key directly; the master key only wraps the DEK. Lazy so a
+   * host that never touches the vault never generates one, and so opening
+   * the store with a wrong/absent key still succeeds (the failure lands
+   * on the first vault call, matching the pre-envelope contract).
+   */
+  private _dek?: Buffer
   // Vault prepared statements — lazy because they're only allocated for
   // hosts that actually use vault APIs. better-sqlite3's per-db statement
   // cache makes the first prepare ~zero-cost; we just don't want to
@@ -75,6 +96,9 @@ export class VaultStore {
   private _stmtVaultById?: SqliteStmt
   private _stmtVaultTouch?: SqliteStmt
   private _stmtVaultRevoke?: SqliteStmt
+  private _stmtVaultMetaGet?: SqliteStmt
+  private _stmtVaultMetaPut?: SqliteStmt
+  private _stmtVaultReEncrypt?: SqliteStmt
 
   // Audit #145 — vault-mutation subscribers. OrgApiPool / future cache
   // layers subscribe here; the store fires after every successful
@@ -110,7 +134,10 @@ export class VaultStore {
    *     8KB (same as audit_log).
    */
   createVaultEntry(input: CreateVaultEntryInput): VaultEntry {
-    const key = this.requireMasterKey()
+    // requireDek() also enforces the vault_not_configured gate (it calls
+    // requireMasterKey internally), so the "no master key" behaviour is
+    // unchanged. Secrets are encrypted with the DEK, not the master key.
+    const dek = this.requireDek()
     if (!input || typeof input !== 'object') {
       throw new IdentityError({
         code: 'invalid_input',
@@ -198,7 +225,7 @@ export class VaultStore {
 
     const id = newId()
     const now = Date.now()
-    const secretEnc = encryptSecret(key, input.secret)
+    const secretEnc = encryptSecret(dek, input.secret)
     this.stmtVaultInsert.run(
       id,
       input.kind,
@@ -243,7 +270,7 @@ export class VaultStore {
    *     row's ciphertext
    */
   readVaultSecret(id: string): string {
-    const key = this.requireMasterKey()
+    const dek = this.requireDek()
     if (typeof id !== 'string' || id.length === 0) {
       throw new IdentityError({
         code: 'vault_entry_not_found',
@@ -263,7 +290,7 @@ export class VaultStore {
         message: `vault entry revoked: ${id}`,
       })
     }
-    const plaintext = decryptSecret(key, row.secret_enc)
+    const plaintext = decryptSecret(dek, row.secret_enc)
     this.stmtVaultTouch.run(Date.now(), id)
     return plaintext
   }
@@ -407,6 +434,62 @@ export class VaultStore {
     return this.masterKey
   }
 
+  /**
+   * Route B P0-M4b — resolve the data key (DEK) used to encrypt secrets,
+   * memoising it for the process lifetime.
+   *
+   *   - Fast path: a wrapped DEK already exists in vault_meta → unwrap it
+   *     with the master key (KEK). A wrong KEK throws `vault_decrypt_failed`
+   *     here, which is why reopening with the wrong key still fails on the
+   *     first vault call (just at unwrap instead of per-row decrypt).
+   *   - First run after the envelope upgrade: generate a DEK, re-encrypt
+   *     any pre-envelope (legacy KEK-direct) rows under it, and persist the
+   *     wrapped DEK — all inside one IMMEDIATE transaction, so a crash (or a
+   *     second process racing the seed) can never leave half-migrated rows
+   *     with no marker. `wrapDataKey` runs before the transaction so a
+   *     wrong-length KEK fails before any row is touched.
+   */
+  private requireDek(): Buffer {
+    if (this._dek) return this._dek
+    const kek = this.requireMasterKey()
+    const existing = this.stmtVaultMetaGet.get(VAULT_DEK_META_KEY) as
+      | { value: string }
+      | undefined
+    if (existing) {
+      this._dek = unwrapDataKey(kek, existing.value)
+      return this._dek
+    }
+    const dek = generateDataKey()
+    const wrapped = wrapDataKey(kek, dek)
+    const seed = (): Buffer => {
+      // Re-check under the write lock — another process may have seeded the
+      // DEK between our read above and acquiring the lock. If so, adopt its
+      // DEK (the rows it migrated are under that key), not our throwaway one.
+      const raced = this.stmtVaultMetaGet.get(VAULT_DEK_META_KEY) as
+        | { value: string }
+        | undefined
+      if (raced) return unwrapDataKey(kek, raced.value)
+      // Rows present here predate the envelope, so they're KEK-encrypted.
+      // Re-encrypt each under the DEK. A fresh vault has none → empty loop.
+      const rows = this.db
+        .prepare('SELECT id, secret_enc FROM vault')
+        .all() as { id: string; secret_enc: string }[]
+      for (const r of rows) {
+        const plaintext = decryptSecret(kek, r.secret_enc)
+        this.stmtVaultReEncrypt.run(encryptSecret(dek, plaintext), r.id)
+      }
+      this.stmtVaultMetaPut.run(VAULT_DEK_META_KEY, wrapped, Date.now())
+      return dek
+    }
+    // The seed (migrate + persist) must be atomic. If the caller already
+    // opened a transaction — addPeer wraps its vault write + peer write in
+    // one — nesting BEGIN IMMEDIATE would throw "transaction within a
+    // transaction", so reuse the caller's (already-atomic) transaction.
+    // Otherwise open our own IMMEDIATE one.
+    this._dek = this.db.inTransaction ? seed() : transactionImmediate(this.db, seed)
+    return this._dek
+  }
+
   private get stmtVaultInsert(): SqliteStmt {
     return (this._stmtVaultInsert ??= this.db.prepare(
       `INSERT INTO vault(
@@ -428,6 +511,23 @@ export class VaultStore {
   private get stmtVaultRevoke(): SqliteStmt {
     return (this._stmtVaultRevoke ??= this.db.prepare(
       'UPDATE vault SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL',
+    ))
+  }
+  // Route B P0-M4b — vault_meta access for the wrapped data key.
+  private get stmtVaultMetaGet(): SqliteStmt {
+    return (this._stmtVaultMetaGet ??= this.db.prepare(
+      'SELECT value FROM vault_meta WHERE key = ?',
+    ))
+  }
+  private get stmtVaultMetaPut(): SqliteStmt {
+    return (this._stmtVaultMetaPut ??= this.db.prepare(
+      `INSERT INTO vault_meta(key, value, updated_at) VALUES(?, ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    ))
+  }
+  private get stmtVaultReEncrypt(): SqliteStmt {
+    return (this._stmtVaultReEncrypt ??= this.db.prepare(
+      'UPDATE vault SET secret_enc = ? WHERE id = ?',
     ))
   }
 }

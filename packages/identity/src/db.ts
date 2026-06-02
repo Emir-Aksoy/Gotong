@@ -22,6 +22,15 @@ export interface SqliteDb {
   pragma(s: string): unknown
   close(): void
   readonly open: boolean
+  /**
+   * better-sqlite3 exposes whether a transaction is currently open. Optional
+   * here because the structural type may be satisfied by a fake in tests;
+   * an undefined value reads as "not in a transaction" (the safe default —
+   * the caller opens its own). Lets nested writes (a DEK seed inside an
+   * addPeer transaction) reuse the active transaction instead of issuing a
+   * second BEGIN, which SQLite rejects.
+   */
+  readonly inTransaction?: boolean
 }
 export interface SqliteStmt {
   run(...params: unknown[]): { changes: number; lastInsertRowid: number | bigint }

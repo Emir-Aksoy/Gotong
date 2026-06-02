@@ -372,3 +372,52 @@ function assertKey(masterKey: Buffer): void {
     })
   }
 }
+
+// ---- Envelope encryption (Route B P0-M4b) ----
+//
+// The master key (KEK) no longer encrypts vault secrets directly. A single
+// 32-byte data key (DEK) encrypts every secret; the DEK is stored once,
+// wrapped by the KEK. The point is rotation (M4c): swapping the KEK only
+// re-wraps the DEK — the secret rows are never re-encrypted, so an O(1)
+// operation rotates the key that protects an unbounded number of secrets.
+//
+// The threat model is unchanged. The wrapped DEK lives next to the data it
+// protects (a row in the SQLite db), exactly as secret as the ciphertext
+// beside it; without the KEK it can't be unwrapped, so reading the db
+// without the key still yields nothing. The wrap blob reuses the same
+// `v1.gcm$...` AEAD format — a DEK is just a 32-byte plaintext.
+
+/** Generate a fresh 32-byte data key (DEK). */
+export function generateDataKey(): Buffer {
+  return randomBytes(KEY_LEN_BYTES)
+}
+
+/**
+ * Wrap a DEK under the KEK → an on-disk blob (the vault_meta value).
+ * A wrong-length KEK throws `invalid_input` here, BEFORE any secret rows
+ * are touched, which is what keeps "a wrong-length master key surfaces on
+ * the first vault call" true after the envelope change.
+ */
+export function wrapDataKey(masterKey: Buffer, dek: Buffer): string {
+  assertKey(masterKey)
+  assertKey(dek) // a DEK is itself a 32-byte key
+  return encryptSecret(masterKey, dek.toString('base64'))
+}
+
+/**
+ * Unwrap a DEK previously produced by `wrapDataKey`. A wrong KEK (or a
+ * tampered blob) throws `vault_decrypt_failed` — the same code the vault
+ * raised before, so callers that reopen with the wrong key see no new
+ * error shape, only a new (earlier) failure point.
+ */
+export function unwrapDataKey(masterKey: Buffer, wrapped: string): Buffer {
+  assertKey(masterKey)
+  const dek = Buffer.from(decryptSecret(masterKey, wrapped), 'base64')
+  if (dek.length !== KEY_LEN_BYTES) {
+    throw new IdentityError({
+      code: 'vault_decrypt_failed',
+      message: `unwrapped data key has wrong length (${dek.length}, expected ${KEY_LEN_BYTES})`,
+    })
+  }
+  return dek
+}

@@ -691,6 +691,29 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE peers ADD COLUMN allowed_knowledge_bases_json TEXT;
     `,
   },
+  {
+    // Route B P0-M4b — envelope encryption metadata. A small key/value
+    // table holding the vault's wrapped data key (DEK): the 32-byte DEK
+    // that encrypts every vault secret, itself encrypted under the host
+    // master key (KEK). Rotating the KEK (M4c) re-wraps this one row
+    // instead of re-encrypting every secret. The wrapped DEK is exactly
+    // as secret as the ciphertext beside it — without the KEK it can't be
+    // unwrapped — so it lives with the data, not the key file.
+    //
+    // Lazily seeded on the first vault operation, not at migrate time:
+    // a host that never configures a master key never gets a DEK, and the
+    // seed must re-encrypt any pre-envelope (legacy KEK-direct) rows under
+    // the new DEK in the same transaction.
+    version: 18,
+    name: 'vault-envelope-meta',
+    sql: `
+      CREATE TABLE IF NOT EXISTS vault_meta (
+        key        TEXT PRIMARY KEY,
+        value      TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      );
+    `,
+  },
 ]
 
 /**
