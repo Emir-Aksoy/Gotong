@@ -98,6 +98,22 @@ export {
   WORKFLOW_PERMS,
   WORKFLOW_PERM_RANK,
 } from './types.js'
+// v5 Stream 0 — unified Principal vocabulary (org→hub convergence).
+export type { PrincipalKind, Principal } from './principal.js'
+export {
+  PRINCIPAL_KINDS,
+  HUB_SELF_ID,
+  HUB_PRINCIPAL,
+  isPrincipalKind,
+  userPrincipal,
+  agentPrincipal,
+  peerPrincipal,
+  hubPrincipal,
+  principalKey,
+  parsePrincipalKey,
+  principalFromVaultOwner,
+  principalToVaultOwner,
+} from './principal.js'
 // A1 — exported so hosts can wire the workspace .key file into
 // openIdentityStore. crypto primitives (encryptSecret / decryptSecret)
 // are NOT re-exported: callers should only ever touch plaintext via
