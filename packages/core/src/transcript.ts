@@ -34,10 +34,14 @@ export class Transcript {
   async load(): Promise<void> {
     const loaded = await this.storage.loadTranscript()
     this.entries = loaded
-    if (loaded.length > 0) {
-      const last = loaded[loaded.length - 1]!
-      this.seq = last.seq
-    }
+    let maxSeq = loaded.length > 0 ? loaded[loaded.length - 1]!.seq : 0
+    // A storage may persist a high-water seq that outlives the loadable entries
+    // — e.g. after archiving moved older segments out of the boot path (Route B
+    // P0-M2). Take the max so seq never regresses and reissues a number an
+    // archived entry already owns.
+    const hwm = this.storage.highWaterSeq?.() ?? 0
+    if (hwm > maxSeq) maxSeq = hwm
+    this.seq = maxSeq
   }
 
   append(entry: Omit<TranscriptEntry, 'seq'>): TranscriptEntry {

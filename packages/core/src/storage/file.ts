@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { appendFile, readFile, rename } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 
@@ -74,6 +82,10 @@ export class FileStorage implements Storage {
   private activeBytes: number
   /** Number to assign the next sealed segment (one past the highest on disk). */
   private nextSegmentNo: number
+  /** Path of the high-water-seq checkpoint (Route B P0-M2 M3). */
+  private readonly hwmPath: string
+  /** Highest seq ever persisted; survives archiving the loadable entries away. */
+  private hwmSeq: number
 
   constructor(
     private readonly path: string,
@@ -90,6 +102,8 @@ export class FileStorage implements Storage {
     if (this.dir && !existsSync(this.dir)) mkdirSync(this.dir, { recursive: true })
     this.activeBytes = existsSync(path) ? statSync(path).size : 0
     this.nextSegmentNo = this.scanMaxSegmentNo() + 1
+    this.hwmPath = join(this.dir, `${this.base}.hwm`)
+    this.hwmSeq = this.readHwmFile()
   }
 
   async loadTranscript(): Promise<TranscriptEntry[]> {
@@ -143,6 +157,13 @@ export class FileStorage implements Storage {
   async archiveSegments(opts: ArchiveOptions = {}): Promise<string[]> {
     const { keepLast, before } = opts
     if (keepLast === undefined && before === undefined) return []
+    // Persist the high-water seq from the full history BEFORE moving anything.
+    // Archiving removes entries from the boot load path; without a durable
+    // record of the highest seq ever assigned, a later boot that finds every
+    // entry archived away would reset seq to 0 and reissue numbers an archived
+    // entry already owns. Recording it while all segments are still in place
+    // means a crash mid-move can never lose it.
+    await this.flushHighWaterSeq()
     const sealed = this.sealedSegmentEntries().sort((a, b) => a.n - b.n)
     const protectCount = keepLast ?? 0
     const protectedNs = new Set(
@@ -197,6 +218,54 @@ export class FileStorage implements Storage {
       }
     }
     return max
+  }
+
+  // --- high-water seq checkpoint (Route B P0-M2 M3) ------------------------
+
+  /**
+   * Highest transcript seq ever persisted. Read from the checkpoint on
+   * construction and refreshed whenever {@link archiveSegments} runs.
+   * {@link Transcript.load} maxes the loadable entries against this so seq
+   * stays monotonic even after archiving moved older segments out of the load
+   * path — a reissued number can never collide with an archived entry.
+   */
+  highWaterSeq(): number {
+    return this.hwmSeq
+  }
+
+  /** Recompute the high-water seq from the full history and persist it. */
+  private async flushHighWaterSeq(): Promise<void> {
+    const all = await this.loadAll()
+    const maxSeq = all.length > 0 ? all[all.length - 1]!.seq : this.hwmSeq
+    if (maxSeq > this.hwmSeq) this.hwmSeq = maxSeq
+    this.writeHwmFile(this.hwmSeq)
+  }
+
+  /** Read the persisted high-water seq (0 if absent / unreadable / corrupt). */
+  private readHwmFile(): number {
+    try {
+      if (!existsSync(this.hwmPath)) return 0
+      const n = Number(readFileSync(this.hwmPath, 'utf8').trim())
+      return Number.isInteger(n) && n >= 0 ? n : 0
+    } catch {
+      return 0
+    }
+  }
+
+  /**
+   * Persist the high-water seq via tmp-write + atomic rename, so a crash can't
+   * leave a torn value. A lost / corrupt checkpoint simply reads back as 0; the
+   * entries still on disk carry the true seq unless they were archived, and
+   * archiving writes this first — so the number is never actually lost.
+   */
+  private writeHwmFile(seq: number): void {
+    try {
+      const tmp = `${this.hwmPath}.tmp`
+      writeFileSync(tmp, String(seq), 'utf8')
+      renameSync(tmp, this.hwmPath)
+    } catch (err) {
+      log.warn('failed to persist transcript high-water seq', { err })
+    }
   }
 
   // --- segmentation internals ----------------------------------------------

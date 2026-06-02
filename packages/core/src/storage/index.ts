@@ -27,6 +27,16 @@ export interface Storage {
   /** Append a single entry. The Hub calls this for every event. */
   appendTranscriptEntry(entry: TranscriptEntry): Promise<void>
 
+  /**
+   * Highest transcript seq ever assigned, persisted independently of the
+   * loadable entries (Route B P0-M2). After archiving moves old segments out of
+   * the boot load path the loadable entries no longer cover the full seq range;
+   * this lets {@link Transcript.load} keep seq monotonic so a reissued number
+   * can never collide with an archived entry. Optional — storages that never
+   * drop entries from their load path (in-memory, sqlite) don't need it.
+   */
+  highWaterSeq?(): number
+
   /** Optional graceful shutdown hook (flush, close handles). */
   close?(): Promise<void>
 }
