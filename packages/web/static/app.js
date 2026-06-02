@@ -853,11 +853,16 @@
     const desc = a.description ? `<p class="me-meta">${escape(a.description)}</p>` : ''
     const dotCls = a.online ? 'me-agent-online' : 'me-agent-offline'
     const onlineLabel = a.online ? '在线' : '离线'
+    // v5 D-M4 — read-only "this helper wakes itself on a cadence" badge.
+    const heartbeatBadge = a.heartbeat?.enabled
+      ? '<span class="me-heartbeat-badge" title="定时唤醒已开启">⏰ 定时</span>'
+      : ''
     return `
       <div class="me-agent-card">
         <div class="me-agent-head">
           <span class="me-agent-dot ${dotCls}" title="${onlineLabel}"></span>
           <strong>${escape(a.label || a.id)}</strong>
+          ${heartbeatBadge}
         </div>
         ${desc}
         <div class="me-agent-caps">${capChips}</div>

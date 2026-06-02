@@ -296,6 +296,12 @@ export interface MeAgentView {
    * model carries a safe description field.
    */
   description?: string
+  /**
+   * v5 D-M4 — read-only "this helper wakes itself on a cadence" indicator.
+   * Only the `enabled` flag crosses over — the interval and (especially) the
+   * checklist stay host-side, since a checklist can carry standing instructions.
+   */
+  heartbeat?: { enabled: boolean }
 }
 
 export interface MeAgentListSurface {

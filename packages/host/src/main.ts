@@ -1338,6 +1338,8 @@ async function main(): Promise<void> {
           label: a.displayName ?? a.id,
           capabilities: [...a.allowedCapabilities],
           online: liveIds.has(a.id),
+          // v5 D-M4 — expose only the on/off flag; interval + checklist stay host-side.
+          ...(a.managed?.heartbeat?.enabled ? { heartbeat: { enabled: true } } : {}),
         }))
       },
     },

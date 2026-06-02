@@ -299,6 +299,13 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
         // form so the user can edit them without retyping.
         if (dom.maBaseUrl) dom.maBaseUrl.value = agent.managed.baseURL || ''
         if (dom.maProviderLabel) dom.maProviderLabel.value = agent.managed.providerLabel || ''
+        // v5 D-M4 — heartbeat. Wire is ms; the form edits minutes.
+        const hb = agent.managed.heartbeat
+        if (dom.maHeartbeatEnabled) dom.maHeartbeatEnabled.checked = !!hb?.enabled
+        if (dom.maHeartbeatInterval) {
+          dom.maHeartbeatInterval.value = hb?.intervalMs ? String(Math.round(hb.intervalMs / 60000)) : ''
+        }
+        if (dom.maHeartbeatChecklist) dom.maHeartbeatChecklist.value = hb?.checklist || ''
       }
       // Show "this agent has its own key" hint + a Clear button when applicable
       const hasOverride = !!ma.secrets.agents[agent.id]
@@ -370,6 +377,15 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       ).map((c) => c.value)
     } else if (Array.isArray(ma._editingMcpServers) && ma._editingMcpServers.length > 0) {
       body.useMcpServers = ma._editingMcpServers
+    }
+    // v5 D-M4 — heartbeat. Checked → persist { enabled, intervalMs (from the
+    // minutes input), checklist? }. Unchecked → omit so a PUT (which replaces
+    // `managed` wholesale) removes it and the host prunes the wake-up row.
+    if (dom.maHeartbeatEnabled?.checked) {
+      const minutes = Math.max(1, Math.round(Number(dom.maHeartbeatInterval?.value.trim()) || 30))
+      const checklist = (dom.maHeartbeatChecklist?.value ?? '').trim()
+      body.heartbeat = { enabled: true, intervalMs: minutes * 60000 }
+      if (checklist) body.heartbeat.checklist = checklist
     }
     try {
       const url = ma.formMode === 'edit'

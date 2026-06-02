@@ -645,6 +645,12 @@
           dom.maWeight.value = agent.managed.weightDefault != null ? String(agent.managed.weightDefault) : "";
           if (dom.maBaseUrl) dom.maBaseUrl.value = agent.managed.baseURL || "";
           if (dom.maProviderLabel) dom.maProviderLabel.value = agent.managed.providerLabel || "";
+          const hb = agent.managed.heartbeat;
+          if (dom.maHeartbeatEnabled) dom.maHeartbeatEnabled.checked = !!hb?.enabled;
+          if (dom.maHeartbeatInterval) {
+            dom.maHeartbeatInterval.value = hb?.intervalMs ? String(Math.round(hb.intervalMs / 6e4)) : "";
+          }
+          if (dom.maHeartbeatChecklist) dom.maHeartbeatChecklist.value = hb?.checklist || "";
         }
         const hasOverride = !!ma.secrets.agents[agent.id];
         dom.maApiKey.value = "";
@@ -695,6 +701,12 @@
         ).map((c) => c.value);
       } else if (Array.isArray(ma._editingMcpServers) && ma._editingMcpServers.length > 0) {
         body.useMcpServers = ma._editingMcpServers;
+      }
+      if (dom.maHeartbeatEnabled?.checked) {
+        const minutes = Math.max(1, Math.round(Number(dom.maHeartbeatInterval?.value.trim()) || 30));
+        const checklist = (dom.maHeartbeatChecklist?.value ?? "").trim();
+        body.heartbeat = { enabled: true, intervalMs: minutes * 6e4 };
+        if (checklist) body.heartbeat.checklist = checklist;
       }
       try {
         const url = ma.formMode === "edit" ? `/api/admin/agents/${encodeURIComponent(ma.editingId)}` : "/api/admin/agents";
@@ -1739,6 +1751,9 @@
         maModel: $("ma-model"),
         maSystem: $("ma-system"),
         maWeight: $("ma-weight"),
+        maHeartbeatEnabled: $("ma-heartbeat-enabled"),
+        maHeartbeatInterval: $("ma-heartbeat-interval"),
+        maHeartbeatChecklist: $("ma-heartbeat-checklist"),
         maImportModal: $("ma-import-modal"),
         maImportFile: $("ma-import-file"),
         maImportText: $("ma-import-text"),

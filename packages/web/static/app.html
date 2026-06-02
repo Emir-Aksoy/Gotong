@@ -356,6 +356,25 @@
               <div id="ma-mcp-optin" class="ma-mcp-optin"></div>
               <p id="ma-mcp-empty" class="hint" hidden data-i18n="mcpAgentOptInEmpty">还没有可用的 MCP 集成。去「MCP」标签页安装一个。</p>
             </fieldset>
+            <!-- v5 D-M4 — proactive heartbeat: the agent wakes itself on a
+                 cadence and runs a full turn to check for things to do. Off
+                 by default; interval is entered in minutes (wire is ms). -->
+            <fieldset class="ma-mcp-fieldset">
+              <legend data-i18n="agentHeartbeatLegend">定时唤醒（心跳）</legend>
+              <label class="ma-heartbeat-toggle">
+                <input id="ma-heartbeat-enabled" type="checkbox" />
+                <span data-i18n="agentHeartbeatEnable">启用定时唤醒</span>
+              </label>
+              <label>
+                <span data-i18n="agentHeartbeatInterval">唤醒间隔（分钟）</span>
+                <input id="ma-heartbeat-interval" type="number" min="1" step="1" placeholder="30" />
+              </label>
+              <label>
+                <span data-i18n="agentHeartbeatChecklist">待办清单（可选）</span>
+                <textarea id="ma-heartbeat-checklist" rows="3"></textarea>
+              </label>
+              <p class="hint" data-i18n="agentHeartbeatHint">勾选后此智能体按间隔自动醒来跑一轮；没事就保持安静。</p>
+            </fieldset>
             <label>
               <span data-i18n="agentApiKey">私有 API Key（可选，加密保存）</span>
               <input id="ma-api-key" type="password" autocomplete="off" />
