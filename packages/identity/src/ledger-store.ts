@@ -232,6 +232,34 @@ export class LedgerStore {
       costMicros: r.cost_micros,
     }))
   }
+
+  /**
+   * Delete ledger rows in the half-open window `ts < before`, returning the
+   * count removed — the retention knob for a table that otherwise grows one
+   * row per LLM call forever (Route B P0-M3-M4).
+   *
+   * Deliberately scoped to the BILLING ledger only: the compliance trail in
+   * `audit_log` is a separate table and is never touched here. The RETAINED
+   * window (`ts >= before`) stays fully queryable + exportable via the Phase 17
+   * CSV/JSONL routes, so "prune" never costs you the audit you kept — operators
+   * who need permanent cost records export (or back up the db) before the
+   * window rolls. The host gates this OFF by default (no env ⇒ never called),
+   * so a default deployment loses nothing. Prepared per-call: this is
+   * boot-time-only, never on the append hot path.
+   */
+  prune(opts: { before: number }): number {
+    if (!opts || typeof opts !== 'object') {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'pruneLedger: opts object with a `before` cutoff required',
+      })
+    }
+    const before = assertNonNegInt(opts.before, 'before')
+    const res = this.db
+      .prepare('DELETE FROM usage_ledger WHERE ts < ?')
+      .run(before)
+    return Number(res.changes)
+  }
 }
 
 // ---------------------------------------------------------------------------

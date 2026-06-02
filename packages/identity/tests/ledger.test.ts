@@ -297,3 +297,63 @@ describe('IdentityStore — ledger peer attribution (Phase 19 P4-M2)', () => {
     expect(byKey['(none)'].costMicros).toBe(7)
   })
 })
+
+describe('IdentityStore — ledger retention / prune (Route B P0-M3-M4)', () => {
+  let store: IdentityStore
+
+  beforeEach(() => {
+    store = openIdentityStore({ dbPath: ':memory:' })
+  })
+
+  /** Seed three rows on three distinct days (D15 < D16 < D17). */
+  const D17 = Date.UTC(2026, 3, 17, 9, 0, 0) // 2026-04-17
+  function seedThreeDays(): void {
+    for (const ts of [D15, D16, D17]) {
+      store.appendLedger({ ts, agentId: 'a', model: 'm', inputTokens: 1, outputTokens: 1, costMicros: 10 })
+    }
+  }
+
+  it('deletes rows older than `before` (half-open) and returns the count', () => {
+    seedThreeDays()
+    // Cutoff at D16: D15 is older (deleted), D16 itself is RETAINED (ts < before
+    // is half-open), D17 is newer (retained).
+    const removed = store.pruneLedger({ before: D16 })
+    expect(removed).toBe(1)
+
+    const kept = store.queryLedger({})
+    expect(kept.map((e) => e.ts).sort()).toEqual([D16, D17])
+  })
+
+  it('retained window stays queryable/exportable after prune', () => {
+    seedThreeDays()
+    store.pruneLedger({ before: D17 }) // drop D15 + D16, keep only D17
+    const kept = store.queryLedger({})
+    expect(kept).toHaveLength(1)
+    expect(kept[0].ts).toBe(D17)
+    // And aggregate (which backs the CSV/JSONL export) sees only the kept row.
+    const agg = store.aggregateLedger({ groupBy: 'day' })
+    expect(agg).toHaveLength(1)
+    expect(agg[0].calls).toBe(1)
+  })
+
+  it('leaves the audit_log compliance trail untouched (separate table)', () => {
+    seedThreeDays()
+    store.writeAuditLog({ action: 'login_success', actorSource: 'v4-session' })
+    expect(store.pruneLedger({ before: D17 })).toBe(2) // prunes 2 ledger rows
+    // The audit row predates nothing in the ledger window — prune must not
+    // reach into audit_log at all.
+    expect(store.listAuditLog()).toHaveLength(1)
+  })
+
+  it('is a no-op (0 removed) when nothing is older than the cutoff', () => {
+    seedThreeDays()
+    expect(store.pruneLedger({ before: D15 })).toBe(0) // D15 itself is half-open-retained
+    expect(store.queryLedger({})).toHaveLength(3)
+  })
+
+  it('validates the cutoff — missing / negative / non-integer throws', () => {
+    expect(() => store.pruneLedger({} as { before: number })).toThrow(IdentityError)
+    expect(() => store.pruneLedger({ before: -1 })).toThrow(IdentityError)
+    expect(() => store.pruneLedger({ before: 1.5 })).toThrow(IdentityError)
+  })
+})

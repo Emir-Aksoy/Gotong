@@ -2165,6 +2165,15 @@ export class IdentityStore {
     return this.ledger.aggregate(query)
   }
 
+  /**
+   * Prune ledger rows older than `before` (Route B P0-M3-M4 retention). Returns
+   * the count removed. The retained window stays exportable; `audit_log` is a
+   * separate table and untouched. Host-gated OFF by default.
+   */
+  pruneLedger(opts: { before: number }): number {
+    return this.ledger.prune(opts)
+  }
+
   // =====================================================================
   // v5 A-M1 — unified resource grants (resource-level RBAC, ownership MVP).
   // One row per (resourceKind, resourceId, principal); the owner is the
