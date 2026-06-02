@@ -2,7 +2,12 @@ import { describe, expect, it } from 'vitest'
 import { parse as parseYaml } from 'yaml'
 
 import { ManifestError } from '../src/manifest.js'
-import { TEMPLATE_SCHEMA_V1, parseTemplate } from '../src/template-manifest.js'
+import {
+  TEMPLATE_SCHEMA_V1,
+  parseTemplate,
+  renderTemplate,
+  type TemplateAgentInput,
+} from '../src/template-manifest.js'
 
 /**
  * The v5 Stream B template parser is the trust boundary between "untrusted
@@ -255,6 +260,98 @@ describe('parseTemplate (aipehub.template/v1)', () => {
   it('rejects malformed YAML / JSON with a friendly message', () => {
     expect(() => parseTemplate('{ not json')).toThrow(/not valid JSON/)
     expect(() => parseTemplate('   ')).toThrow(/template is empty/)
+  })
+})
+
+/**
+ * renderTemplate is the inverse of parseTemplate — it turns selected hub
+ * structure into an aipehub.template/v1 object. Its job is the structure-safe
+ * DEFAULT export (decision #5): structure + wiring + references, and by
+ * construction NO personnel, NO knowledge content, NO literal secrets.
+ */
+describe('renderTemplate (B-M2 structure export)', () => {
+  function agentRec(over: Partial<TemplateAgentInput> = {}): TemplateAgentInput {
+    return {
+      id: 'support-agent',
+      allowedCapabilities: ['answer-ticket'],
+      managed: { kind: 'llm', provider: 'openai-compatible', baseURL: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash', system: '你是客服。' },
+      ...over,
+    }
+  }
+
+  it('renders agents + workflows + KBs and round-trips through parseTemplate', () => {
+    const out = renderTemplate({
+      name: '客服模板',
+      description: '导出的结构',
+      version: 3,
+      agents: [agentRec()],
+      workflows: [{ id: 'ticket-flow', workflow: { id: 'ticket-flow', trigger: { capability: 'answer-ticket' }, steps: [{ id: 's', dispatch: { strategy: { kind: 'capability', capabilities: ['answer-ticket'] }, payload: {} } }] } }],
+      knowledgeBases: [{ name: 'kb', useMcpServer: 'company-kb' }],
+      apiKeyPrompt: { provider: 'openai-compatible', baseURL: 'https://api.deepseek.com/v1', label: 'DeepSeek' },
+    })
+    expect(out.schema).toBe(TEMPLATE_SCHEMA_V1)
+    // The whole rendered object must parse back cleanly (the route relies on this).
+    const t = parseTemplate(JSON.stringify(out))
+    expect(t.name).toBe('客服模板')
+    expect(t.version).toBe(3)
+    expect(t.agents.map((a) => a.id)).toEqual(['support-agent'])
+    expect(t.workflows.map((w) => w.id)).toEqual(['ticket-flow'])
+    expect(t.knowledgeBases[0]!.useMcpServer).toBe('company-kb')
+    expect(t.apiKeyPrompt?.label).toBe('DeepSeek')
+  })
+
+  it('defaults version to 1 and omits empty sections', () => {
+    const out = renderTemplate({ name: 'agents-only', agents: [agentRec()] })
+    const template = out.template as Record<string, unknown>
+    expect(template.version).toBe(1)
+    expect(template.workflows).toBeUndefined()
+    expect(template.knowledgeBases).toBeUndefined()
+    expect(template.defaults).toBeUndefined()
+  })
+
+  it('NEVER leaks personnel — owner / grant fields never appear in the output', () => {
+    // Even if the input record carries extra fields, only agent config is rendered.
+    const polluted = { ...agentRec(), ownerUserId: 'user-alice', grants: [{ who: 'bob' }] } as unknown as TemplateAgentInput
+    const out = renderTemplate({ name: 't', agents: [polluted] })
+    const json = JSON.stringify(out)
+    expect(json).not.toContain('ownerUserId')
+    expect(json).not.toContain('user-alice')
+    expect(json).not.toContain('grants')
+  })
+
+  it('skips externally-connected agents (no managed spec to export)', () => {
+    const external: TemplateAgentInput = { id: 'remote', allowedCapabilities: ['x'] } // no managed
+    const out = renderTemplate({ name: 't', agents: [external], knowledgeBases: [{ name: 'k', useMcpServer: 'm' }] })
+    expect((out.template as Record<string, unknown>).agents).toBeUndefined()
+  })
+
+  it('placeholder-izes literal MCP secrets (env + headers) so none leak', () => {
+    const withSecrets = agentRec({
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'hi',
+        mcpServers: [
+          { name: 'kb', command: 'npx', env: { CHROMA_TOKEN: 'sk-LITERAL-secret', SAFE: '${ALREADY_PLACEHOLDER}' } },
+          { name: 'api', transport: 'http', url: 'https://x/mcp', headers: { Authorization: 'Bearer real-token' } },
+        ],
+      },
+    })
+    const out = renderTemplate({ name: 't', agents: [withSecrets] })
+    const json = JSON.stringify(out)
+    expect(json).not.toContain('sk-LITERAL-secret')
+    expect(json).not.toContain('real-token')
+    // The literal was replaced with a placeholder named after the key; the
+    // pre-existing placeholder is preserved verbatim.
+    expect(json).toContain('${CHROMA_TOKEN}')
+    expect(json).toContain('${ALREADY_PLACEHOLDER}')
+    expect(json).toContain('${AUTHORIZATION}')
+  })
+
+  it('a bad operator-supplied KB makes the rendered template fail the parse gate', () => {
+    const out = renderTemplate({ name: 't', knowledgeBases: [{ name: 'bad-kb-no-wiring' }] })
+    // The renderer is permissive; the route's parseTemplate gate is the validator.
+    expect(() => parseTemplate(JSON.stringify(out))).toThrow(/must declare its wiring/)
   })
 })
 

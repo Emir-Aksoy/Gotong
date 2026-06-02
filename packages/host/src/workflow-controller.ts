@@ -24,7 +24,7 @@
  */
 
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs'
-import { rename, writeFile } from 'node:fs/promises'
+import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 import { createLogger, type Hub } from '@aipehub/core'
@@ -478,6 +478,23 @@ export class WorkflowController {
   /** Full lifecycle view for one workflow. */
   async getState(id: string): Promise<WorkflowLifecycleView> {
     return this.versioning.getState(id)
+  }
+
+  /**
+   * The authored YAML text for `id` (v5 B-M2 template export). Returns the
+   * on-disk `definitions/<id>.yaml` verbatim — the exact text that imported
+   * successfully — so a template that embeds it is guaranteed to re-parse (no
+   * re-emit drift from the in-memory `WorkflowDefinition`). Returns null when
+   * the id is unknown or its file is missing (e.g. a never-written draft).
+   */
+  async exportDefinitionText(id: string): Promise<string | null> {
+    const file = this.known.get(id)?.file
+    if (!file) return null
+    try {
+      return await readFile(file, 'utf8')
+    } catch {
+      return null
+    }
   }
 
   // --- internals -----------------------------------------------------------

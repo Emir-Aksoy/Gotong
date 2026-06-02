@@ -1,12 +1,13 @@
 import { parse as parseYaml } from 'yaml'
 
-import type { McpServerSpec } from '@aipehub/core'
+import type { ManagedAgentSpec, McpServerSpec } from '@aipehub/core'
 
 import {
   ManifestError,
   TEAM_SCHEMA_V1,
   indentYaml,
   parseManifest,
+  renderAgentManifest,
   stringifyYamlSafe,
   validateMcpServersArray,
   validateUseMcpServersArray,
@@ -337,6 +338,110 @@ function parsePresetData(raw: unknown, path: string): TemplatePresetData {
   const out: TemplatePresetData = { kind: p.kind, ref: p.ref }
   if (typeof p.description === 'string') out.description = p.description
   return out
+}
+
+// ── B-M2: structure export (the inverse of parseTemplate) ──────────────────
+
+/** One agent to render — the same structural shape `renderAgentManifest` takes. */
+export interface TemplateAgentInput {
+  id: string
+  allowedCapabilities: readonly string[]
+  displayName?: string
+  managed?: ManagedAgentSpec
+}
+
+/** One workflow to embed — the authored `workflow:` block (id/trigger/steps/…). */
+export interface TemplateWorkflowInput {
+  id: string
+  /** The authored inner block, embedded verbatim under the template's workflows[]. */
+  workflow: Record<string, unknown>
+}
+
+export interface RenderTemplateInput {
+  name: string
+  description?: string
+  version?: number
+  agents?: TemplateAgentInput[]
+  /** Authored workflow blocks (the host hands these from `definitions/<id>.yaml`). */
+  workflows?: TemplateWorkflowInput[]
+  /** Addressable KB slots — raw template-shaped objects (validated by a re-parse gate). */
+  knowledgeBases?: Array<Record<string, unknown>>
+  apiKeyPrompt?: BundleApiKeyPrompt
+}
+
+/**
+ * Render selected hub structure into an `aipehub.template/v1` manifest object
+ * (v5 B-M2). This is the structure-safe DEFAULT export (decision #5):
+ *
+ *   - NO personnel info — by construction. The input carries no owner / grant /
+ *     uploader fields, and `renderAgentManifest` emits only an agent's config
+ *     (id, capabilities, provider, model, system, MCP wiring), never who owns it.
+ *   - NO knowledge content — by construction. Only MCP-server *wiring* is
+ *     emitted (commands / urls / env keys), never the documents inside a KB.
+ *   - NO secrets — `scrubAgentSecrets` placeholder-izes any literal MCP env /
+ *     header value so a template shared publicly can't leak a baked-in key.
+ *
+ * Including knowledge content / personnel is B-M3's gated, audited, opt-in
+ * path — deliberately NOT reachable from here.
+ *
+ * The result round-trips through `parseTemplate`; callers should run that as an
+ * integrity gate (it also validates operator-supplied `knowledgeBases`).
+ */
+export function renderTemplate(input: RenderTemplateInput): Record<string, unknown> {
+  const agents = (input.agents ?? [])
+    // Externally-connected participants have no managed spec to export — skip them.
+    .filter((a) => a.managed)
+    .map((a) => scrubAgentSecrets(renderAgentManifest(a).agent as Record<string, unknown>))
+  const workflows = (input.workflows ?? []).map((w) => w.workflow)
+  const knowledgeBases = input.knowledgeBases ?? []
+
+  const template: Record<string, unknown> = { name: input.name }
+  if (input.description) template.description = input.description
+  template.version = input.version ?? 1
+  if (agents.length > 0) template.agents = agents
+  if (workflows.length > 0) template.workflows = workflows
+  if (knowledgeBases.length > 0) template.knowledgeBases = knowledgeBases
+  if (input.apiKeyPrompt) template.defaults = { apiKeyPrompt: { ...input.apiKeyPrompt } }
+  return { schema: TEMPLATE_SCHEMA_V1, template }
+}
+
+// An MCP env / header value is "safe" to export verbatim only when it's already
+// an env-var placeholder like `${BRAVE_API_KEY}` — anything else might be a
+// literal secret, so we replace it with a placeholder named after its key.
+const ENV_PLACEHOLDER_RE = /^\$\{[^}]+\}$/
+
+/**
+ * Mutate a rendered agent object so no literal MCP secret rides along in the
+ * export. We keep the *keys* (the importer still learns which env vars / headers
+ * the server needs) but replace any non-placeholder value with `${KEY}`. Safe to
+ * mutate: `renderAgentManifest` already deep-copied env / headers off the record.
+ */
+function scrubAgentSecrets(agent: Record<string, unknown>): Record<string, unknown> {
+  const servers = agent.mcpServers
+  if (!Array.isArray(servers)) return agent
+  for (const s of servers) {
+    if (!s || typeof s !== 'object') continue
+    const srv = s as { env?: Record<string, unknown>; headers?: Record<string, unknown> }
+    placeholderize(srv.env, (k) => `\${${k}}`)
+    placeholderize(srv.headers, (k) => `\${${headerEnvName(k)}}`)
+  }
+  return agent
+}
+
+function placeholderize(
+  map: Record<string, unknown> | undefined,
+  name: (key: string) => string,
+): void {
+  if (!map || typeof map !== 'object') return
+  for (const k of Object.keys(map)) {
+    const v = map[k]
+    if (typeof v !== 'string' || !ENV_PLACEHOLDER_RE.test(v)) map[k] = name(k)
+  }
+}
+
+/** `Authorization` → `AUTHORIZATION`, `X-Api-Key` → `X_API_KEY` (env-var safe). */
+function headerEnvName(header: string): string {
+  return header.toUpperCase().replace(/[^A-Z0-9]+/g, '_')
 }
 
 /**

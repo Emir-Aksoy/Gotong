@@ -125,6 +125,17 @@ describe('WorkflowController', () => {
     expect(existsSync(`${filePath}.tmp`)).toBe(false)
   })
 
+  it('exportDefinitionText() returns the authored YAML verbatim; null for unknown id (v5 B-M2)', async () => {
+    const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+    // Unknown before import — no silent empty string.
+    expect(await c.exportDefinitionText('editorial')).toBeNull()
+    await c.importFromText(SAMPLE)
+    // After import, the on-disk text comes back byte-for-byte (no re-emit drift),
+    // so a template embedding it is guaranteed to re-parse.
+    expect(await c.exportDefinitionText('editorial')).toBe(SAMPLE)
+    expect(await c.exportDefinitionText('ghost')).toBeNull()
+  })
+
   it('importFromText() rejects duplicate ids', async () => {
     const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
     await c.importFromText(SAMPLE)

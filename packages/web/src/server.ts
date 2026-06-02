@@ -64,6 +64,9 @@ import {
 
 import {
   handlePeerManifestRoute,
+} from './peer-routes.js'
+import { handleTemplateRoute } from './template-routes.js'
+import {
   type PeerManifestFederationSurface,
 } from './peer-routes.js'
 
@@ -574,6 +577,12 @@ export interface WorkflowSurface {
   listRevisions(id: string): Promise<WorkflowRevisionMeta[]>
   /** Full lifecycle view (state, pointers, revisions, history, legal actions). */
   getState(id: string): Promise<WorkflowLifecycleView>
+  /**
+   * v5 B-M2 — the authored YAML text for `id`, for template export. Returns
+   * the exact text that imported (guaranteed re-parseable), or null when the
+   * id is unknown / its file is missing. The host reads `definitions/<id>.yaml`.
+   */
+  exportDefinitionText(id: string): Promise<string | null>
 }
 
 /**
@@ -1775,6 +1784,20 @@ async function handle(
     const handled = await handlePeerManifestRoute(
       {
         peerManifests: ctx.peerManifests,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // v5 B-M2 — template structure export (agents + workflows + KB wiring;
+  // structure-safe default, no content / personnel / secrets).
+  if (path === '/api/admin/templates/export') {
+    const handled = await handleTemplateRoute(
+      {
+        agentSource: ctx.space,
+        workflows: ctx.workflows,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req, res, method, path,
