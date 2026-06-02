@@ -19,13 +19,26 @@ import { describe, expect, it } from 'vitest'
 import { selectLlmApiKey } from '../src/local-agent-pool.js'
 import type { OrgApiPool, ResolvedLlmKey } from '../src/org-api-pool.js'
 
-/** Build a stand-in `OrgApiPool` whose `resolveLlmKey` table is the arg. */
-function fakeOrgPool(table: Record<string, string>): OrgApiPool {
+/**
+ * Build a stand-in `OrgApiPool`. `table` is the org-scope key map; the
+ * optional `userTable` (keyed `<userId>:<provider>`) is the v5 A-M3
+ * per-user "bring your own" map consulted by `resolveUserLlmKey`.
+ */
+function fakeOrgPool(
+  table: Record<string, string>,
+  userTable: Record<string, string> = {},
+): OrgApiPool {
   return {
     resolveLlmKey(provider: string): ResolvedLlmKey | null {
       const apiKey = table[provider]
       return apiKey
         ? { provider, apiKey, entryId: `entry-${provider}`, label: null }
+        : null
+    },
+    resolveUserLlmKey(provider: string, userId: string): ResolvedLlmKey | null {
+      const apiKey = userTable[`${userId}:${provider}`]
+      return apiKey
+        ? { provider, apiKey, entryId: `user-entry-${userId}-${provider}`, label: null }
         : null
     },
   } as unknown as OrgApiPool
@@ -165,6 +178,77 @@ describe('selectLlmApiKey — priority chain', () => {
     })
     expect(r?.apiKey).toBe('sk-agent-explicit')
     expect(r?.source).toEqual({ kind: 'per-agent' })
+  })
+
+  // -- v5 A-M3: per-user "bring your own key" tier (org primary, user fallback)
+
+  it('org pool wins over the owner per-user key (central billing default)', () => {
+    const r = selectLlmApiKey({
+      provider: 'anthropic',
+      perAgent: null,
+      orgPool: fakeOrgPool({ anthropic: 'sk-org' }, { 'u-alice:anthropic': 'sk-alice' }),
+      ownerUserId: 'u-alice',
+      workspace: null,
+      env: null,
+    })
+    expect(r?.apiKey).toBe('sk-org')
+    expect(r?.source).toEqual({ kind: 'org-pool', vaultEntryId: 'entry-anthropic' })
+  })
+
+  it("owner's per-user key is the fallback when the org has none for the provider", () => {
+    const r = selectLlmApiKey({
+      provider: 'anthropic',
+      perAgent: null,
+      orgPool: fakeOrgPool({}, { 'u-alice:anthropic': 'sk-alice' }),
+      ownerUserId: 'u-alice',
+      workspace: 'sk-workspace',
+      env: 'sk-env',
+    })
+    expect(r?.apiKey).toBe('sk-alice')
+    expect(r?.source).toEqual({
+      kind: 'user-pool',
+      vaultEntryId: 'user-entry-u-alice-anthropic',
+      userId: 'u-alice',
+    })
+  })
+
+  it('the user tier is skipped when the agent has no owner (operator agents unchanged)', () => {
+    const r = selectLlmApiKey({
+      provider: 'anthropic',
+      perAgent: null,
+      orgPool: fakeOrgPool({}, { 'u-alice:anthropic': 'sk-alice' }),
+      ownerUserId: null, // operator agent — no owning member
+      workspace: 'sk-workspace',
+      env: null,
+    })
+    expect(r?.apiKey).toBe('sk-workspace')
+    expect(r?.source).toEqual({ kind: 'workspace' })
+  })
+
+  it('a member key for a DIFFERENT user is not used (per-user isolation)', () => {
+    const r = selectLlmApiKey({
+      provider: 'anthropic',
+      perAgent: null,
+      orgPool: fakeOrgPool({}, { 'u-bob:anthropic': 'sk-bob' }),
+      ownerUserId: 'u-alice', // alice owns this agent; only bob has a key
+      workspace: null,
+      env: 'sk-env',
+    })
+    expect(r?.apiKey).toBe('sk-env')
+    expect(r?.source).toEqual({ kind: 'env' })
+  })
+
+  it('the owner per-user key beats workspace + env', () => {
+    const r = selectLlmApiKey({
+      provider: 'openai',
+      perAgent: null,
+      orgPool: fakeOrgPool({}, { 'u-alice:openai': 'sk-alice-openai' }),
+      ownerUserId: 'u-alice',
+      workspace: 'sk-workspace',
+      env: 'sk-env',
+    })
+    expect(r?.apiKey).toBe('sk-alice-openai')
+    expect(r?.source).toMatchObject({ kind: 'user-pool', userId: 'u-alice' })
   })
 
   it('empty-string sources are treated as absent', () => {

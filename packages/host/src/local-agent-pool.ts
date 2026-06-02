@@ -139,6 +139,10 @@ function resolveLedgerPeerId(identity: LedgerPeerLookup, task: Task): string | n
 export type LlmApiKeySource =
   | { kind: 'per-agent' }
   | { kind: 'org-pool'; vaultEntryId: string }
+  // v5 A-M3 — a member's own ("bring your own") vault key, used when an
+  // agent has an owning user and the org configured no key for the
+  // provider. Carries the userId so audit/revoke can attribute it.
+  | { kind: 'user-pool'; vaultEntryId: string; userId: string }
   | { kind: 'workspace' }
   | { kind: 'env' }
 
@@ -1028,9 +1032,37 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       provider,
       perAgent,
       orgPool: this.orgApiPool ?? null,
+      // v5 A-M3 — when this agent is owned by a member (A-M2 resource
+      // grant), let their personal vault key serve as the fallback after
+      // the org pool. Admin/operator agents have no owner → null → the
+      // user tier is skipped and selection is byte-for-byte as before.
+      ownerUserId: this.ownerUserIdOf(agentId),
       workspace,
       env,
     })
+  }
+
+  /**
+   * v5 A-M3 — find the member who OWNS `agentId` (the `perm='owner'`
+   * resource grant with a user principal), or null. Used to scope the
+   * per-user "bring your own key" fallback. Read-only; defensively
+   * guarded so identity stubs without `listResourceGrants` (older test
+   * fixtures) just report "no owner".
+   */
+  private ownerUserIdOf(agentId: ParticipantId): string | null {
+    const id = this.identity
+    if (!id || typeof (id as { listResourceGrants?: unknown }).listResourceGrants !== 'function') {
+      return null
+    }
+    try {
+      for (const g of id.listResourceGrants('agent', agentId)) {
+        if (g.perm === 'owner' && g.principal.kind === 'user') return g.principal.id
+      }
+    } catch {
+      // Ownership lookup is best-effort: a grant-store fault must not
+      // block spawn — fall back to the org/workspace/env tiers.
+    }
+    return null
   }
 
   /**
@@ -1065,9 +1097,16 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   ): ((err: unknown, _task: Task) => void) | undefined {
     if (!record.managed) return undefined
     if (record.managed.provider === 'mock') return undefined
-    if (!resolution || resolution.source.kind !== 'org-pool') return undefined
+    // v5 A-M3 — auto-revoke applies to ANY vault-backed key (org pool or a
+    // member's own per-user key); both are AipeHub-managed rows we can
+    // soft-delete on a 401. per-agent / workspace / env stay operator-owned.
+    if (!resolution) return undefined
+    const src = resolution.source
+    if (src.kind !== 'org-pool' && src.kind !== 'user-pool') return undefined
     if (!this.identity || !this.orgApiPool) return undefined
-    const vaultEntryId = resolution.source.vaultEntryId
+    const vaultEntryId = src.vaultEntryId
+    const ownerScope = src.kind === 'user-pool' ? 'user' : 'org'
+    const ownerUserId = src.kind === 'user-pool' ? src.userId : null
     const identityRef = this.identity
     const orgPoolRef = this.orgApiPool
     const providerName = record.managed.provider
@@ -1112,11 +1151,15 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
           identityRef.writeAuditLog({
             action: AUDIT_ACTIONS.VAULT_REVOKE,
             actorSource: 'system',
+            ...(ownerUserId ? { targetUserId: ownerUserId } : {}),
             metadata: {
               reason: 'llm_auth_failure',
               provider: providerName,
               agent: agentId,
               vaultEntryId,
+              // v5 A-M3 — distinguish a revoked org key from a member's
+              // own (BYO) key so the audit reader knows whose key died.
+              ownerScope,
               // Audit #147 — never write raw err.message: provider SDKs
               // routinely interpolate `Authorization: Bearer sk-...`,
               // proxy URLs with `user:pass`, request body fragments, or
@@ -1177,20 +1220,27 @@ function extractStatus(err: unknown): number | undefined {
  * gather every source up-front (Space lookups + env reads + the org
  * pool reference) and this function picks the first non-empty hit.
  *
- * Priority (B1.2):
+ * Priority (B1.2 + v5 A-M3):
  *   1. per-agent override
  *   2. org pool (v4 vault, ownerKind='org' llm_provider row)
- *   3. workspace default (v3 Space-stored per-provider key)
- *   4. host env (ANTHROPIC_API_KEY / OPENAI_API_KEY)
+ *   3. owner's per-user pool (v5 A-M3 — vault ownerKind='user' for the
+ *      agent's owning member; `ownerUserId` null → tier skipped)
+ *   4. workspace default (v3 Space-stored per-provider key)
+ *   5. host env (ANTHROPIC_API_KEY / OPENAI_API_KEY)
+ *
+ * Org BEFORE user is deliberate: an org-provided key stays the shared
+ * default (central billing/control) and a member's "bring your own key"
+ * only serves as a fallback when the org configured none for the
+ * provider — the roadmap's "读 org 行的同时支持 user 行回退".
  *
  * Special cases:
  *   - `mock`: returns undefined unconditionally — no provider needs a
  *     key for the mock backend.
  *   - `openai-compatible`: only per-agent is considered for the workspace
  *     and env tiers (callers should pass `workspace=null` and `env=null`
- *     for this provider). The org pool tier is still consulted because
- *     a vault row with `metadata.provider='openai-compatible'` is a
- *     legitimate way to scope a vendor-specific key org-wide.
+ *     for this provider). The org + user pool tiers are still consulted
+ *     because a vault row with `metadata.provider='openai-compatible'`
+ *     is a legitimate way to scope a vendor-specific key.
  *
  * @internal
  */
@@ -1198,6 +1248,8 @@ export function selectLlmApiKey(args: {
   provider: ManagedAgentSpec['provider']
   perAgent: string | null
   orgPool: OrgApiPool | null
+  /** v5 A-M3 — the agent's owning member, or null for operator agents. */
+  ownerUserId?: string | null
   workspace: string | null
   env: string | null
 }): LlmApiKeyResolution | undefined {
@@ -1211,6 +1263,19 @@ export function selectLlmApiKey(args: {
       return {
         apiKey: hit.apiKey,
         source: { kind: 'org-pool', vaultEntryId: hit.entryId },
+      }
+    }
+  }
+  if (args.orgPool && args.ownerUserId) {
+    const hit = args.orgPool.resolveUserLlmKey(args.provider, args.ownerUserId)
+    if (hit) {
+      return {
+        apiKey: hit.apiKey,
+        source: {
+          kind: 'user-pool',
+          vaultEntryId: hit.entryId,
+          userId: args.ownerUserId,
+        },
       }
     }
   }

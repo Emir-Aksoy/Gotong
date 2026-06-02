@@ -678,4 +678,78 @@ describe('OrgApiPool.makeLlmQuotaGate (B2.2)', () => {
       }),
     ).toThrow(/non-negative integer/)
   })
+
+  // -- v5 A-M3: per-user "bring your own key" resolution -------------------
+
+  it('resolveUserLlmKey returns null when the member has no key', () => {
+    expect(pool.resolveUserLlmKey('anthropic', 'u-alice')).toBeNull()
+  })
+
+  it('resolveUserLlmKey resolves a user-owned llm_provider key', () => {
+    const entry = identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'user',
+      ownerId: 'u-alice',
+      secret: 'sk-alice-byo',
+      label: 'alice anthropic',
+      metadata: { provider: 'anthropic' },
+    })
+    expect(pool.resolveUserLlmKey('anthropic', 'u-alice')).toEqual({
+      provider: 'anthropic',
+      apiKey: 'sk-alice-byo',
+      entryId: entry.id,
+      label: 'alice anthropic',
+    })
+  })
+
+  it('resolveUserLlmKey is isolated per user — alice never sees bob’s key', () => {
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'user',
+      ownerId: 'u-bob',
+      secret: 'sk-bob-byo',
+      metadata: { provider: 'anthropic' },
+    })
+    expect(pool.resolveUserLlmKey('anthropic', 'u-bob')?.apiKey).toBe('sk-bob-byo')
+    expect(pool.resolveUserLlmKey('anthropic', 'u-alice')).toBeNull()
+  })
+
+  it('a user key does NOT leak into the org resolution (and vice versa)', () => {
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'user',
+      ownerId: 'u-alice',
+      secret: 'sk-alice-only',
+      metadata: { provider: 'anthropic' },
+    })
+    // The org pool sees no org-scope row → still null.
+    expect(pool.resolveLlmKey('anthropic')).toBeNull()
+    // And the user resolution does not surface an org row when only an
+    // org key exists.
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      secret: 'sk-org-only',
+      metadata: { provider: 'openai' },
+    })
+    expect(pool.resolveUserLlmKey('openai', 'u-alice')).toBeNull()
+  })
+
+  it('user-key create auto-invalidates the per-user negative cache', () => {
+    expect(pool.resolveUserLlmKey('anthropic', 'u-alice')).toBeNull() // caches null
+    identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'user',
+      ownerId: 'u-alice',
+      secret: 'sk-alice-late',
+      metadata: { provider: 'anthropic' },
+    })
+    // No manual invalidate — the vault-mutation listener flushed the user cache.
+    expect(pool.resolveUserLlmKey('anthropic', 'u-alice')?.apiKey).toBe('sk-alice-late')
+  })
+
+  it('resolveUserLlmKey rejects an empty provider / userId', () => {
+    expect(() => pool.resolveUserLlmKey('', 'u-alice')).toThrow(/provider/)
+    expect(() => pool.resolveUserLlmKey('anthropic', '')).toThrow(/userId/)
+  })
 })

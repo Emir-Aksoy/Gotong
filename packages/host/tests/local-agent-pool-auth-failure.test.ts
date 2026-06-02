@@ -101,6 +101,14 @@ describe('LocalAgentPool.buildAuthFailureHook — gating', () => {
     expect(typeof hook).toBe('function')
   })
 
+  it('v5 A-M3 — returns a closure for a user-pool (BYO) key too', () => {
+    const hook = f.pool.buildAuthFailureHook(rec('anthropic'), {
+      apiKey: 'sk-alice-byo',
+      source: { kind: 'user-pool', vaultEntryId: f.entryId, userId: 'u-alice' },
+    })
+    expect(typeof hook).toBe('function')
+  })
+
   it('returns undefined for per-agent source', () => {
     const hook = f.pool.buildAuthFailureHook(rec('anthropic'), {
       apiKey: 'sk-from-per-agent',
@@ -216,6 +224,43 @@ describe('LocalAgentPool.buildAuthFailureHook — side effects', () => {
     // Defense-in-depth: explicitly assert the raw message was NOT
     // serialised — guards against a future revert that re-adds it.
     expect(md.errorMessage).toBeUndefined()
+  })
+
+  it('v5 A-M3 — a member BYO key 401 revokes THAT user’s vault row + tags the audit', () => {
+    // Seed a user-owned (BYO) anthropic key for alice.
+    const aliceKey = f.identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'user',
+      ownerId: 'u-alice',
+      secret: 'sk-alice-byo-test',
+      metadata: { provider: 'anthropic' },
+    })
+    expect(f.identity.getVaultEntry(aliceKey.id)?.revokedAt).toBeNull()
+
+    const hook = f.pool.buildAuthFailureHook(rec('anthropic', 'alice-agent'), {
+      apiKey: 'sk-alice-byo-test',
+      source: { kind: 'user-pool', vaultEntryId: aliceKey.id, userId: 'u-alice' },
+    })!
+    hook(Object.assign(new Error('401'), { status: 401 }), {
+      from: 'sys',
+      strategy: { kind: 'capability', capabilities: [] },
+      payload: null,
+    } as never)
+
+    // alice's key is revoked — the org key (different row) is untouched.
+    expect(f.identity.getVaultEntry(aliceKey.id)?.revokedAt).toBeTruthy()
+    expect(f.identity.getVaultEntry(f.entryId)?.revokedAt).toBeNull()
+
+    // Audit row carries ownerScope='user' + targetUserId so the reader
+    // knows whose key died (not an org-wide key).
+    const audits = f.identity.listAuditLog!({ action: 'vault_revoke' })
+    const ours = audits.find((a) => {
+      const md = a.metadata as { vaultEntryId?: string } | null
+      return md?.vaultEntryId === aliceKey.id
+    })!
+    expect(ours).toBeTruthy()
+    expect(ours.targetUserId).toBe('u-alice')
+    expect((ours.metadata as { ownerScope?: string }).ownerScope).toBe('user')
   })
 
   it('hook is idempotent + dedups audit on concurrent 401s (Audit #157)', () => {
