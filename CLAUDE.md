@@ -517,6 +517,7 @@ UX 入口都从 admin 视角进。**个人用户应该有 first-class 入口**:
 - **不需要向前兼容**: 还没上线, 大胆改 schema / API。删旧代码比加 deprecation shim 优先
 - **代码尽量简化, 节点尽量轻量**: 每个 PR 一个小目标, 别一次塞 5 个 feature
 - **一个任务一个任务**: 规划完一项 → 开发 → 测试 → commit → 下一项
+- **主流 agent 接入标准**: 以后每个主流 agent 适配器都必须过《`docs/zh/AGENT-ADAPTER-CONTRACT.md`》的「双向 + 可快速接管」验收门 —— ① 双向连通 (入站 MCP/A2A + 出站 shell-out/A2A/鸭子 adapter); ② 五控制缝 (可观测/可拦截/可移交/可续跑/可终止); ③ 接管粒度至少 Tier 1, 能改文件·花钱·对外发的到 Tier 2, 黑盒 agent 的副作用面在 hub 边界钉 Tier 2。新写 adapter 先对表。
 - **Auto Mode bias**: 不要每步都问; 不清楚的地方留 inline 注释说明默认选择, 用户会 redirect
 
 ### 4.2 代码风格
@@ -575,6 +576,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 联邦信任契约收口 (出站 allowlist + peer 账本 + rich manifest + per-link data-class/quota/revocation) | `docs/zh/V4-PHASE19-P4-FINAL.md` |
 | 生态接入与行业模板 (framework adapter + automation 桥 + 行业模板 + governance 元数据) | `docs/zh/V4-PHASE19-P5-FINAL.md` |
 | 完整审计报告 | `docs/zh/AUDIT-v4-phase5.md` |
+| 主流 agent 适配器契约 (双向 + 可快速接管验收门) | `docs/zh/AGENT-ADAPTER-CONTRACT.md` |
 | MCP 接入(client + server) | `docs/zh/MCP.md` |
 | Services 插件 RFC 系列 | `docs/services-rfc.md` 及 `*-rfc.md` |
 | 部署 / 运维 / 监控 | `docs/zh/DEPLOY.md`, `docs/OPERATIONS.md`, `docs/MONITORING.md` |
