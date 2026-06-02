@@ -84,6 +84,7 @@ import { OrgApiPool } from './org-api-pool.js'
 import { BAKED_VERSION } from './version.js'
 import { buildAgentCard } from './agent-card.js'
 import { auditBootSecurity, formatBootSecurityReport, isLoopbackHost } from './boot-security.js'
+import { rotateMasterKey } from './rotate-master-key.js'
 
 const log = createLogger('host')
 import { serveWebSocket } from '@aipehub/transport-ws'
@@ -235,6 +236,16 @@ if (ARGV[0] === 'mint-admin-token') {
   process.exit(0)
 }
 
+// Subcommand: `aipehub-host rotate-master-key` (Route B P0-M4d)
+// Rotates the identity vault master key (KEK) without starting the Hub.
+// Envelope encryption (M4b) makes this O(1): the single data key is
+// re-wrapped under a freshly generated key, secret rows are untouched.
+// local-file provider only — env/kms keys are rotated out of band.
+if (ARGV[0] === 'rotate-master-key') {
+  rotateMasterKeyCmd()
+  process.exit(0)
+}
+
 function pkgVersion(): string {
   // Prefer reading from disk so an in-place upgrade (`npm install -g
   // @aipehub/host@new` without restarting tsc) reflects in --version.
@@ -314,6 +325,55 @@ async function mintAdminTokenCmd(displayNameArg: string | undefined): Promise<vo
 }
 
 /**
+ * `aipehub-host rotate-master-key` (Route B P0-M4d) — rotate the identity
+ * vault master key (KEK) for a local-file workspace without starting the Hub.
+ *
+ * Reads AIPE_SPACE / AIPE_MASTER_KEY_PROVIDER / AIPE_MASTER_KEY exactly like the
+ * boot path, so it loads the SAME current key, then generates a fresh random
+ * key, re-wraps the data key in the DB under it (O(1) — secret rows untouched,
+ * M4b/M4c), and persists the new key to `<space>/identity-master.key`. The new
+ * key is NEVER printed (it's secret-grade; an attacker reading logs must not get
+ * it). A running host keeps serving on its cached data key; the new KEK takes
+ * effect on the next restart — that is the no-downtime property.
+ *
+ * Exits 2 on any failure (wrong provider, missing/wrong-length key, db open),
+ * and because the orchestration fails before it mutates, a failed run never
+ * half-rotates.
+ */
+function rotateMasterKeyCmd(): void {
+  const dir = env('AIPE_SPACE', '.aipehub')!
+  let result: { keyFilePath: string }
+  try {
+    result = rotateMasterKey({
+      spaceDir: dir,
+      providerKind: env('AIPE_MASTER_KEY_PROVIDER'),
+      envKeyMaterial: env('AIPE_MASTER_KEY'),
+      envKeyEncoding: 'hex',
+    })
+  } catch (err) {
+    process.stderr.write(
+      `error: master key rotation failed: ${
+        err instanceof Error ? err.message : String(err)
+      }\n` +
+        `hint: AIPE_SPACE must point at an initialised workspace whose current\n` +
+        `      key still loads; rotation only supports the local-file provider.\n`,
+    )
+    process.exit(2)
+  }
+
+  process.stdout.write(
+    `\n` +
+      `  Vault master key rotated for ${dir}.\n` +
+      `  New key written to (mode 0o600): ${result.keyFilePath}\n` +
+      `\n` +
+      `  The data key was re-wrapped in place — existing secrets were NOT\n` +
+      `  re-encrypted, and the OLD master key no longer opens this vault.\n` +
+      `  A running host keeps serving on its cached key; restart it to adopt\n` +
+      `  the new key. Back up the new key file with the same care as the db.\n\n`,
+  )
+}
+
+/**
  * Persist the one-time admin URL to `runtime/admin-link.txt` with file
  * mode 0o600. Idempotent — overwrites any prior link from a previous
  * run / mint-admin-token invocation. See H20 in AUDIT-v3.3.md.
@@ -341,6 +401,7 @@ function printUsage(): void {
   process.stdout.write(`Usage:
   aipehub-host                            run the host (env-driven)
   aipehub-host mint-admin-token [name]    add a fresh admin (recovery)
+  aipehub-host rotate-master-key          rotate the vault master key (KEK)
   aipehub-host --version | -V             print version + exit
   aipehub-host --help    | -h             this message + exit
 
@@ -359,6 +420,16 @@ SUBCOMMANDS
       Default displayName: AIPE_ADMIN_DISPLAY_NAME, else 'Recovered Operator'.
       Exits with status 2 if AIPE_SPACE does not point at an
       initialised workspace.
+
+  rotate-master-key
+      Rotate the identity vault master key (KEK) without starting the
+      Hub. Loads the current key (AIPE_MASTER_KEY_PROVIDER / AIPE_MASTER_KEY),
+      generates a fresh random key, re-wraps the data key under it in O(1)
+      (secrets are NOT re-encrypted), and writes the new key to
+      <AIPE_SPACE>/identity-master.key (mode 0600, never printed). The OLD
+      key stops working; a running host adopts the new key on next restart.
+      local-file provider only — env / kms keys are rotated out of band.
+      Exits with status 2 on failure (never half-rotates).
 
 ENVIRONMENT
   AIPE_SPACE              workspace directory (default: .aipehub)
