@@ -445,6 +445,54 @@ describe('renderTemplate (B-M2 structure export)', () => {
     expect(Object.keys(secrets)).toHaveLength(2)
   })
 
+  it('two MCP servers’ same-named env secrets don’t collide; round-trip restores each (audit L10)', () => {
+    const twoServers = agentRec({
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'hi',
+        mcpServers: [
+          { name: 'svc-a', command: 'npx', env: { API_KEY: 'literal-A' } },
+          { name: 'svc-b', command: 'npx', env: { API_KEY: 'literal-B' } },
+        ],
+      },
+    })
+    const { template: out, secrets } = renderTemplate({ name: 't', agents: [twoServers] })
+
+    // Both distinct literals must survive in the sidecar — keying by env-name
+    // alone made the second overwrite the first (last-wins).
+    expect(Object.values(secrets).sort()).toEqual(['literal-A', 'literal-B'])
+    expect(Object.keys(secrets)).toHaveLength(2)
+    // Neither literal leaks into the structure export.
+    const json = JSON.stringify(out)
+    expect(json).not.toContain('literal-A')
+    expect(json).not.toContain('literal-B')
+
+    // Full round-trip: each server gets ITS OWN secret back, not the survivor's.
+    const reparsed = parseTemplate(json)
+    const restored = injectAgentSecrets(reparsed.agents[0]!.managed!, secrets)
+    expect(restored.mcpServers?.[0]?.env?.API_KEY).toBe('literal-A')
+    expect(restored.mcpServers?.[1]?.env?.API_KEY).toBe('literal-B')
+  })
+
+  it('two MCP servers sharing the SAME env literal reuse one placeholder (dedup)', () => {
+    const shared = agentRec({
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'hi',
+        mcpServers: [
+          { name: 'svc-a', command: 'npx', env: { API_KEY: 'same-literal' } },
+          { name: 'svc-b', command: 'npx', env: { API_KEY: 'same-literal' } },
+        ],
+      },
+    })
+    const { secrets } = renderTemplate({ name: 't', agents: [shared] })
+    // Identical value → one entry; no needless `${API_KEY__2}` proliferation.
+    expect(Object.keys(secrets)).toEqual(['${API_KEY}'])
+    expect(secrets['${API_KEY}']).toBe('same-literal')
+  })
+
   it('a bad operator-supplied KB makes the rendered template fail the parse gate', () => {
     const { template: out } = renderTemplate({ name: 't', knowledgeBases: [{ name: 'bad-kb-no-wiring' }] })
     // The renderer is permissive; the route's parseTemplate gate is the validator.

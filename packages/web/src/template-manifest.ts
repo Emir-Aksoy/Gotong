@@ -572,15 +572,53 @@ function placeholderize(
   if (!map || typeof map !== 'object') return
   for (const k of Object.keys(map)) {
     const v = map[k]
-    if (typeof v !== 'string' || !ENV_PLACEHOLDER_RE.test(v)) {
-      const placeholder = name(k)
-      // Only a string literal is a recoverable secret worth carrying; a
-      // non-string value can't be re-injected as an env var, so we placeholder
-      // it but don't record it.
-      if (typeof v === 'string') secrets[placeholder] = v
+    if (typeof v === 'string' && ENV_PLACEHOLDER_RE.test(v)) continue // already a placeholder
+    if (typeof v === 'string') {
+      // Pick a placeholder that won't collide with a DIFFERENT literal already
+      // captured under the same env-var name (two MCP servers in one agent each
+      // with their own `API_KEY`). The first keeps the clean `${KEY}`; a clash
+      // gets `${KEY__2}`, … so distinct secrets survive into the sidecar.
+      const placeholder = uniqueSecretPlaceholder(name(k), v, secrets)
+      secrets[placeholder] = v
       map[k] = placeholder
+    } else {
+      // A non-string value can't be re-injected as an env var, so we
+      // placeholder it (by bare key name) but don't record it.
+      map[k] = name(k)
     }
   }
+}
+
+/**
+ * Choose a placeholder for one scrubbed MCP secret. Prefers the natural
+ * `${KEY}` so the common single-server case stays readable (and an importer can
+ * still supply it by env-var name). But MCP `env` / `headers` maps are
+ * PER-SERVER, so two servers in one agent can legitimately hold different
+ * literals under the same key — keying the sidecar by name alone made the
+ * second overwrite the first (last-wins), so on import BOTH servers received
+ * the survivor's secret. On a name clash with a different value, allocate a
+ * fresh `${KEY__2}`, `${KEY__3}`, … (a repeat of the SAME literal reuses the
+ * existing placeholder — harmless dedup). The inject side is unchanged: it
+ * looks the value up by the exact placeholder string stored in the slot.
+ */
+function uniqueSecretPlaceholder(
+  preferred: string,
+  value: string,
+  secrets: Record<string, string>,
+): string {
+  const existing = secrets[preferred]
+  if (existing === undefined || existing === value) return preferred
+  const inner = preferred.slice(2, -1) // strip the `${` … `}` wrapper
+  let n = 2
+  let candidate = `\${${inner}__${n}}`
+  while (
+    Object.prototype.hasOwnProperty.call(secrets, candidate) &&
+    secrets[candidate] !== value
+  ) {
+    n += 1
+    candidate = `\${${inner}__${n}}`
+  }
+  return candidate
 }
 
 /** `Authorization` → `AUTHORIZATION`, `X-Api-Key` → `X_API_KEY` (env-var safe). */
