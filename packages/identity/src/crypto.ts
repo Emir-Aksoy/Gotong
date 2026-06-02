@@ -113,6 +113,152 @@ export function loadOrCreateMasterKey(path: string): Buffer {
 }
 
 /**
+ * Where the master key comes from (Route B P0-M4a).
+ *
+ *   - `local-file`  The default, behaviour-identical path: a 0600 key file
+ *                   in the workspace, created on first run. Right for a
+ *                   single machine where the key is as secret as the db.
+ *   - `env`         The key is injected as decoded material (e.g. a secret
+ *                   mounted by Kubernetes / Docker / a secret manager into
+ *                   an env var). Nothing is written to disk.
+ *   - `kms-stub`    A reserved seam for a real KMS/HSM provider. The
+ *                   interface is in place but `load()` throws — wiring a
+ *                   cloud KMS is deferred (P2 / on demand), and a stub that
+ *                   silently invented a key would be a security lie.
+ */
+export type MasterKeyProviderKind = 'local-file' | 'env' | 'kms-stub'
+
+/**
+ * Resolves the host's 32-byte master key. `load()` is sync to match the
+ * existing boot path; it may have side effects (local-file creates the key
+ * on first call). `describe()` returns a log-safe source label and MUST
+ * NEVER include key bytes.
+ */
+export interface MasterKeyProvider {
+  readonly kind: MasterKeyProviderKind
+  load(): Buffer
+  describe(): string
+}
+
+/** Default provider: the on-disk 0600 key file (unchanged behaviour). */
+export class LocalFileMasterKeyProvider implements MasterKeyProvider {
+  readonly kind = 'local-file' as const
+  constructor(private readonly path: string) {}
+  load(): Buffer {
+    return loadOrCreateMasterKey(this.path)
+  }
+  describe(): string {
+    return `local-file(${this.path})`
+  }
+}
+
+/**
+ * Key injected as encoded material (hex by default, base64 optional). The
+ * material is decoded and length-checked on every `load()` — no disk, no
+ * cache. Rotating the key is a restart with new env material.
+ */
+export class EnvMasterKeyProvider implements MasterKeyProvider {
+  readonly kind = 'env' as const
+  constructor(
+    private readonly material: string,
+    private readonly encoding: 'hex' | 'base64' = 'hex',
+    private readonly sourceLabel = 'env',
+  ) {}
+  load(): Buffer {
+    return decodeMasterKeyMaterial(this.material, this.encoding)
+  }
+  describe(): string {
+    return `env(${this.sourceLabel})`
+  }
+}
+
+/**
+ * Reserved KMS/HSM seam. `load()` fails closed with an actionable message
+ * rather than returning a key — there is no real implementation yet, and
+ * inventing one silently would be worse than refusing.
+ */
+export class KmsStubMasterKeyProvider implements MasterKeyProvider {
+  readonly kind = 'kms-stub' as const
+  load(): Buffer {
+    throw new IdentityError({
+      code: 'invalid_input',
+      message:
+        'master key provider "kms-stub" is a reserved interface with no ' +
+        'implementation; set AIPE_MASTER_KEY_PROVIDER=local-file (default) ' +
+        'or =env and supply AIPE_MASTER_KEY',
+    })
+  }
+  describe(): string {
+    return 'kms-stub(unimplemented)'
+  }
+}
+
+/** Decode + length-check injected key material. Wrong length → throws. */
+function decodeMasterKeyMaterial(material: string, encoding: 'hex' | 'base64'): Buffer {
+  if (typeof material !== 'string') {
+    throw new IdentityError({
+      code: 'invalid_input',
+      message: 'master key material must be a string',
+    })
+  }
+  // Buffer.from with a bad charset does not throw — it silently drops
+  // invalid bytes — so the length check below is the real gate.
+  const buf = Buffer.from(material.trim(), encoding)
+  if (buf.length !== KEY_LEN_BYTES) {
+    throw new IdentityError({
+      code: 'invalid_input',
+      message: `master key material must decode to ${KEY_LEN_BYTES} bytes (${
+        encoding === 'hex' ? `${KEY_LEN_BYTES * 2} hex chars` : 'base64'
+      }); got ${buf.length} bytes`,
+    })
+  }
+  return buf
+}
+
+export interface ResolveMasterKeyProviderInput {
+  /** AIPE_MASTER_KEY_PROVIDER — undefined/'' → 'local-file'. */
+  kind?: string
+  /** Key file path for the local-file provider. */
+  localFilePath: string
+  /** Injected material for the env provider (e.g. process.env.AIPE_MASTER_KEY). */
+  envKeyMaterial?: string
+  /** Encoding of `envKeyMaterial`; default 'hex'. */
+  envKeyEncoding?: 'hex' | 'base64'
+}
+
+/**
+ * Pick a `MasterKeyProvider` from config. The default (no kind) is
+ * `local-file`, so an unconfigured host behaves exactly as before.
+ */
+export function resolveMasterKeyProvider(
+  input: ResolveMasterKeyProviderInput,
+): MasterKeyProvider {
+  const kind = (input.kind ?? '').trim().toLowerCase()
+  switch (kind) {
+    case '':
+    case 'local-file':
+      return new LocalFileMasterKeyProvider(input.localFilePath)
+    case 'env':
+      if (!input.envKeyMaterial) {
+        throw new IdentityError({
+          code: 'invalid_input',
+          message:
+            'AIPE_MASTER_KEY_PROVIDER=env requires AIPE_MASTER_KEY (the ' +
+            '32-byte master key as hex)',
+        })
+      }
+      return new EnvMasterKeyProvider(input.envKeyMaterial, input.envKeyEncoding ?? 'hex')
+    case 'kms-stub':
+      return new KmsStubMasterKeyProvider()
+    default:
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `unknown master key provider '${input.kind}' (expected local-file | env | kms-stub)`,
+      })
+  }
+}
+
+/**
  * Encrypt plaintext with the master key. Returns the on-disk blob
  * ready for the vault.secret_enc column.
  */

@@ -72,9 +72,9 @@ import { dirname, join } from 'node:path'
 import { Hub, Space, createLogger, type Logger, type McpServerSpec, type Participant, type RemoteHubViaLink, type SpaceConfig, type Task, type TranscriptEntry } from '@aipehub/core'
 import {
   AUDIT_ACTIONS,
-  loadOrCreateMasterKey,
   openIdentityStore,
   principalKey,
+  resolveMasterKeyProvider,
   type IdentityStore,
   type PeerRegistration,
 } from '@aipehub/identity'
@@ -387,8 +387,14 @@ ENVIRONMENT
   AIPE_ASSISTANT_MAX_TOKENS  integer cap on assist response tokens (default 4096)
   AIPE_ASSISTANT_DISABLED '1' | 'true' → don't register the assistant at all
 
-  AIPE_SECRET_KEY         optional master key for secrets encryption
+  AIPE_SECRET_KEY         optional master key for the workspace secrets file
                           (64 hex chars; overrides on-disk runtime/secret.key)
+  AIPE_MASTER_KEY_PROVIDER  identity vault master key source:
+                          'local-file' (default, <AIPE_SPACE>/identity-master.key)
+                          | 'env' (inject via AIPE_MASTER_KEY, no disk)
+                          | 'kms-stub' (reserved seam, fails closed)
+  AIPE_MASTER_KEY         identity vault master key as 64 hex chars; required
+                          when AIPE_MASTER_KEY_PROVIDER=env
   ANTHROPIC_API_KEY       fallback Anthropic key for managed LLM agents
   OPENAI_API_KEY          fallback OpenAI key for managed LLM agents
 
@@ -523,13 +529,22 @@ async function main(): Promise<void> {
   let identity: IdentityStore | undefined
   let orgApiPool: OrgApiPool | undefined
   try {
-    // B1.2 — also load the vault master key from the same workspace.
-    // `loadOrCreateMasterKey` creates the file 0600 on first run; a
-    // pre-existing file with the wrong length throws (a stale key
-    // means existing vault rows can't decrypt — fail loudly).
-    const masterKey = loadOrCreateMasterKey(
-      join(SPACE_DIR, 'identity-master.key'),
-    )
+    // B1.2 / Route B P0-M4a — resolve the vault master key through a
+    // pluggable provider. Default `local-file` creates the 0600 key file
+    // on first run (a wrong-length pre-existing key throws — a stale key
+    // means existing vault rows can't decrypt, so fail loudly). Set
+    // AIPE_MASTER_KEY_PROVIDER=env + AIPE_MASTER_KEY (64 hex) to inject the
+    // key from a secret manager without touching disk; =kms-stub is a
+    // reserved seam that fails closed.
+    const masterKeyProvider = resolveMasterKeyProvider({
+      kind: env('AIPE_MASTER_KEY_PROVIDER'),
+      localFilePath: join(SPACE_DIR, 'identity-master.key'),
+      envKeyMaterial: env('AIPE_MASTER_KEY'),
+      envKeyEncoding: 'hex',
+    })
+    // describe() is log-safe (source label only, never key bytes).
+    log.info('identity: master key provider', { source: masterKeyProvider.describe() })
+    const masterKey = masterKeyProvider.load()
     identity = openIdentityStore({
       dbPath: join(SPACE_DIR, 'identity.sqlite'),
       masterKey,

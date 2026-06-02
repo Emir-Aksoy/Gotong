@@ -137,3 +137,15 @@ export {
 // IdentityStore.readVaultSecret, which enforces the masterKey config
 // gate and last_used_at tracking.
 export { loadOrCreateMasterKey, MASTER_KEY_LEN_BYTES } from './crypto.js'
+// Route B P0-M4a — pluggable master key provider. local-file (default,
+// unchanged) / env (injected material, no disk) / kms-stub (reserved seam,
+// load() throws). Hosts pass the resolved provider's key to openIdentityStore.
+export {
+  EnvMasterKeyProvider,
+  KmsStubMasterKeyProvider,
+  LocalFileMasterKeyProvider,
+  resolveMasterKeyProvider,
+  type MasterKeyProvider,
+  type MasterKeyProviderKind,
+  type ResolveMasterKeyProviderInput,
+} from './crypto.js'
