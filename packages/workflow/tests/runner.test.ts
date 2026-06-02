@@ -32,6 +32,7 @@ interface DispatchCall {
   payload: unknown
   title?: string
   ancestry?: readonly AncestryNode[]
+  dataClasses?: readonly string[]
 }
 
 function makeStubHub(
@@ -47,6 +48,7 @@ function makeStubHub(
       }
       if (opts.title !== undefined) call.title = opts.title
       if (opts.ancestry !== undefined) call.ancestry = opts.ancestry
+      if (opts.dataClasses !== undefined) call.dataClasses = opts.dataClasses
       calls.push(call)
       return dispatcher(call)
     },
@@ -1354,5 +1356,68 @@ describe('WorkflowRunner — revision binding (Phase 15)', () => {
     const cap =
       step0.dispatch.strategy.kind === 'capability' ? step0.dispatch.strategy.capabilities[0] : undefined
     expect(cap).toBe('rev2-cap')
+  })
+})
+
+// v5 C-M2 — node-level I/O authorization. A node's declared `dataClasses` ride
+// onto the dispatched Task.dataClasses so the per-link OUTBOUND data-class gate
+// (enforced on the federation wrapper) authorizes federated dispatch per node.
+// The runner is transport-agnostic — it just stamps; the host E2E proves the
+// gate fires (peer-kb-isolation pattern). Here we pin the stamp itself.
+describe('WorkflowRunner — node-level data classes (v5 C-M2)', () => {
+  it('stamps a node-declared dataClasses onto the dispatch', async () => {
+    const def: WorkflowDefinition = {
+      schema: 'aipehub.workflow/v1',
+      id: 'io-auth',
+      trigger: { capability: 'run-io' },
+      steps: [
+        {
+          id: 'send-pii',
+          dispatch: {
+            strategy: { kind: 'capability', capabilities: ['remote-svc'] },
+            payload: { ssn: '...' },
+            dataClasses: ['pii'],
+          },
+        },
+      ],
+      onFailure: 'halt',
+    }
+    const { hub, calls } = makeStubHub(() => ok('send-pii', 'done', 'mock'))
+    const r = new WorkflowRunner({ definition: def, hub })
+    await r.onTask(makeTask({}))
+    expect(calls).toHaveLength(1)
+    expect(calls[0].dataClasses).toEqual(['pii'])
+  })
+
+  it('per-node — different nodes carry different (or no) data classes', async () => {
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: io-auth-multi
+  trigger: { capability: run-io }
+  steps:
+    - id: public-step
+      dispatch:
+        strategy: { kind: capability, capabilities: [remote-svc] }
+        payload: { note: hi }
+        dataClasses: [public]
+    - id: pii-step
+      dispatch:
+        strategy: { kind: capability, capabilities: [remote-svc] }
+        payload: { ssn: x }
+        dataClasses: [pii, confidential]
+    - id: bare-step
+      dispatch:
+        strategy: { kind: capability, capabilities: [remote-svc] }
+        payload: { x: 1 }
+`
+    const def = parseWorkflow(yaml)
+    const { hub, calls } = makeStubHub(() => ok('s', 'ok', 'mock'))
+    const r = new WorkflowRunner({ definition: def, hub })
+    await r.onTask(makeTask({}))
+    expect(calls).toHaveLength(3)
+    expect(calls[0].dataClasses).toEqual(['public'])
+    expect(calls[1].dataClasses).toEqual(['pii', 'confidential'])
+    expect(calls[2].dataClasses).toBeUndefined() // a bare node stamps nothing
   })
 })

@@ -336,6 +336,20 @@ export interface DispatchSpec {
   title?: string
   weight?: number
   priority?: number
+  /**
+   * v5 C-M1/C-M2 — node-level I/O authorization. The data classes THIS node's
+   * I/O carries (e.g. `['pii']`, `['public']`). The runner stamps them onto the
+   * dispatched `Task.dataClasses`, so the per-link OUTBOUND data-class contract
+   * (`PeerRegistration.allowedDataClasses`, enforced in `RemoteHubViaLink`)
+   * authorizes federated dispatch at the NODE level — a single workflow can
+   * have a `public` node cross a clamped link while its `pii` node is refused.
+   *
+   * Free-form string tags matched 1:1 against the link's `allowedDataClasses`;
+   * this is the EXECUTION vocabulary, distinct from the workflow-level
+   * `governance.dataSensitivity` enum (a human-facing risk summary, not a gate).
+   * Local (non-federated) dispatch ignores it — no link, no gate.
+   */
+  dataClasses?: string[]
 }
 
 export type StepFailurePolicy =

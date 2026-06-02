@@ -755,3 +755,43 @@ ${governance}
     ).toThrow(/workflow\.governance must be an object/)
   })
 })
+
+// v5 C-M2 — per-node I/O data classes on a dispatch step.
+describe('parseWorkflow — dispatch.dataClasses (v5 C-M2)', () => {
+  const WF = (dispatchExtra: string) => `
+schema: aipehub.workflow/v1
+workflow:
+  id: io-auth
+  trigger: { capability: run-io }
+  steps:
+    - id: s1
+      dispatch:
+        strategy: { kind: capability, capabilities: [remote-svc] }
+        payload: { x: 1 }
+${dispatchExtra}
+`
+
+  it('carries a string-array dataClasses onto the parsed step', () => {
+    const wf = parseWorkflow(WF('        dataClasses: [pii, confidential]'))
+    const step = wf.steps[0]
+    if (!('dispatch' in step)) throw new Error('expected a simple step')
+    expect(step.dispatch.dataClasses).toEqual(['pii', 'confidential'])
+  })
+
+  it('omits dataClasses when not declared', () => {
+    const wf = parseWorkflow(WF(''))
+    const step = wf.steps[0]
+    if (!('dispatch' in step)) throw new Error('expected a simple step')
+    expect(step.dispatch.dataClasses).toBeUndefined()
+  })
+
+  it('rejects a non-array dataClasses', () => {
+    expect(() => parseWorkflow(WF('        dataClasses: pii'))).toThrow(/dataClasses must be a string array/)
+  })
+
+  it('rejects a dataClasses array with a non-string element', () => {
+    expect(() => parseWorkflow(WF('        dataClasses: [pii, 42]'))).toThrow(
+      /dataClasses must be a string array/,
+    )
+  })
+})

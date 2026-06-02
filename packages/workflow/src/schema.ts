@@ -343,6 +343,14 @@ function validateDispatchSpec(raw: unknown, path: string): DispatchSpec {
   if (typeof d.priority === 'number' && Number.isFinite(d.priority)) {
     out.priority = d.priority
   }
+  // v5 C-M2 — node-level I/O data classes, stamped onto Task.dataClasses by the
+  // runner so the per-link outbound contract gates federated dispatch per node.
+  if (d.dataClasses !== undefined) {
+    if (!Array.isArray(d.dataClasses) || !d.dataClasses.every((c) => typeof c === 'string')) {
+      throw new WorkflowSchemaError(`${path}.dataClasses must be a string array`)
+    }
+    out.dataClasses = d.dataClasses as string[]
+  }
   return out
 }
 
