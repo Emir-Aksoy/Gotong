@@ -1,0 +1,14 @@
+{
+  "name": "@aipehub/example-heartbeat-agent",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "v5 Stream D demo — an agent wakes itself on a cadence (heartbeat), runs a checklist turn, and stays quiet (HEARTBEAT_OK suppressed) unless something needs attention. Built on Phase 11 suspend/resume, no new table.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*"
+  }
+}
