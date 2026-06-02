@@ -299,8 +299,12 @@ export function parseBundle(raw: string): ParsedBundle {
  * Strategy: lean on `JSON.stringify` and let parseYaml's JSON tolerance
  * handle it. (YAML is a superset of JSON; any valid JSON object is a
  * valid YAML document.) That keeps us off a yaml-emitter dependency.
+ *
+ * Exported so the v5 template parser (`template-manifest.ts`) can reuse
+ * the exact same re-wrap path when it folds agents/workflows into the
+ * sub-parsers — one proven serializer, not two.
  */
-function stringifyYamlSafe(value: unknown): string {
+export function stringifyYamlSafe(value: unknown): string {
   return JSON.stringify(value, null, 2)
 }
 
@@ -308,7 +312,7 @@ function stringifyYamlSafe(value: unknown): string {
  * Prepend `count` spaces to every line. Used so the inlined JSON
  * payload sits under its parent key in the wrapper yaml document.
  */
-function indentYaml(text: string, count: number): string {
+export function indentYaml(text: string, count: number): string {
   const pad = ' '.repeat(count)
   return text.split('\n').map((l) => pad + l).join('\n')
 }
