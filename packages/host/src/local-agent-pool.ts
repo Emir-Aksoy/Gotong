@@ -271,6 +271,18 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * `<AIPE_SPACE>/pricing.json` override and passes it in.
    */
   private readonly pricingTable: PricingTable
+  /**
+   * Test seam — overrides how a managed spec is turned into a live
+   * `LlmProvider`. Defaults to {@link buildProvider} (the only real path:
+   * mock + network providers). Tests inject a deterministic provider while
+   * still registering the agent under a NON-`mock` provider name, which is
+   * the only way to exercise the non-mock-only hooks (quota gate,
+   * federated-attribution ledger sink) without a network call.
+   */
+  private readonly providerFactory: (
+    spec: ManagedAgentSpec,
+    apiKey: string | undefined,
+  ) => LlmProvider
 
   constructor(opts: {
     hub: Hub
@@ -297,6 +309,14 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
      * built-in defaults. The host wires `loadPricingTable(...)`.
      */
     pricingTable?: PricingTable
+    /**
+     * Test seam (see field doc). Production never passes this — boot uses
+     * the default {@link buildProvider}.
+     */
+    providerFactory?: (
+      spec: ManagedAgentSpec,
+      apiKey: string | undefined,
+    ) => LlmProvider
   }) {
     this.hub = opts.hub
     this.space = opts.space
@@ -305,6 +325,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     this.identity = opts.identity
     this.peerLinkResolver = opts.peerLinkResolver
     this.pricingTable = opts.pricingTable ?? DEFAULT_PRICING
+    this.providerFactory = opts.providerFactory ?? buildProvider
     // Built once: the gate is a stateless closure over `identity`,
     // shared by every managed LlmAgent. Settings (metric/period) are
     // hardcoded here in B2.2.2; C2 will surface them in admin UI.
@@ -594,7 +615,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
 
     const resolution = await this.resolveApiKey(record.id, record.managed.provider)
     const apiKey = resolution?.apiKey
-    const provider = buildProvider(record.managed, apiKey)
+    const provider = this.providerFactory(record.managed, apiKey)
 
     // If the manifest declared `mcpServers:`, spawn the toolset NOW
     // (before constructing LlmAgent) so the connect()'s child-process
@@ -732,9 +753,19 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     // admin-triggered tasks (no origin) free-ride. That asymmetry is
     // by design: admins are the operators, not the consumers.
     const gate = this.llmQuotaGate
+    const poolIdentity = this.identity
     const preCallHook =
       gate && record.managed.provider !== 'mock'
-        ? (task: Task): void => gate(task.origin)
+        ? (task: Task): void => {
+            // Audit A3 — the per-user quota only debits LOCAL-origin tasks. A
+            // federated task's `origin.userId` is the SENDER's (peer-controlled)
+            // namespace; debiting it against our `usage_counters` would let a
+            // peer poison / DoS a local user's day budget (and FK-faults on
+            // ids that aren't local users). Federated quota belongs to the
+            // per-link contract (P4-M4 inboundGate), not this per-user gate.
+            if (poolIdentity && resolveLedgerPeerId(poolIdentity, task) !== null) return
+            gate(task.origin)
+          }
         : undefined
 
     // Phase 6 #2 — wire an auth-failure hook when the resolved key
@@ -816,7 +847,12 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
             // `used >= quota`; with the gated checkAndIncrement the
             // over-cap increment was silently dropped and `used` froze
             // just below the cap → the peek never fired → fail-OPEN.
-            if (attr.userId && !recordIsMock) {
+            // Audit A3 — per-user budget debit only for LOCAL usage (peerId
+            // null). A federated call's attribution userId is peer-controlled;
+            // the ledger row above still records it WITH peerId for isolated
+            // peer-aware accounting, but it must never touch a local user's
+            // usage_counters day budget.
+            if (attr.userId && !recordIsMock && !peerId) {
               const tokens =
                 (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
               identityForLedger.recordUsage({
