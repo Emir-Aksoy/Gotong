@@ -265,9 +265,11 @@ describe('parseTemplate (aipehub.template/v1)', () => {
 
 /**
  * renderTemplate is the inverse of parseTemplate — it turns selected hub
- * structure into an aipehub.template/v1 object. Its job is the structure-safe
- * DEFAULT export (decision #5): structure + wiring + references, and by
- * construction NO personnel, NO knowledge content, NO literal secrets.
+ * structure into an aipehub.template/v1 object. Its `template` is the
+ * structure-safe DEFAULT export (decision #5): structure + wiring + references,
+ * and by construction NO personnel, NO knowledge content, NO literal secrets.
+ * Any scrubbed literal secrets are returned *separately* as `secrets` (the B-M3
+ * sidecar input) and never appear in `template`.
  */
 describe('renderTemplate (B-M2 structure export)', () => {
   function agentRec(over: Partial<TemplateAgentInput> = {}): TemplateAgentInput {
@@ -280,7 +282,7 @@ describe('renderTemplate (B-M2 structure export)', () => {
   }
 
   it('renders agents + workflows + KBs and round-trips through parseTemplate', () => {
-    const out = renderTemplate({
+    const { template: out } = renderTemplate({
       name: '客服模板',
       description: '导出的结构',
       version: 3,
@@ -301,7 +303,7 @@ describe('renderTemplate (B-M2 structure export)', () => {
   })
 
   it('defaults version to 1 and omits empty sections', () => {
-    const out = renderTemplate({ name: 'agents-only', agents: [agentRec()] })
+    const { template: out } = renderTemplate({ name: 'agents-only', agents: [agentRec()] })
     const template = out.template as Record<string, unknown>
     expect(template.version).toBe(1)
     expect(template.workflows).toBeUndefined()
@@ -312,7 +314,7 @@ describe('renderTemplate (B-M2 structure export)', () => {
   it('NEVER leaks personnel — owner / grant fields never appear in the output', () => {
     // Even if the input record carries extra fields, only agent config is rendered.
     const polluted = { ...agentRec(), ownerUserId: 'user-alice', grants: [{ who: 'bob' }] } as unknown as TemplateAgentInput
-    const out = renderTemplate({ name: 't', agents: [polluted] })
+    const { template: out } = renderTemplate({ name: 't', agents: [polluted] })
     const json = JSON.stringify(out)
     expect(json).not.toContain('ownerUserId')
     expect(json).not.toContain('user-alice')
@@ -321,7 +323,7 @@ describe('renderTemplate (B-M2 structure export)', () => {
 
   it('skips externally-connected agents (no managed spec to export)', () => {
     const external: TemplateAgentInput = { id: 'remote', allowedCapabilities: ['x'] } // no managed
-    const out = renderTemplate({ name: 't', agents: [external], knowledgeBases: [{ name: 'k', useMcpServer: 'm' }] })
+    const { template: out } = renderTemplate({ name: 't', agents: [external], knowledgeBases: [{ name: 'k', useMcpServer: 'm' }] })
     expect((out.template as Record<string, unknown>).agents).toBeUndefined()
   })
 
@@ -337,7 +339,7 @@ describe('renderTemplate (B-M2 structure export)', () => {
         ],
       },
     })
-    const out = renderTemplate({ name: 't', agents: [withSecrets] })
+    const { template: out, secrets } = renderTemplate({ name: 't', agents: [withSecrets] })
     const json = JSON.stringify(out)
     expect(json).not.toContain('sk-LITERAL-secret')
     expect(json).not.toContain('real-token')
@@ -346,10 +348,29 @@ describe('renderTemplate (B-M2 structure export)', () => {
     expect(json).toContain('${CHROMA_TOKEN}')
     expect(json).toContain('${ALREADY_PLACEHOLDER}')
     expect(json).toContain('${AUTHORIZATION}')
+    // B-M3 — the scrubbed literals are returned separately (keyed by placeholder)
+    // for the encrypted sidecar; an already-placeholder value is NOT captured.
+    expect(secrets['${CHROMA_TOKEN}']).toBe('sk-LITERAL-secret')
+    expect(secrets['${AUTHORIZATION}']).toBe('Bearer real-token')
+    expect(secrets['${SAFE}']).toBeUndefined()
+    expect(Object.keys(secrets)).toHaveLength(2)
+  })
+
+  it('captures no secrets when every MCP value is already an env placeholder', () => {
+    const clean = agentRec({
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'hi',
+        mcpServers: [{ name: 'kb', command: 'npx', env: { TOKEN: '${TOKEN}' } }],
+      },
+    })
+    const { secrets } = renderTemplate({ name: 't', agents: [clean] })
+    expect(Object.keys(secrets)).toHaveLength(0)
   })
 
   it('a bad operator-supplied KB makes the rendered template fail the parse gate', () => {
-    const out = renderTemplate({ name: 't', knowledgeBases: [{ name: 'bad-kb-no-wiring' }] })
+    const { template: out } = renderTemplate({ name: 't', knowledgeBases: [{ name: 'bad-kb-no-wiring' }] })
     // The renderer is permissive; the route's parseTemplate gate is the validator.
     expect(() => parseTemplate(JSON.stringify(out))).toThrow(/must declare its wiring/)
   })

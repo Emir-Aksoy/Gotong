@@ -369,6 +369,23 @@ export interface RenderTemplateInput {
   apiKeyPrompt?: BundleApiKeyPrompt
 }
 
+export interface RenderTemplateResult {
+  /**
+   * The `aipehub.template/v1` manifest object — structure-safe and shareable
+   * as-is: every literal MCP secret is replaced by a `${ENV_KEY}` placeholder.
+   */
+  template: Record<string, unknown>
+  /**
+   * The literal secrets that were scrubbed out, as `{ "${ENV_KEY}": "<value>" }`
+   * keyed by the placeholder that replaced them. This is the *content* B-M3 may
+   * encrypt into a separate, opt-in, audited sidecar (decision #5) — the
+   * structure export itself never carries it. Empty when every value was
+   * already a placeholder. Last-wins on a shared key, matching env-var-by-name
+   * semantics (one env name resolves to one value at import time anyway).
+   */
+  secrets: Record<string, string>
+}
+
 /**
  * Render selected hub structure into an `aipehub.template/v1` manifest object
  * (v5 B-M2). This is the structure-safe DEFAULT export (decision #5):
@@ -378,20 +395,20 @@ export interface RenderTemplateInput {
  *     (id, capabilities, provider, model, system, MCP wiring), never who owns it.
  *   - NO knowledge content — by construction. Only MCP-server *wiring* is
  *     emitted (commands / urls / env keys), never the documents inside a KB.
- *   - NO secrets — `scrubAgentSecrets` placeholder-izes any literal MCP env /
- *     header value so a template shared publicly can't leak a baked-in key.
+ *   - NO secrets in `template` — `scrubAgentSecrets` placeholder-izes any literal
+ *     MCP env / header value so a template shared publicly can't leak a baked-in
+ *     key. The scrubbed literals are returned *separately* as `secrets` for the
+ *     caller (B-M3) to optionally encrypt; the default path discards them.
  *
- * Including knowledge content / personnel is B-M3's gated, audited, opt-in
- * path — deliberately NOT reachable from here.
- *
- * The result round-trips through `parseTemplate`; callers should run that as an
- * integrity gate (it also validates operator-supplied `knowledgeBases`).
+ * The `template` round-trips through `parseTemplate`; callers should run that as
+ * an integrity gate (it also validates operator-supplied `knowledgeBases`).
  */
-export function renderTemplate(input: RenderTemplateInput): Record<string, unknown> {
+export function renderTemplate(input: RenderTemplateInput): RenderTemplateResult {
+  const secrets: Record<string, string> = {}
   const agents = (input.agents ?? [])
     // Externally-connected participants have no managed spec to export — skip them.
     .filter((a) => a.managed)
-    .map((a) => scrubAgentSecrets(renderAgentManifest(a).agent as Record<string, unknown>))
+    .map((a) => scrubAgentSecrets(renderAgentManifest(a).agent as Record<string, unknown>, secrets))
   const workflows = (input.workflows ?? []).map((w) => w.workflow)
   const knowledgeBases = input.knowledgeBases ?? []
 
@@ -402,7 +419,7 @@ export function renderTemplate(input: RenderTemplateInput): Record<string, unkno
   if (workflows.length > 0) template.workflows = workflows
   if (knowledgeBases.length > 0) template.knowledgeBases = knowledgeBases
   if (input.apiKeyPrompt) template.defaults = { apiKeyPrompt: { ...input.apiKeyPrompt } }
-  return { schema: TEMPLATE_SCHEMA_V1, template }
+  return { template: { schema: TEMPLATE_SCHEMA_V1, template }, secrets }
 }
 
 // An MCP env / header value is "safe" to export verbatim only when it's already
@@ -413,17 +430,22 @@ const ENV_PLACEHOLDER_RE = /^\$\{[^}]+\}$/
 /**
  * Mutate a rendered agent object so no literal MCP secret rides along in the
  * export. We keep the *keys* (the importer still learns which env vars / headers
- * the server needs) but replace any non-placeholder value with `${KEY}`. Safe to
- * mutate: `renderAgentManifest` already deep-copied env / headers off the record.
+ * the server needs) but replace any non-placeholder value with `${KEY}`, and
+ * record the displaced literal into `secrets` (keyed by that placeholder) so the
+ * caller can optionally ship it encrypted. Safe to mutate: `renderAgentManifest`
+ * already deep-copied env / headers off the record.
  */
-function scrubAgentSecrets(agent: Record<string, unknown>): Record<string, unknown> {
+function scrubAgentSecrets(
+  agent: Record<string, unknown>,
+  secrets: Record<string, string>,
+): Record<string, unknown> {
   const servers = agent.mcpServers
   if (!Array.isArray(servers)) return agent
   for (const s of servers) {
     if (!s || typeof s !== 'object') continue
     const srv = s as { env?: Record<string, unknown>; headers?: Record<string, unknown> }
-    placeholderize(srv.env, (k) => `\${${k}}`)
-    placeholderize(srv.headers, (k) => `\${${headerEnvName(k)}}`)
+    placeholderize(srv.env, (k) => `\${${k}}`, secrets)
+    placeholderize(srv.headers, (k) => `\${${headerEnvName(k)}}`, secrets)
   }
   return agent
 }
@@ -431,11 +453,19 @@ function scrubAgentSecrets(agent: Record<string, unknown>): Record<string, unkno
 function placeholderize(
   map: Record<string, unknown> | undefined,
   name: (key: string) => string,
+  secrets: Record<string, string>,
 ): void {
   if (!map || typeof map !== 'object') return
   for (const k of Object.keys(map)) {
     const v = map[k]
-    if (typeof v !== 'string' || !ENV_PLACEHOLDER_RE.test(v)) map[k] = name(k)
+    if (typeof v !== 'string' || !ENV_PLACEHOLDER_RE.test(v)) {
+      const placeholder = name(k)
+      // Only a string literal is a recoverable secret worth carrying; a
+      // non-string value can't be re-injected as an env var, so we placeholder
+      // it but don't record it.
+      if (typeof v === 'string') secrets[placeholder] = v
+      map[k] = placeholder
+    }
   }
 }
 

@@ -1,22 +1,29 @@
 /**
- * Admin route for v5 Stream B template export (B-M2).
+ * Admin route for v5 Stream B template export (B-M2 structure + B-M3 sensitive).
  *
  *   POST /api/admin/templates/export
  *     body: { name, description?, version?, agentIds?, workflowIds?,
- *             knowledgeBases?, apiKeyPrompt? }
- *     → { ok: true, template }   // an aipehub.template/v1 manifest object
+ *             knowledgeBases?, apiKeyPrompt?,
+ *             includeSecrets?, includePersonnel? }   // B-M3 opt-ins, default off
+ *     → { ok: true, template, encryptionKey? }       // key present iff sensitive
  *
- * The export is the structure-safe DEFAULT (decision #5): it carries agent
- * config + workflow definitions + KB *wiring*, and by construction NO knowledge
- * content, NO personnel info, NO literal secrets (see `renderTemplate` /
- * `scrubAgentSecrets`). Including content / personnel is B-M3's gated, audited
- * path — not reachable here.
+ * The DEFAULT export is structure-safe (decision #5): it carries agent config +
+ * workflow definitions + KB *wiring*, and by construction NO knowledge content,
+ * NO personnel info, NO literal secrets (see `renderTemplate` / `scrubAgentSecrets`).
+ *
+ * B-M3 adds two opt-in flags. When either is set, the sensitive material —
+ * literal MCP secrets (`includeSecrets`) and/or who-can-access each agent
+ * (`includePersonnel`) — is gathered into a sidecar, AES-256-GCM encrypted, and
+ * embedded as `template.template.encrypted`; the key is returned SEPARATELY as
+ * `encryptionKey` (never inside the file). Every sensitive export is audited.
+ * The structure stays identical either way (secrets remain `${PLACEHOLDER}`
+ * references), so a sensitive export is a strict superset of the structure one.
  *
  * Agent records come from the Space; workflow structure from the host's
  * authored-YAML reader (`exportDefinitionText`) so an embedded workflow is
- * guaranteed to re-parse. The rendered manifest is run back through
- * `parseTemplate` as an integrity gate (which also validates any
- * operator-supplied `knowledgeBases`).
+ * guaranteed to re-parse; personnel from identity's resource_grants. The
+ * STRUCTURE is run back through `parseTemplate` as an integrity gate (before any
+ * sidecar is attached) which also validates operator-supplied `knowledgeBases`.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -27,6 +34,7 @@ import { createLogger } from '@aipehub/core'
 
 import { readJsonBody, sendJson } from './http-helpers.js'
 import { ManifestError, type BundleApiKeyPrompt } from './manifest.js'
+import { encryptJson } from './template-crypto.js'
 import {
   parseTemplate,
   renderTemplate,
@@ -47,9 +55,46 @@ export interface TemplateWorkflowSource {
   exportDefinitionText(id: string): Promise<string | null>
 }
 
+/** One access-grant on an exported agent — the "personnel" B-M3 may export. */
+export interface TemplatePersonnelEntry {
+  /** The grantee, as a `principalKey` ("user:alice", "agent:x", …). */
+  principal: string
+  /** viewer | editor | owner. */
+  perm: string
+}
+
+/**
+ * Narrow personnel source (v5 B-M3). Returns who can access an agent — sourced
+ * from identity's resource_grants. Wired only when identity is present, so an
+ * `includePersonnel` request fails closed (503) on a hub without it.
+ */
+export interface TemplatePersonnelSource {
+  ownersOfAgent(agentId: string): Promise<TemplatePersonnelEntry[]>
+}
+
+/**
+ * Narrow audit sink (v5 B-M3). Structurally a subset of identity's
+ * `writeAuditLog`, so the host injects `ctx.identity` directly. Only the
+ * sensitive (opt-in) export path writes a row — a plain structure export is the
+ * safe default and is not audited.
+ */
+export interface TemplateAuditSink {
+  writeAuditLog?(input: {
+    action: string
+    actorSource: 'v4-session' | 'v4-bearer' | 'anonymous' | 'system' | 'federated'
+    actorUserId?: string | null
+    metadata?: Record<string, unknown> | null
+    success?: boolean
+  }): unknown
+}
+
 export interface TemplateRoutesCtx {
   agentSource: TemplateAgentSource
   workflows?: TemplateWorkflowSource
+  /** v5 B-M3 — who-owns-what reader for `includePersonnel` (undefined → 503). */
+  personnel?: TemplatePersonnelSource
+  /** v5 B-M3 — audit sink for sensitive exports (best-effort). */
+  audit?: TemplateAuditSink
   requireAdmin: (req: IncomingMessage, res: ServerResponse) => Promise<AdminRecord | null>
 }
 
@@ -91,6 +136,19 @@ export async function handleTemplateRoute(
   const workflowIds = toStringArray(body.workflowIds)
   if (agentIds === null || workflowIds === null) {
     sendJson(res, { error: 'agentIds / workflowIds must be arrays of strings' }, 400)
+    return true
+  }
+
+  // v5 B-M3 — sensitive opt-ins (decision #5). Default OFF: the plain export is
+  // structure-only. requireAdmin above IS the hub's highest privilege for admin
+  // routes, so the extra protection here is explicit opt-in + encryption + audit
+  // rather than a separate auth tier (there is none above the admin operator).
+  const includeSecrets = body.includeSecrets === true
+  const includePersonnel = body.includePersonnel === true
+  // Personnel reads identity's resource_grants — fail closed when that source
+  // isn't wired rather than silently exporting an empty personnel block.
+  if (includePersonnel && !ctx.personnel) {
+    sendJson(res, { error: 'personnel export is not available on this hub' }, 503)
     return true
   }
 
@@ -139,10 +197,12 @@ export async function handleTemplateRoute(
     input.apiKeyPrompt = body.apiKeyPrompt as BundleApiKeyPrompt
   }
 
-  const rendered = renderTemplate(input)
-  // Integrity gate: the export MUST round-trip through the parser. This proves
+  const { template: rendered, secrets } = renderTemplate(input)
+  // Integrity gate: the STRUCTURE must round-trip through the parser. This proves
   // structural soundness AND validates operator-supplied knowledgeBases — a bad
-  // KB slot surfaces as a friendly 400 instead of a broken downloadable file.
+  // KB slot surfaces as a friendly 400 instead of a broken downloadable file. We
+  // gate BEFORE attaching any encrypted sidecar, so the parser stays ignorant of
+  // crypto (the sidecar is the importer's concern, B-M4).
   try {
     parseTemplate(JSON.stringify(rendered))
   } catch (err) {
@@ -158,7 +218,49 @@ export async function handleTemplateRoute(
     return true
   }
 
-  sendJson(res, { ok: true, template: rendered })
+  // v5 B-M3 — collect the opt-in sensitive material into a sidecar, kept OUT of
+  // the shareable structure above. `secrets` are the literal MCP credentials
+  // renderTemplate scrubbed (structure keeps the ${PLACEHOLDER} references);
+  // `personnel` is who-can-access each exported agent.
+  const sensitive: {
+    secrets?: Record<string, string>
+    personnel?: Record<string, TemplatePersonnelEntry[]>
+  } = {}
+  if (includeSecrets && Object.keys(secrets).length > 0) sensitive.secrets = secrets
+  if (includePersonnel && ctx.personnel) {
+    const personnel: Record<string, TemplatePersonnelEntry[]> = {}
+    for (const a of agents) personnel[a.id] = await ctx.personnel.ownersOfAgent(a.id)
+    sensitive.personnel = personnel
+  }
+
+  let encryptionKey: string | undefined
+  if (sensitive.secrets || sensitive.personnel) {
+    // Encrypt the sidecar and hand the key back SEPARATELY (decision #5): it rides
+    // in the HTTP response, never inside the template the operator saves / shares.
+    // Whoever receives the file still needs the out-of-band key to read it.
+    const { blob, keyB64 } = encryptJson(sensitive)
+    ;(rendered.template as Record<string, unknown>).encrypted = blob
+    encryptionKey = keyB64
+    // Audit the sensitive export (best-effort). A plain structure export is the
+    // safe default and is intentionally NOT audited.
+    ctx.audit?.writeAuditLog?.({
+      action: 'template_export',
+      actorSource: 'v4-session',
+      actorUserId: admin.id,
+      metadata: {
+        name: name.trim(),
+        agentIds,
+        workflowIds,
+        includeSecrets: !!sensitive.secrets,
+        includePersonnel: !!sensitive.personnel,
+      },
+      success: true,
+    })
+  }
+
+  const out: Record<string, unknown> = { ok: true, template: rendered }
+  if (encryptionKey) out.encryptionKey = encryptionKey
+  sendJson(res, out)
   return true
 }
 

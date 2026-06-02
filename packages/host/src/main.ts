@@ -70,6 +70,7 @@ import {
   AUDIT_ACTIONS,
   loadOrCreateMasterKey,
   openIdentityStore,
+  principalKey,
   type IdentityStore,
   type PeerRegistration,
 } from '@aipehub/identity'
@@ -1350,6 +1351,19 @@ async function main(): Promise<void> {
     mcpFederation,
     peerManifests: peerFederation,
     workflows: workflowController,
+    // v5 B-M3 — "who-can-access this agent" reader for the template export's
+    // includePersonnel opt-in. Sourced from identity's resource_grants; absent
+    // when identity is unwired, so includePersonnel fails closed (503).
+    ...(identity
+      ? {
+          templatePersonnel: {
+            ownersOfAgent: async (agentId: string) =>
+              identity
+                .listResourceGrants('agent', agentId)
+                .map((g) => ({ principal: principalKey(g.principal), perm: g.perm })),
+          },
+        }
+      : {}),
     // Phase 19 P1-M3 — sanitized agent directory for /api/me/agents. Project
     // the managed-agent roster to {id,label,capabilities,online}; the system
     // prompt / model / provider config / per-agent key never leave the host,

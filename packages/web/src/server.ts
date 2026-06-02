@@ -65,7 +65,7 @@ import {
 import {
   handlePeerManifestRoute,
 } from './peer-routes.js'
-import { handleTemplateRoute } from './template-routes.js'
+import { handleTemplateRoute, type TemplatePersonnelSource } from './template-routes.js'
 import {
   type PeerManifestFederationSurface,
 } from './peer-routes.js'
@@ -251,6 +251,13 @@ export interface WebServerOptions {
    * runner. When absent, the workflow API endpoints return 404.
    */
   workflows?: WorkflowSurface
+  /**
+   * v5 B-M3 — optional "who-can-access this agent" reader for the template
+   * export's `includePersonnel` opt-in. The host wires it to identity's
+   * resource_grants; when absent, an `includePersonnel` export fails closed
+   * (503) instead of silently shipping an empty personnel block.
+   */
+  templatePersonnel?: TemplatePersonnelSource
   /**
    * Phase 19 P1-M3 — optional sanitized agent directory for `/api/me/agents`.
    * The host wires a projection of its managed agents that excludes every
@@ -827,6 +834,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     lifecycle: opts.lifecycle,
     reconcileHeartbeats: opts.reconcileHeartbeats,
     workflows: opts.workflows,
+    templatePersonnel: opts.templatePersonnel,
     meAgents: opts.meAgents,
     meAgentAdmin: opts.meAgentAdmin,
     meAgentGrants: opts.meAgentGrants,
@@ -958,6 +966,8 @@ interface HandlerCtx {
   /** v5 D-M4 — see WebServerOptions.reconcileHeartbeats doc above. */
   reconcileHeartbeats: (() => Promise<void>) | undefined
   workflows: WorkflowSurface | undefined
+  /** v5 B-M3 — see WebServerOptions.templatePersonnel doc above. */
+  templatePersonnel: TemplatePersonnelSource | undefined
   /** Phase 19 P1-M3 — see WebServerOptions.meAgents doc above. */
   meAgents: MeAgentListSurface | undefined
   /** v5 A-M2 — see WebServerOptions.meAgentAdmin doc above. */
@@ -1791,13 +1801,18 @@ async function handle(
     if (handled) return
   }
 
-  // v5 B-M2 — template structure export (agents + workflows + KB wiring;
-  // structure-safe default, no content / personnel / secrets).
+  // v5 B-M2 + B-M3 — template export. Structure-safe by default; the opt-in
+  // includeSecrets / includePersonnel flags ride an encrypted sidecar (key
+  // returned separately) and write an audit row. `audit` reuses the identity
+  // surface (writeAuditLog optional); `personnel` is the resource_grants reader
+  // (undefined → includePersonnel 503s).
   if (path === '/api/admin/templates/export') {
     const handled = await handleTemplateRoute(
       {
         agentSource: ctx.space,
         workflows: ctx.workflows,
+        personnel: ctx.templatePersonnel,
+        audit: ctx.identity,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req, res, method, path,

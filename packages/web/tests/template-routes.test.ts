@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { Hub, Space } from '@aipehub/core'
 
 import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/server.js'
+import { decryptJson, type EncryptedBlob } from '../src/template-crypto.js'
 
 const WF_YAML = `schema: aipehub.workflow/v1
 workflow:
@@ -30,11 +31,18 @@ workflow:
         payload: {}
 `
 
+interface AuditRow {
+  action: string
+  actorUserId?: string | null
+  metadata?: Record<string, unknown> | null
+}
+
 interface Boot {
   tmp: string
   hub: Hub
   server: WebServerHandle
   adminToken: string
+  auditRows: AuditRow[]
 }
 
 let b: Boot
@@ -66,8 +74,27 @@ beforeEach(async () => {
     exportDefinitionText: async (id: string) => (id === 'ticket-flow' ? WF_YAML : null),
   } as unknown as WorkflowSurface
 
-  const server = await serveWeb(hub, { host: '127.0.0.1', port: 0, workflows })
-  b = { tmp, hub, server, adminToken }
+  // v5 B-M3 — stub personnel source (who-owns-what) + a capturing audit sink.
+  const templatePersonnel = {
+    ownersOfAgent: async (id: string) =>
+      id === 'support-agent' ? [{ principal: 'user:alice', perm: 'owner' }] : [],
+  }
+  const auditRows: AuditRow[] = []
+  const identity = {
+    writeAuditLog: (input: AuditRow) => {
+      auditRows.push(input)
+      return {}
+    },
+  } as unknown as Parameters<typeof serveWeb>[1]['identity']
+
+  const server = await serveWeb(hub, {
+    host: '127.0.0.1',
+    port: 0,
+    workflows,
+    templatePersonnel,
+    identity,
+  })
+  b = { tmp, hub, server, adminToken, auditRows }
 })
 
 afterEach(async () => {
@@ -171,5 +198,73 @@ describe('POST /api/admin/templates/export (v5 B-M2)', () => {
       headers: { authorization: `Bearer ${b.adminToken}` },
     })
     expect(res.status).toBe(405)
+  })
+
+  // ── B-M3: sensitive (opt-in) export ──────────────────────────────────────
+
+  it('default export is structure-only: no encrypted sidecar, no key, no audit', async () => {
+    const r = await exportReq({ name: 't', agentIds: ['support-agent'] })
+    expect(r.status).toBe(200)
+    expect(r.json.template.template.encrypted).toBeUndefined()
+    expect(r.json.encryptionKey).toBeUndefined()
+    expect(b.auditRows).toHaveLength(0)
+  })
+
+  it('includeSecrets encrypts the literal into a sidecar, key returned SEPARATELY', async () => {
+    const r = await exportReq({ name: 't', agentIds: ['support-agent'], includeSecrets: true })
+    expect(r.status).toBe(200)
+    const tpl = r.json.template.template
+    // Structure is unchanged — the secret is still a placeholder, not the literal.
+    const json = JSON.stringify(tpl)
+    expect(json).not.toContain('sk-LITERAL')
+    expect(json).toContain('${KB_TOKEN}')
+    // The sidecar is an opaque blob; the literal is NOT in it in plaintext.
+    expect(tpl.encrypted).toBeTruthy()
+    expect(JSON.stringify(tpl.encrypted)).not.toContain('sk-LITERAL')
+    // The key comes back in the response body, never inside the template file.
+    expect(typeof r.json.encryptionKey).toBe('string')
+    expect(JSON.stringify(r.json.template)).not.toContain(r.json.encryptionKey)
+    // With the separately-delivered key, the sidecar decrypts to the real secret.
+    const sidecar = decryptJson(tpl.encrypted as EncryptedBlob, r.json.encryptionKey) as {
+      secrets?: Record<string, string>
+    }
+    expect(sidecar.secrets?.['${KB_TOKEN}']).toBe('sk-LITERAL')
+  })
+
+  it('includePersonnel encrypts who-owns-what and writes an audit row', async () => {
+    const r = await exportReq({ name: '客服', agentIds: ['support-agent'], includePersonnel: true })
+    expect(r.status).toBe(200)
+    const tpl = r.json.template.template
+    // Personnel never appears in plaintext anywhere in the template.
+    expect(JSON.stringify(tpl)).not.toContain('user:alice')
+    const sidecar = decryptJson(tpl.encrypted as EncryptedBlob, r.json.encryptionKey) as {
+      personnel?: Record<string, Array<{ principal: string; perm: string }>>
+    }
+    expect(sidecar.personnel?.['support-agent']?.[0]).toEqual({ principal: 'user:alice', perm: 'owner' })
+    // The sensitive export is audited (the plain one above is not).
+    expect(b.auditRows).toHaveLength(1)
+    expect(b.auditRows[0]).toMatchObject({
+      action: 'template_export',
+      metadata: { includePersonnel: true, includeSecrets: false },
+    })
+  })
+
+  it('includePersonnel fails closed (503) when no personnel source is wired', async () => {
+    // A second web server on the same hub, intentionally WITHOUT templatePersonnel.
+    const bare = await serveWeb(b.hub, {
+      host: '127.0.0.1',
+      port: 0,
+      workflows: { exportDefinitionText: async () => null } as unknown as WorkflowSurface,
+    })
+    try {
+      const res = await fetch(`${bare.url}/api/admin/templates/export`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${b.adminToken}` },
+        body: JSON.stringify({ name: 't', agentIds: ['support-agent'], includePersonnel: true }),
+      })
+      expect(res.status).toBe(503)
+    } finally {
+      await bare.close()
+    }
   })
 })

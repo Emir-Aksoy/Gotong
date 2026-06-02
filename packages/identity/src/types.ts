@@ -299,6 +299,11 @@ export const AUDIT_ACTIONS = {
   // level". metadata carries { resourceKind, resourceId, principal, perm }.
   RESOURCE_GRANT_SET: 'resource_grant_set',
   RESOURCE_GRANT_REVOKE: 'resource_grant_revoke',
+  // v5 B-M3 — a template was exported WITH sensitive material (literal MCP
+  // secrets and/or personnel/ownership info), the gated opt-in path. A plain
+  // structure export is the safe default and is intentionally NOT audited.
+  // metadata carries { name, agentIds, workflowIds, includeSecrets, includePersonnel }.
+  TEMPLATE_EXPORT: 'template_export',
 } as const
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS]
