@@ -294,6 +294,7 @@
     await loadMyInbox()
     await loadMyReports()
     await loadMyAgents()
+    await loadMyOwnAgents()
     document.getElementById('me-dispatch-btn')?.addEventListener('click', submitDispatch)
     document.getElementById('me-refresh-reports-btn')?.addEventListener('click', loadMyReports)
     document.getElementById('me-runs-refresh-btn')?.addEventListener('click', loadMyRuns)
@@ -301,6 +302,10 @@
     document.getElementById('me-inbox-refresh-btn')?.addEventListener('click', loadMyInbox)
     // Delegated: the list is re-rendered, but #me-inbox-list is stable.
     document.getElementById('me-inbox-list')?.addEventListener('click', onInboxClick)
+    // v5 A-M2 — my own agents: form submit + cancel + delegated edit/delete.
+    document.getElementById('me-own-agent-form')?.addEventListener('submit', submitOwnAgent)
+    document.getElementById('me-own-cancel')?.addEventListener('click', resetOwnForm)
+    document.getElementById('me-own-agents-list')?.addEventListener('click', onOwnAgentsClick)
   }
 
   async function renderWhoami() {
@@ -867,6 +872,177 @@
         ${desc}
         <div class="me-agent-caps">${capChips}</div>
       </div>`
+  }
+
+  // ---- My own agents (v5 A-M2) -----------------------------------------
+  // A member builds + manages helpers they OWN. The server forces ownership
+  // and composes the id from the session user, so the client just collects a
+  // friendly form and renders the owned list with edit / delete.
+  let myOwnAgents = []
+
+  async function loadMyOwnAgents() {
+    const list = document.getElementById('me-own-agents-list')
+    if (!list) return
+    await populateProviderSelect()
+    list.innerHTML = '<p class="me-meta">加载中…</p>'
+    try {
+      const r = await fetch('/api/me/agents/owned')
+      if (!r.ok) {
+        list.innerHTML = `<p class="me-meta">加载失败 (HTTP ${r.status})</p>`
+        return
+      }
+      const j = await r.json()
+      myOwnAgents = Array.isArray(j?.agents) ? j.agents : []
+      if (myOwnAgents.length === 0) {
+        list.innerHTML = '<p class="me-meta">你还没有搭过自己的助手。用上面的表单建一个吧。</p>'
+        return
+      }
+      list.innerHTML = myOwnAgents.map(renderOwnAgentCard).join('')
+    } catch (err) {
+      list.innerHTML = `<p class="me-meta">加载失败: ${escape(err?.message || String(err))}</p>`
+    }
+  }
+
+  async function populateProviderSelect() {
+    const sel = document.getElementById('me-own-provider')
+    if (!sel || sel.dataset.loaded === '1') return
+    try {
+      const r = await fetch('/api/me/agents/providers')
+      const j = await r.json().catch(() => ({}))
+      const providers = Array.isArray(j?.providers) ? j.providers : []
+      if (providers.length === 0) {
+        sel.innerHTML = '<option value="">（暂无可用供应商，请联系管理员配置密钥）</option>'
+        return
+      }
+      sel.innerHTML = providers.map((p) => `<option value="${escape(p)}">${escape(p)}</option>`).join('')
+      sel.dataset.loaded = '1'
+    } catch { /* leave empty; submit will surface the server error */ }
+  }
+
+  function renderOwnAgentCard(a) {
+    const caps = Array.isArray(a.capabilities) ? a.capabilities : []
+    const capChips = caps.length
+      ? caps.map((c) => `<span class="me-cap-chip">${escape(c)}</span>`).join('')
+      : '<span class="me-meta">无</span>'
+    const dotCls = a.online ? 'me-agent-online' : 'me-agent-offline'
+    const onlineLabel = a.online ? '在线' : '离线'
+    const model = a.model ? ` · ${escape(a.model)}` : ''
+    return `
+      <div class="me-agent-card" data-own-id="${escape(a.id)}">
+        <div class="me-agent-head">
+          <span class="me-agent-dot ${dotCls}" title="${onlineLabel}"></span>
+          <strong>${escape(a.label || a.id)}</strong>
+          <span class="me-meta">${escape(a.provider || '')}${model}</span>
+        </div>
+        <div class="me-agent-caps">${capChips}</div>
+        <div class="me-own-agent-row-actions">
+          <button type="button" class="me-secondary-btn" data-own-edit="${escape(a.id)}">编辑</button>
+          <button type="button" class="me-secondary-btn me-danger-btn" data-own-delete="${escape(a.id)}">删除</button>
+        </div>
+      </div>`
+  }
+
+  function resetOwnForm() {
+    const form = document.getElementById('me-own-agent-form')
+    if (!form) return
+    form.reset()
+    document.getElementById('me-own-editing').value = ''
+    document.getElementById('me-own-handle').disabled = false
+    document.getElementById('me-own-submit').textContent = '创建助手'
+    document.getElementById('me-own-cancel').hidden = true
+    const status = document.getElementById('me-own-status')
+    if (status) { status.textContent = ''; status.className = 'me-status' }
+  }
+
+  function enterEditMode(agent) {
+    document.getElementById('me-own-editing').value = agent.id
+    // id is immutable — show the handle (last segment) but lock it.
+    const handle = String(agent.id).split('.').slice(2).join('.') || agent.id
+    const hEl = document.getElementById('me-own-handle')
+    hEl.value = handle
+    hEl.disabled = true
+    document.getElementById('me-own-label').value = agent.label || ''
+    document.getElementById('me-own-caps').value = (agent.capabilities || []).join(', ')
+    document.getElementById('me-own-provider').value = agent.provider || ''
+    document.getElementById('me-own-model').value = agent.model || ''
+    document.getElementById('me-own-system').value = agent.system || ''
+    document.getElementById('me-own-submit').textContent = '保存修改'
+    document.getElementById('me-own-cancel').hidden = false
+    document.getElementById('me-own-agent-form')?.scrollIntoView?.({ behavior: 'smooth' })
+  }
+
+  function parseCaps(raw) {
+    return String(raw || '')
+      .split(/[,\s]+/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+  }
+
+  async function submitOwnAgent(e) {
+    e.preventDefault()
+    const status = document.getElementById('me-own-status')
+    status.className = 'me-status'
+    status.textContent = '提交中…'
+    const editingId = document.getElementById('me-own-editing').value
+    const body = {
+      label: document.getElementById('me-own-label').value.trim(),
+      capabilities: parseCaps(document.getElementById('me-own-caps').value),
+      provider: document.getElementById('me-own-provider').value,
+      model: document.getElementById('me-own-model').value.trim(),
+      system: document.getElementById('me-own-system').value,
+    }
+    let url = '/api/me/agents'
+    let method = 'POST'
+    if (editingId) {
+      url = `/api/me/agents/${encodeURIComponent(editingId)}`
+      method = 'PUT'
+    } else {
+      body.id = document.getElementById('me-own-handle').value.trim()
+    }
+    try {
+      const r = await fetch(url, {
+        method,
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        status.className = 'me-status error'
+        status.textContent = `失败: ${escape(j?.error || `HTTP ${r.status}`)}`
+        return
+      }
+      status.className = 'me-status ok'
+      status.textContent = editingId ? '已保存' : '已创建'
+      resetOwnForm()
+      await loadMyOwnAgents()
+    } catch (err) {
+      status.className = 'me-status error'
+      status.textContent = `失败: ${escape(err?.message || String(err))}`
+    }
+  }
+
+  async function onOwnAgentsClick(e) {
+    const editId = e.target?.getAttribute?.('data-own-edit')
+    if (editId) {
+      const agent = myOwnAgents.find((a) => a.id === editId)
+      if (agent) enterEditMode(agent)
+      return
+    }
+    const delId = e.target?.getAttribute?.('data-own-delete')
+    if (delId) {
+      if (!confirm('确定删除这个助手？此操作不可撤销。')) return
+      try {
+        const r = await fetch(`/api/me/agents/${encodeURIComponent(delId)}`, { method: 'DELETE' })
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}))
+          alert(`删除失败: ${j?.error || `HTTP ${r.status}`}`)
+          return
+        }
+        await loadMyOwnAgents()
+      } catch (err) {
+        alert(`删除失败: ${err?.message || String(err)}`)
+      }
+    }
   }
 
   // ---- Settings tab -----------------------------------------------------

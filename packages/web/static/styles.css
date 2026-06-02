@@ -2128,6 +2128,23 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .me-upload-status.error { color: #c0392b; }
 .settings-form { display: block; max-width: 24rem; }
 
+/* v5 A-M2 — "build my own agent" form + owned-agent cards */
+.me-own-agents { margin-top: 1.5rem; }
+.me-own-agent-form { display: flex; flex-direction: column; gap: 0.6rem; max-width: 32rem; margin: 0.75rem 0; }
+.me-own-agent-form .me-field { display: flex; flex-direction: column; gap: 0.2rem; }
+.me-own-agent-form .me-field label { font-size: 0.82rem; color: #555; }
+.me-own-agent-form input, .me-own-agent-form select, .me-own-agent-form textarea {
+  padding: 0.4rem 0.5rem; border: 1px solid #d0d7de; border-radius: 5px; font: inherit;
+}
+.me-own-agent-form input:disabled { background: #f0f0f0; color: #888; }
+.me-own-agent-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.me-own-agent-actions .me-primary-btn, .me-own-agent-actions .me-secondary-btn { margin-top: 0; }
+.me-own-agent-actions .me-status { margin-top: 0; }
+.me-own-agent-row-actions { margin-top: 0.5rem; display: flex; gap: 0.4rem; }
+.me-own-agent-row-actions .me-secondary-btn { margin-top: 0; padding: 0.2rem 0.6rem; font-size: 0.8rem; }
+.me-danger-btn { background: #c0392b; }
+.me-danger-btn:hover { background: #a02d22; }
+
 /* C2 — org quota management panel */
 .quotas-panel { padding: 1rem; }
 .quotas-panel .q-header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }

@@ -188,6 +188,47 @@
         <button id="me-agents-refresh-btn" type="button" class="me-secondary-btn">刷新</button>
         <div id="me-agents-list" class="me-agents-list"></div>
       </div>
+
+      <!-- v5 A-M2 — members build + manage THEIR OWN helpers. Ownership lives
+           in resource_grants; the server composes the agent id from the session
+           user, so a member can only ever touch their own. -->
+      <div class="me-own-agents">
+        <h2>我自己搭的助手</h2>
+        <p class="me-meta">用你的话搭一个属于你自己的 AI 助手。它会用机构配置的模型额度（按用量计费），不需要你填密钥。只有你能看到 / 修改 / 删除它。</p>
+        <form id="me-own-agent-form" class="me-own-agent-form" autocomplete="off">
+          <input type="hidden" id="me-own-editing" value="" />
+          <div class="me-field">
+            <label for="me-own-handle">短名（英文/数字，创建后不可改）</label>
+            <input type="text" id="me-own-handle" name="handle" maxlength="48" placeholder="my-writer" required />
+          </div>
+          <div class="me-field">
+            <label for="me-own-label">显示名</label>
+            <input type="text" id="me-own-label" name="label" placeholder="我的中文写手" required />
+          </div>
+          <div class="me-field">
+            <label for="me-own-caps">能力标签（逗号或空格分隔）</label>
+            <input type="text" id="me-own-caps" name="capabilities" placeholder="write-zh, summarize" required />
+          </div>
+          <div class="me-field">
+            <label for="me-own-provider">模型供应商</label>
+            <select id="me-own-provider" name="provider" required></select>
+          </div>
+          <div class="me-field">
+            <label for="me-own-model">模型（可选，留空用默认）</label>
+            <input type="text" id="me-own-model" name="model" placeholder="" />
+          </div>
+          <div class="me-field">
+            <label for="me-own-system">系统提示词（告诉它你要它做什么）</label>
+            <textarea id="me-own-system" name="system" rows="4" placeholder="你是我的中文写作助手……" required></textarea>
+          </div>
+          <div class="me-own-agent-actions">
+            <button type="submit" id="me-own-submit" class="me-primary-btn">创建助手</button>
+            <button type="button" id="me-own-cancel" class="me-secondary-btn" hidden>取消编辑</button>
+            <span id="me-own-status" class="me-status"></span>
+          </div>
+        </form>
+        <div id="me-own-agents-list" class="me-agents-list"></div>
+      </div>
     </section>
 
     <!-- Settings tab — visible to every signed-in role. C1a ships only
