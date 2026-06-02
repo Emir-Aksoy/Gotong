@@ -79,6 +79,13 @@ class SuspendAgainAgent extends AgentParticipant {
   protected async handleTask(_t: Task): Promise<unknown> {
     throw new SuspendTaskError({ resumeAt: this.resumeAt, state: this.state })
   }
+  // A real suspend-again agent OVERRIDES handleResume to decide, on each wake,
+  // whether to nap another window — the legitimate re-suspend pattern. (The
+  // L11 guard rejects re-suspending via the *default* handleResume, which can
+  // never make progress; deliberate re-suspend must be explicit like this.)
+  protected override async handleResume(_t: Task, _state: unknown): Promise<unknown> {
+    throw new SuspendTaskError({ resumeAt: this.resumeAt, state: this.state })
+  }
 }
 
 class BoomyResumeAgent extends AgentParticipant {

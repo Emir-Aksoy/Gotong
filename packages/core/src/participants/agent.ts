@@ -62,10 +62,29 @@ export abstract class AgentParticipant implements Participant {
       const output = await this.handleResume(task, state)
       return this.ok(task.id, output)
     } catch (err) {
-      // Re-throw suspend so an agent can chain `suspendAgain` — useful
-      // when the wake-up condition still isn't met and the agent wants
-      // to sleep another window.
-      if (err instanceof SuspendTaskError) throw err
+      if (err instanceof SuspendTaskError) {
+        // L11 — guard against an infinite re-suspend loop. The DEFAULT
+        // `handleResume` just re-runs `handleTask` and ignores `state`, so a
+        // participant that *suspends* in `handleTask` but never overrode
+        // `handleResume` re-suspends identically on every wake — it can never
+        // make progress, and the sweep re-parks it forever (a tight loop when
+        // `resumeAt <= now`, a silent never-completing park otherwise).
+        // Re-suspending on resume is only legitimate when `handleResume` is
+        // OVERRIDDEN (heartbeat re-park, inbox re-wait): that path consumes
+        // `state` and decides deliberately. The un-overridden default doing it
+        // is always a programming error — fail loudly instead of looping.
+        if (this.handleResume === AgentParticipant.prototype.handleResume) {
+          return this.fail(
+            task.id,
+            `participant '${this.id}' suspended on resume via the default handleResume ` +
+              `(handleTask re-threw SuspendTaskError) — it can never progress. Override ` +
+              `handleResume to consume the carried state instead of re-running handleTask.`,
+          )
+        }
+        // Overridden handleResume → a deliberate suspend-again. Re-throw so the
+        // scheduler parks it for the next window.
+        throw err
+      }
       return this.fail(task.id, err instanceof Error ? err.message : String(err))
     }
   }

@@ -207,4 +207,28 @@ describe('AgentParticipant.onResume', () => {
     const a = new A({ id: 'a' })
     await expect(a.onResume(makeTask(), { round: 1 })).rejects.toBeInstanceOf(SuspendTaskError)
   })
+
+  it('fails instead of re-suspending when the DEFAULT handleResume re-suspends (audit L11)', async () => {
+    // A participant that suspends in handleTask but never overrides
+    // handleResume: the default handleResume re-runs handleTask → another
+    // SuspendTaskError. Unguarded, the scheduler re-parks it on every wake and
+    // it can never progress (an infinite resume loop). The base class must
+    // surface a clear failure rather than re-throw (which would re-park).
+    let handleTaskCalls = 0
+    class ForgetfulBroker extends AgentParticipant {
+      protected async handleTask(_t: Task): Promise<unknown> {
+        handleTaskCalls++
+        throw new SuspendTaskError({ resumeAt: 1_000, state: { parked: true } })
+      }
+      // deliberately NO handleResume override — that's the bug being guarded.
+    }
+    const a = new ForgetfulBroker({ id: 'forgetful-broker' })
+    const r = await a.onResume(makeTask(), { parked: true })
+    expect(handleTaskCalls).toBe(1) // ran once; the loop was broken, not re-parked
+    expect(r.kind).toBe('failed')
+    if (r.kind === 'failed') {
+      expect(r.error).toMatch(/default handleResume/)
+      expect(r.error).toContain('forgetful-broker')
+    }
+  })
 })
