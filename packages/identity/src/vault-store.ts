@@ -76,9 +76,11 @@ export class VaultStore {
    * A1 — present iff the caller passed `masterKey` to openIdentityStore.
    * Vault APIs throw `vault_not_configured` when this is undefined.
    * Kept as a field (not a closure capture) so methods can check it
-   * uniformly via a single `requireMasterKey()` helper.
+   * uniformly via a single `requireMasterKey()` helper. Mutable because
+   * `rotateMasterKey` (P0-M4c) replaces the in-memory KEK after re-wrapping
+   * the data key.
    */
-  private readonly masterKey?: Buffer
+  private masterKey?: Buffer
   /**
    * Route B P0-M4b — the unwrapped data key (DEK), memoised after the
    * first vault operation. Every secret row is encrypted with THIS, not
@@ -324,6 +326,42 @@ export class VaultStore {
     // Audit #145 — flush cached resolves of this entry.
     this.emitVaultMutation('revoke')
     return true
+  }
+
+  /**
+   * Route B P0-M4c — rotate the master key (KEK) online.
+   *
+   * Unwraps the data key (DEK) with the current KEK, re-wraps it under
+   * `newMasterKey`, and atomically replaces the vault_meta row. Secret rows
+   * are NEVER touched — that's the whole point of the envelope — so this is
+   * O(1) no matter how many secrets exist, and a *running* host that already
+   * cached the DEK keeps working unchanged: only the at-rest wrapping moved.
+   *
+   * After this returns the OLD key can no longer unwrap the vault. The
+   * operator must persist `newMasterKey` (the host `rotate-master-key`
+   * subcommand does this) so the next boot loads it. A no-downtime rotation
+   * is therefore: run the rotation (re-wraps this row) → persist the new key
+   * → the live host is unaffected, the next restart uses the new key.
+   *
+   * Throws `vault_not_configured` if no key was set, `vault_decrypt_failed`
+   * if the current key can't unwrap the DEK, `invalid_input` if
+   * `newMasterKey` is not a 32-byte Buffer.
+   */
+  rotateMasterKey(newMasterKey: Buffer): void {
+    // Resolve the DEK under the CURRENT key first (also enforces the
+    // vault_not_configured gate and seeds the DEK if it somehow wasn't yet).
+    const dek = this.requireDek()
+    // wrapDataKey validates newMasterKey's length BEFORE we write anything,
+    // so a bad new key can't half-rotate the vault.
+    const reWrapped = wrapDataKey(newMasterKey, dek)
+    const apply = (): void => {
+      this.stmtVaultMetaPut.run(VAULT_DEK_META_KEY, reWrapped, Date.now())
+    }
+    if (this.db.inTransaction) apply()
+    else transactionImmediate(this.db, apply)
+    // Adopt the new key in-memory. The cached DEK is unchanged, so reads and
+    // writes keep working; this just keeps the KEK honest for a later rotate.
+    this.masterKey = newMasterKey
   }
 
   /**

@@ -2019,6 +2019,16 @@ export class IdentityStore {
     return this.vault.revokeVaultEntry(id)
   }
 
+  /**
+   * Route B P0-M4c — rotate the vault master key (KEK) online. Re-wraps the
+   * data key under `newMasterKey` in O(1); secret rows are untouched. The
+   * caller is responsible for persisting `newMasterKey` so the next boot
+   * loads it (see the host `rotate-master-key` subcommand).
+   */
+  rotateVaultMasterKey(newMasterKey: Buffer): void {
+    this.vault.rotateMasterKey(newMasterKey)
+  }
+
   listVaultEntries(query: ListVaultEntriesQuery = {}): VaultEntry[] {
     return this.vault.listVaultEntries(query)
   }
