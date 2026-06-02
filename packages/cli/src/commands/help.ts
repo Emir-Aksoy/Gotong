@@ -12,6 +12,7 @@ Commands:
   new python-agent <name>     Scaffold a Python sidecar agent project
   ping <ws-url>               Verify a Hub is reachable (HELLO/WELCOME handshake)
   repl                        Start an interactive shell against an in-memory hub
+  connect [agent]             Print MCP quick-connect config for a coding agent
   help [command]              Show usage for a specific command
   --version                   Print the CLI version
 
@@ -21,6 +22,7 @@ Examples:
   aipehub new python-agent classifier --capabilities=triage,classify
   aipehub ping ws://127.0.0.1:4000
   aipehub repl
+  aipehub connect claude-code --bin=/abs/packages/mcp-server/bin/aipehub-mcp.js
 `
 
 const PER_COMMAND: Readonly<Record<string, string>> = {
@@ -83,6 +85,42 @@ Options:
 Examples:
   aipehub repl
   aipehub repl --no-banner --prompt='aipe> '
+`,
+  connect: `aipehub connect [agent] [options]
+
+Prints the exact MCP config to connect a mainstream coding agent to a
+running AipeHub Hub. Every supported agent is an MCP client, so the
+move is the same for all: point its MCP config at @aipehub/mcp-server
+(spawned by absolute path with node, since it's not on npm yet).
+
+With no agent id, lists what's supported. Config goes to stdout;
+warnings (placeholder token, bin not found) go to stderr.
+
+Supported agents:
+  claude-code   Claude Code (Anthropic)   — claude mcp add / ~/.claude.json
+  codex         Codex (OpenAI)            — ~/.codex/config.toml
+  opencode      OpenCode (sst/opencode)   — opencode.json
+  antigravity   Antigravity (Google)      — ~/.gemini/config/mcp_config.json
+  cursor        Cursor                    — ~/.cursor/mcp.json
+  openclaw      OpenClaw                  — openclaw mcp add / openclaw.json
+  nanobot       nanobot (nanobot-ai)      — nanobot.yaml
+  hermes        Hermes Agent (Nous)       — hermes mcp add / ~/.hermes/config.yaml
+
+Options:
+  --hub=<url>        Hub admin HTTP base URL (default: $AIPE_HUB_URL or
+                     http://127.0.0.1:3000)
+  --token=<token>    Admin bearer token to inline (default: a placeholder;
+                     a secret is never auto-read from env into output)
+  --name=<name>      MCP server name in the agent's config (default: aipehub)
+  --bin=<path>       Path to packages/mcp-server/bin/aipehub-mcp.js (auto-
+                     detected in a monorepo checkout; override otherwise)
+  --help / -h        Show this message
+
+Examples:
+  aipehub connect
+  aipehub connect codex
+  aipehub connect claude-code --hub=http://127.0.0.1:3000 --token="$AIPE_ADMIN_TOKEN"
+  aipehub connect cursor --name=my-hub --bin=/opt/aipehub/packages/mcp-server/bin/aipehub-mcp.js
 `,
   ping: `aipehub ping <ws-url> [options]
 

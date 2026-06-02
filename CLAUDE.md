@@ -577,6 +577,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 生态接入与行业模板 (framework adapter + automation 桥 + 行业模板 + governance 元数据) | `docs/zh/V4-PHASE19-P5-FINAL.md` |
 | 完整审计报告 | `docs/zh/AUDIT-v4-phase5.md` |
 | 主流 agent 适配器契约 (双向 + 可快速接管验收门) | `docs/zh/AGENT-ADAPTER-CONTRACT.md` |
+| 快捷接入主流 agent (入站: `aipehub connect <agent>`) | `docs/zh/QUICK-CONNECT.md` |
 | MCP 接入(client + server) | `docs/zh/MCP.md` |
 | Services 插件 RFC 系列 | `docs/services-rfc.md` 及 `*-rfc.md` |
 | 部署 / 运维 / 监控 | `docs/zh/DEPLOY.md`, `docs/OPERATIONS.md`, `docs/MONITORING.md` |
