@@ -310,6 +310,66 @@ export interface MeAgentListSurface {
 }
 
 // ---------------------------------------------------------------------------
+// Member agent ownership + self-service CRUD (v5 A-M2)
+//
+// "I can build and manage MY OWN helpers", distinct from the read-only
+// directory above (every helper I'm allowed to talk to). Ownership lives in
+// the identity `resource_grants` table (kind='agent', perm='owner') — NOT a
+// field on the agent record — so the one grant model (v5 #3) covers it.
+//
+// The HOST owns every privileged decision: it composes the real participant id
+// from the SESSION userId (`me.<userId>.<handle>` — a member can't squat or
+// guess another member's namespace, the same "scope from the session, never a
+// client value" rule the uploads surface uses), enforces ownership on every
+// edit/delete, constrains the provider to ones it already has a key for, and
+// records / clears the owner grant. The web layer only shape-checks the body.
+//
+// A member's own-agent view MAY include the system prompt + model: they wrote
+// it, and they need it to edit. The per-agent API key is never set by a member
+// (that's a credential — A-M3) and never crosses the wire either way.
+// ---------------------------------------------------------------------------
+
+/** A member's view of an agent they OWN (richer than the sanitized directory). */
+export interface MeOwnedAgentView {
+  id: string
+  label: string
+  capabilities: string[]
+  online: boolean
+  provider: string
+  model?: string
+  /** The system prompt — visible because the member owns + edits this agent. */
+  system: string
+  createdAt: string
+}
+
+/** Shape-checked member create/update body (the raw `id` is a short handle). */
+export interface MeAgentInput {
+  id: string
+  label: string
+  capabilities: string[]
+  system: string
+  provider: string
+  model?: string
+}
+
+export interface MeAgentAdminSurface {
+  /** Providers the host has a key for — the member's provider picker. */
+  availableProviders(): Promise<string[]>
+  /** Agents owned by `userId` (perm='owner' grant) that still exist. */
+  listOwned(userId: string): Promise<MeOwnedAgentView[]>
+  /** Create an agent owned by `userId`; host composes the namespaced id. */
+  create(userId: string, input: MeAgentInput): Promise<MeOwnedAgentView>
+  /** Edit an agent `userId` owns. Throws (status 403/404) otherwise. */
+  update(
+    userId: string,
+    agentId: string,
+    input: Partial<Omit<MeAgentInput, 'id'>>,
+  ): Promise<MeOwnedAgentView>
+  /** Delete an agent `userId` owns. Throws (status 403/404) otherwise. */
+  remove(userId: string, agentId: string): Promise<boolean>
+}
+
+// ---------------------------------------------------------------------------
 // Member upload surface (Phase 19 P1-M4)
 //
 // Same host UploadSurface the admin route uses (`WorkflowSurface`-style duck
@@ -423,6 +483,12 @@ export interface HandleMeRouteCtx {
    */
   meAgents: MeAgentListSurface | undefined
   /**
+   * v5 A-M2 — member agent ownership + self-service CRUD. Undefined when the
+   * host wired no identity (ownership grants live in identity); the
+   * create/list-owned/update/delete routes then return 503.
+   */
+  meAgentAdmin: MeAgentAdminSurface | undefined
+  /**
    * Phase 19 P1-M4 — member file uploads. Undefined when the host wired no
    * upload backing; `/api/me/uploads` then returns 503.
    */
@@ -477,6 +543,32 @@ export async function handleMeRoute(
   if (method === 'GET' && path === '/api/me/agents') {
     await handleMeListAgents(ctx, res)
     return
+  }
+  // v5 A-M2 — member agent ownership + self-service CRUD. These sit on the
+  // SAME /api/me/agents path family but are guarded by exact path / method, so
+  // the directory GET above is unaffected.
+  if (method === 'GET' && path === '/api/me/agents/providers') {
+    await handleMeAgentProviders(ctx, res)
+    return
+  }
+  if (method === 'GET' && path === '/api/me/agents/owned') {
+    await handleMeListOwnedAgents(ctx, res, userId)
+    return
+  }
+  if (method === 'POST' && path === '/api/me/agents') {
+    await handleMeCreateAgent(ctx, req, res, userId)
+    return
+  }
+  {
+    const m = /^\/api\/me\/agents\/([^/]+)$/.exec(path)
+    if (m && method === 'PUT') {
+      await handleMeUpdateAgent(ctx, req, res, userId, decodeURIComponent(m[1]!))
+      return
+    }
+    if (m && method === 'DELETE') {
+      await handleMeDeleteAgent(ctx, res, userId, decodeURIComponent(m[1]!))
+      return
+    }
   }
   // Phase 19 P1-M4 — member file uploads. POST writes under the caller's
   // per-user scope; GET serves back ONLY artifacts under that scope (a member
@@ -947,6 +1039,175 @@ async function handleMeListAgents(
   // The host already sanitized — pass through verbatim (no prompt / key /
   // config to strip here).
   sendJson(res, { agents })
+}
+
+// ---------------------------------------------------------------------------
+// Member agent ownership + self-service CRUD (v5 A-M2)
+//
+// The web layer shape-checks the body and maps the host's status-coded errors
+// to HTTP; every privileged decision (id namespacing, ownership, provider
+// availability, grant writes) stays in the host surface.
+// ---------------------------------------------------------------------------
+
+/** Map a host surface error to an HTTP status (default 500). */
+function meAgentErrStatus(err: unknown): number {
+  if (err && typeof err === 'object' && 'status' in err) {
+    const s = (err as { status?: unknown }).status
+    if (typeof s === 'number' && s >= 400 && s < 600) return s
+  }
+  return 500
+}
+
+/** Parse + shape-check a member create/update body. `partial` relaxes required
+ * fields for PUT (only the supplied fields are validated + returned). */
+function parseMeAgentInput(
+  body: Record<string, unknown>,
+  partial: boolean,
+): Partial<MeAgentInput> {
+  const out: Partial<MeAgentInput> = {}
+  const wantId = !partial
+  if (wantId || body.id !== undefined) {
+    if (typeof body.id !== 'string' || body.id.length === 0) {
+      throw httpError(400, 'id is required (a short handle)')
+    }
+    if (body.id.length > 48 || !/^[a-zA-Z0-9_.-]+$/.test(body.id)) {
+      throw httpError(400, "id may only contain letters, digits, '_', '.', '-' (max 48)")
+    }
+    out.id = body.id
+  }
+  if (!partial || body.label !== undefined) {
+    if (typeof body.label !== 'string' || body.label.trim().length === 0) {
+      throw httpError(400, 'label is required')
+    }
+    out.label = body.label.trim()
+  }
+  if (!partial || body.capabilities !== undefined) {
+    if (!Array.isArray(body.capabilities) || body.capabilities.length === 0) {
+      throw httpError(400, 'capabilities must be a non-empty array')
+    }
+    const caps: string[] = []
+    for (const c of body.capabilities) {
+      if (typeof c !== 'string' || c.trim().length === 0) {
+        throw httpError(400, 'capabilities must contain non-empty strings')
+      }
+      caps.push(c.trim())
+    }
+    out.capabilities = caps
+  }
+  if (!partial || body.system !== undefined) {
+    if (typeof body.system !== 'string' || body.system.trim().length === 0) {
+      throw httpError(400, 'system (the prompt) is required')
+    }
+    out.system = body.system
+  }
+  if (!partial || body.provider !== undefined) {
+    if (typeof body.provider !== 'string' || body.provider.length === 0) {
+      throw httpError(400, 'provider is required')
+    }
+    out.provider = body.provider
+  }
+  if (body.model !== undefined) {
+    if (typeof body.model !== 'string') throw httpError(400, 'model must be a string')
+    const m = body.model.trim()
+    if (m.length > 0) out.model = m
+  }
+  return out
+}
+
+/** A plain Error carrying an HTTP status for the route's catch to read. */
+function httpError(status: number, message: string): Error & { status: number } {
+  return Object.assign(new Error(message), { status })
+}
+
+async function handleMeAgentProviders(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+): Promise<void> {
+  if (!ctx.meAgentAdmin) {
+    sendJson(res, { providers: [] })
+    return
+  }
+  try {
+    sendJson(res, { providers: await ctx.meAgentAdmin.availableProviders() })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
+  }
+}
+
+async function handleMeListOwnedAgents(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.meAgentAdmin) {
+    sendJson(res, { agents: [] })
+    return
+  }
+  try {
+    sendJson(res, { agents: await ctx.meAgentAdmin.listOwned(userId) })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+async function handleMeCreateAgent(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.meAgentAdmin) {
+    sendJson(res, { error: 'agent self-service unavailable (identity not wired)' }, 503)
+    return
+  }
+  const body = (await readJsonBody(req).catch(() => ({}))) as Record<string, unknown>
+  try {
+    const input = parseMeAgentInput(body, false) as MeAgentInput
+    const agent = await ctx.meAgentAdmin.create(userId, input)
+    sendJson(res, { ok: true, agent }, 201)
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+async function handleMeUpdateAgent(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  agentId: string,
+): Promise<void> {
+  if (!ctx.meAgentAdmin) {
+    sendJson(res, { error: 'agent self-service unavailable (identity not wired)' }, 503)
+    return
+  }
+  const body = (await readJsonBody(req).catch(() => ({}))) as Record<string, unknown>
+  try {
+    const patch = parseMeAgentInput(body, true)
+    delete (patch as { id?: unknown }).id // id is immutable; ignore any client value
+    const agent = await ctx.meAgentAdmin.update(userId, agentId, patch)
+    sendJson(res, { ok: true, agent })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+async function handleMeDeleteAgent(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+  agentId: string,
+): Promise<void> {
+  if (!ctx.meAgentAdmin) {
+    sendJson(res, { error: 'agent self-service unavailable (identity not wired)' }, 503)
+    return
+  }
+  try {
+    const removed = await ctx.meAgentAdmin.remove(userId, agentId)
+    sendJson(res, { ok: true, removed })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
 }
 
 // ---------------------------------------------------------------------------

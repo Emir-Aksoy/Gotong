@@ -38,7 +38,12 @@ import {
   type IdentitySurface,
   type IdentityPeerReputationDTO,
 } from './identity-routes.js'
-import { handleMeRoute, type InboxSurface, type MeAgentListSurface } from './me-routes.js'
+import {
+  handleMeRoute,
+  type InboxSurface,
+  type MeAgentListSurface,
+  type MeAgentAdminSurface,
+} from './me-routes.js'
 import {
   handleWorkflowRoute,
   type WorkflowGrantSink,
@@ -248,6 +253,13 @@ export interface WebServerOptions {
    * → `/api/me/agents` degrades to an empty list.
    */
   meAgents?: MeAgentListSurface
+  /**
+   * v5 A-M2 — optional member agent ownership + self-service CRUD surface for
+   * `/api/me/agents` (create / list-owned / update / delete). Ownership grants
+   * live in identity, so the host wires this only when identity is present;
+   * absent → those routes return 503 (the read-only directory still works).
+   */
+  meAgentAdmin?: MeAgentAdminSurface
   /**
    * Phase 13 M3 — optional workflow assistant surface. The host wires
    * `createWorkflowAssistAgent(...)` here when a built-in
@@ -792,6 +804,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     reconcileHeartbeats: opts.reconcileHeartbeats,
     workflows: opts.workflows,
     meAgents: opts.meAgents,
+    meAgentAdmin: opts.meAgentAdmin,
     workflowAssist: opts.workflowAssist,
     services: opts.services,
     growthReports: opts.growthReports,
@@ -921,6 +934,8 @@ interface HandlerCtx {
   workflows: WorkflowSurface | undefined
   /** Phase 19 P1-M3 — see WebServerOptions.meAgents doc above. */
   meAgents: MeAgentListSurface | undefined
+  /** v5 A-M2 — see WebServerOptions.meAgentAdmin doc above. */
+  meAgentAdmin: MeAgentAdminSurface | undefined
   /** Phase 13 M3 — see WebServerOptions.workflowAssist doc above. */
   workflowAssist: WorkflowAssistSurface | undefined
   services: ServicesAdminSurface | undefined
@@ -1500,6 +1515,8 @@ async function handle(
         runs: ctx.workflows,
         // Phase 19 P1-M3 — sanitized agent directory; undefined → empty list.
         meAgents: ctx.meAgents,
+        // v5 A-M2 — member agent ownership + self-service CRUD; undefined → 503.
+        meAgentAdmin: ctx.meAgentAdmin,
         // Phase 19 P1-M4 — member file uploads (same UploadSurface as admin,
         // member route scopes by userId); undefined → /api/me/uploads 503.
         uploads: ctx.uploads,

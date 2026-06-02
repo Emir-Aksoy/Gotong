@@ -185,6 +185,7 @@ import { createUploadSurface } from './uploads.js'
 import { createWorkflowController } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 import { HostInboxService } from './inbox-service.js'
+import { HostMeAgentService } from './me-agent-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
 import {
   DEFAULT_HEARTBEAT_MIN_MS,
@@ -1315,6 +1316,13 @@ async function main(): Promise<void> {
     log.info('inbound A2A server enabled', { defaultCapability: a2aDefaultCap ?? '(none)' })
   }
 
+  // v5 A-M2 — member agent ownership + self-service CRUD. Ownership grants live
+  // in identity, so this is wired only when identity is present; otherwise the
+  // /api/me/agents CRUD routes 503 (the read-only directory still works).
+  const meAgentAdmin = identity
+    ? new HostMeAgentService({ space, hub, identity, lifecycle: localAgents })
+    : undefined
+
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
@@ -1343,6 +1351,8 @@ async function main(): Promise<void> {
         }))
       },
     },
+    // v5 A-M2 — member agent ownership + self-service CRUD (undefined → 503).
+    ...(meAgentAdmin ? { meAgentAdmin } : {}),
     // Phase 16 — member task inbox; undefined when identity is unwired, in
     // which case /me/inbox degrades (empty list / 503).
     ...(inboxService ? { inbox: inboxService } : {}),
