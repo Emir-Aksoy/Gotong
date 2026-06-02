@@ -58,6 +58,11 @@
  *                           many days ago. May be combined with AIPE_RUN_KEEP
  *                           (both must hold). Archived runs stay reachable for
  *                           audit; a malformed value fails the boot loudly.
+ *   AIPE_LEDGER_KEEP_DAYS   prune usage-ledger (billing) rows older than this
+ *                           many days at boot, bounding the append-only ledger.
+ *                           The retained window stays exportable (Phase 17
+ *                           CSV/JSONL) and audit_log is untouched. Unset ⇒ off;
+ *                           a malformed value fails the boot loudly.
  *
  *   --- structured logging (default ON, see @aipehub/core/logger) ---
  *
@@ -105,6 +110,7 @@ import { BAKED_VERSION } from './version.js'
 import { buildAgentCard } from './agent-card.js'
 import { auditBootSecurity, formatBootSecurityReport, isLoopbackHost } from './boot-security.js'
 import { rotateMasterKey } from './rotate-master-key.js'
+import { applyLedgerRetention, parseLedgerRetention } from './ledger-retention.js'
 import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
 import { writeAdminLinkFile } from './admin-link.js'
@@ -462,6 +468,9 @@ ENVIRONMENT
   AIPE_RUN_ARCHIVE_DAYS   archive terminal runs that ended more than N days ago
                           (may combine with AIPE_RUN_KEEP; archived runs stay
                           reachable for audit; malformed value fails boot)
+  AIPE_LEDGER_KEEP_DAYS   prune usage-ledger (billing) rows older than N days at
+                          boot (retained window stays exportable; audit_log
+                          untouched; unset = off; malformed value fails boot)
 
   AIPE_ASSISTANT_PROVIDER 'anthropic' (default) | 'openai' | 'mock' —
                           provider for the host-built-in WorkflowAssistantAgent
@@ -1191,6 +1200,29 @@ async function main(): Promise<void> {
       }
     } catch (err) {
       log.warn('workflow run retention failed — booting with the full run history', { err })
+    }
+  }
+
+  // Route B P0-M3 (M3-M4) — usage-ledger retention. The ledger is append-only
+  // (one row per LLM call) and grows without bound; prune rows older than
+  // AIPE_LEDGER_KEEP_DAYS so the billing table stays a bounded working set. The
+  // retained window remains exportable via the Phase 17 CSV/JSONL routes, and
+  // `audit_log` is a SEPARATE table this never touches. Parse runs before the
+  // identity guard so a malformed env fails the boot loudly even on a degraded
+  // (no-identity) host; the prune itself is best-effort and skipped without an
+  // identity store (there is no ledger to prune).
+  const ledgerRetentionPolicy = parseLedgerRetention(process.env, Date.now())
+  if (ledgerRetentionPolicy && identity) {
+    try {
+      const { pruned } = applyLedgerRetention(identity, ledgerRetentionPolicy)
+      if (pruned > 0) {
+        log.info('usage ledger retention applied', {
+          pruned,
+          before: ledgerRetentionPolicy.before,
+        })
+      }
+    } catch (err) {
+      log.warn('usage ledger retention failed — booting with the full ledger', { err })
     }
   }
 
