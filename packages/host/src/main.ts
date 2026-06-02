@@ -186,6 +186,7 @@ import { createWorkflowController } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 import { HostInboxService } from './inbox-service.js'
 import { HostMeAgentService } from './me-agent-service.js'
+import { HostMeCredentialsService } from './me-credentials-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
 import {
   DEFAULT_HEARTBEAT_MIN_MS,
@@ -1323,6 +1324,13 @@ async function main(): Promise<void> {
     ? new HostMeAgentService({ space, hub, identity, lifecycle: localAgents })
     : undefined
 
+  // v5 A-M3 — member API-credential ("bring your own key") management. Keys
+  // live in the vault, so this is wired only when identity is present; the
+  // /api/me/credentials routes 503 otherwise.
+  const meCredentials = identity
+    ? new HostMeCredentialsService({ identity })
+    : undefined
+
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
@@ -1353,6 +1361,8 @@ async function main(): Promise<void> {
     },
     // v5 A-M2 — member agent ownership + self-service CRUD (undefined → 503).
     ...(meAgentAdmin ? { meAgentAdmin } : {}),
+    // v5 A-M3 — member API-credential management (undefined → 503).
+    ...(meCredentials ? { meCredentials } : {}),
     // Phase 16 — member task inbox; undefined when identity is unwired, in
     // which case /me/inbox degrades (empty list / 503).
     ...(inboxService ? { inbox: inboxService } : {}),

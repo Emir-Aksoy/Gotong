@@ -370,6 +370,44 @@ export interface MeAgentAdminSurface {
 }
 
 // ---------------------------------------------------------------------------
+// Member API-credential surface (v5 A-M3)
+//
+// A member manages THEIR OWN LLM API keys ("bring your own key"). Keys live in
+// the identity vault with ownerKind='user'/ownerId=<caller> and are consumed by
+// the member's own agents (A-M2) via the per-user fallback (A-M3a). The web
+// layer only shape-checks + maps errors; every privileged decision (encryption,
+// ownership on delete, provider allow-list) stays in the host surface. The
+// SECRET is never returned — only metadata.
+// ---------------------------------------------------------------------------
+
+/** A member's view of one of their own stored credentials — never the secret. */
+export interface MeCredentialView {
+  id: string
+  provider: string
+  label: string | null
+  createdAt: number
+  lastUsedAt: number | null
+}
+
+/** Shape-checked member credential create body. */
+export interface MeCredentialInput {
+  provider: string
+  apiKey: string
+  label?: string
+}
+
+export interface MeCredentialsSurface {
+  /** Providers a member may store a raw key for (the picker's options). */
+  providers(): Promise<string[]>
+  /** The caller's own stored credentials (metadata only). */
+  list(userId: string): Promise<MeCredentialView[]>
+  /** Store a new key owned by `userId`. Returns the metadata view (no secret). */
+  create(userId: string, input: MeCredentialInput): Promise<MeCredentialView>
+  /** Revoke one of `userId`'s OWN credentials. Throws (status 404) otherwise. */
+  remove(userId: string, credentialId: string): Promise<boolean>
+}
+
+// ---------------------------------------------------------------------------
 // Member upload surface (Phase 19 P1-M4)
 //
 // Same host UploadSurface the admin route uses (`WorkflowSurface`-style duck
@@ -489,6 +527,12 @@ export interface HandleMeRouteCtx {
    */
   meAgentAdmin: MeAgentAdminSurface | undefined
   /**
+   * v5 A-M3 — member API-credential ("bring your own key") management.
+   * Undefined when the host wired no identity/vault; the credential routes
+   * then return 503 (and an empty list on GET).
+   */
+  meCredentials: MeCredentialsSurface | undefined
+  /**
    * Phase 19 P1-M4 — member file uploads. Undefined when the host wired no
    * upload backing; `/api/me/uploads` then returns 503.
    */
@@ -567,6 +611,25 @@ export async function handleMeRoute(
     }
     if (m && method === 'DELETE') {
       await handleMeDeleteAgent(ctx, res, userId, decodeURIComponent(m[1]!))
+      return
+    }
+  }
+  // v5 A-M3 — member API credentials ("bring your own key"). GET returns the
+  // caller's own stored keys (metadata only) + the allowable providers; POST
+  // stores a new key; DELETE revokes one the caller owns. All scoped to the
+  // session userId server-side.
+  if (method === 'GET' && path === '/api/me/credentials') {
+    await handleMeListCredentials(ctx, res, userId)
+    return
+  }
+  if (method === 'POST' && path === '/api/me/credentials') {
+    await handleMeCreateCredential(ctx, req, res, userId)
+    return
+  }
+  {
+    const m = /^\/api\/me\/credentials\/([^/]+)$/.exec(path)
+    if (m && method === 'DELETE') {
+      await handleMeDeleteCredential(ctx, res, userId, decodeURIComponent(m[1]!))
       return
     }
   }
@@ -1204,6 +1267,89 @@ async function handleMeDeleteAgent(
   }
   try {
     const removed = await ctx.meAgentAdmin.remove(userId, agentId)
+    sendJson(res, { ok: true, removed })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Member API credentials — "bring your own key" (v5 A-M3)
+// ---------------------------------------------------------------------------
+
+/** Parse + shape-check a member credential create body. */
+function parseMeCredentialInput(body: Record<string, unknown>): MeCredentialInput {
+  if (typeof body.provider !== 'string' || body.provider.length === 0) {
+    throw httpError(400, 'provider is required')
+  }
+  if (typeof body.apiKey !== 'string' || body.apiKey.trim().length === 0) {
+    throw httpError(400, 'apiKey is required')
+  }
+  const apiKey = body.apiKey.trim()
+  if (apiKey.length > 800) {
+    throw httpError(400, 'apiKey is too long (max 800 chars)')
+  }
+  const out: MeCredentialInput = { provider: body.provider, apiKey }
+  if (body.label !== undefined) {
+    if (typeof body.label !== 'string') throw httpError(400, 'label must be a string')
+    const l = body.label.trim()
+    if (l.length > 0) out.label = l
+  }
+  return out
+}
+
+async function handleMeListCredentials(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.meCredentials) {
+    sendJson(res, { credentials: [], providers: [] })
+    return
+  }
+  try {
+    const [credentials, providers] = await Promise.all([
+      ctx.meCredentials.list(userId),
+      ctx.meCredentials.providers(),
+    ])
+    sendJson(res, { credentials, providers })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+async function handleMeCreateCredential(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.meCredentials) {
+    sendJson(res, { error: 'credential management unavailable (identity not wired)' }, 503)
+    return
+  }
+  const body = (await readJsonBody(req).catch(() => ({}))) as Record<string, unknown>
+  try {
+    const input = parseMeCredentialInput(body)
+    const credential = await ctx.meCredentials.create(userId, input)
+    sendJson(res, { ok: true, credential }, 201)
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+async function handleMeDeleteCredential(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+  credentialId: string,
+): Promise<void> {
+  if (!ctx.meCredentials) {
+    sendJson(res, { error: 'credential management unavailable (identity not wired)' }, 503)
+    return
+  }
+  try {
+    const removed = await ctx.meCredentials.remove(userId, credentialId)
     sendJson(res, { ok: true, removed })
   } catch (err) {
     sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))

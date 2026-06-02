@@ -43,6 +43,7 @@ import {
   type InboxSurface,
   type MeAgentListSurface,
   type MeAgentAdminSurface,
+  type MeCredentialsSurface,
 } from './me-routes.js'
 import {
   handleWorkflowRoute,
@@ -260,6 +261,12 @@ export interface WebServerOptions {
    * absent → those routes return 503 (the read-only directory still works).
    */
   meAgentAdmin?: MeAgentAdminSurface
+  /**
+   * v5 A-M3 — optional member API-credential surface for `/api/me/credentials`
+   * ("bring your own key"). Keys live in the identity vault, so the host wires
+   * this only when identity is present; absent → those routes return 503.
+   */
+  meCredentials?: MeCredentialsSurface
   /**
    * Phase 13 M3 — optional workflow assistant surface. The host wires
    * `createWorkflowAssistAgent(...)` here when a built-in
@@ -805,6 +812,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     workflows: opts.workflows,
     meAgents: opts.meAgents,
     meAgentAdmin: opts.meAgentAdmin,
+    meCredentials: opts.meCredentials,
     workflowAssist: opts.workflowAssist,
     services: opts.services,
     growthReports: opts.growthReports,
@@ -936,6 +944,8 @@ interface HandlerCtx {
   meAgents: MeAgentListSurface | undefined
   /** v5 A-M2 — see WebServerOptions.meAgentAdmin doc above. */
   meAgentAdmin: MeAgentAdminSurface | undefined
+  /** v5 A-M3 — see WebServerOptions.meCredentials doc above. */
+  meCredentials: MeCredentialsSurface | undefined
   /** Phase 13 M3 — see WebServerOptions.workflowAssist doc above. */
   workflowAssist: WorkflowAssistSurface | undefined
   services: ServicesAdminSurface | undefined
@@ -1517,6 +1527,8 @@ async function handle(
         meAgents: ctx.meAgents,
         // v5 A-M2 — member agent ownership + self-service CRUD; undefined → 503.
         meAgentAdmin: ctx.meAgentAdmin,
+        // v5 A-M3 — member API-credential management; undefined → 503.
+        meCredentials: ctx.meCredentials,
         // Phase 19 P1-M4 — member file uploads (same UploadSurface as admin,
         // member route scopes by userId); undefined → /api/me/uploads 503.
         uploads: ctx.uploads,
