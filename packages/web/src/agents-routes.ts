@@ -42,6 +42,8 @@ import {
   validateHeartbeatSpec,
   type ParsedAgent,
 } from './manifest.js'
+import { decryptJson } from './template-crypto.js'
+import { injectAgentSecrets, parseTemplate, type ParsedTemplate } from './template-manifest.js'
 
 const log = createLogger('agents-routes')
 
@@ -367,6 +369,124 @@ export async function handleAgentsRoute(
       team: { created: created.map((r) => publicAgent(r, ctx.hub)), skipped, spawnErrors },
       workflow: workflowSummary,
       workflowError,
+    })
+    return true
+  }
+
+  // --- template import (v5 B-M4) ---
+  // The inverse of the B-M2/B-M3 export: land an aipehub.template/v1's agents +
+  // workflows. Mirrors bundle import (same upsert / skip-existing / lifecycle /
+  // importFromText pattern) but with N workflows, KB slots reported (NOT
+  // auto-wired — decision #4: the importer connects their OWN knowledge base to
+  // each slot), and optional sidecar decryption (B-M3): with the separately-
+  // delivered key, scrubbed MCP secrets are re-injected. Personnel is NEVER
+  // restored — principal ids are hub-local and don't transfer across hubs.
+  if (method === 'POST' && path === '/api/admin/templates/import') {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    const rawBody = await readTextBody(req).catch(() => '')
+    if (!rawBody) { sendJson(res, { error: 'empty body' }, 400); return true }
+    let body: { template?: unknown; encryptionKey?: unknown }
+    try {
+      body = JSON.parse(rawBody)
+    } catch (err) {
+      sendJson(res, { error: `body must be JSON {"template": "<template yaml/json>", "encryptionKey": "<optional base64 key>"} — got: ${err instanceof Error ? err.message : String(err)}` }, 400)
+      return true
+    }
+    if (typeof body.template !== 'string' || body.template.length === 0) {
+      sendJson(res, { error: 'body.template is required (non-empty string)' }, 400)
+      return true
+    }
+    const encryptionKey =
+      typeof body.encryptionKey === 'string' && body.encryptionKey.length > 0 ? body.encryptionKey : undefined
+    let template: ParsedTemplate
+    try {
+      template = parseTemplate(body.template)
+    } catch (err) {
+      const msg = err instanceof ManifestError ? err.message : err instanceof Error ? err.message : String(err)
+      sendJson(res, { error: msg }, 400)
+      return true
+    }
+
+    // B-M3 sidecar: decrypt with the separately-delivered key, if present. No
+    // key + an encrypted block → land structure with ${PLACEHOLDER}s (the
+    // importer supplies real values via their own env); flagged in the response.
+    let secrets: Record<string, string> | undefined
+    let encryptedSkipped = false
+    let personnelOmitted = false
+    if (template.encrypted) {
+      if (!encryptionKey) {
+        encryptedSkipped = true
+      } else {
+        let sidecar: { secrets?: Record<string, string>; personnel?: unknown }
+        try {
+          sidecar = decryptJson(template.encrypted, encryptionKey) as typeof sidecar
+        } catch (err) {
+          sendJson(res, { error: `could not decrypt the template's sensitive sidecar — wrong key? (${err instanceof Error ? err.message : String(err)})` }, 400)
+          return true
+        }
+        if (sidecar.secrets && typeof sidecar.secrets === 'object') secrets = sidecar.secrets
+        // Personnel decrypts fine but is deliberately NOT restored (hub-local ids).
+        if (sidecar.personnel) personnelOmitted = true
+      }
+    }
+
+    const existing = new Set((await ctx.space.agents()).map((a) => a.id))
+    const created: AgentRecord[] = []
+    const skipped: string[] = []
+    for (const a of template.agents) {
+      if (existing.has(a.id)) { skipped.push(a.id); continue }
+      const managed = secrets ? injectAgentSecrets(a.managed, secrets) : a.managed
+      const rec = await ctx.space.upsertAgent({
+        id: a.id,
+        allowedCapabilities: a.capabilities,
+        displayName: a.displayName,
+        managed,
+      })
+      created.push(rec)
+      existing.add(a.id)
+    }
+    const spawnErrors: { id: string; error: string }[] = []
+    if (ctx.lifecycle) {
+      for (const rec of created) {
+        try { await ctx.lifecycle.start(rec) }
+        catch (err) { spawnErrors.push({ id: rec.id, error: err instanceof Error ? err.message : String(err) }) }
+      }
+    }
+
+    // N workflows — soft-report per id (a duplicate id fails just that one,
+    // agents already landed; mirrors the bundle's tolerant single-workflow path).
+    const workflows: { id: string; ok: boolean; error?: string }[] = []
+    for (const wf of template.workflows) {
+      if (!ctx.workflows) {
+        workflows.push({ id: wf.id, ok: false, error: 'workflows surface not enabled on this host' })
+        continue
+      }
+      try {
+        await ctx.workflows.importFromText(wf.yaml)
+        workflows.push({ id: wf.id, ok: true })
+      } catch (err) {
+        workflows.push({ id: wf.id, ok: false, error: err instanceof Error ? err.message : String(err) })
+      }
+    }
+
+    await reconcileHeartbeats('template')
+    sendJson(res, {
+      ok: true,
+      template: { name: template.name, version: template.version, description: template.description },
+      team: { created: created.map((r) => publicAgent(r, ctx.hub)), skipped, spawnErrors },
+      workflows,
+      // KB slots are reported, never auto-wired (decision #4) — the importer
+      // connects their own knowledge base to each declared slot.
+      knowledgeBases: template.knowledgeBases.map((kb) => ({
+        name: kb.name,
+        description: kb.description,
+        wiring: kb.mcpServer ? 'inline' : 'ref',
+        useMcpServer: kb.useMcpServer,
+      })),
+      secretsApplied: secrets ? Object.keys(secrets).length : 0,
+      encryptedSkipped,
+      personnelOmitted,
     })
     return true
   }

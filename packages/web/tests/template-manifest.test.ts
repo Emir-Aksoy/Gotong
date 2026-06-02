@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { parse as parseYaml } from 'yaml'
 
+import type { ManagedAgentSpec } from '@aipehub/core'
+
 import { ManifestError } from '../src/manifest.js'
+import { encryptJson } from '../src/template-crypto.js'
 import {
   TEMPLATE_SCHEMA_V1,
+  injectAgentSecrets,
   parseTemplate,
   renderTemplate,
   type TemplateAgentInput,
@@ -373,6 +377,82 @@ describe('renderTemplate (B-M2 structure export)', () => {
     const { template: out } = renderTemplate({ name: 't', knowledgeBases: [{ name: 'bad-kb-no-wiring' }] })
     // The renderer is permissive; the route's parseTemplate gate is the validator.
     expect(() => parseTemplate(JSON.stringify(out))).toThrow(/must declare its wiring/)
+  })
+})
+
+/**
+ * B-M4 — the import half. parseTemplate must carry the B-M3 encrypted sidecar
+ * through verbatim (it has no structural meaning, but a malformed blob is a
+ * corruption signal), and injectAgentSecrets must put the decrypted literals
+ * back where scrubAgentSecrets took them — without mutating the parsed input.
+ */
+describe('parseTemplate carries the B-M3 encrypted sidecar (B-M4)', () => {
+  it('passes a well-formed encrypted blob through untouched', () => {
+    const { blob } = encryptJson({ secrets: { '${KB_TOKEN}': 'sk-REAL' } })
+    const t = parseTemplate(
+      JSON.stringify({
+        schema: 'aipehub.template/v1',
+        template: { name: 't', agents: [llmAgent('a')], encrypted: blob },
+      }),
+    )
+    expect(t.encrypted).toEqual(blob)
+  })
+
+  it('a present-but-malformed encrypted block is rejected loudly', () => {
+    expect(() =>
+      parseTemplate(
+        JSON.stringify({
+          schema: 'aipehub.template/v1',
+          template: { name: 't', agents: [llmAgent('a')], encrypted: { algo: 'aes-256-gcm', iv: 'x' } },
+        }),
+      ),
+    ).toThrow(/encrypted is present but malformed/)
+  })
+
+  it('no sidecar → encrypted is undefined (the structure-only default)', () => {
+    const t = parseTemplate(tmpl({ agents: [llmAgent('a')] }))
+    expect(t.encrypted).toBeUndefined()
+  })
+})
+
+describe('injectAgentSecrets (B-M4 re-injection)', () => {
+  function managed(): ManagedAgentSpec {
+    return {
+      kind: 'llm',
+      provider: 'mock',
+      system: 'hi',
+      mcpServers: [
+        { name: 'kb', command: 'npx', env: { KB_TOKEN: '${KB_TOKEN}', OTHER: '${SUPPLIED_BY_IMPORTER}' } },
+        { name: 'api', transport: 'http', url: 'https://x/mcp', headers: { Authorization: '${AUTHORIZATION}' } },
+      ],
+    }
+  }
+
+  it('replaces a known placeholder with its real value (env + headers)', () => {
+    const out = injectAgentSecrets(managed(), {
+      '${KB_TOKEN}': 'sk-REAL',
+      '${AUTHORIZATION}': 'Bearer real-token',
+    })
+    expect(out.mcpServers?.[0]?.env?.KB_TOKEN).toBe('sk-REAL')
+    expect(out.mcpServers?.[1]?.headers?.Authorization).toBe('Bearer real-token')
+  })
+
+  it('leaves an unknown placeholder untouched (importer supplies it via env)', () => {
+    const out = injectAgentSecrets(managed(), { '${KB_TOKEN}': 'sk-REAL' })
+    expect(out.mcpServers?.[0]?.env?.OTHER).toBe('${SUPPLIED_BY_IMPORTER}')
+  })
+
+  it('deep-copies — the parsed input is never mutated', () => {
+    const input = managed()
+    const out = injectAgentSecrets(input, { '${KB_TOKEN}': 'sk-REAL' })
+    expect(input.mcpServers?.[0]?.env?.KB_TOKEN).toBe('${KB_TOKEN}') // original intact
+    expect(out.mcpServers).not.toBe(input.mcpServers) // a fresh array
+    expect(out.mcpServers?.[0]).not.toBe(input.mcpServers?.[0]) // fresh server objects
+  })
+
+  it('an agent without MCP servers is returned unchanged', () => {
+    const bare: ManagedAgentSpec = { kind: 'llm', provider: 'mock', system: 'hi' }
+    expect(injectAgentSecrets(bare, { '${X}': 'y' })).toBe(bare)
   })
 })
 

@@ -1726,7 +1726,15 @@ async function handle(
   }
 
   // Agents CRUD + bundle import live in agents-routes.ts (P3 audit cleanup).
-  if (path.startsWith('/api/admin/agents') || path === '/api/admin/bundles/import') {
+  // Agent CRUD, plus the two manifest *import* paths (bundle + v5 B-M4 template)
+  // — they land agents/workflows through the same Space/lifecycle/workflows ctx,
+  // so they live alongside agent import here. Template *export* is read-only and
+  // routed separately to handleTemplateRoute below.
+  if (
+    path.startsWith('/api/admin/agents') ||
+    path === '/api/admin/bundles/import' ||
+    path === '/api/admin/templates/import'
+  ) {
     const handled = await handleAgentsRoute(
       {
         hub: ctx.hub,

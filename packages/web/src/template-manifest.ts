@@ -2,6 +2,7 @@ import { parse as parseYaml } from 'yaml'
 
 import type { ManagedAgentSpec, McpServerSpec } from '@aipehub/core'
 
+import { isEncryptedBlob, type EncryptedBlob } from './template-crypto.js'
 import {
   ManifestError,
   TEAM_SCHEMA_V1,
@@ -113,6 +114,13 @@ export interface ParsedTemplate {
   workflows: ParsedTemplateWorkflow[]
   knowledgeBases: TemplateKnowledgeBase[]
   apiKeyPrompt?: BundleApiKeyPrompt
+  /**
+   * B-M3 sensitive sidecar (present iff the export opted into secrets/personnel).
+   * Opaque AES-256-GCM blob; the importer (B-M4) decrypts it with the
+   * separately-delivered key to recover `{ secrets?, personnel? }`. Structure
+   * parsing ignores it entirely — it carries no structural meaning.
+   */
+  encrypted?: EncryptedBlob
 }
 
 // A KB slot name is a local, addressable identifier (the Stream C.1 link
@@ -199,6 +207,14 @@ export function parseTemplate(raw: string): ParsedTemplate {
   if (typeof t.description === 'string') out.description = t.description
   const apiKeyPrompt = parseTemplateDefaults(t.defaults)
   if (apiKeyPrompt) out.apiKeyPrompt = apiKeyPrompt
+  // Carry the B-M3 encrypted sidecar through verbatim (B-M4 decrypts it). A
+  // present-but-malformed blob is a corruption signal — fail visibly.
+  if (t.encrypted !== undefined) {
+    if (!isEncryptedBlob(t.encrypted)) {
+      throw new ManifestError('template.encrypted is present but malformed (expected an aes-256-gcm blob)')
+    }
+    out.encrypted = t.encrypted
+  }
   return out
 }
 
@@ -472,6 +488,51 @@ function placeholderize(
 /** `Authorization` → `AUTHORIZATION`, `X-Api-Key` → `X_API_KEY` (env-var safe). */
 function headerEnvName(header: string): string {
   return header.toUpperCase().replace(/[^A-Z0-9]+/g, '_')
+}
+
+// ── B-M4: import-side secret re-injection (the inverse of scrubAgentSecrets) ──
+
+/**
+ * Re-inject decrypted secrets into a managed-agent spec on template import.
+ * `scrubAgentSecrets` left every literal as a `${PLACEHOLDER}` reference; here
+ * we replace any MCP env / header value that *is* one of those placeholders with
+ * its real value from `secrets` (keyed by the same `${…}` string). Returns a
+ * deep copy — the parsed template is never mutated. Values that aren't a known
+ * placeholder (e.g. a `${SOME_OTHER_ENV}` the importer wants to supply via their
+ * own environment) are left untouched.
+ */
+export function injectAgentSecrets(
+  managed: ManagedAgentSpec,
+  secrets: Record<string, string>,
+): ManagedAgentSpec {
+  const servers = managed.mcpServers
+  if (!Array.isArray(servers) || servers.length === 0) return managed
+  // McpServerSpec is a stdio|http union (env XOR headers). Treat each server
+  // structurally — same escape hatch scrubAgentSecrets uses on the export side —
+  // and clone+substitute whichever credential map is present.
+  const cloned: McpServerSpec[] = servers.map((s) => {
+    const src = s as { env?: Record<string, string>; headers?: Record<string, string> }
+    const copy = { ...s } as McpServerSpec & { env?: Record<string, string>; headers?: Record<string, string> }
+    if (src.env) copy.env = { ...src.env }
+    if (src.headers) copy.headers = { ...src.headers }
+    substituteSecrets(copy.env, secrets)
+    substituteSecrets(copy.headers, secrets)
+    return copy
+  })
+  return { ...managed, mcpServers: cloned }
+}
+
+function substituteSecrets(
+  map: Record<string, string> | undefined,
+  secrets: Record<string, string>,
+): void {
+  if (!map) return
+  for (const k of Object.keys(map)) {
+    const v = map[k]
+    if (typeof v === 'string' && Object.prototype.hasOwnProperty.call(secrets, v)) {
+      map[k] = secrets[v]!
+    }
+  }
 }
 
 /**
