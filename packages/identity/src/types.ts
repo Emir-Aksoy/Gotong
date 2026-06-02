@@ -855,6 +855,18 @@ export interface PeerRegistration {
    * shared server is callable (legacy); [] = locked out of all of them.
    */
   allowedKnowledgeBases: string[] | null
+  /**
+   * Audit L13 — corruption trail. Present (and non-empty) ONLY when one or
+   * more stored policy JSON columns were unparseable or the wrong shape and
+   * had to be normalised on read (e.g. `outbound_caps_json` held `"chat"`
+   * instead of `["chat"]`). Lists the projected field names that were
+   * salvaged (e.g. `['outboundCaps', 'acl.capabilities']`). Omitted entirely
+   * on a healthy row, so the record shape is unchanged for the common case —
+   * the same observable-flag pattern `SuspendedTask.corrupt` uses, giving a
+   * read-side trail without a logger (identity has none). A NULL column is
+   * NOT corruption (it's the legacy/accept-all default) and never flags.
+   */
+  policyCorrupt?: string[]
 }
 
 /** Phase 19 P4-M4 — a peer link's revocation status. */

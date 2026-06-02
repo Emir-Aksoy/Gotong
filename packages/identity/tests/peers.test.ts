@@ -40,6 +40,7 @@ import {
   IdentityStore,
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
+  type PeerRegistration,
 } from '../src/index.js'
 import { openDb } from '../src/db.js'
 
@@ -442,6 +443,126 @@ describe('IdentityStore — peers (D1)', () => {
       expect(p.allowedDataClasses).toBeNull()
       s.close()
       await rm(tmp2, { recursive: true, force: true })
+    })
+  })
+
+  // ---------- audit L13 — policy JSON normalization + corruption trail ----------
+
+  describe('policy JSON non-array normalization (audit L13)', () => {
+    // Hand-mangle one stored policy column to an arbitrary JSON string via a
+    // second raw connection (the only way to plant valid-JSON-wrong-shape —
+    // the store itself only ever writes via JSON.stringify), then read back.
+    async function readWithMangledColumn(
+      column: string,
+      rawJson: string,
+      seed: Parameters<IdentityStore['addPeer']>[0],
+    ): Promise<PeerRegistration> {
+      const tmp2 = await mkdtemp(join(tmpdir(), 'aipe-id-peers-l13-'))
+      const path = join(tmp2, 'identity.sqlite')
+      const mk = randomBytes(MASTER_KEY_LEN_BYTES)
+      const s1 = openIdentityStore({ dbPath: path, masterKey: mk })
+      s1.addPeer(seed)
+      s1.close()
+      const raw = openDb(path)
+      raw.prepare(`UPDATE peers SET ${column} = ? WHERE peer_id = ?`).run(rawJson, seed.peerId)
+      raw.close()
+      const s2 = openIdentityStore({ dbPath: path, masterKey: mk })
+      const p = s2.getPeerByPeerId(seed.peerId)!
+      s2.close()
+      await rm(tmp2, { recursive: true, force: true })
+      return p
+    }
+
+    const seedFor = (peerId: string) => ({
+      peerId,
+      endpointUrl: `wss://${peerId}.example`,
+      peerToken: `tok-${peerId}`,
+    })
+
+    it('a non-array outbound_caps_json ("chat" string) normalizes to null + trail — NOT a passthrough', async () => {
+      // The bug: the old parser returned the raw string, so `new Set("chat")`
+      // downstream char-splits into {c,h,a,t} — the WRONG allowlist.
+      const p = await readWithMangledColumn('outbound_caps_json', '"chat"', seedFor('hub_l13_str'))
+      expect(p.outboundCaps).toBeNull()
+      expect(p.policyCorrupt).toEqual(['outboundCaps'])
+    })
+
+    it('a numeric allowed_data_classes_json (42) normalizes to null + trail — NOT a "not iterable" crash', async () => {
+      const p = await readWithMangledColumn('allowed_data_classes_json', '42', seedFor('hub_l13_num'))
+      expect(p.allowedDataClasses).toBeNull()
+      expect(p.policyCorrupt).toEqual(['allowedDataClasses'])
+    })
+
+    it('an array with junk elements keeps the string entries (intent honoured) and flags', async () => {
+      const p = await readWithMangledColumn(
+        'allowed_knowledge_bases_json',
+        '["company_kb", 42, "policy_kb"]',
+        seedFor('hub_l13_junk'),
+      )
+      expect(p.allowedKnowledgeBases).toEqual(['company_kb', 'policy_kb'])
+      expect(p.policyCorrupt).toEqual(['allowedKnowledgeBases'])
+    })
+
+    it('an all-junk array collapses to [] (deny-all, fail-closed), never a passthrough', async () => {
+      const p = await readWithMangledColumn('outbound_caps_json', '[1, 2, 3]', seedFor('hub_l13_alljunk'))
+      expect(p.outboundCaps).toEqual([]) // [] = deny-all, distinct from null = send-all
+      expect(p.policyCorrupt).toEqual(['outboundCaps'])
+    })
+
+    it('an acl_json that is an array (wrong top-level shape) normalizes to null + trail', async () => {
+      const p = await readWithMangledColumn('acl_json', '["chat"]', seedFor('hub_l13_aclarr'))
+      expect(p.acl).toBeNull()
+      expect(p.policyCorrupt).toEqual(['acl'])
+    })
+
+    it('a non-array acl.capabilities sub-field is dropped + flagged (same new Set() risk)', async () => {
+      const p = await readWithMangledColumn(
+        'acl_json',
+        '{"capabilities":"chat","requireOrigin":true}',
+        seedFor('hub_l13_aclsub'),
+      )
+      // The object survives; the bad sub-array is dropped (undefined = no cap
+      // check), the good boolean is kept, and the trail names the sub-field.
+      expect(p.acl).toEqual({ requireOrigin: true })
+      expect(p.policyCorrupt).toEqual(['acl.capabilities'])
+    })
+
+    it('a healthy row omits policyCorrupt entirely (record shape unchanged)', () => {
+      const p = store.addPeer({
+        peerId: 'hub_l13_ok',
+        endpointUrl: 'wss://ok.example',
+        peerToken: 'tok-ok-1',
+        outboundCaps: ['chat'],
+        acl: { capabilities: ['chat'], requireOriginRole: ['admin'] },
+        allowedDataClasses: ['public'],
+      })
+      for (const r of [p, store.getPeerByPeerId('hub_l13_ok')!]) {
+        expect(r.outboundCaps).toEqual(['chat'])
+        expect(r.acl).toEqual({ capabilities: ['chat'], requireOriginRole: ['admin'] })
+        expect('policyCorrupt' in r).toBe(false)
+      }
+    })
+
+    it('multiple corrupt columns all appear in the trail', async () => {
+      const tmp2 = await mkdtemp(join(tmpdir(), 'aipe-id-peers-l13-multi-'))
+      const path = join(tmp2, 'identity.sqlite')
+      const mk = randomBytes(MASTER_KEY_LEN_BYTES)
+      const s1 = openIdentityStore({ dbPath: path, masterKey: mk })
+      s1.addPeer(seedFor('hub_l13_multi'))
+      s1.close()
+      const raw = openDb(path)
+      raw
+        .prepare('UPDATE peers SET outbound_caps_json = ?, allowed_data_classes_json = ? WHERE peer_id = ?')
+        .run('"x"', '{"a":1}', 'hub_l13_multi')
+      raw.close()
+      const s2 = openIdentityStore({ dbPath: path, masterKey: mk })
+      const p = s2.getPeerByPeerId('hub_l13_multi')!
+      s2.close()
+      await rm(tmp2, { recursive: true, force: true })
+      expect(p.outboundCaps).toBeNull()
+      expect(p.allowedDataClasses).toBeNull()
+      expect(p.policyCorrupt).toContain('outboundCaps')
+      expect(p.policyCorrupt).toContain('allowedDataClasses')
     })
   })
 

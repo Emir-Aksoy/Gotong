@@ -373,7 +373,10 @@ function assertNonEmptyId(id: unknown, label: string): asserts id is string {
 }
 
 function rowToPeerRegistration(r: PeerRow): PeerRegistration {
-  return {
+  // Audit L13 — collect every policy column we had to normalise so the read
+  // leaves a trail (`policyCorrupt`) instead of silently widening or crashing.
+  const corrupt: string[] = []
+  const reg: PeerRegistration = {
     id: r.id,
     peerId: r.peer_id,
     endpointUrl: r.endpoint_url,
@@ -384,34 +387,114 @@ function rowToPeerRegistration(r: PeerRow): PeerRegistration {
     updatedAt: r.updated_at,
     // Phase 18 B-M1 policy projection.
     kind: ((r.kind as PeerKind) || 'service'),
-    acl: parsePolicyJson<PeerInboundAcl>(r.acl_json),
-    outboundCaps: parsePolicyJson<string[]>(r.outbound_caps_json),
+    acl: parsePolicyAcl(r.acl_json, corrupt),
+    outboundCaps: parsePolicyArray(r.outbound_caps_json, 'outboundCaps', corrupt),
     requireApprovalOutbound: r.require_approval_outbound !== 0,
     // Phase 19 P4-M4 per-link contract projection.
     revocationState: r.revocation_state === 'revoked' ? 'revoked' : 'active',
     perLinkQuotaBudget:
       typeof r.per_link_quota_budget === 'number' ? r.per_link_quota_budget : null,
-    allowedDataClasses: parsePolicyJson<string[]>(r.allowed_data_classes_json),
+    allowedDataClasses: parsePolicyArray(r.allowed_data_classes_json, 'allowedDataClasses', corrupt),
     // v5 C-M1 callable-KB allowlist projection.
-    allowedKnowledgeBases: parsePolicyJson<string[]>(r.allowed_knowledge_bases_json),
+    allowedKnowledgeBases: parsePolicyArray(
+      r.allowed_knowledge_bases_json,
+      'allowedKnowledgeBases',
+      corrupt,
+    ),
   }
+  // Omit on healthy rows so the record shape is unchanged for the common case
+  // (mirrors `SuspendedTask.corrupt`).
+  if (corrupt.length > 0) reg.policyCorrupt = corrupt
+  return reg
 }
 
 /**
- * Parse a stored policy JSON column. Corrupt JSON degrades to null — the
- * same accept-all / send-all default a NULL column carries — instead of
- * throwing, so one hand-mangled row can't break the whole peer-list load
- * (same "don't let a bad row poison the read" rule as the suspended-task
- * corrupt-json drop). We only ever write these via JSON.stringify, so
- * corruption means external DB tampering, against which this buys
- * resilience, not security (the tamperer could just store NULL anyway).
+ * Coerce an already-parsed value into a `string[]` allowlist, or `null` when
+ * it isn't an array at all. A NON-array (`"chat"`, `42`, `{}`) is total shape
+ * corruption → fall back to the column's NULL default (`null`) + flag. An
+ * array with junk elements honours the restrict-intent: non-string entries are
+ * dropped (flagging), so an all-junk `[42]` collapses to `[]` = deny-all
+ * (fail-CLOSED), never a wrong-shape passthrough. The whole point: callers
+ * (`new Set(outboundCaps)` in peer-acl, `acl.requireOriginRole.includes(...)`
+ * in evaluateAcl) get a real array or null — never a string that char-splits
+ * in `new Set` nor a number that throws "not iterable".
  */
-function parsePolicyJson<T>(raw: string | null): T | null {
-  if (raw == null) return null
-  try {
-    const v = JSON.parse(raw)
-    return v == null ? null : (v as T)
-  } catch {
+function coerceStringArray(v: unknown, field: string, corrupt: string[]): string[] | null {
+  if (!Array.isArray(v)) {
+    corrupt.push(field)
     return null
   }
+  const strings = v.filter((x): x is string => typeof x === 'string')
+  if (strings.length !== v.length) corrupt.push(field)
+  return strings
+}
+
+/**
+ * Parse a stored policy JSON column that MUST hold a string array (the
+ * outbound capability / data-class / knowledge-base allowlists).
+ *
+ * The previous `parsePolicyJson<string[]>` only caught JSON *parse* errors, so
+ * a column holding valid-JSON-but-wrong-shape (`"chat"` or `42`) flowed
+ * straight through cast to `string[]` — a live bug downstream, not just a type
+ * lie: `new Set("chat")` char-splits into `{c,h,a,t}` (silently the WRONG
+ * allowlist) and `new Set(42)` throws (crashes link install). Normalising at
+ * this single chokepoint keeps both peer-acl gates honest.
+ *
+ * Corrupt JSON still degrades to null (the same accept-all / send-all default
+ * a NULL column carries) rather than throwing, so one hand-mangled row can't
+ * poison the whole peer-list load. We only ever write via JSON.stringify, so
+ * corruption means external DB tampering — this buys resilience, not security
+ * (a tamperer could store NULL anyway) — but now it also leaves a trail.
+ */
+function parsePolicyArray(raw: string | null, field: string, corrupt: string[]): string[] | null {
+  if (raw == null) return null
+  let v: unknown
+  try {
+    v = JSON.parse(raw)
+  } catch {
+    corrupt.push(field)
+    return null
+  }
+  return coerceStringArray(v, field, corrupt)
+}
+
+/**
+ * Parse the inbound-ACL JSON column into a sanitised `PeerInboundAcl` (object)
+ * or `null`. An array / primitive cast to an object would have flowed through
+ * the old generic parser; here a non-object degrades to null + flag. The
+ * `capabilities` / `requireOriginRole` sub-arrays are themselves normalised
+ * via `coerceStringArray` — they hit the same `new Set(...)` / `.includes(...)`
+ * paths in `evaluateAcl`, so a `"chat"` there char-splits and a number crashes
+ * exactly like the top-level columns.
+ */
+function parsePolicyAcl(raw: string | null, corrupt: string[]): PeerInboundAcl | null {
+  if (raw == null) return null
+  let v: unknown
+  try {
+    v = JSON.parse(raw)
+  } catch {
+    corrupt.push('acl')
+    return null
+  }
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) {
+    corrupt.push('acl')
+    return null
+  }
+  const src = v as Record<string, unknown>
+  const acl: PeerInboundAcl = {}
+  if (src.capabilities !== undefined) {
+    const caps = coerceStringArray(src.capabilities, 'acl.capabilities', corrupt)
+    // A non-array (caps===null) drops the field → undefined = no capability
+    // check, matching a top-level non-array → null = send-all.
+    if (caps !== null) acl.capabilities = caps
+  }
+  if (src.requireOrigin !== undefined) {
+    if (typeof src.requireOrigin === 'boolean') acl.requireOrigin = src.requireOrigin
+    else corrupt.push('acl.requireOrigin')
+  }
+  if (src.requireOriginRole !== undefined) {
+    const roles = coerceStringArray(src.requireOriginRole, 'acl.requireOriginRole', corrupt)
+    if (roles !== null) acl.requireOriginRole = roles
+  }
+  return acl
 }
