@@ -228,6 +228,13 @@ export interface WebServerOptions {
    */
   lifecycle?: ManagedAgentLifecycle
   /**
+   * v5 D-M4 — optional host callback to reconcile proactive-heartbeat rows
+   * after a managed-agent create / edit / delete. The host wires this to its
+   * HeartbeatScheduler (lazily spinning the engine up on first opt-in). When
+   * absent, heartbeat config still persists and takes effect on next boot.
+   */
+  reconcileHeartbeats?: () => Promise<void>
+  /**
    * Optional workflow controller. The host wires this to
    * `@aipehub/workflow` so the admin UI can list / import workflows
    * without the Web package taking a runtime dep on the workflow
@@ -782,6 +789,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     adminLoginLimiter,
     workerCreateLimiter,
     lifecycle: opts.lifecycle,
+    reconcileHeartbeats: opts.reconcileHeartbeats,
     workflows: opts.workflows,
     meAgents: opts.meAgents,
     workflowAssist: opts.workflowAssist,
@@ -908,6 +916,8 @@ interface HandlerCtx {
   adminLoginLimiter: RateLimiter
   workerCreateLimiter: RateLimiter
   lifecycle: ManagedAgentLifecycle | undefined
+  /** v5 D-M4 — see WebServerOptions.reconcileHeartbeats doc above. */
+  reconcileHeartbeats: (() => Promise<void>) | undefined
   workflows: WorkflowSurface | undefined
   /** Phase 19 P1-M3 — see WebServerOptions.meAgents doc above. */
   meAgents: MeAgentListSurface | undefined
@@ -1661,6 +1671,7 @@ async function handle(
         hub: ctx.hub,
         space: ctx.space,
         lifecycle: ctx.lifecycle,
+        reconcileHeartbeats: ctx.reconcileHeartbeats,
         workflows: ctx.workflows,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },

@@ -758,6 +758,48 @@ agent:
     )
   })
 
+  it('renderAgentManifest round-trips a heartbeat block (v5 D-M4)', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: watcher
+  capabilities: [watch]
+  kind: llm
+  provider: mock
+  system: hi
+  heartbeat:
+    enabled: true
+    intervalMs: 1800000
+    checklist: check the inbox
+`.trim()
+    const parsed = parseManifest(yaml)
+    expect(parsed.agents[0]!.managed.heartbeat).toEqual({
+      enabled: true,
+      intervalMs: 1_800_000,
+      checklist: 'check the inbox',
+    })
+    const rendered = renderAgentManifest({
+      id: parsed.agents[0]!.id,
+      allowedCapabilities: parsed.agents[0]!.capabilities,
+      managed: parsed.agents[0]!.managed,
+    })
+    const reparsed = parseManifest(JSON.stringify(rendered))
+    expect(reparsed.agents[0]!.managed.heartbeat).toEqual(parsed.agents[0]!.managed.heartbeat)
+  })
+
+  it('rejects a heartbeat with a non-positive intervalMs', () => {
+    const yaml = `
+schema: aipehub.agent/v1
+agent:
+  id: bad
+  capabilities: [x]
+  provider: mock
+  system: hi
+  heartbeat: { enabled: true, intervalMs: 0 }
+`.trim()
+    expect(() => parseManifest(yaml)).toThrow(/intervalMs must be a positive number/)
+  })
+
   it('absent mcpServers (the common case) yields undefined, not []', () => {
     const yaml = `
 schema: aipehub.agent/v1

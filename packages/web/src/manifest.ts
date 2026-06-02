@@ -1,6 +1,7 @@
 import { parse as parseYaml } from 'yaml'
 
 import type {
+  HeartbeatSpec,
   ManagedAgentSpec,
   McpServerSpec,
   ServiceUseSpec,
@@ -416,6 +417,13 @@ function validateAgent(a: Record<string, unknown>, path: string): ParsedAgent {
       `${path}.useMcpServers`,
     )
   }
+  // Optional `heartbeat:` — v5 Stream D proactive wake-up. Shape-only
+  // validation here; the host's HeartbeatScheduler acts on it at boot /
+  // on agent CRUD. Carried through manifests so an exported agent's
+  // heartbeat survives a round-trip (and rides along in B-stream templates).
+  if (a.heartbeat !== undefined) {
+    managed.heartbeat = validateHeartbeatSpec(a.heartbeat, `${path}.heartbeat`)
+  }
   const out: ParsedAgent = { id: a.id, capabilities, managed }
   if (typeof a.displayName === 'string') out.displayName = a.displayName
   return out
@@ -640,6 +648,32 @@ export function validateUseMcpServersArray(raw: unknown, path: string): string[]
 }
 
 /**
+ * Validate an optional `heartbeat:` block (v5 Stream D). Shape-only — the
+ * host's HeartbeatScheduler enforces the interval floor and acts on it.
+ * `intervalMs` must be a positive number; `checklist` is optional free text.
+ */
+export function validateHeartbeatSpec(raw: unknown, path: string): HeartbeatSpec {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ManifestError(`${path} must be an object`)
+  }
+  const h = raw as Record<string, unknown>
+  if (typeof h.enabled !== 'boolean') {
+    throw new ManifestError(`${path}.enabled must be a boolean`)
+  }
+  if (typeof h.intervalMs !== 'number' || !Number.isFinite(h.intervalMs) || h.intervalMs <= 0) {
+    throw new ManifestError(`${path}.intervalMs must be a positive number (milliseconds)`)
+  }
+  const spec: HeartbeatSpec = { enabled: h.enabled, intervalMs: h.intervalMs }
+  if (h.checklist !== undefined) {
+    if (typeof h.checklist !== 'string') {
+      throw new ManifestError(`${path}.checklist must be a string`)
+    }
+    spec.checklist = h.checklist
+  }
+  return spec
+}
+
+/**
  * Validate an optional `{ string: string }` map (used for both stdio
  * `env` and http/sse `headers`). Returns `undefined` when the field is
  * absent, the validated copy otherwise. Throws on a non-object or a
@@ -727,6 +761,13 @@ export function renderAgentManifest(rec: {
   }
   if (rec.managed.useMcpServers && rec.managed.useMcpServers.length > 0) {
     agent.useMcpServers = [...rec.managed.useMcpServers]
+  }
+  if (rec.managed.heartbeat) {
+    // Echo the proactive-heartbeat block so export → re-import preserves it.
+    const hb = rec.managed.heartbeat
+    const out: Record<string, unknown> = { enabled: hb.enabled, intervalMs: hb.intervalMs }
+    if (hb.checklist !== undefined) out.checklist = hb.checklist
+    agent.heartbeat = out
   }
   if (rec.displayName) agent.displayName = rec.displayName
   return {

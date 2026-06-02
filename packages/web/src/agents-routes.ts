@@ -39,6 +39,7 @@ import {
   renderAgentManifest,
   validateUsesArray,
   validateUseMcpServersArray,
+  validateHeartbeatSpec,
   type ParsedAgent,
 } from './manifest.js'
 
@@ -56,6 +57,14 @@ export interface AgentsRoutesCtx {
   space: Space
   lifecycle?: ManagedAgentLifecycle
   workflows?: AgentsWorkflowSurface
+  /**
+   * v5 D-M4 — optional host callback to re-seed / prune proactive-heartbeat
+   * rows after a managed-agent create / edit / delete. The host wires this to
+   * its HeartbeatScheduler (lazily spinning up the engine on first opt-in).
+   * Absent → heartbeat config still persists and takes effect on next boot,
+   * just not live. Best-effort: a failure here never fails the agent write.
+   */
+  reconcileHeartbeats?: () => Promise<void>
   requireAdmin: (req: IncomingMessage, res: ServerResponse) => Promise<AdminRecord | null>
 }
 
@@ -112,6 +121,11 @@ function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
   if (body.useMcpServers !== undefined) {
     managed.useMcpServers = validateUseMcpServersArray(body.useMcpServers, 'useMcpServers')
   }
+  // v5 Stream D — optional proactive heartbeat. The host reconciles parked
+  // wake-up rows from this on create/edit (see ctx.reconcileHeartbeats).
+  if (body.heartbeat !== undefined) {
+    managed.heartbeat = validateHeartbeatSpec(body.heartbeat, 'heartbeat')
+  }
   const out: ParsedAgent = { id: body.id, capabilities, managed }
   if (typeof body.displayName === 'string') out.displayName = body.displayName
   return out
@@ -142,6 +156,13 @@ export async function handleAgentsRoute(
   method: string,
   path: string,
 ): Promise<boolean> {
+  // v5 D-M4 — re-seed/prune heartbeat rows after an agent-set change.
+  // Best-effort: a reconcile failure is logged but never fails the write.
+  const reconcileHeartbeats = (at: string): Promise<void> =>
+    ctx.reconcileHeartbeats
+      ? ctx.reconcileHeartbeats().catch((err) => log.warn('heartbeat reconcile failed', { at, err }))
+      : Promise.resolve()
+
   // --- list agents ---
   if (method === 'GET' && path === '/api/admin/agents') {
     const admin = await ctx.requireAdmin(req, res)
@@ -217,6 +238,7 @@ export async function handleAgentsRoute(
         return true
       }
     }
+    await reconcileHeartbeats('create')
     sendJson(res, { ok: true, agent: publicAgent(record, ctx.hub) })
     return true
   }
@@ -261,6 +283,7 @@ export async function handleAgentsRoute(
         catch (err) { spawnErrors.push({ id: rec.id, error: err instanceof Error ? err.message : String(err) }) }
       }
     }
+    await reconcileHeartbeats('import')
     sendJson(res, {
       ok: true,
       created: created.map((r) => publicAgent(r, ctx.hub)),
@@ -337,6 +360,7 @@ export async function handleAgentsRoute(
         }
       }
     }
+    await reconcileHeartbeats('bundle')
     sendJson(res, {
       ok: true,
       bundle: { name: bundle.bundleName, description: bundle.bundleDescription },
@@ -406,6 +430,7 @@ export async function handleAgentsRoute(
         return true
       }
     }
+    await reconcileHeartbeats('edit')
     sendJson(res, { ok: true, agent: publicAgent(record, ctx.hub) })
     return true
   }
@@ -425,6 +450,7 @@ export async function handleAgentsRoute(
         log.error('lifecycle.onAgentRemoved failed', { id, err }),
       )
     }
+    await reconcileHeartbeats('delete')
     sendJson(res, { ok: true })
     return true
   }

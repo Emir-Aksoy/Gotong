@@ -128,6 +128,80 @@ describe('agents-route: useMcpServers (#2-M4a)', () => {
   })
 })
 
+describe('agents-route: heartbeat (v5 D-M4)', () => {
+  let b: Boot
+  let reconcileCalls: number
+
+  // Boots with a reconcileHeartbeats spy so we can assert a managed-agent
+  // mutation re-seeds/prunes heartbeat rows (the host wires this to its
+  // HeartbeatScheduler; here a counter stands in).
+  beforeEach(async () => {
+    reconcileCalls = 0
+    const tmp = await mkdtemp(join(tmpdir(), 'aipehub-agents-route-hb-'))
+    const init = await Space.init(tmp, { name: 'agents-route-hb-test' })
+    const space = init.space
+    const hub = new Hub({ space })
+    await hub.start()
+    const { token } = await space.createAdmin('TestAdmin')
+    const server = await serveWeb(hub, {
+      host: '127.0.0.1',
+      port: 0,
+      reconcileHeartbeats: async () => { reconcileCalls += 1 },
+    })
+    b = { tmp, hub, space, server, baseUrl: server.url, token }
+  })
+  afterEach(async () => { await teardown(b) })
+
+  it('POST persists a heartbeat block and triggers a reconcile', async () => {
+    const hb = { enabled: true, intervalMs: 1_800_000, checklist: 'check inbox' }
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST',
+      headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'hb-agent', heartbeat: hb }),
+    })
+    expect(res.status).toBe(200)
+    expect((await res.json()).agent.managed.heartbeat).toEqual(hb)
+    const rec = (await b.space.agents()).find((a) => a.id === 'hb-agent')
+    expect(rec?.managed.heartbeat).toEqual(hb)
+    expect(reconcileCalls).toBeGreaterThanOrEqual(1)
+  })
+
+  it('PUT can toggle heartbeat off and reconciles again', async () => {
+    await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST', headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'toggle', heartbeat: { enabled: true, intervalMs: 60_000 } }),
+    })
+    const before = reconcileCalls
+    const res = await fetch(`${b.baseUrl}/api/admin/agents/toggle`, {
+      method: 'PUT', headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'toggle', heartbeat: { enabled: false, intervalMs: 60_000 } }),
+    })
+    expect(res.status).toBe(200)
+    const rec = (await b.space.agents()).find((a) => a.id === 'toggle')
+    expect(rec?.managed.heartbeat?.enabled).toBe(false)
+    expect(reconcileCalls).toBeGreaterThan(before)
+  })
+
+  it('a malformed heartbeat (intervalMs: 0) → 400, nothing persisted, no reconcile', async () => {
+    const res = await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST', headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'bad-hb', heartbeat: { enabled: true, intervalMs: 0 } }),
+    })
+    expect(res.status).toBe(400)
+    expect((await b.space.agents()).some((a) => a.id === 'bad-hb')).toBe(false)
+    expect(reconcileCalls).toBe(0) // validation rejects before any side effect
+  })
+
+  it('omitting heartbeat leaves it undefined (not coerced)', async () => {
+    await fetch(`${b.baseUrl}/api/admin/agents`, {
+      method: 'POST', headers: auth(b.token),
+      body: JSON.stringify({ ...base, id: 'no-hb' }),
+    })
+    const rec = (await b.space.agents()).find((a) => a.id === 'no-hb')
+    expect(rec?.managed.heartbeat).toBeUndefined()
+  })
+})
+
 describe('agents-route: v4 identity admin auth', () => {
   let b: Boot
   beforeEach(async () => {

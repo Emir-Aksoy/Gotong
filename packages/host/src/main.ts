@@ -795,8 +795,10 @@ async function main(): Promise<void> {
   // singleton broker parks a self-renewing `suspended_tasks` row per
   // heartbeat-enabled agent; the resume sweep wakes it on cadence; it
   // dispatches the agent a heartbeat task, then re-parks for the next
-  // interval. Registered ONLY when at least one agent opts in (or stale
-  // rows need pruning) so hubs that never use heartbeat are untouched.
+  // interval. The engine is spun up lazily — a hub with zero heartbeat
+  // agents stays completely untouched, but one enabled at runtime (D-M4)
+  // brings the broker + scheduler online on the spot.
+  let reconcileHeartbeats: (() => Promise<void>) | undefined
   if (identity) {
     const heartbeatStore = identity
     const minRaw = Number(process.env.AIPE_HEARTBEAT_MIN_MS ?? '')
@@ -818,10 +820,12 @@ async function main(): Promise<void> {
       }
       return out
     }
-    const enabledHeartbeats = await listEnabledHeartbeats()
-    const existingHeartbeatRows =
-      heartbeatStore.listSuspendedTasksByAgent(HEARTBEAT_BROKER_ID)
-    if (enabledHeartbeats.length > 0 || existingHeartbeatRows.length > 0) {
+
+    // Build (once) the broker + scheduler. The broker is a cheap idle
+    // singleton — never capability-routed, only resumed by id via the sweep.
+    let heartbeatScheduler: HeartbeatScheduler | undefined
+    const ensureHeartbeatEngine = (): HeartbeatScheduler => {
+      if (heartbeatScheduler) return heartbeatScheduler
       const broker = new HeartbeatParticipant({
         fire: async (st) => {
           // D-M2: the payload carries the agent's standing checklist as a
@@ -855,19 +859,34 @@ async function main(): Promise<void> {
         },
       })
       hub.register(broker)
-      const heartbeatScheduler = new HeartbeatScheduler({
+      const sched = new HeartbeatScheduler({
         store: heartbeatStore,
         minIntervalMs: heartbeatMinMs,
         listEnabled: listEnabledHeartbeats,
       })
-      const r = await heartbeatScheduler.reconcile()
-      log.info('heartbeat engine started', {
-        enabled: enabledHeartbeats.length,
-        seeded: r.seeded.length,
-        pruned: r.pruned.length,
-        minIntervalMs: heartbeatMinMs,
-      })
+      heartbeatScheduler = sched
+      log.info('heartbeat engine started', { minIntervalMs: heartbeatMinMs })
+      return sched
     }
+
+    // Reconcile parked rows against the enabled roster. Called at boot and by
+    // agent CRUD (web layer). Stays fully dormant — no broker, no rows — until
+    // at least one agent opts in (preserves the D-M1 zero-regression promise).
+    reconcileHeartbeats = async (): Promise<void> => {
+      const enabled = await listEnabledHeartbeats()
+      const rows = heartbeatStore.listSuspendedTasksByAgent(HEARTBEAT_BROKER_ID)
+      if (enabled.length === 0 && rows.length === 0) return
+      const r = await ensureHeartbeatEngine().reconcile()
+      if (r.seeded.length > 0 || r.pruned.length > 0) {
+        log.info('heartbeat reconciled', {
+          enabled: enabled.length,
+          seeded: r.seeded.length,
+          pruned: r.pruned.length,
+        })
+      }
+    }
+
+    await reconcileHeartbeats()
   }
 
   // Hub Services (memory / artifact / datastore plugins). Plugin load
@@ -1301,6 +1320,7 @@ async function main(): Promise<void> {
     port: config.webPort,
     cookieSecure: config.cookieSecure,
     lifecycle: localAgents,
+    reconcileHeartbeats,
     mcpRegistry,
     mcpFederation,
     peerManifests: peerFederation,
