@@ -29,6 +29,7 @@ import {
   classifyHeartbeatResult,
   heartbeatResultText,
   parseHeartbeatState,
+  type HeartbeatAgentConfig,
   type HeartbeatStore,
 } from '../src/heartbeat.js'
 
@@ -259,6 +260,93 @@ describe('HeartbeatScheduler.reconcile', () => {
     enabled = []
     const r = await sched.reconcile()
     expect(r.pruned).toEqual(['a'])
+    expect(store.rows.size).toBe(0)
+  })
+
+  // --- audit M9: config edits must take effect; orphans must be pruned ----
+
+  it('applies an interval change on the next reconcile (re-anchored clock)', async () => {
+    const store = new MemStore()
+    let now = 1_000
+    let enabled: HeartbeatAgentConfig[] = [{ agentId: 'a', intervalMs: 500 }]
+    const sched = new HeartbeatScheduler({
+      store,
+      minIntervalMs: 0,
+      now: () => now,
+      listEnabled: () => enabled,
+    })
+    await sched.reconcile()
+    expect(store.rows.get(HEARTBEAT_TASK_PREFIX + 'a')!.resumeAt).toBe(1_500)
+
+    // Operator edits the interval 500 → 2000 (D-M4 calls reconcile on edit).
+    // The OLD code `continue`d on the existing row, so this change vanished.
+    now = 1_200
+    enabled = [{ agentId: 'a', intervalMs: 2_000 }]
+    const r = await sched.reconcile()
+    expect(r.updated).toEqual(['a'])
+    expect(r.seeded).toEqual([])
+    const row = store.rows.get(HEARTBEAT_TASK_PREFIX + 'a')!
+    expect((row.state as { intervalMs: number }).intervalMs).toBe(2_000)
+    expect(row.resumeAt).toBe(3_200) // re-anchored: now(1200) + new interval(2000)
+  })
+
+  it('applies a checklist change on the next reconcile', async () => {
+    const store = new MemStore()
+    let enabled: HeartbeatAgentConfig[] = [{ agentId: 'a', intervalMs: 500 }]
+    const sched = new HeartbeatScheduler({
+      store,
+      minIntervalMs: 0,
+      now: () => 0,
+      listEnabled: () => enabled,
+    })
+    await sched.reconcile()
+    expect(
+      (store.rows.get(HEARTBEAT_TASK_PREFIX + 'a')!.state as { checklist?: string }).checklist,
+    ).toBeUndefined()
+
+    enabled = [{ agentId: 'a', intervalMs: 500, checklist: 'check the inbox' }]
+    const r = await sched.reconcile()
+    expect(r.updated).toEqual(['a'])
+    expect(
+      (store.rows.get(HEARTBEAT_TASK_PREFIX + 'a')!.state as { checklist?: string }).checklist,
+    ).toBe('check the inbox')
+  })
+
+  it('leaves an unchanged row alone — no update, the live clock survives', async () => {
+    const store = new MemStore()
+    let now = 1_000
+    const enabled: HeartbeatAgentConfig[] = [{ agentId: 'a', intervalMs: 500, checklist: 'x' }]
+    const sched = new HeartbeatScheduler({
+      store,
+      minIntervalMs: 0,
+      now: () => now,
+      listEnabled: () => enabled,
+    })
+    await sched.reconcile()
+    now = 1_400 // clock advanced, but the config is identical
+    const r = await sched.reconcile()
+    expect(r.updated).toEqual([])
+    expect(r.seeded).toEqual([])
+    // The running clock must NOT be re-anchored on an unchanged reconcile,
+    // or a frequent reconcile would starve the cadence.
+    expect(store.rows.get(HEARTBEAT_TASK_PREFIX + 'a')!.resumeAt).toBe(1_500)
+  })
+
+  it('prunes a corrupt-state orphan row (no usable targetAgentId)', async () => {
+    const store = new MemStore()
+    // A broker row that can never be mapped back to an agent — the old guard
+    // (`typeof targetId === 'string' && …`) skipped these, so they waked the
+    // broker on every sweep forever.
+    store.persistSuspendedTask({
+      taskId: HEARTBEAT_TASK_PREFIX + 'ghost',
+      agentId: HEARTBEAT_BROKER_ID,
+      resumeAt: 0,
+      state: { intervalMs: 500 }, // no targetAgentId
+      taskJson: '{}',
+    })
+    const sched = new HeartbeatScheduler({ store, minIntervalMs: 0, listEnabled: () => [] })
+    const r = await sched.reconcile()
+    expect(r.pruned).toEqual([HEARTBEAT_TASK_PREFIX + 'ghost'])
     expect(store.rows.size).toBe(0)
   })
 })

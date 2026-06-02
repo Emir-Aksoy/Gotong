@@ -881,11 +881,12 @@ async function main(): Promise<void> {
       const rows = heartbeatStore.listSuspendedTasksByAgent(HEARTBEAT_BROKER_ID)
       if (enabled.length === 0 && rows.length === 0) return
       const r = await ensureHeartbeatEngine().reconcile()
-      if (r.seeded.length > 0 || r.pruned.length > 0) {
+      if (r.seeded.length > 0 || r.pruned.length > 0 || r.updated.length > 0) {
         log.info('heartbeat reconciled', {
           enabled: enabled.length,
           seeded: r.seeded.length,
           pruned: r.pruned.length,
+          updated: r.updated.length,
         })
       }
     }

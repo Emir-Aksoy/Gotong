@@ -267,6 +267,23 @@ export interface HeartbeatSchedulerOptions {
 }
 
 /**
+ * True when a parked row's stored state already matches the desired config
+ * (same target, interval, checklist). Used by {@link HeartbeatScheduler.reconcile}
+ * to decide whether an edit actually changed anything. Defensive: corrupt /
+ * non-object state compares as "different" so an enabled agent's broken row
+ * gets healed (re-persisted with valid state) rather than left to throw on
+ * every wake.
+ */
+function sameHeartbeatConfig(storedRaw: unknown, desired: HeartbeatState): boolean {
+  if (!storedRaw || typeof storedRaw !== 'object' || Array.isArray(storedRaw)) return false
+  const s = storedRaw as Partial<HeartbeatState>
+  if (s.targetAgentId !== desired.targetAgentId) return false
+  if (s.intervalMs !== desired.intervalMs) return false
+  const storedChecklist = typeof s.checklist === 'string' ? s.checklist : undefined
+  return storedChecklist === desired.checklist
+}
+
+/**
  * Reconciles parked heartbeat rows against the enabled agent roster. Run on
  * boot (and on config change in D-M4). Pure data — owns no timer; the
  * existing resume sweep is the heartbeat's clock.
@@ -286,26 +303,31 @@ export class HeartbeatScheduler {
 
   /**
    * Bring parked heartbeat rows in line with the enabled roster:
-   *   - seed a self-renewing row for each enabled agent that has none
-   *     (idempotent via the deterministic id — never resets a live clock);
-   *   - prune rows whose target is no longer enabled.
-   * Returns what changed (for boot logging / tests).
+   *   - seed a self-renewing row for each enabled agent that has none;
+   *   - UPDATE a row whose stored interval / checklist drifted from the
+   *     agent's current config (re-anchored to `now + newInterval` so an
+   *     edit takes effect on the next wake instead of being silently
+   *     ignored until a disable→re-enable cycle);
+   *   - PRUNE any broker row whose target isn't currently enabled —
+   *     including corrupt-state orphans (no usable `targetAgentId`), which
+   *     the old guard skipped and so waked the broker forever.
+   *
+   * An UNCHANGED enabled row is left untouched (its running clock survives),
+   * so a frequent reconcile never starves the cadence. Reconcile owns no
+   * timer (only boot + agent CRUD call it), so re-anchoring on a real edit
+   * can't be triggered in a tight loop. Returns what changed.
    */
-  async reconcile(): Promise<{ seeded: string[]; pruned: string[] }> {
+  async reconcile(): Promise<{ seeded: string[]; pruned: string[]; updated: string[] }> {
     const enabled = await this.listEnabled()
     const enabledIds = new Set(enabled.map((c) => c.agentId))
     const now = this.clock()
     const seeded: string[] = []
     const pruned: string[] = []
+    const updated: string[] = []
 
-    for (const cfg of enabled) {
-      const taskId = HEARTBEAT_TASK_PREFIX + cfg.agentId
-      if (this.store.getSuspendedTask(taskId)) continue // live row — leave its clock alone
-      const interval = Math.max(cfg.intervalMs, this.minIntervalMs)
-      const state: HeartbeatState = { targetAgentId: cfg.agentId, intervalMs: interval }
-      if (cfg.checklist !== undefined) state.checklist = cfg.checklist
+    const persistRow = (state: HeartbeatState, interval: number): void => {
       this.store.persistSuspendedTask({
-        taskId,
+        taskId: HEARTBEAT_TASK_PREFIX + state.targetAgentId,
         agentId: HEARTBEAT_BROKER_ID,
         hubId: 'local',
         originUserId: null,
@@ -313,16 +335,36 @@ export class HeartbeatScheduler {
         state,
         taskJson: JSON.stringify(buildHeartbeatTask(state, now)),
       })
-      seeded.push(cfg.agentId)
+    }
+
+    for (const cfg of enabled) {
+      const interval = Math.max(cfg.intervalMs, this.minIntervalMs)
+      const state: HeartbeatState = { targetAgentId: cfg.agentId, intervalMs: interval }
+      if (cfg.checklist !== undefined) state.checklist = cfg.checklist
+
+      const existing = this.store.getSuspendedTask(HEARTBEAT_TASK_PREFIX + cfg.agentId)
+      if (!existing) {
+        persistRow(state, interval)
+        seeded.push(cfg.agentId)
+      } else if (!sameHeartbeatConfig(existing.state, state)) {
+        // Config edit (or a corrupt row for a still-enabled agent) → re-write
+        // with the new state so the change actually takes effect.
+        persistRow(state, interval)
+        updated.push(cfg.agentId)
+      }
+      // else: unchanged — leave its live clock alone.
     }
 
     for (const row of this.store.listSuspendedTasksByAgent(HEARTBEAT_BROKER_ID)) {
       const targetId = (row.state as Partial<HeartbeatState> | null | undefined)?.targetAgentId
-      if (typeof targetId === 'string' && !enabledIds.has(targetId)) {
+      // Prune when the target isn't enabled — OR when the state is corrupt
+      // (no usable targetAgentId), which is a true orphan we can't map back
+      // to any agent and must not let wake the broker indefinitely.
+      if (typeof targetId !== 'string' || !enabledIds.has(targetId)) {
         this.store.removeSuspendedTask(row.taskId)
-        pruned.push(targetId)
+        pruned.push(typeof targetId === 'string' ? targetId : row.taskId)
       }
     }
-    return { seeded, pruned }
+    return { seeded, pruned, updated }
   }
 }
