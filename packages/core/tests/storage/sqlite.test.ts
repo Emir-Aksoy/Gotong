@@ -45,6 +45,16 @@ describe('SqliteStorage', () => {
     await s.close()
   })
 
+  it('exposes its tenant namespace (Route B P0-M1)', async () => {
+    const def = new SqliteStorage({ path: ':memory:' })
+    expect(def.namespace).toBe('default')
+    await def.close()
+    const ns = new SqliteStorage({ path: ':memory:', namespace: 'alpha' })
+    expect(ns.namespace).toBe('alpha')
+    await ns.close()
+    expect(() => new SqliteStorage({ path: ':memory:', namespace: 'BAD/NS' })).toThrow()
+  })
+
   it('persists across instances (file-backed)', async () => {
     const s1 = new SqliteStorage({ path })
     await s1.appendTranscriptEntry(joinEntry(1, 'a'))

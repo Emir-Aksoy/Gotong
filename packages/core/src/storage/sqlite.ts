@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { createRequire } from 'node:module'
 
 import { createLogger } from '../logger.js'
+import { normalizeNamespace } from '../tenant.js'
 import type { TranscriptEntry } from '../types.js'
 import type { Storage } from './index.js'
 
@@ -46,6 +47,12 @@ export interface SqliteStorageOptions {
    * callers who need to share a connection. When set, `path` is ignored.
    */
   db?: SqliteDatabase
+  /**
+   * Tenant/namespace this storage belongs to (Route B P0-M1). Defaults to
+   * `DEFAULT_TENANT`. Metadata only — the `path`/`db` is already
+   * tenant-resolved by the caller.
+   */
+  namespace?: string
 }
 
 /**
@@ -75,7 +82,11 @@ export class SqliteStorage implements Storage {
   private readonly ownsDb: boolean
   private writeQueue: Promise<void> = Promise.resolve()
 
+  /** Tenant this transcript DB belongs to (Route B P0-M1). */
+  readonly namespace: string
+
   constructor(opts: SqliteStorageOptions) {
+    this.namespace = normalizeNamespace(opts.namespace)
     if (opts.db) {
       this.db = opts.db
       this.ownsDb = false

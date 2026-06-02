@@ -85,6 +85,18 @@ export type { Logger, LogLevel, LoggerOptions } from './logger.js'
 export { InMemoryStorage, FileStorage, SqliteStorage } from './storage/index.js'
 export type { Storage, SqliteStorageOptions } from './storage/index.js'
 
+// Route B P0-M1 — tenant/namespace dimension. `DEFAULT_TENANT` resolves to
+// the bare workspace root (zero behaviour change); `tenantRoot` isolates
+// non-default tenants under `<root>/tenants/<id>/`.
+export {
+  DEFAULT_TENANT,
+  TenantIdError,
+  assertTenantId,
+  normalizeNamespace,
+  tenantRoot,
+} from './tenant.js'
+export type { TenantIdErrorCode } from './tenant.js'
+
 export { AgentParticipant } from './participants/agent.js'
 export type { AgentOptions } from './participants/agent.js'
 

@@ -131,6 +131,14 @@ import { randomInt } from 'node:crypto'
 
 const DEFAULT_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
+// Route B P0-M1 — tenant/namespace of this identity store. An identity DB is
+// already one tenant's (the `dbPath` is tenant-resolved by the host); this is
+// the self-describing label so higher layers can read back *which* tenant.
+// Kept as a local literal — `@aipehub/identity` has zero deps on purpose, so
+// we deliberately do NOT import `DEFAULT_TENANT` from `@aipehub/core`. The
+// value MUST stay in sync with core's `DEFAULT_TENANT`.
+const DEFAULT_NAMESPACE = 'default'
+
 // Invitation TTL bounds. Default 24h matches the operator's mental model
 // ("link is good for a day"). Lower bound is 1 minute (smoke-test floor;
 // anything shorter is almost certainly a typo). Upper bound is 30 days —
@@ -165,6 +173,13 @@ export interface OpenIdentityStoreInput {
    * Tests can inject a fixed buffer for determinism.
    */
   masterKey?: Buffer
+  /**
+   * Route B P0-M1 — tenant/namespace this store serves. Defaults to
+   * `'default'`. Metadata only: physical isolation is the host's
+   * tenant-resolved `dbPath` (see core's `tenantRoot`). Provided so a future
+   * multi-tenant host can tag each store and read the tenant back off it.
+   */
+  namespace?: string
 }
 
 interface UserRow {
@@ -375,6 +390,12 @@ function isUniqueViolation(err: unknown): boolean {
 export class IdentityStore {
   private readonly db: SqliteDb
   private readonly defaultSessionTtlMs: number
+  /**
+   * Tenant/namespace this identity store serves (Route B P0-M1). Metadata
+   * only — physical isolation is the host's tenant-resolved `dbPath`.
+   * Defaults to `'default'` (see {@link DEFAULT_NAMESPACE}).
+   */
+  readonly namespace: string
   // R13 — the vault domain (AES-256-GCM secret storage) lives in its own
   // VaultStore. IdentityStore composes one and forwards the public vault
   // methods, so callers see no API change. masterKey + vault prepared
@@ -462,9 +483,15 @@ export class IdentityStore {
   private readonly stmtImBindingCodeDeleteByUser: SqliteStmt
   private readonly stmtImBindingCodeDeleteExpired: SqliteStmt
 
-  constructor(db: SqliteDb, defaultSessionTtlMs: number, masterKey?: Buffer) {
+  constructor(
+    db: SqliteDb,
+    defaultSessionTtlMs: number,
+    masterKey?: Buffer,
+    namespace: string = DEFAULT_NAMESPACE,
+  ) {
     this.db = db
     this.defaultSessionTtlMs = defaultSessionTtlMs
+    this.namespace = namespace
     // R13 — vault domain extracted. VaultStore owns the masterKey (and
     // detects "host didn't configure encryption" vs "wrong key supplied")
     // plus its own lazy prepared statements + mutation listeners.
@@ -2597,7 +2624,18 @@ export function openIdentityStore(input: OpenIdentityStoreInput): IdentityStore 
       `masterKey must be a Buffer when provided; got ${typeof input.masterKey}`,
     )
   }
+  // Route B P0-M1 — namespace is metadata; a light non-empty-string guard is
+  // enough here (identity never builds paths from it, so full charset
+  // validation lives in core's `assertTenantId` at the path-resolving seam).
+  if (
+    input.namespace !== undefined &&
+    (typeof input.namespace !== 'string' || input.namespace.length === 0)
+  ) {
+    throw new TypeError(
+      `namespace must be a non-empty string when provided; got ${JSON.stringify(input.namespace)}`,
+    )
+  }
   const db = openDb(input.dbPath)
   applyMigrations(db)
-  return new IdentityStore(db, ttl, input.masterKey)
+  return new IdentityStore(db, ttl, input.masterKey, input.namespace ?? DEFAULT_NAMESPACE)
 }

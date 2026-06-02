@@ -3,6 +3,7 @@ import { appendFile, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
 import { createLogger } from '../logger.js'
+import { normalizeNamespace } from '../tenant.js'
 import type { TranscriptEntry } from '../types.js'
 import type { Storage } from './index.js'
 
@@ -19,7 +20,16 @@ const log = createLogger('storage/file')
 export class FileStorage implements Storage {
   private writeQueue: Promise<void> = Promise.resolve()
 
-  constructor(private readonly path: string) {
+  /** Tenant this transcript file belongs to (Route B P0-M1). The path is
+   *  already tenant-resolved by the caller; this is the self-describing
+   *  label, not a second source of truth for *where* bytes land. */
+  readonly namespace: string
+
+  constructor(
+    private readonly path: string,
+    namespace?: string,
+  ) {
+    this.namespace = normalizeNamespace(namespace)
     const dir = dirname(path)
     if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true })
   }

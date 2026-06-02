@@ -8,6 +8,19 @@ import type { TranscriptEntry } from '../types.js'
  * in without changing the call sites.
  */
 export interface Storage {
+  /**
+   * Tenant/namespace this storage belongs to (Route B P0-M1). A storage
+   * instance is already scoped to one tenant's transcript — the physical
+   * isolation lives upstream in how the path/db is resolved (see
+   * `tenantRoot`). This field only lets higher layers (Hub, web, routing)
+   * read back *which* tenant they're looking at without re-deriving it.
+   *
+   * Optional on the interface so external implementers aren't forced to set
+   * it; the built-in storages always populate it (defaulting to
+   * `DEFAULT_TENANT`).
+   */
+  readonly namespace?: string
+
   /** Load all previously persisted transcript entries, in seq order. */
   loadTranscript(): Promise<TranscriptEntry[]>
 

@@ -80,6 +80,7 @@ import {
   type SecretsFile,
 } from './secrets.js'
 import { FileStorage } from './storage/file.js'
+import { DEFAULT_TENANT } from './tenant.js'
 import type { ParticipantId } from './types.js'
 
 /**
@@ -793,9 +794,17 @@ export class Space {
 
   // --- transcript storage ---------------------------------------------------
 
-  /** A `FileStorage` rooted at `<root>/transcript.jsonl`. */
+  /**
+   * A `FileStorage` rooted at `<root>/transcript.jsonl`.
+   *
+   * A Space is one tenant's workspace directory — historically the *only*
+   * tenant. Route B P0-M1 makes that explicit by tagging the storage with
+   * {@link DEFAULT_TENANT}; the bytes are unchanged (the root path already
+   * is whatever the caller resolved, which for the default tenant is the
+   * bare workspace root — see `tenantRoot`).
+   */
   storage(): FileStorage {
-    return new FileStorage(this.paths.transcript)
+    return new FileStorage(this.paths.transcript, DEFAULT_TENANT)
   }
 
   // --- secrets (v2.1) -------------------------------------------------------

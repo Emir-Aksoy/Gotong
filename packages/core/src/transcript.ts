@@ -1,5 +1,6 @@
 import { createLogger } from './logger.js'
 import type { Storage } from './storage/index.js'
+import { DEFAULT_TENANT } from './tenant.js'
 import type { TranscriptEntry } from './types.js'
 
 const log = createLogger('transcript')
@@ -20,6 +21,15 @@ export class Transcript {
   private observers: Array<(entry: TranscriptEntry) => void> = []
 
   constructor(private readonly storage: Storage) {}
+
+  /**
+   * Tenant/namespace of the underlying storage (Route B P0-M1). Falls back
+   * to {@link DEFAULT_TENANT} for any storage that predates the dimension
+   * (an external `Storage` impl that doesn't set `namespace`).
+   */
+  namespace(): string {
+    return this.storage.namespace ?? DEFAULT_TENANT
+  }
 
   async load(): Promise<void> {
     const loaded = await this.storage.loadTranscript()
