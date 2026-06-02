@@ -11,6 +11,10 @@
  *       runs/                    — one JSON per run, written atomically
  *         <runId>.json
  *         …
+ *         archive/               — retained-but-pruned terminal runs (M3-M1)
+ *           <runId>.json         — moved here by `archiveRuns`; excluded from
+ *           …                      the active scan that boot-resume / listRuns
+ *                                  / metrics walk, so they stay O(tail)
  *
  * Why files, not memory:
  *   - Stays consistent with AipeHub's v2.0 "file-first" promise. Drop the
@@ -18,6 +22,15 @@
  *   - Lets an operator inspect a half-run workflow with `jq` / `cat`.
  *   - Sets up v0.2 resume (scan the runs/ dir on startup, restart anything
  *     not in a terminal status).
+ *
+ * Bounding growth (Route B P0-M3): the active `runs/` dir gains one file per
+ * run forever. Every `listRuns` / boot-resume / `/metrics` scrape reads ALL of
+ * them (O(all)). `archiveRuns` moves old TERMINAL runs into `runs/archive/`,
+ * which the non-recursive `listRunIds` naturally skips — so the active scan
+ * shrinks to O(tail). Archived bytes are never lost: `readArchived` /
+ * `listArchivedRunIds` reach them for audit / export. A `running` run is NEVER
+ * archived — boot-resume needs it on the active path (a human-inbox-parked run
+ * is also `status: 'running'`, so this one rule keeps both resumable).
  *
  * Writes are atomic: write to `<file>.tmp`, then rename. A `kill -9`
  * mid-write can never leave the run file half-formed.
@@ -34,6 +47,35 @@ import type { RunState, RunSummary } from './types.js'
 
 const SUBDIR_RUNS = 'runs'
 const SUBDIR_DEFINITIONS = 'definitions'
+/**
+ * Pruned terminal runs live one level under `runs/`. Named without a `.json`
+ * suffix so `listRunIds`' non-recursive `.json` filter excludes the directory
+ * entry automatically — the same trick the transcript archive (M2-M2) uses to
+ * keep archived segments off the active load path.
+ */
+const SUBDIR_ARCHIVE = 'archive'
+
+/**
+ * Retention policy for {@link RunStore.archiveRuns}. Both knobs are optional and
+ * may be combined; with neither set, `archiveRuns` is a no-op (it never guesses
+ * a default — the host's env policy decides, mirroring transcript `ArchiveOptions`).
+ */
+export interface ArchiveRunsOptions {
+  /**
+   * Keep this many of the NEWEST terminal runs on the active path (ranked by
+   * end time, `endedAt ?? startedAt`, descending). The rest are eligible to
+   * archive. Undefined ⇒ 0 protected. `running` runs are never counted here —
+   * they're always retained regardless.
+   */
+  keepLast?: number
+  /**
+   * Only archive terminal runs that ended strictly before this (epoch ms,
+   * keyed on `endedAt ?? startedAt`). Undefined ⇒ no age constraint. Combined
+   * with `keepLast`, a run is archived only when it is BOTH unprotected AND
+   * older than the cutoff.
+   */
+  before?: number
+}
 
 /**
  * RunStore — owns the on-disk shape of `.aipehub/workflows/`.
@@ -42,6 +84,7 @@ export class RunStore {
   readonly root: string
   readonly runsDir: string
   readonly definitionsDir: string
+  readonly archiveDir: string
 
   /**
    * @param spaceRoot The space root directory (e.g. `.aipehub`).
@@ -51,6 +94,7 @@ export class RunStore {
     this.root = join(spaceRoot, 'workflows')
     this.runsDir = join(this.root, SUBDIR_RUNS)
     this.definitionsDir = join(this.root, SUBDIR_DEFINITIONS)
+    this.archiveDir = join(this.runsDir, SUBDIR_ARCHIVE)
   }
 
   /** Create the directory tree if it doesn't exist. Idempotent. */
@@ -191,6 +235,95 @@ export class RunStore {
       out.length = Math.min(out.length, limit)
     }
     return out
+  }
+
+  // --- archive / prune (Route B P0-M3) -------------------------------------
+
+  /** Path for one archived run file (under `runs/archive/`). */
+  archivePathFor(runId: string): string {
+    return join(this.archiveDir, `${runId}.json`)
+  }
+
+  /**
+   * Move old TERMINAL runs into `runs/archive/`, out of the active scan path.
+   * Returns the run ids moved this call (possibly empty), so the host can log
+   * how much it pruned.
+   *
+   * A run is archived iff it is terminal (`status !== 'running'`), NOT among the
+   * `keepLast` newest terminal runs, AND (when `before` is set) it ended before
+   * the cutoff. `running` runs — including human-inbox-parked ones, which carry
+   * `status: 'running'` — are never touched, so boot-resume keeps finding them
+   * on the active path. Empty options are a no-op (never archive by accident).
+   *
+   * The move is `rename` (atomic within a filesystem). A `kill -9` between two
+   * renames leaves some runs archived and the rest active — both states are
+   * individually valid, and a later `archiveRuns` finishes the job idempotently.
+   */
+  async archiveRuns(opts: ArchiveRunsOptions = {}): Promise<string[]> {
+    const { keepLast, before } = opts
+    if (keepLast === undefined && before === undefined) return []
+    if (!existsSync(this.runsDir)) return []
+
+    // Gather active terminal runs with their end-time key. Skip 'running'
+    // (resume safety) and anything unreadable — leave a corrupt file on the
+    // active path where `read()` surfaces it rather than silently burying it.
+    const ids = await this.listRunIds()
+    const terminals: Array<{ id: string; endKey: number }> = []
+    for (const id of ids) {
+      let state: RunState | null
+      try {
+        state = await this.read(id)
+      } catch (err) {
+        console.error(
+          `[aipehub-workflow] archiveRuns: skipping unreadable run ${id}: ${err instanceof Error ? err.message : String(err)}`,
+        )
+        continue
+      }
+      if (!state) continue
+      if (state.status === 'running') continue // SAFETY: never archive a live/parked run
+      terminals.push({ id, endKey: state.endedAt ?? state.startedAt })
+    }
+
+    // keepLast protects the newest terminal runs (by end time, desc); the rest,
+    // when also older than `before`, are archived.
+    terminals.sort((a, b) => b.endKey - a.endKey)
+    const protectCount = keepLast ?? 0
+    const moved: string[] = []
+    for (let i = protectCount; i < terminals.length; i++) {
+      const t = terminals[i]!
+      if (before !== undefined && t.endKey >= before) continue
+      if (!existsSync(this.archiveDir)) mkdirSync(this.archiveDir, { recursive: true })
+      await rename(this.pathFor(t.id), this.archivePathFor(t.id))
+      moved.push(t.id)
+    }
+    return moved
+  }
+
+  /**
+   * List archived run ids (terminal runs moved out by `archiveRuns`). The
+   * active `listRunIds` excludes the `archive/` subdir automatically, so this
+   * is the explicit way to reach archived history for audit / export.
+   */
+  async listArchivedRunIds(): Promise<string[]> {
+    if (!existsSync(this.archiveDir)) return []
+    const files = await readdir(this.archiveDir)
+    return files
+      .filter((f) => f.endsWith('.json') && !f.endsWith('.tmp'))
+      .map((f) => f.slice(0, -'.json'.length))
+  }
+
+  /** Read an archived run state by id. Returns `null` if not in the archive. */
+  async readArchived(runId: string): Promise<RunState | null> {
+    const file = this.archivePathFor(runId)
+    if (!existsSync(file)) return null
+    const raw = await readFile(file, 'utf8')
+    try {
+      return JSON.parse(raw) as RunState
+    } catch (err) {
+      throw new Error(
+        `RunStore: archived '${file}' is not valid JSON: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    }
   }
 
   /**
