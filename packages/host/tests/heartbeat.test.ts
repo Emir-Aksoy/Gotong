@@ -21,9 +21,11 @@ import {
 
 import {
   HEARTBEAT_BROKER_ID,
+  HEARTBEAT_OK,
   HEARTBEAT_TASK_PREFIX,
   HeartbeatParticipant,
   HeartbeatScheduler,
+  buildHeartbeatPayload,
   parseHeartbeatState,
   type HeartbeatStore,
 } from '../src/heartbeat.js'
@@ -114,6 +116,43 @@ describe('parseHeartbeatState', () => {
     expect(() => parseHeartbeatState({ targetAgentId: 'a', intervalMs: -1 })).toThrow()
     expect(() => parseHeartbeatState(null)).toThrow()
     expect(() => parseHeartbeatState([])).toThrow()
+  })
+})
+
+// --- 1b. buildHeartbeatPayload (D-M2) --------------------------------------
+
+describe('buildHeartbeatPayload', () => {
+  it('embeds the checklist in the prompt and keeps it as a structured field', () => {
+    const p = buildHeartbeatPayload(
+      { targetAgentId: 'a', intervalMs: 60_000, checklist: 'check the inbox\nreview deadlines' },
+      1_000,
+    )
+    expect(p.heartbeat).toBe(true)
+    expect(p.firedAt).toBe(1_000)
+    expect(p.checklist).toBe('check the inbox\nreview deadlines')
+    // The prompt is what a default LlmAgent.buildRequest turns into the user
+    // turn — it must carry the checklist verbatim + the idle convention.
+    const prompt = p.prompt as string
+    expect(prompt).toContain('check the inbox')
+    expect(prompt).toContain('review deadlines')
+    expect(prompt).toContain(HEARTBEAT_OK)
+  })
+
+  it('falls back to a generic prompt and omits checklist when none is set', () => {
+    const p = buildHeartbeatPayload({ targetAgentId: 'a', intervalMs: 60_000 }, 2_000)
+    expect(p.heartbeat).toBe(true)
+    expect('checklist' in p).toBe(false) // absent stays absent — no null noise
+    const prompt = p.prompt as string
+    expect(prompt).toContain('standing responsibilities')
+    expect(prompt).toContain(HEARTBEAT_OK)
+  })
+
+  it('treats a whitespace-only checklist as no checklist for the prompt body', () => {
+    const p = buildHeartbeatPayload({ targetAgentId: 'a', intervalMs: 60_000, checklist: '   ' }, 3_000)
+    // Raw field is preserved (round-trips what the agent declared)...
+    expect(p.checklist).toBe('   ')
+    // ...but the prompt uses the generic body, not an empty checklist block.
+    expect(p.prompt as string).toContain('standing responsibilities')
   })
 })
 

@@ -191,6 +191,7 @@ import {
   HEARTBEAT_BROKER_ID,
   HeartbeatParticipant,
   HeartbeatScheduler,
+  buildHeartbeatPayload,
   type HeartbeatAgentConfig,
 } from './heartbeat.js'
 import { FileInboxStore, HumanInboxParticipant, HUMAN_CAPABILITY } from '@aipehub/inbox'
@@ -822,13 +823,14 @@ async function main(): Promise<void> {
     if (enabledHeartbeats.length > 0 || existingHeartbeatRows.length > 0) {
       const broker = new HeartbeatParticipant({
         fire: async (st) => {
-          // D-M1 fires a bare wake; D-M2 enriches the payload with the
-          // agent's checklist. A failing dispatch is swallowed by the
-          // broker so the cadence never stalls.
+          // D-M2: the payload carries the agent's standing checklist as a
+          // ready-to-read `prompt` (plus structured `heartbeat`/`checklist`
+          // fields). A failing dispatch is swallowed by the broker so the
+          // cadence never stalls.
           await hub.dispatch({
             from: HEARTBEAT_BROKER_ID,
             strategy: { kind: 'explicit', to: st.targetAgentId },
-            payload: { heartbeat: true },
+            payload: buildHeartbeatPayload(st, Date.now()),
             title: 'heartbeat',
           })
         },

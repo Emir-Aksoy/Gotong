@@ -40,6 +40,15 @@ export const HEARTBEAT_TASK_PREFIX = 'heartbeat:'
 export const DEFAULT_HEARTBEAT_MIN_MS = 60_000
 
 /**
+ * Sentinel an agent returns from a heartbeat turn when nothing needs
+ * attention. The host suppresses these (D-M3) so a quiet heartbeat makes no
+ * noise — the "don't bother me when there's nothing to do" convention. The
+ * heartbeat prompt (see {@link buildHeartbeatPayload}) instructs the agent to
+ * reply with exactly this string when idle.
+ */
+export const HEARTBEAT_OK = 'HEARTBEAT_OK'
+
+/**
  * The opaque `state` the broker round-trips through suspend/resume. It is
  * also the heartbeat task's payload at seed time, so `handleTask` and
  * `handleResume` parse the same shape.
@@ -110,6 +119,42 @@ export function buildHeartbeatTask(state: HeartbeatState, now: number): Task {
     title: `heartbeat:${state.targetAgentId}`,
     createdAt: now,
   }
+}
+
+/**
+ * The dispatched heartbeat task's payload (D-M2). It carries the agent's
+ * standing checklist as a ready-to-read `prompt` so a *default* `LlmAgent`
+ * — whose `buildRequest` turns `payload.prompt` into the user turn — wakes
+ * with a clean, on-topic instruction and needs ZERO heartbeat awareness.
+ *
+ * Structured fields ride alongside for heartbeat-aware subclasses / non-LLM
+ * participants:
+ *   - `heartbeat: true`  — marker to branch on a heartbeat turn.
+ *   - `checklist`        — the raw standing instructions (omitted if none).
+ *   - `firedAt`          — wake timestamp.
+ *
+ * The prompt always tells the agent to reply with exactly {@link HEARTBEAT_OK}
+ * when idle; D-M3 turns that reply into silence.
+ */
+export function buildHeartbeatPayload(state: HeartbeatState, now: number): Record<string, unknown> {
+  const checklist = typeof state.checklist === 'string' ? state.checklist.trim() : ''
+  const lines = ['[Heartbeat] Scheduled proactive check-in.', '']
+  if (checklist.length > 0) {
+    lines.push('Run through this checklist and act on anything that needs attention:', '', checklist)
+  } else {
+    lines.push('Review your standing responsibilities and act on anything that needs attention.')
+  }
+  lines.push('', `If nothing needs action, reply with exactly ${HEARTBEAT_OK} and do nothing else.`)
+
+  const payload: Record<string, unknown> = {
+    heartbeat: true,
+    firedAt: now,
+    prompt: lines.join('\n'),
+  }
+  // Keep the raw checklist only when present — absent stays absent (no `null`
+  // noise), matching how `parseHeartbeatState` treats it.
+  if (state.checklist !== undefined) payload.checklist = state.checklist
+  return payload
 }
 
 export interface HeartbeatParticipantOptions {
