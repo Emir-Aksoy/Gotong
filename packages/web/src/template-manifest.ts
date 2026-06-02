@@ -456,14 +456,112 @@ function scrubAgentSecrets(
   secrets: Record<string, string>,
 ): Record<string, unknown> {
   const servers = agent.mcpServers
-  if (!Array.isArray(servers)) return agent
-  for (const s of servers) {
-    if (!s || typeof s !== 'object') continue
-    const srv = s as { env?: Record<string, unknown>; headers?: Record<string, unknown> }
-    placeholderize(srv.env, (k) => `\${${k}}`, secrets)
-    placeholderize(srv.headers, (k) => `\${${headerEnvName(k)}}`, secrets)
+  if (Array.isArray(servers)) {
+    for (const s of servers) {
+      if (!s || typeof s !== 'object') continue
+      const srv = s as { env?: Record<string, unknown>; headers?: Record<string, unknown> }
+      placeholderize(srv.env, (k) => `\${${k}}`, secrets)
+      placeholderize(srv.headers, (k) => `\${${headerEnvName(k)}}`, secrets)
+    }
+  }
+  // A service `uses[].config` is opaque to web (only `plugin.validateConfig`
+  // knows its shape), so it can carry a literal credential — a hosted
+  // datastore's apiKey, an external service's token — right next to structural
+  // settings (scope, name, limits). We previously only scrubbed MCP env/headers,
+  // so those config secrets leaked verbatim into the public structure export.
+  // Scrub any credential-named value (recursively) into the sidecar, leaving
+  // structural keys untouched so the shipped file services still export usefully.
+  const uses = agent.uses
+  if (Array.isArray(uses)) {
+    for (const u of uses) {
+      if (!u || typeof u !== 'object') continue
+      const entry = u as { config?: unknown }
+      if (entry.config && typeof entry.config === 'object') {
+        // renderAgentManifest only shallow-copies config, so a nested object is
+        // still shared with the live agents.json record — build a fresh value
+        // rather than mutating in place.
+        entry.config = scrubConfigValue(entry.config, false, secrets)
+      }
+    }
   }
   return agent
+}
+
+// Credential-ish config keys (case-insensitive substring). Errs BROAD on
+// purpose: over-scrubbing a non-secret into the opt-in, encrypted sidecar is
+// harmless (it round-trips on import); under-scrubbing a real secret into the
+// public structure export is a leak. The shipped file services carry only
+// structural keys (name/scope/maxBytes/kinds), none of which match — their
+// config survives intact. A genuinely odd-named secret can still slip through;
+// that's the honest limit of classifying an opaque config map.
+function looksSecretKey(key: string): boolean {
+  const k = key.toLowerCase()
+  return (
+    k === 'key' ||
+    k === 'pass' ||
+    k.includes('secret') ||
+    k.includes('token') ||
+    k.includes('password') ||
+    k.includes('passwd') ||
+    k.includes('apikey') ||
+    k.includes('api_key') ||
+    k.includes('accesskey') ||
+    k.includes('access_key') ||
+    k.includes('auth') ||
+    k.includes('credential') ||
+    k.includes('bearer') ||
+    k.includes('privatekey') ||
+    k.includes('private_key')
+  )
+}
+
+/**
+ * Recursively scrub literal secrets out of an opaque service-config value,
+ * returning a FRESH structure (never mutates the input — config may be shared
+ * with the live record). `forceSecret` carries down once a parent key looked
+ * credential-ish, so `{ auth: { value: 'xyz' } }` scrubs `value` too. Every
+ * scrubbed string is recorded into `secrets` under a fresh unique placeholder
+ * (so two services' different apiKeys can't collide on one `${APIKEY}`), and an
+ * existing `${…}` placeholder is preserved verbatim — same contract as the MCP
+ * env/header scrub.
+ */
+function scrubConfigValue(
+  value: unknown,
+  forceSecret: boolean,
+  secrets: Record<string, string>,
+  keyHint = 'SECRET',
+): unknown {
+  if (typeof value === 'string') {
+    if (!forceSecret || ENV_PLACEHOLDER_RE.test(value)) return value
+    const placeholder = freshConfigPlaceholder(keyHint, secrets)
+    secrets[placeholder] = value
+    return placeholder
+  }
+  if (Array.isArray(value)) {
+    return value.map((v) => scrubConfigValue(v, forceSecret, secrets, keyHint))
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = scrubConfigValue(v, forceSecret || looksSecretKey(k), secrets, k)
+    }
+    return out
+  }
+  // number / boolean / null — not a recoverable secret, pass through.
+  return value
+}
+
+/** A `${CONFIG_<KEY>_<n>}` placeholder unique within the secrets map. */
+function freshConfigPlaceholder(keyHint: string, secrets: Record<string, string>): string {
+  const base =
+    keyHint.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'SECRET'
+  let n = 0
+  let placeholder = `\${CONFIG_${base}_${n}}`
+  while (Object.prototype.hasOwnProperty.call(secrets, placeholder)) {
+    n += 1
+    placeholder = `\${CONFIG_${base}_${n}}`
+  }
+  return placeholder
 }
 
 function placeholderize(
@@ -505,21 +603,56 @@ export function injectAgentSecrets(
   managed: ManagedAgentSpec,
   secrets: Record<string, string>,
 ): ManagedAgentSpec {
+  let result = managed
   const servers = managed.mcpServers
-  if (!Array.isArray(servers) || servers.length === 0) return managed
-  // McpServerSpec is a stdio|http union (env XOR headers). Treat each server
-  // structurally — same escape hatch scrubAgentSecrets uses on the export side —
-  // and clone+substitute whichever credential map is present.
-  const cloned: McpServerSpec[] = servers.map((s) => {
-    const src = s as { env?: Record<string, string>; headers?: Record<string, string> }
-    const copy = { ...s } as McpServerSpec & { env?: Record<string, string>; headers?: Record<string, string> }
-    if (src.env) copy.env = { ...src.env }
-    if (src.headers) copy.headers = { ...src.headers }
-    substituteSecrets(copy.env, secrets)
-    substituteSecrets(copy.headers, secrets)
-    return copy
-  })
-  return { ...managed, mcpServers: cloned }
+  if (Array.isArray(servers) && servers.length > 0) {
+    // McpServerSpec is a stdio|http union (env XOR headers). Treat each server
+    // structurally — same escape hatch scrubAgentSecrets uses on the export
+    // side — and clone+substitute whichever credential map is present.
+    const cloned: McpServerSpec[] = servers.map((s) => {
+      const src = s as { env?: Record<string, string>; headers?: Record<string, string> }
+      const copy = { ...s } as McpServerSpec & { env?: Record<string, string>; headers?: Record<string, string> }
+      if (src.env) copy.env = { ...src.env }
+      if (src.headers) copy.headers = { ...src.headers }
+      substituteSecrets(copy.env, secrets)
+      substituteSecrets(copy.headers, secrets)
+      return copy
+    })
+    result = { ...result, mcpServers: cloned }
+  }
+  // Mirror the export-side `uses[].config` scrub: put the decrypted literals
+  // back where scrubConfigValue replaced them with `${CONFIG_…}` placeholders.
+  // Deep-substitute so a nested credential is restored too; build fresh objects
+  // (the parsed input is never mutated).
+  const uses = result.uses
+  if (Array.isArray(uses) && uses.some((u) => u && u.config !== undefined)) {
+    const clonedUses = uses.map((u) =>
+      u && u.config !== undefined
+        ? { ...u, config: substituteConfigValue(u.config, secrets) as Record<string, unknown> }
+        : u,
+    )
+    result = { ...result, uses: clonedUses }
+  }
+  return result
+}
+
+/**
+ * Inverse of `scrubConfigValue` — recursively replace any string that is a known
+ * `${…}` placeholder with its real value from `secrets`, returning a fresh
+ * structure. Unknown placeholders are left untouched (the importer may supply
+ * them via their own environment), matching `substituteSecrets`.
+ */
+function substituteConfigValue(value: unknown, secrets: Record<string, string>): unknown {
+  if (typeof value === 'string') {
+    return Object.prototype.hasOwnProperty.call(secrets, value) ? secrets[value]! : value
+  }
+  if (Array.isArray(value)) return value.map((v) => substituteConfigValue(v, secrets))
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value)) out[k] = substituteConfigValue(v, secrets)
+    return out
+  }
+  return value
 }
 
 function substituteSecrets(

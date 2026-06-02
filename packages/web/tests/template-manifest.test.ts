@@ -373,6 +373,78 @@ describe('renderTemplate (B-M2 structure export)', () => {
     expect(Object.keys(secrets)).toHaveLength(0)
   })
 
+  it('placeholder-izes literal secrets in uses[].config but keeps structural keys (audit M6)', () => {
+    const withConfig = agentRec({
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'hi',
+        uses: [
+          {
+            type: 'datastore',
+            impl: 'http-kv',
+            config: {
+              scope: 'private', // structural — must survive verbatim
+              maxBytes: 1000, // structural non-string — untouched
+              apiKey: 'sk-LITERAL-cfg', // secret — must be scrubbed
+              endpoint: 'https://kv.example', // non-secret key — survives
+              auth: { token: 'tok-NESTED-secret' }, // nested secret — scrubbed
+            },
+          },
+        ],
+      },
+    })
+    const { template: out, secrets } = renderTemplate({ name: 't', agents: [withConfig] })
+    const json = JSON.stringify(out)
+    // The literal credentials are gone from the public structure export.
+    expect(json).not.toContain('sk-LITERAL-cfg')
+    expect(json).not.toContain('tok-NESTED-secret')
+    // Structural keys (and the endpoint URL) survive intact.
+    expect(json).toContain('private')
+    expect(json).toContain('https://kv.example')
+    expect(json).toContain('1000')
+    // Both literals (top-level + nested) were captured into the sidecar.
+    const captured = Object.values(secrets)
+    expect(captured).toContain('sk-LITERAL-cfg')
+    expect(captured).toContain('tok-NESTED-secret')
+  })
+
+  it('does not mutate the input record when scrubbing uses[].config (shared nested object)', () => {
+    const sharedConfig = { apiKey: 'sk-DONT-MUTATE', scope: 'private' }
+    const rec = agentRec({
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'hi',
+        uses: [{ type: 'datastore', impl: 'http-kv', config: sharedConfig }],
+      },
+    })
+    renderTemplate({ name: 't', agents: [rec] })
+    // The live record's config literal must be intact — the export builds a
+    // fresh scrubbed copy rather than overwriting the shared object.
+    expect(sharedConfig.apiKey).toBe('sk-DONT-MUTATE')
+  })
+
+  it('uses fresh unique placeholders so two services’ different apiKeys do not collide', () => {
+    const rec = agentRec({
+      managed: {
+        kind: 'llm',
+        provider: 'mock',
+        system: 'hi',
+        uses: [
+          { type: 'datastore', impl: 'a', config: { apiKey: 'sk-AAA' } },
+          { type: 'datastore', impl: 'b', config: { apiKey: 'sk-BBB' } },
+        ],
+      },
+    })
+    const { secrets } = renderTemplate({ name: 't', agents: [rec] })
+    // Distinct placeholders → both literals survive in the sidecar (no last-wins).
+    const captured = Object.values(secrets)
+    expect(captured).toContain('sk-AAA')
+    expect(captured).toContain('sk-BBB')
+    expect(Object.keys(secrets)).toHaveLength(2)
+  })
+
   it('a bad operator-supplied KB makes the rendered template fail the parse gate', () => {
     const { template: out } = renderTemplate({ name: 't', knowledgeBases: [{ name: 'bad-kb-no-wiring' }] })
     // The renderer is permissive; the route's parseTemplate gate is the validator.
@@ -453,6 +525,61 @@ describe('injectAgentSecrets (B-M4 re-injection)', () => {
   it('an agent without MCP servers is returned unchanged', () => {
     const bare: ManagedAgentSpec = { kind: 'llm', provider: 'mock', system: 'hi' }
     expect(injectAgentSecrets(bare, { '${X}': 'y' })).toBe(bare)
+  })
+
+  it('re-injects known placeholders into uses[].config, incl. nested (audit M6)', () => {
+    const m: ManagedAgentSpec = {
+      kind: 'llm',
+      provider: 'mock',
+      system: 'hi',
+      uses: [
+        {
+          type: 'datastore',
+          impl: 'http-kv',
+          config: {
+            scope: 'private',
+            apiKey: '${CONFIG_APIKEY_0}',
+            auth: { token: '${CONFIG_TOKEN_0}' },
+            other: '${SUPPLIED_BY_IMPORTER}',
+          },
+        },
+      ],
+    }
+    const out = injectAgentSecrets(m, {
+      '${CONFIG_APIKEY_0}': 'sk-REAL',
+      '${CONFIG_TOKEN_0}': 'tok-REAL',
+    })
+    const cfg = out.uses![0]!.config as Record<string, unknown>
+    expect(cfg.apiKey).toBe('sk-REAL')
+    expect((cfg.auth as Record<string, unknown>).token).toBe('tok-REAL')
+    expect(cfg.scope).toBe('private') // structural untouched
+    expect(cfg.other).toBe('${SUPPLIED_BY_IMPORTER}') // unknown placeholder left
+    // The parsed input is never mutated.
+    expect((m.uses![0]!.config as Record<string, unknown>).apiKey).toBe('${CONFIG_APIKEY_0}')
+  })
+
+  it('round-trips a uses[].config secret: export scrub → parse → inject (audit M6)', () => {
+    const { template: out, secrets } = renderTemplate({
+      name: 't',
+      agents: [
+        {
+          id: 'svc-agent',
+          allowedCapabilities: ['chat'],
+          managed: {
+            kind: 'llm',
+            provider: 'mock',
+            system: 'hi',
+            uses: [{ type: 'datastore', impl: 'http-kv', config: { scope: 'private', apiKey: 'sk-RT' } }],
+          },
+        },
+      ],
+    })
+    // The scrubbed structure parses back, then the captured secret re-injects.
+    const t = parseTemplate(JSON.stringify(out))
+    const restored = injectAgentSecrets(t.agents[0]!.managed!, secrets)
+    const cfg = restored.uses![0]!.config as Record<string, unknown>
+    expect(cfg.apiKey).toBe('sk-RT')
+    expect(cfg.scope).toBe('private')
   })
 })
 
