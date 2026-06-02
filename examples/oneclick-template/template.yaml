@@ -1,0 +1,89 @@
+# 一键模板示例 — 客服知识助手 (aipehub.template/v1)
+#
+# 这是 v5 Stream B「模板系统」的端到端样例:一个文件描述一整套架构 ——
+#   1 个客服 agent  +  1 个工单工作流  +  1 个可寻址知识库槽位。
+#
+# 「一键」= 导入这一个文件 + 填一次 API key,就能在工作流面板点「开始」跑工单。
+# 知识库走 MCP 接线 + presetData「指针」(决策 #4):框架永不吞知识内容,只接线。
+#
+# 导入:admin UI →「工作流 / Agents」→ 导入,或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/oneclick-template/template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+schema: aipehub.template/v1
+template:
+  name: 客服知识助手(一键模板)
+  description: |-
+    开箱即用的「客服 + 知识库」架构:1 个客服 agent + 1 个工单工作流 +
+    1 个可寻址知识库槽位(chroma-mcp 本机向量库)。导入时只需填一次 DeepSeek
+    API key,即可在工作流面板点「开始」跑工单 —— 知识内容由你自己的 KB 提供,
+    模板只带接线和一份可选的预置数据「指针」。
+  version: 1
+
+  # ── 1 个 agent:客服助手,挂一个本机知识库 MCP server ──────────────────────
+  # agent 的 mcpServers 是「自带」的 —— host spawn 时拉起 chroma-mcp 子进程,
+  # 把它的工具暴露给 agent 的 tool-use 循环。无需额外注册,导入即可用。
+  agents:
+    - id: support-agent
+      displayName: 客服助手
+      capabilities: [answer-ticket]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是公司客服助手。回答工单前,先用知识库工具检索公司资料,再基于检索
+        到的内容作答;检索不到就如实说「资料里没有」,绝不编造。
+
+        可用工具(经 MCP 提供):
+        - company_kb__query_collection: 检索公司知识库,返回相关片段
+
+        语气专业、简洁、友好。每次作答都标注你引用了哪条检索片段。
+      mcpServers:
+        - name: company_kb
+          command: uvx
+          args: [chroma-mcp, --persist-dir, .aipehub/knowledge/company-kb]
+          # 本机持久化模式不需要鉴权。若你换成「有鉴权的托管 KB」,把密钥写成
+          # ${ENV} 占位(如 CHROMA_TOKEN: ${COMPANY_KB_TOKEN})—— 导出模板时
+          # 字面 secret 会被自动脱敏成占位符,真值只在 includeSecrets 的加密
+          # 边车里(决策 #5),密钥另行传递。
+
+  # ── 1 个工作流:工单 → 客服 agent 回复 ───────────────────────────────────
+  workflows:
+    - id: ticket-flow
+      name: 工单处理
+      trigger:
+        capability: answer-ticket
+      steps:
+        - id: answer
+          dispatch:
+            strategy: { kind: capability, capabilities: [answer-ticket] }
+            payload:
+              q: $trigger.payload.q
+
+  # ── 1 个可寻址知识库槽位:MCP 接线 + 预置数据「指针」(不是内容!)──────────
+  # 槽位是模板里 KB 的「可寻址声明」(也是 Stream C 联邦 per-link 授权的目标)。
+  # 导入时只「上报」不「自动接线」(决策 #4)—— 由你把自己的 KB 接到这个槽位,
+  # 并按 presetData 指针显式拉取脱敏样例数据。
+  knowledgeBases:
+    - name: company_kb
+      description: 公司客服知识库(chroma-mcp 本机向量检索)
+      mcpServer:
+        name: company_kb
+        command: uvx
+        args: [chroma-mcp, --persist-dir, .aipehub/knowledge/company-kb]
+      presetData:
+        kind: url
+        ref: https://example.com/company-kb-seed.tar.zst
+        description: |-
+          一份脱敏的样例 KB 快照 —— 注意这是「指针」,不是内容。导入后由你显式
+          下载并解压到 chroma-mcp 的 --persist-dir;框架永不经手这份知识内容。
+
+  # ── 一键:导入时提示填一次 API key,自动应用到上面的 agent ────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek
