@@ -52,6 +52,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/llm
 
+  examples/coding-agent-bridge:
+    dependencies:
+      '@aipehub/cli-agent':
+        specifier: workspace:*
+        version: link:../../packages/cli-agent
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
   examples/cross-hub-mcp:
     dependencies:
       '@aipehub/core':
@@ -489,6 +498,9 @@ importers:
         specifier: ^6.38.0
         version: 6.38.0(ws@8.20.1)(zod@4.4.3)
     devDependencies:
+      '@aipehub/cli-agent':
+        specifier: workspace:*
+        version: link:../cli-agent
       '@aipehub/sdk-node':
         specifier: workspace:*
         version: link:../sdk-node

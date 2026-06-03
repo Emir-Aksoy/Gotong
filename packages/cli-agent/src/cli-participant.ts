@@ -251,7 +251,7 @@ export class CliParticipant extends AgentParticipant {
   }
 
   /** TERMINATE seam — a person cancels the task → kill the child process. */
-  onTaskCancelled(taskId: TaskId): void {
+  onTaskCancelled(taskId: TaskId, _reason?: string): void {
     this.running.get(taskId)?.abort()
   }
 }

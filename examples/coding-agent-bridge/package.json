@@ -1,0 +1,15 @@
+{
+  "name": "@aipehub/example-coding-agent-bridge",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Stream E E2-M3 demo — the hub DRIVES a self-hosted coding-agent CLI (Claude Code / Codex / OpenCode / Aider / Goose) as a Participant, with all five AGENT-ADAPTER-CONTRACT seams (observe / intercept / handoff / resume / terminate) shown against a deterministic mock CLI.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/cli-agent": "workspace:*",
+    "@aipehub/core": "workspace:*"
+  }
+}
