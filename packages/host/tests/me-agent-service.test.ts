@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Hub, Space, type AgentRecord, type ManagedAgentLifecycle, type ParticipantId } from '@aipehub/core'
-import { openIdentityStore, userPrincipal, type IdentityStore } from '@aipehub/identity'
+import { AUDIT_ACTIONS, openIdentityStore, userPrincipal, type IdentityStore } from '@aipehub/identity'
 
 import { HostMeAgentService } from '../src/me-agent-service.js'
 
@@ -173,5 +173,100 @@ describe('HostMeAgentService (v5 A-M2)', () => {
     h = await setup()
     h.lifecycle.providers = ['anthropic', 'openai', 'openai-compatible', 'mock']
     expect(await h.svc.availableProviders()).toEqual(['anthropic', 'openai', 'mock'])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Route B P1-M1 — the viewer < editor < owner ladder is ENFORCED, not just
+// recorded. Before this, sharing an agent at 'editor' was a dangerous illusion:
+// the grant existed but `update` demanded 'owner', so an editor got a flat 404.
+// Each test below pins one rung; neutralising a guard reds exactly one:
+//   - lower `update`'s required level to 'viewer' → "viewer → 403" reds.
+//   - make `remove`'s level 'editor' → "editor → 403 on remove" reds.
+//   - collapse the 403/404 split (always 404) → "viewer → 403" + audit reds.
+//   - drop the denial audit → the audit-row test reds.
+// ---------------------------------------------------------------------------
+describe('HostMeAgentService RBAC ladder (Route B P1-M1)', () => {
+  let h: Harness
+
+  afterEach(async () => {
+    await rm(h.tmp, { recursive: true, force: true })
+  })
+
+  /** Share USER's agent with OTHER (bob) at a given level. */
+  function shareWith(agentId: string, perm: 'viewer' | 'editor' | 'owner'): void {
+    h.identity.setResourceGrant({
+      resourceKind: 'agent',
+      resourceId: agentId,
+      principal: userPrincipal(OTHER),
+      perm,
+      grantedBy: USER,
+    })
+  }
+
+  it('viewer is read-only: update → 403 AND remove → 403 (nothing mutates)', async () => {
+    h = await setup()
+    const v = await h.svc.create(USER, baseInput)
+    shareWith(v.id, 'viewer')
+    h.lifecycle.started.length = 0
+
+    await expect(h.svc.update(OTHER, v.id, { system: 'x' })).rejects.toMatchObject({ status: 403 })
+    await expect(h.svc.remove(OTHER, v.id)).rejects.toMatchObject({ status: 403 })
+    // neither respawned nor torn down — the read-only grant changed nothing
+    expect(h.lifecycle.started).toHaveLength(0)
+    expect(h.lifecycle.stopped).toHaveLength(0)
+    expect((await h.space.agents()).some((a) => a.id === v.id)).toBe(true)
+  })
+
+  it('editor can edit but NOT delete: update → ok, remove → 403', async () => {
+    h = await setup()
+    const v = await h.svc.create(USER, baseInput)
+    shareWith(v.id, 'editor')
+    h.lifecycle.started.length = 0
+
+    const updated = await h.svc.update(OTHER, v.id, { system: 'edited by an editor' })
+    expect(updated.system).toBe('edited by an editor')
+    expect(h.lifecycle.started.map((r) => r.id)).toEqual([v.id]) // respawned with new config
+
+    await expect(h.svc.remove(OTHER, v.id)).rejects.toMatchObject({ status: 403 })
+    expect((await h.space.agents()).some((a) => a.id === v.id)).toBe(true) // still there
+  })
+
+  it('owner satisfies every rung: a co-owner can update AND delete', async () => {
+    h = await setup()
+    const v = await h.svc.create(USER, baseInput)
+    shareWith(v.id, 'owner') // bob is now a co-owner
+    await h.svc.update(OTHER, v.id, { system: 'co-owner edit' })
+    expect(await h.svc.remove(OTHER, v.id)).toBe(true)
+  })
+
+  it('no grant at all → 404 (anti-enumeration preserved)', async () => {
+    h = await setup()
+    const v = await h.svc.create(USER, baseInput)
+    await expect(h.svc.update(OTHER, v.id, { system: 'x' })).rejects.toMatchObject({ status: 404 })
+    await expect(h.svc.remove(OTHER, v.id)).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('an over-privilege 403 writes a resource_access_denied audit row; a bare 404 probe does NOT', async () => {
+    h = await setup()
+    const v = await h.svc.create(USER, baseInput)
+
+    // viewer over-reaches to edit → 403 + one denial audit row
+    shareWith(v.id, 'viewer')
+    await expect(h.svc.update(OTHER, v.id, { system: 'x' })).rejects.toMatchObject({ status: 403 })
+    const denied = h.identity.listAuditLog!({ action: AUDIT_ACTIONS.RESOURCE_ACCESS_DENIED })
+    expect(denied.length).toBeGreaterThanOrEqual(1)
+    expect(denied[0]).toMatchObject({
+      actorUserId: OTHER,
+      success: false,
+      metadata: { resourceKind: 'agent', resourceId: v.id, required: 'editor' },
+    })
+
+    // a blind probe by a stranger (no grant) is a 404 — never audited (it's
+    // indistinguishable from "agent doesn't exist", so logging it is just noise)
+    const before = h.identity.listAuditLog!({ action: AUDIT_ACTIONS.RESOURCE_ACCESS_DENIED }).length
+    await expect(h.svc.update('user-carol', v.id, { system: 'x' })).rejects.toMatchObject({ status: 404 })
+    const after = h.identity.listAuditLog!({ action: AUDIT_ACTIONS.RESOURCE_ACCESS_DENIED }).length
+    expect(after).toBe(before)
   })
 })

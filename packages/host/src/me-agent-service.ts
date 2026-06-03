@@ -32,7 +32,14 @@ import type {
   ParticipantId,
 } from '@aipehub/core'
 import { createLogger } from '@aipehub/core'
-import { userPrincipal, type Principal, type ResourceGrant } from '@aipehub/identity'
+import {
+  AUDIT_ACTIONS,
+  userPrincipal,
+  type GrantPerm,
+  type Principal,
+  type ResourceGrant,
+  type WriteAuditLogInput,
+} from '@aipehub/identity'
 import type { WebServerOptions } from '@aipehub/web'
 
 const log = createLogger('me-agent')
@@ -56,10 +63,12 @@ export interface MeAgentOwnershipStore {
     resourceKind: 'agent',
     resourceId: string,
     principal: Principal,
-    min: 'owner',
+    min: GrantPerm,
   ): boolean
   listPrincipalGrants(principal: Principal): ResourceGrant[]
   removeAllResourceGrants(resourceKind: 'agent', resourceId: string): number
+  /** Best-effort denial audit (P1-M1). Optional — absent in lean fakes. */
+  writeAuditLog?(input: WriteAuditLogInput): unknown
 }
 
 /** Providers a MEMBER may pick. `openai-compatible` is excluded — it needs a
@@ -161,7 +170,10 @@ export class HostMeAgentService implements MeAgentAdminSurface {
     agentId: string,
     input: Partial<Omit<MeAgentInput, 'id'>>,
   ): Promise<MeOwnedAgentView> {
-    this.assertOwns(userId, agentId)
+    // Editing is an EDITOR-level act: a member granted 'editor' on this agent
+    // can change its prompt / capabilities / model, but cannot delete it or
+    // re-share it (those stay owner-only). owner satisfies 'editor' too.
+    this.assertGrant(userId, agentId, 'editor')
     const recs = await this.space.agents()
     const rec = recs.find((a) => a.id === agentId)
     if (!rec || !rec.managed) {
@@ -195,7 +207,8 @@ export class HostMeAgentService implements MeAgentAdminSurface {
   }
 
   async remove(userId: string, agentId: string): Promise<boolean> {
-    this.assertOwns(userId, agentId)
+    // Deletion is destructive — OWNER only. An editor gets 403, not a delete.
+    this.assertGrant(userId, agentId, 'owner')
     // Tear down the live participant first (best-effort), then persistence,
     // then grants, then per-plugin service data (best-effort cleanup hook).
     await this.lifecycle.stop(agentId).catch((err) => log.warn('stop failed', { agentId, err }))
@@ -216,10 +229,41 @@ export class HostMeAgentService implements MeAgentAdminSurface {
 
   // -- internals ----------------------------------------------------------
 
-  /** Throw 404 (not 403) when `userId` doesn't own `agentId` — no enumeration. */
-  private assertOwns(userId: string, agentId: string): void {
-    if (!this.identity.hasResourceGrant('agent', agentId, userPrincipal(userId), 'owner')) {
-      throw httpError(404, 'agent not found')
+  /**
+   * Gate an action behind a minimum grant level on the agent (P1-M1). The
+   * ladder is enforced, not just owner:
+   *   - holds >= `min`            → pass.
+   *   - holds a LOWER grant       → 403 + a denial audit row. They already know
+   *                                 the agent exists (they have *a* grant), so
+   *                                 403 leaks nothing and is the honest answer.
+   *   - holds NO grant at all     → 404, exactly as before. Never confirm an
+   *                                 agent a member has no relationship with —
+   *                                 that preserves the anti-enumeration posture.
+   */
+  private assertGrant(userId: string, agentId: string, min: GrantPerm): void {
+    const principal = userPrincipal(userId)
+    if (this.identity.hasResourceGrant('agent', agentId, principal, min)) return
+    // Insufficient. Does the caller hold ANY grant (>= viewer, the floor)?
+    if (this.identity.hasResourceGrant('agent', agentId, principal, 'viewer')) {
+      this.auditDenied(userId, agentId, min)
+      throw httpError(403, `requires '${min}' permission on this agent`)
+    }
+    throw httpError(404, 'agent not found')
+  }
+
+  /** Best-effort over-privilege audit — a fault here never changes the 403. */
+  private auditDenied(userId: string, agentId: string, required: GrantPerm): void {
+    if (typeof this.identity.writeAuditLog !== 'function') return
+    try {
+      this.identity.writeAuditLog({
+        action: AUDIT_ACTIONS.RESOURCE_ACCESS_DENIED,
+        actorSource: 'v4-session',
+        actorUserId: userId,
+        success: false, // an explicit authorization failure, like login_failure
+        metadata: { resourceKind: 'agent', resourceId: agentId, required },
+      })
+    } catch (err) {
+      log.warn('denial audit write failed', { userId, agentId, required, err })
     }
   }
 

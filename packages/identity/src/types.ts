@@ -299,6 +299,14 @@ export const AUDIT_ACTIONS = {
   // level". metadata carries { resourceKind, resourceId, principal, perm }.
   RESOURCE_GRANT_SET: 'resource_grant_set',
   RESOURCE_GRANT_REVOKE: 'resource_grant_revoke',
+  // v6 Route B P1-M1 — a principal was DENIED an action on a resource because
+  // they hold a LOWER grant than the action requires (e.g. a viewer tried to
+  // edit an agent). Recorded so operators can see over-privilege attempts. A
+  // bare "no grant at all" is NOT audited — that path returns 404 and is
+  // indistinguishable from "resource doesn't exist", so logging it would just
+  // record every blind probe. metadata carries { resourceKind, resourceId,
+  // required }.
+  RESOURCE_ACCESS_DENIED: 'resource_access_denied',
   // v5 B-M3 — a template was exported WITH sensitive material (literal MCP
   // secrets and/or personnel/ownership info), the gated opt-in path. A plain
   // structure export is the safe default and is intentionally NOT audited.
