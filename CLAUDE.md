@@ -582,6 +582,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 生态接入与行业模板 (framework adapter + automation 桥 + 行业模板 + governance 元数据) | `docs/zh/V4-PHASE19-P5-FINAL.md` |
 | 企业 SSO — OIDC 单点登录 (账号联结 + 协议核 + client + provider 存储 + 登录/admin 路由 + UI) | `docs/zh/V6-ROUTE-B-P1-M4-OIDC.md` |
 | 企业 SSO — SAML 2.0 SP (成熟 DSig 库 + 自写 SP 胶水 + XSW 防护 + cert 公钥无 vault + JIT-link-by-asserted-email + 登录/admin 路由 + UI) | `docs/zh/V6-ROUTE-B-P1-M5-SAML.md` |
+| 联邦 peer onboarding (mint-peer-token CLI + admin onboarding 面板 + per-link 信任契约编辑器; 后端复用 Phase 18/P4/C-M1) | `docs/zh/V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md` |
 | 完整审计报告 | `docs/zh/AUDIT-v4-phase5.md` |
 | 主流 agent 适配器契约 (双向 + 可快速接管验收门) | `docs/zh/AGENT-ADAPTER-CONTRACT.md` |
 | 快捷接入主流 agent (入站: `aipehub connect <agent>`) | `docs/zh/QUICK-CONNECT.md` |
@@ -617,7 +618,7 @@ packages/                       30 个包, pnpm workspace
 │       ├── oidc-login-service.ts      Route B P1-M4e — 浏览器 SSO 往返编排 (single-use state + JIT-link-by-verified-email 不自动开户 + 铸同一 ses_ session)
 │       ├── saml-login-service.ts      Route B P1-M5d — 浏览器 SAML 往返编排 (single-use RelayState 验签前消费 + InResponseTo 钉死 + JIT-link-by-asserted-email + 铸同一 ses_ session; ACS URL 从 AIPE_PUBLIC_URL)
 │       └── ...
-├── web/                        admin UI HTTP + SSE + SPA; Route B P1-M4 OIDC: src/oidc-routes.ts (公开登录 start/callback/providers, pre-CSRF 区) + src/oidc-admin-routes.ts (admin provider CRUD, secret write-only) + static/oidc-ui.js (admin「SSO」tab 面板) + static/app.js renderSsoButtons (登录屏); Route B P1-M5 SAML: src/saml-routes.ts (公开 start/acs/providers/metadata, ACS 跨站 POST 住 pre-CSRF 区) + src/saml-admin-routes.ts (admin provider CRUD, cert 是公钥照常返回) + static/saml-ui.js (admin「SAML」tab 面板)
+├── web/                        admin UI HTTP + SSE + SPA; Route B P1-M4 OIDC: src/oidc-routes.ts (公开登录 start/callback/providers, pre-CSRF 区) + src/oidc-admin-routes.ts (admin provider CRUD, secret write-only) + static/oidc-ui.js (admin「SSO」tab 面板) + static/app.js renderSsoButtons (登录屏); Route B P1-M5 SAML: src/saml-routes.ts (公开 start/acs/providers/metadata, ACS 跨站 POST 住 pre-CSRF 区) + src/saml-admin-routes.ts (admin provider CRUD, cert 是公钥照常返回) + static/saml-ui.js (admin「SAML」tab 面板); Route B P1-M7 peer onboarding: static/peer-admin-ui.js (「联邦」tab `#peer-admin-panel` — peer CRUD/生命周期 + 行内 per-link 信任契约编辑器, peerToken write-only; 后端复用既有 identity-routes peer CRUD + parsePeerPolicyFields)
 ├── llm/                        LlmAgent + LlmProvider 抽象 + DispatchToolset + ComposedToolset
 ├── llm-anthropic/              Anthropic provider (streaming + tool use + vision)
 ├── llm-openai/                 OpenAI / DeepSeek / Qwen / Ollama (compat, streaming + tool use)
@@ -640,7 +641,7 @@ packages/                       30 个包, pnpm workspace
 ├── im-discord/                 Discord Gateway WSS
 ├── im-slack/                   Slack Events API webhook + HMAC
 ├── im-qq/                      QQ OneBot v11 forward WS
-├── cli/                        aipehub CLI (host start / repl / demo)
+├── cli/                        aipehub CLI (host start / repl / demo / connect / mint-peer-token [Route B P1-M7a: 256-bit base64url 对称 bearer, 纯无状态])
 └── evals/                      workflow / prompt 评测
 
 python-sdk/                     PyPI `aipehub` (含 adapters/ — Phase 19 P5 LangGraph/CrewAI participant adapter)
