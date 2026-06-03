@@ -35,7 +35,7 @@ export const ROLES: readonly Role[] = [
 // session every other auth path uses (decision D-3: self-built session, not
 // pure SP passthrough — AipeHub already owns a complete `Session` model, so
 // OIDC merely bootstraps it).
-export type CredentialKind = 'password' | 'admin_token' | 'api_key' | 'oidc'
+export type CredentialKind = 'password' | 'admin_token' | 'api_key' | 'oidc' | 'saml'
 
 export interface User {
   id: string
@@ -126,6 +126,28 @@ export interface LinkOidcInput {
 export interface OidcLogin {
   issuer: string
   sub: string
+  ttlMs?: number
+}
+
+/**
+ * Route B P1-M5b — bind a verified SAML identity to a local user. The (IdP
+ * entityID, NameID) pair is the SAML analogue of OIDC's (issuer, sub): the
+ * stable federated identity. The assertion signature + conditions MUST be
+ * validated upstream (@aipehub/saml validateSamlResponse in the host) before
+ * this is called — this store method is pure mapping + session-mint.
+ */
+export interface LinkSamlInput {
+  userId: string
+  /** The IdP's SAML entityID — the validated assertion Issuer. */
+  idpEntityId: string
+  /** The Subject NameID — the IdP's stable subject identifier. */
+  nameId: string
+}
+
+/** Route B P1-M5b — authenticate a previously-linked SAML identity. */
+export interface SamlLogin {
+  idpEntityId: string
+  nameId: string
   ttlMs?: number
 }
 

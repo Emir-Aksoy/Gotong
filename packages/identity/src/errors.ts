@@ -32,6 +32,14 @@ export type IdentityErrorCode =
   //                         idempotent no-op, not this error.
   | 'oidc_not_linked'
   | 'oidc_already_linked'
+  // Route B P1-M5b — SAML account linking (twins of the OIDC codes).
+  //   `saml_not_linked`     authenticateSaml found no local user for this
+  //                         (idpEntityId, NameID). The ACS route decides
+  //                         JIT-link-by-verified-email vs refuse.
+  //   `saml_already_linked` linkSaml was asked to bind a (idpEntityId, NameID)
+  //                         already mapped to a DIFFERENT local user.
+  | 'saml_not_linked'
+  | 'saml_already_linked'
   // Route B P1-M4d — OIDC provider (IdP) configuration store.
   //   `oidc_provider_exists`     addOidcProvider hit the UNIQUE(issuer) — one
   //                              IdP registration per issuer URL.

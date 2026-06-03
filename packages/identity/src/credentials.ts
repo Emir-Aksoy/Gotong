@@ -141,6 +141,27 @@ export function oidcLinkIdentifier(issuer: string, sub: string): string {
 }
 
 /**
+ * Stable, collision-free lookup key for a SAML (IdP entityID, NameID) pair.
+ *
+ * Route B P1-M5b — the SAML analogue of `oidcLinkIdentifier`. The same
+ * JSON-array-then-hash trick keeps the encoding unambiguous (entityIDs are URLs
+ * full of colons; a naive join could collide). Stored under kind='saml', so it
+ * never collides with an OIDC link even if two hashes matched — UNIQUE(kind,
+ * identifier) keeps the namespaces apart.
+ */
+export function samlLinkIdentifier(idpEntityId: string, nameId: string): string {
+  if (typeof idpEntityId !== 'string' || idpEntityId.length === 0) {
+    throw new Error('saml idpEntityId must be a non-empty string')
+  }
+  if (typeof nameId !== 'string' || nameId.length === 0) {
+    throw new Error('saml nameId must be a non-empty string')
+  }
+  return createHash('sha256')
+    .update(JSON.stringify([idpEntityId, nameId]), 'utf8')
+    .digest('hex')
+}
+
+/**
  * Constant-time compare two sha256 hex digests. Returns false on any
  * malformed input rather than throwing — callers want a boolean.
  */

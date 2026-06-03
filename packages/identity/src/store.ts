@@ -38,6 +38,7 @@ import {
   hashPassword,
   hashToken,
   oidcLinkIdentifier,
+  samlLinkIdentifier,
   verifyPassword,
 } from './credentials.js'
 import {
@@ -82,11 +83,13 @@ import {
   type ListAuditLogQuery,
   type ListInvitationsQuery,
   type LinkOidcInput,
+  type LinkSamlInput,
   type ListVaultEntriesQuery,
   type Membership,
   type AddOidcProviderInput,
   type OidcLogin,
   type OidcProvider,
+  type SamlLogin,
   type UpdateOidcProviderInput,
   type OwnerKind,
   type ResetUsageInput,
@@ -1273,6 +1276,118 @@ export class IdentityStore {
       throw new IdentityError({
         code: 'oidc_not_linked',
         message: 'no local user linked to this oidc identity',
+      })
+    }
+    return this.beginSession(
+      cred.user_id,
+      opts.ttlMs ?? this.defaultSessionTtlMs,
+      cred.id,
+    )
+  }
+
+  /**
+   * Route B P1-M5b — bind a verified SAML identity to a local user. The SAML
+   * twin of linkOidc: idempotent on the SAME (idpEntityId, NameID) → user, and
+   * throws `saml_already_linked` when that pair already maps to a DIFFERENT
+   * user. The assertion MUST be validated upstream (@aipehub/saml verifies the
+   * signature, Issuer, Audience, time window, Recipient, InResponseTo) — this
+   * method makes no trust decision, it only maps.
+   */
+  linkSaml(input: LinkSamlInput): string {
+    if (
+      typeof input?.userId !== 'string' ||
+      typeof input?.idpEntityId !== 'string' ||
+      typeof input?.nameId !== 'string' ||
+      input.idpEntityId.length === 0 ||
+      input.nameId.length === 0
+    ) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'linkSaml requires userId, idpEntityId, nameId',
+      })
+    }
+    const user = this.getUserById(input.userId)
+    if (!user) {
+      throw new IdentityError({
+        code: 'user_not_found',
+        message: `user not found: ${input.userId}`,
+      })
+    }
+    const identifier = samlLinkIdentifier(input.idpEntityId, input.nameId)
+    const existing = this.stmtFindCredByKindIdent.get('saml', identifier) as
+      | CredentialRow
+      | undefined
+    if (existing) {
+      if (existing.user_id === input.userId) return existing.id
+      throw new IdentityError({
+        code: 'saml_already_linked',
+        message: 'this identity is already linked to another user',
+      })
+    }
+    const credentialId = newId()
+    // No replayable secret of its own — the IdP-signed assertion is the proof,
+    // re-validated every login. secret_hash is '' (NOT NULL needs a value);
+    // `label` carries the IdP entityID so an admin sees WHICH IdP at a glance.
+    this.stmtInsertCredential.run(
+      credentialId,
+      input.userId,
+      'saml',
+      identifier,
+      '',
+      input.idpEntityId,
+      Date.now(),
+    )
+    return credentialId
+  }
+
+  /**
+   * Route B P1-M5b — look up the local user linked to a SAML identity.
+   * Returns the user id, or null when no link exists. Pure read; no session.
+   */
+  findUserBySaml(opts: { idpEntityId: string; nameId: string }): string | null {
+    if (
+      typeof opts?.idpEntityId !== 'string' ||
+      typeof opts?.nameId !== 'string' ||
+      opts.idpEntityId.length === 0 ||
+      opts.nameId.length === 0
+    ) {
+      return null
+    }
+    const identifier = samlLinkIdentifier(opts.idpEntityId, opts.nameId)
+    const cred = this.stmtFindCredByKindIdent.get('saml', identifier) as
+      | CredentialRow
+      | undefined
+    return cred ? cred.user_id : null
+  }
+
+  /**
+   * Route B P1-M5b — authenticate a previously-linked SAML identity, minting
+   * the SAME local `Session` every other auth path produces (decision D-3 from
+   * OIDC, reused here). Throws `saml_not_linked` when no local user is bound —
+   * the ACS route owns the provisioning policy (JIT-link-by-verified-email vs
+   * refuse), so this stays mechanism-only. MFA-exempt for the same reason as
+   * OIDC: the IdP is the authentication authority and runs its own MFA.
+   */
+  authenticateSaml(opts: SamlLogin): Session {
+    if (
+      typeof opts?.idpEntityId !== 'string' ||
+      typeof opts?.nameId !== 'string' ||
+      opts.idpEntityId.length === 0 ||
+      opts.nameId.length === 0
+    ) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'authenticateSaml requires idpEntityId, nameId',
+      })
+    }
+    const identifier = samlLinkIdentifier(opts.idpEntityId, opts.nameId)
+    const cred = this.stmtFindCredByKindIdent.get('saml', identifier) as
+      | CredentialRow
+      | undefined
+    if (!cred) {
+      throw new IdentityError({
+        code: 'saml_not_linked',
+        message: 'no local user linked to this saml identity',
       })
     }
     return this.beginSession(

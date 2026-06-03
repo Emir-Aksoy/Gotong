@@ -26,6 +26,8 @@ export type {
   CredentialKind,
   LinkOidcInput,
   OidcLogin,
+  LinkSamlInput,
+  SamlLogin,
   OidcProvider,
   AddOidcProviderInput,
   UpdateOidcProviderInput,
