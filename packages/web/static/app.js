@@ -278,7 +278,14 @@
   // name). Neither router used to include them, so clicking those buttons
   // just fell through to overview — R14b folds them into the one router.
   const C1_TABS = new Set(['home', 'settings'])
-  const ADMIN_TABS = new Set(['overview', 'agents', 'workflows', 'tasks', 'activity', 'services', 'users', 'quotas', 'reputation'])
+  // Every admin-shell tabbar button must be listed or the router falls the
+  // click through to overview. mcp/usage/federation were added to app.html
+  // after R14b folded quotas/reputation in but never registered here — so
+  // they were silently unreachable; restored alongside the new oidc (SSO) tab.
+  const ADMIN_TABS = new Set([
+    'overview', 'agents', 'workflows', 'tasks', 'activity', 'services',
+    'mcp', 'users', 'quotas', 'usage', 'reputation', 'federation', 'oidc',
+  ])
 
   function defaultTabForRole() {
     if (ADMIN_OR_OWNER) return 'overview'
@@ -1573,6 +1580,7 @@
       .then(() => inject('/reputation-ui.js'))
       .then(() => inject('/usage-ui.js'))
       .then(() => inject('/peer-manifest-ui.js'))
+      .then(() => inject('/oidc-ui.js'))
       .catch((err) => {
         console.error('[app] failed to load admin bundles', err)
       })

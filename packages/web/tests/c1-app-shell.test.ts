@@ -251,5 +251,30 @@ describe('C1 — unified SPA shell', () => {
       expect(html).toContain('name="totpCode"')
       expect(html).toContain('id="settings-mfa"')
     })
+
+    it('serves the P1-M4f SSO markup: owner-only SSO tab + panel + login buttons', async () => {
+      // Pins the rebuilt bundle carries the OIDC UI hooks: the M4f-3 admin
+      // SSO tab (owner-only) + its mount section, and the M4f-2 login-screen
+      // SSO button container. Goes red if app.html drops them after a rebuild.
+      const r = await fetch(`${b.baseUrl}/`, { headers: { cookie: b.adminCookie } })
+      const html = await r.text()
+      expect(html).toMatch(/data-tab="oidc"\s+data-roles="owner"/)
+      expect(html).toContain('id="oidc-panel"')
+      expect(html).toContain('id="login-sso"')
+    })
+  })
+
+  describe('OIDC admin bundle (Route B P1-M4f-3)', () => {
+    it('serves /oidc-ui.js with the provider-registry panel markers', async () => {
+      // The self-contained admin panel is a public static asset (app.js
+      // injects it for owners, but the file itself carries no secret — it
+      // only calls the requireAdmin-gated /api/admin/oidc/providers routes).
+      // This pins it is embedded + served so the SSO tab can mount.
+      const r = await fetch(`${b.baseUrl}/oidc-ui.js`)
+      expect(r.status).toBe(200)
+      const js = await r.text()
+      expect(js).toContain('oidc-add-form')
+      expect(js).toContain('/api/admin/oidc/providers')
+    })
   })
 })

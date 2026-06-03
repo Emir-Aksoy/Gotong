@@ -135,6 +135,7 @@
       <button class="tabbar-btn" type="button" data-tab="usage"     data-roles="owner" data-i18n="tabUsage">用量</button>
       <button class="tabbar-btn" type="button" data-tab="reputation" data-roles="owner" data-i18n="tabReputation">信誉</button>
       <button class="tabbar-btn" type="button" data-tab="federation" data-roles="owner" data-i18n="tabFederation">联邦</button>
+      <button class="tabbar-btn" type="button" data-tab="oidc"      data-roles="owner" data-i18n="tabOidc">SSO</button>
       <button class="tabbar-btn" type="button" data-tab="settings"  data-roles="owner,admin,member,viewer" data-i18n="tabSettings">设置</button>
     </nav>
 
@@ -1158,6 +1159,12 @@
            and lets the owner force an on-demand refresh. 503 inline when
            the host has no peer federation wired (peers disabled). -->
       <section id="peer-federation-panel" class="peer-federation-panel" data-tab="federation"></section>
+
+      <!-- Route B P1-M4f-3 — OIDC IdP registry. Owner-only. Filled by the
+           self-contained oidc-ui.js on tab activation (CRUD over
+           /api/admin/oidc/providers); 503 inline when the host wired no
+           identity store. -->
+      <section id="oidc-panel" class="oidc-panel" data-tab="oidc"></section>
     </main>
   </body>
 </html>
