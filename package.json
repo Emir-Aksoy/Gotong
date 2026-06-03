@@ -32,6 +32,8 @@
     "demo:personal-coding-hub:template": "pnpm --filter @aipehub/example-personal-coding-hub load-template",
     "demo:personal-research-hub": "pnpm --filter @aipehub/example-personal-research-hub start",
     "demo:personal-research-hub:template": "pnpm --filter @aipehub/example-personal-research-hub load-template",
+    "demo:battle-monk-training": "pnpm --filter @aipehub/example-battle-monk-training start",
+    "demo:battle-monk-training:template": "pnpm --filter @aipehub/example-battle-monk-training load-template",
     "demo:obsidian-kb": "pnpm --filter @aipehub/example-obsidian-kb start",
     "demo:elasticsearch-kb": "pnpm --filter @aipehub/example-elasticsearch-kb start",
     "demo:im-bridge-host": "pnpm --filter @aipehub/example-im-bridge-host start",

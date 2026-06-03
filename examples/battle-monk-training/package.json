@@ -6,10 +6,12 @@
   "description": "战斗修士锻炼 — a personal-growth hub for the austere: a preceptor (router LLM) drives three pillars (body / mind / lore), each writing the trainee's evolving STATE into a persistent Obsidian-style Codex. Grimdark-monastic aesthetic (original homage). Deterministic, no API key.",
   "scripts": {
     "start": "tsx src/index.ts",
+    "load-template": "tsx src/load-template.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@aipehub/core": "workspace:*",
-    "@aipehub/llm": "workspace:*"
+    "@aipehub/llm": "workspace:*",
+    "yaml": "^2.6.0"
   }
 }
