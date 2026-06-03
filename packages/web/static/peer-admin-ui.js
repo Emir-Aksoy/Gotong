@@ -242,6 +242,8 @@
       '        <option value="active"' + (revoked ? '' : ' selected') + '>active</option>' +
       '        <option value="revoked"' + (revoked ? ' selected' : '') + '>revoked</option>' +
       '      </select></label>' +
+      '    <label class="pa-pol-check"><input class="pa-pol-sharesummary" type="checkbox"' +
+      (p.shareSummary ? ' checked' : '') + ' /> 向该对端共享本 hub 摘要 <small>(仅计数, 控制面用)</small></label>' +
       '  </div>' +
       '  <button type="button" class="pa-pol-save">保存策略</button>' +
       '</div>'
@@ -270,6 +272,7 @@
       allowedKnowledgeBases: textToArr($('.pa-pol-kb', detail).value),
       perLinkQuotaBudget: perLinkQuotaBudget,
       revocationState: $('.pa-pol-revstate', detail).value,
+      shareSummary: $('.pa-pol-sharesummary', detail).checked,
     }
     setStatus(root, '保存策略...', 'loading')
     try {

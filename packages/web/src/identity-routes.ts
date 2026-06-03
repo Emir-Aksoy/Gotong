@@ -181,6 +181,9 @@ export interface IdentityPeerDTO {
   allowedDataClasses: string[] | null
   // v5 C-M1 callable-knowledge-base allowlist (always present from a v17 store).
   allowedKnowledgeBases: string[] | null
+  // v5 E5 — opt-in to expose a privacy-safe footprint summary over peer.summary
+  // (always present from a v23 store; default false = fail-closed).
+  shareSummary: boolean
 }
 
 export interface IdentityOrgQuotaDTO {
@@ -290,6 +293,7 @@ export interface IdentitySurface {
     perLinkQuotaBudget?: number | null
     allowedDataClasses?: string[] | null
     allowedKnowledgeBases?: string[] | null
+    shareSummary?: boolean
   }): IdentityPeerDTO
   listPeers?(): IdentityPeerDTO[]
   updatePeer?(
@@ -307,6 +311,7 @@ export interface IdentitySurface {
       perLinkQuotaBudget?: number | null
       allowedDataClasses?: string[] | null
       allowedKnowledgeBases?: string[] | null
+      shareSummary?: boolean
     },
   ): IdentityPeerDTO
   removePeer?(id: string): boolean
@@ -2060,6 +2065,8 @@ interface PeerPolicyFields {
   allowedDataClasses?: string[] | null
   // v5 C-M1 — the callable-knowledge-base allowlist (null = all callable).
   allowedKnowledgeBases?: string[] | null
+  // v5 E5 — opt-in to share a privacy-safe footprint summary (fail-closed default).
+  shareSummary?: boolean
 }
 
 /**
@@ -2107,6 +2114,7 @@ function parsePeerPolicyFields(b: {
   perLinkQuotaBudget?: unknown
   allowedDataClasses?: unknown
   allowedKnowledgeBases?: unknown
+  shareSummary?: unknown
 }): { ok: true; value: PeerPolicyFields } | { ok: false; error: string } {
   const value: PeerPolicyFields = {}
   if (b.kind !== undefined) {
@@ -2164,6 +2172,14 @@ function parsePeerPolicyFields(b: {
     if (b.allowedKnowledgeBases === null) value.allowedKnowledgeBases = null
     else if (isStringArray(b.allowedKnowledgeBases)) value.allowedKnowledgeBases = b.allowedKnowledgeBases
     else return { ok: false, error: 'allowedKnowledgeBases must be a string array or null' }
+  }
+  // v5 E5 — opt into exposing a privacy-safe footprint summary over peer.summary
+  // (counts only, fail-closed default). A plain boolean: there's no "null" state.
+  if (b.shareSummary !== undefined) {
+    if (typeof b.shareSummary !== 'boolean') {
+      return { ok: false, error: 'shareSummary must be a boolean' }
+    }
+    value.shareSummary = b.shareSummary
   }
   return { ok: true, value }
 }

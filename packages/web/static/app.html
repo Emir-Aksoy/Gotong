@@ -1213,6 +1213,14 @@
            blob). 503 inline when the host wired no identity store. -->
       <section id="a2a-outbound-panel" class="a2a-outbound-panel" data-tab="federation"></section>
 
+      <!-- v5 E5-M4 — cross-hub control plane ("控制面"). Owner-only, same "联邦"
+           tab, BELOW the other federation panels. Rendered by /peer-summary-ui.js
+           (read + refresh over /api/admin/peer-summaries): this hub's own
+           privacy-safe footprint joined with each peer's VOLUNTARILY-SHARED
+           summary (counts only, never raw rows; a peer shows numbers only if it
+           opted into per-link `shareSummary`). 503 inline when peers disabled. -->
+      <section id="peer-summary-panel" class="peer-summary-panel" data-tab="federation"></section>
+
       <!-- Route B P1-M4f-3 — OIDC IdP registry. Owner-only. Filled by the
            self-contained oidc-ui.js on tab activation (CRUD over
            /api/admin/oidc/providers); 503 inline when the host wired no
