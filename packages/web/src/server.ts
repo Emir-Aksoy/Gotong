@@ -71,10 +71,12 @@ import {
 } from './peer-routes.js'
 import { handleOidcRoute, type OidcLoginSurface } from './oidc-routes.js'
 import { handleOidcAdminRoute, type OidcProviderAdminSurface } from './oidc-admin-routes.js'
+import { handleSamlRoute, type SamlLoginSurface } from './saml-routes.js'
 
 export type { PeerManifestFederationSurface, PeerManifestRow } from './peer-routes.js'
 export type { OidcLoginSurface } from './oidc-routes.js'
 export type { OidcProviderAdminSurface, OidcProviderView } from './oidc-admin-routes.js'
+export type { SamlLoginSurface } from './saml-routes.js'
 
 export type {
   IdentitySurface,
@@ -449,6 +451,15 @@ export interface WebServerOptions {
    * OidcLoginService + the provider config store.
    */
   oidcLogin?: OidcLoginSurface
+  /**
+   * Route B P1-M5e — host-injected SAML 2.0 SP login surface. When wired, the
+   * public `/api/auth/saml/{providers,metadata,start,acs}` routes let a browser
+   * log in via a configured IdP (the ACS POST mints the SAME identity cookie a
+   * password login does). Absent → `/providers` returns an empty list and
+   * start/acs bounce to `/?saml_error=not_enabled`. The host implements it over
+   * its SamlLoginService + the SAML provider config store.
+   */
+  samlLogin?: SamlLoginSurface
   /**
    * Route B P1-M4f — host-injected OIDC provider registry (admin CRUD). When
    * wired, `/api/admin/oidc/providers[/:id]` lets an admin register the IdPs the
@@ -891,6 +902,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     mcpFederation: opts.mcpFederation,
     peerManifests: opts.peerManifests,
     oidcLogin: opts.oidcLogin,
+    samlLogin: opts.samlLogin,
     oidcAdmin: opts.oidcAdmin,
     httpStats: new HttpStats(),
     metricsToken: opts.metricsToken,
@@ -1042,6 +1054,8 @@ interface HandlerCtx {
   peerManifests: PeerManifestFederationSurface | undefined
   /** Route B P1-M4e — see WebServerOptions.oidcLogin doc above. */
   oidcLogin: OidcLoginSurface | undefined
+  /** Route B P1-M5e — see WebServerOptions.samlLogin doc above. */
+  samlLogin: SamlLoginSurface | undefined
   /** Route B P1-M4f — see WebServerOptions.oidcAdmin doc above. */
   oidcAdmin: OidcProviderAdminSurface | undefined
   /**
@@ -1380,6 +1394,16 @@ async function handle(
   // session yet), so the CSRF Origin check must not run. The callback mints the
   // identity cookie on success; the host surface owns all OIDC auth + policy.
   if (await handleOidcRoute({ oidcLogin: ctx.oidcLogin, cookieSecure: ctx.cookieSecure }, req, res, method, path)) {
+    return
+  }
+
+  // --- Public SAML 2.0 SP login (Route B P1-M5e) ------------------------
+  // BEFORE the CSRF gate and OUTSIDE requireAdmin. /start is a top-level browser
+  // navigation; the ACS is a CROSS-SITE form POST auto-submitted by the IdP — it
+  // carries no Origin/CSRF token, so the Origin check must not run. Authenticity
+  // comes from the SIGNED assertion (pinned IdP cert), not same-origin; the host
+  // surface owns all SAML auth + policy and the ACS mints the identity cookie.
+  if (await handleSamlRoute({ samlLogin: ctx.samlLogin, cookieSecure: ctx.cookieSecure }, req, res, method, path)) {
     return
   }
 

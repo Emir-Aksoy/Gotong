@@ -123,11 +123,14 @@ import { A2aServer } from './a2a-server.js'
 import { A2aRemoteParticipant } from '@aipehub/a2a'
 import { OidcClient } from './oidc-client.js'
 import { OidcLoginService } from './oidc-login-service.js'
+import { SamlLoginService } from './saml-login-service.js'
+import { buildSpMetadata, SamlError } from '@aipehub/saml'
 import {
   serveWeb,
   type WebServerOptions,
   type OidcLoginSurface,
   type OidcProviderAdminSurface,
+  type SamlLoginSurface,
 } from '@aipehub/web'
 
 /**
@@ -1615,6 +1618,38 @@ async function main(): Promise<void> {
     }
   }
 
+  // Route B P1-M5e — browser SSO via configured SAML 2.0 IdPs. Wired only when
+  // identity is present (the provider registry + (idpEntityId,NameID)→user links
+  // + the session it mints all live there). Absent → /api/auth/saml/* degrades:
+  // the provider list is empty and start/acs bounce to ?saml_error=not_enabled.
+  //
+  // The ACS URL must be a STABLE absolute URL the IdP can POST back to (it's
+  // baked into the AuthnRequest and re-checked against the response Recipient),
+  // so it can't be request-derived like the agent card. Source it from
+  // AIPE_PUBLIC_URL (the externally-reachable base, e.g. behind a proxy);
+  // fall back to host:port for local dev. Production behind TLS MUST set it.
+  let samlLogin: SamlLoginSurface | undefined
+  if (identity) {
+    const idForSaml = identity
+    const publicBase = (env('AIPE_PUBLIC_URL') ?? `http://${config.host}:${config.webPort}`).replace(/\/+$/, '')
+    const samlAcsUrl = `${publicBase}/api/auth/saml/acs`
+    const samlService = new SamlLoginService(idForSaml, { acsUrl: samlAcsUrl })
+    samlLogin = {
+      listProviders: () =>
+        idForSaml
+          .listSamlProviders()
+          .filter((p) => p.enabled)
+          .map((p) => ({ id: p.id, label: p.label })),
+      begin: (providerId) => samlService.begin(providerId),
+      complete: (input) => samlService.complete(input),
+      metadata: (providerId) => {
+        const p = idForSaml.getSamlProvider(providerId)
+        if (!p) throw new SamlError('saml_provider_not_found', `no SAML provider ${providerId}`)
+        return buildSpMetadata({ spEntityId: p.spEntityId, acsUrl: samlAcsUrl })
+      },
+    }
+  }
+
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
@@ -1682,6 +1717,8 @@ async function main(): Promise<void> {
     ...(a2aServer ? { a2aServer } : {}),
     // Route B P1-M4e — public OIDC login (undefined → /api/auth/oidc/* degrades).
     ...(oidcLogin ? { oidcLogin } : {}),
+    // Route B P1-M5e — public SAML login (undefined → /api/auth/saml/* degrades).
+    ...(samlLogin ? { samlLogin } : {}),
     // Route B P1-M4f — admin OIDC provider registry CRUD (undefined → 503).
     ...(oidcAdmin ? { oidcAdmin } : {}),
     // Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
