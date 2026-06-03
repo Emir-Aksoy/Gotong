@@ -243,6 +243,16 @@ importers:
         specifier: ^6.38.0
         version: 6.38.0(ws@8.20.1)(zod@4.4.3)
 
+  examples/obsidian-kb:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+    devDependencies:
+      tsx:
+        specifier: ^4.7.0
+        version: 4.22.0
+
   examples/open-space:
     dependencies:
       '@aipehub/core':

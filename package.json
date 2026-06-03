@@ -28,6 +28,8 @@
     "demo:long-running-agent": "pnpm --filter @aipehub/example-long-running-agent start",
     "demo:heartbeat-agent": "pnpm --filter @aipehub/example-heartbeat-agent start",
     "demo:coding-agent-bridge": "pnpm --filter @aipehub/example-coding-agent-bridge start",
+    "demo:obsidian-kb": "pnpm --filter @aipehub/example-obsidian-kb start",
+    "demo:elasticsearch-kb": "pnpm --filter @aipehub/example-elasticsearch-kb start",
     "demo:im-bridge-host": "pnpm --filter @aipehub/example-im-bridge-host start",
     "demo:cli-human": "pnpm --filter @aipehub/example-cli-human start",
     "demo:open-space": "pnpm --filter @aipehub/example-open-space start",
