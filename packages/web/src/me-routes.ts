@@ -814,10 +814,8 @@ async function handleMeDispatch(
   //
   // `check()` not `peek()` — every successful dispatch must count, since
   // the cost is in the action itself, not in detecting attack patterns.
-  const rlKey = `me-dispatch:${userId}`
-  if (!ctx.loginLimiter.check(rlKey)) {
-    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
-    res.end('too many dispatches; try again in a minute')
+  if (!checkMeRateLimit(ctx, userId, 'me-dispatch')) {
+    sendRateLimited(res, 'too many dispatches; try again in a minute')
     return
   }
   let body: unknown
@@ -921,6 +919,48 @@ async function handleMeDispatch(
       400,
     )
   }
+}
+
+/**
+ * Per-user application-layer rate limit for an expensive AUTHENTICATED action
+ * (Route B P1-M2). The /me endpoints that fan out to LLM agents share one
+ * budget bucket PER ACTION + per user, so a member can't loop one endpoint to
+ * burn the host's API quota / agent-pool capacity. Keyed on userId (not IP) so
+ * a NAT'd office isn't punished collectively.
+ *
+ * Returns true if the hit is allowed (and records it via `check()`). On
+ * rejection it is fail-closed AND observable: a best-effort `rate_limited`
+ * audit row is written so an operator can SEE a member hitting the cap, then
+ * false is returned and the caller sends 429. Before P1-M2 the reject was
+ * silent — fail-closed, but invisible.
+ */
+function checkMeRateLimit(ctx: HandleMeRouteCtx, userId: string, action: string): boolean {
+  if (ctx.loginLimiter.check(`${action}:${userId}`)) return true
+  // 'rate_limited' is identity's AUDIT_ACTIONS.RATE_LIMITED — kept as a literal
+  // because the web layer carries no runtime identity dep (the test pins the
+  // two together by asserting against the constant). Best-effort: a fault in
+  // the audit write must never change the 429 the caller is about to send.
+  try {
+    ctx.identity.writeAuditLog?.({
+      action: 'rate_limited',
+      actorSource: 'v4-session',
+      actorUserId: userId,
+      success: false,
+      metadata: { action, scope: 'me' },
+    })
+  } catch {
+    /* swallow — observability is best-effort, the limit still holds */
+  }
+  return false
+}
+
+/** Typed 429 for a member rate-limit reject (keeps the retry-after header). */
+function sendRateLimited(res: ServerResponse, message: string): void {
+  res.writeHead(429, {
+    'content-type': 'application/json; charset=utf-8',
+    'retry-after': '60',
+  })
+  res.end(JSON.stringify({ error: message, code: 'rate_limited' }))
 }
 
 // ---------------------------------------------------------------------------

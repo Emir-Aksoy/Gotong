@@ -307,6 +307,13 @@ export const AUDIT_ACTIONS = {
   // record every blind probe. metadata carries { resourceKind, resourceId,
   // required }.
   RESOURCE_ACCESS_DENIED: 'resource_access_denied',
+  // v6 Route B P1-M2 — an authenticated member's expensive action (a /me
+  // dispatch, or another LLM-fanout endpoint) was throttled by the per-user
+  // application-layer rate limiter. The reject is already fail-closed (429);
+  // this row makes it observable so an operator can see a member hitting the
+  // cap. metadata carries { action, scope }. (Distinct from API_QUOTA_DENIED,
+  // which is the LLM token/cost budget — this is request frequency.)
+  RATE_LIMITED: 'rate_limited',
   // v5 B-M3 — a template was exported WITH sensitive material (literal MCP
   // secrets and/or personnel/ownership info), the gated opt-in path. A plain
   // structure export is the safe default and is intentionally NOT audited.

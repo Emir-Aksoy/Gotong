@@ -30,7 +30,7 @@ import {
   type GrowthReportSummary,
   type GrowthReportsAdminSurface,
 } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { AUDIT_ACTIONS, openIdentityStore, type IdentityStore } from '@aipehub/identity'
 
 import {
   serveWeb,
@@ -982,9 +982,23 @@ describe('/api/me/dispatch — rate limit (AUDIT-P3-01)', () => {
       })
     expect((await dispatch()).status).toBe(200)
     expect((await dispatch()).status).toBe(200)
+    // Route B P1-M2 — the two allowed dispatches must NOT have written a
+    // rate_limited row (only a reject does).
+    expect(
+      b.identity.listAuditLog!({ action: AUDIT_ACTIONS.RATE_LIMITED }).length,
+    ).toBe(0)
     const r3 = await dispatch()
     expect(r3.status).toBe(429)
     expect(r3.headers.get('retry-after')).toBe('60')
+    // P1-M2 — the reject is now typed + observable, not a bare text 429.
+    expect((await r3.json()).code).toBe('rate_limited')
+    const denied = b.identity.listAuditLog!({ action: AUDIT_ACTIONS.RATE_LIMITED })
+    expect(denied.length).toBeGreaterThanOrEqual(1)
+    expect(denied[0]).toMatchObject({
+      actorUserId: b.memberUserId,
+      success: false,
+      metadata: { action: 'me-dispatch', scope: 'me' },
+    })
   })
 })
 
