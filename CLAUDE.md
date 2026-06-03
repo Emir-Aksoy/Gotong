@@ -585,6 +585,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 联邦 peer onboarding (mint-peer-token CLI + admin onboarding 面板 + per-link 信任契约编辑器; 后端复用 Phase 18/P4/C-M1) | `docs/zh/V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md` |
 | 出站 A2A agent 持久化配置 (identity v22 a2a_outbound_agents 无 vault + host A2aOutboundManager 开机/运行时物化 + web 鸭子 CRUD + 「联邦」tab 面板; 替代 AIPE_A2A_AGENTS env blob; token 留环境变量名永不入库) | `docs/zh/V6-ROUTE-B-P1-M11-A2A-OUTBOUND.md` |
 | A2A 任务生命周期 (suspend→Task(working) + tasks/get 轮询; opaque 句柄 + per-peer 归属隔离 fail-closed; tasks/get 被动读 hub.taskResult 零新 core hook; 真 HTTP 生命周期验收门) | `docs/zh/V6-ROUTE-B-P1-M8-A2A-LIFECYCLE.md` |
+| 真实 LLM 冒烟门进 CI (provider 工具调用往返 + 整栈工作流 live 测; 独立 `live.yml` 夜间/手动门, key 从 secrets, skip-clean 缺 key 跳过永不假红; 廉价模型默认 + DeepSeek 兼容路径; 故意非硬释放闸) | `docs/zh/V6-ROUTE-B-P1-M13-LIVE-GATE.md` |
 | 完整审计报告 | `docs/zh/AUDIT-v4-phase5.md` |
 | 主流 agent 适配器契约 (双向 + 可快速接管验收门) | `docs/zh/AGENT-ADAPTER-CONTRACT.md` |
 | 快捷接入主流 agent (入站: `aipehub connect <agent>`) | `docs/zh/QUICK-CONNECT.md` |

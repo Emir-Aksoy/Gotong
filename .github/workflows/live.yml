@@ -1,0 +1,101 @@
+# Live LLM gate — exercise the provider + workflow stack against a REAL model.
+#
+# Unlike ci.yml (which mocks the wire and must stay deterministic + free),
+# this workflow spends real tokens. It runs the gated `live.test.ts` /
+# `live-workflow.test.ts` files that `ci.yml` skips, with an API key supplied
+# from repo secrets.
+#
+# Triggers:
+#   - schedule — nightly signal. If the tool-use contract or a provider's
+#     stream translation silently drifts against the live vendor, the nightly
+#     run goes red and we find out within a day, not at release time.
+#   - workflow_dispatch — run it on demand, e.g. as a pre-release smoke before
+#     cutting a GitHub Release.
+#
+# Deliberately NOT wired as an automatic hard release blocker: these tests hit
+# a paid, non-deterministic, third-party API, so a vendor outage or rate-limit
+# must never be able to block shipping. Treat a red run as "investigate", and
+# run it manually (workflow_dispatch) before a release when you want the
+# signal. See docs/zh/V6-ROUTE-B-P1-M13-LIVE-GATE.md.
+#
+# Skip-clean by construction: every live test is `describe.skipIf(!key)`. With
+# no secret configured the env var is the empty string, the suite skips, and
+# the run is GREEN (skipped != failed). So a fork without secrets, or this repo
+# before secrets are added, never goes red over a missing key — only a genuine
+# live failure turns it red.
+#
+# Cost: tiny prompts, a small max-tokens cap, and cheap models by default
+# (Claude Haiku / gpt-4o-mini). Point the OpenAI-compatible provider at
+# DeepSeek for the cheapest path — set OPENAI_BASE_URL + AIPE_LIVE_OPENAI_MODEL.
+#
+# Supply-chain hardening mirrors ci.yml: all third-party actions pinned to a
+# 40-char commit SHA (with `# vX.Y.Z` for humans); harden-runner runs first in
+# audit mode.
+
+name: Live LLM gate
+
+on:
+  schedule:
+    # 08:00 UTC daily — off-peak, well clear of the post-merge ci.yml runs.
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+
+# Read-only token: this workflow builds + tests, it never writes to the repo.
+permissions:
+  contents: read
+
+# Never run two live gates at once — they'd race for the same rate limit and
+# double the spend for no extra signal. Let an in-flight run finish.
+concurrency:
+  group: live-llm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  live:
+    name: Live LLM · provider round-trip + workflow
+    runs-on: ubuntu-latest
+    # Real API calls are slower than mocked ones, but the prompts are tiny.
+    # 15min is generous headroom over the expected ~2-3min so a transient
+    # vendor slowdown doesn't false-fail, without letting a hang sit forever.
+    timeout-minutes: 15
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          # The live API endpoints (api.anthropic.com / api.openai.com /
+          # api.deepseek.com) are legitimate egress here — `audit` records the
+          # call graph without blocking so we can tighten to `block` later.
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Build
+        # Live tests import the built dist of @aipehub/llm and the provider
+        # packages, so the workspace must be built before vitest runs.
+        run: pnpm -r build
+
+      - name: Run live gate (provider round-trips + workflow)
+        # Three gated files only — not the whole suite. Each skips cleanly when
+        # its key is absent, so this step is green-by-skip until secrets exist
+        # and only red on a genuine live failure.
+        run: |
+          set -euo pipefail
+          pnpm -C packages/llm-anthropic exec vitest run tests/live.test.ts
+          pnpm -C packages/llm-openai exec vitest run tests/live.test.ts
+          pnpm -C packages/host exec vitest run tests/live-workflow.test.ts
+        env:
+          # Secrets — unset ones arrive as the empty string, which the
+          # skipIf(!key) gate reads as "no key" and skips. Configure whichever
+          # you have (Anthropic and/or an OpenAI-compatible endpoint).
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # Optional: point the OpenAI-compatible provider at DeepSeek etc.
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
+          # Optional model overrides (repo/Actions variables, not secrets).
+          AIPE_LIVE_ANTHROPIC_MODEL: ${{ vars.AIPE_LIVE_ANTHROPIC_MODEL }}
+          AIPE_LIVE_OPENAI_MODEL: ${{ vars.AIPE_LIVE_OPENAI_MODEL }}
+          CI: "true"
