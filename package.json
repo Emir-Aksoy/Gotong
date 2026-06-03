@@ -29,6 +29,7 @@
     "demo:heartbeat-agent": "pnpm --filter @aipehub/example-heartbeat-agent start",
     "demo:coding-agent-bridge": "pnpm --filter @aipehub/example-coding-agent-bridge start",
     "demo:personal-coding-hub": "pnpm --filter @aipehub/example-personal-coding-hub start",
+    "demo:personal-coding-hub:template": "pnpm --filter @aipehub/example-personal-coding-hub load-template",
     "demo:obsidian-kb": "pnpm --filter @aipehub/example-obsidian-kb start",
     "demo:elasticsearch-kb": "pnpm --filter @aipehub/example-elasticsearch-kb start",
     "demo:im-bridge-host": "pnpm --filter @aipehub/example-im-bridge-host start",
