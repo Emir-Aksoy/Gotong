@@ -75,6 +75,20 @@ export interface MeAgentOwnershipStore {
   ): boolean
   listPrincipalGrants(principal: Principal): ResourceGrant[]
   removeAllResourceGrants(resourceKind: 'agent', resourceId: string): number
+  /**
+   * The member's own BYO LLM keys (A-M3). Optional — lean fakes omit it, and
+   * then only org/workspace/env providers light up the picker. The real
+   * IdentityStore satisfies it, so a member who stored their own anthropic /
+   * openai key under `我的密钥` can build a real agent even on a hub the owner
+   * never gave an org key — the per-user key already resolves at spawn via
+   * OrgApiPool (A-M3a); this just lets the create-form + spawn gate SEE it.
+   */
+  listVaultEntries?(query: {
+    kind: 'llm_provider'
+    ownerKind: 'user'
+    ownerId: string
+    activeOnly?: boolean
+  }): Array<{ metadata?: Record<string, unknown> | null }>
   /** Best-effort denial audit (P1-M1). Optional — absent in lean fakes. */
   writeAuditLog?(input: WriteAuditLogInput): unknown
 }
@@ -107,10 +121,16 @@ export class HostMeAgentService implements MeAgentAdminSurface {
     this.maxPerMember = opts.maxPerMember ?? 20
   }
 
-  async availableProviders(): Promise<string[]> {
+  async availableProviders(userId: string): Promise<string[]> {
     const avail = await this.lifecycle.availableProviders()
-    // Intersect with member-allowable providers; 'mock' is always available.
-    return avail.filter((p) => MEMBER_PROVIDERS.has(p))
+    // Org/workspace/env providers, narrowed to what a member may pick ('mock'
+    // is always in the lifecycle list)...
+    const set = new Set(avail.filter((p) => MEMBER_PROVIDERS.has(p)))
+    // ...plus any provider this member holds their OWN key for. This is the
+    // personal-hub unlock: no org key, but I brought my anthropic key → I can
+    // build a real helper, not just a mock one.
+    for (const p of this.memberKeyProviders(userId)) set.add(p)
+    return [...set]
   }
 
   async listOwned(userId: string): Promise<MeOwnedAgentView[]> {
@@ -142,7 +162,7 @@ export class HostMeAgentService implements MeAgentAdminSurface {
 
   async create(userId: string, input: MeAgentInput): Promise<MeOwnedAgentView> {
     const provider = this.assertMemberProvider(input.provider)
-    await this.assertProviderHasKey(provider)
+    await this.assertProviderHasKey(provider, userId)
     const id = composeAgentId(userId, input.id)
 
     const existing = await this.space.agents()
@@ -207,7 +227,7 @@ export class HostMeAgentService implements MeAgentAdminSurface {
     const managed: ManagedAgentSpec = { ...rec.managed }
     if (input.provider !== undefined) {
       const provider = this.assertMemberProvider(input.provider)
-      await this.assertProviderHasKey(provider)
+      await this.assertProviderHasKey(provider, userId)
       managed.provider = provider
     }
     if (input.system !== undefined) managed.system = input.system
@@ -263,6 +283,25 @@ export class HostMeAgentService implements MeAgentAdminSurface {
     })
   }
 
+  /** Providers the member holds their OWN vault key for (BYO, A-M3), narrowed
+   * to member-allowable providers. Empty when the store slice has no vault
+   * access (lean fakes) — the picker then shows only org/workspace providers. */
+  private memberKeyProviders(userId: string): Set<string> {
+    const out = new Set<string>()
+    const rows = this.identity.listVaultEntries?.({
+      kind: 'llm_provider',
+      ownerKind: 'user',
+      ownerId: userId,
+      activeOnly: true,
+    })
+    if (!rows) return out
+    for (const row of rows) {
+      const p = readVaultProvider(row)
+      if (p && MEMBER_PROVIDERS.has(p)) out.add(p)
+    }
+    return out
+  }
+
   private ownedAgentIds(userId: string): Set<string> {
     const grants = this.identity.listPrincipalGrants(userPrincipal(userId))
     const ids = new Set<string>()
@@ -283,13 +322,28 @@ export class HostMeAgentService implements MeAgentAdminSurface {
     return provider as ManagedAgentSpec['provider']
   }
 
-  private async assertProviderHasKey(provider: string): Promise<void> {
+  private async assertProviderHasKey(provider: string, userId: string): Promise<void> {
     if (provider === 'mock') return
     const avail = await this.lifecycle.availableProviders()
-    if (!avail.includes(provider)) {
-      throw httpError(400, `no API key configured for provider '${provider}'`)
-    }
+    if (avail.includes(provider)) return
+    // BYO fallback (A-M3): a member's own key resolves at spawn via the per-user
+    // pool, so it's a valid key source even when the host has no org key here.
+    if (this.memberKeyProviders(userId).has(provider)) return
+    throw httpError(
+      400,
+      `no API key for provider '${provider}'. Add your own under 我的密钥, or ask an admin to configure one.`,
+    )
   }
+}
+
+/** Read the provider tag a BYO key was stored with (vault metadata.provider). */
+function readVaultProvider(row: { metadata?: Record<string, unknown> | null }): string | null {
+  const m = row.metadata
+  if (m && typeof m === 'object') {
+    const p = (m as Record<string, unknown>).provider
+    if (typeof p === 'string') return p
+  }
+  return null
 }
 
 // -- helpers --------------------------------------------------------------

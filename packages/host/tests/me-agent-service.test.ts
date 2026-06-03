@@ -9,9 +9,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { randomBytes } from 'node:crypto'
 
 import { Hub, Space, type AgentRecord, type ManagedAgentLifecycle, type ParticipantId } from '@aipehub/core'
-import { AUDIT_ACTIONS, openIdentityStore, userPrincipal, type IdentityStore } from '@aipehub/identity'
+import { AUDIT_ACTIONS, MASTER_KEY_LEN_BYTES, openIdentityStore, userPrincipal, type IdentityStore } from '@aipehub/identity'
 
 import { HostMeAgentService } from '../src/me-agent-service.js'
 
@@ -55,7 +56,9 @@ async function setup(maxPerMember?: number): Promise<Harness> {
   const space = init.space
   const hub = new Hub({ space })
   await hub.start()
-  const identity = openIdentityStore({ dbPath: ':memory:' })
+  // Unlock the vault so BYO-key tests (E1) can store a member credential —
+  // the real host always opens identity with a master key.
+  const identity = openIdentityStore({ dbPath: ':memory:', masterKey: randomBytes(MASTER_KEY_LEN_BYTES) })
   const lifecycle = new FakeLifecycle()
   const svc = new HostMeAgentService({ space, hub, identity, lifecycle, maxPerMember })
   return { tmp, space, hub, identity, lifecycle, svc }
@@ -172,7 +175,40 @@ describe('HostMeAgentService (v5 A-M2)', () => {
   it('availableProviders excludes openai-compatible', async () => {
     h = await setup()
     h.lifecycle.providers = ['anthropic', 'openai', 'openai-compatible', 'mock']
-    expect(await h.svc.availableProviders()).toEqual(['anthropic', 'openai', 'mock'])
+    expect(await h.svc.availableProviders(USER)).toEqual(['anthropic', 'openai', 'mock'])
+  })
+
+  // E1 — a member's OWN key (BYO, A-M3) lights up its provider even when the
+  // host has no org/workspace key for it. This is the personal-hub unlock:
+  // without it, a single user who added their anthropic key still saw an empty
+  // picker and `create` rejected the provider as "no API key".
+  it('availableProviders unions the member BYO key provider', async () => {
+    h = await setup()
+    h.lifecycle.providers = ['mock'] // host has NO openai key
+    h.identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'user',
+      ownerId: USER,
+      secret: 'sk-byo-openai',
+      metadata: { provider: 'openai' },
+    })
+    expect((await h.svc.availableProviders(USER)).sort()).toEqual(['mock', 'openai'])
+    // ...and another member does NOT see alice's key.
+    expect(await h.svc.availableProviders(OTHER)).toEqual(['mock'])
+  })
+
+  it('create succeeds with a provider the member only has a BYO key for', async () => {
+    h = await setup()
+    h.lifecycle.providers = ['mock'] // no org openai key
+    h.identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'user',
+      ownerId: USER,
+      secret: 'sk-byo-openai',
+      metadata: { provider: 'openai' },
+    })
+    const view = await h.svc.create(USER, { ...baseInput, provider: 'openai' })
+    expect(view.provider).toBe('openai')
   })
 })
 

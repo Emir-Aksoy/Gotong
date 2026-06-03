@@ -353,8 +353,10 @@ export interface MeAgentInput {
 }
 
 export interface MeAgentAdminSurface {
-  /** Providers the host has a key for — the member's provider picker. */
-  availableProviders(): Promise<string[]>
+  /** Providers this member may pick — the host's org/workspace/env keys plus
+   * any the member brought their OWN key for (A-M3), so a personal-hub user
+   * who added their key sees a real provider, not just 'mock'. */
+  availableProviders(userId: string): Promise<string[]>
   /** Agents owned by `userId` (perm='owner' grant) that still exist. */
   listOwned(userId: string): Promise<MeOwnedAgentView[]>
   /**
@@ -654,7 +656,7 @@ export async function handleMeRoute(
   // SAME /api/me/agents path family but are guarded by exact path / method, so
   // the directory GET above is unaffected.
   if (method === 'GET' && path === '/api/me/agents/providers') {
-    await handleMeAgentProviders(ctx, res)
+    await handleMeAgentProviders(ctx, res, userId)
     return
   }
   if (method === 'GET' && path === '/api/me/agents/owned') {
@@ -1341,13 +1343,14 @@ function httpError(status: number, message: string): Error & { status: number } 
 async function handleMeAgentProviders(
   ctx: HandleMeRouteCtx,
   res: ServerResponse,
+  userId: string,
 ): Promise<void> {
   if (!ctx.meAgentAdmin) {
     sendJson(res, { providers: [] })
     return
   }
   try {
-    sendJson(res, { providers: await ctx.meAgentAdmin.availableProviders() })
+    sendJson(res, { providers: await ctx.meAgentAdmin.availableProviders(userId) })
   } catch (err) {
     sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
   }

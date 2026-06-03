@@ -1001,12 +1001,22 @@
       const j = await r.json().catch(() => ({}))
       const providers = Array.isArray(j?.providers) ? j.providers : []
       if (providers.length === 0) {
-        sel.innerHTML = '<option value="">（暂无可用供应商，请联系管理员配置密钥）</option>'
+        // Never normally hit — 'mock' is always available — but if it is, point
+        // at the BYO-key panel below (in personal mode you ARE the admin).
+        sel.innerHTML = '<option value="">（暂无可用模型 — 在下方「我的 API 密钥」里加一把自己的 key）</option>'
         return
       }
       sel.innerHTML = providers.map((p) => `<option value="${escape(p)}">${escape(p)}</option>`).join('')
       sel.dataset.loaded = '1'
     } catch { /* leave empty; submit will surface the server error */ }
+  }
+
+  // After a BYO key is added/removed the provider picker must re-derive — a new
+  // key lights up its provider (anthropic/openai); a removed one may drop it.
+  async function refreshProviderSelect() {
+    const sel = document.getElementById('me-own-provider')
+    if (sel) sel.dataset.loaded = ''
+    await populateProviderSelect()
   }
 
   function renderOwnAgentCard(a) {
@@ -1356,6 +1366,8 @@
       status.textContent = '已保存'
       document.getElementById('me-cred-form').reset()
       await loadMyCredentials()
+      // The just-added key may unlock a real provider for the agent picker above.
+      await refreshProviderSelect()
     } catch (err) {
       status.className = 'me-status error'
       status.textContent = `失败: ${escape(err?.message || String(err))}`
@@ -1374,6 +1386,8 @@
         return
       }
       await loadMyCredentials()
+      // A removed key may drop its provider from the agent picker above.
+      await refreshProviderSelect()
     } catch (err) {
       alert(`删除失败: ${err?.message || String(err)}`)
     }
