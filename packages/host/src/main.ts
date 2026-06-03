@@ -111,6 +111,7 @@ import { buildAgentCard } from './agent-card.js'
 import { auditBootSecurity, formatBootSecurityReport, isLoopbackHost } from './boot-security.js'
 import { rotateMasterKey } from './rotate-master-key.js'
 import { applyLedgerRetention, parseLedgerRetention } from './ledger-retention.js'
+import { recoverMasterKeyRotation } from './master-key-recovery.js'
 import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
 import { writeAdminLinkFile } from './admin-link.js'
@@ -622,6 +623,20 @@ async function main(): Promise<void> {
   let identity: IdentityStore | undefined
   let orgApiPool: OrgApiPool | undefined
   try {
+    // Route B P0-M5 — recover from an interrupted master-key rotation BEFORE
+    // we load the live key. A crash between P0-M4d's DB re-wrap and its
+    // key-file promote leaves `<keyfile>.next` holding the only key that
+    // unwraps the vault; loading the stale live key below would brick it.
+    // local-file only; best-effort (a failure here must not block boot — the
+    // normal path still fails loudly if the key genuinely can't open the vault).
+    try {
+      const rec = recoverMasterKeyRotation(SPACE_DIR, env('AIPE_MASTER_KEY_PROVIDER'))
+      if (rec.action !== 'none') {
+        log.info('identity: master key rotation recovery', { action: rec.action, reason: rec.reason })
+      }
+    } catch (err) {
+      log.warn('identity: master key rotation recovery failed (continuing)', { err })
+    }
     // B1.2 / Route B P0-M4a — resolve the vault master key through a
     // pluggable provider. Default `local-file` creates the 0600 key file
     // on first run (a wrong-length pre-existing key throws — a stale key
