@@ -1003,9 +1003,8 @@ async function handleMeResolveInbox(
   // to LLM agents downstream — same budget machinery as /me/dispatch. The
   // markResolved guard already caps repeat-resolves of one item, but this
   // bounds a member churning across many assigned items.
-  if (!ctx.loginLimiter.check(`me-inbox-resolve:${userId}`)) {
-    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
-    res.end('too many inbox resolves; try again in a minute')
+  if (!checkMeRateLimit(ctx, userId, 'me-inbox-resolve')) {
+    sendRateLimited(res, 'too many inbox resolves; try again in a minute')
     return
   }
   let body: unknown
@@ -1065,9 +1064,8 @@ async function handleMeDelegateInbox(
   }
   // Same per-user budget as resolve — a handoff is cheap, but this bounds a
   // member churning across many items.
-  if (!ctx.loginLimiter.check(`me-inbox-delegate:${userId}`)) {
-    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
-    res.end('too many inbox delegations; try again in a minute')
+  if (!checkMeRateLimit(ctx, userId, 'me-inbox-delegate')) {
+    sendRateLimited(res, 'too many inbox delegations; try again in a minute')
     return
   }
   let body: unknown
@@ -1658,9 +1656,8 @@ async function handleMeUploads(
   // --- upload (POST) ---
   // Rate-limit per user (same budget machinery as /me/dispatch) so a member
   // can't loop-upload to exhaust disk.
-  if (!ctx.loginLimiter.check(`me-upload:${userId}`)) {
-    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
-    res.end('too many uploads; try again in a minute')
+  if (!checkMeRateLimit(ctx, userId, 'me-upload')) {
+    sendRateLimited(res, 'too many uploads; try again in a minute')
     return
   }
   const u = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`)
@@ -1721,13 +1718,10 @@ async function handleMeListReports(
 ): Promise<void> {
   // AUDIT-P3-02: rate-limit. growthReports.list() walks every report on
   // the host then filters in memory (the surface predates /me); a
-  // looping member can force full-table scans. Higher budget than
-  // dispatch (30/min vs 10/min) because list is a read, not a write.
-  // `check()` for the same reason as dispatch: action volume is the cap.
-  const rlKey = `me-reports:${userId}`
-  if (!ctx.loginLimiter.check(rlKey)) {
-    res.writeHead(429, { 'content-type': 'text/plain', 'retry-after': '60' })
-    res.end('too many report-list requests; try again in a minute')
+  // looping member can force full-table scans. Own per-action bucket
+  // (`me-reports`) so a reader doesn't share a budget with dispatch.
+  if (!checkMeRateLimit(ctx, userId, 'me-reports')) {
+    sendRateLimited(res, 'too many report-list requests; try again in a minute')
     return
   }
   if (!ctx.growthReports) {

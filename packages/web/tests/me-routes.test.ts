@@ -1021,7 +1021,25 @@ describe('/api/me/growth-reports — rate limit (AUDIT-P3-02)', () => {
       })
     expect((await list()).status).toBe(200)
     expect((await list()).status).toBe(200)
-    expect((await list()).status).toBe(429)
+    // Route B P1-M2b — the two allowed reads must NOT have written a
+    // rate_limited row (only a reject does).
+    expect(
+      b.identity.listAuditLog!({ action: AUDIT_ACTIONS.RATE_LIMITED }).length,
+    ).toBe(0)
+    const r3 = await list()
+    expect(r3.status).toBe(429)
+    expect(r3.headers.get('retry-after')).toBe('60')
+    // P1-M2b — growth-reports routes through the SAME shared helper as
+    // dispatch, so its reject is typed + observable too (not a bare text 429),
+    // and the audit row carries this site's own action key.
+    expect((await r3.json()).code).toBe('rate_limited')
+    const denied = b.identity.listAuditLog!({ action: AUDIT_ACTIONS.RATE_LIMITED })
+    expect(denied.length).toBeGreaterThanOrEqual(1)
+    expect(denied[0]).toMatchObject({
+      actorUserId: b.memberUserId,
+      success: false,
+      metadata: { action: 'me-reports', scope: 'me' },
+    })
   })
 
   it('dispatch budget and reports budget are independent buckets', async () => {
