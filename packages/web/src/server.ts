@@ -69,8 +69,10 @@ import { handleTemplateRoute, type TemplatePersonnelSource } from './template-ro
 import {
   type PeerManifestFederationSurface,
 } from './peer-routes.js'
+import { handleOidcRoute, type OidcLoginSurface } from './oidc-routes.js'
 
 export type { PeerManifestFederationSurface, PeerManifestRow } from './peer-routes.js'
+export type { OidcLoginSurface } from './oidc-routes.js'
 
 export type {
   IdentitySurface,
@@ -436,6 +438,15 @@ export interface WebServerOptions {
    * the peer registry + the `peer.manifest` rpc + an in-process cache.
    */
   peerManifests?: PeerManifestFederationSurface
+  /**
+   * Route B P1-M4e — host-injected OIDC login surface. When wired, the public
+   * `/api/auth/oidc/{providers,start,callback}` routes let a browser log in via
+   * a configured IdP (the callback mints the SAME identity cookie a password
+   * login does). Absent → `/providers` returns an empty list and start/callback
+   * bounce to `/?oidc_error=not_enabled`. The host implements it over its
+   * OidcLoginService + the provider config store.
+   */
+  oidcLogin?: OidcLoginSurface
   /**
    * Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
    * When set, a Prometheus scraper presenting `Authorization: Bearer <token>`
@@ -870,6 +881,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     mcpRegistry: opts.mcpRegistry,
     mcpFederation: opts.mcpFederation,
     peerManifests: opts.peerManifests,
+    oidcLogin: opts.oidcLogin,
     httpStats: new HttpStats(),
     metricsToken: opts.metricsToken,
   }
@@ -1018,6 +1030,8 @@ interface HandlerCtx {
   mcpFederation: McpFederationSurface | undefined
   /** Phase 18 A-M2 — see WebServerOptions.peerManifests doc above. */
   peerManifests: PeerManifestFederationSurface | undefined
+  /** Route B P1-M4e — see WebServerOptions.oidcLogin doc above. */
+  oidcLogin: OidcLoginSurface | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -1345,6 +1359,15 @@ async function handle(
       return
     }
     await ctx.a2aServer.handle(req, res)
+    return
+  }
+
+  // --- Public OIDC login (Route B P1-M4e) -------------------------------
+  // BEFORE the CSRF gate and OUTSIDE requireAdmin: these are top-level browser
+  // navigations (the IdP redirect to /callback carries no Origin header and no
+  // session yet), so the CSRF Origin check must not run. The callback mints the
+  // identity cookie on success; the host surface owns all OIDC auth + policy.
+  if (await handleOidcRoute({ oidcLogin: ctx.oidcLogin, cookieSecure: ctx.cookieSecure }, req, res, method, path)) {
     return
   }
 

@@ -121,7 +121,9 @@ import { serveWebSocket } from '@aipehub/transport-ws'
 import { PeerRegistry, buildPeerTokenResolver } from './peer-registry.js'
 import { A2aServer } from './a2a-server.js'
 import { A2aRemoteParticipant } from '@aipehub/a2a'
-import { serveWeb, type WebServerOptions } from '@aipehub/web'
+import { OidcClient } from './oidc-client.js'
+import { OidcLoginService } from './oidc-login-service.js'
+import { serveWeb, type WebServerOptions, type OidcLoginSurface } from '@aipehub/web'
 
 /**
  * Phase 18 B-M3 — resolve the org owner's user id (the default approver for
@@ -1575,6 +1577,28 @@ async function main(): Promise<void> {
     ? new HostMeAgentGrantsService({ identity })
     : undefined
 
+  // Route B P1-M4e — browser SSO via configured OIDC IdPs. Wired only when
+  // identity is present (the provider registry + (issuer,sub)→user links + the
+  // session it mints all live there). Absent → /api/auth/oidc/* degrades: the
+  // provider list is empty and start/callback bounce to ?oidc_error=not_enabled.
+  // The OidcClient does the real network discovery + JWKS + token exchange; the
+  // surface only exposes the three things web needs (list, begin, complete) and
+  // filters the provider list to enabled IdPs with no secret.
+  let oidcLogin: OidcLoginSurface | undefined
+  if (identity) {
+    const idForOidc = identity
+    const oidcService = new OidcLoginService(idForOidc, new OidcClient())
+    oidcLogin = {
+      listProviders: () =>
+        idForOidc
+          .listOidcProviders()
+          .filter((p) => p.enabled)
+          .map((p) => ({ id: p.id, label: p.label, issuer: p.issuer })),
+      begin: (providerId) => oidcService.begin(providerId),
+      complete: (input) => oidcService.complete(input),
+    }
+  }
+
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
@@ -1640,6 +1664,8 @@ async function main(): Promise<void> {
     agentCard,
     // Phase 18 C-M3 — inbound A2A message/send (undefined → /a2a 404s).
     ...(a2aServer ? { a2aServer } : {}),
+    // Route B P1-M4e — public OIDC login (undefined → /api/auth/oidc/* degrades).
+    ...(oidcLogin ? { oidcLogin } : {}),
     // Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
     // Lets Prometheus pull the same body as /api/admin/metrics without a
     // machine-admin token. Unset/empty (env() already maps '' → undefined) →

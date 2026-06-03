@@ -435,7 +435,9 @@ export interface IdentitySurface {
 export const IDENTITY_COOKIE = 'aipehub_identity'
 const COOKIE_MAX_AGE_S = 60 * 60 * 24 * 7 // 7 days; mirrors IdentityStore default TTL
 
-function setIdentityCookie(value: string, secure: boolean): string {
+// Exported so the OIDC login routes (oidc-routes.ts) mint the SAME identity
+// cookie a password login does — one cookie format, one place to change it.
+export function setIdentityCookie(value: string, secure: boolean): string {
   const sameSite = secure ? 'Strict' : 'Lax'
   const sec = secure ? '; Secure' : ''
   return `${IDENTITY_COOKIE}=${value}; HttpOnly; SameSite=${sameSite}${sec}; Path=/; Max-Age=${COOKIE_MAX_AGE_S}`

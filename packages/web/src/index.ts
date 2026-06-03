@@ -1,5 +1,7 @@
 export { serveWeb } from './server.js'
 export type { WebServerOptions, WebServerHandle, UploadSurface } from './server.js'
+// Route B P1-M4e — the host implements this duck-typed surface to wire SSO.
+export type { OidcLoginSurface } from './server.js'
 
 // Phase 17 (Sprint 4) — export-format primitives + the usage-ledger column
 // spec, surfaced so embedders (and the host's E2E acceptance gate) can format
