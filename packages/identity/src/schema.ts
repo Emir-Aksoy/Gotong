@@ -739,6 +739,35 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // Route B P1-M4d — OIDC identity-provider (IdP) registrations. The hub is
+    // the Relying Party; one row per IdP it accepts SSO from. The confidential
+    // client_secret is NOT here: like a TOTP secret (v19) it lives as a vault
+    // entry (kind='oidc_client_secret', ownerKind='org'), so envelope
+    // encryption + master-key rotation cover it for free. `vault_id` points at
+    // that entry; NULL = a public (PKCE-only) client with no secret.
+    //   issuer        UNIQUE — the IdP's issuer URL, the discovery base and the
+    //                 expected id_token `iss`. Immutable per registration.
+    //   redirect_uri  the callback this hub registered with the IdP.
+    //   scope         extra space-separated scopes (NULL = client default).
+    //   enabled       0 disables it without deleting the config (+ its secret).
+    version: 20,
+    name: 'oidc-providers',
+    sql: `
+      CREATE TABLE IF NOT EXISTS oidc_providers (
+        id           TEXT PRIMARY KEY,
+        issuer       TEXT NOT NULL UNIQUE,
+        client_id    TEXT NOT NULL,
+        redirect_uri TEXT NOT NULL,
+        scope        TEXT,
+        vault_id     TEXT,
+        enabled      INTEGER NOT NULL DEFAULT 1,
+        label        TEXT,
+        created_at   INTEGER NOT NULL,
+        updated_at   INTEGER NOT NULL
+      );
+    `,
+  },
 ]
 
 /**

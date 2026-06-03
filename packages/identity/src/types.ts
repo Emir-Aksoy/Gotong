@@ -129,6 +129,51 @@ export interface OidcLogin {
   ttlMs?: number
 }
 
+/**
+ * Route B P1-M4d — a configured OIDC identity provider (the hub acting as a
+ * Relying Party). Public projection: the confidential `client_secret` is NEVER
+ * here — it lives in the vault and is read only at token-exchange time via
+ * `readOidcClientSecret`. `hasClientSecret` lets the admin UI show whether one
+ * is set without ever exposing it.
+ */
+export interface OidcProvider {
+  id: string
+  /** The IdP issuer URL — both the discovery base and the expected `iss`. */
+  issuer: string
+  clientId: string
+  redirectUri: string
+  /** Space-separated extra scopes; null = the client default (openid email profile). */
+  scope: string | null
+  enabled: boolean
+  label: string | null
+  /** True iff a confidential client_secret is stored (confidential client). */
+  hasClientSecret: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AddOidcProviderInput {
+  issuer: string
+  clientId: string
+  redirectUri: string
+  scope?: string | null
+  /** Confidential client secret. Omit/empty → a public (PKCE-only) client. */
+  clientSecret?: string | null
+  label?: string | null
+  enabled?: boolean
+}
+
+/** Targeted update — every field optional; `issuer` is immutable (re-add to change IdP). */
+export interface UpdateOidcProviderInput {
+  clientId?: string
+  redirectUri?: string
+  scope?: string | null
+  /** Provide to rotate the secret; '' clears it (→ public client); undefined = keep. */
+  clientSecret?: string | null
+  label?: string | null
+  enabled?: boolean
+}
+
 export interface IssuedAdminToken {
   /** Raw token — shown ONCE. */
   token: string
@@ -453,6 +498,11 @@ export type VaultKind =
   // Route B P1-M3b — a user's MFA TOTP shared secret. Stored as a vault entry
   // (ownerKind 'user') so envelope encryption + master-key rotation apply.
   | 'totp'
+  // Route B P1-M4d — an OIDC IdP's confidential client_secret. Stored as a
+  // vault entry (ownerKind 'org' — the hub owns its IdP registration), so the
+  // same envelope encryption + master-key rotation cover it for free. A public
+  // (PKCE-only) client has no secret and therefore no vault entry at all.
+  | 'oidc_client_secret'
 
 export const VAULT_KINDS: readonly VaultKind[] = [
   'llm_provider',
@@ -460,6 +510,7 @@ export const VAULT_KINDS: readonly VaultKind[] = [
   'peer_token',
   'third_party_api',
   'totp',
+  'oidc_client_secret',
 ] as const
 
 /**

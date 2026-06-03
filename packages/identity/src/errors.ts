@@ -32,6 +32,12 @@ export type IdentityErrorCode =
   //                         idempotent no-op, not this error.
   | 'oidc_not_linked'
   | 'oidc_already_linked'
+  // Route B P1-M4d — OIDC provider (IdP) configuration store.
+  //   `oidc_provider_exists`     addOidcProvider hit the UNIQUE(issuer) — one
+  //                              IdP registration per issuer URL.
+  //   `oidc_provider_not_found`  get/update/readSecret targeted an id with no row.
+  | 'oidc_provider_exists'
+  | 'oidc_provider_not_found'
   | 'session_expired'
   | 'session_not_found'
   | 'weak_password'

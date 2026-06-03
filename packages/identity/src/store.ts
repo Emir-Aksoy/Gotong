@@ -56,6 +56,7 @@ import { userPrincipal, type Principal } from './principal.js'
 import { PeerStore } from './peer-store.js'
 import { QuotaStore } from './quota-store.js'
 import { TotpStore, type EnrollTotpInput, type VerifyTotpInput } from './totp-store.js'
+import { OidcProviderStore } from './oidc-provider-store.js'
 import {
   AUDIT_ACTIONS,
   ROLES,
@@ -83,7 +84,10 @@ import {
   type LinkOidcInput,
   type ListVaultEntriesQuery,
   type Membership,
+  type AddOidcProviderInput,
   type OidcLogin,
+  type OidcProvider,
+  type UpdateOidcProviderInput,
   type OwnerKind,
   type ResetUsageInput,
   type Role,
@@ -470,6 +474,9 @@ export class IdentityStore {
   // Route B P1-M3b — MFA (TOTP) enrollment store. Composes the vault for the
   // encrypted shared secret; the facade methods below delegate here.
   private readonly totp: TotpStore
+  // Route B P1-M4d — OIDC identity-provider registry. Composes the vault for
+  // each IdP's confidential client_secret; the facade methods below delegate.
+  private readonly oidcProviders: OidcProviderStore
   // Phase 7 M4 — org_meta kv (org_mode lives here).
   private readonly stmtOrgMetaGet: SqliteStmt
   private readonly stmtOrgMetaUpsert: SqliteStmt
@@ -521,6 +528,9 @@ export class IdentityStore {
     // facade exposes createVaultEntry / readVaultSecret / revokeVaultEntry);
     // the methods are only called later, so the partially-built `this` is fine.
     this.totp = new TotpStore(db, this)
+    // Route B P1-M4d — OIDC IdP registry. Same composition as TotpStore: `this`
+    // supplies the vault facade for each IdP's client_secret (ownerKind 'org').
+    this.oidcProviders = new OidcProviderStore(db, this)
 
     this.stmtUserById = db.prepare('SELECT * FROM users WHERE id = ?')
     this.stmtUserByEmail = db.prepare('SELECT * FROM users WHERE email = ?')
@@ -2212,6 +2222,46 @@ export class IdentityStore {
   /** Remove the second factor entirely (state row + vault secret). */
   disableTotp(userId: string): boolean {
     return this.totp.disable(userId)
+  }
+
+  // =====================================================================
+  // Route B P1-M4d — OIDC identity-provider (IdP) registry. Delegates to
+  // OidcProviderStore; each IdP's client_secret is a vault entry (encrypted,
+  // rotation-safe). Public projections never carry the secret — only
+  // readOidcClientSecret (called by the host's OIDC callback) touches it.
+  // =====================================================================
+
+  /** Register an IdP. Duplicate issuer → `oidc_provider_exists`. */
+  addOidcProvider(input: AddOidcProviderInput): OidcProvider {
+    return this.oidcProviders.add(input)
+  }
+
+  getOidcProvider(id: string): OidcProvider | null {
+    return this.oidcProviders.get(id)
+  }
+
+  /** Lookup by issuer — the OIDC callback resolves the provider from `iss`. */
+  getOidcProviderByIssuer(issuer: string): OidcProvider | null {
+    return this.oidcProviders.getByIssuer(issuer)
+  }
+
+  listOidcProviders(): OidcProvider[] {
+    return this.oidcProviders.list()
+  }
+
+  /** Read the client secret for the token exchange ('' = public/PKCE-only client). */
+  readOidcClientSecret(id: string): string {
+    return this.oidcProviders.readClientSecret(id)
+  }
+
+  /** Targeted update (issuer immutable; `clientSecret: ''` clears it). */
+  updateOidcProvider(id: string, patch: UpdateOidcProviderInput): OidcProvider {
+    return this.oidcProviders.update(id, patch)
+  }
+
+  /** Delete the registration and revoke its client secret. */
+  removeOidcProvider(id: string): boolean {
+    return this.oidcProviders.remove(id)
   }
 
   /**
