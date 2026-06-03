@@ -166,13 +166,6 @@ export const A2A_ERROR = {
   INTERNAL: -32603,
   /** `tasks/get` for an unknown / not-owned task id (A2A `TaskNotFoundError`). */
   TASK_NOT_FOUND: -32001,
-  /**
-   * @deprecated Route B P1-M8 — `message/send` now returns a `Task` (state
-   * `working`) instead of this error when a dispatch suspends. Same numeric
-   * value as TASK_NOT_FOUND (A2A's -32001); removed once the host stops
-   * emitting it (M8b).
-   */
-  SUSPENDED: -32001,
   /** No participant satisfied the requested capability. */
   NO_PARTICIPANT: -32002,
 } as const

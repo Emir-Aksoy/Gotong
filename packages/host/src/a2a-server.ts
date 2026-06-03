@@ -35,11 +35,16 @@ import { evaluateInboundAcl } from '@aipehub/core'
 import {
   A2A_ERROR,
   A2A_METHOD_MESSAGE_SEND,
+  A2A_METHOD_TASKS_GET,
   JSONRPC_VERSION,
   agentMessage,
+  completedTask,
+  failedTask,
   messageText,
+  workingTask,
   type A2AMessage,
   type A2AResponse,
+  type A2ATask,
 } from '@aipehub/a2a'
 
 interface A2aLogger {
@@ -48,7 +53,12 @@ interface A2aLogger {
 }
 
 export interface A2aServerOptions {
-  hub: Pick<Hub, 'dispatch'>
+  /**
+   * `dispatch` runs an inbound `message/send`; `taskResult` is read by
+   * `tasks/get` to poll a parked task's outcome from the transcript (the
+   * canonical, passive seam — no new core hook). Route B P1-M8.
+   */
+  hub: Pick<Hub, 'dispatch' | 'taskResult'>
   /**
    * peerId → expected pre-shared token, or null for an unknown / disabled /
    * tokenless peer. Wire `buildPeerTokenResolver(identity, log)`.
@@ -82,12 +92,37 @@ export interface A2aServerOptions {
   logger?: A2aLogger
   /** For the reply message id; injectable so tests are deterministic. */
   newMessageId?: () => string
+  /**
+   * Mints the OPAQUE a2a task handle returned when a dispatch suspends (never
+   * the internal hub task id). Injectable so tests are deterministic; defaults
+   * to a random uuid.
+   */
+  newTaskId?: () => string
+  /** Clock for the parked-task TTL prune; injectable for tests. Defaults to `Date.now`. */
+  now?: () => number
+}
+
+/**
+ * A parked task minted by `message/send` (the dispatch suspended) and polled by
+ * `tasks/get`. In-memory only — a host restart drops these (the caller re-polls,
+ * gets TASK_NOT_FOUND, and re-sends; honest over persisting a handle whose hub
+ * task may not survive). `peerId` scopes ownership: `tasks/get` from a different
+ * peer must not resolve this record (anti-enumeration, fail-closed).
+ */
+interface A2aTaskRecord {
+  hubTaskId: string
+  peerId: string
+  createdAt: number
 }
 
 const MAX_BODY_BYTES = 1_000_000
+/** Parked tasks expire from the in-mem store after this; the poller re-sends. */
+const TASK_TTL_MS = 60 * 60 * 1000
+/** Hard ceiling on parked tasks held in memory (oldest-first eviction past TTL). */
+const TASK_CAP = 10_000
 
 export class A2aServer {
-  private readonly hub: Pick<Hub, 'dispatch'>
+  private readonly hub: Pick<Hub, 'dispatch' | 'taskResult'>
   private readonly resolvePeerToken: (peerId: string) => string | null
   private readonly resolvePeerAcl:
     | ((peerId: string) => PeerLinkAcl | null)
@@ -101,6 +136,10 @@ export class A2aServer {
   private readonly defaultCapability: string | undefined
   private readonly log: A2aLogger | undefined
   private readonly newMessageId: () => string
+  private readonly newTaskId: () => string
+  private readonly now: () => number
+  /** a2aTaskId → parked record (in-memory; dropped on restart — see A2aTaskRecord). */
+  private readonly tasks = new Map<string, A2aTaskRecord>()
 
   constructor(opts: A2aServerOptions) {
     this.hub = opts.hub
@@ -110,6 +149,8 @@ export class A2aServer {
     this.defaultCapability = opts.defaultCapability
     this.log = opts.logger
     this.newMessageId = opts.newMessageId ?? (() => crypto.randomUUID())
+    this.newTaskId = opts.newTaskId ?? (() => crypto.randomUUID())
+    this.now = opts.now ?? (() => Date.now())
   }
 
   async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
@@ -148,6 +189,15 @@ export class A2aServer {
       return
     }
     const reqId = readRpcId(parsed)
+
+    // Route by method. `tasks/get` polls a parked task (scoped to this peer);
+    // everything else falls through to the message/send validator below (which
+    // rejects unknown methods with METHOD_NOT_FOUND).
+    if (readMethod(parsed) === A2A_METHOD_TASKS_GET) {
+      this.handleTasksGet(res, reqId, peerId, parsed)
+      return
+    }
+
     const message = validateSendRequest(parsed)
     if (!message.ok) {
       sendRpc(res, rpcError(reqId, message.code, message.error))
@@ -214,10 +264,88 @@ export class A2aServer {
       return
     }
 
+    // A suspend (long compute / HITL approval) can't answer in one blocking
+    // round-trip: mint an opaque task handle scoped to THIS peer and return a
+    // `working` Task; the caller polls `tasks/get`. Everything else (ok / failed
+    // / no_participant / cancelled) answers inline below.
+    if (result.kind === 'suspended') {
+      const a2aTaskId = this.registerParkedTask(result.taskId, peerId)
+      sendRpc(res, { jsonrpc: JSONRPC_VERSION, id: reqId, result: workingTask(a2aTaskId) })
+      return
+    }
+
     sendRpc(res, this.resultToResponse(reqId, result))
   }
 
-  private resultToResponse(id: string | number | null, result: TaskResult): A2AResponse {
+  /**
+   * `tasks/get` — resolve a parked task's current status. Ownership is enforced:
+   * an unknown id AND one owned by a DIFFERENT peer both resolve to
+   * TASK_NOT_FOUND (anti-enumeration; never reveal another org's task exists).
+   * The outcome is read passively from the transcript via `hub.taskResult` —
+   * still parked / not yet recorded → `working`; resumed → completed / failed.
+   */
+  private handleTasksGet(
+    res: ServerResponse,
+    id: string | number | null,
+    peerId: string,
+    parsed: unknown,
+  ): void {
+    const params = (parsed as { params?: { id?: unknown } }).params
+    const taskId = params?.id
+    if (typeof taskId !== 'string' || taskId.length === 0) {
+      sendRpc(res, rpcError(id, A2A_ERROR.INVALID_PARAMS, 'params.id is required'))
+      return
+    }
+    const record = this.tasks.get(taskId)
+    if (!record || record.peerId !== peerId) {
+      sendRpc(res, rpcError(id, A2A_ERROR.TASK_NOT_FOUND, 'task not found'))
+      return
+    }
+    const result = this.hub.taskResult(record.hubTaskId)
+    sendRpc(res, { jsonrpc: JSONRPC_VERSION, id, result: this.taskRecordToA2A(taskId, result) })
+  }
+
+  /** Map a hub `TaskResult` (or undefined = not yet recorded) to an A2A `Task` status. */
+  private taskRecordToA2A(a2aTaskId: string, result: TaskResult | undefined): A2ATask {
+    if (!result || result.kind === 'suspended') return workingTask(a2aTaskId)
+    if (result.kind === 'ok') {
+      return completedTask(a2aTaskId, outputToText(result.output), this.newMessageId())
+    }
+    // failed / cancelled / no_participant → a failed Task carrying the reason.
+    const errorText =
+      result.kind === 'failed'
+        ? result.error
+        : result.kind === 'cancelled'
+          ? `cancelled: ${result.reason}`
+          : result.reason
+    return failedTask(a2aTaskId, errorText, this.newMessageId())
+  }
+
+  /** Mint an opaque handle for a parked hub task, scoped to `peerId`; prune first. */
+  private registerParkedTask(hubTaskId: string, peerId: string): string {
+    this.pruneTasks()
+    const a2aTaskId = this.newTaskId()
+    this.tasks.set(a2aTaskId, { hubTaskId, peerId, createdAt: this.now() })
+    return a2aTaskId
+  }
+
+  /** Drop TTL-expired records, then evict oldest-first if still over the cap. */
+  private pruneTasks(): void {
+    const cutoff = this.now() - TASK_TTL_MS
+    for (const [id, rec] of this.tasks) {
+      if (rec.createdAt < cutoff) this.tasks.delete(id)
+    }
+    while (this.tasks.size > TASK_CAP) {
+      const oldest = this.tasks.keys().next().value
+      if (oldest === undefined) break
+      this.tasks.delete(oldest)
+    }
+  }
+
+  private resultToResponse(
+    id: string | number | null,
+    result: Exclude<TaskResult, { kind: 'suspended' }>,
+  ): A2AResponse {
     switch (result.kind) {
       case 'ok': {
         const reply = agentMessage(outputToText(result.output), this.newMessageId())
@@ -229,10 +357,6 @@ export class A2aServer {
         return rpcError(id, A2A_ERROR.NO_PARTICIPANT, result.reason)
       case 'cancelled':
         return rpcError(id, A2A_ERROR.INTERNAL, `cancelled: ${result.reason}`)
-      case 'suspended':
-        // No task lifecycle to poll in this minimal surface — surface the park
-        // as an error rather than a Task the caller would have to follow.
-        return rpcError(id, A2A_ERROR.SUSPENDED, 'task suspended (not resumable over A2A)')
     }
   }
 }
@@ -269,6 +393,15 @@ async function readBody(req: IncomingMessage): Promise<string> {
     chunks.push(buf)
   }
   return Buffer.concat(chunks).toString('utf8')
+}
+
+/** Pull the JSON-RPC method out of an unparsed request (undefined when absent/odd). */
+function readMethod(parsed: unknown): string | undefined {
+  if (parsed && typeof parsed === 'object') {
+    const method = (parsed as { method?: unknown }).method
+    if (typeof method === 'string') return method
+  }
+  return undefined
 }
 
 /** Pull the JSON-RPC id out of an unparsed request (null when absent/odd). */

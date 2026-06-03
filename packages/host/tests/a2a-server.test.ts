@@ -12,9 +12,12 @@ import { describe, expect, it } from 'vitest'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import type { PeerLinkAcl, TaskResult } from '@aipehub/core'
-import { buildSendRequest, type A2AResponse } from '@aipehub/a2a'
+import { buildSendRequest, buildTasksGetRequest, isA2ATask, type A2AResponse, type A2ATask } from '@aipehub/a2a'
 
 import { A2aServer, type A2aServerOptions } from '../src/a2a-server.js'
+
+/** A `resumeAt` so far out the sweep never fires — HITL / long-park sentinel. */
+const NEVER = 9_999_999_999_000
 
 interface DispatchArgs {
   from: string
@@ -31,6 +34,10 @@ function makeServer(opts: {
     peerId: string,
     task: unknown,
   ) => { ok: true } | { ok: false; reason: string }
+  /** Drives `hub.taskResult` (what `tasks/get` reads back); default → undefined. */
+  taskResult?: (hubTaskId: string) => TaskResult | undefined
+  /** Deterministic opaque task-handle minter; default → a counter. */
+  newTaskId?: () => string
 } = {}) {
   const calls: DispatchArgs[] = []
   const result: TaskResult =
@@ -40,16 +47,20 @@ function makeServer(opts: {
       calls.push(a)
       return result
     },
+    taskResult: opts.taskResult ?? (() => undefined),
   }
+  let taskSeq = 0
   const server = new A2aServer({
     hub: hub as unknown as A2aServerOptions['hub'],
-    resolvePeerToken: (pid) => (pid === 'hubA' ? 'secret-token' : null),
+    // Two known peers (hubA / hubB) so ownership-isolation can be exercised.
+    resolvePeerToken: (pid) => (pid === 'hubA' ? 'secret-token' : pid === 'hubB' ? 'token-b' : null),
     ...(opts.defaultCapability !== undefined ? { defaultCapability: opts.defaultCapability } : {}),
     ...(opts.resolvePeerAcl ? { resolvePeerAcl: opts.resolvePeerAcl } : {}),
     ...(opts.inboundGate
       ? { inboundGate: opts.inboundGate as A2aServerOptions['inboundGate'] }
       : {}),
     newMessageId: () => 'reply-msg-id',
+    newTaskId: opts.newTaskId ?? (() => `a2a-task-${++taskSeq}`),
   })
   return { server, calls }
 }
@@ -85,11 +96,28 @@ function fakeRes() {
 }
 
 const AUTH = { 'x-aipe-peer-id': 'hubA', authorization: 'Bearer secret-token' }
+const AUTH_B = { 'x-aipe-peer-id': 'hubB', authorization: 'Bearer token-b' }
 
 function sendBody(text: string, metadata?: Record<string, unknown>): string {
   return JSON.stringify(
     buildSendRequest(text, { messageId: 'm-1', requestId: 9, ...(metadata ? { metadata } : {}) }),
   )
+}
+
+function tasksGetBody(taskId: string): string {
+  return JSON.stringify(buildTasksGetRequest(taskId, 5))
+}
+
+/** POST a message/send that suspends; return the opaque a2a task id minted. */
+async function parkTask(
+  server: A2aServer,
+  headers: Record<string, string> = AUTH,
+): Promise<string> {
+  const { res, out } = fakeRes()
+  await server.handle(fakeReq({ headers, body: sendBody('go') }), res)
+  const result = parse(out).result
+  if (!result || !isA2ATask(result)) throw new Error('expected a Task result')
+  return result.id
 }
 
 function parse(out: { body: string }): A2AResponse {
@@ -189,7 +217,9 @@ describe('A2aServer.handle — JSON-RPC + result mapping', () => {
   it('method_not_found (-32601) on an unsupported method', async () => {
     const { server } = makeServer({ defaultCapability: 'chat' })
     const { res, out } = fakeRes()
-    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tasks/get', params: {} })
+    // `message/stream` is a real A2A method we deliberately don't serve (no
+    // streaming) — and `tasks/get` is now valid, so use a genuinely unknown one.
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'message/stream', params: {} })
     await server.handle(fakeReq({ headers: AUTH, body }), res)
     expect(parse(out).error?.code).toBe(-32601)
   })
@@ -202,14 +232,23 @@ describe('A2aServer.handle — JSON-RPC + result mapping', () => {
     expect(calls).toHaveLength(0)
   })
 
-  it('maps a suspended result to -32001', async () => {
+  it('mints a working Task with an opaque id when the dispatch suspends', async () => {
     const { server } = makeServer({
       defaultCapability: 'chat',
-      result: { kind: 'suspended', taskId: 't', by: 'a', resumeAt: 9_999_999_999_000, ts: 1 },
+      result: { kind: 'suspended', taskId: 'hub-task-internal', by: 'a', resumeAt: NEVER, ts: 1 },
+      newTaskId: () => 'a2a-opaque-1',
     })
     const { res, out } = fakeRes()
     await server.handle(fakeReq({ headers: AUTH, body: sendBody('x') }), res)
-    expect(parse(out).error?.code).toBe(-32001)
+    const resp = parse(out)
+    expect(resp.error).toBeUndefined()
+    const task = resp.result as A2ATask
+    expect(task.kind).toBe('task')
+    expect(task.status.state).toBe('working')
+    // The returned handle is OPAQUE — never the internal hub task id (leaking
+    // it would let a peer poll another org's task / learn hub naming).
+    expect(task.id).toBe('a2a-opaque-1')
+    expect(task.id).not.toBe('hub-task-internal')
   })
 
   it('maps no_participant to -32002', async () => {
@@ -323,5 +362,83 @@ describe('A2aServer.handle — inbound ACL + quota (audit A2)', () => {
     expect(parse(out).error?.message).toContain('cross_org_acl_denied')
     expect(gateCalled).toBe(false) // short-circuited before quota
     expect(calls).toHaveLength(0)
+  })
+})
+
+describe('A2aServer.handle — tasks/get lifecycle (Route B P1-M8b)', () => {
+  const SUSPEND: TaskResult = { kind: 'suspended', taskId: 'h1', by: 'a', resumeAt: NEVER, ts: 1 }
+
+  it('a still-parked task polls back as working (taskResult not yet recorded)', async () => {
+    const { server } = makeServer({ defaultCapability: 'chat', result: SUSPEND })
+    const id = await parkTask(server)
+    const { res, out } = fakeRes()
+    await server.handle(fakeReq({ headers: AUTH, body: tasksGetBody(id) }), res)
+    const task = parse(out).result as A2ATask
+    expect(task.kind).toBe('task')
+    expect(task.status.state).toBe('working')
+  })
+
+  it('a resumed → ok task polls back as completed, carrying the reply text', async () => {
+    const { server } = makeServer({
+      defaultCapability: 'chat',
+      result: SUSPEND,
+      taskResult: (hubTaskId) =>
+        hubTaskId === 'h1' ? { kind: 'ok', taskId: 'h1', by: 'a', output: 'final answer', ts: 2 } : undefined,
+    })
+    const id = await parkTask(server)
+    const { res, out } = fakeRes()
+    await server.handle(fakeReq({ headers: AUTH, body: tasksGetBody(id) }), res)
+    const task = parse(out).result as A2ATask
+    expect(task.status.state).toBe('completed')
+    expect(task.status.message?.parts).toEqual([{ kind: 'text', text: 'final answer' }])
+  })
+
+  it('a resumed → failed task polls back as failed, carrying the error text', async () => {
+    const { server } = makeServer({
+      defaultCapability: 'chat',
+      result: SUSPEND,
+      taskResult: () => ({ kind: 'failed', taskId: 'h1', by: 'a', error: 'kaboom', ts: 2 }),
+    })
+    const id = await parkTask(server)
+    const { res, out } = fakeRes()
+    await server.handle(fakeReq({ headers: AUTH, body: tasksGetBody(id) }), res)
+    const task = parse(out).result as A2ATask
+    expect(task.status.state).toBe('failed')
+    expect(task.status.message?.parts).toEqual([{ kind: 'text', text: 'kaboom' }])
+  })
+
+  it('an unknown task id → TASK_NOT_FOUND (-32001), not an empty Task', async () => {
+    const { server } = makeServer({ defaultCapability: 'chat' })
+    const { res, out } = fakeRes()
+    await server.handle(fakeReq({ headers: AUTH, body: tasksGetBody('does-not-exist') }), res)
+    expect(parse(out).error?.code).toBe(-32001)
+  })
+
+  it('tasks/get without params.id → INVALID_PARAMS (-32602)', async () => {
+    const { server } = makeServer({ defaultCapability: 'chat' })
+    const { res, out } = fakeRes()
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tasks/get', params: {} })
+    await server.handle(fakeReq({ headers: AUTH, body }), res)
+    expect(parse(out).error?.code).toBe(-32602)
+  })
+
+  it('a peer CANNOT poll another peer’s parked task (ownership isolation)', async () => {
+    // hubA parks a task; hubB authenticates fine but must not resolve hubA's
+    // opaque id — fail-closed TASK_NOT_FOUND (anti-enumeration). hubA still can.
+    const { server } = makeServer({
+      defaultCapability: 'chat',
+      result: SUSPEND,
+      taskResult: () => ({ kind: 'ok', taskId: 'h1', by: 'a', output: 'secret', ts: 2 }),
+      newTaskId: () => 'a2a-shared-id',
+    })
+    const id = await parkTask(server, AUTH) // owned by hubA
+
+    const denied = fakeRes()
+    await server.handle(fakeReq({ headers: AUTH_B, body: tasksGetBody(id) }), denied.res)
+    expect(parse(denied.out).error?.code).toBe(-32001) // hubB → not found
+
+    const owned = fakeRes()
+    await server.handle(fakeReq({ headers: AUTH, body: tasksGetBody(id) }), owned.res)
+    expect((parse(owned.out).result as A2ATask).status.state).toBe('completed') // hubA → ok
   })
 })
