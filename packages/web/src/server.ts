@@ -65,6 +65,10 @@ import {
 import {
   handlePeerManifestRoute,
 } from './peer-routes.js'
+import {
+  handlePeerSummaryRoute,
+  type PeerSummaryFederationSurface,
+} from './peer-summary-routes.js'
 import { handleTemplateRoute, type TemplatePersonnelSource } from './template-routes.js'
 import {
   type PeerManifestFederationSurface,
@@ -76,6 +80,11 @@ import { handleSamlAdminRoute, type SamlProviderAdminSurface } from './saml-admi
 import { handleA2aAdminRoute, type A2aAgentAdminSurface } from './a2a-admin-routes.js'
 
 export type { PeerManifestFederationSurface, PeerManifestRow } from './peer-routes.js'
+export type {
+  PeerSummaryFederationSurface,
+  PeerSummaryRow,
+  PeerSummary,
+} from './peer-summary-routes.js'
 export type { OidcLoginSurface } from './oidc-routes.js'
 export type { OidcProviderAdminSurface, OidcProviderView } from './oidc-admin-routes.js'
 export type { SamlLoginSurface } from './saml-routes.js'
@@ -446,6 +455,14 @@ export interface WebServerOptions {
    * the peer registry + the `peer.manifest` rpc + an in-process cache.
    */
   peerManifests?: PeerManifestFederationSurface
+  /**
+   * v5 E5-M3 — host-injected control-plane surface. When wired,
+   * `GET /api/admin/peer-summaries` returns this hub's own privacy-safe
+   * footprint plus each connected peer's voluntarily-shared summary (counts
+   * only); `POST .../refresh` refetches. Absent (peers disabled) → 503. Backed
+   * by the peer registry + the `peer.summary` rpc + an in-process cache.
+   */
+  peerSummaries?: PeerSummaryFederationSurface
   /**
    * Route B P1-M4e — host-injected OIDC login surface. When wired, the public
    * `/api/auth/oidc/{providers,start,callback}` routes let a browser log in via
@@ -922,6 +939,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     mcpRegistry: opts.mcpRegistry,
     mcpFederation: opts.mcpFederation,
     peerManifests: opts.peerManifests,
+    peerSummaries: opts.peerSummaries,
     oidcLogin: opts.oidcLogin,
     samlLogin: opts.samlLogin,
     oidcAdmin: opts.oidcAdmin,
@@ -1075,6 +1093,8 @@ interface HandlerCtx {
   mcpFederation: McpFederationSurface | undefined
   /** Phase 18 A-M2 — see WebServerOptions.peerManifests doc above. */
   peerManifests: PeerManifestFederationSurface | undefined
+  /** v5 E5-M3 — see WebServerOptions.peerSummaries doc above. */
+  peerSummaries: PeerSummaryFederationSurface | undefined
   /** Route B P1-M4e — see WebServerOptions.oidcLogin doc above. */
   oidcLogin: OidcLoginSurface | undefined
   /** Route B P1-M5e — see WebServerOptions.samlLogin doc above. */
@@ -1988,6 +2008,18 @@ async function handle(
     const handled = await handlePeerManifestRoute(
       {
         peerManifests: ctx.peerManifests,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // v5 E5-M3 — cross-hub control plane (local footprint + peer summaries).
+  if (path === '/api/admin/peer-summaries' || path === '/api/admin/peer-summaries/refresh') {
+    const handled = await handlePeerSummaryRoute(
+      {
+        peerSummaries: ctx.peerSummaries,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req, res, method, path,

@@ -18,11 +18,14 @@ import {
   PEER_SUMMARY_METHODS,
   PEER_SUMMARY_VERSION,
   buildLocalSummary,
+  createPeerSummaryFederation,
   denyPeerSummaryRpc,
   fetchPeerSummary,
   normalizePeerSummary,
   type BuildSummaryDeps,
+  type PeerSummary,
   type SummaryLedgerRow,
+  type SummaryPeerRegistryView,
 } from '../src/peer-summary.js'
 
 const DAY_MS = 86_400_000
@@ -254,5 +257,142 @@ describe('peer summary — end to end over a live link (v5 E5-M2)', () => {
     a.on('rpc', denyPeerSummaryRpc(host.respond))
     await expect(fetchPeerSummary(b)).rejects.toThrow(/not shared by this peer/)
     await a.close()
+  })
+})
+
+describe('createPeerSummaryFederation (v5 E5-M3)', () => {
+  type Row = { peerId: string; label: string | null; connected: boolean }
+
+  const summaryFor = (hubId: string): PeerSummary => ({
+    hubId,
+    protocolVersion: PEER_SUMMARY_VERSION,
+    generatedAt: 1,
+    assets: { agents: 1, workflows: 0, publishedWorkflows: 0, peers: 0 },
+    runs: { total: 0, byStatus: {} },
+    llm: { windowDays: 30, calls: 0, tokens: 0, costMicros: 0 },
+    health: { suspendedTasks: 0 },
+  })
+
+  function summaryLink(s: PeerSummary | null): HubLink {
+    return { status: 'open', rpc: async () => s } as unknown as HubLink
+  }
+  function notSharedLink(): HubLink {
+    return {
+      status: 'open',
+      rpc: async () => {
+        throw new Error('peer summary is not shared by this peer')
+      },
+    } as unknown as HubLink
+  }
+
+  function stub(rows: Row[], links: Record<string, HubLink | null>): SummaryPeerRegistryView {
+    return {
+      status: () => rows,
+      linkForHub: (peerId) => links[peerId] ?? null,
+    }
+  }
+
+  const local = summaryFor('local')
+
+  it('local() returns the host-built summary', async () => {
+    const fed = createPeerSummaryFederation(stub([], {}), { buildLocal: async () => local })
+    expect((await fed.local()).hubId).toBe('local')
+  })
+
+  it('lists every peer as unknown (no summary, no error) before any refresh', async () => {
+    const fed = createPeerSummaryFederation(
+      stub([{ peerId: 'p1', label: 'Partner', connected: true }], {}),
+      { buildLocal: async () => local },
+    )
+    expect(await fed.list()).toEqual([
+      {
+        peer: 'p1',
+        label: 'Partner',
+        online: true,
+        stale: false,
+        summary: null,
+        lastFetchedAt: null,
+        lastError: null,
+      },
+    ])
+  })
+
+  it('refresh caches a connected peer summary + timestamp', async () => {
+    const fed = createPeerSummaryFederation(
+      stub([{ peerId: 'p1', label: null, connected: true }], { p1: summaryLink(summaryFor('p1')) }),
+      { buildLocal: async () => local, now: () => 1000 },
+    )
+    await fed.refresh()
+    const row = (await fed.list())[0]!
+    expect(row.summary?.hubId).toBe('p1')
+    expect(row.lastFetchedAt).toBe(1000)
+    expect(row.lastError).toBeNull()
+  })
+
+  it('records lastError when a peer refuses to share (the gate rejects)', async () => {
+    const fed = createPeerSummaryFederation(
+      stub([{ peerId: 'p1', label: null, connected: true }], { p1: notSharedLink() }),
+      { buildLocal: async () => local },
+    )
+    await fed.refresh()
+    const row = (await fed.list())[0]!
+    expect(row.summary).toBeNull() // no counts — distinct from offline
+    expect(row.lastError).toMatch(/not shared by this peer/)
+  })
+
+  it('marks a peer stale once offline but keeps its cached summary', async () => {
+    const rows: Row[] = [{ peerId: 'p1', label: null, connected: true }]
+    const fed = createPeerSummaryFederation(stub(rows, { p1: summaryLink(summaryFor('p1')) }), {
+      buildLocal: async () => local,
+      now: () => 1000,
+    })
+    await fed.refresh()
+    rows[0]!.connected = false
+    const row = (await fed.list())[0]!
+    expect(row.online).toBe(false)
+    expect(row.stale).toBe(true)
+    expect(row.summary?.hubId).toBe('p1') // last-known retained
+  })
+
+  it('refresh(peerId) only refetches the named peer', async () => {
+    const seen: string[] = []
+    const linkFor = (id: string): HubLink =>
+      ({
+        status: 'open',
+        rpc: async () => {
+          seen.push(id)
+          return summaryFor(id)
+        },
+      }) as unknown as HubLink
+    const fed = createPeerSummaryFederation(
+      stub(
+        [
+          { peerId: 'p1', label: null, connected: true },
+          { peerId: 'p2', label: null, connected: true },
+        ],
+        { p1: linkFor('p1'), p2: linkFor('p2') },
+      ),
+      { buildLocal: async () => local },
+    )
+    await fed.refresh('p2')
+    expect(seen).toEqual(['p2'])
+    const rows = await fed.list()
+    expect(rows.find((r) => r.peer === 'p1')!.summary).toBeNull()
+    expect(rows.find((r) => r.peer === 'p2')!.summary?.hubId).toBe('p2')
+  })
+
+  it('clears a prior lastError once a later refresh succeeds', async () => {
+    const links: Record<string, HubLink | null> = { p1: notSharedLink() }
+    const fed = createPeerSummaryFederation(
+      stub([{ peerId: 'p1', label: null, connected: true }], links),
+      { buildLocal: async () => local, now: () => 1 },
+    )
+    await fed.refresh()
+    expect((await fed.list())[0]!.lastError).toBeTruthy()
+    links.p1 = summaryLink(summaryFor('p1')) // peer opted in since
+    await fed.refresh()
+    const row = (await fed.list())[0]!
+    expect(row.lastError).toBeNull()
+    expect(row.summary?.hubId).toBe('p1')
   })
 })

@@ -165,7 +165,14 @@ import {
   createPeerManifestFederation,
   type PeerManifestFederation,
 } from './peer-manifest.js'
-import { PeerSummaryHost, PEER_SUMMARY_METHODS } from './peer-summary.js'
+import {
+  PeerSummaryHost,
+  PEER_SUMMARY_METHODS,
+  buildLocalSummary,
+  createPeerSummaryFederation,
+  type BuildSummaryDeps,
+  type PeerSummaryFederation,
+} from './peer-summary.js'
 import { GrowthReportsAdmin } from './services/growth-reports-admin.js'
 import {
   BINARY_SAFE_PLUGINS,
@@ -1253,6 +1260,7 @@ async function main(): Promise<void> {
   // the admin UI. In-process cache over the registry; refreshed on demand.
   // Wired in the same block as the registry / proxy (peers on).
   let peerFederation: PeerManifestFederation | undefined
+  let peerSummaryFederation: PeerSummaryFederation | undefined
   // Phase 16/18 — the member task inbox store is built HERE (ahead of the peers
   // block) so the Phase 18 outbound approval gate and the human-step broker
   // (registered further down) share the EXACT same store. Only with identity
@@ -1302,15 +1310,19 @@ async function main(): Promise<void> {
     })
     // v5 E5 — privacy-safe footprint summary (the free-graph control plane).
     // Counts only, built on demand from the same hub + workflow + identity
-    // surfaces. Composed onto the rpcResponder below; the per-link gate in
-    // peer-registry denies `peer.summary` unless the row opted into sharing.
-    const peerSummaryHost = new PeerSummaryHost({
+    // surfaces. The deps are shared by the RPC provider (answers a peer's
+    // `peer.summary`) AND the federation surface's `local()` (this hub's own
+    // footprint in the admin control plane). Composed onto the rpcResponder
+    // below; the per-link gate in peer-registry denies `peer.summary` unless the
+    // row opted into sharing.
+    const summaryDeps: BuildSummaryDeps = {
       hub,
       hubId: selfHubId,
       peerWrapperIds,
       workflows: workflowController,
       identity,
-    })
+    }
+    const peerSummaryHost = new PeerSummaryHost(summaryDeps)
     // Phase 18 B-M3 — outbound cross-org approval gate. A peer row flagged
     // `requireApprovalOutbound` has its outbound sender wrapped so a task parks
     // as an approval item in the owner's /me inbox and only crosses the org
@@ -1392,6 +1404,13 @@ async function main(): Promise<void> {
     // Phase 18 A-M2 — on-demand peer capability manifest discovery for the
     // admin UI. In-process cache over the same registry; the admin refreshes.
     peerFederation = createPeerManifestFederation(fedRegistry, { logger: log })
+    // v5 E5-M3 — the control plane: this hub's own footprint (`local`) joined
+    // with each connected peer's voluntarily-shared summary. In-process cache
+    // over the same registry; the admin refreshes on demand.
+    peerSummaryFederation = createPeerSummaryFederation(fedRegistry, {
+      buildLocal: () => buildLocalSummary(summaryDeps),
+      logger: log,
+    })
     // Phase 6 #4 — per-peer resolver is auto-wired by PeerRegistry
     // when identity is present (it is here — we only enter this block
     // when identity is wired). The shared token remains as fallback
@@ -1677,6 +1696,7 @@ async function main(): Promise<void> {
     mcpRegistry,
     mcpFederation,
     peerManifests: peerFederation,
+    peerSummaries: peerSummaryFederation,
     workflows: workflowController,
     // v5 B-M3 — "who-can-access this agent" reader for the template export's
     // includePersonnel opt-in. Sourced from identity's resource_grants; absent

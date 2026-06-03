@@ -343,3 +343,106 @@ export async function fetchPeerSummary(link: HubLink): Promise<PeerSummary | nul
   if (!out || typeof out !== 'object') return null
   return normalizePeerSummary(out)
 }
+
+// ─── federation surface (host → admin UI, v5 E5-M3) ─────────────────────────
+
+/** The slice of the host `PeerRegistry` the federation surface reads. */
+export interface SummaryPeerRegistryView {
+  status(): Array<{ peerId: ParticipantId; label: string | null; connected: boolean }>
+  linkForHub(peerId: ParticipantId): HubLink | null
+}
+
+/** One peer's summary row served to the admin control plane (web mirrors this shape). */
+export interface PeerSummaryRow {
+  /** Peer hub id. */
+  peer: string
+  /** Human label from the peers table, if any. */
+  label: string | null
+  /** Whether the peer link is connected right now. */
+  online: boolean
+  /** A cached summary exists but the peer is offline — its counts may be stale. */
+  stale: boolean
+  /** Last fetched summary (counts only), or null when never fetched / unavailable. */
+  summary: PeerSummary | null
+  /** Epoch ms of the last successful summary fetch, or null if never. */
+  lastFetchedAt: number | null
+  /**
+   * Why the last refresh failed, or null on success / never-tried. The control
+   * plane shows this to distinguish "peer offline" from "peer hasn't opted into
+   * sharing" (the gate rejects with `not shared by this peer`) — the opt-in is
+   * the whole point, so the UI must be able to surface it honestly.
+   */
+  lastError: string | null
+}
+
+export interface PeerSummaryFederation {
+  /** The host's OWN footprint — the control plane always shows local first. */
+  local(): Promise<PeerSummary>
+  /** Join the registry's live connection state with the summary cache. */
+  list(): Promise<PeerSummaryRow[]>
+  /** Refetch `peer.summary` from connected peers (all, or one by id). */
+  refresh(peerId?: string): Promise<void>
+}
+
+/**
+ * Build the on-demand peer summary federation surface — the free-graph control
+ * plane. Mirrors `createPeerManifestFederation`: an in-process cache (lost on
+ * restart BY DESIGN) over the peer registry, joined with live connection state.
+ * `local()` builds this hub's own summary on demand; `refresh` refetches from
+ * connected peers, keeping the prior entry on a fetch error AND recording the
+ * error so the UI can say WHY a peer has no summary (offline vs not shared).
+ */
+export function createPeerSummaryFederation(
+  registry: SummaryPeerRegistryView,
+  opts: {
+    /** Thunk that builds the host's own summary (closes over the same deps). */
+    buildLocal: () => Promise<PeerSummary>
+    now?: () => number
+    logger?: { warn?: (msg: string, meta?: Record<string, unknown>) => void }
+  },
+): PeerSummaryFederation {
+  const now = opts.now ?? (() => Date.now())
+  const cache = new Map<string, { summary: PeerSummary; lastFetchedAt: number }>()
+  const errors = new Map<string, string>()
+  return {
+    async local() {
+      return opts.buildLocal()
+    },
+    async list() {
+      return registry.status().map((row) => {
+        const cached = cache.get(row.peerId)
+        return {
+          peer: row.peerId,
+          label: row.label,
+          online: row.connected,
+          stale: cached ? !row.connected : false,
+          summary: cached?.summary ?? null,
+          lastFetchedAt: cached?.lastFetchedAt ?? null,
+          lastError: errors.get(row.peerId) ?? null,
+        }
+      })
+    },
+    async refresh(peerId?: string) {
+      const rows = registry
+        .status()
+        .filter((r) => r.connected && (peerId === undefined || r.peerId === peerId))
+      await Promise.all(
+        rows.map(async (row) => {
+          const link = registry.linkForHub(row.peerId)
+          if (!link) return
+          try {
+            const summary = await fetchPeerSummary(link)
+            if (summary) {
+              cache.set(row.peerId, { summary, lastFetchedAt: now() })
+              errors.delete(row.peerId)
+            }
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err)
+            errors.set(row.peerId, msg)
+            opts.logger?.warn?.('peer summary: fetch failed', { peer: row.peerId, err: msg })
+          }
+        }),
+      )
+    },
+  }
+}
