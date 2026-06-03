@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -196,5 +196,40 @@ describe('FileInboxStore', () => {
     expect(fulfilled).toHaveLength(1)
     expect(rejected).toHaveLength(1)
     expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(InboxError)
+  })
+
+  // Route B P0-M5 — crash consistency (fault injection). write() is atomic
+  // (`<file>.tmp` → rename), so a crash mid-write leaves at most an orphan
+  // `<itemId>.json.tmp` that was never committed. These pin that listPending
+  // ignores it. Falsifiable: drop the `.tmp` suffix skip and a fully-staged
+  // orphan surfaces as a phantom inbox item; drop the per-file JSON catch and
+  // one corrupt item file sinks the whole list.
+  // Items live under `<spaceRoot>/inbox/` — inject crash artifacts there, not
+  // at the space root (else listPending's readdir never sees them and the test
+  // would pass vacuously even with the guard removed).
+  const itemsDir = () => join(root, 'inbox')
+
+  it('ignores an orphan .tmp (valid body) left by a crash before rename', async () => {
+    await store.write(item({ itemId: 'task-ok', userId: 'user-a', createdAt: 100 }))
+
+    // A crash after writeFile(tmp) but before rename leaves a complete,
+    // parseable item under `.json.tmp`. The rename is the commit point and it
+    // never happened, so this item must not appear to anyone.
+    const orphan = item({ itemId: 'task-crash', userId: 'user-a', createdAt: 200 })
+    writeFileSync(join(itemsDir(), 'task-crash.json.tmp'), JSON.stringify(orphan, null, 2), 'utf8')
+
+    // Only the committed item is pending; the orphan is filtered by suffix.
+    expect((await store.listPending('user-a')).map((i) => i.itemId)).toEqual(['task-ok'])
+    // get() of the orphan id is null too — it was never committed at `.json`.
+    expect(await store.get('task-crash')).toBeNull()
+  })
+
+  it('skips a corrupt item file instead of sinking the list', async () => {
+    await store.write(item({ itemId: 'task-ok', userId: 'user-a' }))
+    // A committed but unparseable `.json` (disk corruption / torn flush) must
+    // not take down everyone else's pending items.
+    writeFileSync(join(itemsDir(), 'task-bad.json'), '{ "itemId": "task-bad", trunc', 'utf8')
+
+    expect((await store.listPending('user-a')).map((i) => i.itemId)).toEqual(['task-ok'])
   })
 })

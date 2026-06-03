@@ -1,8 +1,8 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { RunStore, type RunState } from '../src/index.js'
 
@@ -148,5 +148,50 @@ describe('RunStore.listByUser', () => {
   it('returns [] when runs dir is missing', async () => {
     const fresh = new RunStore(join(tmp, 'never-touched'))
     expect(await fresh.listByUser('alice')).toEqual([])
+  })
+})
+
+// Route B P0-M5 — crash consistency (fault injection). RunStore.write is
+// atomic (write `<file>.tmp` → rename), so a `kill -9` mid-write leaves the
+// committed run untouched and at most an orphan `<id>.json.tmp` that was never
+// renamed. These inject exactly those crash artifacts and pin that the next
+// boot ignores them without losing or double-counting a committed run. Each
+// guard is falsifiable: drop the `.tmp` filter in listRunIds and the orphan
+// surfaces as a phantom run; drop the per-file try/catch in the scan and one
+// corrupt file aborts the whole list.
+describe('RunStore crash consistency (Route B P0-M5)', () => {
+  it('ignores an orphan .tmp left by a crash before rename; the committed run survives', async () => {
+    const ok = makeRun({ runId: 'r_ok', workflowId: 'wf_a', startedAt: 100, status: 'done', endedAt: 110, finalOutput: 'committed' })
+    await store.write(ok)
+
+    // A crash after writeFile(tmp) but before rename(tmp,file) leaves a fully
+    // formed body under `<id>.json.tmp`. It must NEVER be adopted as a run —
+    // the rename is the commit point, and it never happened.
+    const orphan = makeRun({ runId: 'r_crash', workflowId: 'wf_a', startedAt: 200, status: 'running' })
+    writeFileSync(join(store.runsDir, 'r_crash.json.tmp'), JSON.stringify(orphan, null, 2), 'utf8')
+
+    // The id list excludes the orphan (this is the load-bearing `.tmp` filter).
+    expect(await store.listRunIds()).toEqual(['r_ok'])
+    // The committed run is whole (atomic rename never tears it).
+    expect(await store.read('r_ok')).toEqual(ok)
+    // Neither the summary scan nor the metrics count sees the orphan.
+    expect((await store.listRuns()).map((r) => r.runId)).toEqual(['r_ok'])
+    expect((await store.countRuns()).total).toBe(1)
+  })
+
+  it('skips an intact-but-corrupt run file instead of aborting the whole list', async () => {
+    const ok = makeRun({ runId: 'r_ok', workflowId: 'wf_a', startedAt: 100, status: 'done', endedAt: 110 })
+    await store.write(ok)
+    // Disk corruption / a torn flush can leave a committed `.json` that no
+    // longer parses. One bad file must not sink the list or the count.
+    writeFileSync(join(store.runsDir, 'r_bad.json'), '{ "runId": "r_bad", trunc', 'utf8')
+
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      expect((await store.listRuns()).map((r) => r.runId)).toEqual(['r_ok'])
+      expect((await store.countRuns()).total).toBe(1)
+    } finally {
+      errSpy.mockRestore()
+    }
   })
 })
