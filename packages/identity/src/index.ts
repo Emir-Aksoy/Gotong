@@ -24,6 +24,8 @@ export type {
   Session,
   Credential,
   CredentialKind,
+  LinkOidcInput,
+  OidcLogin,
   IssuedApiKey,
   IssuedAdminToken,
   CreateUserInput,

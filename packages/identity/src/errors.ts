@@ -20,6 +20,18 @@ export type IdentityErrorCode =
   // the 6-digit code and retry. Distinct from authentication_failed so the web
   // layer can map it to a "challenge" response rather than a flat 401.
   | 'totp_required'
+  // Route B P1-M4a — OIDC account linking.
+  //   `oidc_not_linked`     authenticateOidc found no local user for this
+  //                         (issuer, sub). The callback layer decides whether
+  //                         to auto-provision or refuse (its provisioning
+  //                         policy), so the store stays mechanism-only.
+  //   `oidc_already_linked` linkOidc was asked to bind an (issuer, sub) that
+  //                         already maps to a DIFFERENT local user — a real
+  //                         conflict (two accounts can't claim one IdP
+  //                         identity). Re-linking to the SAME user is an
+  //                         idempotent no-op, not this error.
+  | 'oidc_not_linked'
+  | 'oidc_already_linked'
   | 'session_expired'
   | 'session_not_found'
   | 'weak_password'

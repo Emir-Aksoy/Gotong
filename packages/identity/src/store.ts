@@ -37,6 +37,7 @@ import { applyMigrations } from './schema.js'
 import {
   hashPassword,
   hashToken,
+  oidcLinkIdentifier,
   verifyPassword,
 } from './credentials.js'
 import {
@@ -79,8 +80,10 @@ import {
   type IssuedInvitation,
   type ListAuditLogQuery,
   type ListInvitationsQuery,
+  type LinkOidcInput,
   type ListVaultEntriesQuery,
   type Membership,
+  type OidcLogin,
   type OwnerKind,
   type ResetUsageInput,
   type Role,
@@ -1140,6 +1143,126 @@ export class IdentityStore {
       throw new IdentityError({
         code: 'authentication_failed',
         message: 'invalid token',
+      })
+    }
+    return this.beginSession(
+      cred.user_id,
+      opts.ttlMs ?? this.defaultSessionTtlMs,
+      cred.id,
+    )
+  }
+
+  /**
+   * Route B P1-M4a — bind a verified OIDC identity to a local user.
+   *
+   * Idempotent: re-linking the SAME (issuer, sub) to the SAME user returns the
+   * existing credential id without inserting a duplicate. Binding an (issuer,
+   * sub) already claimed by a DIFFERENT user throws `oidc_already_linked` (one
+   * IdP identity must not fan out to two local accounts). The (issuer, sub)
+   * MUST already be validated upstream (M4b verifies the id_token signature,
+   * iss, aud, exp, nonce) — this method makes no trust decision, it only maps.
+   */
+  linkOidc(input: LinkOidcInput): string {
+    if (
+      typeof input?.userId !== 'string' ||
+      typeof input?.issuer !== 'string' ||
+      typeof input?.sub !== 'string' ||
+      input.issuer.length === 0 ||
+      input.sub.length === 0
+    ) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'linkOidc requires userId, issuer, sub',
+      })
+    }
+    const user = this.getUserById(input.userId)
+    if (!user) {
+      throw new IdentityError({
+        code: 'user_not_found',
+        message: `user not found: ${input.userId}`,
+      })
+    }
+    const identifier = oidcLinkIdentifier(input.issuer, input.sub)
+    const existing = this.stmtFindCredByKindIdent.get('oidc', identifier) as
+      | CredentialRow
+      | undefined
+    if (existing) {
+      if (existing.user_id === input.userId) return existing.id
+      throw new IdentityError({
+        code: 'oidc_already_linked',
+        message: 'this identity is already linked to another user',
+      })
+    }
+    const credentialId = newId()
+    // No replayable secret of its own — the IdP-signed token is the proof,
+    // re-validated every login. secret_hash is '' (the NOT NULL column still
+    // needs a value); `label` carries the issuer so an admin sees WHICH IdP at
+    // a glance in the existing credential listing.
+    this.stmtInsertCredential.run(
+      credentialId,
+      input.userId,
+      'oidc',
+      identifier,
+      '',
+      input.issuer,
+      Date.now(),
+    )
+    return credentialId
+  }
+
+  /**
+   * Route B P1-M4a — look up the local user linked to an OIDC identity.
+   * Returns the user id, or null when no link exists. Pure read; no session.
+   */
+  findUserByOidc(opts: { issuer: string; sub: string }): string | null {
+    if (
+      typeof opts?.issuer !== 'string' ||
+      typeof opts?.sub !== 'string' ||
+      opts.issuer.length === 0 ||
+      opts.sub.length === 0
+    ) {
+      return null
+    }
+    const identifier = oidcLinkIdentifier(opts.issuer, opts.sub)
+    const cred = this.stmtFindCredByKindIdent.get('oidc', identifier) as
+      | CredentialRow
+      | undefined
+    return cred ? cred.user_id : null
+  }
+
+  /**
+   * Route B P1-M4a — authenticate a previously-linked OIDC identity, minting
+   * the SAME local `Session` every other auth path produces (decision D-3:
+   * self-built session, not pure SP passthrough). Throws `oidc_not_linked`
+   * when no local user is bound — the callback route (M4e) owns the
+   * provisioning policy (auto-create vs refuse), so this stays mechanism-only.
+   *
+   * MFA boundary: OIDC login is NOT gated by local TOTP. The IdP is the
+   * authentication authority and runs its own MFA; layering a second local
+   * factor on a federated login is a deliberate non-goal for this MVP (mirrors
+   * `authenticateToken` staying MFA-exempt — a delegated assertion is itself
+   * the strong factor). Revisit if per-account "force local 2FA" is ever asked.
+   */
+  authenticateOidc(opts: OidcLogin): Session {
+    if (
+      typeof opts?.issuer !== 'string' ||
+      typeof opts?.sub !== 'string' ||
+      opts.issuer.length === 0 ||
+      opts.sub.length === 0
+    ) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'authenticateOidc requires issuer, sub',
+      })
+    }
+    const identifier = oidcLinkIdentifier(opts.issuer, opts.sub)
+    const cred = this.stmtFindCredByKindIdent.get('oidc', identifier) as
+      | CredentialRow
+      | undefined
+    if (!cred) {
+      throw new IdentityError({
+        code: 'oidc_not_linked',
+        message: 'no local user linked to this oidc identity',
       })
     }
     return this.beginSession(

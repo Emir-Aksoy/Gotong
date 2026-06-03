@@ -28,7 +28,14 @@ export const ROLES: readonly Role[] = [
   'viewer',
 ] as const
 
-export type CredentialKind = 'password' | 'admin_token' | 'api_key'
+// Route B P1-M4a — `oidc` links a verified external IdP identity (issuer+sub)
+// to a local user. Like token credentials it has no replayable secret of its
+// own (the IdP-signed id_token is the proof, validated per-login in M4b); the
+// row exists only to map (issuer, sub) → user and to mint the SAME local
+// session every other auth path uses (decision D-3: self-built session, not
+// pure SP passthrough — AipeHub already owns a complete `Session` model, so
+// OIDC merely bootstraps it).
+export type CredentialKind = 'password' | 'admin_token' | 'api_key' | 'oidc'
 
 export interface User {
   id: string
@@ -98,6 +105,28 @@ export interface IssuedApiKey {
   /** Raw key — shown ONCE. Re-derive `identifier` via `hashToken(key)`. */
   key: string
   credentialId: string
+}
+
+/**
+ * Route B P1-M4a — link a verified OIDC identity to a local user.
+ * `issuer`/`sub` MUST already be validated (the id_token signature, iss, aud,
+ * exp and nonce are checked upstream in M4b before this is called). This store
+ * method is pure mapping + session-mint; it makes no trust decision about the
+ * token itself.
+ */
+export interface LinkOidcInput {
+  userId: string
+  /** OIDC `iss` claim — the IdP's issuer URL. */
+  issuer: string
+  /** OIDC `sub` claim — the IdP's stable opaque subject id. */
+  sub: string
+}
+
+/** Route B P1-M4a — authenticate a previously-linked OIDC identity. */
+export interface OidcLogin {
+  issuer: string
+  sub: string
+  ttlMs?: number
 }
 
 export interface IssuedAdminToken {

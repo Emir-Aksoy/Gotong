@@ -117,6 +117,30 @@ export function hashToken(token: string): string {
 }
 
 /**
+ * Stable, collision-free lookup key for an OIDC (issuer, sub) pair.
+ *
+ * Route B P1-M4a — an OIDC login links a verified IdP identity to a local
+ * user. We reuse the `credentials` table (kind='oidc') and need a single
+ * TEXT `identifier` to carry both the issuer and the subject under the
+ * existing UNIQUE(kind, identifier) index. JSON-encoding the pair before
+ * hashing makes the encoding unambiguous for ANY issuer/sub content (a
+ * naive `issuer + ':' + sub` join could collide because issuers are URLs
+ * full of colons) — `["a:","b"]` and `["a",":b"]` hash distinctly. sha256
+ * hex, same shape as `hashToken`, so it slots into the same column.
+ */
+export function oidcLinkIdentifier(issuer: string, sub: string): string {
+  if (typeof issuer !== 'string' || issuer.length === 0) {
+    throw new Error('oidc issuer must be a non-empty string')
+  }
+  if (typeof sub !== 'string' || sub.length === 0) {
+    throw new Error('oidc sub must be a non-empty string')
+  }
+  return createHash('sha256')
+    .update(JSON.stringify([issuer, sub]), 'utf8')
+    .digest('hex')
+}
+
+/**
  * Constant-time compare two sha256 hex digests. Returns false on any
  * malformed input rather than throwing — callers want a boolean.
  */
