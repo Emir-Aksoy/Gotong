@@ -95,10 +95,11 @@ export interface IdentitySessionDTO {
 export interface IdentityCredentialDTO {
   id: string
   userId: string
-  // Mirrors @aipehub/identity CredentialKind. 'oidc' (Route B P1-M4a) is an
-  // external-IdP link with no replayable secret — listed like any other
-  // credential so a member/admin can see & revoke their SSO connections.
-  kind: 'password' | 'admin_token' | 'api_key' | 'oidc'
+  // Mirrors @aipehub/identity CredentialKind. 'oidc' (Route B P1-M4a) and
+  // 'saml' (P1-M5b) are external-IdP links with no replayable secret — listed
+  // like any other credential so a member/admin can see & revoke their SSO
+  // connections.
+  kind: 'password' | 'admin_token' | 'api_key' | 'oidc' | 'saml'
   identifier: string
   label: string | null
   createdAt: number

@@ -442,6 +442,9 @@ importers:
       '@aipehub/protocol':
         specifier: workspace:*
         version: link:../protocol
+      '@aipehub/saml':
+        specifier: workspace:*
+        version: link:../saml
       '@aipehub/service-artifact-file':
         specifier: workspace:*
         version: link:../service-artifact-file

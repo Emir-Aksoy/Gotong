@@ -58,6 +58,7 @@
     "@aipehub/llm-openai": "workspace:*",
     "@aipehub/mcp-client": "workspace:*",
     "@aipehub/protocol": "workspace:*",
+    "@aipehub/saml": "workspace:*",
     "@aipehub/service-artifact-file": "workspace:*",
     "@aipehub/service-datastore-sqlite": "workspace:*",
     "@aipehub/service-memory-file": "workspace:*",
