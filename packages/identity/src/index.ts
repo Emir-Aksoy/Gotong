@@ -178,3 +178,20 @@ export {
   type GeneratedTotpSecret,
   type OtpauthUriInput,
 } from './totp.js'
+// Route B P1-M4b — OIDC protocol pure core (PKCE + RS256 id_token validation).
+// Pure, deterministic (now/jwks injected); network + config land in M4c/M4d.
+export {
+  OidcError,
+  randomUrlToken,
+  randomState,
+  randomNonce,
+  generatePkce,
+  buildAuthorizationUrl,
+  validateIdToken,
+  type PkcePair,
+  type BuildAuthUrlInput,
+  type Jwk,
+  type Jwks,
+  type ValidateIdTokenInput,
+  type IdTokenClaims,
+} from './oidc.js'
