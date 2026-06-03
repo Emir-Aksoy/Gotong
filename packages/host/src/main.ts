@@ -1640,6 +1640,11 @@ async function main(): Promise<void> {
     agentCard,
     // Phase 18 C-M3 — inbound A2A message/send (undefined → /a2a 404s).
     ...(a2aServer ? { a2aServer } : {}),
+    // Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
+    // Lets Prometheus pull the same body as /api/admin/metrics without a
+    // machine-admin token. Unset/empty (env() already maps '' → undefined) →
+    // the route 404s (fail-closed: no anonymous metrics endpoint).
+    ...(env('AIPE_METRICS_TOKEN') ? { metricsToken: env('AIPE_METRICS_TOKEN') } : {}),
     ...(allowedHosts ? { allowedHosts } : {}),
     adminLoginRateLimit: { max: adminRateMax, windowSec: adminRateSec },
     readinessGate: { isReady: () => bootReady },

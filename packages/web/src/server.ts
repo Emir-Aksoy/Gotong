@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { readBearer, readCookie, readJsonBody, sendJson } from './http-helpers.js'
@@ -436,6 +436,16 @@ export interface WebServerOptions {
    * the peer registry + the `peer.manifest` rpc + an in-process cache.
    */
   peerManifests?: PeerManifestFederationSurface
+  /**
+   * Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
+   * When set, a Prometheus scraper presenting `Authorization: Bearer <token>`
+   * gets the same OpenMetrics body as `/api/admin/metrics` WITHOUT a browser
+   * session or a machine-admin token (which would widen the admin surface).
+   * Fail-closed: when this is `undefined` the route 404s — an unconfigured
+   * deployment exposes no anonymous metrics endpoint. The host sources it
+   * from `AIPE_METRICS_TOKEN` (empty/unset → undefined).
+   */
+  metricsToken?: string
 }
 
 /**
@@ -861,6 +871,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     mcpFederation: opts.mcpFederation,
     peerManifests: opts.peerManifests,
     httpStats: new HttpStats(),
+    metricsToken: opts.metricsToken,
   }
 
   const server = createServer((req, res) => {
@@ -1015,6 +1026,8 @@ interface HandlerCtx {
    * expects counter resets and handles them via `rate()`.
    */
   httpStats: HttpStats
+  /** Route B P0-M7 — see WebServerOptions.metricsToken doc above. */
+  metricsToken: string | undefined
 }
 
 // HttpStats moved to metrics.ts (C1 god-object split) — it exists solely
@@ -1222,6 +1235,31 @@ function checkOrigin(
   return true
 }
 
+/**
+ * Extract a `Bearer <token>` value from the Authorization header, or undefined.
+ * Used by the internal `/metrics` scrape route (Route B P0-M7) — a
+ * server-to-server domain with no browser session, so it carries its token
+ * in the standard Authorization header, not a cookie.
+ */
+function readBearerToken(req: IncomingMessage): string | undefined {
+  const auth = req.headers.authorization
+  if (!auth) return undefined
+  const m = /^Bearer\s+(.+)$/i.exec(auth)
+  return m?.[1]?.trim() || undefined
+}
+
+/**
+ * Constant-time string compare for bearer secrets — never short-circuit on the
+ * first differing byte (that leaks length/prefix via timing). Length mismatch
+ * returns false up front (lengths aren't secret), otherwise `timingSafeEqual`.
+ */
+function constantTimeEqual(a: string, b: string): boolean {
+  const ab = Buffer.from(a)
+  const bb = Buffer.from(b)
+  if (ab.length !== bb.length) return false
+  return timingSafeEqual(ab, bb)
+}
+
 async function handle(
   ctx: HandlerCtx,
   req: IncomingMessage,
@@ -1307,6 +1345,46 @@ async function handle(
       return
     }
     await ctx.a2aServer.handle(req, res)
+    return
+  }
+
+  // --- Internal metrics scrape (Route B P0-M7) --------------------------
+  // BEFORE the CSRF gate and OUTSIDE requireAdmin: a Prometheus scraper is a
+  // server-to-server client with no browser session, so it satisfies neither
+  // the admin cookie nor the CSRF Origin check. This route has its own
+  // bearer-token domain (AIPE_METRICS_TOKEN), letting an operator scrape the
+  // SAME body as /api/admin/metrics WITHOUT minting a machine admin (which
+  // would widen the admin surface to a scraper credential).
+  //
+  // Fail-closed: when the token is unset the route 404s — indistinguishable
+  // from "no such endpoint", so an unconfigured deployment exposes no
+  // anonymous metrics. Set + correct bearer → 200; set + wrong/absent bearer
+  // → 401 via constant-time compare (no token-length/prefix timing oracle).
+  if (method === 'GET' && path === '/metrics') {
+    if (!ctx.metricsToken) {
+      res.writeHead(404, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'metrics scrape not enabled' }))
+      return
+    }
+    const presented = readBearerToken(req)
+    if (!presented || !constantTimeEqual(presented, ctx.metricsToken)) {
+      res.writeHead(401, { 'content-type': 'application/json' })
+      res.end(JSON.stringify({ error: 'unauthorized' }))
+      return
+    }
+    // Identical snapshot to /api/admin/metrics: business metrics are
+    // best-effort (a scrape must never 500 — collectBusinessMetrics swallows
+    // its own per-family errors, the `.catch` is belt-and-suspenders) and the
+    // hub metrics always render.
+    const business = await collectBusinessMetrics({
+      workflows: ctx.workflows,
+      identity: ctx.identity as unknown as MetricsIdentitySource | undefined,
+    }).catch(() => ({}))
+    const text = renderMetrics(ctx.hub, { httpStats: ctx.httpStats, business })
+    res.writeHead(200, {
+      'content-type': 'text/plain; version=0.0.4; charset=utf-8',
+    })
+    res.end(text)
     return
   }
 
