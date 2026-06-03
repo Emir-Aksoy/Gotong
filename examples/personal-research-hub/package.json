@@ -6,10 +6,12 @@
   "description": "Personal research/knowledge hub — Karpathy's LLM knowledge-base loop as an AipeHub case: a librarian router dispatches a compiler agent (raw source → compiled wiki note with backlinks, 'LLM as compiler') and a researcher agent (ask-your-wiki: search the notes → synthesize an answer → file it back). Real markdown file I/O; deterministic, no API key.",
   "scripts": {
     "start": "tsx src/index.ts",
+    "load-template": "tsx src/load-template.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@aipehub/core": "workspace:*",
-    "@aipehub/llm": "workspace:*"
+    "@aipehub/llm": "workspace:*",
+    "yaml": "^2.6.0"
   }
 }

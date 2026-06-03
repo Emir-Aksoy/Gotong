@@ -307,6 +307,9 @@ importers:
       '@aipehub/llm':
         specifier: workspace:*
         version: link:../../packages/llm
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.0
 
   examples/rag-mcp:
     dependencies:
