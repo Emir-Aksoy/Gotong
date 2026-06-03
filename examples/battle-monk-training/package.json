@@ -1,0 +1,15 @@
+{
+  "name": "@aipehub/example-battle-monk-training",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "战斗修士锻炼 — a personal-growth hub for the austere: a preceptor (router LLM) drives three pillars (body / mind / lore), each writing the trainee's evolving STATE into a persistent Obsidian-style Codex. Grimdark-monastic aesthetic (original homage). Deterministic, no API key.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/llm": "workspace:*"
+  }
+}

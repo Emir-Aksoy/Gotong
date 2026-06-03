@@ -37,6 +37,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/llm
 
+  examples/battle-monk-training:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+
   examples/broadcast-claim:
     dependencies:
       '@aipehub/core':
