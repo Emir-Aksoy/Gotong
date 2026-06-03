@@ -136,6 +136,7 @@
       <button class="tabbar-btn" type="button" data-tab="reputation" data-roles="owner" data-i18n="tabReputation">信誉</button>
       <button class="tabbar-btn" type="button" data-tab="federation" data-roles="owner" data-i18n="tabFederation">联邦</button>
       <button class="tabbar-btn" type="button" data-tab="oidc"      data-roles="owner" data-i18n="tabOidc">SSO</button>
+      <button class="tabbar-btn" type="button" data-tab="saml"      data-roles="owner" data-i18n="tabSaml">SAML</button>
       <button class="tabbar-btn" type="button" data-tab="settings"  data-roles="owner,admin,member,viewer" data-i18n="tabSettings">设置</button>
     </nav>
 
@@ -1165,6 +1166,12 @@
            /api/admin/oidc/providers); 503 inline when the host wired no
            identity store. -->
       <section id="oidc-panel" class="oidc-panel" data-tab="oidc"></section>
+
+      <!-- Route B P1-M5f-3 — SAML 2.0 IdP registry. Owner-only. Filled by the
+           self-contained saml-ui.js on tab activation (CRUD over
+           /api/admin/saml/providers); 503 inline when the host wired no
+           identity store. -->
+      <section id="saml-panel" class="saml-panel" data-tab="saml"></section>
     </main>
   </body>
 </html>

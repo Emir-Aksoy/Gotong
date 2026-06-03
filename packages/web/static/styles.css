@@ -2262,6 +2262,15 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .oidc-panel .oidc-on { background: #d6ecdb; color: #1a6a3a; }
 .oidc-panel .oidc-off { background: #e9e9e9; color: #888; }
 
+/* Route B P1-M5f-3 — SAML IdP registry (tab "SAML"). Mirrors the OIDC panel. */
+.saml-panel .saml-status { font-size: 0.85rem; min-height: 1em; }
+.saml-panel .saml-status-loading { color: #888; }
+.saml-panel .saml-status-ok { color: #27ae60; }
+.saml-panel .saml-status-error { color: #c0392b; }
+.saml-panel .saml-badge { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 3px; font-weight: 700; white-space: nowrap; }
+.saml-panel .saml-on { background: #d6ecdb; color: #1a6a3a; }
+.saml-panel .saml-off { background: #e9e9e9; color: #888; }
+
 /* Phase 17 — usage / cost dashboard (tab "用量"). */
 .usage-panel { padding: 1rem; }
 .usage-panel .usage-header h2 { margin: 0 0 0.35rem; }

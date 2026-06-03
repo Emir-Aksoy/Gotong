@@ -298,6 +298,7 @@
   const ADMIN_TABS = new Set([
     'overview', 'agents', 'workflows', 'tasks', 'activity', 'services',
     'mcp', 'users', 'quotas', 'usage', 'reputation', 'federation', 'oidc',
+    'saml',
   ])
 
   function defaultTabForRole() {
@@ -1594,6 +1595,7 @@
       .then(() => inject('/usage-ui.js'))
       .then(() => inject('/peer-manifest-ui.js'))
       .then(() => inject('/oidc-ui.js'))
+      .then(() => inject('/saml-ui.js'))
       .catch((err) => {
         console.error('[app] failed to load admin bundles', err)
       })

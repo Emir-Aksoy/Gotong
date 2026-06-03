@@ -262,6 +262,17 @@ describe('C1 — unified SPA shell', () => {
       expect(html).toContain('id="oidc-panel"')
       expect(html).toContain('id="login-sso"')
     })
+
+    it('serves the P1-M5f SAML markup: owner-only SAML tab + panel', async () => {
+      // Pins the rebuilt bundle carries the M5f-3 admin SAML tab (owner-only)
+      // + its mount section. The login-screen SSO button container (#login-sso)
+      // is shared with OIDC (M5f-2 extended renderSsoButtons to also fetch the
+      // SAML provider list). Goes red if app.html drops them after a rebuild.
+      const r = await fetch(`${b.baseUrl}/`, { headers: { cookie: b.adminCookie } })
+      const html = await r.text()
+      expect(html).toMatch(/data-tab="saml"\s+data-roles="owner"/)
+      expect(html).toContain('id="saml-panel"')
+    })
   })
 
   describe('OIDC admin bundle (Route B P1-M4f-3)', () => {
@@ -275,6 +286,19 @@ describe('C1 — unified SPA shell', () => {
       const js = await r.text()
       expect(js).toContain('oidc-add-form')
       expect(js).toContain('/api/admin/oidc/providers')
+    })
+  })
+
+  describe('SAML admin bundle (Route B P1-M5f-3)', () => {
+    it('serves /saml-ui.js with the provider-registry panel markers', async () => {
+      // Same posture as oidc-ui.js: a public static asset carrying no secret
+      // (it only calls the requireAdmin-gated /api/admin/saml/providers routes).
+      // Pins it is embedded + served so the SAML tab can mount.
+      const r = await fetch(`${b.baseUrl}/saml-ui.js`)
+      expect(r.status).toBe(200)
+      const js = await r.text()
+      expect(js).toContain('saml-add-form')
+      expect(js).toContain('/api/admin/saml/providers')
     })
   })
 })
