@@ -326,5 +326,16 @@ describe('C1 — unified SPA shell', () => {
       expect(js).toContain('pa-add-form')
       expect(js).toContain('/api/admin/identity/peers')
     })
+
+    it('carries the M7c trust-contract editor (policy fields + save)', async () => {
+      // Pins the expandable per-row policy editor: it PATCHes the full
+      // per-link contract the route already accepts — inbound ACL, outbound
+      // allowlist, data-class + callable-KB allowlists, quota, revocation.
+      const r = await fetch(`${b.baseUrl}/peer-admin-ui.js`)
+      const js = await r.text()
+      expect(js).toContain('pa-pol-save')
+      expect(js).toContain('allowedKnowledgeBases')
+      expect(js).toContain('revocationState')
+    })
   })
 })

@@ -2282,6 +2282,14 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .peer-admin-panel .pa-disc { background: #f2f2f2; color: #aaa; }
 .peer-admin-panel .pa-row-actions { white-space: nowrap; }
 .peer-admin-panel .pa-row-actions button { font-size: 0.78rem; padding: 2px 8px; margin-right: 4px; }
+/* M7c — expandable per-row trust-contract editor. */
+.peer-admin-panel .pa-policy-row > td { background: #f7f9fb; padding: 0.75rem 1rem; }
+.peer-admin-panel .pa-policy-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 0.6rem 1rem; margin-bottom: 0.6rem; }
+.peer-admin-panel .pa-policy-grid label { font-size: 0.78rem; color: #555; display: flex; flex-direction: column; gap: 3px; }
+.peer-admin-panel .pa-policy-grid label small { color: #999; font-weight: 400; }
+.peer-admin-panel .pa-policy-grid input[type="text"], .peer-admin-panel .pa-policy-grid input[type="number"], .peer-admin-panel .pa-policy-grid select { font-size: 0.82rem; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; }
+.peer-admin-panel .pa-policy-grid .pa-pol-check { flex-direction: row; align-items: center; gap: 6px; }
+.peer-admin-panel .pa-pol-save { font-size: 0.82rem; padding: 4px 14px; }
 
 /* Route B P1-M4f-3 — OIDC IdP registry (tab "SSO"). */
 .oidc-panel .oidc-status { font-size: 0.85rem; min-height: 1em; }

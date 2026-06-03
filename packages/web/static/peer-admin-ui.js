@@ -14,12 +14,14 @@
  * list route, so this panel never displays it (write-only — type it in
  * to set / rotate, never read back).
  *
- * Lifecycle only here. The trust-contract policy editor (inbound ACL,
- * outbound capability allowlist, data-class / KB allowlists, per-link
- * quota, revocation) is M7c — it layers onto each row's expandable
- * detail without changing this CRUD spine.
- *
- * ~210 LOC; auditable in one pass.
+ * Each row expands (button "策略") into the M7c trust-contract editor:
+ * inbound ACL (capabilities + require-origin), outbound capability
+ * allowlist, per-link inbound quota, data-class allowlist, callable-KB
+ * allowlist, and revocation. All seven PATCH through the same route the
+ * lifecycle actions use. Array fields follow one idiom — blank input =
+ * null (the route's "default / all-allowed"), a comma list = an explicit
+ * allowlist. (The []=lockdown state per axis is API-only; revoke the link
+ * for a full deny.)
  */
 ;(function () {
   'use strict'
@@ -43,6 +45,19 @@
     if (!el) return
     el.textContent = msg || ''
     el.className = 'pa-status' + (kind ? ' pa-status-' + kind : '')
+  }
+
+  // Array policy fields use one idiom: a comma/space list ⇄ string[].
+  // Blank ⇒ null, which the route reads as "default / all-allowed".
+  function arrToText(arr) {
+    return Array.isArray(arr) ? arr.join(', ') : ''
+  }
+  function textToArr(text) {
+    const parts = String(text || '')
+      .split(/[,\s]+/)
+      .map(function (s) { return s.trim() })
+      .filter(Boolean)
+    return parts.length ? parts : null
   }
 
   // ---- API --------------------------------------------------------------
@@ -158,10 +173,25 @@
         '<td class="pa-kind">' + escHtml(p.kind || 'service') + '</td>' +
         '<td class="pa-state">' + stateBits + '</td>' +
         '<td class="pa-row-actions">' +
+        '  <button type="button" class="pa-policy-toggle">策略</button>' +
         '  <button type="button" class="pa-toggle">' + (enabled ? '停用' : '启用') + '</button>' +
         '  <button type="button" class="pa-rotate">轮换 token</button>' +
         '  <button type="button" class="pa-remove">删除</button>' +
         '</td>'
+      // M7c — expandable trust-contract editor row, hidden until 策略 click.
+      const detail = document.createElement('tr')
+      detail.className = 'pa-policy-row'
+      detail.hidden = true
+      const cell = document.createElement('td')
+      cell.colSpan = 5
+      cell.innerHTML = policyEditorHtml(p)
+      detail.appendChild(cell)
+      tr.querySelector('.pa-policy-toggle').addEventListener('click', function () {
+        detail.hidden = !detail.hidden
+      })
+      cell.querySelector('.pa-pol-save').addEventListener('click', function () {
+        onSavePolicy(root, p.id, cell).catch(function () { /* setStatus handled it */ })
+      })
       tr.querySelector('.pa-toggle').addEventListener('click', function () {
         doPatch(root, p.id, { enabled: !enabled }, enabled ? '已停用' : '已启用')
       })
@@ -179,6 +209,75 @@
         doRemove(root, p.id)
       })
       tbody.appendChild(tr)
+      tbody.appendChild(detail)
+    }
+  }
+
+  // M7c — the per-link trust-contract editor (pre-filled from the list row;
+  // every field is already in the GET response). escHtml doubles as attr
+  // escaping (it encodes the double-quote).
+  function policyEditorHtml(p) {
+    const acl = p.acl || {}
+    const quota = p.perLinkQuotaBudget == null ? '' : String(p.perLinkQuotaBudget)
+    const revoked = p.revocationState === 'revoked'
+    return (
+      '<div class="pa-policy">' +
+      '  <div class="pa-policy-grid">' +
+      '    <label>入站 ACL capabilities <small>(逗号分隔, 留空=接受全部)</small>' +
+      '      <input class="pa-pol-aclcaps" type="text" value="' + escHtml(arrToText(acl.capabilities)) + '" /></label>' +
+      '    <label class="pa-pol-check"><input class="pa-pol-requireorigin" type="checkbox"' +
+      (acl.requireOrigin ? ' checked' : '') + ' /> 入站要求带 origin</label>' +
+      '    <label>出站 capability 白名单 <small>(留空=全放)</small>' +
+      '      <input class="pa-pol-outcaps" type="text" value="' + escHtml(arrToText(p.outboundCaps)) + '" /></label>' +
+      '    <label class="pa-pol-check"><input class="pa-pol-approve" type="checkbox"' +
+      (p.requireApprovalOutbound ? ' checked' : '') + ' /> 出站需人工审批</label>' +
+      '    <label>允许的数据类 <small>(留空=全放)</small>' +
+      '      <input class="pa-pol-dataclasses" type="text" value="' + escHtml(arrToText(p.allowedDataClasses)) + '" /></label>' +
+      '    <label>可调用知识库 <small>(留空=全部可调)</small>' +
+      '      <input class="pa-pol-kb" type="text" value="' + escHtml(arrToText(p.allowedKnowledgeBases)) + '" /></label>' +
+      '    <label>每链路入站配额 <small>(非负整数, 留空=无限)</small>' +
+      '      <input class="pa-pol-quota" type="number" min="0" step="1" value="' + escHtml(quota) + '" /></label>' +
+      '    <label>撤销状态' +
+      '      <select class="pa-pol-revstate">' +
+      '        <option value="active"' + (revoked ? '' : ' selected') + '>active</option>' +
+      '        <option value="revoked"' + (revoked ? ' selected' : '') + '>revoked</option>' +
+      '      </select></label>' +
+      '  </div>' +
+      '  <button type="button" class="pa-pol-save">保存策略</button>' +
+      '</div>'
+    )
+  }
+
+  async function onSavePolicy(root, id, detail) {
+    const quotaRaw = $('.pa-pol-quota', detail).value.trim()
+    let perLinkQuotaBudget = null
+    if (quotaRaw !== '') {
+      const n = Number(quotaRaw)
+      if (!Number.isInteger(n) || n < 0) {
+        setStatus(root, '每链路配额必须是非负整数', 'error')
+        return
+      }
+      perLinkQuotaBudget = n
+    }
+    const aclCaps = textToArr($('.pa-pol-aclcaps', detail).value)
+    const acl = { requireOrigin: $('.pa-pol-requireorigin', detail).checked }
+    if (aclCaps) acl.capabilities = aclCaps
+    const body = {
+      acl: acl,
+      outboundCaps: textToArr($('.pa-pol-outcaps', detail).value),
+      requireApprovalOutbound: $('.pa-pol-approve', detail).checked,
+      allowedDataClasses: textToArr($('.pa-pol-dataclasses', detail).value),
+      allowedKnowledgeBases: textToArr($('.pa-pol-kb', detail).value),
+      perLinkQuotaBudget: perLinkQuotaBudget,
+      revocationState: $('.pa-pol-revstate', detail).value,
+    }
+    setStatus(root, '保存策略...', 'loading')
+    try {
+      await apiPatch(id, body)
+      setStatus(root, '策略已保存', 'ok')
+      await load(root)
+    } catch (err) {
+      setStatus(root, '保存策略失败: ' + (err.message || err), 'error')
     }
   }
 
