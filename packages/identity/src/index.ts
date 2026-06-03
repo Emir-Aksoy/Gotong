@@ -153,3 +153,21 @@ export {
 // unwrap the stored DEK?" so the host can decide between a live key and a
 // staged `<keyfile>.next` left behind by a crashed KEK rotation.
 export { probeVaultMasterKey, type MasterKeyProbeResult } from './master-key-probe.js'
+// Route B P1-M3a — MFA TOTP primitive (RFC 6238 / RFC 4226 / RFC 4648 base32).
+// Pure deterministic algorithm layer; storage + login wiring land in later M3x.
+export {
+  base32Encode,
+  base32Decode,
+  hotp,
+  totpCodeAt,
+  verifyTotp,
+  generateTotpSecret,
+  buildOtpauthUri,
+  TOTP_DEFAULT_DIGITS,
+  TOTP_DEFAULT_PERIOD_S,
+  TOTP_SECRET_BYTES,
+  type TotpParams,
+  type VerifyTotpParams,
+  type GeneratedTotpSecret,
+  type OtpauthUriInput,
+} from './totp.js'
