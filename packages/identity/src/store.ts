@@ -1056,6 +1056,12 @@ export class IdentityStore {
   authenticatePassword(opts: {
     email: string
     password: string
+    /**
+     * Route B P1-M3c — second factor. Only consulted when the user has an
+     * ACTIVE TOTP enrollment; omit it on the first attempt to receive a
+     * `totp_required` challenge, then retry with the code.
+     */
+    totpCode?: string
     ttlMs?: number
   }): Session {
     if (
@@ -1089,6 +1095,27 @@ export class IdentityStore {
         code: 'authentication_failed',
         message: 'invalid credentials',
       })
+    }
+    // Route B P1-M3c — second factor. Gates interactive PASSWORD login only;
+    // token / api-key auth (authenticateToken) is non-interactive and stays
+    // MFA-exempt by design (a high-entropy key is itself a strong factor). The
+    // challenge fires only AFTER the password verifies, so MFA state can't be
+    // probed without the password. A wrong code is reported as a generic
+    // authentication_failed (no "password was right, code was wrong" oracle);
+    // the client knows from its own step which field to re-prompt.
+    if (this.totp.isEnabled(cred.user_id)) {
+      if (typeof opts.totpCode !== 'string' || opts.totpCode.length === 0) {
+        throw new IdentityError({
+          code: 'totp_required',
+          message: 'second factor required',
+        })
+      }
+      if (!this.totp.verifyForLogin({ userId: cred.user_id, code: opts.totpCode })) {
+        throw new IdentityError({
+          code: 'authentication_failed',
+          message: 'invalid credentials',
+        })
+      }
     }
     return this.beginSession(
       cred.user_id,

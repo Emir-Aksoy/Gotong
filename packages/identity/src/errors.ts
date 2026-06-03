@@ -15,6 +15,11 @@ export type IdentityErrorCode =
   | 'user_not_found'
   | 'credential_not_found'
   | 'authentication_failed'
+  // Route B P1-M3c — password verified but the user has an ACTIVE TOTP factor
+  // and no (or no further) code was supplied. The caller should re-prompt for
+  // the 6-digit code and retry. Distinct from authentication_failed so the web
+  // layer can map it to a "challenge" response rather than a flat 401.
+  | 'totp_required'
   | 'session_expired'
   | 'session_not_found'
   | 'weak_password'
