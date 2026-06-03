@@ -6,18 +6,33 @@
  * comes back as the task output. The mirror of `aipehub connect` (inbound: the
  * CLI calls the hub as an MCP client) — here the hub drives the CLI.
  *
- * This is the M1 single-shot core (one invocation per task) + the two cheapest
- * control seams from AGENT-ADAPTER-CONTRACT:
- *   - OBSERVE: stdout/stderr stream to `onChunk` in real time (host → transcript)
- *   - TERMINATE: `onTaskCancelled` aborts the child (SIGTERM→SIGKILL)
- * The checkpoint loop + on-demand park (intercept) + resume land in M2 on top of
- * this — `handleTask` becomes a loop, but the spawn/observe/terminate plumbing is
- * unchanged.
+ * All five AGENT-ADAPTER-CONTRACT control seams:
+ *   - OBSERVE    — stdout/stderr stream to `onChunk` in real time (host → transcript)
+ *   - INTERCEPT  — a cooperative `TakeoverController` flag parks the task between turns
+ *   - HANDOFF    — a parked task carries its state to a human, who can edit the prompt
+ *   - RESUME     — `onResume` reads the reviewer's decision and continues the loop
+ *   - TERMINATE  — `onTaskCancelled` aborts the child (SIGTERM→SIGKILL)
+ *
+ * Execution is a bounded TURN loop. Default `maxTurns: 1` (no gate, no takeover) is
+ * exactly the M1 single-shot run. Raise it + supply `next`/`gate`/`takeover` to get
+ * a multi-turn conversation with checkpoints.
  */
 
-import { AgentParticipant, type ParticipantId, type Task, type TaskId } from '@aipehub/core'
+import { AgentParticipant, SuspendTaskError, type ParticipantId, type Task, type TaskId } from '@aipehub/core'
 
-import { runCliCommand, type CliChunk } from './cli-runner.js'
+import {
+  CLI_CHECKPOINT_STATE_V,
+  CLI_NEVER_RESUME_AT,
+  readCheckpointState,
+  readReviewDecision,
+  type CliCheckpointState,
+  type CliGateVerdict,
+  type CliParkKind,
+  type CliTurnContext,
+  type CliTurnRecord,
+  TakeoverController,
+} from './cli-checkpoint.js'
+import { runCliCommand, type CliChunk, type CliRunResult } from './cli-runner.js'
 
 const PROMPT_TOKEN = '{prompt}'
 
@@ -48,6 +63,29 @@ export interface CliParticipantOptions {
    * a blob at the end. `taskId` attributes the chunk to the right task.
    */
   onChunk?: (taskId: TaskId, chunk: CliChunk) => void
+  /**
+   * Max CLI invocations for one task. Default 1 = single-shot. Raise it (with
+   * `next`) for a multi-turn conversation; it bounds the loop so a runaway
+   * continuation can't spin forever.
+   */
+  maxTurns?: number
+  /**
+   * Pre-spawn action gate (T2). Inspect the about-to-run invocation; return
+   * `{ park, reason }` to suspend for human approval before it runs, or
+   * `{ allow: true }` to proceed. See `dangerousCommandGate`.
+   */
+  gate?: (ctx: CliTurnContext) => CliGateVerdict
+  /**
+   * Continuation decision after a turn finishes. Return the next prompt to run
+   * another turn (up to `maxTurns`), or `null` to finish. Default: finish after
+   * the first turn.
+   */
+  next?: (result: CliRunResult, ctx: CliTurnContext) => string | null
+  /**
+   * Cooperative takeover switch (intercept/handoff). Checked before each turn; a
+   * requested takeover parks the task for a human to steer.
+   */
+  takeover?: TakeoverController
 }
 
 export class CliParticipant extends AgentParticipant {
@@ -58,6 +96,10 @@ export class CliParticipant extends AgentParticipant {
   protected readonly env: Record<string, string | undefined> | undefined
   protected readonly timeoutMs: number | undefined
   protected readonly onChunk: ((taskId: TaskId, chunk: CliChunk) => void) | undefined
+  protected readonly maxTurns: number
+  protected readonly gate: ((ctx: CliTurnContext) => CliGateVerdict) | undefined
+  protected readonly next: ((result: CliRunResult, ctx: CliTurnContext) => string | null) | undefined
+  protected readonly takeover: TakeoverController | undefined
 
   /** Live abort handles per running task → `onTaskCancelled` kills the child. */
   private readonly running = new Map<TaskId, AbortController>()
@@ -71,34 +113,135 @@ export class CliParticipant extends AgentParticipant {
     this.env = opts.env
     this.timeoutMs = opts.timeoutMs
     this.onChunk = opts.onChunk
+    this.maxTurns = opts.maxTurns && opts.maxTurns > 0 ? opts.maxTurns : 1
+    this.gate = opts.gate
+    this.next = opts.next
+    this.takeover = opts.takeover
   }
 
   protected async handleTask(task: Task): Promise<unknown> {
-    const prompt = payloadToText(task.payload)
+    const initial: CliCheckpointState = {
+      v: CLI_CHECKPOINT_STATE_V,
+      turn: 0,
+      prompt: payloadToText(task.payload),
+      kind: 'action_gate',
+      reason: '',
+      transcript: [],
+    }
+    return await this.runLoop(task, initial, false)
+  }
+
+  /**
+   * RESUME seam. The host hands back `{ ...persistedCheckpointState, decision }`
+   * (or an inbox-style `{ answer }`). Continue the loop from where it parked.
+   */
+  protected async handleResume(task: Task, state: unknown): Promise<unknown> {
+    const carried = readCheckpointState(state)
+    // No checkpoint state → a plain resume; re-run from the top (base default).
+    if (!carried) return await this.handleTask(task)
+
+    const decision = readReviewDecision(state)
+    if (carried.kind === 'action_gate' && !decision?.approved) {
+      // Fail-closed: a flagged invocation only proceeds on explicit approval.
+      const note = decision?.note ? ` (${decision.note})` : ''
+      throw new Error(`CLI action denied at turn ${carried.turn}: ${carried.reason}${note}`)
+    }
+    // Takeover handled → clear the flag so the same turn doesn't re-park.
+    if (carried.kind === 'takeover') this.takeover?.clear(task.id)
+
+    const resumed: CliCheckpointState = {
+      ...carried,
+      // A reviewer may steer by editing the prompt (handoff).
+      prompt: decision?.prompt ?? carried.prompt,
+    }
+    // Approval is consumed for THIS turn — don't re-gate the invocation we just
+    // approved; later turns gate normally.
+    return await this.runLoop(task, resumed, true)
+  }
+
+  /** The bounded turn loop: checkpoint → spawn → record → continue. */
+  private async runLoop(
+    task: Task,
+    state: CliCheckpointState,
+    skipGateThisTurn: boolean,
+  ): Promise<unknown> {
     const ac = new AbortController()
     this.running.set(task.id, ac)
     try {
-      const result = await runCliCommand({
-        command: this.command,
-        args: this.buildArgs(prompt),
-        signal: ac.signal,
-        ...(this.cwd ? { cwd: this.cwd } : {}),
-        ...(this.env ? { env: this.env } : {}),
-        ...(this.promptVia === 'stdin' ? { input: prompt } : {}),
-        ...(this.timeoutMs ? { timeoutMs: this.timeoutMs } : {}),
-        ...(this.onChunk ? { onChunk: (c: CliChunk) => this.onChunk!(task.id, c) } : {}),
-      })
-      if (result.aborted) throw new Error('task cancelled')
-      if (result.timedOut) throw new Error(`CLI '${this.command}' timed out after ${this.timeoutMs}ms`)
-      if (result.exitCode !== 0) {
-        throw new Error(
-          `CLI '${this.command}' exited ${result.exitCode}: ${tail(result.stderr) || tail(result.stdout)}`,
-        )
+      let turn = state.turn
+      let prompt = state.prompt
+      let skipGate = skipGateThisTurn
+      const transcript: CliTurnRecord[] = [...state.transcript]
+
+      while (turn < this.maxTurns) {
+        const ctx: CliTurnContext = {
+          taskId: task.id,
+          turn,
+          command: this.command,
+          args: this.buildArgs(prompt),
+          prompt,
+        }
+
+        // Checkpoint 1 — cooperative takeover (intercept / handoff).
+        if (this.takeover?.isRequested(task.id)) {
+          throw new SuspendTaskError({
+            resumeAt: CLI_NEVER_RESUME_AT,
+            state: parkState(turn, prompt, 'takeover', 'takeover requested', transcript),
+          })
+        }
+        // Checkpoint 2 — pre-spawn action gate (T2).
+        if (!skipGate && this.gate) {
+          const verdict = this.gate(ctx)
+          if ('park' in verdict) {
+            throw new SuspendTaskError({
+              resumeAt: CLI_NEVER_RESUME_AT,
+              state: parkState(turn, prompt, 'action_gate', verdict.reason, transcript),
+            })
+          }
+        }
+        skipGate = false
+
+        const result = await this.invoke(ctx, ac)
+        transcript.push({ turn, prompt, exitCode: result.exitCode, output: result.stdout.trim() })
+
+        const nextPrompt = this.next ? this.next(result, ctx) : null
+        if (nextPrompt == null) break
+        prompt = nextPrompt
+        turn += 1
       }
-      return { text: result.stdout.trim(), exitCode: result.exitCode }
+
+      const last = transcript[transcript.length - 1]
+      return {
+        text: last?.output ?? '',
+        exitCode: last?.exitCode ?? 0,
+        turns: transcript.length,
+        transcript,
+      }
     } finally {
       this.running.delete(task.id)
     }
+  }
+
+  /** One bounded CLI invocation; throws on abort / timeout / non-zero exit. */
+  private async invoke(ctx: CliTurnContext, ac: AbortController): Promise<CliRunResult> {
+    const result = await runCliCommand({
+      command: this.command,
+      args: ctx.args,
+      signal: ac.signal,
+      ...(this.cwd ? { cwd: this.cwd } : {}),
+      ...(this.env ? { env: this.env } : {}),
+      ...(this.promptVia === 'stdin' ? { input: ctx.prompt } : {}),
+      ...(this.timeoutMs ? { timeoutMs: this.timeoutMs } : {}),
+      ...(this.onChunk ? { onChunk: (c: CliChunk) => this.onChunk!(ctx.taskId, c) } : {}),
+    })
+    if (result.aborted) throw new Error('task cancelled')
+    if (result.timedOut) throw new Error(`CLI '${this.command}' timed out after ${this.timeoutMs}ms`)
+    if (result.exitCode !== 0) {
+      throw new Error(
+        `CLI '${this.command}' exited ${result.exitCode}: ${tail(result.stderr) || tail(result.stdout)}`,
+      )
+    }
+    return result
   }
 
   /** Place the prompt into argv when in arg mode; static argv otherwise. */
@@ -111,6 +254,17 @@ export class CliParticipant extends AgentParticipant {
   onTaskCancelled(taskId: TaskId): void {
     this.running.get(taskId)?.abort()
   }
+}
+
+/** Assemble the state that rides a `SuspendTaskError` across a park. */
+function parkState(
+  turn: number,
+  prompt: string,
+  kind: CliParkKind,
+  reason: string,
+  transcript: CliTurnRecord[],
+): CliCheckpointState {
+  return { v: CLI_CHECKPOINT_STATE_V, turn, prompt, kind, reason, transcript }
 }
 
 /** Pull the prompt text out of a dispatched task payload. */
