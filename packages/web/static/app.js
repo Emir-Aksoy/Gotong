@@ -199,6 +199,50 @@
     })
   }
 
+  // Route B P1-M4f — single sign-on. Ask the host which IdPs it accepts; a
+  // password-only hub returns [] (or 404 when the route isn't wired) and we
+  // leave #login-sso hidden. Clicking a button is a top-level navigation to
+  // the public /api/auth/oidc/start route, which 302s on to the IdP — no
+  // fetch/CORS, the cookie comes back on the /callback redirect.
+  async function renderSsoButtons() {
+    const wrap = document.getElementById('login-sso')
+    const list = document.getElementById('login-sso-buttons')
+    if (!wrap || !list) return
+    // Surface a failed round-trip the callback bounced back as ?oidc_error=.
+    const oidcError = new URLSearchParams(window.location.search).get('oidc_error')
+    if (oidcError) {
+      const status = document.getElementById('login-status')
+      if (status) {
+        status.className = 'login-status error'
+        status.textContent = `单点登录失败: ${oidcError}`
+      }
+    }
+    let providers = []
+    try {
+      const r = await fetch('/api/auth/oidc/providers')
+      if (!r.ok) return
+      const j = await r.json().catch(() => ({}))
+      providers = Array.isArray(j?.providers) ? j.providers : []
+    } catch {
+      return // network hiccup — password login still works, stay quiet.
+    }
+    if (providers.length === 0) return
+    list.innerHTML = ''
+    for (const p of providers) {
+      if (!p || typeof p.id !== 'string') continue
+      const name = (p.label || p.issuer || p.id)
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'login-sso-btn'
+      btn.textContent = `用 ${name} 登录`
+      btn.addEventListener('click', () => {
+        window.location.href = '/api/auth/oidc/start?provider=' + encodeURIComponent(p.id)
+      })
+      list.appendChild(btn)
+    }
+    wrap.hidden = false
+  }
+
   // ---- Logout (header button + settings button) ------------------------
   async function doLogout() {
     try {
@@ -1545,7 +1589,12 @@
       // setup wizard. If maybeStartSetupWizard returns false we're in
       // the normal anonymous case → attach the login form.
       const wizardStarted = await maybeStartSetupWizard()
-      if (!wizardStarted) attachLoginForm()
+      if (!wizardStarted) {
+        attachLoginForm()
+        // SSO buttons sit alongside the password form; only the wizard
+        // (fresh host, no owner yet) suppresses them.
+        renderSsoButtons()
+      }
       return
     }
     // Signed in — reveal tabbar and wire everything.

@@ -102,6 +102,13 @@
           </div>
           <div id="login-status" class="login-status"></div>
         </form>
+        <!-- Route B P1-M4f — single sign-on. Populated by renderSsoButtons()
+             from GET /api/auth/oidc/providers; stays hidden when the host has
+             no enabled IdP registered, so password-only hubs see nothing. -->
+        <div id="login-sso" class="login-sso" hidden>
+          <div class="login-sso-sep"><span>或</span></div>
+          <div id="login-sso-buttons" class="login-sso-buttons"></div>
+        </div>
       </div>
     </section>
 

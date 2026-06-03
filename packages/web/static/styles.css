@@ -2025,6 +2025,15 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .login-status.error { color: #c0392b; }
 .login-status.ok { color: #27ae60; }
 
+/* Route B P1-M4f — SSO buttons below the password form (hidden when the
+   host has no IdP registered). */
+.login-sso { margin-top: 1rem; }
+.login-sso-sep { display: flex; align-items: center; gap: 0.6rem; color: #999; font-size: 0.8rem; margin: 0.25rem 0 0.75rem; }
+.login-sso-sep::before, .login-sso-sep::after { content: ''; flex: 1; height: 1px; background: #e2e2e2; }
+.login-sso-buttons { display: flex; flex-direction: column; gap: 0.5rem; }
+.login-sso-btn { font: inherit; padding: 0.5rem 0.95rem; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #222; cursor: pointer; text-align: center; }
+.login-sso-btn:hover { background: #f4f6fb; border-color: #1f6feb; }
+
 /* Home + settings panels — visible to every signed-in role. */
 #home-panel, #settings-panel {
   max-width: 48rem;
