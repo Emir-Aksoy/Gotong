@@ -99,6 +99,9 @@ export type {
   WorkflowGrant,
   SetWorkflowGrantInput,
   WorkflowPerm,
+  // v5 E4-M1 — agent grants (resource RBAC).
+  AgentGrant,
+  SetAgentGrantInput,
   // v5 A-M1 — unified resource grants.
   ResourceGrant,
   SetResourceGrantInput,

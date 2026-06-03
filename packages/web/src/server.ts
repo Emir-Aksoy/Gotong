@@ -50,7 +50,7 @@ import {
   handleWorkflowRoute,
   type WorkflowGrantSink,
 } from './workflow-routes.js'
-import { handleAgentsRoute } from './agents-routes.js'
+import { handleAgentsRoute, type AgentGrantSink } from './agents-routes.js'
 import { handleServicesRoute } from './services-routes.js'
 import { handleUploadsRoute } from './uploads-routes.js'
 import { handleSetupRoute } from './setup-routes.js'
@@ -1851,6 +1851,20 @@ async function handle(
   // Auth: each handler in the sub-module calls back into our
   // `requireAdmin` closure so the v3 admin auth machinery (cookies,
   // sessions, rate limiter) stays here in server.ts.
+  // P2-M5b / v5 E4-M1 — shared resource-RBAC actor resolver for the workflow
+  // AND agent admin routes. A v4 owner/admin → that user (operator iff owner);
+  // a v3 Space-admin (requireAdmin passed but no v4 user) → operator bypass.
+  const resolveResourceActor = (
+    rq: IncomingMessage,
+  ): { userId: string | null; isOperator: boolean } => {
+    if (ctx.identity) {
+      const auth = resolveV4Auth(ctx.identity, rq)
+      if (auth.user && auth.role) {
+        return { userId: auth.user.id, isOperator: auth.role === 'owner' }
+      }
+    }
+    return { userId: null, isOperator: true }
+  }
   if (path.startsWith('/api/admin/workflows')) {
     // P2-M5b — workflow RBAC is ON only when the identity store actually
     // carries the grant methods (a current @aipehub/identity); otherwise the
@@ -1873,18 +1887,9 @@ async function handle(
         // lifecycle transitions write one audit row through it.
         audit: ctx.identity,
         // P2-M5b — resource RBAC. `resolveActor` derives the acting admin's
-        // RBAC identity: a v4 owner/admin → that user (operator iff owner); a
-        // v3 Space-admin (requireAdmin passed but no v4 user) → operator bypass.
+        // RBAC identity (shared closure above).
         grants: wfGrants,
-        resolveActor: (rq) => {
-          if (ctx.identity) {
-            const auth = resolveV4Auth(ctx.identity, rq)
-            if (auth.user && auth.role) {
-              return { userId: auth.user.id, isOperator: auth.role === 'owner' }
-            }
-          }
-          return { userId: null, isOperator: true }
-        },
+        resolveActor: resolveResourceActor,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req,
@@ -1906,6 +1911,14 @@ async function handle(
     path === '/api/admin/bundles/import' ||
     path === '/api/admin/templates/import'
   ) {
+    // v5 E4-M1 — agent resource RBAC mirrors the workflow block: ON only when
+    // the identity store actually carries the agent-grant facade; otherwise the
+    // routes see `agentGrants: undefined` and every admin passes (back-compat).
+    const agentGrants: AgentGrantSink | undefined =
+      ctx.identity &&
+      typeof (ctx.identity as { hasAgentGrant?: unknown }).hasAgentGrant === 'function'
+        ? (ctx.identity as unknown as AgentGrantSink)
+        : undefined
     const handled = await handleAgentsRoute(
       {
         hub: ctx.hub,
@@ -1914,6 +1927,8 @@ async function handle(
         reconcileHeartbeats: ctx.reconcileHeartbeats,
         workflows: ctx.workflows,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+        agentGrants,
+        resolveActor: resolveResourceActor,
       },
       req, res, method, path,
     )

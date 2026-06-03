@@ -54,6 +54,39 @@ export interface AgentsWorkflowSurface {
   importFromText(yaml: string): Promise<unknown>
 }
 
+/** v5 E4-M1 — grant levels on an agent resource (mirror of workflow perms). */
+export type AgentPermLiteral = 'viewer' | 'editor' | 'owner'
+
+/**
+ * v5 E4-M1 — duck-typed agent-grant sink (the IdentityStore satisfies it via
+ * its `hasAgentGrant`/`setAgentGrant`/… facade). Mirrors workflow-routes'
+ * WorkflowGrantSink so the web layer keeps zero `@aipehub/identity` runtime dep.
+ */
+export interface AgentGrantSink {
+  hasAgentGrant(agentId: string, userId: string, min: AgentPermLiteral): boolean
+  setAgentGrant(input: {
+    agentId: string
+    userId: string
+    perm: AgentPermLiteral
+    grantedBy?: string | null
+  }): unknown
+  listAgentGrants(agentId: string): {
+    agentId: string
+    userId: string
+    perm: AgentPermLiteral
+    grantedBy: string | null
+    grantedAt: number
+  }[]
+  removeAgentGrant(agentId: string, userId: string): boolean
+  removeAllAgentGrants(agentId: string): number
+}
+
+/** v5 E4-M1 — the acting admin's RBAC identity (same shape workflow-routes uses). */
+export interface AgentActor {
+  userId: string | null
+  isOperator: boolean
+}
+
 export interface AgentsRoutesCtx {
   hub: Hub
   space: Space
@@ -68,6 +101,14 @@ export interface AgentsRoutesCtx {
    */
   reconcileHeartbeats?: () => Promise<void>
   requireAdmin: (req: IncomingMessage, res: ServerResponse) => Promise<AdminRecord | null>
+  /**
+   * v5 E4-M1 — agent resource RBAC (mirrors workflow-routes). RBAC is OFF unless
+   * the host wires BOTH `agentGrants` and `resolveActor`; then operators (org
+   * owner / v3 Space admin) bypass and a non-operator v4 admin needs a grant.
+   * Absent → every admin passes (zero regression for existing deployments).
+   */
+  agentGrants?: AgentGrantSink
+  resolveActor?(req: IncomingMessage): AgentActor
 }
 
 // -- validation -----------------------------------------------------------
@@ -142,6 +183,49 @@ function publicAgent(rec: AgentRecord, hub: Hub) {
     createdAt: rec.createdAt,
     lastSeen: rec.lastSeen,
     online: hub.participant(rec.id) != null,
+  }
+}
+
+// -- RBAC (v5 E4-M1) ------------------------------------------------------
+
+/**
+ * v5 E4-M1 — agent grant gate. Returns true (and writes 403) iff the acting
+ * admin LACKS `min` permission on the agent; false = allowed, continue.
+ *
+ * RBAC is OFF when the host didn't wire BOTH `agentGrants` and `resolveActor`
+ * (embedded / test / pre-migration host) — then every admin passes, so existing
+ * deployments are unaffected. Operators (org owner / v3 Space admin) always
+ * bypass; a non-operator needs a `userId` holding a grant ≥ `min`.
+ */
+function denyIfNoAgentPerm(
+  ctx: AgentsRoutesCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  id: string,
+  min: AgentPermLiteral,
+): boolean {
+  if (!ctx.agentGrants || !ctx.resolveActor) return false
+  const actor = ctx.resolveActor(req)
+  if (actor.isOperator) return false
+  if (actor.userId && ctx.agentGrants.hasAgentGrant(id, actor.userId, min)) return false
+  sendJson(res, { error: `agent '${id}' requires ${min} permission`, code: 'agent_forbidden' }, 403)
+  return true
+}
+
+/**
+ * v5 E4-M1 — seed the creator as the agent's owner after create / import. Only
+ * when RBAC is wired AND the actor is a v4 user: a v3-admin operator has no user
+ * row to own it (operators manage by bypass, not by grant). Best-effort — a
+ * grant-seed hiccup must never fail the create that already succeeded.
+ */
+function seedAgentOwner(ctx: AgentsRoutesCtx, req: IncomingMessage, agentId: string): void {
+  if (!ctx.agentGrants || !ctx.resolveActor) return
+  const actor = ctx.resolveActor(req)
+  if (!actor.userId) return
+  try {
+    ctx.agentGrants.setAgentGrant({ agentId, userId: actor.userId, perm: 'owner', grantedBy: actor.userId })
+  } catch (err) {
+    log.warn('seed agent owner failed', { agentId, err })
   }
 }
 
@@ -240,6 +324,7 @@ export async function handleAgentsRoute(
         return true
       }
     }
+    seedAgentOwner(ctx, req, record.id)
     await reconcileHeartbeats('create')
     sendJson(res, { ok: true, agent: publicAgent(record, ctx.hub) })
     return true
@@ -285,6 +370,7 @@ export async function handleAgentsRoute(
         catch (err) { spawnErrors.push({ id: rec.id, error: err instanceof Error ? err.message : String(err) }) }
       }
     }
+    for (const rec of created) seedAgentOwner(ctx, req, rec.id)
     await reconcileHeartbeats('import')
     sendJson(res, {
       ok: true,
@@ -362,6 +448,7 @@ export async function handleAgentsRoute(
         }
       }
     }
+    for (const rec of created) seedAgentOwner(ctx, req, rec.id)
     await reconcileHeartbeats('bundle')
     sendJson(res, {
       ok: true,
@@ -470,6 +557,7 @@ export async function handleAgentsRoute(
       }
     }
 
+    for (const rec of created) seedAgentOwner(ctx, req, rec.id)
     await reconcileHeartbeats('template')
     sendJson(res, {
       ok: true,
@@ -491,6 +579,64 @@ export async function handleAgentsRoute(
     return true
   }
 
+  // --- agent grant management (v5 E4-M1, resource RBAC) ---
+  // Owner-gated; operators (org owner / v3 admin) bypass. Matched BEFORE the
+  // catch-all PUT/DELETE /:id — the extra /grants segment(s) keep these
+  // unambiguous. RBAC off (no agentGrants) → 404 so the admin UI hides the panel.
+  const agentGrantsMatch = path.match(/^\/api\/admin\/agents\/([^/]+)\/grants$/)
+  if (agentGrantsMatch && (method === 'GET' || method === 'POST')) {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    if (!ctx.agentGrants) {
+      sendJson(res, { error: 'agent RBAC not enabled on this host' }, 404)
+      return true
+    }
+    const id = decodeURIComponent(agentGrantsMatch[1]!)
+    // Managing (and viewing) the access list is an owner concern.
+    if (denyIfNoAgentPerm(ctx, req, res, id, 'owner')) return true
+    if (method === 'GET') {
+      sendJson(res, { grants: ctx.agentGrants.listAgentGrants(id) })
+      return true
+    }
+    const body = (await readJsonBody(req).catch(() => undefined)) as
+      | { userId?: unknown; perm?: unknown }
+      | undefined
+    const userId = body && typeof body.userId === 'string' ? body.userId.trim() : ''
+    const perm = body && typeof body.perm === 'string' ? body.perm : ''
+    if (!userId) {
+      sendJson(res, { error: 'userId is required' }, 400)
+      return true
+    }
+    if (perm !== 'owner' && perm !== 'editor' && perm !== 'viewer') {
+      sendJson(res, { error: "perm must be 'owner' | 'editor' | 'viewer'" }, 400)
+      return true
+    }
+    try {
+      ctx.agentGrants.setAgentGrant({ agentId: id, userId, perm, grantedBy: admin.id })
+      sendJson(res, { ok: true, grants: ctx.agentGrants.listAgentGrants(id) })
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
+    }
+    return true
+  }
+
+  // DELETE /api/admin/agents/:id/grants/:userId — revoke one grant.
+  const agentGrantDeleteMatch = path.match(/^\/api\/admin\/agents\/([^/]+)\/grants\/([^/]+)$/)
+  if (method === 'DELETE' && agentGrantDeleteMatch) {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    if (!ctx.agentGrants) {
+      sendJson(res, { error: 'agent RBAC not enabled on this host' }, 404)
+      return true
+    }
+    const id = decodeURIComponent(agentGrantDeleteMatch[1]!)
+    const userId = decodeURIComponent(agentGrantDeleteMatch[2]!)
+    if (denyIfNoAgentPerm(ctx, req, res, id, 'owner')) return true
+    const removed = ctx.agentGrants.removeAgentGrant(id, userId)
+    sendJson(res, { ok: true, removed })
+    return true
+  }
+
   // --- edit one ---
   const editAgentMatch = path.match(/^\/api\/admin\/agents\/([^/]+)$/)
 
@@ -498,6 +644,8 @@ export async function handleAgentsRoute(
     const admin = await ctx.requireAdmin(req, res)
     if (!admin) return true
     const id = decodeURIComponent(editAgentMatch[1]!)
+    // v5 E4-M1 — editing the agent needs editor on it (operators bypass).
+    if (denyIfNoAgentPerm(ctx, req, res, id, 'editor')) return true
     const body = (await readJsonBody(req).catch(() => ({}))) as Record<string, unknown>
     body.id = id
     let parsed: ParsedAgent
@@ -560,6 +708,8 @@ export async function handleAgentsRoute(
     const admin = await ctx.requireAdmin(req, res)
     if (!admin) return true
     const id = decodeURIComponent(editAgentMatch[1]!)
+    // v5 E4-M1 — deleting an agent needs owner on it (operators bypass).
+    if (denyIfNoAgentPerm(ctx, req, res, id, 'owner')) return true
     if (ctx.lifecycle) {
       await ctx.lifecycle.stop(id).catch((err) => log.error('lifecycle stop failed', { id, err }))
     }
@@ -570,6 +720,8 @@ export async function handleAgentsRoute(
         log.error('lifecycle.onAgentRemoved failed', { id, err }),
       )
     }
+    // Drop the agent's grants so a re-create with the same id starts clean.
+    ctx.agentGrants?.removeAllAgentGrants(id)
     await reconcileHeartbeats('delete')
     sendJson(res, { ok: true })
     return true
@@ -581,6 +733,8 @@ export async function handleAgentsRoute(
     const admin = await ctx.requireAdmin(req, res)
     if (!admin) return true
     const id = decodeURIComponent(exportAgentMatch[1]!)
+    // v5 E4-M1 — exporting an agent's spec needs at least viewer (operators bypass).
+    if (denyIfNoAgentPerm(ctx, req, res, id, 'viewer')) return true
     const rec = (await ctx.space.agents()).find((a) => a.id === id)
     if (!rec) { sendJson(res, { error: `unknown agent '${id}'` }, 404); return true }
     if (!rec.managed) {

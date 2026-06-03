@@ -1451,6 +1451,28 @@ export interface SetWorkflowGrantInput {
   grantedAt?: number
 }
 
+// v5 E4-M1 — agent-grant facade types (mirror WorkflowGrant). The agent admin
+// RBAC routes speak "agent grant for a user"; that is just a resource grant with
+// resourceKind='agent' + a user principal. Same shape, reusing GrantPerm — kept
+// thin so the web routes need not learn the principal codec for the common case.
+export interface AgentGrant {
+  agentId: string
+  userId: string
+  perm: WorkflowPerm
+  /** user_id that wrote the grant; null = system (e.g. the create owner seed). */
+  grantedBy: string | null
+  grantedAt: number
+}
+
+export interface SetAgentGrantInput {
+  agentId: string
+  userId: string
+  perm: WorkflowPerm
+  grantedBy?: string | null
+  /** Defaults to Date.now(). */
+  grantedAt?: number
+}
+
 // ---------------------------------------------------------------------------
 // Resource grants (v5 Stream A-M1 — the unified RBAC table, decision #3)
 //

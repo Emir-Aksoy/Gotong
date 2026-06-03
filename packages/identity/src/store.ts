@@ -142,6 +142,9 @@ import {
   type SetWorkflowGrantInput,
   type WorkflowGrant,
   type WorkflowPerm,
+  // v5 E4-M1 — agent grants (resource RBAC, mirror of the workflow facade).
+  type SetAgentGrantInput,
+  type AgentGrant,
   // v5 A-M1 — unified resource grants.
   type ResourceGrant,
   type SetResourceGrantInput,
@@ -2719,6 +2722,46 @@ export class IdentityStore {
     return this.resourceGrants.removeAllForResource('workflow', workflowId)
   }
 
+  // ---------------------------------------------------------------------
+  // v5 E4-M1 — agent-grant facade. Exact mirror of the workflow facade above:
+  // the agent admin RBAC routes speak "agent grant for a user" = a resource
+  // grant with resourceKind='agent' + a user principal. Kept thin so the web
+  // layer (no identity dep) need not construct a Principal.
+  // ---------------------------------------------------------------------
+
+  setAgentGrant(input: SetAgentGrantInput): AgentGrant {
+    const g = this.resourceGrants.set({
+      resourceKind: 'agent',
+      resourceId: input.agentId,
+      principal: userPrincipal(input.userId),
+      perm: input.perm,
+      grantedBy: input.grantedBy,
+      grantedAt: input.grantedAt,
+    })
+    return resourceGrantToAgentGrant(g)
+  }
+
+  hasAgentGrant(agentId: string, userId: string, min: WorkflowPerm): boolean {
+    return this.resourceGrants.has('agent', agentId, userPrincipal(userId), min)
+  }
+
+  listAgentGrants(agentId: string): AgentGrant[] {
+    // Only user principals carry a userId; an agent granted to an agent/peer
+    // principal is invisible to this legacy view (it has no userId to report).
+    return this.resourceGrants
+      .listForResource('agent', agentId)
+      .filter((g) => g.principal.kind === 'user')
+      .map(resourceGrantToAgentGrant)
+  }
+
+  removeAgentGrant(agentId: string, userId: string): boolean {
+    return this.resourceGrants.remove('agent', agentId, userPrincipal(userId))
+  }
+
+  removeAllAgentGrants(agentId: string): number {
+    return this.resourceGrants.removeAllForResource('agent', agentId)
+  }
+
   // =====================================================================
   // Phase 11 M2 — Suspended tasks (long-running agent park/resume).
   // =====================================================================
@@ -3058,6 +3101,18 @@ function rowToImBinding(r: ImBindingRow): ImBinding {
 function resourceGrantToWorkflowGrant(g: ResourceGrant): WorkflowGrant {
   return {
     workflowId: g.resourceId,
+    userId: g.principal.id,
+    perm: g.perm,
+    grantedBy: g.grantedBy,
+    grantedAt: g.grantedAt,
+  }
+}
+
+// v5 E4-M1 — project a unified ResourceGrant back to the AgentGrant shape.
+// Caller has already constrained to resourceKind='agent' + a user principal.
+function resourceGrantToAgentGrant(g: ResourceGrant): AgentGrant {
+  return {
+    agentId: g.resourceId,
     userId: g.principal.id,
     perm: g.perm,
     grantedBy: g.grantedBy,
