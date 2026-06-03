@@ -1154,6 +1154,14 @@
            offers CSV/JSONL export of the ledger and audit log. -->
       <section id="usage-panel" class="usage-panel" data-tab="usage"></section>
 
+      <!-- Route B P1-M7b — peer onboarding: register / configure federation
+           peers (add + enable/disable + rotate token + remove). Rendered by
+           /peer-admin-ui.js on the same "联邦" tab, ABOVE the read-only
+           manifest browse below. Owner-only; 503 inline when the host wired
+           no identity store (peers disabled). The trust-contract policy
+           editor (ACL / data-class / quota) layers on in M7c. -->
+      <section id="peer-admin-panel" class="peer-admin-panel" data-tab="federation"></section>
+
       <!-- Phase 18 A-M3 — cross-hub peer capability manifest browse +
            refresh. Rendered by /peer-manifest-ui.js. Owner-only; shows
            what each connected peer advertises (online / stale / unknown)

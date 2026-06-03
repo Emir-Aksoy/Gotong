@@ -273,6 +273,17 @@ describe('C1 — unified SPA shell', () => {
       expect(html).toMatch(/data-tab="saml"\s+data-roles="owner"/)
       expect(html).toContain('id="saml-panel"')
     })
+
+    it('serves the P1-M7b peer-onboarding markup: peer-admin panel on the 联邦 tab', async () => {
+      // Pins the rebuilt bundle carries the M7b peer onboarding mount point.
+      // It shares the owner-only "联邦" tab with the M-A3 manifest browse
+      // (both data-tab="federation"); this panel hosts the add/configure
+      // CRUD, peer-manifest-ui.js the read-only advertise view below it.
+      const r = await fetch(`${b.baseUrl}/`, { headers: { cookie: b.adminCookie } })
+      const html = await r.text()
+      expect(html).toContain('id="peer-admin-panel"')
+      expect(html).toContain('id="peer-federation-panel"')
+    })
   })
 
   describe('OIDC admin bundle (Route B P1-M4f-3)', () => {
@@ -299,6 +310,21 @@ describe('C1 — unified SPA shell', () => {
       const js = await r.text()
       expect(js).toContain('saml-add-form')
       expect(js).toContain('/api/admin/saml/providers')
+    })
+  })
+
+  describe('Peer admin bundle (Route B P1-M7b)', () => {
+    it('serves /peer-admin-ui.js with the onboarding form + CRUD route markers', async () => {
+      // Public static asset carrying no secret — it only calls the
+      // requireAdmin-gated /api/admin/identity/peers routes. The shared
+      // bearer token is write-only (never returned by the list route), so
+      // the panel can never display it. Pins it is embedded + served so the
+      // 联邦 tab can mount the onboarding panel.
+      const r = await fetch(`${b.baseUrl}/peer-admin-ui.js`)
+      expect(r.status).toBe(200)
+      const js = await r.text()
+      expect(js).toContain('pa-add-form')
+      expect(js).toContain('/api/admin/identity/peers')
     })
   })
 })

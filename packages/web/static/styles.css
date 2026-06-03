@@ -2253,6 +2253,36 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .peer-federation-panel .pf-unknown { background: #e9e9e9; color: #888; }
 .peer-federation-panel .pf-row-refresh { font-size: 0.78rem; padding: 2px 10px; }
 
+/* Route B P1-M7b — peer onboarding (tab "联邦", panel above manifest browse). */
+.peer-admin-panel { padding: 1rem; }
+.peer-admin-panel .pa-header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+.peer-admin-panel .pa-header h2 { margin: 0; flex: 1 0 100%; }
+.peer-admin-panel .pa-meta { flex: 1 0 100%; color: #666; font-size: 0.85rem; margin: 0; }
+.peer-admin-panel .pa-status { font-size: 0.85rem; min-height: 1em; }
+.peer-admin-panel .pa-status-loading { color: #888; }
+.peer-admin-panel .pa-status-ok { color: #27ae60; }
+.peer-admin-panel .pa-status-error { color: #c0392b; }
+.peer-admin-panel .pa-add-form { display: flex; flex-wrap: wrap; gap: 0.5rem 0.75rem; align-items: flex-end; margin-bottom: 1rem; padding: 0.75rem; background: #fafafa; border: 1px solid #eee; border-radius: 6px; }
+.peer-admin-panel .pa-field { display: flex; flex-direction: column; }
+.peer-admin-panel .pa-field label { font-size: 0.78rem; color: #555; display: flex; flex-direction: column; gap: 3px; }
+.peer-admin-panel .pa-field input, .peer-admin-panel .pa-field select { font-size: 0.85rem; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; }
+.peer-admin-panel .pa-actions { align-self: flex-end; }
+.peer-admin-panel .pa-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+.peer-admin-panel .pa-table th, .peer-admin-panel .pa-table td { text-align: left; border-bottom: 1px solid #eee; padding: 0.4rem 0.5rem; vertical-align: top; }
+.peer-admin-panel .pa-table th { background: #fafafa; font-weight: 600; color: #555; }
+.peer-admin-panel .pa-empty { color: #888; text-align: center; padding: 1.5rem; }
+.peer-admin-panel .pa-id { font-size: 0.78rem; color: #888; }
+.peer-admin-panel .pa-peer code, .peer-admin-panel .pa-endpoint code { background: transparent; }
+.peer-admin-panel .pa-endpoint code { font-size: 0.78rem; color: #555; }
+.peer-admin-panel .pa-state { display: flex; flex-wrap: wrap; gap: 4px; }
+.peer-admin-panel .pa-badge { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 3px; font-weight: 700; white-space: nowrap; }
+.peer-admin-panel .pa-on { background: #d6ecdb; color: #1a6a3a; }
+.peer-admin-panel .pa-off { background: #e9e9e9; color: #888; }
+.peer-admin-panel .pa-conn { background: #d6e4ec; color: #1a4a6a; }
+.peer-admin-panel .pa-disc { background: #f2f2f2; color: #aaa; }
+.peer-admin-panel .pa-row-actions { white-space: nowrap; }
+.peer-admin-panel .pa-row-actions button { font-size: 0.78rem; padding: 2px 8px; margin-right: 4px; }
+
 /* Route B P1-M4f-3 — OIDC IdP registry (tab "SSO"). */
 .oidc-panel .oidc-status { font-size: 0.85rem; min-height: 1em; }
 .oidc-panel .oidc-status-loading { color: #888; }

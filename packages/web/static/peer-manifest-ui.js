@@ -147,7 +147,7 @@
     if (!peers.length) {
       tbody.innerHTML =
         '<tr><td colspan="5" class="pf-empty">还没有已配置的 peer。' +
-        '在「用户」标签页配置一个 peer 后,这里会列出它广播的能力。</td></tr>'
+        '在本页上方「对端」面板添加一个 peer 后,这里会列出它广播的能力。</td></tr>'
       return
     }
     tbody.innerHTML = ''
@@ -220,7 +220,11 @@
     return load(root)
   }
   function init() {
-    const root = document.querySelector('section[data-tab="federation"]')
+    // Target our own panel by id, not the generic section[data-tab="federation"]
+    // first-match — the federation tab now also hosts the peer-admin panel
+    // (Route B P1-M7b), and a bare data-tab selector would grab whichever
+    // comes first in the DOM.
+    const root = document.querySelector('#peer-federation-panel')
     if (!root) return
     buildUi(root)
     new MutationObserver(function () {
