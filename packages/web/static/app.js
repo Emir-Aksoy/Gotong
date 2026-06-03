@@ -199,48 +199,61 @@
     })
   }
 
-  // Route B P1-M4f — single sign-on. Ask the host which IdPs it accepts; a
-  // password-only hub returns [] (or 404 when the route isn't wired) and we
-  // leave #login-sso hidden. Clicking a button is a top-level navigation to
-  // the public /api/auth/oidc/start route, which 302s on to the IdP — no
-  // fetch/CORS, the cookie comes back on the /callback redirect.
+  // Route B P1-M4f/M5f — single sign-on. Ask the host which IdPs it accepts
+  // over BOTH protocols (OIDC + SAML); a password-only hub returns [] (or 404
+  // when a route isn't wired) and we leave #login-sso hidden. Clicking a button
+  // is a top-level navigation to the public /start route, which 302s on to the
+  // IdP — no fetch/CORS, the cookie comes back on the /callback (OIDC) or /acs
+  // (SAML) redirect.
   async function renderSsoButtons() {
     const wrap = document.getElementById('login-sso')
     const list = document.getElementById('login-sso-buttons')
     if (!wrap || !list) return
-    // Surface a failed round-trip the callback bounced back as ?oidc_error=.
-    const oidcError = new URLSearchParams(window.location.search).get('oidc_error')
-    if (oidcError) {
+    // Surface a failed round-trip the IdP redirect bounced back as ?*_error=.
+    const params = new URLSearchParams(window.location.search)
+    const ssoError = params.get('oidc_error') || params.get('saml_error')
+    if (ssoError) {
       const status = document.getElementById('login-status')
       if (status) {
         status.className = 'login-status error'
-        status.textContent = `单点登录失败: ${oidcError}`
+        status.textContent = `单点登录失败: ${ssoError}`
       }
     }
-    let providers = []
-    try {
-      const r = await fetch('/api/auth/oidc/providers')
-      if (!r.ok) return
-      const j = await r.json().catch(() => ({}))
-      providers = Array.isArray(j?.providers) ? j.providers : []
-    } catch {
-      return // network hiccup — password login still works, stay quiet.
-    }
-    if (providers.length === 0) return
     list.innerHTML = ''
-    for (const p of providers) {
-      if (!p || typeof p.id !== 'string') continue
-      const name = (p.label || p.issuer || p.id)
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'login-sso-btn'
-      btn.textContent = `用 ${name} 登录`
-      btn.addEventListener('click', () => {
-        window.location.href = '/api/auth/oidc/start?provider=' + encodeURIComponent(p.id)
-      })
-      list.appendChild(btn)
+    // Fetch a provider list and append a button per IdP. `startPath` is the
+    // public /start route for that protocol; returns how many were added so the
+    // caller can decide whether to reveal the divider.
+    const addButtons = async (endpoint, startPath) => {
+      let providers = []
+      try {
+        const r = await fetch(endpoint)
+        if (!r.ok) return 0
+        const j = await r.json().catch(() => ({}))
+        providers = Array.isArray(j?.providers) ? j.providers : []
+      } catch {
+        return 0 // network hiccup — password login still works, stay quiet.
+      }
+      let added = 0
+      for (const p of providers) {
+        if (!p || typeof p.id !== 'string') continue
+        const name = (p.label || p.issuer || p.id)
+        const btn = document.createElement('button')
+        btn.type = 'button'
+        btn.className = 'login-sso-btn'
+        btn.textContent = `用 ${name} 登录`
+        btn.addEventListener('click', () => {
+          window.location.href = startPath + '?provider=' + encodeURIComponent(p.id)
+        })
+        list.appendChild(btn)
+        added++
+      }
+      return added
     }
-    wrap.hidden = false
+    const counts = await Promise.all([
+      addButtons('/api/auth/oidc/providers', '/api/auth/oidc/start'),
+      addButtons('/api/auth/saml/providers', '/api/auth/saml/start'),
+    ])
+    if (counts[0] + counts[1] > 0) wrap.hidden = false
   }
 
   // ---- Logout (header button + settings button) ------------------------
