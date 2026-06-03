@@ -1088,6 +1088,13 @@ export interface PeerRegistration {
    */
   allowedKnowledgeBases: string[] | null
   /**
+   * v5 E5 — whether this link is opted in to exposing a privacy-safe summary
+   * (asset / activity / health COUNTS, never raw rows) over the `peer.summary`
+   * RPC. Default false = fail-closed: a peer that asks for my summary is denied
+   * unless I flipped this on for the link to it.
+   */
+  shareSummary: boolean
+  /**
    * Audit L13 — corruption trail. Present (and non-empty) ONLY when one or
    * more stored policy JSON columns were unparseable or the wrong shape and
    * had to be normalised on read (e.g. `outbound_caps_json` held `"chat"`
@@ -1130,6 +1137,8 @@ export interface AddPeerInput {
   allowedDataClasses?: string[] | null
   // ---- v5 C-M1 — callable-KB allowlist (omitted → NULL = every shared KB). ----
   allowedKnowledgeBases?: string[] | null
+  // ---- v5 E5 — summary sharing (omitted → 0 = fail-closed, not shared). ----
+  shareSummary?: boolean
 }
 
 export interface UpdatePeerInput {
@@ -1159,6 +1168,8 @@ export interface UpdatePeerInput {
   // ---- v5 C-M1 — callable-KB allowlist. undefined = preserve; explicit null
   //      CLEARS it (back to every-shared-KB-callable). ----
   allowedKnowledgeBases?: string[] | null
+  // ---- v5 E5 — summary sharing. undefined = preserve; explicit bool sets. ----
+  shareSummary?: boolean
 }
 
 export interface ListPeersQuery {

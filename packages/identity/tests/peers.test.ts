@@ -441,6 +441,8 @@ describe('IdentityStore — peers (D1)', () => {
       expect(p.revocationState).toBe('active')
       expect(p.perLinkQuotaBudget).toBeNull()
       expect(p.allowedDataClasses).toBeNull()
+      // v5 E5 — a legacy row reads the v23 default: summary sharing OFF.
+      expect(p.shareSummary).toBe(false)
       s.close()
       await rm(tmp2, { recursive: true, force: true })
     })
@@ -658,6 +660,48 @@ describe('IdentityStore — peers (D1)', () => {
       const u = store.updatePeer(p.id, { allowedKnowledgeBases: ['company_kb'] })
       expect(u.allowedKnowledgeBases).toEqual(['company_kb'])
       expect(u.allowedDataClasses).toEqual(['public']) // untouched
+    })
+  })
+
+  // ---------- v5 E5 — per-link summary-sharing opt-in (schema v23) ----------
+
+  describe('summary-sharing opt-in (v5 E5)', () => {
+    it('addPeer without the field → false (fail-closed, summary not shared)', () => {
+      const p = store.addPeer({
+        peerId: 'hub_e5def', endpointUrl: 'wss://e5.example', peerToken: 'tok-e5-1',
+      })
+      expect(p.shareSummary).toBe(false)
+    })
+
+    it('addPeer round-trips an explicit opt-in', () => {
+      const p = store.addPeer({
+        peerId: 'hub_e5on', endpointUrl: 'wss://e5on.example', peerToken: 'tok-e5on-1',
+        shareSummary: true,
+      })
+      for (const r of [p, store.getPeerByPeerId('hub_e5on')!]) {
+        expect(r.shareSummary).toBe(true)
+      }
+    })
+
+    it('updatePeer preserves the opt-in on undefined, sets on explicit bool', () => {
+      const p = store.addPeer({
+        peerId: 'hub_e5upd', endpointUrl: 'wss://e5u.example', peerToken: 'tok-e5u-1',
+        shareSummary: true,
+      })
+      const preserved = store.updatePeer(p.id, { label: 'renamed' })
+      expect(preserved.shareSummary).toBe(true) // undefined preserves
+      const off = store.updatePeer(p.id, { shareSummary: false })
+      expect(off.shareSummary).toBe(false) // explicit false sets
+    })
+
+    it('updatePeer toggles summary sharing without touching the KB allowlist', () => {
+      const p = store.addPeer({
+        peerId: 'hub_e5iso', endpointUrl: 'wss://e5i.example', peerToken: 'tok-e5i-1',
+        allowedKnowledgeBases: ['company_kb'],
+      })
+      const u = store.updatePeer(p.id, { shareSummary: true })
+      expect(u.shareSummary).toBe(true)
+      expect(u.allowedKnowledgeBases).toEqual(['company_kb']) // untouched
     })
   })
 })

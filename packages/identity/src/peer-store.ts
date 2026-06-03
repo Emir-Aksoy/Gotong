@@ -53,6 +53,8 @@ interface PeerRow {
   allowed_data_classes_json: string | null
   // v5 C-M1 — callable-knowledge-base allowlist (schema v17).
   allowed_knowledge_bases_json: string | null
+  // v5 E5 — per-link opt-in to expose a privacy-safe summary (schema v23).
+  share_summary: number
 }
 
 export class PeerStore {
@@ -134,6 +136,8 @@ export class PeerStore {
           input.allowedKnowledgeBases != null
             ? JSON.stringify(input.allowedKnowledgeBases)
             : null,
+          // v5 E5 — summary sharing; omitted → 0 = fail-closed (not shared).
+          input.shareSummary ? 1 : 0,
         )
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -253,6 +257,13 @@ export class PeerStore {
             ? null
             : JSON.stringify(input.allowedKnowledgeBases)
           : existing.allowed_knowledge_bases_json
+      // v5 E5 — boolean opt-in; undefined preserves, explicit value sets.
+      const shareSummary =
+        input.shareSummary !== undefined
+          ? input.shareSummary
+            ? 1
+            : 0
+          : existing.share_summary
       this.stmtPeerUpdate.run(
         endpointUrl,
         label,
@@ -266,6 +277,7 @@ export class PeerStore {
         perLinkQuotaBudget,
         allowedDataClassesJson,
         allowedKnowledgeBasesJson,
+        shareSummary,
         Date.now(),
         id,
       )
@@ -314,8 +326,8 @@ export class PeerStore {
          created_at, updated_at,
          kind, acl_json, outbound_caps_json, require_approval_outbound,
          revocation_state, per_link_quota_budget, allowed_data_classes_json,
-         allowed_knowledge_bases_json
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         allowed_knowledge_bases_json, share_summary
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ))
   }
   private get stmtPeerById(): SqliteStmt {
@@ -346,6 +358,7 @@ export class PeerStore {
              require_approval_outbound = ?,
              revocation_state = ?, per_link_quota_budget = ?,
              allowed_data_classes_json = ?, allowed_knowledge_bases_json = ?,
+             share_summary = ?,
              updated_at = ?
        WHERE id = ?`,
     ))
@@ -401,6 +414,8 @@ function rowToPeerRegistration(r: PeerRow): PeerRegistration {
       'allowedKnowledgeBases',
       corrupt,
     ),
+    // v5 E5 — per-link summary-sharing opt-in projection (default 0 = off).
+    shareSummary: r.share_summary !== 0,
   }
   // Omit on healthy rows so the record shape is unchanged for the common case
   // (mirrors `SuspendedTask.corrupt`).

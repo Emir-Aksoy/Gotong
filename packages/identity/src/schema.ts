@@ -834,6 +834,22 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // v5 Stream E5 — per-link opt-in to expose a privacy-safe summary over the
+    // `peer.summary` RPC. One additive, defaulted column so an un-migrated row
+    // keeps today's behaviour: NOT shared. This is the control-plane gate — a
+    // peer reads my asset/activity/health COUNTS only if I flipped this on for
+    // the link to it (fail-closed). Mirrors the per-link contract columns (v15)
+    // and the callable-KB allowlist (v17): one dedicated column per dimension.
+    //
+    //   share_summary  0 | 1 — default 0 = my summary is never returned to this
+    //                  peer. Set to 1 to opt this specific link into sharing.
+    version: 23,
+    name: 'peer-share-summary',
+    sql: `
+      ALTER TABLE peers ADD COLUMN share_summary INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ]
 
 /**
