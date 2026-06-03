@@ -1,0 +1,106 @@
+# 个人编码导师 — 可载入模板 (aipehub.template/v1)
+#
+# personal-coding-hub 的「方法论大脑」做成一个**可载入文件**(不是内置 TS):
+#   1 个编码导师 agent  +  1 个可寻址知识库槽位(Karpathy 编程方法论 / Obsidian)。
+#
+# 为什么 agents[] 里只有「导师」,没有 claude-code / codex:
+#   模板的 agents 是**托管 LLM agent**(过 parseManifest 校验)。claude-code / codex
+#   是 `CliParticipant`(shell-out 到外部 CLI),不是 LLM-provider agent —— 它们由
+#   example 在运行时接线(见 src/index.ts)。模板携带的是**方法论导师 + KB 接线**,
+#   example 在它周围接上两个 CLI 编码 agent。
+#
+# 知识内容**不在这个文件里**(Stream B 决策 #4):模板只带「MCP 接线 + presetData
+# 指针」。方法论内容是 ../methodology-vault/ 那些 .md(你导入自己的 Obsidian vault)。
+#
+# 导入:admin UI →「Agents / 工作流」→ 导入,或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/personal-coding-hub/template/personal-coding-hub.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+schema: aipehub.template/v1
+template:
+  name: 个人编码导师(Karpathy 工作流)
+  description: |-
+    personal-coding-hub 的方法论大脑:一个**编码导师 agent**,在派活前先查一套
+    「Karpathy 编程方法论」Obsidian 知识库(Software 3.0 / vibe coding 的边界 /
+    agentic engineering / LLM-as-compiler),再决定怎么把任务拆给规划编码 agent
+    (如 claude-code)与实现编码 agent(如 codex)。模板只带接线 + 一份指向方法论
+    vault 快照的 presetData「指针」;知识内容由你自己的 Obsidian vault 提供。
+
+  version: 1
+
+  # ── 1 个 agent:编码导师,挂方法论知识库(mcp-obsidian)──────────────────────
+  # host spawn 时拉起 mcp-obsidian 子进程,把它的工具(coding_methodology 槽位背后
+  # 那台 obsidian server → obsidian__search / obsidian__get_file_contents)暴露给
+  # 导师的 tool-use 循环。导师据此「ask-your-wiki」,再做路由决策。
+  agents:
+    - id: coding-mentor
+      displayName: 编码导师
+      capabilities: [mentor, route]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是一个个人编码导师 / 路由器。你不亲自写代码 —— 你查方法论、把目标拆成
+        小步、决定每一步派给哪个编码 agent,并守住安全底线。
+
+        每接到一个非琐碎的编码目标,按这个循环走:
+
+        1. 读规范:确认目标符合仓库根的 AGENTS.md(两个编码 CLI 共享同一份)。
+        2. 查方法论:先调用 obsidian__search 检索「Karpathy 编程方法论」知识库
+           (关键词如 "vibe coding" / "agentic engineering" / "小步" /
+           "Software 3.0" / "PROGRESS"),必要时 obsidian__get_file_contents 读全文。
+           作答/决策时**按笔记路径标注依据**(如「依据 agentic-engineering.md」)。
+        3. 拆 + 派:把活拆成小到一次能审的步骤。规划/起草派给规划编码 agent
+           (capability: code,如 claude-code),实现派给实现编码 agent(如 codex)。
+           让 PROGRESS.md 承载交接 —— 每个 agent 动手前读、做完追加一行。
+        4. 守底线:危险动作(rm -rf / git push / sudo / curl|sh)由动作闸挂起等人批,
+           绝不绕过。
+
+        核心原则(来自方法论库):规范即程序(Software 3.0);原型可凭感觉,要维护的
+        东西就把 agent 拴住小步走(agentic engineering);不盲接大 diff。拿不准时,
+        先查库再决定。
+      mcpServers:
+        # 方法论知识库的接线 —— mcp-obsidian 经 Obsidian「Local REST API」插件读你的
+        # vault。server 名 = `obsidian` → 工具命名 obsidian__search 等(与
+        # examples/obsidian-kb 同约定,便于复用那套 Local REST API 配置)。
+        - name: obsidian
+          command: uvx
+          args: [mcp-obsidian]
+          env:
+            OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+            OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+            OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+
+  # ── 1 个可寻址知识库槽位:MCP 接线 + 预置数据「指针」(不是内容!)──────────
+  # 槽位 name(`coding_methodology`)是 KB 的**可寻址身份**(也是 Stream C 联邦
+  # per-link 授权的目标);它背后的 mcpServer name(`obsidian`)是**传输**。导入时
+  # 只「上报」不「自动接线」(决策 #4)—— 由你把自己的 Obsidian vault 接到这个槽位。
+  knowledgeBases:
+    - name: coding_methodology
+      description: 卡帕西式编程方法论知识库(Obsidian vault via mcp-obsidian)
+      mcpServer:
+        name: obsidian
+        command: uvx
+        args: [mcp-obsidian]
+        env:
+          OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+          OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+          OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+      presetData:
+        kind: url
+        ref: https://example.com/karpathy-coding-methodology-vault.tar.zst
+        description: |-
+          一份方法论 vault 快照(= ../methodology-vault/ 那些 .md 的打包)——
+          注意这是「指针」,不是内容。两种用法:① 把 methodology-vault/ 的笔记直接
+          拷进你的 Obsidian vault;或 ② 把它们打包托管,让这个 ref 指过去再显式拉取。
+          框架永不经手这份知识内容。
+
+  # ── 一键:导入时提示填一次 API key,自动应用到导师 agent ────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek
