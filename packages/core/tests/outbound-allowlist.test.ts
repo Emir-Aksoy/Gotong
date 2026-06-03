@@ -20,7 +20,12 @@ import { describe, expect, it } from 'vitest'
 
 import { Hub } from '../src/hub.js'
 import { createInprocHubLinkPair } from '../src/hub-link.js'
-import { checkOutboundCapabilities, checkOutboundDataClasses } from '../src/peer-acl.js'
+import {
+  checkOutboundCapabilities,
+  checkOutboundDataClasses,
+  disallowedDataClasses,
+  type OutboundRedactor,
+} from '../src/peer-acl.js'
 import { installPeerLink } from '../src/peer-link-install.js'
 import { AgentParticipant } from '../src/participants/agent.js'
 import type { DispatchStrategy, Task } from '../src/types.js'
@@ -87,6 +92,21 @@ class CountingEcho extends AgentParticipant {
   }
   protected async handleTask(task: Task): Promise<unknown> {
     this.invocations++
+    return { echoedFrom: this.id, payload: task.payload }
+  }
+}
+
+/** Like `CountingEcho` but keeps the LAST task it saw, so a redaction test can
+ *  assert exactly what crossed the wire (reduced payload + pruned classes). */
+class RecordingEcho extends AgentParticipant {
+  invocations = 0
+  lastTask?: Task
+  constructor(id: string, capabilities: readonly string[]) {
+    super({ id, capabilities })
+  }
+  protected async handleTask(task: Task): Promise<unknown> {
+    this.invocations++
+    this.lastTask = task
     return { echoedFrom: this.id, payload: task.payload }
   }
 }
@@ -196,6 +216,36 @@ describe('checkOutboundDataClasses — pure verdict (Phase 19 P4-M4)', () => {
   })
 })
 
+describe('disallowedDataClasses — pure helper (Phase 19 P1-M10)', () => {
+  const withClasses = (classes?: string[]): Task => ({
+    ...makeTask({ kind: 'capability', capabilities: ['draft'] }),
+    ...(classes ? { dataClasses: classes } : {}),
+  })
+
+  it('no contract (undefined / null) → nothing to strip', () => {
+    expect(disallowedDataClasses(withClasses(['pii']), undefined)).toEqual([])
+    expect(disallowedDataClasses(withClasses(['pii']), null)).toEqual([])
+  })
+
+  it('task declares no classes → []', () => {
+    expect(disallowedDataClasses(withClasses(), ['public'])).toEqual([])
+    expect(disallowedDataClasses(withClasses([]), ['public'])).toEqual([])
+  })
+
+  it('all declared classes allowed → []', () => {
+    expect(disallowedDataClasses(withClasses(['public']), ['public', 'internal'])).toEqual([])
+  })
+
+  it('returns the FULL disallowed subset, not just the first offender', () => {
+    // `checkOutboundDataClasses` names only 'pii' (the first); a redactor needs
+    // the whole set to know everything it must strip.
+    expect(disallowedDataClasses(withClasses(['public', 'pii', 'secret']), ['public'])).toEqual([
+      'pii',
+      'secret',
+    ])
+  })
+})
+
 describe('installPeerLink — outbound data-class enforcement (mesh edge)', () => {
   it('a task carrying a disallowed data class never leaves to the peer', async () => {
     const hubA = Hub.inMemory()
@@ -238,6 +288,164 @@ describe('installPeerLink — outbound data-class enforcement (mesh edge)', () =
     expect(denied.kind).toBe('failed')
     if (denied.kind === 'failed') expect(denied.error).toContain('outbound_data_class_denied:pii')
     expect(bAgent.invocations).toBe(1) // remote never saw the pii task
+
+    await hubA.stop()
+    await hubB.stop()
+  })
+})
+
+describe('installPeerLink — outbound data-class redaction (Phase 19 P1-M10)', () => {
+  it('a redactor strips the disallowed field; a compliant reduced task crosses', async () => {
+    const hubA = Hub.inMemory()
+    const hubB = Hub.inMemory()
+    await Promise.all([hubA.start(), hubB.start()])
+
+    const bAgent = new RecordingEcho('b-agent', ['draft'])
+    hubB.register(bAgent)
+
+    const { a: linkAtoB, b: linkBtoA } = createInprocHubLinkPair({
+      aPeerId: 'hubB',
+      bPeerId: 'hubA',
+    })
+    // Peer cleared for 'public' only. The redactor drops the pii field and lets
+    // the public part through; it omits `dataClasses`, so core prunes the
+    // original declaration to the allowed subset (['public']).
+    const redactor: OutboundRedactor = (task, ctx) => {
+      // The hook is handed exactly what it needs to decide what to strip.
+      expect(ctx.allowed).toEqual(['public'])
+      expect(ctx.disallowed).toEqual(['pii'])
+      const p = task.payload as { note?: string; ssn?: string }
+      return { payload: { note: p.note } }
+    }
+    installPeerLink({
+      hub: hubA,
+      link: linkAtoB,
+      remoteCapabilities: ['draft'],
+      allowedDataClasses: ['public'],
+      redactor,
+    })
+    installPeerLink({ hub: hubB, link: linkBtoA, remoteCapabilities: [] })
+
+    const res = await hubA.dispatch({
+      from: 'system',
+      strategy: { kind: 'capability', capabilities: ['draft'] },
+      payload: { note: 'hello', ssn: '123-45-6789' },
+      dataClasses: ['public', 'pii'],
+    })
+    expect(res.kind).toBe('ok')
+    // The REDUCED task is what reached the peer: ssn gone, classes pruned.
+    expect(bAgent.invocations).toBe(1)
+    expect(bAgent.lastTask?.payload).toEqual({ note: 'hello' })
+    expect(bAgent.lastTask?.dataClasses).toEqual(['public'])
+
+    await hubA.stop()
+    await hubB.stop()
+  })
+
+  it('a redactor that declines (returns null) → refuse; remote untouched', async () => {
+    const hubA = Hub.inMemory()
+    const hubB = Hub.inMemory()
+    await Promise.all([hubA.start(), hubB.start()])
+
+    const bAgent = new RecordingEcho('b-agent', ['draft'])
+    hubB.register(bAgent)
+
+    const { a: linkAtoB, b: linkBtoA } = createInprocHubLinkPair({
+      aPeerId: 'hubB',
+      bPeerId: 'hubA',
+    })
+    installPeerLink({
+      hub: hubA,
+      link: linkAtoB,
+      remoteCapabilities: ['draft'],
+      allowedDataClasses: ['public'],
+      redactor: () => null,
+    })
+    installPeerLink({ hub: hubB, link: linkBtoA, remoteCapabilities: [] })
+
+    const denied = await hubA.dispatch({
+      from: 'system',
+      strategy: { kind: 'capability', capabilities: ['draft'] },
+      payload: { ssn: '...' },
+      dataClasses: ['pii'],
+    })
+    expect(denied.kind).toBe('failed')
+    if (denied.kind === 'failed') expect(denied.error).toContain('outbound_data_class_denied:pii')
+    expect(bAgent.invocations).toBe(0)
+
+    await hubA.stop()
+    await hubB.stop()
+  })
+
+  it('fail-closed: a redactor whose result STILL carries a disallowed class never leaks', async () => {
+    const hubA = Hub.inMemory()
+    const hubB = Hub.inMemory()
+    await Promise.all([hubA.start(), hubB.start()])
+
+    const bAgent = new RecordingEcho('b-agent', ['draft'])
+    hubB.register(bAgent)
+
+    const { a: linkAtoB, b: linkBtoA } = createInprocHubLinkPair({
+      aPeerId: 'hubB',
+      bPeerId: 'hubA',
+    })
+    // Buggy / malicious redactor: rewrites the payload but RE-DECLARES the pii
+    // class. Core's mandatory re-check rejects it, so nothing crosses.
+    installPeerLink({
+      hub: hubA,
+      link: linkAtoB,
+      remoteCapabilities: ['draft'],
+      allowedDataClasses: ['public'],
+      redactor: () => ({ payload: { looks: 'clean' }, dataClasses: ['pii'] }),
+    })
+    installPeerLink({ hub: hubB, link: linkBtoA, remoteCapabilities: [] })
+
+    const denied = await hubA.dispatch({
+      from: 'system',
+      strategy: { kind: 'capability', capabilities: ['draft'] },
+      payload: { ssn: '...' },
+      dataClasses: ['pii'],
+    })
+    expect(denied.kind).toBe('failed')
+    if (denied.kind === 'failed') expect(denied.error).toContain('outbound_data_class_denied')
+    expect(bAgent.invocations).toBe(0)
+
+    await hubA.stop()
+    await hubB.stop()
+  })
+
+  it('a redactor that throws is treated as a decline (refuse, never leak)', async () => {
+    const hubA = Hub.inMemory()
+    const hubB = Hub.inMemory()
+    await Promise.all([hubA.start(), hubB.start()])
+
+    const bAgent = new RecordingEcho('b-agent', ['draft'])
+    hubB.register(bAgent)
+
+    const { a: linkAtoB, b: linkBtoA } = createInprocHubLinkPair({
+      aPeerId: 'hubB',
+      bPeerId: 'hubA',
+    })
+    installPeerLink({
+      hub: hubA,
+      link: linkAtoB,
+      remoteCapabilities: ['draft'],
+      allowedDataClasses: ['public'],
+      redactor: () => {
+        throw new Error('boom')
+      },
+    })
+    installPeerLink({ hub: hubB, link: linkBtoA, remoteCapabilities: [] })
+
+    const denied = await hubA.dispatch({
+      from: 'system',
+      strategy: { kind: 'capability', capabilities: ['draft'] },
+      payload: { ssn: '...' },
+      dataClasses: ['pii'],
+    })
+    expect(denied.kind).toBe('failed')
+    if (denied.kind === 'failed') expect(denied.error).toContain('outbound_data_class_denied')
+    expect(bAgent.invocations).toBe(0)
 
     await hubA.stop()
     await hubB.stop()

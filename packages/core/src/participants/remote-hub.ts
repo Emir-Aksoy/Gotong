@@ -19,7 +19,13 @@
  */
 
 import type { HubLink } from '../hub-link.js'
-import { checkOutboundCapabilities, checkOutboundDataClasses } from '../peer-acl.js'
+import {
+  checkOutboundCapabilities,
+  checkOutboundDataClasses,
+  disallowedDataClasses,
+  type OutboundRedactor,
+  type RedactionResult,
+} from '../peer-acl.js'
 import type {
   Message,
   Participant,
@@ -122,6 +128,15 @@ export interface RemoteHubViaLinkOptions {
    * no classes always passes. See `checkOutboundDataClasses`.
    */
   allowedDataClasses?: readonly string[] | null
+  /**
+   * Phase 19 P1-M10 — OUTBOUND data-class REDACTION hook. When a task trips
+   * the `allowedDataClasses` gate, this (if set) gets a chance to strip the
+   * offending fields and return a REDUCED payload, which the wrapper forwards
+   * in place of refusing the whole task. Unset → the gate's safe default
+   * (refuse, never leak). The wrapper fail-closed re-checks the reduced task,
+   * so a buggy redactor can't leak a disallowed class. See `OutboundRedactor`.
+   */
+  redactor?: OutboundRedactor
 }
 
 export class RemoteHubViaLink implements Participant {
@@ -137,6 +152,8 @@ export class RemoteHubViaLink implements Participant {
   private readonly outboundCaps?: readonly string[] | null
   /** Phase 19 P4-M4 — see `RemoteHubViaLinkOptions.allowedDataClasses`. */
   private readonly allowedDataClasses?: readonly string[] | null
+  /** Phase 19 P1-M10 — see `RemoteHubViaLinkOptions.redactor`. */
+  private readonly redactor?: OutboundRedactor
 
   constructor(opts: RemoteHubViaLinkOptions) {
     this.id = opts.id
@@ -146,6 +163,7 @@ export class RemoteHubViaLink implements Participant {
     if (opts.originResolver !== undefined) this.originResolver = opts.originResolver
     if (opts.outboundCaps !== undefined) this.outboundCaps = opts.outboundCaps
     if (opts.allowedDataClasses !== undefined) this.allowedDataClasses = opts.allowedDataClasses
+    if (opts.redactor !== undefined) this.redactor = opts.redactor
   }
 
   get capabilities(): readonly string[] {
@@ -178,16 +196,25 @@ export class RemoteHubViaLink implements Participant {
     }
 
     // Phase 19 P4-M4 — OUTBOUND data-class gate, same chokepoint: a task
-    // carrying a data class the peer isn't cleared for never leaves.
+    // carrying a data class the peer isn't cleared for never leaves whole.
+    // Phase 19 P1-M10 — when a redactor is configured, a tripped gate is a
+    // chance to strip the offending fields and send a REDUCED version instead
+    // of refusing; `tryRedact` fail-closed re-checks the result so a buggy
+    // redactor can never leak. No redactor → safe default (refuse).
+    let effectiveTask = task
     const dataOk = checkOutboundDataClasses(task, this.allowedDataClasses)
     if (!dataOk.ok) {
-      return {
-        kind: 'failed',
-        taskId: task.id,
-        by: this.id,
-        error: `outbound_data_class_denied:${dataOk.reason}`,
-        ts: Date.now(),
+      const reduced = await this.tryRedact(task)
+      if (!reduced) {
+        return {
+          kind: 'failed',
+          taskId: task.id,
+          by: this.id,
+          error: `outbound_data_class_denied:${dataOk.reason}`,
+          ts: Date.now(),
+        }
       }
+      effectiveTask = reduced
     }
 
     // FED-M2 — stamp `origin` before forwarding so the receiver knows
@@ -200,13 +227,16 @@ export class RemoteHubViaLink implements Participant {
     //   3. Resolver returns null OR no resolver configured → forward
     //      as-is. Receiver's ACL decides whether unidentified
     //      federated tasks are acceptable.
-    let forwardTask = task
-    if (task.origin === undefined && this.originResolver && this.selfHubId) {
+    // P1-M10: built on `effectiveTask` (= the redacted task when redaction
+    // fired), which preserves id / from / origin so this logic is identical
+    // either way.
+    let forwardTask = effectiveTask
+    if (effectiveTask.origin === undefined && this.originResolver && this.selfHubId) {
       try {
-        const partial = await this.originResolver(task.from)
+        const partial = await this.originResolver(effectiveTask.from)
         if (partial !== null) {
           forwardTask = {
-            ...task,
+            ...effectiveTask,
             origin: {
               orgId: this.selfHubId,
               ...partial,
@@ -220,6 +250,44 @@ export class RemoteHubViaLink implements Participant {
     }
     const result = await this.link.dispatch(forwardTask)
     return relabel(result, task.id, this.id)
+  }
+
+  /**
+   * P1-M10 — run the optional redactor when the data-class gate fails, and
+   * FAIL-CLOSED re-check its result so a buggy or malicious redactor can never
+   * leak a disallowed class. Returns the reduced task to forward, or `null` to
+   * refuse (no redactor / declined / threw / result still dirty). The reduced
+   * task keeps the original id / from / origin — the redactor only steers
+   * payload + data classes.
+   */
+  private async tryRedact(task: Task): Promise<Task | null> {
+    const allowed = this.allowedDataClasses
+    // The gate only fails when a contract is set, so `allowed` is a real array
+    // here; the guard satisfies the type and documents the invariant.
+    if (!this.redactor || allowed === null || allowed === undefined) return null
+    let result: RedactionResult | null
+    try {
+      result = await this.redactor(task, {
+        allowed,
+        disallowed: disallowedDataClasses(task, allowed),
+      })
+    } catch {
+      // A redactor fault must never leak the original — treat as decline.
+      return null
+    }
+    if (!result) return null
+    const reduced: Task = {
+      ...task,
+      payload: result.payload,
+      // Default: prune the original declaration to the classes the peer IS
+      // cleared for. An explicit `dataClasses` from the redactor overrides.
+      dataClasses:
+        result.dataClasses ?? (task.dataClasses ?? []).filter((c) => allowed.includes(c)),
+    }
+    // Fail-closed: the reduced task MUST now satisfy the contract. A redactor
+    // that left a disallowed class (or declared a fresh one) is refused.
+    if (!checkOutboundDataClasses(reduced, allowed).ok) return null
+    return reduced
   }
 
   async onMessage(msg: Message): Promise<void> {

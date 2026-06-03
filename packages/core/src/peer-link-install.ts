@@ -21,7 +21,7 @@
 import type { Hub } from './hub.js'
 import type { HubLink } from './hub-link.js'
 import { RemoteHubViaLink, type OriginResolver } from './participants/remote-hub.js'
-import { extractRequiredCapabilities } from './peer-acl.js'
+import { extractRequiredCapabilities, type OutboundRedactor } from './peer-acl.js'
 import type {
   Participant,
   ParticipantId,
@@ -185,6 +185,14 @@ export interface InstallPeerLinkOptions {
    * contract. See `RemoteHubViaLinkOptions.allowedDataClasses`.
    */
   allowedDataClasses?: readonly string[] | null
+  /**
+   * Phase 19 P1-M10 — OUTBOUND data-class REDACTION hook, passed into the
+   * wrapper. When a task trips the `allowedDataClasses` gate, this (if set)
+   * may strip the offending fields and return a reduced payload to forward in
+   * place of refusing. Unset → the gate's safe default (refuse). The wrapper
+   * fail-closed re-checks the reduced task. See `RemoteHubViaLinkOptions.redactor`.
+   */
+  redactor?: OutboundRedactor
   /**
    * Phase 19 P4-M4 — INBOUND policy gate, evaluated AFTER the ACL and BEFORE
    * the task is dispatched into the local hub. Returns `{ok:false, reason}` to
@@ -357,6 +365,8 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
     ...(opts.allowedDataClasses !== undefined
       ? { allowedDataClasses: opts.allowedDataClasses }
       : {}),
+    // Phase 19 P1-M10: optional redaction hook for data-class-tripped tasks.
+    ...(opts.redactor !== undefined ? { redactor: opts.redactor } : {}),
   })
   // B-M3: an optional host decorator (e.g. outbound approval gate) sits in
   // front of the wrapper. It must keep `remotePeer.id` so the registry key,
