@@ -258,6 +258,17 @@ export interface IdentitySurface {
   }
   listCredentials(userId: string): IdentityCredentialDTO[]
   revokeCredential(credentialId: string): void
+  // Route B P1-M3e — MFA (TOTP) self-service. All optional so surfaces / test
+  // stubs that predate MFA still typecheck; the /me TOTP routes check
+  // `typeof identity.enrollTotp === 'function'` and 503 when absent.
+  totpState?(userId: string): 'none' | 'pending' | 'active'
+  enrollTotp?(input: { userId: string; account: string; issuer: string }): {
+    secretBase32: string
+    otpauthUri: string
+  }
+  confirmTotp?(input: { userId: string; code: string }): boolean
+  verifyTotpForLogin?(input: { userId: string; code: string }): boolean
+  disableTotp?(userId: string): boolean
   // D1 — Peer registry. All four optional so older identity surfaces
   // (and tests that stub the interface) continue to typecheck; the
   // route handlers do `typeof identity.addPeer === 'function'` checks

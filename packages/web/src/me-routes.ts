@@ -737,6 +737,28 @@ export async function handleMeRoute(
     await handleMeUploads(ctx, req, res, userId, method)
     return
   }
+  // Route B P1-M3e — MFA (TOTP) self-service. A member manages their OWN second
+  // factor; userId/email come from the session, never a client value. Enroll
+  // mints a pending secret (QR payload), confirm activates it with a current
+  // code, disable turns it off (an ACTIVE factor needs a current code so a
+  // hijacked session alone can't strip 2FA; a PENDING enrollment can just be
+  // cancelled). Admin-forced MFA / admin reset / recovery codes are later work.
+  if (method === 'GET' && path === '/api/me/totp') {
+    await handleMeTotpState(ctx, res, userId)
+    return
+  }
+  if (method === 'POST' && path === '/api/me/totp/enroll') {
+    await handleMeTotpEnroll(ctx, res, userId, v4.user.email)
+    return
+  }
+  if (method === 'POST' && path === '/api/me/totp/confirm') {
+    await handleMeTotpConfirm(ctx, req, res, userId)
+    return
+  }
+  if (method === 'POST' && path === '/api/me/totp/disable') {
+    await handleMeTotpDisable(ctx, req, res, userId)
+    return
+  }
   // Phase 7 M5 — org mode for the SPA shell. Every signed-in user can
   // read this (it drives body-class CSS); only owner can flip it via
   // POST /api/admin/identity/org-mode below.
@@ -1592,6 +1614,125 @@ async function handleMeDeleteCredential(
   } catch (err) {
     sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
   }
+}
+
+// ---------------------------------------------------------------------------
+// /api/me/totp/* — member MFA (TOTP) self-service (Route B P1-M3e)
+// ---------------------------------------------------------------------------
+
+/**
+ * Read a `{ code }` body, tolerating a missing/empty/garbled body as no code.
+ * readJsonBody resolves to `undefined` for an empty body (a bare POST with no
+ * payload, e.g. "disable" with no code), so guard the object before indexing.
+ */
+async function readTotpCode(req: IncomingMessage): Promise<string> {
+  const body = (await readJsonBody(req).catch(() => null)) as { code?: unknown } | null
+  return body && typeof body.code === 'string' ? body.code.trim() : ''
+}
+
+async function handleMeTotpState(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (typeof ctx.identity.totpState !== 'function') {
+    sendJson(res, { error: 'MFA unavailable on this host', code: 'totp_unavailable' }, 503)
+    return
+  }
+  sendJson(res, { state: ctx.identity.totpState(userId) })
+}
+
+async function handleMeTotpEnroll(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+  email: string,
+): Promise<void> {
+  if (typeof ctx.identity.enrollTotp !== 'function') {
+    sendJson(res, { error: 'MFA unavailable on this host', code: 'totp_unavailable' }, 503)
+    return
+  }
+  try {
+    // account = the member's own email (server-side, never client-supplied);
+    // issuer is the app name shown in the authenticator. The plaintext secret
+    // is returned ONCE here for the QR code — it lives encrypted in the vault.
+    const e = ctx.identity.enrollTotp({ userId, account: email, issuer: 'AipeHub' })
+    sendJson(res, { ok: true, secretBase32: e.secretBase32, otpauthUri: e.otpauthUri })
+  } catch (err) {
+    // No master key configured → the vault can't encrypt the secret. That's a
+    // host-config gap, not a client error: surface 503 so the UI says "ask
+    // the operator to enable encryption" rather than a generic failure.
+    const code = (err as { code?: string } | null)?.code
+    if (code === 'vault_not_configured') {
+      sendJson(res, { error: 'MFA requires the host to configure encryption', code }, 503)
+      return
+    }
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
+  }
+}
+
+async function handleMeTotpConfirm(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (typeof ctx.identity.confirmTotp !== 'function') {
+    sendJson(res, { error: 'MFA unavailable on this host', code: 'totp_unavailable' }, 503)
+    return
+  }
+  const code = await readTotpCode(req)
+  if (!code) {
+    sendJson(res, { error: 'code required', code: 'invalid_input' }, 400)
+    return
+  }
+  try {
+    const ok = ctx.identity.confirmTotp({ userId, code })
+    if (!ok) {
+      sendJson(res, { ok: false, error: 'invalid code', code: 'invalid_code' }, 400)
+      return
+    }
+    sendJson(res, { ok: true, state: 'active' })
+  } catch (err) {
+    // invalid_input == "no pending enrollment to confirm" / "already active".
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 409)
+  }
+}
+
+async function handleMeTotpDisable(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (
+    typeof ctx.identity.disableTotp !== 'function' ||
+    typeof ctx.identity.totpState !== 'function'
+  ) {
+    sendJson(res, { error: 'MFA unavailable on this host', code: 'totp_unavailable' }, 503)
+    return
+  }
+  const state = ctx.identity.totpState(userId)
+  if (state === 'none') {
+    sendJson(res, { ok: false, error: 'no MFA enrollment', code: 'no_enrollment' }, 400)
+    return
+  }
+  if (state === 'active') {
+    // Turning OFF an active factor requires proving current possession — a
+    // stolen session cookie alone must not be enough to drop 2FA. (A pending,
+    // never-confirmed enrollment protects nothing, so it can just be cancelled.)
+    if (typeof ctx.identity.verifyTotpForLogin !== 'function') {
+      sendJson(res, { error: 'MFA unavailable on this host', code: 'totp_unavailable' }, 503)
+      return
+    }
+    const code = await readTotpCode(req)
+    if (!code || !ctx.identity.verifyTotpForLogin({ userId, code })) {
+      sendJson(res, { ok: false, error: 'invalid code', code: 'invalid_code' }, 400)
+      return
+    }
+  }
+  const removed = ctx.identity.disableTotp(userId)
+  sendJson(res, { ok: removed, state: 'none' })
 }
 
 // ---------------------------------------------------------------------------
