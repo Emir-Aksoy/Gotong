@@ -284,6 +284,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
+  examples/personal-coding-hub:
+    dependencies:
+      '@aipehub/cli-agent':
+        specifier: workspace:*
+        version: link:../../packages/cli-agent
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+
   examples/rag-mcp:
     dependencies:
       '@aipehub/core':
