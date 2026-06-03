@@ -131,6 +131,7 @@ import {
   type OidcLoginSurface,
   type OidcProviderAdminSurface,
   type SamlLoginSurface,
+  type SamlProviderAdminSurface,
 } from '@aipehub/web'
 
 /**
@@ -1629,6 +1630,7 @@ async function main(): Promise<void> {
   // AIPE_PUBLIC_URL (the externally-reachable base, e.g. behind a proxy);
   // fall back to host:port for local dev. Production behind TLS MUST set it.
   let samlLogin: SamlLoginSurface | undefined
+  let samlAdmin: SamlProviderAdminSurface | undefined
   if (identity) {
     const idForSaml = identity
     const publicBase = (env('AIPE_PUBLIC_URL') ?? `http://${config.host}:${config.webPort}`).replace(/\/+$/, '')
@@ -1647,6 +1649,16 @@ async function main(): Promise<void> {
         if (!p) throw new SamlError('saml_provider_not_found', `no SAML provider ${providerId}`)
         return buildSpMetadata({ spEntityId: p.spEntityId, acsUrl: samlAcsUrl })
       },
+    }
+    // Route B P1-M5f — provider registry CRUD (admin). Thin pass-through to the
+    // identity SAML facade. Unlike OIDC there is no secret: `idpCert` is a public
+    // X.509 verification key, so the projection carries it in full (admins audit
+    // which cert is pinned).
+    samlAdmin = {
+      list: () => idForSaml.listSamlProviders(),
+      add: (input) => idForSaml.addSamlProvider(input),
+      update: (id, patch) => idForSaml.updateSamlProvider(id, patch),
+      remove: (id) => idForSaml.removeSamlProvider(id),
     }
   }
 
@@ -1721,6 +1733,8 @@ async function main(): Promise<void> {
     ...(samlLogin ? { samlLogin } : {}),
     // Route B P1-M4f — admin OIDC provider registry CRUD (undefined → 503).
     ...(oidcAdmin ? { oidcAdmin } : {}),
+    // Route B P1-M5f — admin SAML provider registry CRUD (undefined → 503).
+    ...(samlAdmin ? { samlAdmin } : {}),
     // Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
     // Lets Prometheus pull the same body as /api/admin/metrics without a
     // machine-admin token. Unset/empty (env() already maps '' → undefined) →

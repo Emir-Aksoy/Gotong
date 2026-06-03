@@ -72,11 +72,13 @@ import {
 import { handleOidcRoute, type OidcLoginSurface } from './oidc-routes.js'
 import { handleOidcAdminRoute, type OidcProviderAdminSurface } from './oidc-admin-routes.js'
 import { handleSamlRoute, type SamlLoginSurface } from './saml-routes.js'
+import { handleSamlAdminRoute, type SamlProviderAdminSurface } from './saml-admin-routes.js'
 
 export type { PeerManifestFederationSurface, PeerManifestRow } from './peer-routes.js'
 export type { OidcLoginSurface } from './oidc-routes.js'
 export type { OidcProviderAdminSurface, OidcProviderView } from './oidc-admin-routes.js'
 export type { SamlLoginSurface } from './saml-routes.js'
+export type { SamlProviderAdminSurface, SamlProviderView } from './saml-admin-routes.js'
 
 export type {
   IdentitySurface,
@@ -467,6 +469,14 @@ export interface WebServerOptions {
    * client_secret is write-only: accepted on input, never echoed back.
    */
   oidcAdmin?: OidcProviderAdminSurface
+  /**
+   * Route B P1-M5f — host-injected SAML provider registry (admin CRUD). When
+   * wired, `/api/admin/saml/providers[/:id]` lets an admin register the IdPs the
+   * hub accepts SAML assertions from. Absent (no identity store) → those routes
+   * 503. Unlike OIDC there is no secret: `idpCert` is a public X.509 verification
+   * key, so it is returned in full (admins must see which cert is pinned).
+   */
+  samlAdmin?: SamlProviderAdminSurface
   /**
    * Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
    * When set, a Prometheus scraper presenting `Authorization: Bearer <token>`
@@ -904,6 +914,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     oidcLogin: opts.oidcLogin,
     samlLogin: opts.samlLogin,
     oidcAdmin: opts.oidcAdmin,
+    samlAdmin: opts.samlAdmin,
     httpStats: new HttpStats(),
     metricsToken: opts.metricsToken,
   }
@@ -1058,6 +1069,8 @@ interface HandlerCtx {
   samlLogin: SamlLoginSurface | undefined
   /** Route B P1-M4f — see WebServerOptions.oidcAdmin doc above. */
   oidcAdmin: OidcProviderAdminSurface | undefined
+  /** Route B P1-M5f — see WebServerOptions.samlAdmin doc above. */
+  samlAdmin: SamlProviderAdminSurface | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -1958,6 +1971,18 @@ async function handle(
     const handled = await handleOidcAdminRoute(
       {
         oidcAdmin: ctx.oidcAdmin,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // Route B P1-M5f — admin SAML provider registry CRUD.
+  if (path === '/api/admin/saml/providers' || path.startsWith('/api/admin/saml/providers/')) {
+    const handled = await handleSamlAdminRoute(
+      {
+        samlAdmin: ctx.samlAdmin,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req, res, method, path,

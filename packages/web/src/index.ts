@@ -6,6 +6,8 @@ export type { OidcLoginSurface } from './server.js'
 export type { OidcProviderAdminSurface, OidcProviderView } from './server.js'
 // Route B P1-M5e — public SAML SP login routes (host injects the surface).
 export type { SamlLoginSurface } from './server.js'
+// Route B P1-M5f — admin SAML provider registry CRUD (host injects the surface).
+export type { SamlProviderAdminSurface, SamlProviderView } from './server.js'
 
 // Phase 17 (Sprint 4) — export-format primitives + the usage-ledger column
 // spec, surfaced so embedders (and the host's E2E acceptance gate) can format
