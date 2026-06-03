@@ -37,6 +37,7 @@ import { installPeerLink, type InstalledPeerLink } from '@aipehub/core'
 import type { IdentityStore, PeerRegistration } from '@aipehub/identity'
 import { acceptHubLinks, bearerAuth, connectHubLink } from '@aipehub/transport-ws'
 import { gateKnowledgeBaseRpc, type RpcResponder } from './peer-kb-gate.js'
+import { denyPeerSummaryRpc } from './peer-summary.js'
 // `WebSocketServer` is the runtime shape from `ws`. We don't take a
 // runtime dep on the `ws` package here (transport-ws owns that); the
 // caller passes the server instance from their `serveWebSocket` handle
@@ -487,22 +488,29 @@ export class PeerRegistry {
   }
 
   /**
-   * v5 C-M1 — the `rpcResponder` slice of `installPeerLink` options, gated by
-   * the row's callable-knowledge-base allowlist. Shared by both install paths
-   * so a peer can only discover + call the named shared MCP servers regardless
-   * of which direction the link was established.
+   * The `rpcResponder` slice of `installPeerLink` options, composing the
+   * per-link gates that ride the rpc channel. Shared by both install paths so
+   * gating is direction-independent (which side dialed never changes policy):
    *
-   * Three cases, mirroring the other per-link contract dimensions:
-   *   - no shared responder wired       → omit (peer has no rpc handler)
-   *   - allowlist null/unset (legacy)   → hand the responder through unwrapped
-   *                                       (all shared servers callable)
-   *   - explicit allowlist (incl. [])   → wrap in the per-link KB gate
+   *   - callable-KB allowlist (v5 C-M1) — `mcp.listShared/listTools/callTool`
+   *     filtered to `allowedKnowledgeBases`. Null/unset = all callable (legacy),
+   *     so we only wrap in the restrictive case.
+   *   - summary share (v5 E5) — `peer.summary` is OPT-IN: denied unless the row
+   *     explicitly shares (`share_summary`), so the default is fail-closed by
+   *     omission. We wrap (to deny) only when NOT sharing.
+   *
+   * No shared responder wired → omit entirely (peer has no rpc handler).
    */
-  private kbGatedResponder(row: PeerRegistration): { rpcResponder?: RpcResponder } {
-    const inner = this.opts.rpcResponder
-    if (!inner) return {}
-    if (!row.allowedKnowledgeBases) return { rpcResponder: inner }
-    return { rpcResponder: gateKnowledgeBaseRpc(inner, row.allowedKnowledgeBases) }
+  private gatedRpcResponder(row: PeerRegistration): { rpcResponder?: RpcResponder } {
+    let responder = this.opts.rpcResponder
+    if (!responder) return {}
+    if (row.allowedKnowledgeBases) {
+      responder = gateKnowledgeBaseRpc(responder, row.allowedKnowledgeBases)
+    }
+    if (!row.shareSummary) {
+      responder = denyPeerSummaryRpc(responder)
+    }
+    return { rpcResponder: responder }
   }
 
   /**
@@ -617,7 +625,7 @@ export class PeerRegistry {
         // v5 C-M1 — the shared rpc responder, gated by the row's callable-KB
         // allowlist (null → unwrapped/all callable; explicit list → per-link
         // gate that filters mcp.listShared + denies mcp.callTool off-list).
-        ...this.kbGatedResponder(row),
+        ...this.gatedRpcResponder(row),
         // Phase 18 B-M2 — apply the peer's persisted inbound trust contract.
         // A null acl (legacy / unset row) leaves the gate off (accept-all),
         // exactly the pre-B-M2 behaviour.
@@ -700,7 +708,7 @@ export class PeerRegistry {
       selfHubId: this.opts.selfHubId,
       // v5 C-M1 — same callable-KB gate on the shared rpc responder for a
       // wrapper installed off an inbound-accepted link.
-      ...this.kbGatedResponder(row),
+      ...this.gatedRpcResponder(row),
       // Phase 18 B-M2 — receiver-side ACL from the peer row (inbound is the
       // direction the ACL actually guards). null → accept-all, as before.
       ...(row.acl ? { acl: row.acl } : {}),

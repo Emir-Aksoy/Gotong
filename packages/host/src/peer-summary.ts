@@ -1,0 +1,345 @@
+/**
+ * Peer summary — PROVIDER + consumer + per-link gate (v5 Stream E5).
+ *
+ * The free-graph "control plane" (控制面): a hub asks a connected peer for a
+ * privacy-safe OVERVIEW of its footprint over the same authenticated HubLink
+ * rpc seam that already carries cross-hub MCP (`mcp-proxy.ts`) and the
+ * capability manifest (`peer-manifest.ts`). The peer answers with COUNTS only —
+ * never raw rows, names, payloads, or user/credential material — so an operator
+ * watching many sovereign hubs sees aggregate health WITHOUT any hub being
+ * absorbed into a platform tenant (North Star: the hub network is a free graph,
+ * not a hierarchy — a control plane observes, it never owns).
+ *
+ * Why this is gated when `peer.manifest` is not: a manifest discloses only
+ * capability NAMES an authenticated peer could already dispatch (it learns
+ * nothing new), but a summary discloses ACTIVITY VOLUME. So sharing is OPT-IN
+ * per link and FAIL-CLOSED: the per-link gate (`denyPeerSummaryRpc`, applied by
+ * peer-registry) rejects `peer.summary` unless the peer row's `share_summary`
+ * flag (identity v23) is set. A hub that never flips it leaks nothing.
+ *
+ * Wire contract — one method:
+ *
+ *   peer.summary { }  → PeerSummary
+ *
+ * The link is authenticated (peerToken); this is mesh-internal aggregation, not
+ * the public `/.well-known/agent-card.json`.
+ */
+
+import type { HubLink, Participant, ParticipantId } from '@aipehub/core'
+import type { RpcResponder } from './peer-kb-gate.js'
+
+/** Wire method names for the peer summary (shared producer/consumer). */
+export const PEER_SUMMARY_METHODS = {
+  get: 'peer.summary',
+} as const
+
+/**
+ * The summary schema version. Bumps when `PeerSummary` changes shape so a
+ * consumer can reason about an older peer's reply. Independent of the peer
+ * MANIFEST version and the A2A protocol version — this is the control plane's
+ * own contract.
+ */
+export const PEER_SUMMARY_VERSION = '1'
+
+/** Trailing window (days) the LLM-usage roll-up covers when none is configured. */
+const DEFAULT_WINDOW_DAYS = 30
+const DAY_MS = 86_400_000
+
+/**
+ * A peer's privacy-safe footprint — COUNTS ONLY. Every field is a number or a
+ * map of numbers; there is deliberately no place to put a name, id, payload, or
+ * any per-row datum. That invariant is the privacy contract: the producer
+ * cannot accidentally leak a row because the shape has nowhere to hold one.
+ */
+export interface PeerSummary {
+  /** The advertising hub's self id (== `orgId` on the federation wire). */
+  hubId: string
+  /** `PEER_SUMMARY_VERSION` at emit time. */
+  protocolVersion: string
+  /**
+   * Epoch ms the summary was built — the ONLY freshness signal. The producer
+   * emits no per-row timestamps, so a consumer reasons about staleness from
+   * this alone (and its own fetch time).
+   */
+  generatedAt: number
+  /** Point-in-time asset counts. */
+  assets: {
+    /** Locally-owned participants (excludes installed peer wrappers). */
+    agents: number
+    /** Workflow definitions across all lifecycle states. */
+    workflows: number
+    /** Of those, how many are currently `published`. */
+    publishedWorkflows: number
+    /** Configured federation peers. */
+    peers: number
+  }
+  /** Point-in-time tally over the ACTIVE run set (not windowed). */
+  runs: {
+    total: number
+    /** Counts keyed by run status (running/done/failed/cancelled). */
+    byStatus: Record<string, number>
+  }
+  /** LLM usage aggregated over the trailing `windowDays`. */
+  llm: {
+    windowDays: number
+    calls: number
+    /** input + output + cache-creation + cache-read tokens. */
+    tokens: number
+    /** Integer micro-USD (1e6 == $1), mirroring the usage ledger. */
+    costMicros: number
+  }
+  /** Operational health gauges. */
+  health: {
+    /** Parked tasks awaiting resume (includes NEVER_RESUME_AT human/approval items). */
+    suspendedTasks: number
+  }
+}
+
+// ─── producer side ──────────────────────────────────────────────────────────
+
+/** The slice of `Hub` that `buildLocalSummary` reads (tests inject a stub). */
+export interface SummaryHubView {
+  participants(): Participant[]
+}
+
+/** Narrow projection of the workflow controller — list + run tally. */
+export interface SummaryWorkflowSource {
+  listAll?(): Promise<Array<{ state?: string }>> | Array<{ state?: string }>
+  countRuns?(opts?: {
+    workflowId?: string
+  }): Promise<{ total: number; byStatus: Record<string, number> }>
+}
+
+/** Narrow projection of one `aggregateLedger` row (mirrors the ledger DTO). */
+export interface SummaryLedgerRow {
+  calls: number
+  inputTokens: number
+  outputTokens: number
+  cacheCreationTokens: number
+  cacheReadTokens: number
+  costMicros: number
+}
+
+/** Narrow projection of `IdentityStore` — the read methods the summary samples. */
+export interface SummaryIdentitySource {
+  countSuspendedTasks?(): number
+  aggregateLedger?(query: {
+    groupBy: 'model'
+    since?: number
+    until?: number
+  }): SummaryLedgerRow[]
+  listPeers?(): unknown[]
+}
+
+export interface BuildSummaryDeps {
+  /** This hub's self id (stamped as `PeerSummary.hubId`). */
+  hubId: string
+  hub: SummaryHubView
+  /**
+   * Installed peer-wrapper ids to exclude from the agent count — a thunk so it
+   * reflects the registry's CURRENT peers on every call (mirrors the manifest).
+   */
+  peerWrapperIds: () => ReadonlySet<ParticipantId>
+  workflows?: SummaryWorkflowSource
+  identity?: SummaryIdentitySource
+  /** LLM-usage window in days (default 30). */
+  windowDays?: number
+  now?: () => number
+}
+
+/**
+ * Aggregate this hub's privacy-safe footprint. EVERY family is best-effort,
+ * exactly like `collectBusinessMetrics`: a source the host didn't wire, a method
+ * an older host lacks, or a call that throws leaves that family at its zero
+ * default rather than rejecting the whole summary. The stable shape (no omitted
+ * keys) keeps the consumer's aggregation trivial.
+ */
+export async function buildLocalSummary(deps: BuildSummaryDeps): Promise<PeerSummary> {
+  const now = deps.now ?? (() => Date.now())
+  const windowDays =
+    deps.windowDays && deps.windowDays > 0 ? deps.windowDays : DEFAULT_WINDOW_DAYS
+  const generatedAt = now()
+
+  const summary: PeerSummary = {
+    hubId: deps.hubId,
+    protocolVersion: PEER_SUMMARY_VERSION,
+    generatedAt,
+    assets: { agents: 0, workflows: 0, publishedWorkflows: 0, peers: 0 },
+    runs: { total: 0, byStatus: {} },
+    llm: { windowDays, calls: 0, tokens: 0, costMicros: 0 },
+    health: { suspendedTasks: 0 },
+  }
+
+  // --- assets.agents — local participants minus peer wrappers (mirror manifest)
+  try {
+    const wrappers = deps.peerWrapperIds()
+    let n = 0
+    for (const p of deps.hub.participants()) if (!wrappers.has(p.id)) n++
+    summary.assets.agents = n
+  } catch {
+    // leave 0
+  }
+
+  // --- assets.workflows / publishedWorkflows ---------------------------------
+  const wf = deps.workflows
+  if (wf && typeof wf.listAll === 'function') {
+    try {
+      const all = await wf.listAll()
+      summary.assets.workflows = all.length
+      summary.assets.publishedWorkflows = all.filter((w) => w?.state === 'published').length
+    } catch {
+      // leave 0
+    }
+  }
+
+  // --- assets.peers ----------------------------------------------------------
+  const id = deps.identity
+  if (id && typeof id.listPeers === 'function') {
+    try {
+      summary.assets.peers = id.listPeers().length
+    } catch {
+      // leave 0
+    }
+  }
+
+  // --- runs (point-in-time active-set tally) ---------------------------------
+  if (wf && typeof wf.countRuns === 'function') {
+    try {
+      const { total, byStatus } = await wf.countRuns()
+      summary.runs = { total, byStatus }
+    } catch {
+      // leave 0 / {}
+    }
+  }
+
+  // --- llm window ------------------------------------------------------------
+  if (id && typeof id.aggregateLedger === 'function') {
+    try {
+      const since = generatedAt - windowDays * DAY_MS
+      const rows = id.aggregateLedger({ groupBy: 'model', since })
+      let calls = 0
+      let tokens = 0
+      let costMicros = 0
+      for (const r of rows) {
+        calls += r.calls
+        tokens += r.inputTokens + r.outputTokens + r.cacheCreationTokens + r.cacheReadTokens
+        costMicros += r.costMicros
+      }
+      summary.llm = { windowDays, calls, tokens, costMicros }
+    } catch {
+      // leave 0s
+    }
+  }
+
+  // --- health ----------------------------------------------------------------
+  if (id && typeof id.countSuspendedTasks === 'function') {
+    try {
+      summary.health.suspendedTasks = id.countSuspendedTasks()
+    } catch {
+      // leave 0
+    }
+  }
+
+  return summary
+}
+
+export class PeerSummaryHost {
+  private readonly deps: BuildSummaryDeps
+
+  constructor(deps: BuildSummaryDeps) {
+    this.deps = deps
+  }
+
+  /**
+   * Bound `rpcResponder` fragment, composed onto the host's single rpcResponder
+   * alongside the MCP proxy + manifest host. A throw here surfaces as an rpc
+   * rejection on the calling peer.
+   */
+  readonly respond = async (call: {
+    method: string
+    params: unknown
+  }): Promise<unknown> => {
+    switch (call.method) {
+      case PEER_SUMMARY_METHODS.get:
+        return buildLocalSummary(this.deps)
+      default:
+        throw new Error(`unknown peer summary method '${call.method}'`)
+    }
+  }
+}
+
+// ─── per-link gate ──────────────────────────────────────────────────────────
+
+/**
+ * v5 E5 — the per-link summary gate (pure function, like `gateKnowledgeBaseRpc`).
+ * Wrap `inner` so `peer.summary` is DENIED (throws → rpc rejection on the
+ * caller) while every other method passes through untouched. The peer-registry
+ * applies this ONLY when the row has NOT opted into sharing (`share_summary`
+ * false / unset), so the default — and any link that never flips the flag — is
+ * fail-closed by omission of the share.
+ */
+export function denyPeerSummaryRpc(inner: RpcResponder): RpcResponder {
+  return async (call) => {
+    if (call.method === PEER_SUMMARY_METHODS.get) {
+      throw new Error('peer summary is not shared by this peer')
+    }
+    return inner(call)
+  }
+}
+
+// ─── consumer side ──────────────────────────────────────────────────────────
+
+/**
+ * Coerce a peer's reply into a well-formed `PeerSummary`, defending against a
+ * hostile / older peer: every numeric field falls back to 0, unknown
+ * `byStatus` keys are kept but their values coerced. The aggregating surface
+ * (E5-M3) can sum these without per-peer guards.
+ */
+export function normalizePeerSummary(raw: unknown): PeerSummary {
+  const o = (raw ?? {}) as Record<string, unknown>
+  const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+  const obj = (v: unknown): Record<string, unknown> =>
+    v && typeof v === 'object' ? (v as Record<string, unknown>) : {}
+
+  const assets = obj(o.assets)
+  const runs = obj(o.runs)
+  const llm = obj(o.llm)
+  const health = obj(o.health)
+
+  const byStatus: Record<string, number> = {}
+  for (const [k, v] of Object.entries(obj(runs.byStatus))) byStatus[k] = num(v)
+
+  return {
+    hubId: typeof o.hubId === 'string' ? o.hubId : '',
+    protocolVersion:
+      typeof o.protocolVersion === 'string' ? o.protocolVersion : PEER_SUMMARY_VERSION,
+    generatedAt: num(o.generatedAt),
+    assets: {
+      agents: num(assets.agents),
+      workflows: num(assets.workflows),
+      publishedWorkflows: num(assets.publishedWorkflows),
+      peers: num(assets.peers),
+    },
+    runs: { total: num(runs.total), byStatus },
+    llm: {
+      windowDays: num(llm.windowDays),
+      calls: num(llm.calls),
+      tokens: num(llm.tokens),
+      costMicros: num(llm.costMicros),
+    },
+    health: { suspendedTasks: num(health.suspendedTasks) },
+  }
+}
+
+/**
+ * Discovery (consumer side): ask a peer hub over its link for its summary. Thin
+ * wrapper over the `peer.summary` rpc — the caller decides what to do when the
+ * link is closed, the call rejects (e.g. the peer hasn't opted into sharing →
+ * the gate throws), or an older peer lacks the method. Returns `null` when the
+ * peer answers nothing.
+ */
+export async function fetchPeerSummary(link: HubLink): Promise<PeerSummary | null> {
+  const out = await link.rpc(PEER_SUMMARY_METHODS.get, {})
+  if (!out || typeof out !== 'object') return null
+  return normalizePeerSummary(out)
+}

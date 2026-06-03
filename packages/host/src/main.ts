@@ -165,6 +165,7 @@ import {
   createPeerManifestFederation,
   type PeerManifestFederation,
 } from './peer-manifest.js'
+import { PeerSummaryHost, PEER_SUMMARY_METHODS } from './peer-summary.js'
 import { GrowthReportsAdmin } from './services/growth-reports-admin.js'
 import {
   BINARY_SAFE_PLUGINS,
@@ -1292,10 +1293,23 @@ async function main(): Promise<void> {
     // else → manifest host. `peerWrapperIds` is a thunk so it reflects the
     // registry's CURRENT peers (each wrapper is registered under the peer's
     // hub id) — we advertise our own agents, never a neighbour's.
+    const peerWrapperIds = () =>
+      new Set((peerRegistry?.status() ?? []).map((r) => r.peerId))
     const peerManifestHost = new PeerManifestHost({
       hub,
       hubId: selfHubId,
-      peerWrapperIds: () => new Set((peerRegistry?.status() ?? []).map((r) => r.peerId)),
+      peerWrapperIds,
+    })
+    // v5 E5 — privacy-safe footprint summary (the free-graph control plane).
+    // Counts only, built on demand from the same hub + workflow + identity
+    // surfaces. Composed onto the rpcResponder below; the per-link gate in
+    // peer-registry denies `peer.summary` unless the row opted into sharing.
+    const peerSummaryHost = new PeerSummaryHost({
+      hub,
+      hubId: selfHubId,
+      peerWrapperIds,
+      workflows: workflowController,
+      identity,
     })
     // Phase 18 B-M3 — outbound cross-org approval gate. A peer row flagged
     // `requireApprovalOutbound` has its outbound sender wrapped so a task parks
@@ -1331,8 +1345,11 @@ async function main(): Promise<void> {
       inboundRateLimit,
       perLinkQuotaWindowMs: linkQuotaWindowMs,
       ...(trustProxy ? { trustProxy: true } : {}),
-      rpcResponder: (call) =>
-        call.method.startsWith('mcp.') ? proxyRespond(call) : peerManifestHost.respond(call),
+      rpcResponder: (call) => {
+        if (call.method.startsWith('mcp.')) return proxyRespond(call)
+        if (call.method === PEER_SUMMARY_METHODS.get) return peerSummaryHost.respond(call)
+        return peerManifestHost.respond(call)
+      },
       ...(outboundApprovalGate ? { outboundApprovalGate } : {}),
       logger: log,
     })
