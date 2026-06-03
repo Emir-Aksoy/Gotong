@@ -59,6 +59,7 @@ import { QuotaStore } from './quota-store.js'
 import { TotpStore, type EnrollTotpInput, type VerifyTotpInput } from './totp-store.js'
 import { OidcProviderStore } from './oidc-provider-store.js'
 import { SamlProviderStore } from './saml-provider-store.js'
+import { A2aAgentStore } from './a2a-agent-store.js'
 import {
   AUDIT_ACTIONS,
   ROLES,
@@ -94,6 +95,9 @@ import {
   type AddSamlProviderInput,
   type SamlProvider,
   type UpdateSamlProviderInput,
+  type A2aOutboundAgent,
+  type AddA2aOutboundAgentInput,
+  type UpdateA2aOutboundAgentInput,
   type UpdateOidcProviderInput,
   type OwnerKind,
   type ResetUsageInput,
@@ -487,6 +491,9 @@ export class IdentityStore {
   // Route B P1-M5c — SAML identity-provider registry. No vault: idp_cert is a
   // PUBLIC X.509 signing cert, so the whole row is plain config.
   private readonly samlProviders: SamlProviderStore
+  // Route B P1-M11a — outbound A2A agent registry. No vault: the bearer stays
+  // in env (token_env names the var), so every column is non-secret config.
+  private readonly a2aAgents: A2aAgentStore
   // Phase 7 M4 — org_meta kv (org_mode lives here).
   private readonly stmtOrgMetaGet: SqliteStmt
   private readonly stmtOrgMetaUpsert: SqliteStmt
@@ -543,6 +550,8 @@ export class IdentityStore {
     this.oidcProviders = new OidcProviderStore(db, this)
     // Route B P1-M5c — SAML IdP registry. No vault dependency (idp_cert public).
     this.samlProviders = new SamlProviderStore(db)
+    // Route B P1-M11a — outbound A2A agent registry. No vault (bearer in env).
+    this.a2aAgents = new A2aAgentStore(db)
 
     this.stmtUserById = db.prepare('SELECT * FROM users WHERE id = ?')
     this.stmtUserByEmail = db.prepare('SELECT * FROM users WHERE email = ?')
@@ -2420,6 +2429,35 @@ export class IdentityStore {
   /** Delete the registration. No secret to revoke. */
   removeSamlProvider(id: string): boolean {
     return this.samlProviders.remove(id)
+  }
+
+  // =====================================================================
+  // Route B P1-M11a — outbound A2A agent registry. Delegates to A2aAgentStore.
+  // No vault: the bearer the remote demands stays in env (`tokenEnv` names the
+  // var), so projections are pure non-secret config.
+  // =====================================================================
+
+  /** Register an outbound A2A agent. Duplicate id → `a2a_agent_exists`. */
+  addA2aAgent(input: AddA2aOutboundAgentInput): A2aOutboundAgent {
+    return this.a2aAgents.add(input)
+  }
+
+  getA2aAgent(id: string): A2aOutboundAgent | null {
+    return this.a2aAgents.get(id)
+  }
+
+  listA2aAgents(): A2aOutboundAgent[] {
+    return this.a2aAgents.list()
+  }
+
+  /** Targeted update (id immutable — it's the participant identity). */
+  updateA2aAgent(id: string, patch: UpdateA2aOutboundAgentInput): A2aOutboundAgent {
+    return this.a2aAgents.update(id, patch)
+  }
+
+  /** Delete the registration. No secret to revoke (bearer lives in env). */
+  removeA2aAgent(id: string): boolean {
+    return this.a2aAgents.remove(id)
   }
 
   /**

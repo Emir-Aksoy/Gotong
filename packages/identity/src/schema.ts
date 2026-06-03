@@ -797,6 +797,43 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // Route B P1-M11a — outbound A2A agent registrations. An entry makes a
+    // local capability dispatch reach OUT to an external A2A agent's
+    // `message/send` (the mirror of the inbound A2aServer). Replaces the
+    // `AIPE_A2A_AGENTS` env blob with persisted, admin-editable config.
+    //
+    // There is NO vault pointer here — like saml_providers (idp_cert is
+    // public), every column is NON-secret. The bearer the remote demands is
+    // NOT stored: `token_env` names the env var the host reads it from at
+    // registration time, so the secret stays in the normal env channel and
+    // never touches the DB or an admin HTTP body. A row whose `token_env` is
+    // unset at boot is persisted-but-inactive (logged, not registered).
+    //   id            PK = the LOCAL participant id (dispatch target); unique
+    //                 on the hub, admin-supplied (not synthetic).
+    //   capabilities  JSON string[] advertised on the local hub → routing key.
+    //   url           the remote A2A `message/send` endpoint.
+    //   token_env     name of the env var holding the bearer (never the secret).
+    //   peer_id       our X-Aipe-Peer-Id (AipeHub↔AipeHub only); NULL = generic.
+    //   target_skill  metadata.skill the remote should dispatch to; NULL = its default.
+    //   enabled       0 disables without deleting the config.
+    version: 22,
+    name: 'a2a-outbound-agents',
+    sql: `
+      CREATE TABLE IF NOT EXISTS a2a_outbound_agents (
+        id           TEXT PRIMARY KEY,
+        capabilities TEXT NOT NULL,
+        url          TEXT NOT NULL,
+        token_env    TEXT NOT NULL,
+        peer_id      TEXT,
+        target_skill TEXT,
+        enabled      INTEGER NOT NULL DEFAULT 1,
+        label        TEXT,
+        created_at   INTEGER NOT NULL,
+        updated_at   INTEGER NOT NULL
+      );
+    `,
+  },
 ]
 
 /**

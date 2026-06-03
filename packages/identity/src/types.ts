@@ -237,6 +237,54 @@ export interface UpdateSamlProviderInput {
   enabled?: boolean
 }
 
+/**
+ * Route B P1-M11a — a registered OUTBOUND A2A agent. A local capability
+ * dispatch matching `capabilities` is forwarded to the remote `url`'s
+ * `message/send`. There is NO secret in this projection: `tokenEnv` names the
+ * env var the host reads the bearer from — the secret itself never lives here
+ * (nor in any admin response body).
+ */
+export interface A2aOutboundAgent {
+  /** The LOCAL participant id (dispatch target) — unique on the hub. */
+  id: string
+  /** Capabilities advertised on the local hub; dispatching these routes here. */
+  capabilities: string[]
+  /** The remote A2A agent's `message/send` endpoint. */
+  url: string
+  /** Name of the env var holding the bearer token (never the secret itself). */
+  tokenEnv: string
+  /** AipeHub↔AipeHub only: our `X-Aipe-Peer-Id`; null = a generic external agent. */
+  peerId: string | null
+  /** `metadata.skill` the remote should dispatch to; null = let the remote default. */
+  targetSkill: string | null
+  enabled: boolean
+  label: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AddA2aOutboundAgentInput {
+  id: string
+  capabilities: string[]
+  url: string
+  tokenEnv: string
+  peerId?: string | null
+  targetSkill?: string | null
+  label?: string | null
+  enabled?: boolean
+}
+
+/** Targeted update — every field optional; `id` is immutable (it's the participant id). */
+export interface UpdateA2aOutboundAgentInput {
+  capabilities?: string[]
+  url?: string
+  tokenEnv?: string
+  peerId?: string | null
+  targetSkill?: string | null
+  label?: string | null
+  enabled?: boolean
+}
+
 export interface IssuedAdminToken {
   /** Raw token — shown ONCE. */
   token: string

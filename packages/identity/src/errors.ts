@@ -52,6 +52,11 @@ export type IdentityErrorCode =
   //   `saml_provider_not_found`  get/update/remove targeted an id with no row.
   | 'saml_provider_exists'
   | 'saml_provider_not_found'
+  // Route B P1-M11a — outbound A2A agent registry.
+  //   `a2a_agent_exists`     addA2aAgent reused an existing participant id (PK).
+  //   `a2a_agent_not_found`  get/update/remove targeted an id with no row.
+  | 'a2a_agent_exists'
+  | 'a2a_agent_not_found'
   | 'session_expired'
   | 'session_not_found'
   | 'weak_password'
