@@ -1,0 +1,64 @@
+# One-click monitoring stack for an AipeHub host (Route B P0-M7).
+#
+# Brings up Prometheus (scrape + alert rules), Alertmanager (severity routing),
+# and Grafana (the AipeHub dashboard, auto-provisioned). It scrapes the Hub's
+# internal /metrics route — no machine-admin token needed.
+#
+#   1. On the HOST: export AIPE_METRICS_TOKEN=<a long random secret> and
+#      (re)start the hub, so GET /metrics serves to a bearer holder.
+#   2. Put the SAME token, one line no trailing newline, in
+#      ./secrets/aipehub.token  (cp ./secrets/aipehub.token.example first).
+#   3. docker compose up -d
+#   4. Grafana    → http://localhost:3001  (admin / admin, dashboard pre-loaded)
+#      Prometheus → http://localhost:9090
+#      Alertmanager → http://localhost:9093
+#
+# This stack runs ALONGSIDE the Hub (which has its own process / container); it
+# does not start the Hub. On Linux the `extra_hosts` gateway lets the
+# containers reach a Hub + node_exporter listening on the host.
+
+services:
+  prometheus:
+    image: prom/prometheus:latest
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/aipehub.alerts.yml:/etc/prometheus/aipehub.alerts.yml:ro
+      - ./secrets/aipehub.token:/etc/prometheus/aipehub.token:ro
+      - prometheus-data:/prometheus
+    ports:
+      - '9090:9090'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - '9093:9093'
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/aipehub-overview.json:/var/lib/grafana/dashboards/aipehub-overview.json:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - '3001:3000'
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  prometheus-data:
+  grafana-data:

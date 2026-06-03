@@ -24,10 +24,10 @@ groups:
       # ----------------------------------------------------------------
       # 1. Host unreachable
       # ----------------------------------------------------------------
-      # The fact that Prometheus can't scrape /api/admin/metrics is the
-      # most important signal. Could be: process crashed, port closed,
-      # admin token rotated and not propagated, network partition.
-      # for=2m so a deploy-window restart doesn't page.
+      # The fact that Prometheus can't scrape /metrics is the most
+      # important signal. Could be: process crashed, port closed, the
+      # AIPE_METRICS_TOKEN rotated/unset (→ /metrics 404s), network
+      # partition. for=2m so a deploy-window restart doesn't page.
       - alert: AipehubHostDown
         expr: up{job="aipehub"} == 0
         for: 2m

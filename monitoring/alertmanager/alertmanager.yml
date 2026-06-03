@@ -1,0 +1,44 @@
+# Alertmanager routing for AipeHub alerts (Route B P0-M7).
+#
+# The alert rules in ../prometheus/aipehub.alerts.yml stamp every alert with a
+# `severity` label of exactly two values — `page` (wake someone) and `ticket`
+# (next-business-day). This config routes each to its own receiver so nothing
+# fires into the void. Wire your real on-call into the receivers below: each is
+# a NAME-ONLY receiver out of the box (valid + silent), with the common
+# integrations commented. Uncomment one and fill it in — no other change needed.
+
+route:
+  receiver: catch-all # anything without page/ticket (shouldn't happen) lands here
+  group_by: ['alertname', 'component']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    # severity=page → your pager (PagerDuty / OpsGenie / on-call webhook).
+    - matchers:
+        - severity="page"
+      receiver: pager
+      repeat_interval: 1h
+    # severity=ticket → a low-urgency channel (Slack / email / ticketing).
+    - matchers:
+        - severity="ticket"
+      receiver: tickets
+      repeat_interval: 12h
+
+receivers:
+  # A name-only receiver is valid and simply drops the notification — safe to
+  # ship, nothing to leak. Replace with a real integration when you go live.
+  - name: catch-all
+
+  - name: pager
+    # pagerduty_configs:
+    #   - routing_key: <your-pagerduty-integration-key>
+    # webhook_configs:
+    #   - url: https://your-oncall.example.com/hook
+
+  - name: tickets
+    # slack_configs:
+    #   - api_url: <your-slack-webhook-url>
+    #     channel: '#aipehub-alerts'
+    # email_configs:
+    #   - to: oncall@example.com
