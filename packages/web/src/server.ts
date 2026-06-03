@@ -73,12 +73,14 @@ import { handleOidcRoute, type OidcLoginSurface } from './oidc-routes.js'
 import { handleOidcAdminRoute, type OidcProviderAdminSurface } from './oidc-admin-routes.js'
 import { handleSamlRoute, type SamlLoginSurface } from './saml-routes.js'
 import { handleSamlAdminRoute, type SamlProviderAdminSurface } from './saml-admin-routes.js'
+import { handleA2aAdminRoute, type A2aAgentAdminSurface } from './a2a-admin-routes.js'
 
 export type { PeerManifestFederationSurface, PeerManifestRow } from './peer-routes.js'
 export type { OidcLoginSurface } from './oidc-routes.js'
 export type { OidcProviderAdminSurface, OidcProviderView } from './oidc-admin-routes.js'
 export type { SamlLoginSurface } from './saml-routes.js'
 export type { SamlProviderAdminSurface, SamlProviderView } from './saml-admin-routes.js'
+export type { A2aAgentAdminSurface, A2aAgentView } from './a2a-admin-routes.js'
 
 export type {
   IdentitySurface,
@@ -477,6 +479,15 @@ export interface WebServerOptions {
    * key, so it is returned in full (admins must see which cert is pinned).
    */
   samlAdmin?: SamlProviderAdminSurface
+  /**
+   * Route B P1-M11c — host-injected outbound A2A agent registry (admin CRUD).
+   * When wired, `/api/admin/a2a-agents[/:id]` lets an admin register the external
+   * A2A agents this hub forwards capability dispatches to (replacing the Phase 18
+   * `AIPE_A2A_AGENTS` env blob). Absent (no identity store) → those routes 503.
+   * Like SAML there is no secret in the view: `tokenEnv` is the env-var NAME the
+   * bearer is read from, and the view also carries host-joined runtime liveness.
+   */
+  a2aAgents?: A2aAgentAdminSurface
   /**
    * Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
    * When set, a Prometheus scraper presenting `Authorization: Bearer <token>`
@@ -915,6 +926,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     samlLogin: opts.samlLogin,
     oidcAdmin: opts.oidcAdmin,
     samlAdmin: opts.samlAdmin,
+    a2aAgents: opts.a2aAgents,
     httpStats: new HttpStats(),
     metricsToken: opts.metricsToken,
   }
@@ -1071,6 +1083,8 @@ interface HandlerCtx {
   oidcAdmin: OidcProviderAdminSurface | undefined
   /** Route B P1-M5f — see WebServerOptions.samlAdmin doc above. */
   samlAdmin: SamlProviderAdminSurface | undefined
+  /** Route B P1-M11c — see WebServerOptions.a2aAgents doc above. */
+  a2aAgents: A2aAgentAdminSurface | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -1983,6 +1997,18 @@ async function handle(
     const handled = await handleSamlAdminRoute(
       {
         samlAdmin: ctx.samlAdmin,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // Route B P1-M11c — admin outbound A2A agent registry CRUD.
+  if (path === '/api/admin/a2a-agents' || path.startsWith('/api/admin/a2a-agents/')) {
+    const handled = await handleA2aAdminRoute(
+      {
+        a2aAgents: ctx.a2aAgents,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req, res, method, path,

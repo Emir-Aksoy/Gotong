@@ -99,6 +99,23 @@ export class A2aOutboundManager {
     return this.live.has(id)
   }
 
+  /**
+   * Read-only liveness probe — answers "is this stored agent live, and if not,
+   * why?" WITHOUT mutating the hub. The admin list uses it to render an honest
+   * status per row (a token-less row reads as `token_env_unset`, not "running").
+   * Mirrors the reason `tryRegister` would return, but touches nothing.
+   */
+  statusOf(id: string): A2aRegisterResult {
+    if (this.live.has(id)) return { active: true }
+    const agent = this.source.getA2aAgent(id)
+    if (!agent) return { active: false, reason: 'not_found' }
+    if (!agent.enabled) return { active: false, reason: 'disabled' }
+    if (!this.readEnv(agent.tokenEnv)) return { active: false, reason: 'token_env_unset' }
+    // Enabled with its token present, yet not live → its id is owned by another
+    // participant (a managed agent / broker) that won the registration race.
+    return { active: false, reason: 'id_conflict' }
+  }
+
   private unregister(id: string): void {
     if (!this.live.has(id)) return
     this.hub.unregister(id)

@@ -102,6 +102,7 @@ import {
   resolveMasterKeyProvider,
   type IdentityStore,
   type PeerRegistration,
+  type A2aOutboundAgent,
 } from '@aipehub/identity'
 
 import { OrgApiPool } from './org-api-pool.js'
@@ -132,6 +133,8 @@ import {
   type OidcProviderAdminSurface,
   type SamlLoginSurface,
   type SamlProviderAdminSurface,
+  type A2aAgentAdminSurface,
+  type A2aAgentView,
 } from '@aipehub/web'
 
 /**
@@ -1606,6 +1609,48 @@ async function main(): Promise<void> {
     }
   }
 
+  // Route B P1-M11c — outbound A2A agent registry CRUD (admin). Joins identity's
+  // a2a_outbound_agents facade with the A2aOutboundManager so each edit both
+  // PERSISTS and takes effect on the running hub (refresh/remove), and the view
+  // reports honest runtime liveness. `tokenEnv` is the env-var NAME, not the
+  // bearer, so it rides the projection in full (an admin must know which var to
+  // set); the secret itself never touches the DB or an HTTP body.
+  let a2aAgentAdmin: A2aAgentAdminSurface | undefined
+  if (identity && a2aOutbound) {
+    const idForA2a = identity
+    const mgr = a2aOutbound
+    const toView = (a: A2aOutboundAgent, st: { active: boolean; reason?: string }): A2aAgentView => ({
+      id: a.id,
+      capabilities: a.capabilities,
+      url: a.url,
+      tokenEnv: a.tokenEnv,
+      peerId: a.peerId,
+      targetSkill: a.targetSkill,
+      enabled: a.enabled,
+      label: a.label,
+      createdAt: a.createdAt,
+      updatedAt: a.updatedAt,
+      active: st.active,
+      ...(st.reason ? { inactiveReason: st.reason } : {}),
+    })
+    a2aAgentAdmin = {
+      list: () => idForA2a.listA2aAgents().map((a) => toView(a, mgr.statusOf(a.id))),
+      add: (input) => {
+        const a = idForA2a.addA2aAgent(input)
+        return toView(a, mgr.refresh(a.id))
+      },
+      update: (id, patch) => {
+        const a = idForA2a.updateA2aAgent(id, patch)
+        return toView(a, mgr.refresh(id))
+      },
+      remove: (id) => {
+        const ok = idForA2a.removeA2aAgent(id)
+        if (ok) mgr.remove(id)
+        return ok
+      },
+    }
+  }
+
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
@@ -1679,6 +1724,8 @@ async function main(): Promise<void> {
     ...(oidcAdmin ? { oidcAdmin } : {}),
     // Route B P1-M5f — admin SAML provider registry CRUD (undefined → 503).
     ...(samlAdmin ? { samlAdmin } : {}),
+    // Route B P1-M11c — admin outbound A2A agent registry CRUD (undefined → 503).
+    ...(a2aAgentAdmin ? { a2aAgents: a2aAgentAdmin } : {}),
     // Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
     // Lets Prometheus pull the same body as /api/admin/metrics without a
     // machine-admin token. Unset/empty (env() already maps '' → undefined) →

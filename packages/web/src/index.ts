@@ -8,6 +8,8 @@ export type { OidcProviderAdminSurface, OidcProviderView } from './server.js'
 export type { SamlLoginSurface } from './server.js'
 // Route B P1-M5f — admin SAML provider registry CRUD (host injects the surface).
 export type { SamlProviderAdminSurface, SamlProviderView } from './server.js'
+// Route B P1-M11c — admin outbound A2A agent registry CRUD (host injects the surface).
+export type { A2aAgentAdminSurface, A2aAgentView } from './server.js'
 
 // Phase 17 (Sprint 4) — export-format primitives + the usage-ledger column
 // spec, surfaced so embedders (and the host's E2E acceptance gate) can format

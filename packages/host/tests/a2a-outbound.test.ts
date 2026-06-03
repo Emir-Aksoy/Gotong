@@ -161,4 +161,36 @@ describe('A2aOutboundManager (P1-M11b)', () => {
     const res = manager({}).refresh('ghost')
     expect(res).toEqual({ active: false, reason: 'not_found' })
   })
+
+  // P1-M11c — the admin list reads liveness through statusOf, which must report
+  // the SAME reason tryRegister would, WITHOUT mutating the hub.
+  describe('statusOf (read-only liveness probe)', () => {
+    it('reports active for a live agent', () => {
+      const mgr = manager({ TOK: 'secret' })
+      identity.addA2aAgent({ id: 'live', capabilities: ['a'], url: 'https://a/a2a', tokenEnv: 'TOK' })
+      mgr.refresh('live')
+      expect(mgr.statusOf('live')).toEqual({ active: true })
+    })
+
+    it('reports the inactive reason without touching the hub', () => {
+      const mgr = manager({}) // no tokens
+      identity.addA2aAgent({ id: 'disabled', capabilities: ['a'], url: 'https://a/a2a', tokenEnv: 'T', enabled: false })
+      identity.addA2aAgent({ id: 'no-token', capabilities: ['a'], url: 'https://a/a2a', tokenEnv: 'MISSING' })
+
+      expect(mgr.statusOf('disabled')).toEqual({ active: false, reason: 'disabled' })
+      expect(mgr.statusOf('no-token')).toEqual({ active: false, reason: 'token_env_unset' })
+      expect(mgr.statusOf('ghost')).toEqual({ active: false, reason: 'not_found' })
+      // a pure probe must never register anything
+      expect(hub.participant('no-token')).toBeUndefined()
+      expect(mgr.isLive('no-token')).toBe(false)
+    })
+
+    it('reports id_conflict when another participant owns the id', () => {
+      hub.register(new StubAgent({ id: 'clash', capabilities: ['x'] }))
+      identity.addA2aAgent({ id: 'clash', capabilities: ['a'], url: 'https://a/a2a', tokenEnv: 'TOK' })
+      const mgr = manager({ TOK: 'secret' })
+      // enabled + token present, yet we never registered it → owned by the stub.
+      expect(mgr.statusOf('clash')).toEqual({ active: false, reason: 'id_conflict' })
+    })
+  })
 })
