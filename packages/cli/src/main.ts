@@ -23,6 +23,7 @@ import { newAgent } from './commands/new-agent.js'
 import { ping } from './commands/ping.js'
 import { repl } from './commands/repl.js'
 import { connect } from './commands/connect.js'
+import { mintPeerToken } from './commands/mint-peer-token.js'
 import { printHelp } from './commands/help.js'
 
 export async function runCli(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
@@ -64,6 +65,8 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
         return await repl(rest)
       case 'connect':
         return connect(rest)
+      case 'mint-peer-token':
+        return mintPeerToken(rest)
       default:
         console.error(`unknown command: ${cmd}`)
         printHelp()

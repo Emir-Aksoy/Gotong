@@ -13,6 +13,7 @@ Commands:
   ping <ws-url>               Verify a Hub is reachable (HELLO/WELCOME handshake)
   repl                        Start an interactive shell against an in-memory hub
   connect [agent]             Print MCP quick-connect config for a coding agent
+  mint-peer-token             Generate a federation peer bearer token
   help [command]              Show usage for a specific command
   --version                   Print the CLI version
 
@@ -23,6 +24,7 @@ Examples:
   aipehub ping ws://127.0.0.1:4000
   aipehub repl
   aipehub connect claude-code --bin=/abs/packages/mcp-server/bin/aipehub-mcp.js
+  aipehub mint-peer-token --peer-id=partner-hub
 `
 
 const PER_COMMAND: Readonly<Record<string, string>> = {
@@ -136,6 +138,31 @@ Options:
 Examples:
   aipehub ping ws://127.0.0.1:4000
   aipehub ping wss://hub.example.com/ws --api-key=$AIPE_KEY
+`,
+  'mint-peer-token': `aipehub mint-peer-token [options]
+
+Generates a cryptographically strong bearer token (256 bits from the OS
+CSPRNG, base64url) for a cross-hub federation link. Federation auth is
+symmetric: the SAME string is registered on both hubs — on yours as the
+outbound token presented to the peer, on the peer's as the inbound token
+it expects from you.
+
+The token alone goes to stdout (so it pipes / redirects cleanly); the
+pairing instructions go to stderr. This command is stateless — it does
+not touch a workspace, master key, or running hub. Registering the token
+against a peer is a separate admin step (the "对端" UI or the
+POST /api/admin/identity/peers route).
+
+Options:
+  --bytes=<n>        Token entropy in bytes (16–64, default: 32)
+  --peer-id=<id>     Slot the peer id into the printed setup hint
+  --endpoint=<url>   Slot the peer's federation URL into the hint
+  --help / -h        Show this message
+
+Examples:
+  aipehub mint-peer-token
+  aipehub mint-peer-token --peer-id=partner-hub --endpoint=wss://partner/federation
+  aipehub mint-peer-token > peer-token.txt   # token only; hint on stderr
 `,
 }
 
