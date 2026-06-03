@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 
 import {
+  AUDIT_ACTIONS,
   IdentityStore,
   MASTER_KEY_LEN_BYTES,
   openIdentityStore,
@@ -171,5 +172,44 @@ describe('HostMeAgentGrantsService (v5 A-M4)', () => {
     expect(
       revokes.some((a) => (a.metadata as { principal?: string } | null)?.principal === `user:${BOB}`),
     ).toBe(true)
+  })
+
+  // Route B P1-M1b — sharing stays OWNER-only, but an editor/viewer who holds a
+  // LOWER grant now over-reaches to 403 + a denial audit (was a misleading 404).
+  // A stranger with no grant still gets 404 (anti-enumeration), never audited.
+  // Neutralise the shared gate's 403/404 split (always 404) and the first
+  // assertion reds; drop the denial audit and the audit assertion reds.
+  it('over-reach: an editor cannot list/set/remove grants → 403 + denial audit', async () => {
+    // bob holds 'editor' on alice's agent — he can edit it (M1a) but NOT re-share.
+    identity.setResourceGrant({
+      resourceKind: 'agent',
+      resourceId: AGENT,
+      principal: userPrincipal(BOB),
+      perm: 'editor',
+      grantedBy: ALICE,
+    })
+
+    await expect(svc.list(BOB, AGENT)).rejects.toMatchObject({ status: 403 })
+    await expect(
+      svc.set(BOB, AGENT, { principalKind: 'user', principalId: 'user-carol', perm: 'viewer' }),
+    ).rejects.toMatchObject({ status: 403 })
+    await expect(svc.remove(BOB, AGENT, `user:${ALICE}`)).rejects.toMatchObject({ status: 403 })
+
+    const denied = identity.listAuditLog!({ action: AUDIT_ACTIONS.RESOURCE_ACCESS_DENIED })
+    expect(denied.length).toBeGreaterThanOrEqual(1)
+    expect(denied[0]).toMatchObject({
+      actorUserId: BOB,
+      success: false,
+      metadata: { resourceKind: 'agent', resourceId: AGENT, required: 'owner' },
+    })
+    // bob never became an owner — the over-reach changed nothing
+    expect(identity.hasResourceGrant('agent', AGENT, userPrincipal(BOB), 'owner')).toBe(false)
+  })
+
+  it('no relationship → 404 (anti-enumeration) and NOT audited', async () => {
+    const before = identity.listAuditLog!({ action: AUDIT_ACTIONS.RESOURCE_ACCESS_DENIED }).length
+    await expect(svc.list('user-stranger', AGENT)).rejects.toMatchObject({ status: 404 })
+    const after = identity.listAuditLog!({ action: AUDIT_ACTIONS.RESOURCE_ACCESS_DENIED }).length
+    expect(after).toBe(before)
   })
 })

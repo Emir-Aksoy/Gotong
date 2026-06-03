@@ -4,14 +4,17 @@
  * viewer / editor / owner, using the unified `resource_grants` table (A-M1).
  *
  * Granting another USER 'owner' is co-ownership: that user then sees the agent
- * in their own `/me` and can manage it (HostMeAgentService.assertOwns checks the
- * very same grant). viewer / editor are RECORDED for when finer agent-level
- * enforcement lands — today only 'owner' is enforced anywhere, so 'owner' is the
- * immediately functional level and the lower rungs are forward-looking data.
+ * in their own `/me` and can manage it (HostMeAgentService gates the very same
+ * grant). The viewer < editor < owner ladder is ENFORCED as of Route B P1-M1:
+ * an editor can change the agent (M1a) but sharing it stays owner-only here.
  *
- * The constrained door (mirrors HostMeAgentService / HostMeCredentialsService):
- *   - the caller must already OWN the agent (perm='owner' grant) — else 404
- *     (not 403), so a member can't enumerate other members' agent ids;
+ * The constrained door (mirrors HostMeAgentService / HostMeCredentialsService),
+ * via the shared `assertResourceGrant` gate:
+ *   - sharing requires perm='owner'; a viewer / editor who holds a LOWER grant
+ *     over-reaches → 403 + a denial audit row (they hold a grant, so the agent's
+ *     existence is already known to them — 403 leaks nothing);
+ *   - a caller with NO grant at all → 404, so a member can't enumerate other
+ *     members' agent ids (anti-enumeration), and the probe is not audited;
  *   - the host parses + validates the principal against the real Principal enum
  *     (the web layer only shape-checks strings, it has no identity dep);
  *   - an ORPHAN GUARD refuses any set / remove that would leave the resource
@@ -29,13 +32,17 @@ import {
   isPrincipalKind,
   parsePrincipalKey,
   principalKey,
+  userPrincipal,
   type GrantPerm,
   type Principal,
   type ResourceGrant,
+  type ResourceKind,
   type SetResourceGrantInput,
   type WriteAuditLogInput,
 } from '@aipehub/identity'
 import type { WebServerOptions } from '@aipehub/web'
+
+import { assertResourceGrant } from './resource-access.js'
 
 const log = createLogger('me-agent-grants')
 
@@ -47,11 +54,14 @@ type MeGrantInput = Parameters<MeAgentGrantsSurface['set']>[2]
 
 /** The narrow slice of IdentityStore this service needs (real store satisfies). */
 export interface MeAgentGrantsIdentityStore {
+  // General ResourceKind + GrantPerm (not the 'agent'/'owner' literals) so this
+  // slice satisfies the shared `ResourceGrantGateStore` the access gate consumes
+  // — the gate probes the 'viewer' floor to split 403 (over-reach) from 404.
   hasResourceGrant(
-    resourceKind: 'agent',
+    resourceKind: ResourceKind,
     resourceId: string,
     principal: Principal,
-    min: 'owner',
+    min: GrantPerm,
   ): boolean
   listResourceGrants(resourceKind: 'agent', resourceId: string): ResourceGrant[]
   setResourceGrant(input: SetResourceGrantInput): ResourceGrant
@@ -109,11 +119,16 @@ export class HostMeAgentGrantsService implements MeAgentGrantsSurface {
 
   // -- internals ----------------------------------------------------------
 
-  /** Throw 404 (not 403) when `userId` doesn't own `agentId` — no enumeration. */
+  /**
+   * Sharing (list / set / remove grants) is an OWNER-only act. Via the shared
+   * gate: an owner passes; a viewer / editor who tries to re-share over-reaches
+   * → 403 + a denial audit row (they hold a grant, so existence is known — no
+   * enumeration leak); someone with no grant at all → 404 (anti-enumeration).
+   */
   private assertOwns(userId: string, agentId: string): void {
-    if (!this.identity.hasResourceGrant('agent', agentId, { kind: 'user', id: userId }, 'owner')) {
-      throw httpError(404, 'agent not found')
-    }
+    assertResourceGrant(this.identity, userPrincipal(userId), 'agent', agentId, 'owner', {
+      notFoundMessage: 'agent not found',
+    })
   }
 
   /**

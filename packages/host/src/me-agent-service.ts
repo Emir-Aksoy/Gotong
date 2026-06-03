@@ -33,14 +33,16 @@ import type {
 } from '@aipehub/core'
 import { createLogger } from '@aipehub/core'
 import {
-  AUDIT_ACTIONS,
   userPrincipal,
   type GrantPerm,
   type Principal,
   type ResourceGrant,
+  type ResourceKind,
   type WriteAuditLogInput,
 } from '@aipehub/identity'
 import type { WebServerOptions } from '@aipehub/web'
+
+import { assertResourceGrant } from './resource-access.js'
 
 const log = createLogger('me-agent')
 
@@ -59,8 +61,10 @@ export interface MeAgentOwnershipStore {
     perm: 'owner'
     grantedBy?: string | null
   }): unknown
+  // General ResourceKind (not the 'agent' literal) so this slice satisfies the
+  // shared `ResourceGrantGateStore` the access gate consumes.
   hasResourceGrant(
-    resourceKind: 'agent',
+    resourceKind: ResourceKind,
     resourceId: string,
     principal: Principal,
     min: GrantPerm,
@@ -230,41 +234,14 @@ export class HostMeAgentService implements MeAgentAdminSurface {
   // -- internals ----------------------------------------------------------
 
   /**
-   * Gate an action behind a minimum grant level on the agent (P1-M1). The
-   * ladder is enforced, not just owner:
-   *   - holds >= `min`            → pass.
-   *   - holds a LOWER grant       → 403 + a denial audit row. They already know
-   *                                 the agent exists (they have *a* grant), so
-   *                                 403 leaks nothing and is the honest answer.
-   *   - holds NO grant at all     → 404, exactly as before. Never confirm an
-   *                                 agent a member has no relationship with —
-   *                                 that preserves the anti-enumeration posture.
+   * Gate an action behind a minimum grant level on the agent (P1-M1) via the
+   * shared `assertResourceGrant` chokepoint: holds >= min → pass; holds a lower
+   * grant → 403 + denial audit; no grant → 404 (anti-enumeration).
    */
   private assertGrant(userId: string, agentId: string, min: GrantPerm): void {
-    const principal = userPrincipal(userId)
-    if (this.identity.hasResourceGrant('agent', agentId, principal, min)) return
-    // Insufficient. Does the caller hold ANY grant (>= viewer, the floor)?
-    if (this.identity.hasResourceGrant('agent', agentId, principal, 'viewer')) {
-      this.auditDenied(userId, agentId, min)
-      throw httpError(403, `requires '${min}' permission on this agent`)
-    }
-    throw httpError(404, 'agent not found')
-  }
-
-  /** Best-effort over-privilege audit — a fault here never changes the 403. */
-  private auditDenied(userId: string, agentId: string, required: GrantPerm): void {
-    if (typeof this.identity.writeAuditLog !== 'function') return
-    try {
-      this.identity.writeAuditLog({
-        action: AUDIT_ACTIONS.RESOURCE_ACCESS_DENIED,
-        actorSource: 'v4-session',
-        actorUserId: userId,
-        success: false, // an explicit authorization failure, like login_failure
-        metadata: { resourceKind: 'agent', resourceId: agentId, required },
-      })
-    } catch (err) {
-      log.warn('denial audit write failed', { userId, agentId, required, err })
-    }
+    assertResourceGrant(this.identity, userPrincipal(userId), 'agent', agentId, min, {
+      notFoundMessage: 'agent not found',
+    })
   }
 
   private ownedAgentIds(userId: string): Set<string> {
