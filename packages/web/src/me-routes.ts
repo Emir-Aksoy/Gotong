@@ -357,6 +357,13 @@ export interface MeAgentAdminSurface {
   availableProviders(): Promise<string[]>
   /** Agents owned by `userId` (perm='owner' grant) that still exist. */
   listOwned(userId: string): Promise<MeOwnedAgentView[]>
+  /**
+   * Read one agent's full config — the read FLOOR of the grant ladder
+   * (P1-M1c): `userId` must hold at least 'viewer'. Throws (status 403/404)
+   * otherwise, so a viewer grant is real (read-only) and a non-grantee can't
+   * enumerate ids.
+   */
+  read(userId: string, agentId: string): Promise<MeOwnedAgentView>
   /** Create an agent owned by `userId`; host composes the namespaced id. */
   create(userId: string, input: MeAgentInput): Promise<MeOwnedAgentView>
   /** Edit an agent `userId` owns. Throws (status 403/404) otherwise. */
@@ -660,6 +667,12 @@ export async function handleMeRoute(
   }
   {
     const m = /^\/api\/me\/agents\/([^/]+)$/.exec(path)
+    // GET is the read floor (viewer+); the exact /owned + /providers GETs are
+    // matched above, so this single-segment pattern only catches real ids.
+    if (m && method === 'GET') {
+      await handleMeReadAgent(ctx, res, userId, decodeURIComponent(m[1]!))
+      return
+    }
     if (m && method === 'PUT') {
       await handleMeUpdateAgent(ctx, req, res, userId, decodeURIComponent(m[1]!))
       return
@@ -1291,6 +1304,23 @@ async function handleMeListOwnedAgents(
   }
   try {
     sendJson(res, { agents: await ctx.meAgentAdmin.listOwned(userId) })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+async function handleMeReadAgent(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+  agentId: string,
+): Promise<void> {
+  if (!ctx.meAgentAdmin) {
+    sendJson(res, { error: 'agent self-service unavailable (identity not wired)' }, 503)
+    return
+  }
+  try {
+    sendJson(res, { agent: await ctx.meAgentAdmin.read(userId, agentId) })
   } catch (err) {
     sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
   }

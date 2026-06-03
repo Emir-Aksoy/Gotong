@@ -183,6 +183,7 @@ describe('HostMeAgentService (v5 A-M2)', () => {
 // Each test below pins one rung; neutralising a guard reds exactly one:
 //   - lower `update`'s required level to 'viewer' → "viewer → 403" reds.
 //   - make `remove`'s level 'editor' → "editor → 403 on remove" reds.
+//   - raise `read`'s level above 'viewer' → "viewer can read" reds (M1c).
 //   - collapse the 403/404 split (always 404) → "viewer → 403" + audit reds.
 //   - drop the denial audit → the audit-row test reds.
 // ---------------------------------------------------------------------------
@@ -204,11 +205,16 @@ describe('HostMeAgentService RBAC ladder (Route B P1-M1)', () => {
     })
   }
 
-  it('viewer is read-only: update → 403 AND remove → 403 (nothing mutates)', async () => {
+  it('viewer is read-only: read → ok, update → 403 AND remove → 403 (nothing mutates)', async () => {
     h = await setup()
     const v = await h.svc.create(USER, baseInput)
     shareWith(v.id, 'viewer')
     h.lifecycle.started.length = 0
+
+    // the READ half of "read-only" — a viewer sees the full config (M1c)
+    const seen = await h.svc.read(OTHER, v.id)
+    expect(seen.id).toBe(v.id)
+    expect(seen.system).toBe(baseInput.system) // including the system prompt
 
     await expect(h.svc.update(OTHER, v.id, { system: 'x' })).rejects.toMatchObject({ status: 403 })
     await expect(h.svc.remove(OTHER, v.id)).rejects.toMatchObject({ status: 403 })
@@ -243,8 +249,25 @@ describe('HostMeAgentService RBAC ladder (Route B P1-M1)', () => {
   it('no grant at all → 404 (anti-enumeration preserved)', async () => {
     h = await setup()
     const v = await h.svc.create(USER, baseInput)
+    await expect(h.svc.read(OTHER, v.id)).rejects.toMatchObject({ status: 404 })
     await expect(h.svc.update(OTHER, v.id, { system: 'x' })).rejects.toMatchObject({ status: 404 })
     await expect(h.svc.remove(OTHER, v.id)).rejects.toMatchObject({ status: 404 })
+  })
+
+  it('read floor: an editor / owner can also read; a stranger probe → 404, not audited', async () => {
+    h = await setup()
+    const v = await h.svc.create(USER, baseInput)
+
+    // editor and owner are above the viewer floor — both read fine
+    shareWith(v.id, 'editor')
+    expect((await h.svc.read(OTHER, v.id)).id).toBe(v.id)
+    expect((await h.svc.read(USER, v.id)).id).toBe(v.id) // the owner
+
+    // a stranger with no grant reading is a blind probe: 404 + never audited
+    const before = h.identity.listAuditLog!({ action: AUDIT_ACTIONS.RESOURCE_ACCESS_DENIED }).length
+    await expect(h.svc.read('user-carol', v.id)).rejects.toMatchObject({ status: 404 })
+    const after = h.identity.listAuditLog!({ action: AUDIT_ACTIONS.RESOURCE_ACCESS_DENIED }).length
+    expect(after).toBe(before)
   })
 
   it('an over-privilege 403 writes a resource_access_denied audit row; a bare 404 probe does NOT', async () => {

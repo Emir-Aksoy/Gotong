@@ -18,9 +18,13 @@
  *   - the provider must be one the host already has a key for;
  *   - a per-member count cap keeps the roster from being a DoS vector.
  *
- * Every privileged check lives here, behind the web layer's shape-check. Errors
- * carry an HTTP `status` for the route to surface; "not yours" is reported as
- * 404 (not 403) so a member can't enumerate other members' agent ids.
+ * Every privileged check lives here, behind the web layer's shape-check, and
+ * enforces the viewer < editor < owner grant ladder (Route B P1-M1) via the
+ * shared `assertResourceGrant` gate: read needs 'viewer', update 'editor',
+ * delete 'owner'. Over-reach by someone who holds a LOWER grant is a 403 + a
+ * denial audit; a caller with NO grant gets 404, so a member still can't
+ * enumerate other members' agent ids (the 404 is indistinguishable from
+ * "doesn't exist", and a blind probe is never audited).
  */
 
 import type {
@@ -119,6 +123,21 @@ export class HostMeAgentService implements MeAgentAdminSurface {
       if (ownedIds.has(rec.id)) out.push(projectOwned(rec, live.has(rec.id)))
     }
     return out
+  }
+
+  async read(userId: string, agentId: string): Promise<MeOwnedAgentView> {
+    // Reading is the FLOOR of the ladder (P1-M1c): a 'viewer' — or anyone above
+    // them — may see the full config (system prompt, model, capabilities); a
+    // caller with no grant at all gets 404, never confirming the agent exists.
+    // This is what makes a 'viewer' grant do something real, not just record a
+    // row: the write verbs (update/remove) already reject below their rung.
+    this.assertGrant(userId, agentId, 'viewer')
+    const rec = (await this.space.agents()).find((a) => a.id === agentId)
+    if (!rec || !rec.managed) {
+      // Grant exists but the record is gone (or isn't a managed agent) — ghost.
+      throw httpError(404, 'agent not found')
+    }
+    return projectOwned(rec, this.liveIds().has(agentId))
   }
 
   async create(userId: string, input: MeAgentInput): Promise<MeOwnedAgentView> {

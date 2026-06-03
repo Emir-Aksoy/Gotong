@@ -53,6 +53,11 @@ class StubMeAgentAdmin implements MeAgentAdminSurface {
     this.boom()
     return this.owned
   }
+  async read(userId: string, agentId: string): Promise<MeOwnedAgentView> {
+    this.calls.push(['read', userId, agentId])
+    this.boom()
+    return view(agentId, 'L', ['c'], 'S', 'mock')
+  }
   async create(userId: string, input: MeAgentInput): Promise<MeOwnedAgentView> {
     this.calls.push(['create', userId, input])
     this.boom()
@@ -219,6 +224,16 @@ describe('/api/me/agents — member self-service CRUD (v5 A-M2)', () => {
     expect(r.status).toBe(200)
     expect(r.json.removed).toBe(true)
     expect(b.stub!.calls).toContainEqual(['remove', b.memberUserId, 'me.u.writer'])
+  })
+
+  it('GET /api/me/agents/:id reads through the surface (the viewer floor, P1-M1c)', async () => {
+    b = await boot()
+    const r = await req(b, 'GET', '/api/me/agents/me.u.writer')
+    expect(r.status).toBe(200)
+    expect(r.json.agent.id).toBe('me.u.writer')
+    expect(b.stub!.calls).toContainEqual(['read', b.memberUserId, 'me.u.writer'])
+    // the exact /owned + /providers GETs are matched first — the single-segment
+    // read pattern must never have swallowed them (the /owned test above pins it).
   })
 
   it('maps the surface status-coded error (404) to HTTP', async () => {
