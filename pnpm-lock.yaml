@@ -299,6 +299,15 @@ importers:
         specifier: ^2.6.0
         version: 2.9.0
 
+  examples/personal-research-hub:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+
   examples/rag-mcp:
     dependencies:
       '@aipehub/core':
