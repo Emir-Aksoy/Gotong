@@ -123,7 +123,12 @@ import { A2aServer } from './a2a-server.js'
 import { A2aRemoteParticipant } from '@aipehub/a2a'
 import { OidcClient } from './oidc-client.js'
 import { OidcLoginService } from './oidc-login-service.js'
-import { serveWeb, type WebServerOptions, type OidcLoginSurface } from '@aipehub/web'
+import {
+  serveWeb,
+  type WebServerOptions,
+  type OidcLoginSurface,
+  type OidcProviderAdminSurface,
+} from '@aipehub/web'
 
 /**
  * Phase 18 B-M3 — resolve the org owner's user id (the default approver for
@@ -1585,6 +1590,7 @@ async function main(): Promise<void> {
   // surface only exposes the three things web needs (list, begin, complete) and
   // filters the provider list to enabled IdPs with no secret.
   let oidcLogin: OidcLoginSurface | undefined
+  let oidcAdmin: OidcProviderAdminSurface | undefined
   if (identity) {
     const idForOidc = identity
     const oidcService = new OidcLoginService(idForOidc, new OidcClient())
@@ -1596,6 +1602,16 @@ async function main(): Promise<void> {
           .map((p) => ({ id: p.id, label: p.label, issuer: p.issuer })),
       begin: (providerId) => oidcService.begin(providerId),
       complete: (input) => oidcService.complete(input),
+    }
+    // Route B P1-M4f — provider registry CRUD (admin). Thin pass-through to the
+    // identity OIDC facade; the store keeps the client_secret in the vault and
+    // its public projection never carries it, so web only ever sees
+    // `hasClientSecret`.
+    oidcAdmin = {
+      list: () => idForOidc.listOidcProviders(),
+      add: (input) => idForOidc.addOidcProvider(input),
+      update: (id, patch) => idForOidc.updateOidcProvider(id, patch),
+      remove: (id) => idForOidc.removeOidcProvider(id),
     }
   }
 
@@ -1666,6 +1682,8 @@ async function main(): Promise<void> {
     ...(a2aServer ? { a2aServer } : {}),
     // Route B P1-M4e — public OIDC login (undefined → /api/auth/oidc/* degrades).
     ...(oidcLogin ? { oidcLogin } : {}),
+    // Route B P1-M4f — admin OIDC provider registry CRUD (undefined → 503).
+    ...(oidcAdmin ? { oidcAdmin } : {}),
     // Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
     // Lets Prometheus pull the same body as /api/admin/metrics without a
     // machine-admin token. Unset/empty (env() already maps '' → undefined) →

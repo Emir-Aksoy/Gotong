@@ -70,9 +70,11 @@ import {
   type PeerManifestFederationSurface,
 } from './peer-routes.js'
 import { handleOidcRoute, type OidcLoginSurface } from './oidc-routes.js'
+import { handleOidcAdminRoute, type OidcProviderAdminSurface } from './oidc-admin-routes.js'
 
 export type { PeerManifestFederationSurface, PeerManifestRow } from './peer-routes.js'
 export type { OidcLoginSurface } from './oidc-routes.js'
+export type { OidcProviderAdminSurface, OidcProviderView } from './oidc-admin-routes.js'
 
 export type {
   IdentitySurface,
@@ -447,6 +449,13 @@ export interface WebServerOptions {
    * OidcLoginService + the provider config store.
    */
   oidcLogin?: OidcLoginSurface
+  /**
+   * Route B P1-M4f — host-injected OIDC provider registry (admin CRUD). When
+   * wired, `/api/admin/oidc/providers[/:id]` lets an admin register the IdPs the
+   * hub accepts SSO from. Absent (no identity store) → those routes 503. The
+   * client_secret is write-only: accepted on input, never echoed back.
+   */
+  oidcAdmin?: OidcProviderAdminSurface
   /**
    * Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
    * When set, a Prometheus scraper presenting `Authorization: Bearer <token>`
@@ -882,6 +891,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     mcpFederation: opts.mcpFederation,
     peerManifests: opts.peerManifests,
     oidcLogin: opts.oidcLogin,
+    oidcAdmin: opts.oidcAdmin,
     httpStats: new HttpStats(),
     metricsToken: opts.metricsToken,
   }
@@ -1032,6 +1042,8 @@ interface HandlerCtx {
   peerManifests: PeerManifestFederationSurface | undefined
   /** Route B P1-M4e — see WebServerOptions.oidcLogin doc above. */
   oidcLogin: OidcLoginSurface | undefined
+  /** Route B P1-M4f — see WebServerOptions.oidcAdmin doc above. */
+  oidcAdmin: OidcProviderAdminSurface | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -1910,6 +1922,18 @@ async function handle(
     const handled = await handlePeerManifestRoute(
       {
         peerManifests: ctx.peerManifests,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // Route B P1-M4f — admin OIDC provider registry CRUD.
+  if (path === '/api/admin/oidc/providers' || path.startsWith('/api/admin/oidc/providers/')) {
+    const handled = await handleOidcAdminRoute(
+      {
+        oidcAdmin: ctx.oidcAdmin,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req, res, method, path,
