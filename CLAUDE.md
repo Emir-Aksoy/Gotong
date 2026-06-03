@@ -4,7 +4,7 @@
 > 事就是读它，避免重建上下文跑偏。人类读者也可以读，但更友好的入口是
 > `README.md` / `docs/zh/OVERVIEW.md`。
 >
-> Last updated: 2026-06-01
+> Last updated: 2026-06-02
 
 ---
 
@@ -580,6 +580,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 生产级安全与运维 (业务指标 + restore smoke + 文档诚实化) | `docs/zh/V4-PHASE19-P3-FINAL.md` |
 | 联邦信任契约收口 (出站 allowlist + peer 账本 + rich manifest + per-link data-class/quota/revocation) | `docs/zh/V4-PHASE19-P4-FINAL.md` |
 | 生态接入与行业模板 (framework adapter + automation 桥 + 行业模板 + governance 元数据) | `docs/zh/V4-PHASE19-P5-FINAL.md` |
+| 企业 SSO — OIDC 单点登录 (账号联结 + 协议核 + client + provider 存储 + 登录/admin 路由 + UI) | `docs/zh/V6-ROUTE-B-P1-M4-OIDC.md` |
 | 完整审计报告 | `docs/zh/AUDIT-v4-phase5.md` |
 | 主流 agent 适配器契约 (双向 + 可快速接管验收门) | `docs/zh/AGENT-ADAPTER-CONTRACT.md` |
 | 快捷接入主流 agent (入站: `aipehub connect <agent>`) | `docs/zh/QUICK-CONNECT.md` |
@@ -599,7 +600,7 @@ packages/                       29 个包, pnpm workspace
 ├── core/                       Hub, Scheduler, Storage, Participant (依赖 protocol)
 ├── transport-ws/               WebSocket transport + HubLink (federation)
 ├── sdk-node/                   Node 客户端 SDK
-├── identity/                   v4 — users/credentials/sessions/vault/quota/peers/im_bindings/suspended_tasks; Phase 17: usage_ledger (v=11) + ledger-store.ts (逐条账本) + quota-store.ts recordUsage (ungated 记账); Phase 18: peers v12 加 per-peer 信任契约 4 列 (kind/acl_json/outbound_caps_json/require_approval_outbound)
+├── identity/                   v4 — users/credentials/sessions/vault/quota/peers/im_bindings/suspended_tasks; Phase 17: usage_ledger (v=11) + ledger-store.ts (逐条账本) + quota-store.ts recordUsage (ungated 记账); Phase 18: peers v12 加 per-peer 信任契约 4 列 (kind/acl_json/outbound_caps_json/require_approval_outbound); Route B P1-M3: totp (v19, vault-backed); Route B P1-M4 OIDC SSO: oidc.ts (协议纯核 — PKCE/state/nonce/RS256 id_token) + oidc-provider-store.ts (oidc_providers v20, client_secret 进 vault) + credentials kind='oidc' 账号联结 + authenticateOidc
 ├── host/                       生产 host 二进制 (main.ts)
 │   └── src/
 │       ├── local-agent-pool.ts        host-managed agents; Phase 17: usageSink 双账 (账本 + ungated 预算 recordUsage)
@@ -611,8 +612,10 @@ packages/                       29 个包, pnpm workspace
 │       ├── a2a-server.ts              Phase 18 C — 入站 A2A message/send → hub.dispatch (per-peer bearer fail-closed, capability-only)
 │       ├── workflow-versioning.ts     Phase 15 — 生命周期+修订编排, 唯一注册权威, HostDefinitionResolver
 │       ├── inbox-service.ts           Phase 16 — 成员 inbox 两步恢复 (子 broker 先于父 workflow)
+│       ├── oidc-client.ts             Route B P1-M4c — OIDC client 胶水 (discovery + JWKS + code→token, fetchImpl 可注入)
+│       ├── oidc-login-service.ts      Route B P1-M4e — 浏览器 SSO 往返编排 (single-use state + JIT-link-by-verified-email 不自动开户 + 铸同一 ses_ session)
 │       └── ...
-├── web/                        admin UI HTTP + SSE + SPA
+├── web/                        admin UI HTTP + SSE + SPA; Route B P1-M4 OIDC: src/oidc-routes.ts (公开登录 start/callback/providers, pre-CSRF 区) + src/oidc-admin-routes.ts (admin provider CRUD, secret write-only) + static/oidc-ui.js (admin「SSO」tab 面板) + static/app.js renderSsoButtons (登录屏)
 ├── llm/                        LlmAgent + LlmProvider 抽象 + DispatchToolset + ComposedToolset
 ├── llm-anthropic/              Anthropic provider (streaming + tool use + vision)
 ├── llm-openai/                 OpenAI / DeepSeek / Qwen / Ollama (compat, streaming + tool use)
