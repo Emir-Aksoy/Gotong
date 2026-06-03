@@ -54,8 +54,11 @@ export type VaultMutationReason = 'create' | 'revoke'
 /**
  * Route B P0-M4b — the vault_meta row that holds the wrapped data key.
  * Versioned in the key so a future DEK format change can coexist.
+ *
+ * Exported so the P0-M5 interrupted-rotation probe (`probeVaultMasterKey`)
+ * reads the same row without a drifting string literal.
  */
-const VAULT_DEK_META_KEY = 'vault.dek.v1'
+export const VAULT_DEK_META_KEY = 'vault.dek.v1'
 
 interface VaultRow {
   id: string

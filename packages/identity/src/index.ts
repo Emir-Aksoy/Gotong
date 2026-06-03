@@ -149,3 +149,7 @@ export {
   type MasterKeyProviderKind,
   type ResolveMasterKeyProviderInput,
 } from './crypto.js'
+// Route B P0-M5 — interrupted-rotation recovery probe. Answers "does this key
+// unwrap the stored DEK?" so the host can decide between a live key and a
+// staged `<keyfile>.next` left behind by a crashed KEK rotation.
+export { probeVaultMasterKey, type MasterKeyProbeResult } from './master-key-probe.js'
