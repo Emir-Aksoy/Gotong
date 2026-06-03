@@ -54,6 +54,7 @@ import { ResourceGrantStore } from './resource-grant-store.js'
 import { userPrincipal, type Principal } from './principal.js'
 import { PeerStore } from './peer-store.js'
 import { QuotaStore } from './quota-store.js'
+import { TotpStore, type EnrollTotpInput, type VerifyTotpInput } from './totp-store.js'
 import {
   AUDIT_ACTIONS,
   ROLES,
@@ -102,6 +103,8 @@ import {
   type LedgerQuery,
   type LedgerAggregateQuery,
   type LedgerAggregateRow,
+  type TotpEnrollment,
+  type TotpState,
   type User,
   type VaultEntry,
   type VaultKind,
@@ -461,6 +464,9 @@ export class IdentityStore {
   // principal → any resource). Owner-as-grant. Generalizes the old
   // workflow-only grant store; the workflow facade methods below delegate here.
   private readonly resourceGrants: ResourceGrantStore
+  // Route B P1-M3b — MFA (TOTP) enrollment store. Composes the vault for the
+  // encrypted shared secret; the facade methods below delegate here.
+  private readonly totp: TotpStore
   // Phase 7 M4 — org_meta kv (org_mode lives here).
   private readonly stmtOrgMetaGet: SqliteStmt
   private readonly stmtOrgMetaUpsert: SqliteStmt
@@ -508,6 +514,10 @@ export class IdentityStore {
     this.ledger = new LedgerStore(db)
     // Phase 19 P2-M5 → v5 A-M1 — unified resource grants. Eager statements.
     this.resourceGrants = new ResourceGrantStore(db)
+    // Route B P1-M3b — MFA TOTP store. Composes `this` for vault ops (the
+    // facade exposes createVaultEntry / readVaultSecret / revokeVaultEntry);
+    // the methods are only called later, so the partially-built `this` is fine.
+    this.totp = new TotpStore(db, this)
 
     this.stmtUserById = db.prepare('SELECT * FROM users WHERE id = ?')
     this.stmtUserByEmail = db.prepare('SELECT * FROM users WHERE email = ?')
@@ -2017,6 +2027,41 @@ export class IdentityStore {
 
   revokeVaultEntry(id: string): boolean {
     return this.vault.revokeVaultEntry(id)
+  }
+
+  // =====================================================================
+  // Route B P1-M3b — MFA (TOTP) second factor. Delegates to TotpStore;
+  // the shared secret is held as a vault entry (encrypted, rotation-safe).
+  // =====================================================================
+
+  /** Enrollment state for a user: 'none' | 'pending' | 'active'. */
+  totpState(userId: string): TotpState {
+    return this.totp.getState(userId)
+  }
+
+  /** True iff the user has a CONFIRMED TOTP factor (login must require it). */
+  isTotpEnabled(userId: string): boolean {
+    return this.totp.isEnabled(userId)
+  }
+
+  /** Begin/restart enrollment; returns the one-time QR payload. */
+  enrollTotp(input: EnrollTotpInput): TotpEnrollment {
+    return this.totp.enroll(input)
+  }
+
+  /** Confirm a pending enrollment with a current code (only 'pending'). */
+  confirmTotp(input: VerifyTotpInput): boolean {
+    return this.totp.confirm(input)
+  }
+
+  /** Verify a code at login (fail-closed: false unless active + matching). */
+  verifyTotpForLogin(input: VerifyTotpInput): boolean {
+    return this.totp.verifyForLogin(input)
+  }
+
+  /** Remove the second factor entirely (state row + vault secret). */
+  disableTotp(userId: string): boolean {
+    return this.totp.disable(userId)
   }
 
   /**

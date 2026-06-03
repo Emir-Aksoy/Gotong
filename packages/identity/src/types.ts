@@ -421,13 +421,39 @@ export type VaultKind =
   | 'mcp_server'
   | 'peer_token'
   | 'third_party_api'
+  // Route B P1-M3b — a user's MFA TOTP shared secret. Stored as a vault entry
+  // (ownerKind 'user') so envelope encryption + master-key rotation apply.
+  | 'totp'
 
 export const VAULT_KINDS: readonly VaultKind[] = [
   'llm_provider',
   'mcp_server',
   'peer_token',
   'third_party_api',
+  'totp',
 ] as const
+
+/**
+ * Route B P1-M3b — MFA (TOTP) enrollment lifecycle for a user.
+ *   'none'    — no secret enrolled.
+ *   'pending' — a secret exists but the user hasn't proved possession yet, so
+ *               it must NOT gate login. Replaced on re-enroll.
+ *   'active'  — confirmed; the second factor is required at login.
+ */
+export type TotpState = 'none' | 'pending' | 'active'
+
+/**
+ * The one-time payload returned at enrollment so the user can add the secret to
+ * their authenticator app. The raw secret is exposed ONLY here (and only to the
+ * enrolling, authenticated user); after this it lives encrypted in the vault
+ * and is never returned again.
+ */
+export interface TotpEnrollment {
+  /** base32 secret for manual entry. */
+  secretBase32: string
+  /** otpauth:// URI for the QR code. */
+  otpauthUri: string
+}
 
 /**
  * Unified ownership taxonomy. Used by vault here (A1) and aligned in A3

@@ -91,7 +91,12 @@ export type {
   SetResourceGrantInput,
   ResourceKind,
   GrantPerm,
+  // Route B P1-M3b — MFA (TOTP) enrollment.
+  TotpState,
+  TotpEnrollment,
 } from './types.js'
+// Route B P1-M3b — MFA (TOTP) store input types.
+export type { EnrollTotpInput, VerifyTotpInput } from './totp-store.js'
 export {
   AUDIT_ACTIONS,
   ROLES,

@@ -714,6 +714,31 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // Route B P1-M3b — MFA (TOTP) enrollment STATE. The secret itself is NOT
+    // here: it lives as a vault entry (kind='totp', ownerKind='user'), so the
+    // DEK envelope encrypts it at rest and a master-key rotation (M4c) covers
+    // it for free — same path as a member's per-user LLM key (A-M3b). This
+    // table only points at that secret and records lifecycle:
+    //   vault_id      the vault entry holding the encrypted shared secret.
+    //   confirmed_at  NULL = enrolled-but-unconfirmed (a pending secret that
+    //                 must NOT yet gate login); non-NULL = active second factor.
+    //   last_used_at  bumped on a successful login verification.
+    // One row per user (PK = user_id); re-enrolling replaces it. ON DELETE
+    // CASCADE drops the state with the user (the orphaned vault entry is
+    // cleaned by disableTotp on the normal path).
+    version: 19,
+    name: 'user-totp',
+    sql: `
+      CREATE TABLE IF NOT EXISTS user_totp (
+        user_id      TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        vault_id     TEXT NOT NULL,
+        confirmed_at INTEGER,
+        created_at   INTEGER NOT NULL,
+        last_used_at INTEGER
+      );
+    `,
+  },
 ]
 
 /**
