@@ -583,6 +583,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 企业 SSO — OIDC 单点登录 (账号联结 + 协议核 + client + provider 存储 + 登录/admin 路由 + UI) | `docs/zh/V6-ROUTE-B-P1-M4-OIDC.md` |
 | 企业 SSO — SAML 2.0 SP (成熟 DSig 库 + 自写 SP 胶水 + XSW 防护 + cert 公钥无 vault + JIT-link-by-asserted-email + 登录/admin 路由 + UI) | `docs/zh/V6-ROUTE-B-P1-M5-SAML.md` |
 | 联邦 peer onboarding (mint-peer-token CLI + admin onboarding 面板 + per-link 信任契约编辑器; 后端复用 Phase 18/P4/C-M1) | `docs/zh/V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md` |
+| A2A 任务生命周期 (suspend→Task(working) + tasks/get 轮询; opaque 句柄 + per-peer 归属隔离 fail-closed; tasks/get 被动读 hub.taskResult 零新 core hook; 真 HTTP 生命周期验收门) | `docs/zh/V6-ROUTE-B-P1-M8-A2A-LIFECYCLE.md` |
 | 完整审计报告 | `docs/zh/AUDIT-v4-phase5.md` |
 | 主流 agent 适配器契约 (双向 + 可快速接管验收门) | `docs/zh/AGENT-ADAPTER-CONTRACT.md` |
 | 快捷接入主流 agent (入站: `aipehub connect <agent>`) | `docs/zh/QUICK-CONNECT.md` |
@@ -611,7 +612,7 @@ packages/                       30 个包, pnpm workspace
 │       ├── peer-registry.ts           federation peer 拓扑; Phase 18 — 传持久 ACL 进 installPeerLink + outboundApprovalGate wrap
 │       ├── peer-manifest.ts           Phase 18 A — buildLocalManifest (排除 wrapper) + peer.manifest RPC provider + in-mem federation cache
 │       ├── outbound-approval.ts       Phase 18 B — ApprovalGatedParticipant (出站跨组织 task 命中 requireApprovalOutbound → inbox 审批)
-│       ├── a2a-server.ts              Phase 18 C — 入站 A2A message/send → hub.dispatch (per-peer bearer fail-closed, capability-only)
+│       ├── a2a-server.ts              Phase 18 C — 入站 A2A message/send → hub.dispatch (per-peer bearer fail-closed, capability-only); Route B P1-M8b: suspend → workingTask(opaque id) + tasks/get (per-peer 内存任务表, 归属隔离 fail-closed, 读 hub.taskResult)
 │       ├── workflow-versioning.ts     Phase 15 — 生命周期+修订编排, 唯一注册权威, HostDefinitionResolver
 │       ├── inbox-service.ts           Phase 16 — 成员 inbox 两步恢复 (子 broker 先于父 workflow)
 │       ├── oidc-client.ts             Route B P1-M4c — OIDC client 胶水 (discovery + JWKS + code→token, fetchImpl 可注入)
@@ -625,7 +626,7 @@ packages/                       30 个包, pnpm workspace
 ├── workflow/                   YAML workflow runner — parseWorkflow / WorkflowRunner / RunStore / predicate / resolver, 零 LLM dep; Phase 15: lifecycle.ts 状态机 + revision-store.ts / lifecycle-store.ts (文件优先, run 钉修订防漂移)
 ├── workflow-assistant/         Phase 13: WorkflowAssistantAgent (自然语言 → YAML, draftStatus), 依赖 workflow + llm
 ├── inbox/                      Phase 16: 成员任务 inbox — InboxStore / FileInboxStore / HumanInboxParticipant broker (human-in-the-loop, cap aipehub.human/v1), 只依赖 core
-├── a2a/                        Phase 18 C: A2A (Agent2Agent) interop — message/send wire 类型 + a2aSend client + A2aRemoteParticipant (出站), 入站 A2aServer 在 host; 依赖 core
+├── a2a/                        Phase 18 C: A2A (Agent2Agent) interop — message/send wire 类型 + a2aSend client + A2aRemoteParticipant (出站), 入站 A2aServer 在 host; 依赖 core; Route B P1-M8: task lifecycle (A2ATask/tasks/get wire 类型 + workingTask/completedTask/failedTask 构造器 + a2aSendRaw/a2aGetTask client, suspend→Task→轮询)
 ├── saml/                       Route B P1-M5: SAML 2.0 SP 协议核 — AuthnRequest 构造 (HTTP-Redirect deflate) + SAMLResponse 验签/断言解析 + XSW 防御 (pin key/getSignedReferences/禁 DOCTYPE) + SP metadata; 危险 XML-DSig/C14N 交成熟库 (xml-crypto + @xmldom/xmldom), 自写 SP 协议胶水; XML 依赖隔离本包不外溢
 
 ├── mcp-server/                 MCP server (Claude Desktop / Cursor 调 hub)
