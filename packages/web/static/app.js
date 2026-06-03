@@ -146,14 +146,20 @@
     const form = document.getElementById('login-form')
     if (!form) return
     const status = document.getElementById('login-status')
+    // Route B P1-M3f — the second-factor field, revealed on a totp challenge.
+    const totpLabel = document.getElementById('login-totp-label')
     form.addEventListener('submit', async (e) => {
       e.preventDefault()
       status.className = 'login-status'
       status.textContent = '登录中…'
       const fd = new FormData(form)
+      const totpCode = String(fd.get('totpCode') || '').trim()
       const body = JSON.stringify({
         email: String(fd.get('email') || '').trim(),
         password: String(fd.get('password') || ''),
+        // Only sent once the challenge field is revealed and filled; the server
+        // treats an absent/blank code as "no code" and re-issues the challenge.
+        ...(totpCode ? { totpCode } : {}),
       })
       try {
         const r = await fetch('/api/admin/identity/login', {
@@ -163,6 +169,21 @@
         })
         if (!r.ok) {
           const j = await r.json().catch(() => ({}))
+          // P1-M3f — the password was right; the account has MFA on. Reveal the
+          // code field and let the user resubmit the same form WITH the code.
+          // This is not an error state, so style it as a neutral prompt.
+          if (r.status === 401 && j?.challenge === 'totp') {
+            if (totpLabel) totpLabel.hidden = false
+            const codeInput = form.querySelector('[name="totpCode"]')
+            status.className = 'login-status'
+            // If a code was already supplied and still rejected, say so.
+            status.textContent = totpCode ? '验证码错误,请重试' : '请输入两步验证码'
+            if (codeInput) {
+              codeInput.value = ''
+              codeInput.focus()
+            }
+            return
+          }
           status.className = 'login-status error'
           status.textContent = j?.error || `登录失败 (HTTP ${r.status})`
           return
@@ -1310,6 +1331,143 @@
       } catch { /* meh */ }
     }
     document.getElementById('settings-password-form')?.addEventListener('submit', submitPasswordChange)
+    // Route B P1-M3f — two-factor (TOTP) self-service panel.
+    renderMfa().catch((err) => console.error('[app] renderMfa failed', err))
+  }
+
+  // ---- Two-factor (TOTP) self-service (Route B P1-M3f) -----------------
+  // Renders the current MFA state into #settings-mfa and wires the
+  // enroll → confirm → disable controls. The plaintext secret is shown
+  // exactly once (on enroll) for manual key entry; otpauth:// is offered
+  // as a link. QR image rendering is a later nicety — manual key entry
+  // works in every authenticator app.
+  async function renderMfa() {
+    const host = document.getElementById('settings-mfa')
+    if (!host || !SIGNED_IN) return
+    let state = 'none'
+    try {
+      const r = await fetch('/api/me/totp')
+      if (r.status === 503) {
+        host.innerHTML = '<p class="hint">此 Hub 未配置加密,无法使用两步验证。</p>'
+        return
+      }
+      if (r.ok) state = (await r.json())?.state || 'none'
+    } catch {
+      host.innerHTML = '<p class="hint">无法加载两步验证状态。</p>'
+      return
+    }
+
+    if (state === 'active') {
+      host.innerHTML =
+        '<p>状态: <strong>已启用 ✅</strong></p>' +
+        '<label>停用需输入当前验证码' +
+        '<input id="mfa-disable-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6 位验证码" /></label>' +
+        '<button id="mfa-disable-btn" type="button" class="me-secondary-btn">停用两步验证</button>' +
+        '<div id="mfa-status" class="me-status"></div>'
+      document.getElementById('mfa-disable-btn')?.addEventListener('click', () => {
+        const code = String(document.getElementById('mfa-disable-code')?.value || '').trim()
+        mfaPost('/api/me/totp/disable', { code }, '已停用两步验证')
+      })
+      return
+    }
+
+    if (state === 'pending') {
+      host.innerHTML =
+        '<p>状态: <strong>待确认</strong> — 有一个未完成的设置。</p>' +
+        '<label>输入认证器上的验证码以完成启用' +
+        '<input id="mfa-confirm-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6 位验证码" /></label>' +
+        '<div class="settings-actions">' +
+        '<button id="mfa-confirm-btn" type="button" class="me-primary-btn">确认启用</button>' +
+        '<button id="mfa-restart-btn" type="button" class="me-secondary-btn">重新生成密钥</button>' +
+        '<button id="mfa-cancel-btn" type="button" class="me-secondary-btn">取消</button>' +
+        '</div><div id="mfa-status" class="me-status"></div>'
+      document.getElementById('mfa-confirm-btn')?.addEventListener('click', () => {
+        const code = String(document.getElementById('mfa-confirm-code')?.value || '').trim()
+        mfaPost('/api/me/totp/confirm', { code }, '两步验证已启用')
+      })
+      document.getElementById('mfa-restart-btn')?.addEventListener('click', () => startMfaEnroll())
+      // A pending (never-confirmed) enrollment can be cancelled with no code.
+      document.getElementById('mfa-cancel-btn')?.addEventListener('click', () => {
+        mfaPost('/api/me/totp/disable', {}, '已取消设置')
+      })
+      return
+    }
+
+    // state === 'none'
+    host.innerHTML =
+      '<p class="hint">两步验证用一次性验证码为你的账号再加一层保护。</p>' +
+      '<button id="mfa-enroll-btn" type="button" class="me-primary-btn">启用两步验证</button>' +
+      '<div id="mfa-status" class="me-status"></div>'
+    document.getElementById('mfa-enroll-btn')?.addEventListener('click', () => startMfaEnroll())
+  }
+
+  async function startMfaEnroll() {
+    const host = document.getElementById('settings-mfa')
+    if (!host) return
+    host.innerHTML = '<div id="mfa-status" class="me-status">生成中…</div>'
+    try {
+      const r = await fetch('/api/me/totp/enroll', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        host.innerHTML =
+          '<div id="mfa-status" class="me-status error">' +
+          escape(j?.error || `启用失败 (HTTP ${r.status})`) +
+          '</div>'
+        return
+      }
+      host.innerHTML =
+        '<p>在认证器 App 里添加这个密钥 (手动输入):</p>' +
+        `<p><code class="mfa-secret">${escape(j.secretBase32 || '')}</code></p>` +
+        `<p class="hint"><a href="${escape(j.otpauthUri || '')}">otpauth 链接</a> · 二维码渲染待后续</p>` +
+        '<label>输入认证器生成的验证码' +
+        '<input id="mfa-confirm-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6 位验证码" /></label>' +
+        '<button id="mfa-confirm-btn" type="button" class="me-primary-btn">确认启用</button>' +
+        '<div id="mfa-status" class="me-status"></div>'
+      document.getElementById('mfa-confirm-btn')?.addEventListener('click', () => {
+        const code = String(document.getElementById('mfa-confirm-code')?.value || '').trim()
+        mfaPost('/api/me/totp/confirm', { code }, '两步验证已启用')
+      })
+    } catch (err) {
+      host.innerHTML =
+        '<div id="mfa-status" class="me-status error">启用失败: ' + escape(String(err?.message || err)) + '</div>'
+    }
+  }
+
+  // POST a TOTP action; on success re-render to reflect the new state, on
+  // failure keep the current panel and show the error inline.
+  async function mfaPost(url, body, okMsg) {
+    const status = document.getElementById('mfa-status')
+    if (status) {
+      status.className = 'me-status'
+      status.textContent = '提交中…'
+    }
+    try {
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        const s = document.getElementById('mfa-status')
+        if (s) {
+          s.className = 'me-status error'
+          s.textContent = j?.error || `操作失败 (HTTP ${r.status})`
+        }
+        return
+      }
+      await renderMfa()
+    } catch (err) {
+      const s = document.getElementById('mfa-status')
+      if (s) {
+        s.className = 'me-status error'
+        s.textContent = `操作失败: ${err?.message || err}`
+      }
+    }
+    void okMsg // state change is self-evident after re-render; keep arg for clarity
   }
 
   async function submitPasswordChange(e) {

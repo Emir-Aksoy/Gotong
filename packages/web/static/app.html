@@ -90,6 +90,12 @@
           <label>密码
             <input name="password" type="password" required autocomplete="current-password" />
           </label>
+          <!-- Route B P1-M3f — revealed only after the server replies with a
+               totp challenge (401 {challenge:'totp'}). Hidden on first attempt
+               so users without MFA never see it. -->
+          <label id="login-totp-label" hidden>两步验证码
+            <input name="totpCode" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="8" placeholder="6 位验证码" />
+          </label>
           <div class="login-row">
             <button type="submit">登录</button>
             <span class="login-meta">还没有账号? 联系 owner 给你创建,或者用收到的邀请链接 (<code>/invite/&lt;token&gt;</code>) 注册。</span>
@@ -281,6 +287,11 @@
         <button type="submit" class="me-primary-btn">提交</button>
         <div id="settings-password-status" class="me-status"></div>
       </form>
+
+      <!-- Route B P1-M3f — two-factor (TOTP) self-service. app.js renders the
+           current state + enroll / confirm / disable controls into here. -->
+      <h2 style="margin-top:1.5rem;">两步验证 (2FA)</h2>
+      <div id="settings-mfa" class="settings-form"></div>
 
       <!-- Phase 7 M5 — owner-only "升级到团队模式" 注入点. app.js
            reads /api/me/mode + populates this slot conditionally. The

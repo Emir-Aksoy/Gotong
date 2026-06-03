@@ -240,5 +240,16 @@ describe('C1 — unified SPA shell', () => {
       // with data-roles="owner".
       expect(html).toMatch(/data-tab="users"\s+data-roles="owner"/)
     })
+
+    it('serves the P1-M3f MFA markup: login totp field + settings MFA panel', async () => {
+      // Pins that the rebuilt static-assets bundle carries the two-factor UI
+      // hooks app.js drives. If app.html drops them (and is rebuilt) this
+      // goes red — the login challenge field and the /me MFA panel anchor.
+      const r = await fetch(`${b.baseUrl}/`, { headers: { cookie: b.adminCookie } })
+      const html = await r.text()
+      expect(html).toContain('id="login-totp-label"')
+      expect(html).toContain('name="totpCode"')
+      expect(html).toContain('id="settings-mfa"')
+    })
   })
 })
