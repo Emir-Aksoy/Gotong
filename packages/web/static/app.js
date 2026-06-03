@@ -1595,6 +1595,7 @@
       .then(() => inject('/usage-ui.js'))
       .then(() => inject('/peer-admin-ui.js'))
       .then(() => inject('/peer-manifest-ui.js'))
+      .then(() => inject('/a2a-ui.js'))
       .then(() => inject('/oidc-ui.js'))
       .then(() => inject('/saml-ui.js'))
       .catch((err) => {

@@ -1169,6 +1169,13 @@
            the host has no peer federation wired (peers disabled). -->
       <section id="peer-federation-panel" class="peer-federation-panel" data-tab="federation"></section>
 
+      <!-- Route B P1-M11d — outbound A2A agent registry. Owner-only, same "联邦"
+           tab, BELOW the peer panels. Rendered by /a2a-ui.js (CRUD over
+           /api/admin/a2a-agents): register the external A2A agents this hub
+           forwards capability dispatches to (replacing the AIPE_A2A_AGENTS env
+           blob). 503 inline when the host wired no identity store. -->
+      <section id="a2a-outbound-panel" class="a2a-outbound-panel" data-tab="federation"></section>
+
       <!-- Route B P1-M4f-3 — OIDC IdP registry. Owner-only. Filled by the
            self-contained oidc-ui.js on tab activation (CRUD over
            /api/admin/oidc/providers); 503 inline when the host wired no
