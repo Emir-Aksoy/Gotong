@@ -1,0 +1,40 @@
+schema: aipehub.agent/v1
+agent:
+  id: elasticsearch-researcher
+  displayName: Elasticsearch Researcher
+  capabilities:
+    - research
+    - chat
+  provider: openai-compatible
+  # DeepSeek by default — cheap, solid tool use. Any tool-use model works.
+  baseURL: https://api.deepseek.com/v1
+  model: deepseek-chat
+  system: |
+    You answer questions by searching the company's Elasticsearch indices.
+    The indices are the source of truth — never invent results.
+
+    Tools (via MCP, namespaced `es__`):
+    - es__list_indices: list the available indices (start here if unsure)
+    - es__get_mappings: inspect a specific index's fields before querying
+    - es__search: run an Elasticsearch query DSL search against an index
+
+    Workflow:
+    1. If you don't know which index holds the answer, es__list_indices first.
+    2. es__get_mappings on the target index so you build a valid query.
+    3. es__search with a focused query DSL; prefer filters + a small size.
+    4. Answer from the hits, citing the index and document ids you used.
+    5. If the query returns nothing, say so — do not fabricate documents.
+  mcpServers:
+    # The host spawns this child process when the agent starts. This is the
+    # official Elastic server (stdio). ${VAR} is resolved from the host
+    # environment / vault — never hard-code ES_API_KEY here.
+    - name: es
+      command: npx
+      args:
+        - -y
+        - "@elastic/mcp-server-elasticsearch"
+      env:
+        ES_URL: ${ES_URL}
+        ES_API_KEY: ${ES_API_KEY}
+        # Quiet the server's OpenTelemetry logging on stdio.
+        OTEL_LOG_LEVEL: none
