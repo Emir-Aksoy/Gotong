@@ -46,6 +46,12 @@ export type IdentityErrorCode =
   //   `oidc_provider_not_found`  get/update/readSecret targeted an id with no row.
   | 'oidc_provider_exists'
   | 'oidc_provider_not_found'
+  // Route B P1-M5c — SAML provider (IdP) configuration store (twins of OIDC).
+  //   `saml_provider_exists`     addSamlProvider hit UNIQUE(idp_entity_id) — one
+  //                              registration per IdP entityID.
+  //   `saml_provider_not_found`  get/update/remove targeted an id with no row.
+  | 'saml_provider_exists'
+  | 'saml_provider_not_found'
   | 'session_expired'
   | 'session_not_found'
   | 'weak_password'

@@ -768,6 +768,35 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // Route B P1-M5c — SAML 2.0 IdP registrations. The hub is the Service
+    // Provider; one row per IdP it accepts SSO from. Unlike OIDC there is NO
+    // vault pointer: `idp_cert` is the IdP's X.509 SIGNING cert — a PUBLIC
+    // verification key, not a secret — so it sits in the table directly. (We do
+    // not sign AuthnRequests in this MVP, so there is no SP private key to
+    // protect either.)
+    //   idp_entity_id  UNIQUE — the IdP's SAML entityID, the expected assertion
+    //                  Issuer. Immutable per registration.
+    //   sso_url        the IdP's SSO endpoint (HTTP-Redirect binding).
+    //   idp_cert       the IdP's X.509 signing cert (PEM), pinned for verify.
+    //   sp_entity_id   this hub's SP entityID (the assertion Audience).
+    //   enabled        0 disables it without deleting the config.
+    version: 21,
+    name: 'saml-providers',
+    sql: `
+      CREATE TABLE IF NOT EXISTS saml_providers (
+        id            TEXT PRIMARY KEY,
+        idp_entity_id TEXT NOT NULL UNIQUE,
+        sso_url       TEXT NOT NULL,
+        idp_cert      TEXT NOT NULL,
+        sp_entity_id  TEXT NOT NULL,
+        enabled       INTEGER NOT NULL DEFAULT 1,
+        label         TEXT,
+        created_at    INTEGER NOT NULL,
+        updated_at    INTEGER NOT NULL
+      );
+    `,
+  },
 ]
 
 /**

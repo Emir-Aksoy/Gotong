@@ -58,6 +58,7 @@ import { PeerStore } from './peer-store.js'
 import { QuotaStore } from './quota-store.js'
 import { TotpStore, type EnrollTotpInput, type VerifyTotpInput } from './totp-store.js'
 import { OidcProviderStore } from './oidc-provider-store.js'
+import { SamlProviderStore } from './saml-provider-store.js'
 import {
   AUDIT_ACTIONS,
   ROLES,
@@ -90,6 +91,9 @@ import {
   type OidcLogin,
   type OidcProvider,
   type SamlLogin,
+  type AddSamlProviderInput,
+  type SamlProvider,
+  type UpdateSamlProviderInput,
   type UpdateOidcProviderInput,
   type OwnerKind,
   type ResetUsageInput,
@@ -480,6 +484,9 @@ export class IdentityStore {
   // Route B P1-M4d — OIDC identity-provider registry. Composes the vault for
   // each IdP's confidential client_secret; the facade methods below delegate.
   private readonly oidcProviders: OidcProviderStore
+  // Route B P1-M5c — SAML identity-provider registry. No vault: idp_cert is a
+  // PUBLIC X.509 signing cert, so the whole row is plain config.
+  private readonly samlProviders: SamlProviderStore
   // Phase 7 M4 — org_meta kv (org_mode lives here).
   private readonly stmtOrgMetaGet: SqliteStmt
   private readonly stmtOrgMetaUpsert: SqliteStmt
@@ -534,6 +541,8 @@ export class IdentityStore {
     // Route B P1-M4d — OIDC IdP registry. Same composition as TotpStore: `this`
     // supplies the vault facade for each IdP's client_secret (ownerKind 'org').
     this.oidcProviders = new OidcProviderStore(db, this)
+    // Route B P1-M5c — SAML IdP registry. No vault dependency (idp_cert public).
+    this.samlProviders = new SamlProviderStore(db)
 
     this.stmtUserById = db.prepare('SELECT * FROM users WHERE id = ?')
     this.stmtUserByEmail = db.prepare('SELECT * FROM users WHERE email = ?')
@@ -2377,6 +2386,40 @@ export class IdentityStore {
   /** Delete the registration and revoke its client secret. */
   removeOidcProvider(id: string): boolean {
     return this.oidcProviders.remove(id)
+  }
+
+  // =====================================================================
+  // Route B P1-M5c — SAML identity-provider (IdP) registry. Delegates to
+  // SamlProviderStore. Unlike OIDC there is no secret: `idpCert` is a public
+  // X.509 verification cert, so projections carry it and there is no vault.
+  // =====================================================================
+
+  /** Register an IdP. Duplicate entityID → `saml_provider_exists`. */
+  addSamlProvider(input: AddSamlProviderInput): SamlProvider {
+    return this.samlProviders.add(input)
+  }
+
+  getSamlProvider(id: string): SamlProvider | null {
+    return this.samlProviders.get(id)
+  }
+
+  /** Lookup by IdP entityID — the ACS resolves the provider from the assertion Issuer. */
+  getSamlProviderByEntityId(idpEntityId: string): SamlProvider | null {
+    return this.samlProviders.getByEntityId(idpEntityId)
+  }
+
+  listSamlProviders(): SamlProvider[] {
+    return this.samlProviders.list()
+  }
+
+  /** Targeted update (idpEntityId immutable). */
+  updateSamlProvider(id: string, patch: UpdateSamlProviderInput): SamlProvider {
+    return this.samlProviders.update(id, patch)
+  }
+
+  /** Delete the registration. No secret to revoke. */
+  removeSamlProvider(id: string): boolean {
+    return this.samlProviders.remove(id)
   }
 
   /**

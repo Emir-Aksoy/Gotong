@@ -196,6 +196,47 @@ export interface UpdateOidcProviderInput {
   enabled?: boolean
 }
 
+/**
+ * Route B P1-M5c — a configured SAML 2.0 IdP (the hub acting as a Service
+ * Provider). Unlike OidcProvider there is NO secret to hide: `idpCert` is a
+ * PUBLIC X.509 signing cert, so the full projection carries it (admins verify
+ * which cert is pinned). The public login-buttons endpoint still projects only
+ * {id, label}.
+ */
+export interface SamlProvider {
+  id: string
+  /** The IdP's SAML entityID — the expected assertion Issuer. */
+  idpEntityId: string
+  /** The IdP's SSO endpoint (HTTP-Redirect binding). */
+  ssoUrl: string
+  /** The IdP's X.509 signing cert (PEM) — a public verification key, pinned for verify. */
+  idpCert: string
+  /** This hub's SP entityID — the assertion Audience. */
+  spEntityId: string
+  enabled: boolean
+  label: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AddSamlProviderInput {
+  idpEntityId: string
+  ssoUrl: string
+  idpCert: string
+  spEntityId: string
+  label?: string | null
+  enabled?: boolean
+}
+
+/** Targeted update — every field optional; `idpEntityId` is immutable (re-add to change IdP). */
+export interface UpdateSamlProviderInput {
+  ssoUrl?: string
+  idpCert?: string
+  spEntityId?: string
+  label?: string | null
+  enabled?: boolean
+}
+
 export interface IssuedAdminToken {
   /** Raw token — shown ONCE. */
   token: string
