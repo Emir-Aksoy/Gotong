@@ -581,6 +581,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 联邦信任契约收口 (出站 allowlist + peer 账本 + rich manifest + per-link data-class/quota/revocation) | `docs/zh/V4-PHASE19-P4-FINAL.md` |
 | 生态接入与行业模板 (framework adapter + automation 桥 + 行业模板 + governance 元数据) | `docs/zh/V4-PHASE19-P5-FINAL.md` |
 | 企业 SSO — OIDC 单点登录 (账号联结 + 协议核 + client + provider 存储 + 登录/admin 路由 + UI) | `docs/zh/V6-ROUTE-B-P1-M4-OIDC.md` |
+| 企业 SSO — SAML 2.0 SP (成熟 DSig 库 + 自写 SP 胶水 + XSW 防护 + cert 公钥无 vault + JIT-link-by-asserted-email + 登录/admin 路由 + UI) | `docs/zh/V6-ROUTE-B-P1-M5-SAML.md` |
 | 完整审计报告 | `docs/zh/AUDIT-v4-phase5.md` |
 | 主流 agent 适配器契约 (双向 + 可快速接管验收门) | `docs/zh/AGENT-ADAPTER-CONTRACT.md` |
 | 快捷接入主流 agent (入站: `aipehub connect <agent>`) | `docs/zh/QUICK-CONNECT.md` |
@@ -595,12 +596,12 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 ## 六、目录结构速查
 
 ```
-packages/                       29 个包, pnpm workspace
+packages/                       30 个包, pnpm workspace
 ├── protocol/                   wire protocol(v1.2) + wire types, zero runtime
 ├── core/                       Hub, Scheduler, Storage, Participant (依赖 protocol)
 ├── transport-ws/               WebSocket transport + HubLink (federation)
 ├── sdk-node/                   Node 客户端 SDK
-├── identity/                   v4 — users/credentials/sessions/vault/quota/peers/im_bindings/suspended_tasks; Phase 17: usage_ledger (v=11) + ledger-store.ts (逐条账本) + quota-store.ts recordUsage (ungated 记账); Phase 18: peers v12 加 per-peer 信任契约 4 列 (kind/acl_json/outbound_caps_json/require_approval_outbound); Route B P1-M3: totp (v19, vault-backed); Route B P1-M4 OIDC SSO: oidc.ts (协议纯核 — PKCE/state/nonce/RS256 id_token) + oidc-provider-store.ts (oidc_providers v20, client_secret 进 vault) + credentials kind='oidc' 账号联结 + authenticateOidc
+├── identity/                   v4 — users/credentials/sessions/vault/quota/peers/im_bindings/suspended_tasks; Phase 17: usage_ledger (v=11) + ledger-store.ts (逐条账本) + quota-store.ts recordUsage (ungated 记账); Phase 18: peers v12 加 per-peer 信任契约 4 列 (kind/acl_json/outbound_caps_json/require_approval_outbound); Route B P1-M3: totp (v19, vault-backed); Route B P1-M4 OIDC SSO: oidc.ts (协议纯核 — PKCE/state/nonce/RS256 id_token) + oidc-provider-store.ts (oidc_providers v20, client_secret 进 vault) + credentials kind='oidc' 账号联结 + authenticateOidc; Route B P1-M5 SAML SSO: saml-provider-store.ts (saml_providers v21, **无 vault** — idp_cert 是 X.509 公钥) + credentials kind='saml' 账号联结 + authenticateSaml (XML 协议核在独立包 @aipehub/saml, identity 只做纯映射零 XML)
 ├── host/                       生产 host 二进制 (main.ts)
 │   └── src/
 │       ├── local-agent-pool.ts        host-managed agents; Phase 17: usageSink 双账 (账本 + ungated 预算 recordUsage)
@@ -614,8 +615,9 @@ packages/                       29 个包, pnpm workspace
 │       ├── inbox-service.ts           Phase 16 — 成员 inbox 两步恢复 (子 broker 先于父 workflow)
 │       ├── oidc-client.ts             Route B P1-M4c — OIDC client 胶水 (discovery + JWKS + code→token, fetchImpl 可注入)
 │       ├── oidc-login-service.ts      Route B P1-M4e — 浏览器 SSO 往返编排 (single-use state + JIT-link-by-verified-email 不自动开户 + 铸同一 ses_ session)
+│       ├── saml-login-service.ts      Route B P1-M5d — 浏览器 SAML 往返编排 (single-use RelayState 验签前消费 + InResponseTo 钉死 + JIT-link-by-asserted-email + 铸同一 ses_ session; ACS URL 从 AIPE_PUBLIC_URL)
 │       └── ...
-├── web/                        admin UI HTTP + SSE + SPA; Route B P1-M4 OIDC: src/oidc-routes.ts (公开登录 start/callback/providers, pre-CSRF 区) + src/oidc-admin-routes.ts (admin provider CRUD, secret write-only) + static/oidc-ui.js (admin「SSO」tab 面板) + static/app.js renderSsoButtons (登录屏)
+├── web/                        admin UI HTTP + SSE + SPA; Route B P1-M4 OIDC: src/oidc-routes.ts (公开登录 start/callback/providers, pre-CSRF 区) + src/oidc-admin-routes.ts (admin provider CRUD, secret write-only) + static/oidc-ui.js (admin「SSO」tab 面板) + static/app.js renderSsoButtons (登录屏); Route B P1-M5 SAML: src/saml-routes.ts (公开 start/acs/providers/metadata, ACS 跨站 POST 住 pre-CSRF 区) + src/saml-admin-routes.ts (admin provider CRUD, cert 是公钥照常返回) + static/saml-ui.js (admin「SAML」tab 面板)
 ├── llm/                        LlmAgent + LlmProvider 抽象 + DispatchToolset + ComposedToolset
 ├── llm-anthropic/              Anthropic provider (streaming + tool use + vision)
 ├── llm-openai/                 OpenAI / DeepSeek / Qwen / Ollama (compat, streaming + tool use)
@@ -623,6 +625,7 @@ packages/                       29 个包, pnpm workspace
 ├── workflow-assistant/         Phase 13: WorkflowAssistantAgent (自然语言 → YAML, draftStatus), 依赖 workflow + llm
 ├── inbox/                      Phase 16: 成员任务 inbox — InboxStore / FileInboxStore / HumanInboxParticipant broker (human-in-the-loop, cap aipehub.human/v1), 只依赖 core
 ├── a2a/                        Phase 18 C: A2A (Agent2Agent) interop — message/send wire 类型 + a2aSend client + A2aRemoteParticipant (出站), 入站 A2aServer 在 host; 依赖 core
+├── saml/                       Route B P1-M5: SAML 2.0 SP 协议核 — AuthnRequest 构造 (HTTP-Redirect deflate) + SAMLResponse 验签/断言解析 + XSW 防御 (pin key/getSignedReferences/禁 DOCTYPE) + SP metadata; 危险 XML-DSig/C14N 交成熟库 (xml-crypto + @xmldom/xmldom), 自写 SP 协议胶水; XML 依赖隔离本包不外溢
 
 ├── mcp-server/                 MCP server (Claude Desktop / Cursor 调 hub)
 ├── mcp-client/                 MCP client (agent 调外部 MCP tools)
