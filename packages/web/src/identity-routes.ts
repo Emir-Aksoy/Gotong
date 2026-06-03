@@ -232,6 +232,10 @@ export interface IdentitySurface {
   authenticatePassword(opts: {
     email: string
     password: string
+    // Route B P1-M3d — optional second factor. When the user has an ACTIVE
+    // TOTP enrollment, omitting this makes identity throw `totp_required`;
+    // the caller re-prompts and retries with the code.
+    totpCode?: string
     ttlMs?: number
   }): IdentitySessionDTO
   authenticateToken(opts: { token: string; ttlMs?: number }): IdentitySessionDTO
@@ -968,15 +972,20 @@ async function handleLogin(
     sendJson(res, { error: 'login body required: {email, password}' }, 400)
     return
   }
-  const b = body as { email?: unknown; password?: unknown }
+  const b = body as { email?: unknown; password?: unknown; totpCode?: unknown }
   if (typeof b.email !== 'string' || typeof b.password !== 'string') {
     sendJson(res, { error: 'email and password required' }, 400)
     return
   }
+  // P1-M3d — second factor is optional in the body; only forwarded when a
+  // non-empty string so an absent/blank field reliably triggers the challenge
+  // rather than a silent miss.
+  const totpCode = typeof b.totpCode === 'string' && b.totpCode.length > 0 ? b.totpCode : undefined
   try {
     const sess = ctx.identity.authenticatePassword({
       email: b.email,
       password: b.password,
+      ...(totpCode !== undefined ? { totpCode } : {}),
     })
     // V4-AUDIT-06: record the successful login. We pass the real
     // actorUserId from the freshly-minted session (don't rely on the
@@ -997,6 +1006,16 @@ async function handleLogin(
     // Only auth failures burn rate-limit budget — malformed input
     // (caught above as 400) already burned a peek but no record.
     const ec = asErrorWithCode(err)
+    // P1-M3d — the password was CORRECT but a second factor is required. This
+    // is NOT a failure: don't burn rate-limit budget and don't audit a
+    // failure (a wrong code comes back as authentication_failed below, which
+    // does). Reply with a typed challenge so the SPA reveals the code field
+    // and resubmits with `totpCode`. No session cookie is set — the request
+    // stays unauthenticated until the code verifies.
+    if (ec && ec.code === 'totp_required') {
+      sendJson(res, { ok: false, challenge: 'totp', code: 'totp_required' }, 401)
+      return
+    }
     if (ec && ec.code === 'authentication_failed') {
       ctx.loginLimiter.recordFailure(rlKey)
       // V4-AUDIT-06: failed login → actor is anonymous, target unknown.
