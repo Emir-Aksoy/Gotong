@@ -107,8 +107,12 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       const meta = managed
         ? `${kindBadge}<span class="ma-provider">${escapeHtml(providerText)}${managed.model ? ' · ' + escapeHtml(managed.model) : ''}</span>`
         : `${kindBadge}<span class="ma-external">${escapeHtml(t.externalAgent)}</span>`
+      // v5 E4-M2 — "管理访问" opens the resource-RBAC grants modal. Shown on
+      // managed agents (the ones an admin owns/edits); the modal itself is
+      // owner-gated server-side, so a non-owner admin gets a notice inside it.
       const actions = managed ? `
         <button class="ma-action" data-act="edit-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.edit)}</button>
+        <button class="ma-action" data-act="manage-agent-access" data-id="${escapeHtml(a.id)}">${escapeHtml(t.agentAccessManage)}</button>
         <button class="ma-action" data-act="export-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.export_)}</button>
         <button class="ma-action ma-danger" data-act="remove-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.remove)}</button>
       ` : ''
@@ -676,6 +680,157 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     }
   }
 
+  // --- access control / resource RBAC grants (v5 E4-M2) ------------------
+  //
+  // Mirror of the workflow grants panel (workflows.js). Backed by the
+  // owner-gated /api/admin/agents/:id/grants routes: a non-owner admin gets
+  // 403 → "owner only" notice; a host without an identity store gets 404 →
+  // "not enabled" notice. Operators (org owner / v3 admin) manage by bypass.
+
+  let grantsAgentId = null
+
+  function setAgentGrantsNotice(key) {
+    if (dom.maGrantsList) dom.maGrantsList.innerHTML = ''
+    if (dom.maGrantsEmpty) dom.maGrantsEmpty.hidden = true
+    if (dom.maGrantsAdd) dom.maGrantsAdd.hidden = true
+    if (dom.maGrantsMsg) {
+      dom.maGrantsMsg.textContent = t[key] || ''
+      dom.maGrantsMsg.classList.remove('ok')
+      dom.maGrantsMsg.classList.add('err')
+    }
+  }
+
+  function openAccessModal(id) {
+    grantsAgentId = id
+    if (dom.maAccessTarget) dom.maAccessTarget.textContent = id
+    if (dom.maGrantsMsg) {
+      dom.maGrantsMsg.textContent = ''
+      dom.maGrantsMsg.classList.remove('ok', 'err')
+    }
+    if (dom.maGrantsAdd) dom.maGrantsAdd.hidden = false
+    if (dom.maGrantsEmpty) dom.maGrantsEmpty.hidden = true
+    if (dom.maGrantsList) dom.maGrantsList.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
+    if (dom.maAccessModal) dom.maAccessModal.hidden = false
+    void fetchAgentGrants(id)
+  }
+
+  function closeAccessModal() {
+    if (dom.maAccessModal) dom.maAccessModal.hidden = true
+  }
+
+  // Wired to the 刷新 button (data-act="refresh-agent-grants").
+  async function refreshAgentGrants() {
+    if (grantsAgentId) await fetchAgentGrants(grantsAgentId)
+  }
+
+  async function fetchAgentGrants(id) {
+    try {
+      const r = await fetch(`/api/admin/agents/${encodeURIComponent(id)}/grants`)
+      if (!r.ok) {
+        // 403 = non-owner admin; 404 = host without resource RBAC.
+        setAgentGrantsNotice(r.status === 403 ? 'agentGrantsOwnerOnly' : 'workflowGrantsUnavailable')
+        return
+      }
+      const body = await r.json()
+      renderAgentGrants(body.grants || [])
+    } catch (err) {
+      if (dom.maGrantsList) dom.maGrantsList.innerHTML = ''
+      if (dom.maGrantsMsg) {
+        dom.maGrantsMsg.textContent = t.failedAlert(err.message || String(err))
+        dom.maGrantsMsg.classList.add('err')
+      }
+    }
+  }
+
+  function renderAgentGrants(rows) {
+    if (!dom.maGrantsList) return
+    if (rows.length === 0) {
+      dom.maGrantsList.innerHTML = ''
+      if (dom.maGrantsEmpty) dom.maGrantsEmpty.hidden = false
+      return
+    }
+    if (dom.maGrantsEmpty) dom.maGrantsEmpty.hidden = true
+    dom.maGrantsList.innerHTML = rows
+      .map((g) => {
+        const user = escapeHtml(g.userId)
+        const perm = escapeHtml(g.perm)
+        return `<div class="wf-grant-row">
+          <span class="wf-grant-user-id">${user}</span>
+          <span class="wf-grant-perm-tag wf-grant-perm-${perm}">${perm}</span>
+          <button type="button" class="ma-btn ma-btn-secondary ma-danger wf-grant-remove"
+                  data-act="remove-agent-grant" data-user="${user}"
+                  >${escapeHtml(t.workflowGrantsRemove)}</button>
+        </div>`
+      })
+      .join('')
+  }
+
+  // Wired to the 授权 button (data-act="add-agent-grant").
+  async function addAgentGrant() {
+    if (!grantsAgentId) return
+    const userId = dom.maGrantUser ? dom.maGrantUser.value.trim() : ''
+    const perm = dom.maGrantPerm ? dom.maGrantPerm.value : 'viewer'
+    if (dom.maGrantsMsg) {
+      dom.maGrantsMsg.textContent = ''
+      dom.maGrantsMsg.classList.remove('ok', 'err')
+    }
+    if (!userId) {
+      if (dom.maGrantsMsg) {
+        dom.maGrantsMsg.textContent = t.workflowGrantsNeedUser
+        dom.maGrantsMsg.classList.add('err')
+      }
+      return
+    }
+    try {
+      const r = await fetch(`/api/admin/agents/${encodeURIComponent(grantsAgentId)}/grants`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userId, perm }),
+      })
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        if (dom.maGrantsMsg) {
+          dom.maGrantsMsg.textContent = t.failedAlert(body.error || `${r.status}`)
+          dom.maGrantsMsg.classList.add('err')
+        }
+        return
+      }
+      const body = await r.json()
+      if (dom.maGrantUser) dom.maGrantUser.value = ''
+      renderAgentGrants(body.grants || [])
+    } catch (err) {
+      if (dom.maGrantsMsg) {
+        dom.maGrantsMsg.textContent = t.failedAlert(err.message || String(err))
+        dom.maGrantsMsg.classList.add('err')
+      }
+    }
+  }
+
+  // Wired to per-row 撤销 buttons (data-act="remove-agent-grant").
+  async function removeAgentGrant(userId) {
+    if (!grantsAgentId || !userId) return
+    try {
+      const r = await fetch(
+        `/api/admin/agents/${encodeURIComponent(grantsAgentId)}/grants/${encodeURIComponent(userId)}`,
+        { method: 'DELETE' },
+      )
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        if (dom.maGrantsMsg) {
+          dom.maGrantsMsg.textContent = t.failedAlert(body.error || `${r.status}`)
+          dom.maGrantsMsg.classList.add('err')
+        }
+        return
+      }
+      await fetchAgentGrants(grantsAgentId)
+    } catch (err) {
+      if (dom.maGrantsMsg) {
+        dom.maGrantsMsg.textContent = t.failedAlert(err.message || String(err))
+        dom.maGrantsMsg.classList.add('err')
+      }
+    }
+  }
+
   return {
     setDom,
     refreshManagedAgents,
@@ -697,5 +852,10 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     submitGithubImport,
     exportAgent,
     removeAgent,
+    openAccessModal,
+    closeAccessModal,
+    refreshAgentGrants,
+    addAgentGrant,
+    removeAgentGrant,
   }
 }

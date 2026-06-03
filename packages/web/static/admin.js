@@ -504,6 +504,7 @@
         const meta = managed ? `${kindBadge}<span class="ma-provider">${escapeHtml3(providerText)}${managed.model ? " · " + escapeHtml3(managed.model) : ""}</span>` : `${kindBadge}<span class="ma-external">${escapeHtml3(t3.externalAgent)}</span>`;
         const actions = managed ? `
         <button class="ma-action" data-act="edit-agent" data-id="${escapeHtml3(a.id)}">${escapeHtml3(t3.edit)}</button>
+        <button class="ma-action" data-act="manage-agent-access" data-id="${escapeHtml3(a.id)}">${escapeHtml3(t3.agentAccessManage)}</button>
         <button class="ma-action" data-act="export-agent" data-id="${escapeHtml3(a.id)}">${escapeHtml3(t3.export_)}</button>
         <button class="ma-action ma-danger" data-act="remove-agent" data-id="${escapeHtml3(a.id)}">${escapeHtml3(t3.remove)}</button>
       ` : "";
@@ -953,6 +954,135 @@
         alert(t3.failedAlert(err.message || String(err)));
       }
     }
+    let grantsAgentId = null;
+    function setAgentGrantsNotice(key) {
+      if (dom.maGrantsList) dom.maGrantsList.innerHTML = "";
+      if (dom.maGrantsEmpty) dom.maGrantsEmpty.hidden = true;
+      if (dom.maGrantsAdd) dom.maGrantsAdd.hidden = true;
+      if (dom.maGrantsMsg) {
+        dom.maGrantsMsg.textContent = t3[key] || "";
+        dom.maGrantsMsg.classList.remove("ok");
+        dom.maGrantsMsg.classList.add("err");
+      }
+    }
+    function openAccessModal(id) {
+      grantsAgentId = id;
+      if (dom.maAccessTarget) dom.maAccessTarget.textContent = id;
+      if (dom.maGrantsMsg) {
+        dom.maGrantsMsg.textContent = "";
+        dom.maGrantsMsg.classList.remove("ok", "err");
+      }
+      if (dom.maGrantsAdd) dom.maGrantsAdd.hidden = false;
+      if (dom.maGrantsEmpty) dom.maGrantsEmpty.hidden = true;
+      if (dom.maGrantsList) dom.maGrantsList.innerHTML = `<p class="hint">${escapeHtml3(t3.loading)}</p>`;
+      if (dom.maAccessModal) dom.maAccessModal.hidden = false;
+      void fetchAgentGrants(id);
+    }
+    function closeAccessModal() {
+      if (dom.maAccessModal) dom.maAccessModal.hidden = true;
+    }
+    async function refreshAgentGrants() {
+      if (grantsAgentId) await fetchAgentGrants(grantsAgentId);
+    }
+    async function fetchAgentGrants(id) {
+      try {
+        const r = await fetch(`/api/admin/agents/${encodeURIComponent(id)}/grants`);
+        if (!r.ok) {
+          setAgentGrantsNotice(r.status === 403 ? "agentGrantsOwnerOnly" : "workflowGrantsUnavailable");
+          return;
+        }
+        const body = await r.json();
+        renderAgentGrants(body.grants || []);
+      } catch (err) {
+        if (dom.maGrantsList) dom.maGrantsList.innerHTML = "";
+        if (dom.maGrantsMsg) {
+          dom.maGrantsMsg.textContent = t3.failedAlert(err.message || String(err));
+          dom.maGrantsMsg.classList.add("err");
+        }
+      }
+    }
+    function renderAgentGrants(rows) {
+      if (!dom.maGrantsList) return;
+      if (rows.length === 0) {
+        dom.maGrantsList.innerHTML = "";
+        if (dom.maGrantsEmpty) dom.maGrantsEmpty.hidden = false;
+        return;
+      }
+      if (dom.maGrantsEmpty) dom.maGrantsEmpty.hidden = true;
+      dom.maGrantsList.innerHTML = rows.map((g) => {
+        const user = escapeHtml3(g.userId);
+        const perm = escapeHtml3(g.perm);
+        return `<div class="wf-grant-row">
+          <span class="wf-grant-user-id">${user}</span>
+          <span class="wf-grant-perm-tag wf-grant-perm-${perm}">${perm}</span>
+          <button type="button" class="ma-btn ma-btn-secondary ma-danger wf-grant-remove"
+                  data-act="remove-agent-grant" data-user="${user}"
+                  >${escapeHtml3(t3.workflowGrantsRemove)}</button>
+        </div>`;
+      }).join("");
+    }
+    async function addAgentGrant() {
+      if (!grantsAgentId) return;
+      const userId = dom.maGrantUser ? dom.maGrantUser.value.trim() : "";
+      const perm = dom.maGrantPerm ? dom.maGrantPerm.value : "viewer";
+      if (dom.maGrantsMsg) {
+        dom.maGrantsMsg.textContent = "";
+        dom.maGrantsMsg.classList.remove("ok", "err");
+      }
+      if (!userId) {
+        if (dom.maGrantsMsg) {
+          dom.maGrantsMsg.textContent = t3.workflowGrantsNeedUser;
+          dom.maGrantsMsg.classList.add("err");
+        }
+        return;
+      }
+      try {
+        const r = await fetch(`/api/admin/agents/${encodeURIComponent(grantsAgentId)}/grants`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ userId, perm })
+        });
+        if (!r.ok) {
+          const body2 = await r.json().catch(() => ({}));
+          if (dom.maGrantsMsg) {
+            dom.maGrantsMsg.textContent = t3.failedAlert(body2.error || `${r.status}`);
+            dom.maGrantsMsg.classList.add("err");
+          }
+          return;
+        }
+        const body = await r.json();
+        if (dom.maGrantUser) dom.maGrantUser.value = "";
+        renderAgentGrants(body.grants || []);
+      } catch (err) {
+        if (dom.maGrantsMsg) {
+          dom.maGrantsMsg.textContent = t3.failedAlert(err.message || String(err));
+          dom.maGrantsMsg.classList.add("err");
+        }
+      }
+    }
+    async function removeAgentGrant(userId) {
+      if (!grantsAgentId || !userId) return;
+      try {
+        const r = await fetch(
+          `/api/admin/agents/${encodeURIComponent(grantsAgentId)}/grants/${encodeURIComponent(userId)}`,
+          { method: "DELETE" }
+        );
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          if (dom.maGrantsMsg) {
+            dom.maGrantsMsg.textContent = t3.failedAlert(body.error || `${r.status}`);
+            dom.maGrantsMsg.classList.add("err");
+          }
+          return;
+        }
+        await fetchAgentGrants(grantsAgentId);
+      } catch (err) {
+        if (dom.maGrantsMsg) {
+          dom.maGrantsMsg.textContent = t3.failedAlert(err.message || String(err));
+          dom.maGrantsMsg.classList.add("err");
+        }
+      }
+    }
     return {
       setDom,
       refreshManagedAgents,
@@ -973,7 +1103,12 @@
       closeGithubImportModal,
       submitGithubImport,
       exportAgent,
-      removeAgent
+      removeAgent,
+      openAccessModal,
+      closeAccessModal,
+      refreshAgentGrants,
+      addAgentGrant,
+      removeAgentGrant
     };
   }
 
@@ -1759,6 +1894,15 @@
         maImportText: $("ma-import-text"),
         maImportSubmit: $("ma-import-submit"),
         maImportMsg: $("ma-import-msg"),
+        // v5 E4-M2 — agent access-control (resource RBAC grants) modal.
+        maAccessModal: $("ma-access-modal"),
+        maAccessTarget: $("ma-access-target"),
+        maGrantsList: $("ma-grants-list"),
+        maGrantsEmpty: $("ma-grants-empty"),
+        maGrantsAdd: $("ma-grants-add"),
+        maGrantUser: $("ma-grant-user"),
+        maGrantPerm: $("ma-grant-perm"),
+        maGrantsMsg: $("ma-grants-msg"),
         maGhImportBtn: $("ma-gh-import-btn"),
         maGhImportModal: $("ma-gh-import-modal"),
         maGhUrl: $("ma-gh-url"),
@@ -3129,6 +3273,7 @@
           if (!dom.maImportModal.hidden) managedAgents.closeImportModal();
           if (dom.maGhImportModal && !dom.maGhImportModal.hidden) managedAgents.closeGithubImportModal();
           if (!dom.maKeysModal.hidden) managedAgents.closeKeysModal();
+          if (dom.maAccessModal && !dom.maAccessModal.hidden) managedAgents.closeAccessModal();
           if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal();
           if (dom.wfAssistModal && !dom.wfAssistModal.hidden) closeWorkflowAssistModal();
           if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal();
@@ -3150,6 +3295,19 @@
           }
           return;
         }
+        if (act === "refresh-agent-grants") {
+          managedAgents.refreshAgentGrants();
+          return;
+        }
+        if (act === "add-agent-grant") {
+          managedAgents.addAgentGrant();
+          return;
+        }
+        if (act === "remove-agent-grant") {
+          const userId = target.dataset.user;
+          if (userId) managedAgents.removeAgentGrant(userId);
+          return;
+        }
         const id = target.dataset.id;
         if (!act || !id) return;
         if (act === "edit-agent") {
@@ -3157,6 +3315,8 @@
           if (a) managedAgents.openAgentForm("edit", a);
         } else if (act === "export-agent") {
           managedAgents.exportAgent(id);
+        } else if (act === "manage-agent-access") {
+          managedAgents.openAccessModal(id);
         } else if (act === "remove-agent") {
           managedAgents.removeAgent(id);
         } else if (act === "remove-workflow") {
@@ -3206,6 +3366,7 @@
         if (!dom.maImportModal.hidden) managedAgents.closeImportModal();
         if (dom.maGhImportModal && !dom.maGhImportModal.hidden) managedAgents.closeGithubImportModal();
         if (!dom.maKeysModal.hidden) managedAgents.closeKeysModal();
+        if (dom.maAccessModal && !dom.maAccessModal.hidden) managedAgents.closeAccessModal();
         if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal();
         if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal();
         if (dom.wfRevModal && !dom.wfRevModal.hidden) workflows.closeWorkflowRevisionsModal();

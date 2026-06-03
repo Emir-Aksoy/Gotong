@@ -300,6 +300,12 @@
       workflowGrantsOwnerOnly: '需要 owner 权限管理此工作流的访问控制。',
       workflowGrantsUnavailable: '此 host 未启用资源级权限。',
       workflowGrantsNeedUser: '请填写用户 ID。',
+      // v5 E4-M2 — agent access control (reuses the generic workflowGrants*
+      // labels; only the manage button / modal title / owner-only notice need
+      // agent-specific wording).
+      agentAccessManage: '管理访问',
+      agentAccessTitle: 'Agent 访问控制',
+      agentGrantsOwnerOnly: '需要 owner 权限管理此 agent 的访问控制。',
       loading: '加载中…',
       doImport: '导入',
       editAgent: '编辑本地 agent',
@@ -687,6 +693,10 @@
       workflowGrantsOwnerOnly: 'Owner role required to manage this workflow’s access control.',
       workflowGrantsUnavailable: 'Resource-level permissions are not enabled on this host.',
       workflowGrantsNeedUser: 'Enter a user ID.',
+      // v5 E4-M2 — agent access control.
+      agentAccessManage: 'Manage access',
+      agentAccessTitle: 'Agent access control',
+      agentGrantsOwnerOnly: 'Owner role required to manage this agent’s access control.',
       loading: 'Loading…',
       doImport: 'Import',
       editAgent: 'Edit local agent',

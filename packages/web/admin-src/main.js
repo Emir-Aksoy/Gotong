@@ -187,6 +187,15 @@ import { createWorkflows } from './workflows.js'
       maImportText: $('ma-import-text'),
       maImportSubmit: $('ma-import-submit'),
       maImportMsg: $('ma-import-msg'),
+      // v5 E4-M2 — agent access-control (resource RBAC grants) modal.
+      maAccessModal: $('ma-access-modal'),
+      maAccessTarget: $('ma-access-target'),
+      maGrantsList: $('ma-grants-list'),
+      maGrantsEmpty: $('ma-grants-empty'),
+      maGrantsAdd: $('ma-grants-add'),
+      maGrantUser: $('ma-grant-user'),
+      maGrantPerm: $('ma-grant-perm'),
+      maGrantsMsg: $('ma-grants-msg'),
       maGhImportBtn: $('ma-gh-import-btn'),
       maGhImportModal: $('ma-gh-import-modal'),
       maGhUrl: $('ma-gh-url'),
@@ -2082,6 +2091,7 @@ import { createWorkflows } from './workflows.js'
         if (!dom.maImportModal.hidden) managedAgents.closeImportModal()
         if (dom.maGhImportModal && !dom.maGhImportModal.hidden) managedAgents.closeGithubImportModal()
         if (!dom.maKeysModal.hidden) managedAgents.closeKeysModal()
+        if (dom.maAccessModal && !dom.maAccessModal.hidden) managedAgents.closeAccessModal()
         if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal()
         if (dom.wfAssistModal && !dom.wfAssistModal.hidden) closeWorkflowAssistModal()
         if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal()
@@ -2105,6 +2115,16 @@ import { createWorkflows } from './workflows.js'
         }
         return
       }
+      // v5 E4-M2 — agent access-control grant mutations carry no data-id
+      // (refresh/add use the modal's held agent id; remove rides data-user),
+      // so handle them before the `!id` guard below that drops id-less acts.
+      if (act === 'refresh-agent-grants') { managedAgents.refreshAgentGrants(); return }
+      if (act === 'add-agent-grant') { managedAgents.addAgentGrant(); return }
+      if (act === 'remove-agent-grant') {
+        const userId = target.dataset.user
+        if (userId) managedAgents.removeAgentGrant(userId)
+        return
+      }
       const id = target.dataset.id
       if (!act || !id) return
       if (act === 'edit-agent') {
@@ -2112,6 +2132,8 @@ import { createWorkflows } from './workflows.js'
         if (a) managedAgents.openAgentForm('edit', a)
       } else if (act === 'export-agent') {
         managedAgents.exportAgent(id)
+      } else if (act === 'manage-agent-access') {
+        managedAgents.openAccessModal(id)
       } else if (act === 'remove-agent') {
         managedAgents.removeAgent(id)
       } else if (act === 'remove-workflow') {
@@ -2165,6 +2187,7 @@ import { createWorkflows } from './workflows.js'
       if (!dom.maImportModal.hidden) managedAgents.closeImportModal()
       if (dom.maGhImportModal && !dom.maGhImportModal.hidden) managedAgents.closeGithubImportModal()
       if (!dom.maKeysModal.hidden) managedAgents.closeKeysModal()
+      if (dom.maAccessModal && !dom.maAccessModal.hidden) managedAgents.closeAccessModal()
       if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal()
       if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal()
       if (dom.wfRevModal && !dom.wfRevModal.hidden) workflows.closeWorkflowRevisionsModal()

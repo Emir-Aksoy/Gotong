@@ -882,6 +882,43 @@
         </div>
       </div>
 
+      <!-- v5 E4-M2 — agent access control (resource RBAC grants). Mirrors the
+           workflow grants panel: owner-gated, a non-owner admin sees a notice
+           instead of the list/form; operators (org owner / v3 admin) manage by
+           bypass. Reuses the generic wf-grant-* styling. -->
+      <div id="ma-access-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card" role="dialog" aria-modal="true">
+          <header class="modal-head">
+            <h3><span data-i18n="agentAccessTitle">Agent 访问控制</span> · <code id="ma-access-target"></code></h3>
+            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+          </header>
+          <div class="dispatch-form">
+            <div class="wf-grants-head">
+              <strong data-i18n="workflowGrantsTitle">访问控制</strong>
+              <button type="button" class="ma-btn ma-btn-secondary"
+                      data-act="refresh-agent-grants"
+                      data-i18n="workflowGrantsRefresh">刷新</button>
+            </div>
+            <div id="ma-grants-list"></div>
+            <p id="ma-grants-empty" class="hint" hidden data-i18n="workflowGrantsEmpty">还没有授权（仅 owner / 管理员可访问）。</p>
+            <div id="ma-grants-add" class="wf-grants-add">
+              <input id="ma-grant-user" type="text" class="wf-grant-user"
+                     data-i18n-placeholder="workflowGrantsUserPh" placeholder="用户 ID" />
+              <select id="ma-grant-perm" class="wf-grant-perm" aria-label="perm">
+                <option value="viewer">viewer</option>
+                <option value="editor">editor</option>
+                <option value="owner">owner</option>
+              </select>
+              <button type="button" class="ma-btn ma-btn-primary"
+                      data-act="add-agent-grant"
+                      data-i18n="workflowGrantsAdd">授权</button>
+            </div>
+            <p id="ma-grants-msg" class="form-msg"></p>
+          </div>
+        </div>
+      </div>
+
       <section id="leaderboard-section" class="leaderboard-section" data-tab="overview">
         <h2>
           <span data-i18n="leaderboardTitle">贡献榜</span>
