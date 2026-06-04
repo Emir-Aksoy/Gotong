@@ -89,6 +89,11 @@ export type {
   PeerSummarySnapshot,
   AppendPeerSummarySnapshotInput,
   PeerSummarySnapshotQuery,
+  // v5 Stream F — control-plane alert rules
+  PeerSummaryAlertRule,
+  PeerSummaryAlertComparator,
+  AddPeerSummaryAlertRuleInput,
+  UpdatePeerSummaryAlertRuleInput,
   // Phase 11 M2 — Suspended tasks (long-running agent park/resume)
   SuspendedTask,
   PersistSuspendedTaskInput,

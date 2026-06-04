@@ -57,6 +57,11 @@ export type IdentityErrorCode =
   //   `a2a_agent_not_found`  get/update/remove targeted an id with no row.
   | 'a2a_agent_exists'
   | 'a2a_agent_not_found'
+  // v5 Stream F — control-plane alert rules (peer.summary thresholds).
+  //   `alert_rule_exists`     addPeerSummaryAlertRule reused an explicit id (PK).
+  //   `alert_rule_not_found`  get/update/remove targeted an id with no row.
+  | 'alert_rule_exists'
+  | 'alert_rule_not_found'
   | 'session_expired'
   | 'session_not_found'
   | 'weak_password'

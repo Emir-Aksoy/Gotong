@@ -877,6 +877,38 @@ const MIGRATIONS: Migration[] = [
         ON peer_summary_snapshots(source, captured_at);
     `,
   },
+  {
+    // v5 Stream F — control-plane alert rules. A rule says "breach when this
+    // source's metric crosses this threshold" and is evaluated LIVE against the
+    // current summaries (no breach history in the MVP). Like the snapshots
+    // above, identity stays domain-agnostic about WHICH metrics exist — `metric`
+    // and `source` are opaque strings the host interprets. Only the generic
+    // structural bits (comparator enum, numeric threshold) are validated at the
+    // storage boundary.
+    //
+    //   source      'local' | a peer id | '*' (any source).
+    //   metric      a PeerSummary metric key (e.g. health.suspendedTasks).
+    //   comparator  gt | gte | lt | lte.
+    //   threshold   the boundary value (REAL — counts are integers but a rule
+    //               may target a fractional bound).
+    version: 25,
+    name: 'peer-summary-alert-rules',
+    sql: `
+      CREATE TABLE IF NOT EXISTS peer_summary_alert_rules (
+        id          TEXT PRIMARY KEY,
+        source      TEXT NOT NULL,
+        metric      TEXT NOT NULL,
+        comparator  TEXT NOT NULL,
+        threshold   REAL NOT NULL,
+        label       TEXT,
+        enabled     INTEGER NOT NULL DEFAULT 1,
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_psar_source_metric
+        ON peer_summary_alert_rules(source, metric);
+    `,
+  },
 ]
 
 /**

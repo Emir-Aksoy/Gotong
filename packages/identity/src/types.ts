@@ -1061,6 +1061,63 @@ export interface PeerSummarySnapshotQuery {
 export const PEER_SUMMARY_SNAPSHOT_DEFAULT_LIMIT = 500
 export const PEER_SUMMARY_SNAPSHOT_MAX_LIMIT = 10_000
 
+/**
+ * v5 Stream F — a control-plane alert rule: "breach when this source's metric
+ * crosses this threshold". Evaluated LIVE against the current summaries (no
+ * breach history persisted in the MVP). Identity stays domain-agnostic about
+ * WHICH metrics exist — `metric` / `source` are opaque strings the host
+ * interprets; only the generic structural bits (comparator, threshold) are
+ * validated at the storage boundary.
+ */
+export type PeerSummaryAlertComparator = 'gt' | 'gte' | 'lt' | 'lte'
+
+/** The closed set of comparators, for input validation. */
+export const PEER_SUMMARY_ALERT_COMPARATORS: PeerSummaryAlertComparator[] = [
+  'gt',
+  'gte',
+  'lt',
+  'lte',
+]
+
+export interface PeerSummaryAlertRule {
+  /** Stable id (`asr_<hex>`), generated when not supplied. */
+  id: string
+  /** `'local'` | a peer id | `'*'` (matches any source). */
+  source: string
+  /** A PeerSummary metric key (host-validated), e.g. `health.suspendedTasks`. */
+  metric: string
+  comparator: PeerSummaryAlertComparator
+  /** The boundary value the metric is compared against. */
+  threshold: number
+  /** Optional human label; null when absent. */
+  label: string | null
+  /** Disabled rules persist but are skipped by the evaluator. */
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/** Create shape. `id` is generated when absent; `enabled` defaults to true. */
+export interface AddPeerSummaryAlertRuleInput {
+  id?: string
+  source: string
+  metric: string
+  comparator: PeerSummaryAlertComparator
+  threshold: number
+  label?: string | null
+  enabled?: boolean
+}
+
+/** Targeted update — undefined = keep. `id` is immutable. */
+export interface UpdatePeerSummaryAlertRuleInput {
+  source?: string
+  metric?: string
+  comparator?: PeerSummaryAlertComparator
+  threshold?: number
+  label?: string | null
+  enabled?: boolean
+}
+
 // ---------------------------------------------------------------------------
 // D1 (v4 Phase 5) — Peer Registry
 // ---------------------------------------------------------------------------
