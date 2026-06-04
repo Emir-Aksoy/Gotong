@@ -1,6 +1,6 @@
 /**
- * v5 Stream E5-M4 — cross-hub control plane ("控制面") browse + refresh
- * (tab "联邦" in app.html, panel #peer-summary-panel).
+ * v5 Stream E5-M4 + F-M6 — cross-hub control plane ("控制面") browse + refresh +
+ * TRENDS + ALERTS (tab "联邦" in app.html, panel #peer-summary-panel).
  *
  * The aggregate view: this hub's own privacy-safe footprint joined with each
  * connected peer's VOLUNTARILY-SHARED summary (the `peer.summary` rpc, E5-M2).
@@ -9,18 +9,56 @@
  * `shareSummary`, fail-closed); otherwise its row carries an honest reason
  * ("未共享" / 离线) instead of fabricated zeros.
  *
- * North-Star honest: a control plane OBSERVES, it never OWNS. We aggregate what
- * sovereign peers choose to disclose — nothing is pulled without the remote
- * hub's opt-in gate letting it through.
+ * Stream F layers two day-2 features on top, both reading the same counts-only
+ * data the live aggregate shows:
+ *   - 趋势 (F-M2/M3): a per-source per-metric sparkline read from persisted
+ *     snapshots (GET /api/admin/peer-summaries/history). Each "刷新" captures one
+ *     data point; the local footprint is always captured, a peer only when its
+ *     summary fetch succeeds.
+ *   - 告警 (F-M4/M5): threshold rules (CRUD over /peer-summary-alerts/rules)
+ *     evaluated LIVE against the current summaries — a breach is a fact about NOW,
+ *     recomputed each load, no breach history kept.
  *
- * Read + refresh only. Same activation/CSS as peer-manifest-ui.js (reuses the
- * pf-* classes), so this panel needs no new stylesheet.
+ * North-Star honest: a control plane OBSERVES, it never OWNS. We aggregate +
+ * trend + alert on what sovereign peers choose to disclose — nothing is pulled
+ * without the remote hub's opt-in gate letting it through.
+ *
+ * Self-contained module; same activation pattern as peer-manifest-ui.js. The
+ * metric labels mirror the host registry (peer-summary-metrics.ts) — keep them
+ * in sync if the host adds a scalar metric, same convention as the summary-field
+ * accessors below.
  */
 ;(function () {
   'use strict'
 
   const LIST_API = '/api/admin/peer-summaries'
   const REFRESH_API = '/api/admin/peer-summaries/refresh'
+  const HISTORY_API = '/api/admin/peer-summaries/history'
+  const ALERTS_API = '/api/admin/peer-summary-alerts'
+  const RULES_API = '/api/admin/peer-summary-alerts/rules'
+
+  // JS mirror of the host metric registry (PEER_SUMMARY_METRIC_KEYS). The host
+  // is the authority — these are only the labels + the dropdown order; the
+  // route validates the metric. Cost is the one metric rendered as µ$.
+  const METRIC_LABELS = {
+    'assets.agents': 'Agents 数',
+    'assets.workflows': '工作流数',
+    'assets.publishedWorkflows': '已发布工作流',
+    'assets.peers': 'Peer 数',
+    'runs.total': '运行总数',
+    'llm.calls': 'LLM 调用数',
+    'llm.tokens': 'LLM tokens',
+    'llm.costMicros': 'LLM 成本 (µ$)',
+    'health.suspendedTasks': '挂起任务',
+  }
+  const METRIC_KEYS = Object.keys(METRIC_LABELS)
+  const COST_METRIC = 'llm.costMicros'
+  const CMP_SYMBOL = { gt: '>', gte: '≥', lt: '<', lte: '≤' }
+
+  // Sources for the trend / rule dropdowns — derived from the last list() load
+  // (local first, then each configured peer). Keyed exactly as the host keys
+  // snapshots + alert sources: 'local' | peerId (the '*' wildcard is rule-only).
+  let sourceList = []
 
   function $(sel, root) {
     return (root || document).querySelector(sel)
@@ -50,6 +88,10 @@
   function num(n) {
     return Number(n) || 0
   }
+  // A metric value formatted per its kind (cost → µ$, everything else integer).
+  function fmtMetric(metric, value) {
+    return metric === COST_METRIC ? fmtCost(value) : String(num(value))
+  }
 
   function setStatus(root, msg, kind) {
     const el = $('#ps-status', root)
@@ -71,6 +113,17 @@
     }
     if (row.online) return { cls: 'pf-stale', label: '在线·无摘要' }
     return { cls: 'pf-unknown', label: '离线·未知' }
+  }
+
+  // A source key → human label (for breaches + rule rows + dropdowns).
+  function sourceLabelOf(src) {
+    if (src === '*') return '任意来源'
+    if (src === 'local') return '本 hub'
+    const found = sourceList.filter(function (s) { return s.value === src })[0]
+    return found ? found.label : src
+  }
+  function metricLabelOf(metric) {
+    return METRIC_LABELS[metric] || metric
   }
 
   // ---- counts cells (shared by the local footprint + each peer) ----------
@@ -140,7 +193,46 @@
     )
   }
 
-  // ---- render -----------------------------------------------------------
+  async function apiHistory(source, metric) {
+    const url =
+      HISTORY_API + '?source=' + encodeURIComponent(source) + '&metric=' + encodeURIComponent(metric)
+    return readBody(await fetch(url))
+  }
+  async function apiAlerts() {
+    return readBody(await fetch(ALERTS_API))
+  }
+  async function apiAddRule(body) {
+    return readBody(
+      await fetch(RULES_API, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    )
+  }
+  async function apiPatchRule(id, body) {
+    return readBody(
+      await fetch(RULES_API + '/' + encodeURIComponent(id), {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    )
+  }
+  async function apiDeleteRule(id) {
+    return readBody(await fetch(RULES_API + '/' + encodeURIComponent(id), { method: 'DELETE' }))
+  }
+
+  // ---- render: shell ----------------------------------------------------
+
+  function cmpOptions() {
+    return (
+      '<option value="gt">大于 (&gt;)</option>' +
+      '<option value="gte">大于等于 (≥)</option>' +
+      '<option value="lt">小于 (&lt;)</option>' +
+      '<option value="lte">小于等于 (≤)</option>'
+    )
+  }
 
   function buildUi(root) {
     root.innerHTML =
@@ -160,12 +252,84 @@
       '    </tr></thead>' +
       '    <tbody id="ps-rows"><tr><td colspan="8" class="pf-empty">加载中...</td></tr></tbody>' +
       '  </table>' +
+      '</section>' +
+      // --- 告警 (F-M5): live breaches evaluated against the current summaries ---
+      '<section class="ps-section ps-alerts">' +
+      '  <h3>告警</h3>' +
+      '  <p class="pf-meta">规则对<strong>当前</strong>摘要实时求值,不保存历史触发记录 —— 触发是「此刻」的事实。' +
+      '来源可选「本 hub」「某 peer」或「任意来源 (*)」。</p>' +
+      '  <div id="ps-alerts-body"><span class="ps-spark-empty">加载中...</span></div>' +
+      '</section>' +
+      // --- 趋势 (F-M3): per-source per-metric sparkline from persisted snapshots ---
+      '<section class="ps-section ps-trend">' +
+      '  <h3>趋势</h3>' +
+      '  <div class="ps-controls">' +
+      '    <label>来源 <select id="ps-trend-source"></select></label>' +
+      '    <label>指标 <select id="ps-trend-metric"></select></label>' +
+      '  </div>' +
+      '  <div id="ps-trend-chart" class="ps-chart"><span class="ps-spark-empty">选择来源与指标</span></div>' +
+      '  <p class="pf-meta">趋势读自持久化的<strong>计数快照</strong> —— 每次「刷新」采集一个数据点' +
+      '(本 hub 总会采,peer 仅在成功拉取摘要时采)。</p>' +
+      '</section>' +
+      // --- 告警规则 (F-M5): CRUD over the rule store ---
+      '<section class="ps-section ps-rules">' +
+      '  <h3>告警规则</h3>' +
+      '  <form id="ps-rule-form" class="ps-rule-form" autocomplete="off">' +
+      '    <label>来源 <select id="ps-rule-source"></select></label>' +
+      '    <label>指标 <select id="ps-rule-metric"></select></label>' +
+      '    <label>比较 <select id="ps-rule-cmp">' + cmpOptions() + '</select></label>' +
+      '    <label>阈值 <input id="ps-rule-threshold" type="number" step="any" required /></label>' +
+      '    <label>标签 (可选) <input id="ps-rule-label" type="text" placeholder="如: 挂起过多" /></label>' +
+      '    <button type="submit">添加规则</button>' +
+      '  </form>' +
+      '  <table class="pf-table">' +
+      '    <thead><tr>' +
+      '      <th>来源</th><th>指标</th><th>条件</th><th>标签</th><th>状态</th><th>操作</th>' +
+      '    </tr></thead>' +
+      '    <tbody id="ps-rules-rows"><tr><td colspan="6" class="pf-empty">加载中...</td></tr></tbody>' +
+      '  </table>' +
       '</section>'
 
     $('#ps-refresh-all', root).addEventListener('click', function () {
       doRefresh(root, undefined).catch(function () { /* setStatus handled it */ })
     })
+    $('#ps-trend-source', root).addEventListener('change', function () {
+      loadTrend(root).catch(function () { /* chart shows the error */ })
+    })
+    $('#ps-trend-metric', root).addEventListener('change', function () {
+      loadTrend(root).catch(function () { /* chart shows the error */ })
+    })
+    $('#ps-rule-form', root).addEventListener('submit', function (e) {
+      e.preventDefault()
+      onAddRule(root).catch(function () { /* setStatus handled it */ })
+    })
   }
+
+  // Fill a <select> from [{value,label}], preserving the current selection if it
+  // still exists (so a refresh doesn't reset the user's chosen source/metric).
+  function fillSelect(sel, options) {
+    if (!sel) return
+    const prev = sel.value
+    const hasPrev = options.some(function (o) { return o.value === prev })
+    sel.innerHTML = options
+      .map(function (o) {
+        const selected = o.value === prev && hasPrev ? ' selected' : ''
+        return '<option value="' + escHtml(o.value) + '"' + selected + '>' + escHtml(o.label) + '</option>'
+      })
+      .join('')
+  }
+  function metricOpt(k) {
+    return { value: k, label: METRIC_LABELS[k] + ' (' + k + ')' }
+  }
+  function populateControls(root) {
+    const metricOpts = METRIC_KEYS.map(metricOpt)
+    fillSelect($('#ps-trend-source', root), sourceList)
+    fillSelect($('#ps-trend-metric', root), metricOpts)
+    fillSelect($('#ps-rule-source', root), [{ value: '*', label: '任意来源 (*)' }].concat(sourceList))
+    fillSelect($('#ps-rule-metric', root), metricOpts)
+  }
+
+  // ---- render: summary table (E5-M4) ------------------------------------
 
   function dataCells(s) {
     return (
@@ -174,6 +338,18 @@
       '<td class="pf-caps">' + llmText(s) + '</td>' +
       '<td class="pf-caps">' + healthText(s) + '</td>'
     )
+  }
+
+  // Derive the trend/rule source list from a list() payload (local + peers).
+  function deriveSources(data) {
+    const local = data.local || null
+    const out = [
+      { value: 'local', label: '本 hub' + (local && local.hubId ? ' (' + local.hubId + ')' : '') },
+    ]
+    for (const row of data.peers || []) {
+      out.push({ value: row.peer, label: row.label ? row.label + ' (' + row.peer + ')' : row.peer })
+    }
+    return out
   }
 
   function renderRows(root, data) {
@@ -239,17 +415,238 @@
     }
   }
 
+  // ---- render: trend sparkline (F-M6) -----------------------------------
+
+  // A minimal inline-SVG sparkline. One point → just a dot (a polyline of one
+  // vertex draws nothing). A flat series → a mid-height line (span guarded to 1).
+  function sparklineSvg(points) {
+    const w = 360
+    const h = 48
+    const pad = 4
+    const n = points.length
+    const vals = points.map(function (p) { return p.value })
+    const min = Math.min.apply(null, vals)
+    const max = Math.max.apply(null, vals)
+    const span = max - min || 1
+    function px(i) {
+      return n === 1 ? w / 2 : pad + (i * (w - 2 * pad)) / (n - 1)
+    }
+    function py(v) {
+      return h - pad - ((v - min) * (h - 2 * pad)) / span
+    }
+    const pts = points
+      .map(function (p, i) { return px(i).toFixed(1) + ',' + py(p.value).toFixed(1) })
+      .join(' ')
+    const lastX = px(n - 1).toFixed(1)
+    const lastY = py(points[n - 1].value).toFixed(1)
+    return (
+      '<svg class="ps-spark" viewBox="0 0 ' + w + ' ' + h + '" width="' + w + '" height="' + h + '" ' +
+      'preserveAspectRatio="none" role="img">' +
+      '<polyline points="' + pts + '" fill="none" stroke="#1a6a3a" stroke-width="1.5" ' +
+      'stroke-linejoin="round" stroke-linecap="round" />' +
+      '<circle cx="' + lastX + '" cy="' + lastY + '" r="2.5" fill="#1a6a3a" />' +
+      '</svg>'
+    )
+  }
+
+  function renderTrend(chart, points, metric) {
+    if (!points.length) {
+      chart.innerHTML =
+        '<span class="ps-spark-empty">暂无快照 —— 「刷新全部」以采集首个数据点</span>'
+      return
+    }
+    const vals = points.map(function (p) { return p.value })
+    const min = Math.min.apply(null, vals)
+    const max = Math.max.apply(null, vals)
+    const first = points[0]
+    const last = points[points.length - 1]
+    chart.innerHTML =
+      sparklineSvg(points) +
+      '<div class="ps-trend-meta">' +
+      points.length + ' 个数据点 · ' +
+      escHtml(fmtTime(first.capturedAt)) + ' → ' + escHtml(fmtTime(last.capturedAt)) +
+      ' · 最新 ' + escHtml(fmtMetric(metric, last.value)) +
+      ' · 最小 ' + escHtml(fmtMetric(metric, min)) +
+      ' · 最大 ' + escHtml(fmtMetric(metric, max)) +
+      '</div>'
+  }
+
+  async function loadTrend(root) {
+    const srcSel = $('#ps-trend-source', root)
+    const metSel = $('#ps-trend-metric', root)
+    const chart = $('#ps-trend-chart', root)
+    if (!srcSel || !metSel || !chart) return
+    const source = srcSel.value
+    const metric = metSel.value
+    if (!source || !metric) {
+      chart.innerHTML = '<span class="ps-spark-empty">选择来源与指标</span>'
+      return
+    }
+    chart.innerHTML = '<span class="ps-spark-empty">加载趋势...</span>'
+    try {
+      const data = await apiHistory(source, metric)
+      renderTrend(chart, data.points || [], metric)
+    } catch (err) {
+      if (err.status === 503) {
+        chart.innerHTML = '<span class="ps-spark-empty">host 未启用 peer 联邦</span>'
+        return
+      }
+      chart.innerHTML =
+        '<span class="ps-spark-empty">趋势加载失败: ' + escHtml(err.message || String(err)) + '</span>'
+    }
+  }
+
+  // ---- render: alerts + rules (F-M6) ------------------------------------
+
+  function renderAlerts(root, breaches) {
+    const box = $('#ps-alerts-body', root)
+    if (!box) return
+    if (!breaches.length) {
+      box.innerHTML = '<span class="ps-ok">✓ 当前没有触发的告警</span>'
+      return
+    }
+    box.innerHTML =
+      '<div class="ps-breaches">' +
+      breaches
+        .map(function (b) {
+          const name = b.label ? escHtml(b.label) : escHtml(metricLabelOf(b.metric))
+          const sym = CMP_SYMBOL[b.comparator] || escHtml(b.comparator)
+          return (
+            '<span class="ps-breach">⚠ ' + name + ' — ' +
+            escHtml(sourceLabelOf(b.source)) + ': ' +
+            escHtml(fmtMetric(b.metric, b.value)) + ' ' + sym + ' ' +
+            escHtml(fmtMetric(b.metric, b.threshold)) +
+            ' <code class="pf-id">' + escHtml(b.metric) + '</code></span>'
+          )
+        })
+        .join('') +
+      '</div>'
+  }
+
+  function renderRules(root, rules) {
+    const tbody = $('#ps-rules-rows', root)
+    if (!tbody) return
+    if (!rules.length) {
+      tbody.innerHTML =
+        '<tr><td colspan="6" class="pf-empty">还没有告警规则。用上面的表单添加一条。</td></tr>'
+      return
+    }
+    tbody.innerHTML = ''
+    for (const r of rules) {
+      const sym = CMP_SYMBOL[r.comparator] || r.comparator
+      const tr = document.createElement('tr')
+      tr.innerHTML =
+        '<td>' + escHtml(sourceLabelOf(r.source)) + '</td>' +
+        '<td class="pf-caps">' + escHtml(metricLabelOf(r.metric)) +
+        ' <code class="pf-id">' + escHtml(r.metric) + '</code></td>' +
+        '<td>' + escHtml(sym) + ' ' + escHtml(fmtMetric(r.metric, r.threshold)) + '</td>' +
+        '<td>' + (r.label ? escHtml(r.label) : '—') + '</td>' +
+        '<td><span class="pf-badge ' + (r.enabled ? 'pf-online' : 'pf-unknown') + '">' +
+        (r.enabled ? '启用' : '停用') + '</span></td>' +
+        '<td class="ps-rule-actions">' +
+        '  <button type="button" class="ps-rule-toggle">' + (r.enabled ? '停用' : '启用') + '</button>' +
+        '  <button type="button" class="ps-rule-remove">删除</button>' +
+        '</td>'
+      tr.querySelector('.ps-rule-toggle').addEventListener('click', function () {
+        doRulePatch(root, r.id, { enabled: !r.enabled })
+      })
+      tr.querySelector('.ps-rule-remove').addEventListener('click', function () {
+        if (!window.confirm('删除该告警规则?')) return
+        doRuleRemove(root, r.id)
+      })
+      tbody.appendChild(tr)
+    }
+  }
+
+  async function loadAlertsAndRules(root) {
+    try {
+      const data = await apiAlerts()
+      renderAlerts(root, data.alerts || [])
+      renderRules(root, data.rules || [])
+    } catch (err) {
+      const box = $('#ps-alerts-body', root)
+      const rows = $('#ps-rules-rows', root)
+      const msg =
+        err.status === 503 ? 'host 未启用 peer 联邦' : '加载失败: ' + (err.message || String(err))
+      if (box) box.innerHTML = '<span class="ps-spark-empty">' + escHtml(msg) + '</span>'
+      if (rows) rows.innerHTML = '<tr><td colspan="6" class="pf-empty">' + escHtml(msg) + '</td></tr>'
+    }
+  }
+
+  // ---- mutations: rules -------------------------------------------------
+
+  async function onAddRule(root) {
+    const source = $('#ps-rule-source', root).value
+    const metric = $('#ps-rule-metric', root).value
+    const comparator = $('#ps-rule-cmp', root).value
+    const thresholdRaw = $('#ps-rule-threshold', root).value.trim()
+    const label = $('#ps-rule-label', root).value.trim()
+    if (!source || !metric) {
+      setStatus(root, '来源 / 指标必填', 'error')
+      return
+    }
+    const threshold = Number(thresholdRaw)
+    if (thresholdRaw === '' || !Number.isFinite(threshold)) {
+      setStatus(root, '阈值必须是数字', 'error')
+      return
+    }
+    const body = { source: source, metric: metric, comparator: comparator, threshold: threshold }
+    if (label) body.label = label
+    setStatus(root, '添加规则...', 'loading')
+    try {
+      await apiAddRule(body)
+      $('#ps-rule-threshold', root).value = ''
+      $('#ps-rule-label', root).value = ''
+      setStatus(root, '规则已添加', 'ok')
+      await loadAlertsAndRules(root)
+    } catch (err) {
+      setStatus(root, '添加规则失败: ' + (err.message || err), 'error')
+    }
+  }
+
+  async function doRulePatch(root, id, body) {
+    setStatus(root, '保存规则...', 'loading')
+    try {
+      await apiPatchRule(id, body)
+      setStatus(root, '规则已保存', 'ok')
+      await loadAlertsAndRules(root)
+    } catch (err) {
+      setStatus(root, '保存规则失败: ' + (err.message || err), 'error')
+    }
+  }
+
+  async function doRuleRemove(root, id) {
+    setStatus(root, '删除规则...', 'loading')
+    try {
+      await apiDeleteRule(id)
+      setStatus(root, '规则已删除', 'ok')
+      await loadAlertsAndRules(root)
+    } catch (err) {
+      setStatus(root, '删除规则失败: ' + (err.message || err), 'error')
+    }
+  }
+
   // ---- load / refresh ---------------------------------------------------
+
+  // Apply a list()/refresh() payload to the summary table + source dropdowns.
+  function applyData(root, data) {
+    renderRows(root, data)
+    sourceList = deriveSources(data)
+    populateControls(root)
+  }
 
   async function load(root) {
     setStatus(root, '加载...', 'loading')
     try {
       const data = await apiList()
-      renderRows(root, data)
+      applyData(root, data)
       setStatus(root, '已加载 ' + ((data.peers || []).length) + ' 个 peer', 'ok')
+      await Promise.all([loadTrend(root), loadAlertsAndRules(root)])
     } catch (err) {
       if (err.status === 503) {
-        renderRows(root, {})
+        applyData(root, {})
+        renderAlerts(root, [])
+        renderRules(root, [])
         setStatus(root, 'host 未启用 peer 联邦', 'error')
         return
       }
@@ -262,11 +659,13 @@
     setStatus(root, peerId ? '刷新 ' + peerId + '...' : '刷新全部...', 'loading')
     try {
       const data = await apiRefresh(peerId)
-      renderRows(root, data)
+      applyData(root, data)
       setStatus(root, '已刷新', 'ok')
+      // A refresh captured a fresh snapshot — re-read the trend + re-evaluate.
+      await Promise.all([loadTrend(root), loadAlertsAndRules(root)])
     } catch (err) {
       if (err.status === 503) {
-        renderRows(root, {})
+        applyData(root, {})
         setStatus(root, 'host 未启用 peer 联邦', 'error')
         return
       }

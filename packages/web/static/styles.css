@@ -2253,6 +2253,50 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .peer-federation-panel .pf-unknown { background: #e9e9e9; color: #888; }
 .peer-federation-panel .pf-row-refresh { font-size: 0.78rem; padding: 2px 10px; }
 
+/* v5 E5-M4 + Stream F-M6 — control plane ("控制面"): summary aggregation +
+   trend sparklines + alert rules. Reuses the federation pf-* vocabulary (scoped
+   here too, since this panel is .peer-summary-panel not .peer-federation-panel)
+   and adds ps-* for the trend chart + alert badges + rule config. */
+.peer-summary-panel { padding: 1rem; }
+.peer-summary-panel .pf-header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
+.peer-summary-panel .pf-header h2 { margin: 0; flex: 1 0 100%; }
+.peer-summary-panel .pf-meta { flex: 1 0 100%; color: #666; font-size: 0.85rem; margin: 0; }
+.peer-summary-panel .pf-status { font-size: 0.85rem; min-height: 1em; }
+.peer-summary-panel .pf-status-loading { color: #888; }
+.peer-summary-panel .pf-status-ok { color: #27ae60; }
+.peer-summary-panel .pf-status-error { color: #c0392b; }
+.peer-summary-panel .pf-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin-bottom: 0.5rem; }
+.peer-summary-panel .pf-table th, .peer-summary-panel .pf-table td { text-align: left; border-bottom: 1px solid #eee; padding: 0.4rem 0.5rem; vertical-align: top; }
+.peer-summary-panel .pf-table th { background: #fafafa; font-weight: 600; color: #555; }
+.peer-summary-panel .pf-empty { color: #888; text-align: center; padding: 1.5rem; }
+.peer-summary-panel .pf-cap-empty { font-size: 0.78rem; color: #aaa; font-style: italic; }
+.peer-summary-panel .pf-id { font-size: 0.72rem; color: #999; font-family: "SF Mono", "Menlo", "Consolas", monospace; }
+.peer-summary-panel .pf-peer code { background: transparent; }
+.peer-summary-panel .pf-time { font-size: 0.78rem; color: #888; white-space: nowrap; }
+.peer-summary-panel .pf-caps { font-size: 0.82rem; color: #444; }
+.peer-summary-panel .pf-badge { font-size: 0.62rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 1px 6px; border-radius: 3px; font-weight: 700; white-space: nowrap; }
+.peer-summary-panel .pf-online { background: #d6ecdb; color: #1a6a3a; }
+.peer-summary-panel .pf-stale { background: #fde9cf; color: #9a5b13; }
+.peer-summary-panel .pf-unknown { background: #e9e9e9; color: #888; }
+.peer-summary-panel .ps-row-refresh { font-size: 0.78rem; padding: 2px 10px; }
+/* Stream F-M6 — trend + alerts sections. */
+.peer-summary-panel .ps-section { margin-top: 1.75rem; }
+.peer-summary-panel .ps-section h3 { margin: 0 0 0.4rem; font-size: 0.95rem; color: #333; }
+.peer-summary-panel .ps-controls { display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; align-items: flex-end; margin-bottom: 0.6rem; }
+.peer-summary-panel .ps-controls label, .peer-summary-panel .ps-rule-form label { display: flex; flex-direction: column; gap: 3px; font-size: 0.78rem; color: #555; }
+.peer-summary-panel .ps-controls select, .peer-summary-panel .ps-rule-form select, .peer-summary-panel .ps-rule-form input { font-size: 0.85rem; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; }
+.peer-summary-panel .ps-chart { padding: 0.25rem 0; }
+.peer-summary-panel .ps-spark { display: block; width: 100%; max-width: 360px; height: 48px; }
+.peer-summary-panel .ps-spark-empty { color: #aaa; font-style: italic; font-size: 0.82rem; }
+.peer-summary-panel .ps-trend-meta { font-size: 0.78rem; color: #777; margin-top: 0.25rem; }
+.peer-summary-panel .ps-ok { color: #1a6a3a; font-size: 0.84rem; }
+.peer-summary-panel .ps-breaches { display: flex; flex-direction: column; gap: 5px; }
+.peer-summary-panel .ps-breach { display: inline-flex; align-items: center; gap: 6px; background: #fcebea; border: 1px solid #f0c4c0; color: #a02216; padding: 4px 10px; border-radius: 4px; font-size: 0.84rem; width: fit-content; }
+.peer-summary-panel .ps-breach .pf-id { color: #b07; }
+.peer-summary-panel .ps-rule-form { display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; align-items: flex-end; margin-bottom: 0.75rem; padding: 0.6rem 0.75rem; background: #fafafa; border: 1px solid #eee; border-radius: 6px; }
+.peer-summary-panel .ps-rule-actions { white-space: nowrap; }
+.peer-summary-panel .ps-rule-actions button { font-size: 0.78rem; padding: 2px 8px; margin-right: 4px; }
+
 /* Route B P1-M7b — peer onboarding (tab "联邦", panel above manifest browse). */
 .peer-admin-panel { padding: 1rem; }
 .peer-admin-panel .pa-header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem; }
