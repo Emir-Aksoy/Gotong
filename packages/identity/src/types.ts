@@ -1012,6 +1012,56 @@ export interface LedgerAggregateRow {
 }
 
 // ---------------------------------------------------------------------------
+// v5 Stream F — control-plane history (peer.summary snapshots)
+// ---------------------------------------------------------------------------
+
+/**
+ * One persisted control-plane snapshot. identity stores `summaryJson`
+ * OPAQUE — it never parses it. The host owns all `PeerSummary` semantics
+ * (this is the counts-only blob captured at `capturedAt`). `source` is
+ * `'local'` for this hub's own footprint, else the peer id whose shared
+ * summary was captured.
+ */
+export interface PeerSummarySnapshot {
+  /** Monotonic rowid (autoincrement). Stable cursor. */
+  id: number
+  /** ms since epoch the host took the snapshot. */
+  capturedAt: number
+  /** `'local'` or a peer id. */
+  source: string
+  /** The full PeerSummary blob, verbatim. Opaque to identity. */
+  summaryJson: string
+}
+
+/**
+ * Append shape. `capturedAt` defaults to `Date.now()`. `source` +
+ * `summaryJson` are required; identity validates they're non-empty
+ * strings but never inspects the JSON's contents.
+ */
+export interface AppendPeerSummarySnapshotInput {
+  capturedAt?: number
+  source: string
+  summaryJson: string
+}
+
+/**
+ * History query. `source` narrows to one footprint (omit = all sources).
+ * `[since, until)` is the standard half-open window. Results are
+ * chronological (`captured_at ASC`) — a trend reads left-to-right —
+ * clamped to {@link PEER_SUMMARY_SNAPSHOT_MAX_LIMIT}.
+ */
+export interface PeerSummarySnapshotQuery {
+  source?: string
+  since?: number
+  until?: number
+  limit?: number
+}
+
+/** Default / max row count for {@link PeerSummarySnapshotQuery}. */
+export const PEER_SUMMARY_SNAPSHOT_DEFAULT_LIMIT = 500
+export const PEER_SUMMARY_SNAPSHOT_MAX_LIMIT = 10_000
+
+// ---------------------------------------------------------------------------
 // D1 (v4 Phase 5) — Peer Registry
 // ---------------------------------------------------------------------------
 

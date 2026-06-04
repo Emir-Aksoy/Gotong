@@ -85,6 +85,10 @@ export type {
   LedgerGroupBy,
   LedgerAggregateQuery,
   LedgerAggregateRow,
+  // v5 Stream F — control-plane history (peer.summary snapshots)
+  PeerSummarySnapshot,
+  AppendPeerSummarySnapshotInput,
+  PeerSummarySnapshotQuery,
   // Phase 11 M2 — Suspended tasks (long-running agent park/resume)
   SuspendedTask,
   PersistSuspendedTaskInput,

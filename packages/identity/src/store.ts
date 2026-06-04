@@ -52,6 +52,7 @@ import { IdentityError } from './errors.js'
 import { VaultStore, type VaultMutationReason } from './vault-store.js'
 import { SuspendedTaskStore } from './suspended-task-store.js'
 import { LedgerStore } from './ledger-store.js'
+import { PeerSummarySnapshotStore } from './peer-summary-snapshot-store.js'
 import { ResourceGrantStore } from './resource-grant-store.js'
 import { userPrincipal, type Principal } from './principal.js'
 import { PeerStore } from './peer-store.js'
@@ -121,6 +122,10 @@ import {
   type LedgerQuery,
   type LedgerAggregateQuery,
   type LedgerAggregateRow,
+  // v5 Stream F — control-plane history (peer.summary snapshots).
+  type AppendPeerSummarySnapshotInput,
+  type PeerSummarySnapshot,
+  type PeerSummarySnapshotQuery,
   type TotpEnrollment,
   type TotpState,
   type User,
@@ -481,6 +486,10 @@ export class IdentityStore {
   // under the quota counters). Append on the post-LLM-call path; scan on
   // dashboard aggregate + CSV/JSONL export. Owns its own statements.
   private readonly ledger: LedgerStore
+  // v5 Stream F — control-plane history. One counts-only snapshot per
+  // peer.summary refresh; append-only, scan on trend read. Opaque store —
+  // identity never parses the blob (the host owns PeerSummary semantics).
+  private readonly peerSummarySnapshots: PeerSummarySnapshotStore
   // Phase 19 P2-M5 → v5 A-M1 — resource grants (unified resource-level RBAC,
   // principal → any resource). Owner-as-grant. Generalizes the old
   // workflow-only grant store; the workflow facade methods below delegate here.
@@ -542,6 +551,7 @@ export class IdentityStore {
     // Phase 17 — usage / cost ledger. Constructed after quota (same
     // billing domain, but its own table). Eager INSERT + get-by-id.
     this.ledger = new LedgerStore(db)
+    this.peerSummarySnapshots = new PeerSummarySnapshotStore(db)
     // Phase 19 P2-M5 → v5 A-M1 — unified resource grants. Eager statements.
     this.resourceGrants = new ResourceGrantStore(db)
     // Route B P1-M3b — MFA TOTP store. Composes `this` for vault ops (the
@@ -2616,6 +2626,34 @@ export class IdentityStore {
    */
   pruneLedger(opts: { before: number }): number {
     return this.ledger.prune(opts)
+  }
+
+  // =====================================================================
+  // v5 Stream F — control-plane history (peer.summary snapshots). Delegated
+  // to PeerSummarySnapshotStore. One counts-only snapshot per refresh; the
+  // host projects scalar metrics out of `summaryJson` for trends + alerts.
+  // identity stores the blob opaque (never parses it).
+  // =====================================================================
+
+  appendPeerSummarySnapshot(
+    input: AppendPeerSummarySnapshotInput,
+  ): PeerSummarySnapshot {
+    return this.peerSummarySnapshots.append(input)
+  }
+
+  listPeerSummarySnapshots(
+    query: PeerSummarySnapshotQuery = {},
+  ): PeerSummarySnapshot[] {
+    return this.peerSummarySnapshots.list(query)
+  }
+
+  /**
+   * Prune snapshots older than `before` (v5 Stream F retention). Returns the
+   * count removed. Host-gated OFF by default — a default deployment keeps full
+   * history.
+   */
+  prunePeerSummarySnapshots(opts: { before: number }): number {
+    return this.peerSummarySnapshots.prune(opts)
   }
 
   // =====================================================================

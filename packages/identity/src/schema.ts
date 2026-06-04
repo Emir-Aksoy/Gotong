@@ -850,6 +850,33 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE peers ADD COLUMN share_summary INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    // v5 Stream F — control-plane history. The E5 `peer.summary` control plane is
+    // point-in-time only (in-mem cache, lost on restart by design). To draw trends
+    // we persist one COUNTS-ONLY snapshot per refresh: same privacy contract as the
+    // live summary (no row ever lands here, only the aggregate `PeerSummary` blob).
+    //
+    // identity stays domain-agnostic: it stores `summary_json` OPAQUE and never
+    // parses it — all PeerSummary semantics (metric projection for trends, alert
+    // evaluation) live in the host where the type is defined. Append-only with a
+    // retention prune, exactly like `usage_ledger`.
+    //
+    //   captured_at   ms epoch the host took the snapshot (refresh time).
+    //   source        'local' for this hub's own footprint, else the peer id.
+    //   summary_json  the full PeerSummary blob, verbatim. Opaque to identity.
+    version: 24,
+    name: 'peer-summary-snapshots',
+    sql: `
+      CREATE TABLE IF NOT EXISTS peer_summary_snapshots (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        captured_at  INTEGER NOT NULL,
+        source       TEXT NOT NULL,
+        summary_json TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_pss_source_time
+        ON peer_summary_snapshots(source, captured_at);
+    `,
+  },
 ]
 
 /**
