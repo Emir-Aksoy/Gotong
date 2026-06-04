@@ -1,0 +1,56 @@
+# 排班 — 提报可排时段 + 店长确认 (HITL) — 这是 "管理排班" 那条。
+# 店员提报本周可排时段 → 助手整理成排班建议 → 店长 human: 确认 → 可发布。
+schema: aipehub.workflow/v1
+workflow:
+  id: cafe-shift-availability
+  name: 排班 — 提报可排时段 + 店长确认
+  description: 店员提报本周可排时段, 助手整理成排班建议, 店长统一确认。
+  governance:
+    data_sensitivity: internal
+    required_credentials: [deepseek]
+    required_human_roles: [店长 (store manager)]
+    external_systems: [obsidian (店面运营手册)]
+    notes: 店员自助提报, 店长统一确认; 不涉敏感个人数据。
+  trigger:
+    capability: cafe.submit-availability
+    payload_schema:
+      - id: week
+        label: 排班周次
+        type: text
+        required: true
+      - id: availability
+        label: 可排时段 (每行一段, 如 "周一 14:00-22:00")
+        type: textarea
+        rows: 5
+        required: true
+      - id: manager_id
+        label: 确认店长 (userId)
+        type: text
+        required: true
+  surface:
+    me:
+      enabled: true
+      label: 我要提报排班
+      description: 提报你本周可排的时段, 店长统一确认。
+      allowed_roles: [owner, admin, member]
+      user_scope_field: staff_id
+  steps:
+    - id: draft
+      description: 助手把可排时段整理成排班建议。
+      dispatch:
+        strategy: { kind: capability, capabilities: [cafe.schedule-draft] }
+        title: 排班建议
+        payload:
+          week: $trigger.payload.week
+          availability: $trigger.payload.availability
+    - id: manager-confirm
+      description: 店长确认排班建议是否可发布。
+      human:
+        assignee: $trigger.payload.manager_id
+        kind: approval
+        title: 排班确认
+        prompt: 请确认该排班建议是否可发布。
+  output:
+    week: $trigger.payload.week
+    draft: $draft.output
+    confirm: $manager-confirm.output

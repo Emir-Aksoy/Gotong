@@ -1,0 +1,64 @@
+# 加班申报 + 店长审批 (HITL) — 这是 "管理加班费" 那条。
+# 店员报加班 → 助手按店面加班政策给建议金额 → 店长 human: 审批 → 完成。
+# 钱的事: 助手只给 "建议金额", 最终必须店长 approve (LLM 建议, 人定钱)。
+schema: aipehub.workflow/v1
+workflow:
+  id: cafe-overtime-claim
+  name: 加班申报 + 店长审批
+  description: 店员报加班, 助手按店面加班政策给出建议金额, 店长复核后批准。
+  governance:
+    data_sensitivity: confidential
+    required_credentials: [deepseek]
+    required_human_roles: [店长 (store manager)]
+    external_systems: [obsidian (店面运营手册)]
+    notes: 涉及薪酬; 助手给的金额仅供参考, 最终金额须店长 approve 才算数。
+  trigger:
+    capability: cafe.claim-overtime
+    payload_schema:
+      - id: date
+        label: 加班日期
+        type: text
+        required: true
+      - id: hours
+        label: 加班时长 (小时)
+        type: number
+        required: true
+      - id: reason
+        label: 加班事由
+        type: textarea
+        rows: 2
+        required: true
+      - id: manager_id
+        label: 审批店长 (userId)
+        type: text
+        required: true
+  surface:
+    me:
+      enabled: true
+      label: 我要报加班
+      description: 提交加班时长与事由, 由店长审批。
+      allowed_roles: [owner, admin, member]
+      user_scope_field: staff_id
+  steps:
+    - id: assess
+      description: 助手按店面加班政策核算并给出建议金额 (仅供参考)。
+      dispatch:
+        strategy: { kind: capability, capabilities: [cafe.overtime-policy] }
+        title: 加班政策核算
+        payload:
+          hours: $trigger.payload.hours
+          date: $trigger.payload.date
+    # human: 糖 → 派到 aipehub.human/v1 → HumanInboxParticipant 挂起任务,
+    # 落成店长 /me 收件箱里一条 approval, 店长批了才恢复后续 (Phase 16)。
+    - id: manager-approval
+      description: 店长复核加班申报与建议金额, 决定是否批准。
+      human:
+        assignee: $trigger.payload.manager_id
+        kind: approval
+        title: 加班审批
+        prompt: 请复核该加班申报与建议金额, 决定是否批准。
+  output:
+    date: $trigger.payload.date
+    hours: $trigger.payload.hours
+    suggestion: $assess.output
+    approval: $manager-approval.output
