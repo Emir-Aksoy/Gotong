@@ -681,6 +681,11 @@ async function main(): Promise<void> {
   // (default 30 s); each tick reads due rows from suspended_tasks
   // and re-dispatches them via Hub.resumeTask.
   let resumeSweepTimer: NodeJS.Timeout | undefined
+  // One-shot grace timer that kicks off the boot-time workflow resume scan
+  // (see far below). Tracked like the sweeps so shutdown can cancel it —
+  // otherwise a stop within the grace window leaves it to fire into a
+  // half-torn-down host.
+  let resumeKickoffTimer: NodeJS.Timeout | undefined
   if (identity) {
     const sweep = (): void => {
       try {
@@ -1895,7 +1900,7 @@ async function main(): Promise<void> {
   // grace window below for sidecars to re-HELLO before kicking off
   // the resume. Local agents (LocalAgentPool) are already started.
   const resumeGraceMs = envInt('AIPE_WORKFLOW_RESUME_GRACE_MS', 2_000)
-  setTimeout(() => {
+  resumeKickoffTimer = setTimeout(() => {
     workflowController.resumeRunningRuns().then((r) => {
       if (r.resumed > 0 || r.abandoned > 0) {
         log.info('workflow resume', {
@@ -1913,6 +1918,8 @@ async function main(): Promise<void> {
       bootReady = true
     })
   }, resumeGraceMs)
+  // Don't let the grace timer keep the event loop alive past a graceful stop.
+  resumeKickoffTimer.unref?.()
 
   // Boot banner — intentionally plain stdout, NOT a log line. The
   // "First-run admin URL" appears once in a host's lifetime and must
@@ -2007,6 +2014,10 @@ async function main(): Promise<void> {
     if (resumeSweepTimer) {
       clearInterval(resumeSweepTimer)
       resumeSweepTimer = undefined
+    }
+    if (resumeKickoffTimer) {
+      clearTimeout(resumeKickoffTimer)
+      resumeKickoffTimer = undefined
     }
     if (identity) {
       try { identity.close() } catch (err) { log.error('identity close error', { err }) }
