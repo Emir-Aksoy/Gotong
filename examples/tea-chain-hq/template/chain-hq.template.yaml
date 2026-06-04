@@ -1,0 +1,197 @@
+# 连锁奶茶店总部 → 加盟门店 (跨组织指令下发) — 总部一侧的可载入模板 (aipehub.template/v1)
+#
+# 这是第二个**跨组织 (cross-org)** 模板,是 tea-supply-link 的 MIRROR、三层链条的最上一层:
+#
+#     连锁总部 (本模板) ──下发指令──▶ 奶茶店 ──下补货单──▶ 供货商
+#        [HQ → shop]                [tea-supply-link: shop → supplier]
+#
+# tea-supply-link 编排方向**朝上** (门店→供货商);这个模板方向**朝下** (总部→加盟门店):
+# 总部把一条指令 (如调价) 下发到**另一个组织 (加盟门店) 的 hub**。两条都是跨组织,都走同一套
+# 出站审批闸。
+#
+# ★ 模版和框架是分离关系(本案例的教学点,同 tea-supply-link)★
+#   这个文件**只**带「总部一侧的编排骨架」:
+#     - 1 个下发协调员 agent (起草指令 + 建档门店回执);
+#     - 1 条声明式工作流 (起草 → 下发 → 建档);
+#     - 1 个指向「连锁运营手册」的 KB 槽位;
+#     - 一次性 DeepSeek key 提示。
+#   它**不**带、也**不能**带「跨组织的链接」本身:
+#     - 下发给**哪家 / 哪些**加盟门店、出站放行哪些 capability、是否需要区域经理审批 ——
+#       这些是**运行时的 peer 配置** (host 的 installPeerLink / admin「联邦」tab),不在模板里,
+#       也不在工作流 YAML 里。工作流的 `rollout` 步只写一个 capability 名
+#       (`shop.apply-directive`),**从不点名某个门店 peer**。
+#       · 单店:capability 解析到那一条链接的门店;
+#       · 多店:总部连多条加盟门店链路 (或 broadcast 策略),工作流一字不改。
+#   换句话说:模板是「可搬走的骨架」,链接是「落地时各自配的运行时契约」。多个连锁体系
+#   导入同一个模板,各自连各自的加盟门店,凭证 / 数据 / 计费互不串线。
+#
+# ★ 跨组织审批不是工作流里的 human: 步 ★
+#   指令「是否准予跨出总部」由**出站审批闸**决定 —— 加盟门店 peer 上标了
+#   requireApprovalOutbound,host 把出站任务挂起在区域经理的收件箱,批准了才越过边界。
+#   这一层是**框架运行时**的事 (Phase 18 / Stream G),对工作流透明,所以这条工作流里
+#   **没有** human: 步。(注意区别于 cafe-ops 的店内 human: 步 —— 那是同一个 hub 内的审批。
+#   可跑 demo examples/tea-chain-hq/src/index.ts 把这个闸内联成可见的 ~40 行。)
+#
+# 知识**内容**不在这个文件里 (Stream B 决策 #4):模板只带「MCP 接线 + presetData
+# 指针」。连锁运营手册由总部自己的 Obsidian vault 提供 (demo 用确定性 stand-in 替代真 LLM)。
+#
+# 导入:admin UI →「Agents / 工作流」→ 导入,或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/tea-chain-hq/template/chain-hq.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+schema: aipehub.template/v1
+template:
+  name: 连锁奶茶店总部(跨组织指令下发)
+  description: |-
+    一个连锁奶茶店总部组织 hub:运营提出一条门店指令 (如调价) → 下发协调员按运营手册起草
+    规范的下发单 → 区域经理批准外发 → 下发到**加盟门店 (另一个组织的 hub)** 执行 → 门店
+    回执本地建档。模板带 1 个下发协调员 agent、1 条跨组织下发工作流、一个指向连锁运营手册
+    的 KB 槽位接线,以及一次性 DeepSeek key 提示。跨组织的链接(下发给哪些门店 / 出站放行 /
+    区域经理审批)是**运行时**配的,不在模板里 —— 导入后到 admin「联邦」tab 连上你的加盟
+    门店即可落地。
+
+  version: 1
+
+  # ── 1 个 agent:下发协调员 ──────────────────────────────────────────────────────
+  # 服务总部一侧的两个 LOCAL capability:起草下发指令 + 建档门店回执。它**不应用调价**
+  # —— 价格变更是加盟门店在自己的 hub 上按本店菜单确定性应用并回执的。挂连锁运营手册
+  # (mcp-obsidian):host spawn 时拉起 mcp-obsidian 子进程,把工具暴露给该 agent 的
+  # tool-use 循环,用来核对调价规范 / 加盟商政策 / 区域沟通口径。
+  agents:
+    - id: rollout-coordinator
+      displayName: 下发协调员
+      capabilities: [chainhq.draft-directive, chainhq.record-rollout]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是连锁奶茶店总部的下发协调员,负责把运营提出的门店指令 (如调价) 整理成一份规范的
+        下发单,并在加盟门店执行后把回执建档。语气简洁、就事论事。
+
+        起草下发单 (capability chainhq.draft-directive):
+        - 从「连锁运营手册」(obsidian__search / obsidian__get_file_contents) 核对调价规范、
+          加盟商政策、区域沟通口径,把运营的输入整理成一份清晰的下发单 (商品 / 新价 / 生效日 /
+          备注)。
+        - 你**只起草下发单,不替门店应用调价**。门店按各自菜单的现价应用、计算差额、回执 ——
+          那是门店在它自己 hub 上的事。
+
+        建档回执 (capability chainhq.record-rollout):
+        - 把门店确认的明细 (现价 / 新价 / 差额 / 生效日) 原样建档成下发记录,不改数字。
+
+        注意:把下发单发给加盟门店是**跨组织**外发,会先挂起等区域经理在出站审批闸批准 ——
+        那一步不归你管 (是框架运行时的事),你只管把下发单起草清楚。
+
+      mcpServers:
+        - name: obsidian
+          command: uvx
+          args: [mcp-obsidian]
+          env:
+            OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+            OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+            OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+
+  # ── 1 条跨组织声明式工作流 ─────────────────────────────────────────────────────
+  # 导入时 parseTemplate 把这个内层 block 重新序列化成完整 workflow yaml 交给 workflow
+  # runtime 校验 + 注册。注意 `rollout` 步派的 `shop.apply-directive` **不是**这个模板里
+  # 任何 agent 的 capability —— 它住在加盟门店 peer 上,运行时由联邦链路解析 (导入时会作为
+  # 「本地暂无人服务的 capability」软提示,这是预期的:它是跨组织能力)。
+  # 这条工作流里**没有** human: 步:跨组织审批是运行时的出站审批闸,不是工作流步骤。
+  workflows:
+    - id: chain-directive-rollout
+      name: 连锁指令下发 (总部 → 门店, 跨组织)
+      description: 总部起草指令 (如调价) → 区域经理批准外发 → 下发到加盟门店执行 → 回执建档。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        required_human_roles: [区域经理 (regional manager)]
+        external_systems: [加盟门店 hub (联邦 peer)]
+        notes: 指令外发到加盟门店需区域经理在出站审批闸批准;调价等敏感指令对客户 / 加盟商有约束,须人定。
+      trigger:
+        capability: chainhq.rollout-directive
+        payload_schema:
+          - id: sku
+            label: 商品
+            type: text
+            required: true
+          - id: new_price
+            label: 新价格 (元)
+            type: number
+            required: true
+          - id: effective
+            label: 生效日期 (如 2026-06-10)
+            type: text
+            required: true
+          - id: note
+            label: 备注 (可选)
+            type: textarea
+            rows: 2
+      surface:
+        me:
+          enabled: true
+          label: 我要下发指令
+          description: 起草一条门店指令 (如调价), 区域经理批准后下发到加盟门店。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: initiated_by
+      steps:
+        - id: draft
+          description: 总部协调员把指令整理成一份规范的下发单。
+          dispatch:
+            strategy: { kind: capability, capabilities: [chainhq.draft-directive] }
+            title: 起草下发指令
+            payload:
+              sku: $trigger.payload.sku
+              new_price: $trigger.payload.new_price
+              effective: $trigger.payload.effective
+              note: $trigger.payload.note
+              initiated_by: $trigger.payload.initiated_by
+        - id: rollout
+          description: "下发到加盟门店执行 (跨组织能力; 运行时出站审批闸 — 区域经理批准才跨出)。"
+          dispatch:
+            strategy: { kind: capability, capabilities: [shop.apply-directive] }
+            title: 下发指令到门店
+            payload:
+              directive: $draft.output.directive
+        - id: record
+          description: 把门店回执建档 (本地)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [chainhq.record-rollout] }
+            title: 建档下发记录
+            payload:
+              directive: $draft.output.directive
+              ack: $rollout.output
+      output:
+        directive: $draft.output.directive
+        ack: $rollout.output
+        record: $record.output
+
+  # ── 1 个可寻址知识库槽位:MCP 接线 + 预置数据「指针」(不是内容!)──────────────
+  # 槽位 name(`chain_playbook`)是 KB 的可寻址身份;背后的 mcpServer name(`obsidian`)
+  # 是传输。导入时只「上报」不「自动接线」(决策 #4)—— 由你把自己的连锁运营手册接到这个槽位。
+  knowledgeBases:
+    - name: chain_playbook
+      description: 连锁运营手册(调价规范 / 加盟商政策 / 区域沟通口径 / SOP, via mcp-obsidian)
+      mcpServer:
+        name: obsidian
+        command: uvx
+        args: [mcp-obsidian]
+        env:
+          OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+          OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+          OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+      presetData:
+        kind: url
+        ref: https://example.com/tea-chain-playbook-seed.tar.zst
+        description: |-
+          一份连锁运营手册的种子快照(调价规范 / 加盟商政策 / 区域沟通口径的模板)—— 注意这是
+          「指针」,不是内容。两种用法:① 把种子手册直接拷进你的 Obsidian vault;或 ② 打包托管,
+          让这个 ref 指过去再显式拉取。框架永不经手手册内容,门店的调价仍由门店在自己 hub 上应用。
+
+  # ── 一键:导入时提示填一次 API key,自动应用到 agent ──────────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek
