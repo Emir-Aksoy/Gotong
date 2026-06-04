@@ -133,11 +133,18 @@ export async function runCliCommand(opts: CliRunOptions): Promise<CliRunResult> 
 
     child.stdout?.setEncoding('utf8')
     child.stderr?.setEncoding('utf8')
+    // Guard with `settled` like every other callback here: once the run has
+    // resolved/rejected (close, error, or post-kill), a buffered `data` event
+    // must not fire `onChunk` into an already-torn-down consumer — `onChunk`
+    // is contracted to fire "before the run resolves", and a late append to
+    // stdout/stderr is moot anyway (the result already carried the captured text).
     child.stdout?.on('data', (d: string) => {
+      if (settled) return
       stdout += d
       opts.onChunk?.({ stream: 'stdout', text: d })
     })
     child.stderr?.on('data', (d: string) => {
+      if (settled) return
       stderr += d
       opts.onChunk?.({ stream: 'stderr', text: d })
     })
