@@ -52,14 +52,36 @@ export interface PeerSummaryRow {
 }
 
 /**
+ * One point on a metric's trend (duck-typed mirror of the host's
+ * `PeerSummaryTrendPoint`): when it was captured + the scalar value.
+ */
+export interface PeerSummaryTrendPoint {
+  capturedAt: number
+  value: number
+}
+
+/** Query for the history route — one source's trend of one scalar metric. */
+export interface PeerSummaryHistoryQuery {
+  source: string
+  metric: string
+  since?: number
+  until?: number
+  limit?: number
+}
+
+/**
  * Host-injected control-plane surface. Backed by the peer registry + the
- * `peer.summary` rpc + an in-process cache — NOT a persisted store. Absent
- * (→ 503) when peers are disabled.
+ * `peer.summary` rpc + an in-process cache, plus (v5 Stream F) a persisted
+ * snapshot store for trends. Absent (→ 503) when peers are disabled.
  */
 export interface PeerSummaryFederationSurface {
   local(): Promise<PeerSummary>
   list(): Promise<PeerSummaryRow[]>
   refresh(peerId?: string): Promise<void>
+  /** Trend one scalar metric for one source over a window (v5 Stream F). */
+  history(query: PeerSummaryHistoryQuery): Promise<PeerSummaryTrendPoint[]>
+  /** The canonical list of trendable metric keys (single source — host owns it). */
+  metricKeys(): string[]
 }
 
 export interface PeerSummaryRoutesCtx {
@@ -69,6 +91,20 @@ export interface PeerSummaryRoutesCtx {
 
 const PREFIX = '/api/admin/peer-summaries'
 const REFRESH = '/api/admin/peer-summaries/refresh'
+const HISTORY = '/api/admin/peer-summaries/history'
+
+/**
+ * Parse an optional non-negative integer query param. Returns undefined when
+ * absent; throws (→ 400) when present but not a finite non-negative integer.
+ */
+function optInt(raw: string | null, name: string): number | undefined {
+  if (raw === null || raw === '') return undefined
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 0) {
+    throw new Error(`${name} must be a non-negative integer`)
+  }
+  return n
+}
 
 /**
  * Handle the control-plane browse + refresh routes. Returns `true` if the
@@ -81,7 +117,7 @@ export async function handlePeerSummaryRoute(
   method: string,
   path: string,
 ): Promise<boolean> {
-  if (path !== PREFIX && path !== REFRESH) return false
+  if (path !== PREFIX && path !== REFRESH && path !== HISTORY) return false
 
   const admin = await ctx.requireAdmin(req, res)
   if (!admin) return true
@@ -124,6 +160,39 @@ export async function handlePeerSummaryRoute(
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log.error('peer-summaries refresh failed', { by: admin.id, err: msg })
+      sendJson(res, { error: msg }, 500)
+    }
+    return true
+  }
+
+  // GET /api/admin/peer-summaries/history?source=&metric=&since=&until=&limit=
+  // — trend one scalar metric for one source (v5 Stream F). Returns the points
+  // plus the canonical metric-key list so the UI dropdown stays single-source.
+  if (path === HISTORY && method === 'GET') {
+    const url = new URL(req.url ?? path, 'http://localhost')
+    const source = url.searchParams.get('source') ?? ''
+    const metric = url.searchParams.get('metric') ?? ''
+    if (!source || !metric) {
+      sendJson(res, { error: 'source and metric query params are required' }, 400)
+      return true
+    }
+    let since: number | undefined
+    let until: number | undefined
+    let limit: number | undefined
+    try {
+      since = optInt(url.searchParams.get('since'), 'since')
+      until = optInt(url.searchParams.get('until'), 'until')
+      limit = optInt(url.searchParams.get('limit'), 'limit')
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
+      return true
+    }
+    try {
+      const points = await surface.history({ source, metric, since, until, limit })
+      sendJson(res, { source, metric, points, metrics: surface.metricKeys() })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log.error('peer-summaries history failed', { by: admin.id, err: msg })
       sendJson(res, { error: msg }, 500)
     }
     return true

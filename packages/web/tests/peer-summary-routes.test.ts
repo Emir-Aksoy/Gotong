@@ -29,7 +29,9 @@ import {
   serveWeb,
   type PeerSummary,
   type PeerSummaryFederationSurface,
+  type PeerSummaryHistoryQuery,
   type PeerSummaryRow,
+  type PeerSummaryTrendPoint,
   type WebServerHandle,
 } from '../src/server.js'
 
@@ -52,6 +54,8 @@ interface Boot {
   rows: PeerSummaryRow[]
   refreshCalls: Array<string | undefined>
   listThrows: boolean
+  historyCalls: PeerSummaryHistoryQuery[]
+  historyResult: PeerSummaryTrendPoint[]
 }
 
 async function boot(opts: { withFederation?: boolean } = {}): Promise<Boot> {
@@ -70,6 +74,8 @@ async function boot(opts: { withFederation?: boolean } = {}): Promise<Boot> {
     rows: [],
     refreshCalls: [],
     listThrows: false,
+    historyCalls: [],
+    historyResult: [],
   }
 
   const fedStub: PeerSummaryFederationSurface = {
@@ -82,6 +88,13 @@ async function boot(opts: { withFederation?: boolean } = {}): Promise<Boot> {
     },
     async refresh(peerId) {
       out.refreshCalls.push(peerId)
+    },
+    async history(query) {
+      out.historyCalls.push(query)
+      return out.historyResult
+    },
+    metricKeys() {
+      return ['assets.agents', 'health.suspendedTasks']
     },
   }
 
@@ -195,5 +208,78 @@ describe('/api/admin/peer-summaries (v5 E5-M3)', () => {
     b.listThrows = true
     const r = await fetch(`${b.baseUrl}/api/admin/peer-summaries`, { headers: auth(b) })
     expect(r.status).toBe(500)
+  })
+
+  // ── v5 Stream F — GET /history (metric trend from snapshots) ──────────────
+
+  it('GET /history returns trend points + the metric-key list', async () => {
+    b = await boot()
+    b.historyResult = [
+      { capturedAt: 1000, value: 1 },
+      { capturedAt: 2000, value: 3 },
+    ]
+    const r = await fetch(
+      `${b.baseUrl}/api/admin/peer-summaries/history?source=local&metric=assets.agents`,
+      { headers: auth(b) },
+    )
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.source).toBe('local')
+    expect(j.metric).toBe('assets.agents')
+    expect(j.points).toEqual([
+      { capturedAt: 1000, value: 1 },
+      { capturedAt: 2000, value: 3 },
+    ])
+    expect(j.metrics).toContain('assets.agents')
+    // the surface saw the parsed query (no window params this time)
+    expect(b.historyCalls).toEqual([
+      { source: 'local', metric: 'assets.agents', since: undefined, until: undefined, limit: undefined },
+    ])
+  })
+
+  it('GET /history threads since/until/limit through as integers', async () => {
+    b = await boot()
+    const r = await fetch(
+      `${b.baseUrl}/api/admin/peer-summaries/history?source=hub_a&metric=runs.total&since=100&until=900&limit=50`,
+      { headers: auth(b) },
+    )
+    expect(r.status).toBe(200)
+    expect(b.historyCalls).toEqual([
+      { source: 'hub_a', metric: 'runs.total', since: 100, until: 900, limit: 50 },
+    ])
+  })
+
+  it('GET /history 400 when source or metric is missing', async () => {
+    b = await boot()
+    const noMetric = await fetch(
+      `${b.baseUrl}/api/admin/peer-summaries/history?source=local`,
+      { headers: auth(b) },
+    )
+    expect(noMetric.status).toBe(400)
+    const noSource = await fetch(
+      `${b.baseUrl}/api/admin/peer-summaries/history?metric=assets.agents`,
+      { headers: auth(b) },
+    )
+    expect(noSource.status).toBe(400)
+    expect(b.historyCalls).toHaveLength(0)
+  })
+
+  it('GET /history 400 on a non-integer window param', async () => {
+    b = await boot()
+    const r = await fetch(
+      `${b.baseUrl}/api/admin/peer-summaries/history?source=local&metric=assets.agents&since=abc`,
+      { headers: auth(b) },
+    )
+    expect(r.status).toBe(400)
+    expect(b.historyCalls).toHaveLength(0)
+  })
+
+  it('GET /history 503 when the federation surface is not wired', async () => {
+    b = await boot({ withFederation: false })
+    const r = await fetch(
+      `${b.baseUrl}/api/admin/peer-summaries/history?source=local&metric=assets.agents`,
+      { headers: auth(b) },
+    )
+    expect(r.status).toBe(503)
   })
 })

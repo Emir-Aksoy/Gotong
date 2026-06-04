@@ -84,6 +84,8 @@ export type {
   PeerSummaryFederationSurface,
   PeerSummaryRow,
   PeerSummary,
+  PeerSummaryHistoryQuery,
+  PeerSummaryTrendPoint,
 } from './peer-summary-routes.js'
 export type { OidcLoginSurface } from './oidc-routes.js'
 export type { OidcProviderAdminSurface, OidcProviderView } from './oidc-admin-routes.js'
@@ -2016,7 +2018,12 @@ async function handle(
   }
 
   // v5 E5-M3 — cross-hub control plane (local footprint + peer summaries).
-  if (path === '/api/admin/peer-summaries' || path === '/api/admin/peer-summaries/refresh') {
+  // v5 Stream F adds /history for metric trends from persisted snapshots.
+  if (
+    path === '/api/admin/peer-summaries' ||
+    path === '/api/admin/peer-summaries/refresh' ||
+    path === '/api/admin/peer-summaries/history'
+  ) {
     const handled = await handlePeerSummaryRoute(
       {
         peerSummaries: ctx.peerSummaries,

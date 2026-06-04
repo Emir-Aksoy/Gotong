@@ -28,6 +28,7 @@
 import type { HubLink, Participant, ParticipantId } from '@aipehub/core'
 import type { RpcResponder } from './peer-kb-gate.js'
 import {
+  PEER_SUMMARY_METRIC_KEYS,
   buildPeerSummaryTrend,
   type PeerSummaryTrendPoint,
 } from './peer-summary-metrics.js'
@@ -424,6 +425,8 @@ export interface PeerSummaryFederation {
    * persisted snapshots; returns `[]` when no snapshot sink is wired.
    */
   history(query: PeerSummaryHistoryQuery): Promise<PeerSummaryTrendPoint[]>
+  /** The canonical trendable metric keys — single source for the UI dropdown. */
+  metricKeys(): string[]
 }
 
 /**
@@ -531,6 +534,9 @@ export function createPeerSummaryFederation(
         limit: query.limit,
       })
       return buildPeerSummaryTrend(rows, query.metric)
+    },
+    metricKeys() {
+      return PEER_SUMMARY_METRIC_KEYS
     },
   }
 }

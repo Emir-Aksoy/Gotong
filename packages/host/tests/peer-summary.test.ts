@@ -475,4 +475,12 @@ describe('createPeerSummaryFederation (v5 E5-M3)', () => {
     await fed.refresh()
     expect(await fed.history({ source: 'local', metric: 'assets.agents' })).toEqual([])
   })
+
+  it('metricKeys exposes the canonical trendable metric list', async () => {
+    const fed = createPeerSummaryFederation(stub([], {}), { buildLocal: async () => local })
+    const keys = fed.metricKeys()
+    expect(keys).toContain('assets.agents')
+    expect(keys).toContain('health.suspendedTasks')
+    expect(keys.length).toBeGreaterThanOrEqual(9)
+  })
 })
