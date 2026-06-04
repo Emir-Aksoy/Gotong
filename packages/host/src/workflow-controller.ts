@@ -27,7 +27,7 @@ import { existsSync, mkdirSync, unlinkSync } from 'node:fs'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { createLogger, type Hub } from '@aipehub/core'
+import { createLogger, extractRequiredCapabilities, type Hub } from '@aipehub/core'
 import { NEVER_RESUME_AT } from '@aipehub/inbox'
 
 const log = createLogger('workflow-ctl')
@@ -38,11 +38,13 @@ import {
   parseWorkflow,
   workflowParticipantId,
   type ArchiveRunsOptions,
+  type DispatchSpec,
   type LifecycleState,
   type RevisionMeta,
   type RunState,
   type RunStatusCounts,
   type RunSummary,
+  type Step,
   type WorkflowDefinition,
 } from '@aipehub/workflow'
 import {
@@ -92,6 +94,43 @@ export interface WorkflowSummary {
    * has never been published (a pure draft).
    */
   currentRevision?: number
+  /**
+   * Stream G day-2 — steps whose dispatch asks for a capability that a
+   * connected peer hub advertises (and that no local participant serves), i.e.
+   * they'll route ACROSS the federation boundary. Present (non-empty) only
+   * when the controller is wired with a peer-capability view AND the
+   * definition actually has such a step. The admin UI uses this to warn — before
+   * launch — "this step goes to peer <x>; if they gate it, you'll approve in
+   * your inbox". Pure visibility; the dispatch itself is unchanged.
+   */
+  crossHubSteps?: CrossHubStep[]
+}
+
+/** One workflow step that dispatches to a connected peer hub. */
+export interface CrossHubStep {
+  /** The step id (or `${stepId}/${branchId}` for a parallel branch). */
+  stepId: string
+  /** The capability that only a peer (not a local participant) serves. */
+  capability: string
+  /** The peer hub's id (== the peer wrapper participant id). */
+  peer: string
+  /** The peer's human label, when set. */
+  peerLabel: string | null
+}
+
+/**
+ * The connected-peer capability view the controller consults to flag cross-hub
+ * steps. Duck-typed and OPTIONAL: a controller built without it (the common
+ * single-hub case) flags nothing — zero behavior change. The host builds this
+ * from the peer registry's connected links joined with each peer wrapper's
+ * advertised capabilities (Stream G G-M1: advertise == authorize).
+ */
+export interface PeerCapabilityView {
+  peerCapabilities(): Array<{
+    peer: string
+    label: string | null
+    capabilities: readonly string[]
+  }>
 }
 
 export interface WorkflowControllerOptions {
@@ -109,6 +148,12 @@ export interface WorkflowControllerOptions {
   spaceRoot: string
   /** Injectable versioning service. Default: file-backed over `spaceRoot`. */
   versioning?: WorkflowVersioning
+  /**
+   * Stream G day-2 — optional connected-peer capability view. When present, the
+   * controller annotates each summary with its `crossHubSteps`. Absent ⇒ no
+   * cross-hub flags (single-hub deployments pay nothing).
+   */
+  peerCapabilities?: PeerCapabilityView
 }
 
 /**
@@ -147,12 +192,15 @@ export class WorkflowController {
    * truth; this map only carries the file path the UI shows / `remove` deletes.
    */
   private readonly known = new Map<string, { file: string | null }>()
+  /** Stream G day-2 — connected-peer caps for cross-hub-step flags (optional). */
+  private readonly peerCapabilities?: PeerCapabilityView
 
   constructor(opts: WorkflowControllerOptions) {
     this.hub = opts.hub
     this.definitionsDir = opts.definitionsDir
     this.spaceRoot = opts.spaceRoot
     this.runStore = new RunStore(opts.spaceRoot)
+    this.peerCapabilities = opts.peerCapabilities
     this.versioning =
       opts.versioning ??
       new WorkflowVersioning({ hub: opts.hub, spaceRoot: opts.spaceRoot })
@@ -585,8 +633,94 @@ export class WorkflowController {
     if (def.trigger.payloadSchema) out.payloadSchema = def.trigger.payloadSchema
     if (def.surface?.me) out.surfaceMe = def.surface.me
     if (def.governance) out.governance = def.governance
+    const crossHub = this.computeCrossHubSteps(def)
+    if (crossHub.length > 0) out.crossHubSteps = crossHub
     return out
   }
+
+  /**
+   * Resolve which of a definition's steps dispatch to a connected peer hub.
+   * Returns `[]` when no peer-capability view is wired (single-hub case ⇒ zero
+   * cost). The local-capability set EXCLUDES the peer wrapper participants
+   * (their ids == peer ids) so a capability the peer itself advertises isn't
+   * mistaken for "served locally" and thus wrongly suppressed.
+   */
+  private computeCrossHubSteps(def: WorkflowDefinition): CrossHubStep[] {
+    if (!this.peerCapabilities) return []
+    const peerEntries = this.peerCapabilities.peerCapabilities()
+    if (peerEntries.length === 0) return []
+    const peerIds = new Set(peerEntries.map((e) => e.peer))
+    const localCaps = new Set<string>()
+    for (const p of this.hub.participants()) {
+      if (peerIds.has(p.id)) continue
+      for (const c of p.capabilities) localCaps.add(c)
+    }
+    return crossHubStepsOf(def, localCaps, peerEntries)
+  }
+}
+
+/**
+ * Flatten a workflow's steps into `(stepId, capability)` pairs for the
+ * capabilities each dispatch ASKS for. Uses the canonical
+ * {@link extractRequiredCapabilities} so cross-hub detection gates on the SAME
+ * notion of "required caps" as the inbound/outbound peer ACLs (no drift):
+ * `explicit` dispatch and unfiltered `broadcast` yield `null` there → they
+ * contribute nothing (they can't be capability-matched to a peer anyway). A
+ * parallel step's branches are addressed `${stepId}/${branchId}`.
+ */
+function stepDispatchCapabilities(
+  step: Step,
+): Array<{ stepId: string; capability: string }> {
+  const out: Array<{ stepId: string; capability: string }> = []
+  const add = (stepId: string, spec: DispatchSpec): void => {
+    const caps = extractRequiredCapabilities(spec.strategy)
+    if (!caps) return
+    for (const c of caps) out.push({ stepId, capability: c })
+  }
+  if ('parallel' in step) {
+    for (const b of step.branches) add(`${step.id}/${b.id}`, b.dispatch)
+  } else {
+    add(step.id, step.dispatch)
+  }
+  return out
+}
+
+/**
+ * Pure cross-hub-step detection (exported for direct unit testing — no Hub, no
+ * versioning needed). A step is "cross-hub" when its dispatch asks for a
+ * capability that a connected peer advertises AND no local participant serves.
+ *
+ * The "not local" guard matters: a capability that BOTH a local agent and a
+ * peer can serve still routes locally (the capability strategy is satisfied by
+ * any local match first), so flagging it would be a false alarm. When two peers
+ * advertise the same capability the FIRST in `peerEntries` wins attribution —
+ * deterministic; the caller passes a stable order.
+ */
+export function crossHubStepsOf(
+  def: WorkflowDefinition,
+  localCapabilities: ReadonlySet<string>,
+  peerEntries: ReadonlyArray<{
+    peer: string
+    label: string | null
+    capabilities: readonly string[]
+  }>,
+): CrossHubStep[] {
+  const peerCap = new Map<string, { peer: string; label: string | null }>()
+  for (const e of peerEntries) {
+    for (const c of e.capabilities) {
+      if (!peerCap.has(c)) peerCap.set(c, { peer: e.peer, label: e.label })
+    }
+  }
+  const out: CrossHubStep[] = []
+  for (const step of def.steps) {
+    for (const { stepId, capability } of stepDispatchCapabilities(step)) {
+      if (localCapabilities.has(capability)) continue
+      const hit = peerCap.get(capability)
+      if (!hit) continue
+      out.push({ stepId, capability, peer: hit.peer, peerLabel: hit.label })
+    }
+  }
+  return out
 }
 
 /**

@@ -137,6 +137,12 @@ export type {
   InboundAclVerdict,
 } from './peer-link-install.js'
 
+// The canonical strategy → required-capabilities extractor. Re-exported so
+// consumers (host workflow-controller cross-hub detection) gate on the SAME
+// notion of "which caps does this dispatch ask for" as the inbound/outbound
+// peer ACLs — one place, no drift.
+export { extractRequiredCapabilities } from './peer-acl.js'
+
 export {
   FeedbackLedger,
   FileFeedbackStorage,

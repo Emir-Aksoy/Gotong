@@ -1157,7 +1157,32 @@ async function main(): Promise<void> {
   const wfMsg = formatLoadReport(workflowReport)
   if (wfMsg) log.info('workflow loader', { report: wfMsg })
   const workflowController = await createWorkflowController(
-    { hub, definitionsDir: workflowsDir, spaceRoot: SPACE_DIR },
+    {
+      hub,
+      definitionsDir: workflowsDir,
+      spaceRoot: SPACE_DIR,
+      // Stream G day-2 — connected-peer capability view for cross-hub-step
+      // flags on workflow summaries. Read LAZILY via the forward-declared
+      // `peerRegistryRef`: the registry is built further down, but this closure
+      // only fires when an admin summary is projected (an HTTP request long
+      // after boot), so it sees the live registry. A peer's advertised caps ARE
+      // the registered wrapper participant's `.capabilities` (G-M1: outboundCaps
+      // → remoteCapabilities) — the same source dispatch routing consults, so
+      // the flag can't drift from where the step would actually go.
+      peerCapabilities: {
+        peerCapabilities: () =>
+          (peerRegistryRef?.status() ?? [])
+            .filter((s) => s.connected)
+            .map((s) => {
+              const wrapper = hub.registry.get(s.peerId)
+              return {
+                peer: s.peerId,
+                label: s.label,
+                capabilities: wrapper ? [...wrapper.capabilities] : [],
+              }
+            }),
+      },
+    },
     workflowReport,
   )
 
