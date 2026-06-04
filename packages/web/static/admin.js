@@ -1187,8 +1187,9 @@
     function crossHubPanel(steps) {
       if (!Array.isArray(steps) || steps.length === 0) return "";
       const rows = steps.map((s) => {
-        const peer = s.peerLabel || s.peer;
-        return `<li><code>${escapeHtml4(String(s.stepId))}</code> → <code>${escapeHtml4(String(s.capability))}</code> <span class="wf-xhub-peer">${escapeHtml4(t4.workflowCrossHubPeer(String(peer)))}</span></li>`;
+        const dest = s.peerLabel || s.peer;
+        const label = s.kind === "a2a" ? t4.workflowCrossHubA2a(String(dest)) : t4.workflowCrossHubPeer(String(dest));
+        return `<li><code>${escapeHtml4(String(s.stepId))}</code> → <code>${escapeHtml4(String(s.capability))}</code> <span class="wf-xhub-peer">${escapeHtml4(label)}</span></li>`;
       });
       return `<details class="wf-xhub"><summary>${escapeHtml4(t4.workflowCrossHubSummary(steps.length))}</summary><ul class="ma-meta">${rows.join("")}</ul></details>`;
     }
@@ -2584,8 +2585,14 @@
       }
       if (dom.wfStartDesc) {
         const cap = `<code>${escapeHtml5(w.triggerCapability)}</code>`;
-        const peers = Array.isArray(w.crossHubSteps) && w.crossHubSteps.length ? Array.from(new Set(w.crossHubSteps.map((s) => s.peerLabel || s.peer))) : [];
-        const xhub = peers.length ? `<br/><small class="wf-xhub-note">${escapeHtml5(t5.workflowCrossHubNote(w.crossHubSteps.length, peers.join(", ")))}</small>` : "";
+        const xhubSteps = Array.isArray(w.crossHubSteps) ? w.crossHubSteps : [];
+        const peerDests = Array.from(
+          new Set(xhubSteps.filter((s) => s.kind !== "a2a").map((s) => s.peerLabel || s.peer))
+        );
+        const a2aDests = Array.from(
+          new Set(xhubSteps.filter((s) => s.kind === "a2a").map((s) => s.peerLabel || s.peer))
+        );
+        const xhub = peerDests.length || a2aDests.length ? `<br/><small class="wf-xhub-note">${escapeHtml5(t5.workflowCrossHubNote(peerDests, a2aDests))}</small>` : "";
         dom.wfStartDesc.innerHTML = (w.description ? `${escapeHtml5(w.description)}<br/><small>派发能力:${cap}</small>` : `派发能力:${cap}`) + xhub;
       }
       renderWorkflowStartFields(w.payloadSchema);

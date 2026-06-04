@@ -804,25 +804,32 @@ export interface WorkflowSummary {
   /** Phase 15 — the revision new runs bind to. Absent for a never-published draft. */
   currentRevision?: number
   /**
-   * Stream G day-2 — pass-through of the host's `crossHubSteps`: the workflow
-   * steps that dispatch to a CONNECTED peer hub (a capability a peer advertises
-   * and no local participant serves). Present (non-empty) only on a multi-hub
-   * host. The admin UI renders it as a "this step leaves the hub" indicator
-   * before launch — pure visibility; the dispatch itself is unchanged.
+   * Stream G day-2 / H — pass-through of the host's `crossHubSteps`: the
+   * workflow steps that dispatch OFF this hub (a capability no local participant
+   * serves, served instead by a connected mesh peer [`kind:'peer'`] or an
+   * external A2A agent [`kind:'a2a'`]). Present (non-empty) only when the host
+   * has such a destination. The admin UI renders it as a "this step leaves the
+   * hub" indicator before launch — pure visibility; the dispatch is unchanged.
    */
   crossHubSteps?: CrossHubStepView[]
 }
 
-/** Stream G day-2 — one workflow step that dispatches to a connected peer hub. */
+/** Stream G day-2 / H — one workflow step that dispatches OFF this hub. */
 export interface CrossHubStepView {
   /** The step id (or `${stepId}/${branchId}` for a parallel branch). */
   stepId: string
-  /** The capability only a peer (not a local participant) serves. */
+  /** The capability no local participant serves. */
   capability: string
-  /** The peer hub's id. */
+  /** The off-hub destination's id (peer hub id or A2A agent id). */
   peer: string
-  /** The peer's human label, when set. */
+  /** The destination's human label, when set. */
   peerLabel: string | null
+  /**
+   * Destination kind: `'peer'` (mesh hub — may gate the step for inbox
+   * approval) or `'a2a'` (external A2A agent — fires immediately). Absent ⇒
+   * treat as `'peer'`.
+   */
+  kind?: 'peer' | 'a2a'
 }
 
 // --- Phase 15 — lifecycle mirror types -------------------------------------

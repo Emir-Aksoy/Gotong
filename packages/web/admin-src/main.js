@@ -1178,14 +1178,18 @@ import { createWorkflows } from './workflows.js'
     }
     if (dom.wfStartDesc) {
       const cap = `<code>${escapeHtml(w.triggerCapability)}</code>`
-      // Stream G day-2 — warn at launch when a step routes to a peer hub. If
-      // that peer set an outbound-approval gate, the run parks an approval in
-      // your inbox before the cross-hub step actually fires.
-      const peers = Array.isArray(w.crossHubSteps) && w.crossHubSteps.length
-        ? Array.from(new Set(w.crossHubSteps.map((s) => s.peerLabel || s.peer)))
-        : []
-      const xhub = peers.length
-        ? `<br/><small class="wf-xhub-note">${escapeHtml(t.workflowCrossHubNote(w.crossHubSteps.length, peers.join(', ')))}</small>`
+      // Stream G day-2 / H — warn at launch when a step leaves this hub. Split by
+      // destination kind: a mesh peer hub may pause for inbox approval (if gated);
+      // an external A2A agent has no approval gate and fires immediately.
+      const xhubSteps = Array.isArray(w.crossHubSteps) ? w.crossHubSteps : []
+      const peerDests = Array.from(
+        new Set(xhubSteps.filter((s) => s.kind !== 'a2a').map((s) => s.peerLabel || s.peer)),
+      )
+      const a2aDests = Array.from(
+        new Set(xhubSteps.filter((s) => s.kind === 'a2a').map((s) => s.peerLabel || s.peer)),
+      )
+      const xhub = peerDests.length || a2aDests.length
+        ? `<br/><small class="wf-xhub-note">${escapeHtml(t.workflowCrossHubNote(peerDests, a2aDests))}</small>`
         : ''
       dom.wfStartDesc.innerHTML =
         (w.description

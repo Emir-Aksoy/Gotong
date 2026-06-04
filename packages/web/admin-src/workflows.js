@@ -117,11 +117,15 @@ export function createWorkflows({ wf }) {
   function crossHubPanel(steps) {
     if (!Array.isArray(steps) || steps.length === 0) return ''
     const rows = steps.map((s) => {
-      const peer = s.peerLabel || s.peer
+      const dest = s.peerLabel || s.peer
+      // Stream H — distinguish the destination: an external A2A agent fires
+      // immediately (no approval gate), a mesh peer may gate for inbox approval.
+      const label =
+        s.kind === 'a2a' ? t.workflowCrossHubA2a(String(dest)) : t.workflowCrossHubPeer(String(dest))
       return (
         `<li><code>${escapeHtml(String(s.stepId))}</code> → ` +
         `<code>${escapeHtml(String(s.capability))}</code> ` +
-        `<span class="wf-xhub-peer">${escapeHtml(t.workflowCrossHubPeer(String(peer)))}</span></li>`
+        `<span class="wf-xhub-peer">${escapeHtml(label)}</span></li>`
       )
     })
     return (
