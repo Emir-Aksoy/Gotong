@@ -100,6 +100,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/llm
 
+  examples/cross-hub-workflow:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/inbox':
+        specifier: workspace:*
+        version: link:../../packages/inbox
+      '@aipehub/workflow':
+        specifier: workspace:*
+        version: link:../../packages/workflow
+
   examples/cross-org-rfp:
     dependencies:
       '@aipehub/core':

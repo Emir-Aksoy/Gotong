@@ -1,0 +1,16 @@
+{
+  "name": "@aipehub/example-cross-hub-workflow",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Cross-hub workflow orchestration (跨 hub 工作流编排) — two hubs in one process. A workflow on the consumer hub dispatches a step to a CAPABILITY on a peer hub, behind the Phase 18 outbound approval gate: the run parks, the owner approves, the task crosses the org boundary, and the peer's result flows back into the next (local) step. Deterministic, no API key.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/workflow": "workspace:*",
+    "@aipehub/inbox": "workspace:*"
+  }
+}
