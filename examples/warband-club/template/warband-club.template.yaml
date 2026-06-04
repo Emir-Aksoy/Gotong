@@ -1,0 +1,302 @@
+# 战团同好会 — 可载入模板 (aipehub.template/v1)
+#
+# 这是第二个**组织 hub** 模板 (第一个是 cafe-ops 门店运营)。两个模板对照着看:
+#   - cafe-ops    自上而下的正式流程 (店长审批排班 / 加班) —— 组织的「管理」面。
+#   - warband-club 围绕一个**共享资源**的协作 (全团共读共写一个档案库) —— 组织的「协作」面。
+#
+# 形态:一个以战锤 40k 爱好为名的粉丝战团 (原创同人致敬,不含任何受版权保护的文本或
+# 专有名词;「战团 / 兄弟 / 司库 / 传令官 / 集结」都是通用爱好者用语)。组织的价值在于
+# 一个**全团共享的档案库**:任何兄弟交进去的涂装方案 / 战报,别的兄弟都能查到 —— 你
+# 问的答案,可能正来自别人早先的贡献。这就是「有合作、有共享资源」。
+#
+# 装走的是「能协作的骨架」:
+#   - 2 个托管 LLM agent:
+#       · 司库 (archivist) —— 归档贡献 (warband.file-contribution) + 检索作答
+#         (warband.consult-archive),两件事都落在同一个共享档案库上。
+#       · 传令官 (herald) —— 把集结提议整理成章程 (warband.draft-muster)。
+#     工作流里的 human: 步骤派到 aipehub.human/v1 —— host 自带的收件箱 broker,不是
+#     模板 agent (战团长在 /me 拍板)。
+#   - 3 条声明式工作流,覆盖一个同好会最常见的三件事:
+#       1. 贡献档案 (surface.me 成员自助, 无审批) —— 共享资源的「写」。
+#       2. 问询档案库 (surface.me 成员自助, 无审批) —— 共享资源的「读」(= 合作)。
+#       3. 提议集结 + 战团长确认 (human: HITL) —— 协作里需要拍板的那一步。
+#   - 1 个可寻址知识库槽位 (战团共享档案库 / mcp-obsidian):涂装方案、战报、典籍、
+#     集结章程都从这里读写。
+#   - 一次性 DeepSeek apiKeyPrompt。
+#
+# 知识**内容**不在这个文件里 (Stream B 决策 #4):模板只带「MCP 接线 + presetData
+# 指针」。战团档案库的实际内容由你自己的 Obsidian vault 提供 (example 的可跑 demo 用
+# 确定性 stand-in + 真实磁盘目录替代真 LLM + 真 KB)。
+#
+# 导入:admin UI →「Agents / 工作流」→ 导入,或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/warband-club/template/warband-club.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+schema: aipehub.template/v1
+template:
+  name: 战团同好会(共享档案库)
+  description: |-
+    一个围绕**共享资源**协作的同好会组织 hub (以战锤 40k 粉丝战团为题的原创同人):
+    全团共读共写一个档案库,你交进去的涂装方案 / 战报别的兄弟都能查到,你问的答案可能
+    来自别人早先的贡献。模板带 2 个托管 agent(司库 + 传令官)、3 条声明式工作流(贡献 /
+    问询 / 集结)、一个指向战团共享档案库的 KB 槽位接线,以及一次性 DeepSeek key 提示。
+    上手快:导入即用,把你自己的 Obsidian vault 接到 KB 槽位就能落地协作。
+
+  version: 1
+
+  # ── 2 个 agent:司库 + 传令官 ───────────────────────────────────────────────────
+  # 两个都挂同一个战团共享档案库(mcp-obsidian)。host spawn 时各自拉起 mcp-obsidian
+  # 子进程,把工具(obsidian__search / obsidian__get_file_contents / obsidian__*)暴露给
+  # 该 agent 的 tool-use 循环(server 名 = `obsidian` → 工具命名 obsidian__*,同
+  # examples/obsidian-kb)。共享档案库是协作的底座 —— 一个库,全团共读共写。
+  agents:
+    # 司库:归档兄弟们的贡献,并从全团历史贡献里检索作答。冷峻、克制、忠于档案。
+    - id: archivist
+      displayName: 司库 (Archivist)
+      capabilities: [warband.file-contribution, warband.consult-archive]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是战团的司库,执掌全团共享的档案库。语气冷峻、克制、忠于记录 —— 你只对档案
+        负责,不夸大、不编造。
+
+        归档贡献 (capability warband.file-contribution):
+        - 把兄弟交来的涂装方案 / 战报整理成一条结构清晰的档案,用 obsidian 工具写进**共享**
+          档案库 (注明贡献者、类型、标题)。归档后简短确认「已入库,全团可查」。
+
+        检索作答 (capability warband.consult-archive):
+        - 用 obsidian__search 在共享档案库里找最相关的历史贡献,据其作答,并**注明来源**
+          (哪位兄弟、哪份档案)—— 你给的答案往往来自别人早先的贡献,这正是战团协作的样子。
+        - 档案里没有的,如实说「档案无载」,不臆造。只忠于库里真实存在的记录。
+      mcpServers:
+        - name: obsidian
+          command: uvx
+          args: [mcp-obsidian]
+          env:
+            OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+            OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+            OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+
+    # 传令官:把集结提议整理成一份清楚的章程,供战团长确认。简洁、有仪式感、不拖泥带水。
+    - id: herald
+      displayName: 传令官 (Herald)
+      capabilities: [warband.draft-muster]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是战团的传令官,把兄弟们的集结提议整理成一份清楚的章程。语气简洁、有仪式感,
+        就事论事。
+
+        拟集结章程 (capability warband.draft-muster):
+        - 把提议(类型 / 时间 / 规模 / 场地)整理成一份结构清楚的集结章程:集合时间、形式
+          (对战夜 / 涂装会 / 锦标赛)、议程要点。需要时可用 obsidian 工具参考共享档案库里
+          过往集结的格式,保持一致。
+        - 你只**拟稿**,不发布。是否纳入战团日程由战团长在确认步骤里拍板 —— 你不要把
+          章程说成已确认。
+      mcpServers:
+        - name: obsidian
+          command: uvx
+          args: [mcp-obsidian]
+          env:
+            OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+            OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+            OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+
+  # ── 3 条声明式工作流 ───────────────────────────────────────────────────────────
+  # 每条都是一个 aipehub.workflow/v1 的内层 block(id / trigger / steps / …);导入时
+  # parseTemplate 会逐条重新序列化成完整 workflow yaml 交给 workflow runtime 校验 + 注册。
+  # surface.me 让成员能在 /me 自助发起(角色门 + 用户作用域由 /me 层强制);human: 步骤
+  # 派到 aipehub.human/v1 → host 收件箱 broker 挂起任务,战团长批了才恢复(Phase 14 + 16)。
+  workflows:
+    # (1) 贡献档案 — 成员自助, 无审批。共享资源的「写」。
+    - id: warband-contribute
+      name: 贡献档案 — 涂装方案 / 战报
+      description: 成员把一份涂装方案或战报交进战团共享档案库, 供全团查阅。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        external_systems: [obsidian (战团共享档案库)]
+        notes: 成员自助贡献, 无审批; 内容进**全团共享**的同一个档案库, 不涉敏感个人数据。
+      trigger:
+        capability: warband.contribute
+        payload_schema:
+          - id: kind
+            label: 贡献类型
+            type: select
+            required: true
+            options:
+              - { value: paint-scheme, label: 涂装方案 }
+              - { value: battle-report, label: 战报 }
+          - id: title
+            label: 标题
+            type: text
+            required: true
+          - id: body
+            label: 正文 (涂装步骤 / 战斗经过)
+            type: textarea
+            rows: 6
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 我要贡献档案
+          description: 把你的涂装方案或战报交进战团共享档案库, 全团可查。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: contributor_id
+      steps:
+        - id: file
+          description: 司库把这份贡献归档进共享档案库。
+          dispatch:
+            strategy: { kind: capability, capabilities: [warband.file-contribution] }
+            title: "归档: $trigger.payload.title"
+            payload:
+              kind: $trigger.payload.kind
+              title: $trigger.payload.title
+              body: $trigger.payload.body
+              contributor: $trigger.payload.contributor_id
+      output:
+        kind: $trigger.payload.kind
+        title: $trigger.payload.title
+        filed: $file.output
+
+    # (2) 问询档案库 — 成员自助, 无审批。共享资源的「读」= 合作 (答案来自别人的贡献)。
+    - id: warband-consult
+      name: 问询战团档案库
+      description: 成员向战团共享档案库提问, 司库从全团历史贡献里检索作答。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        external_systems: [obsidian (战团共享档案库)]
+        notes: 只读检索共享档案库; 答案来自全团成员的历史贡献。
+      trigger:
+        capability: warband.ask
+        payload_schema:
+          - id: question
+            label: 你的问题 (涂装 / 战术 / 典籍)
+            type: textarea
+            rows: 3
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 我要问档案库
+          description: 向战团共享档案库提问, 司库从全团历史贡献里检索作答。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: asker_id
+      steps:
+        - id: consult
+          description: 司库检索共享档案库, 给出答案与来源。
+          dispatch:
+            strategy: { kind: capability, capabilities: [warband.consult-archive] }
+            title: 检索档案库
+            payload:
+              question: $trigger.payload.question
+      output:
+        question: $trigger.payload.question
+        answer: $consult.output.answer
+        sources: $consult.output.sources
+
+    # (3) 提议集结 + 战团长确认 (HITL) — 协作里需要拍板的那一步。
+    - id: warband-muster
+      name: 提议集结 + 战团长确认
+      description: 成员发起一次集结, 传令官整理成章程, 战团长确认是否纳入战团日程。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        required_human_roles: [战团长 (warband leader)]
+        external_systems: [obsidian (战团共享档案库)]
+        notes: 成员自助发起, 战团长统一确认; 集结章程进共享日程, 不涉敏感个人数据。
+      trigger:
+        capability: warband.propose-muster
+        payload_schema:
+          - id: title
+            label: 集结主题
+            type: text
+            required: true
+          - id: kind
+            label: 集结类型
+            type: select
+            required: true
+            options:
+              - { value: battle-night, label: 对战夜 }
+              - { value: paint-session, label: 涂装会 }
+              - { value: tournament, label: 锦标赛 }
+          - id: when
+            label: 时间 (如 "本周六 19:00")
+            type: text
+            required: true
+          - id: notes
+            label: 补充说明 (规模 / 点数 / 场地)
+            type: textarea
+            rows: 3
+          - id: leader_id
+            label: 确认战团长 (userId)
+            type: text
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 我要发起集结
+          description: 发起一次对战夜 / 涂装会 / 锦标赛, 战团长确认后纳入日程。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: proposer_id
+      steps:
+        - id: draft
+          description: 传令官把提议整理成一份集结章程。
+          dispatch:
+            strategy: { kind: capability, capabilities: [warband.draft-muster] }
+            title: 拟集结章程
+            payload:
+              title: $trigger.payload.title
+              kind: $trigger.payload.kind
+              when: $trigger.payload.when
+              notes: $trigger.payload.notes
+        - id: leader-confirm
+          description: 战团长确认这次集结是否纳入战团日程。
+          human:
+            assignee: $trigger.payload.leader_id
+            kind: approval
+            title: 集结确认
+            prompt: 请确认这次集结是否纳入战团日程。
+      output:
+        title: $trigger.payload.title
+        draft: $draft.output
+        confirm: $leader-confirm.output
+
+  # ── 1 个可寻址知识库槽位:战团共享档案库 (MCP 接线 + 预置数据「指针」, 不是内容!)──
+  # 槽位 name(`warband_archive`)是 KB 的可寻址身份(也是 Stream C 联邦 per-link 授权的
+  # 目标);背后的 mcpServer name(`obsidian`)是传输。导入时只「上报」不「自动接线」
+  # (决策 #4)—— 由你把自己的战团档案库 Obsidian vault 接到这个槽位。这个库是共享的:
+  # 全团共读共写,所以司库的归档与检索、传令官的参考都落在同一处。
+  knowledgeBases:
+    - name: warband_archive
+      description: 战团共享档案库(涂装方案 / 战报 / 典籍 / 集结章程,全团共读共写,via mcp-obsidian)
+      mcpServer:
+        name: obsidian
+        command: uvx
+        args: [mcp-obsidian]
+        env:
+          OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+          OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+          OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+      presetData:
+        kind: url
+        ref: https://example.com/warband-archive-seed.tar.zst
+        description: |-
+          一份战团档案库的种子快照(几份示例涂装方案 / 战报 / 集结章程的模板)—— 注意
+          这是「指针」,不是内容。两种用法:① 把种子档案直接拷进你的 Obsidian vault;
+          或 ② 打包托管,让这个 ref 指过去再显式拉取。框架永不经手你的档案内容。
+
+  # ── 一键:导入时提示填一次 API key,自动应用到两个 agent ──────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek
