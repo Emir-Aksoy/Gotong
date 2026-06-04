@@ -1,0 +1,176 @@
+# 奶茶店 ↔ 供货商 (跨组织供货链接) — 奶茶店一侧的可载入模板 (aipehub.template/v1)
+#
+# 这是第一个**跨组织 (cross-org)** 模板。前两个组织模板里:
+#   - cafe-ops 的审批是**店内** human: 步 (店长在同一个 hub 里批员工的事);
+#   - warband-club 是**单 hub 内**共享。
+# 这个模板的工作流要把一张补货单**派到另一个组织 (供货商) 的 hub 上** —— 跨组织。
+#
+# ★ 模版和框架是分离关系(本案例的教学点)★
+#   这个文件**只**带「奶茶店一侧的编排骨架」:
+#     - 1 个采购助手 agent (起草补货单 + 建档供货商回执);
+#     - 1 条声明式工作流 (起草 → 下单 → 建档);
+#     - 1 个指向「供货商目录」的 KB 槽位;
+#     - 一次性 DeepSeek key 提示。
+#   它**不**带、也**不能**带「跨组织的链接」本身:
+#     - 哪个 peer 是你的供货商、出站放行哪些 capability、是否需要店长审批 —— 这些是
+#       **运行时的 peer 配置** (host 的 installPeerLink / admin「联邦」tab),不在模板里,
+#       也不在工作流 YAML 里。工作流的 `place` 步只写一个 capability 名
+#       (`supplier.confirm-order`),**从不点名某个 peer**。
+#   换句话说:模板是「可搬走的骨架」,链接是「落地时各自配的运行时契约」。两个奶茶店
+#   导入同一个模板,各自连各自的供货商,凭证 / 数据 / 计费互不串线。
+#
+# ★ 跨组织审批不是工作流里的 human: 步 ★
+#   订单「是否准予跨出组织」由**出站审批闸**决定 —— 供货商 peer 上标了
+#   requireApprovalOutbound,host 把出站任务挂起在店长的收件箱,批准了才越过边界。
+#   这一层是**框架运行时**的事 (Phase 18 / Stream G),对工作流透明,所以这条工作流里
+#   **没有** human: 步。(可跑 demo examples/tea-supply-link/src/index.ts 把这个闸内联成
+#   可见的 ~40 行。)
+#
+# 知识**内容**不在这个文件里 (Stream B 决策 #4):模板只带「MCP 接线 + presetData
+# 指针」。供货商目录由你自己的 Obsidian vault 提供 (demo 用确定性 stand-in 替代真 LLM)。
+#
+# 导入:admin UI →「Agents / 工作流」→ 导入,或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/tea-supply-link/template/tea-shop.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+schema: aipehub.template/v1
+template:
+  name: 奶茶店(跨组织供货链接)
+  description: |-
+    一个奶茶店组织 hub:店员申请补货 → 采购助手按供货商目录起草补货单 → 店长批准外发 →
+    向**供货商 (另一个组织的 hub)** 确认价格与货期 → 本地建档。模板带 1 个采购助手
+    agent、1 条跨组织补货工作流、一个指向供货商目录的 KB 槽位接线,以及一次性 DeepSeek
+    key 提示。跨组织的链接(哪个供货商 / 出站放行 / 店长审批)是**运行时**配的,不在模板里
+    —— 导入后到 admin「联邦」tab 连上你的供货商即可落地。
+
+  version: 1
+
+  # ── 1 个 agent:采购助手 ────────────────────────────────────────────────────────
+  # 服务奶茶店一侧的两个 LOCAL capability:起草补货单 + 建档供货商回执。它**不定价**
+  # —— 价格 / 货期是供货商在另一个 hub 上确定性返回的。挂同一个供货商目录 (mcp-obsidian):
+  # host spawn 时拉起 mcp-obsidian 子进程,把工具 (obsidian__search / get_file_contents)
+  # 暴露给该 agent 的 tool-use 循环。
+  agents:
+    - id: procurement-assistant
+      displayName: 采购助手
+      capabilities: [teashop.draft-order, teashop.record-order]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是奶茶店的采购助手,负责把店员的缺货清单整理成一张规范的补货单,并在供货商确认
+        后把回执建档。语气简洁、就事论事。
+
+        起草补货单 (capability teashop.draft-order):
+        - 从「供货商目录」(obsidian__search / obsidian__get_file_contents) 核对物料名称是否
+          对得上供货商的目录条目 (如「珍珠 / 红茶叶 / 全脂牛奶」),把缺货清单整理成
+          物料 + 数量的补货单。
+        - 你**只起草,不定价**。单价、库存是否充足、货期,都由供货商在下单确认步骤里返回
+          —— 起草阶段不要编价格。
+
+        建档回执 (capability teashop.record-order):
+        - 把供货商确认的明细 (单价 / 小计 / 合计 / 货期) 原样建档成采购单,不改数字。
+
+        注意:把补货单发给供货商是**跨组织**外发,会先挂起等店长在出站审批闸批准 —— 那一步
+        不归你管 (是框架运行时的事),你只管把单子起草清楚。
+
+      mcpServers:
+        - name: obsidian
+          command: uvx
+          args: [mcp-obsidian]
+          env:
+            OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+            OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+            OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+
+  # ── 1 条跨组织声明式工作流 ─────────────────────────────────────────────────────
+  # 导入时 parseTemplate 把这个内层 block 重新序列化成完整 workflow yaml 交给 workflow
+  # runtime 校验 + 注册。注意 `place` 步派的 `supplier.confirm-order` **不是**这个模板里
+  # 任何 agent 的 capability —— 它住在供货商 peer 上,运行时由联邦链路解析 (导入时会作为
+  # 「本地暂无人服务的 capability」软提示,这是预期的:它是跨组织能力)。
+  # 这条工作流里**没有** human: 步:跨组织审批是运行时的出站审批闸,不是工作流步骤。
+  workflows:
+    - id: tea-shop-restock
+      name: 奶茶店补货下单 (跨组织)
+      description: 库存见底 → 助手起草补货单 → 店长批准外发 → 供货商确认价格与货期 → 本地建档。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        required_human_roles: [店长 (store manager)]
+        external_systems: [供货商 hub (联邦 peer)]
+        notes: 订单外发到供货商需店长在出站审批闸批准;价格 / 货期由供货商确定性返回,助手只起草不定价。
+      trigger:
+        capability: teashop.request-restock
+        payload_schema:
+          - id: items
+            label: 缺货物料 (每行一项,如 "珍珠 20")
+            type: textarea
+            rows: 5
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 我要申请补货
+          description: 列出见底的物料,店长批准后向供货商下单。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: requested_by
+      steps:
+        - id: draft
+          description: 助手把缺货清单整理成一张补货单 (物料 + 数量)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [teashop.draft-order] }
+            title: 起草补货单
+            payload:
+              items: $trigger.payload.items
+              requested_by: $trigger.payload.requested_by
+        - id: place
+          description: 向供货商下单确认 (跨组织能力;运行时出站审批闸:店长批准才跨出)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [supplier.confirm-order] }
+            title: 向供货商确认订单
+            payload:
+              order: $draft.output
+        - id: record
+          description: 把供货商确认的价格 / 货期建档 (本地)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [teashop.record-order] }
+            title: 建档采购单
+            payload:
+              order: $draft.output
+              confirmation: $place.output
+      output:
+        draft: $draft.output
+        confirmation: $place.output
+        record: $record.output
+
+  # ── 1 个可寻址知识库槽位:MCP 接线 + 预置数据「指针」(不是内容!)──────────────
+  # 槽位 name(`supplier_catalog`)是 KB 的可寻址身份;背后的 mcpServer name(`obsidian`)
+  # 是传输。导入时只「上报」不「自动接线」(决策 #4)—— 由你把自己的供货商目录接到这个槽位。
+  knowledgeBases:
+    - name: supplier_catalog
+      description: 供货商目录(可订物料 / 规格 / 起订量 / 对账口径,via mcp-obsidian)
+      mcpServer:
+        name: obsidian
+        command: uvx
+        args: [mcp-obsidian]
+        env:
+          OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+          OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+          OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+      presetData:
+        kind: url
+        ref: https://example.com/tea-supplier-catalog-seed.tar.zst
+        description: |-
+          一份供货商目录的种子快照(可订物料 / 规格 / 起订量的模板)—— 注意这是「指针」,
+          不是内容。两种用法:① 把种子目录直接拷进你的 Obsidian vault;或 ② 打包托管,让这个
+          ref 指过去再显式拉取。框架永不经手目录内容,价格仍由供货商在下单时返回。
+
+  # ── 一键:导入时提示填一次 API key,自动应用到 agent ──────────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek
