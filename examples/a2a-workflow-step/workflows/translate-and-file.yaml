@@ -1,0 +1,24 @@
+schema: aipehub.workflow/v1
+workflow:
+  id: a2a-translate-and-file
+  name: translate via external A2A agent, then file
+  # This hub runs the workflow. Its first step dispatches a capability served by
+  # an EXTERNAL A2A agent (a third-party translator reached over the A2A wire);
+  # the second step is local and files the translation. Nothing in the YAML names
+  # the agent — `external.translate` is an ordinary capability that just happens
+  # to resolve to an A2aRemoteParticipant (a local participant that forwards the
+  # task to the agent's `message/send` endpoint). Calling an external A2A agent
+  # is capability dispatch where the capability is served by an outbound A2A edge.
+  #
+  # Unlike a cross-hub step to a mesh peer (see examples/cross-hub-workflow), an
+  # external A2A step has NO approval gate — it fires immediately.
+  trigger: { capability: translate:start }
+  steps:
+    - id: translate
+      dispatch:
+        strategy: { kind: capability, capabilities: [external.translate] }
+        payload: { text: $trigger.payload.text }
+    - id: archive
+      dispatch:
+        strategy: { kind: capability, capabilities: [docs.archive] }
+        payload: { original: $trigger.payload.text, translation: $translate.output.text }
