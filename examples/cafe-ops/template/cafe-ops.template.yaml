@@ -1,0 +1,296 @@
+# 门店运营 (奶茶 / 咖啡店) — 可载入模板 (aipehub.template/v1)
+#
+# 这是第一个**组织 hub** 模板,也是第一个 template.workflows[] 非空的模板。
+#
+# 前三个上手案例 (编程 / 研究 / 成长) 的编排是 DispatchToolset (Phase 10) 代码级接线,
+# 模板 workflows: [] 留空。组织的价值在**正式流程**,所以这个模板把声明式工作流真正
+# 装进 workflows[] —— 三条覆盖了门店最常见的三件事:
+#   1. 新员工岗位上手 (surface.me 成员自助, 无审批)
+#   2. 排班提报 + 店长确认 (human: HITL)
+#   3. 加班申报 + 店长审批 (human: HITL, "LLM 建议金额, 人定钱")
+#
+# 装走的是「能干活的骨架」:
+#   - 2 个托管 LLM agent (培训师 + 运营助手),覆盖三条工作流派发的全部 capability
+#     (cafe.train-position / cafe.overtime-policy / cafe.schedule-draft);
+#     工作流里的 human: 步骤派到 aipehub.human/v1 —— 那是 host 自带的收件箱 broker,
+#     不是模板 agent。
+#   - 1 个可寻址知识库槽位 (店面运营手册 / mcp-obsidian):岗位 SOP、规范、加班政策、
+#     排班规则都从这里读。
+#   - 一次性 DeepSeek apiKeyPrompt。
+#
+# 知识**内容**不在这个文件里 (Stream B 决策 #4):模板只带「MCP 接线 + presetData
+# 指针」。运营手册由你自己的 Obsidian vault 提供 (example 的可跑 demo 用确定性
+# stand-in 替代真 LLM + 真 KB)。
+#
+# 导入:admin UI →「Agents / 工作流」→ 导入,或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/cafe-ops/template/cafe-ops.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+schema: aipehub.template/v1
+template:
+  name: 门店运营(奶茶 / 咖啡店)
+  description: |-
+    一个面向连锁 / 单店门店的组织 hub:新员工自助学到本岗位的操作与规范,排班与加班
+    走「成员提报 → 店长审批」的正式流程。模板带 2 个托管 agent(岗位培训师 + 运营
+    助手)、3 条声明式工作流(上手 / 排班 / 加班)、一个指向店面运营手册的 KB 槽位
+    接线,以及一次性 DeepSeek key 提示。覆盖面广、上手快:导入即用,把你自己的运营
+    手册接到 KB 槽位就能落地。
+
+  version: 1
+
+  # ── 2 个 agent:岗位培训师 + 运营助手 ──────────────────────────────────────────
+  # 两个都挂同一个店面运营手册(mcp-obsidian)。host spawn 时各自拉起 mcp-obsidian
+  # 子进程,把工具(obsidian__search / obsidian__get_file_contents)暴露给该 agent 的
+  # tool-use 循环(server 名 = `obsidian` → 工具命名 obsidian__*,同 examples/obsidian-kb)。
+  agents:
+    # 岗位培训师:新员工选岗位 → 从运营手册调出该岗位 SOP + 规范, 边问边答。
+    - id: onboarding-trainer
+      displayName: 岗位培训师
+      capabilities: [cafe.train-position]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是门店的岗位培训师,带新员工上手。语气专业、清楚、有耐心,只讲跟岗位相关的事。
+
+        每次接到新人的岗位上手请求:
+        1. 读手册:用 obsidian__search / obsidian__get_file_contents 从店面运营手册里调出
+           该岗位(吧台 / 收银 / 清洁支持)的标准操作流程(SOP)与必学规范。
+        2. 带教:按「开班 → 营业中 → 收档」的顺序把操作讲一遍,重点标出容易出错和涉及
+           食品安全 / 现金 / 会员信息的红线规范。
+        3. 答疑:如果新人带了问题,结合该岗位规范作答;手册没写的,如实说「问店长」,不编。
+        只教这个岗位该会的,不越界给别岗位指令。
+      mcpServers:
+        - name: obsidian
+          command: uvx
+          args: [mcp-obsidian]
+          env:
+            OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+            OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+            OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+
+    # 运营助手:加班按政策算「建议金额」(店长定钱)、排班把可排时段整理成草案(店长确认)。
+    - id: ops-assistant
+      displayName: 运营助手
+      capabilities: [cafe.overtime-policy, cafe.schedule-draft]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是门店运营助手,处理加班与排班的事务性核算。语气简洁、就事论事。
+
+        加班 (capability cafe.overtime-policy):
+        - 从店面运营手册读加班政策(基础时薪、倍率、计薪规则),按申报的时长算出**建议
+          金额**,并写清算式(时薪 × 倍率 × 时长)。
+        - 你只给「建议」。最终金额必须由店长在审批步骤里 approve 才算数 —— 钱的事 LLM
+          建议、人来定。不要把建议说成已批准。
+
+        排班 (capability cafe.schedule-draft):
+        - 把成员提报的可排时段整理成一份排班草案(按班次归并、标出冲突/空缺),供店长确认。
+        - 你只出草案,不直接发布;发布与否由店长在确认步骤里定。
+      mcpServers:
+        - name: obsidian
+          command: uvx
+          args: [mcp-obsidian]
+          env:
+            OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+            OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+            OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+
+  # ── 3 条声明式工作流 ───────────────────────────────────────────────────────────
+  # 每条都是一个 aipehub.workflow/v1 的内层 block(id / trigger / steps / …);导入时
+  # parseTemplate 会逐条重新序列化成完整 workflow yaml 交给 workflow runtime 校验 + 注册。
+  # surface.me 让成员能在 /me 自助发起(角色门 + 用户作用域由 /me 层强制);human: 步骤
+  # 派到 aipehub.human/v1 → host 收件箱 broker 挂起任务,店长批了才恢复(Phase 14 + 16)。
+  workflows:
+    # (1) 新员工岗位上手 — 成员自助, 无审批。
+    - id: cafe-staff-onboarding
+      name: 新员工岗位上手
+      description: 新人选岗位, 培训师按店面运营手册带他过一遍该岗位的操作与规范。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        external_systems: [obsidian (店面运营手册)]
+        notes: 新人自助学习, 无审批, 不涉个人敏感数据; 内容来自店面运营手册 KB。
+      trigger:
+        capability: cafe.onboard-staff
+        payload_schema:
+          - id: position
+            label: 你的岗位
+            type: select
+            required: true
+            options:
+              - { value: barista, label: 制饮 (吧台) }
+              - { value: cashier, label: 收银 (前台) }
+              - { value: support, label: 清洁 / 出品支持 }
+          - id: question
+            label: 想先弄清的问题 (可选)
+            type: textarea
+            rows: 3
+      surface:
+        me:
+          enabled: true
+          label: 我的岗位上手
+          description: 选你的岗位, 培训师带你过一遍该岗位的操作与规范。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: trainee_id
+      steps:
+        - id: train
+          description: 培训师按岗位调出 SOP + 规范, 回答新人问题。
+          dispatch:
+            strategy: { kind: capability, capabilities: [cafe.train-position] }
+            title: "岗位上手: $trigger.payload.position"
+            payload:
+              position: $trigger.payload.position
+              question: $trigger.payload.question
+      output:
+        position: $trigger.payload.position
+        walkthrough: $train.output
+
+    # (2) 排班 — 提报可排时段 + 店长确认 (HITL)。
+    - id: cafe-shift-availability
+      name: 排班 — 提报可排时段 + 店长确认
+      description: 店员提报本周可排时段, 助手整理成排班建议, 店长统一确认。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        required_human_roles: [店长 (store manager)]
+        external_systems: [obsidian (店面运营手册)]
+        notes: 店员自助提报, 店长统一确认; 不涉敏感个人数据。
+      trigger:
+        capability: cafe.submit-availability
+        payload_schema:
+          - id: week
+            label: 排班周次
+            type: text
+            required: true
+          - id: availability
+            label: 可排时段 (每行一段, 如 "周一 14:00-22:00")
+            type: textarea
+            rows: 5
+            required: true
+          - id: manager_id
+            label: 确认店长 (userId)
+            type: text
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 我要提报排班
+          description: 提报你本周可排的时段, 店长统一确认。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: staff_id
+      steps:
+        - id: draft
+          description: 助手把可排时段整理成排班建议。
+          dispatch:
+            strategy: { kind: capability, capabilities: [cafe.schedule-draft] }
+            title: 排班建议
+            payload:
+              week: $trigger.payload.week
+              availability: $trigger.payload.availability
+        - id: manager-confirm
+          description: 店长确认排班建议是否可发布。
+          human:
+            assignee: $trigger.payload.manager_id
+            kind: approval
+            title: 排班确认
+            prompt: 请确认该排班建议是否可发布。
+      output:
+        week: $trigger.payload.week
+        draft: $draft.output
+        confirm: $manager-confirm.output
+
+    # (3) 加班申报 + 店长审批 (HITL) — "LLM 建议金额, 人定钱"。
+    - id: cafe-overtime-claim
+      name: 加班申报 + 店长审批
+      description: 店员报加班, 助手按店面加班政策给出建议金额, 店长复核后批准。
+      governance:
+        data_sensitivity: confidential
+        required_credentials: [deepseek]
+        required_human_roles: [店长 (store manager)]
+        external_systems: [obsidian (店面运营手册)]
+        notes: 涉及薪酬; 助手给的金额仅供参考, 最终金额须店长 approve 才算数。
+      trigger:
+        capability: cafe.claim-overtime
+        payload_schema:
+          - id: date
+            label: 加班日期
+            type: text
+            required: true
+          - id: hours
+            label: 加班时长 (小时)
+            type: number
+            required: true
+          - id: reason
+            label: 加班事由
+            type: textarea
+            rows: 2
+            required: true
+          - id: manager_id
+            label: 审批店长 (userId)
+            type: text
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 我要报加班
+          description: 提交加班时长与事由, 由店长审批。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: staff_id
+      steps:
+        - id: assess
+          description: 助手按店面加班政策核算并给出建议金额 (仅供参考)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [cafe.overtime-policy] }
+            title: 加班政策核算
+            payload:
+              hours: $trigger.payload.hours
+              date: $trigger.payload.date
+        - id: manager-approval
+          description: 店长复核加班申报与建议金额, 决定是否批准。
+          human:
+            assignee: $trigger.payload.manager_id
+            kind: approval
+            title: 加班审批
+            prompt: 请复核该加班申报与建议金额, 决定是否批准。
+      output:
+        date: $trigger.payload.date
+        hours: $trigger.payload.hours
+        suggestion: $assess.output
+        approval: $manager-approval.output
+
+  # ── 1 个可寻址知识库槽位:MCP 接线 + 预置数据「指针」(不是内容!)──────────────
+  # 槽位 name(`store_ops_manual`)是 KB 的可寻址身份(也是 Stream C 联邦 per-link
+  # 授权的目标);背后的 mcpServer name(`obsidian`)是传输。导入时只「上报」不「自动
+  # 接线」(决策 #4)—— 由你把自己的店面运营手册接到这个槽位。
+  knowledgeBases:
+    - name: store_ops_manual
+      description: 店面运营手册(岗位 SOP / 规范 / 加班政策 / 排班规则,via mcp-obsidian)
+      mcpServer:
+        name: obsidian
+        command: uvx
+        args: [mcp-obsidian]
+        env:
+          OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+          OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+          OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+      presetData:
+        kind: url
+        ref: https://example.com/cafe-ops-manual-seed.tar.zst
+        description: |-
+          一份店面运营手册的种子快照(岗位 SOP / 规范 / 加班政策 / 排班规则的模板)——
+          注意这是「指针」,不是内容。两种用法:① 把种子手册直接拷进你的 Obsidian
+          vault;或 ② 打包托管,让这个 ref 指过去再显式拉取。框架永不经手你的手册内容。
+
+  # ── 一键:导入时提示填一次 API key,自动应用到两个 agent ──────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek

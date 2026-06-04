@@ -877,6 +877,9 @@ importers:
       '@aipehub/identity':
         specifier: workspace:*
         version: link:../identity
+      '@aipehub/workflow':
+        specifier: workspace:*
+        version: link:../workflow
       esbuild:
         specifier: ^0.25.0
         version: 0.25.12
