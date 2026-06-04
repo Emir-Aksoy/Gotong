@@ -26,12 +26,22 @@
  */
 
 import type { HubLink, Participant, ParticipantId } from '@aipehub/core'
+import type {
+  AddPeerSummaryAlertRuleInput,
+  PeerSummaryAlertRule,
+  UpdatePeerSummaryAlertRuleInput,
+} from '@aipehub/identity'
 import type { RpcResponder } from './peer-kb-gate.js'
 import {
   PEER_SUMMARY_METRIC_KEYS,
   buildPeerSummaryTrend,
   type PeerSummaryTrendPoint,
 } from './peer-summary-metrics.js'
+import {
+  evaluatePeerSummaryAlerts,
+  type PeerSummaryAlertBreach,
+  type PeerSummarySource,
+} from './peer-summary-alerts.js'
 
 /** Wire method names for the peer summary (shared producer/consumer). */
 export const PEER_SUMMARY_METHODS = {
@@ -402,6 +412,21 @@ export interface PeerSummarySnapshotSink {
   }): Array<{ capturedAt: number; summaryJson: string }>
 }
 
+/**
+ * Alert-rule store (v5 Stream F-M5) — the rules the control plane evaluates LIVE
+ * against the current summaries. Duck-typed so the host backs it with
+ * `IdentityStore` (the four method names mirror it exactly) while peer-summary
+ * keeps zero identity RUNTIME dep — only the input/output TYPES are imported, and
+ * those are erased. Optional: without it the federation reports no rules and no
+ * breaches (the F-M4 evaluator is a pure function; this just feeds it).
+ */
+export interface PeerSummaryAlertRuleSink {
+  listPeerSummaryAlertRules(): PeerSummaryAlertRule[]
+  addPeerSummaryAlertRule(input: AddPeerSummaryAlertRuleInput): PeerSummaryAlertRule
+  updatePeerSummaryAlertRule(id: string, patch: UpdatePeerSummaryAlertRuleInput): PeerSummaryAlertRule
+  removePeerSummaryAlertRule(id: string): boolean
+}
+
 /** A history query: one source's trend of one scalar metric over a window. */
 export interface PeerSummaryHistoryQuery {
   /** `'local'` or a peer id. */
@@ -427,6 +452,21 @@ export interface PeerSummaryFederation {
   history(query: PeerSummaryHistoryQuery): Promise<PeerSummaryTrendPoint[]>
   /** The canonical trendable metric keys — single source for the UI dropdown. */
   metricKeys(): string[]
+  /** List the configured alert rules (v5 Stream F-M5); `[]` when unwired. */
+  listAlertRules(): PeerSummaryAlertRule[]
+  /** Create an alert rule. Throws (→ store error) when no rule sink is wired. */
+  addAlertRule(input: AddPeerSummaryAlertRuleInput): PeerSummaryAlertRule
+  /** Targeted update of an alert rule (undefined = keep). */
+  updateAlertRule(id: string, patch: UpdatePeerSummaryAlertRuleInput): PeerSummaryAlertRule
+  /** Remove an alert rule; false when no such rule. */
+  removeAlertRule(id: string): boolean
+  /**
+   * Evaluate the rules against the CURRENT summaries — this hub's freshly-built
+   * `local` plus each peer's last-cached summary — and return the firings. A
+   * fact about NOW (no breach history): recomputed each call. `[]` when no rule
+   * sink is wired or no rule breaches.
+   */
+  evaluateAlerts(): Promise<PeerSummaryAlertBreach[]>
 }
 
 /**
@@ -449,6 +489,12 @@ export function createPeerSummaryFederation(
      * and the control plane stays point-in-time only (the E5 behaviour).
      */
     snapshots?: PeerSummarySnapshotSink
+    /**
+     * Alert-rule backing (v5 Stream F-M5). When wired, the federation exposes
+     * rule CRUD + live `evaluateAlerts`. IdentityStore duck-types it. Omit it
+     * and the control plane reports no rules and no breaches.
+     */
+    alertRules?: PeerSummaryAlertRuleSink
     now?: () => number
     logger?: { warn?: (msg: string, meta?: Record<string, unknown>) => void }
   },
@@ -473,23 +519,30 @@ export function createPeerSummaryFederation(
     }
   }
 
+  // Join the registry's live connection state with the summary cache. Shared by
+  // the public `list()` and by `evaluateAlerts` (which needs the cached peer
+  // summaries as alert sources).
+  function listRows(): PeerSummaryRow[] {
+    return registry.status().map((row) => {
+      const cached = cache.get(row.peerId)
+      return {
+        peer: row.peerId,
+        label: row.label,
+        online: row.connected,
+        stale: cached ? !row.connected : false,
+        summary: cached?.summary ?? null,
+        lastFetchedAt: cached?.lastFetchedAt ?? null,
+        lastError: errors.get(row.peerId) ?? null,
+      }
+    })
+  }
+
   return {
     async local() {
       return opts.buildLocal()
     },
     async list() {
-      return registry.status().map((row) => {
-        const cached = cache.get(row.peerId)
-        return {
-          peer: row.peerId,
-          label: row.label,
-          online: row.connected,
-          stale: cached ? !row.connected : false,
-          summary: cached?.summary ?? null,
-          lastFetchedAt: cached?.lastFetchedAt ?? null,
-          lastError: errors.get(row.peerId) ?? null,
-        }
-      })
+      return listRows()
     },
     async refresh(peerId?: string) {
       const rows = registry
@@ -537,6 +590,33 @@ export function createPeerSummaryFederation(
     },
     metricKeys() {
       return PEER_SUMMARY_METRIC_KEYS
+    },
+    listAlertRules() {
+      return opts.alertRules ? opts.alertRules.listPeerSummaryAlertRules() : []
+    },
+    addAlertRule(input) {
+      if (!opts.alertRules) throw new Error('alert rules not enabled on this host')
+      return opts.alertRules.addPeerSummaryAlertRule(input)
+    },
+    updateAlertRule(id, patch) {
+      if (!opts.alertRules) throw new Error('alert rules not enabled on this host')
+      return opts.alertRules.updatePeerSummaryAlertRule(id, patch)
+    },
+    removeAlertRule(id) {
+      return opts.alertRules ? opts.alertRules.removePeerSummaryAlertRule(id) : false
+    },
+    async evaluateAlerts() {
+      if (!opts.alertRules) return []
+      const rules = opts.alertRules.listPeerSummaryAlertRules()
+      if (rules.length === 0) return []
+      // Build the live source set: this hub's freshly-built local summary plus
+      // each peer's LAST-CACHED summary (alerts fire on the last known reading —
+      // the row's `stale` flag is the UI's honesty signal, not a reason to skip).
+      const sources: PeerSummarySource[] = [{ source: 'local', summary: await opts.buildLocal() }]
+      for (const row of listRows()) {
+        if (row.summary) sources.push({ source: row.peer, summary: row.summary })
+      }
+      return evaluatePeerSummaryAlerts(sources, rules)
     },
   }
 }

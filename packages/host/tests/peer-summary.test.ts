@@ -12,6 +12,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { createInprocHubLinkPair, type HubLink, type Participant } from '@aipehub/core'
+import type {
+  AddPeerSummaryAlertRuleInput,
+  PeerSummaryAlertRule,
+  UpdatePeerSummaryAlertRuleInput,
+} from '@aipehub/identity'
 
 import {
   PeerSummaryHost,
@@ -24,6 +29,7 @@ import {
   normalizePeerSummary,
   type BuildSummaryDeps,
   type PeerSummary,
+  type PeerSummaryAlertRuleSink,
   type SummaryLedgerRow,
   type SummaryPeerRegistryView,
 } from '../src/peer-summary.js'
@@ -482,5 +488,128 @@ describe('createPeerSummaryFederation (v5 E5-M3)', () => {
     expect(keys).toContain('assets.agents')
     expect(keys).toContain('health.suspendedTasks')
     expect(keys.length).toBeGreaterThanOrEqual(9)
+  })
+
+  // ── v5 Stream F-M5 — control-plane alert rules + live evaluation ─────────
+
+  /** In-memory alert-rule sink mirroring IdentityStore's four method names. */
+  function makeFakeAlertSink(): PeerSummaryAlertRuleSink & { count: () => number } {
+    const rules = new Map<string, PeerSummaryAlertRule>()
+    let n = 0
+    return {
+      count: () => rules.size,
+      listPeerSummaryAlertRules: () => [...rules.values()],
+      addPeerSummaryAlertRule(input: AddPeerSummaryAlertRuleInput) {
+        const id = input.id ?? `r${++n}`
+        const rule: PeerSummaryAlertRule = {
+          id,
+          source: input.source,
+          metric: input.metric,
+          comparator: input.comparator,
+          threshold: input.threshold,
+          label: input.label ?? null,
+          enabled: input.enabled ?? true,
+          createdAt: 0,
+          updatedAt: 0,
+        }
+        rules.set(id, rule)
+        return rule
+      },
+      updatePeerSummaryAlertRule(id: string, patch: UpdatePeerSummaryAlertRuleInput) {
+        const r = rules.get(id)
+        if (!r) throw Object.assign(new Error('no rule'), { code: 'alert_rule_not_found' })
+        const next: PeerSummaryAlertRule = {
+          ...r,
+          ...(patch.source !== undefined ? { source: patch.source } : {}),
+          ...(patch.metric !== undefined ? { metric: patch.metric } : {}),
+          ...(patch.comparator !== undefined ? { comparator: patch.comparator } : {}),
+          ...(patch.threshold !== undefined ? { threshold: patch.threshold } : {}),
+          ...(patch.label !== undefined ? { label: patch.label } : {}),
+          ...(patch.enabled !== undefined ? { enabled: patch.enabled } : {}),
+        }
+        rules.set(id, next)
+        return next
+      },
+      removePeerSummaryAlertRule(id: string) {
+        return rules.delete(id)
+      },
+    }
+  }
+
+  it('alert CRUD delegates to the wired sink', () => {
+    const sink = makeFakeAlertSink()
+    const fed = createPeerSummaryFederation(stub([], {}), {
+      buildLocal: async () => local,
+      alertRules: sink,
+    })
+    const rule = fed.addAlertRule({
+      source: 'local',
+      metric: 'health.suspendedTasks',
+      comparator: 'gt',
+      threshold: 5,
+    })
+    expect(fed.listAlertRules()).toHaveLength(1)
+    const updated = fed.updateAlertRule(rule.id, { threshold: 9, enabled: false })
+    expect(updated.threshold).toBe(9)
+    expect(updated.enabled).toBe(false)
+    expect(fed.removeAlertRule(rule.id)).toBe(true)
+    expect(fed.listAlertRules()).toEqual([])
+  })
+
+  it('without an alert sink: list/remove are empty, mutations throw', () => {
+    const fed = createPeerSummaryFederation(stub([], {}), { buildLocal: async () => local })
+    expect(fed.listAlertRules()).toEqual([])
+    expect(fed.removeAlertRule('x')).toBe(false)
+    expect(() =>
+      fed.addAlertRule({ source: 'local', metric: 'm', comparator: 'gt', threshold: 1 }),
+    ).toThrow(/not enabled/)
+    expect(() => fed.updateAlertRule('x', { threshold: 1 })).toThrow(/not enabled/)
+  })
+
+  it('evaluateAlerts returns [] without a sink or with no rules', async () => {
+    const bare = createPeerSummaryFederation(stub([], {}), { buildLocal: async () => local })
+    expect(await bare.evaluateAlerts()).toEqual([])
+    const empty = createPeerSummaryFederation(stub([], {}), {
+      buildLocal: async () => local,
+      alertRules: makeFakeAlertSink(),
+    })
+    expect(await empty.evaluateAlerts()).toEqual([])
+  })
+
+  it('evaluateAlerts fires on the freshly-built LOCAL summary', async () => {
+    const sink = makeFakeAlertSink()
+    const fed = createPeerSummaryFederation(stub([], {}), {
+      buildLocal: async () => local, // assets.agents = 1
+      alertRules: sink,
+    })
+    fed.addAlertRule({ source: 'local', metric: 'assets.agents', comparator: 'gte', threshold: 1 })
+    const breaches = await fed.evaluateAlerts()
+    expect(breaches).toHaveLength(1)
+    expect(breaches[0]).toMatchObject({ source: 'local', metric: 'assets.agents', value: 1 })
+  })
+
+  it('evaluateAlerts fires on a PEER using its last-cached summary (and * spans both)', async () => {
+    const sink = makeFakeAlertSink()
+    const fed = createPeerSummaryFederation(
+      stub([{ peerId: 'p1', label: null, connected: true }], { p1: summaryLink(summaryFor('p1')) }),
+      { buildLocal: async () => local, alertRules: sink, now: () => 1 },
+    )
+    await fed.refresh() // caches p1's summary (assets.agents = 1)
+    // A '*' rule evaluates every source — local AND the cached peer both breach.
+    fed.addAlertRule({ source: '*', metric: 'assets.agents', comparator: 'gte', threshold: 1 })
+    const breaches = await fed.evaluateAlerts()
+    expect(breaches.map((b) => b.source).sort()).toEqual(['local', 'p1'])
+    expect(breaches.every((b) => b.source !== '*')).toBe(true)
+  })
+
+  it('evaluateAlerts skips a peer with no cached summary (never fetched)', async () => {
+    const sink = makeFakeAlertSink()
+    const fed = createPeerSummaryFederation(
+      stub([{ peerId: 'p1', label: null, connected: true }], {}),
+      { buildLocal: async () => local, alertRules: sink },
+    )
+    // No refresh → p1 has no cached summary; a p1-scoped rule has nothing to test.
+    fed.addAlertRule({ source: 'p1', metric: 'assets.agents', comparator: 'gte', threshold: 1 })
+    expect(await fed.evaluateAlerts()).toEqual([])
   })
 })

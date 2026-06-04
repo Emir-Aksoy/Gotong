@@ -67,6 +67,7 @@ import {
 } from './peer-routes.js'
 import {
   handlePeerSummaryRoute,
+  handlePeerSummaryAlertRoute,
   type PeerSummaryFederationSurface,
 } from './peer-summary-routes.js'
 import { handleTemplateRoute, type TemplatePersonnelSource } from './template-routes.js'
@@ -86,6 +87,10 @@ export type {
   PeerSummary,
   PeerSummaryHistoryQuery,
   PeerSummaryTrendPoint,
+  PeerSummaryAlertRule,
+  PeerSummaryAlertBreach,
+  PeerSummaryAlertRuleAddInput,
+  PeerSummaryAlertRuleUpdateInput,
 } from './peer-summary-routes.js'
 export type { OidcLoginSurface } from './oidc-routes.js'
 export type { OidcProviderAdminSurface, OidcProviderView } from './oidc-admin-routes.js'
@@ -2025,6 +2030,18 @@ async function handle(
     path === '/api/admin/peer-summaries/history'
   ) {
     const handled = await handlePeerSummaryRoute(
+      {
+        peerSummaries: ctx.peerSummaries,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // v5 Stream F-M5 — control-plane alert rules (CRUD) + live alert evaluation.
+  if (path === '/api/admin/peer-summary-alerts' || path.startsWith('/api/admin/peer-summary-alerts/')) {
+    const handled = await handlePeerSummaryAlertRoute(
       {
         peerSummaries: ctx.peerSummaries,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),

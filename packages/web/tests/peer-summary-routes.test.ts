@@ -28,6 +28,10 @@ import { Hub, Space } from '@aipehub/core'
 import {
   serveWeb,
   type PeerSummary,
+  type PeerSummaryAlertBreach,
+  type PeerSummaryAlertRule,
+  type PeerSummaryAlertRuleAddInput,
+  type PeerSummaryAlertRuleUpdateInput,
   type PeerSummaryFederationSurface,
   type PeerSummaryHistoryQuery,
   type PeerSummaryRow,
@@ -56,6 +60,15 @@ interface Boot {
   listThrows: boolean
   historyCalls: PeerSummaryHistoryQuery[]
   historyResult: PeerSummaryTrendPoint[]
+  // F-M5 alert surface
+  alertRules: PeerSummaryAlertRule[]
+  breaches: PeerSummaryAlertBreach[]
+  addCalls: PeerSummaryAlertRuleAddInput[]
+  updateCalls: Array<{ id: string; patch: PeerSummaryAlertRuleUpdateInput }>
+  removeCalls: string[]
+  removeResult: boolean
+  addThrowsCode: string | null
+  evaluateThrows: boolean
 }
 
 async function boot(opts: { withFederation?: boolean } = {}): Promise<Boot> {
@@ -76,6 +89,14 @@ async function boot(opts: { withFederation?: boolean } = {}): Promise<Boot> {
     listThrows: false,
     historyCalls: [],
     historyResult: [],
+    alertRules: [],
+    breaches: [],
+    addCalls: [],
+    updateCalls: [],
+    removeCalls: [],
+    removeResult: true,
+    addThrowsCode: null,
+    evaluateThrows: false,
   }
 
   const fedStub: PeerSummaryFederationSurface = {
@@ -95,6 +116,49 @@ async function boot(opts: { withFederation?: boolean } = {}): Promise<Boot> {
     },
     metricKeys() {
       return ['assets.agents', 'health.suspendedTasks']
+    },
+    listAlertRules() {
+      return out.alertRules
+    },
+    addAlertRule(input) {
+      out.addCalls.push(input)
+      if (out.addThrowsCode) {
+        throw Object.assign(new Error('store'), { code: out.addThrowsCode })
+      }
+      return {
+        id: 'asr_new',
+        source: input.source,
+        metric: input.metric,
+        comparator: input.comparator,
+        threshold: input.threshold,
+        label: input.label ?? null,
+        enabled: input.enabled ?? true,
+        createdAt: 0,
+        updatedAt: 0,
+      }
+    },
+    updateAlertRule(id, patch) {
+      out.updateCalls.push({ id, patch })
+      return {
+        id,
+        source: 'local',
+        metric: 'assets.agents',
+        comparator: 'gt',
+        threshold: 1,
+        label: null,
+        enabled: true,
+        createdAt: 0,
+        updatedAt: 0,
+        ...patch,
+      }
+    },
+    removeAlertRule(id) {
+      out.removeCalls.push(id)
+      return out.removeResult
+    },
+    async evaluateAlerts() {
+      if (out.evaluateThrows) throw new Error('boom')
+      return out.breaches
     },
   }
 
@@ -281,5 +345,150 @@ describe('/api/admin/peer-summaries (v5 E5-M3)', () => {
       { headers: auth(b) },
     )
     expect(r.status).toBe(503)
+  })
+})
+
+// ── v5 Stream F-M5 — /api/admin/peer-summary-alerts (rules CRUD + live eval) ──
+
+const ALERTS = '/api/admin/peer-summary-alerts'
+const RULES = '/api/admin/peer-summary-alerts/rules'
+
+const breach = (over: Partial<PeerSummaryAlertBreach> = {}): PeerSummaryAlertBreach => ({
+  ruleId: 'asr_1',
+  source: 'local',
+  metric: 'health.suspendedTasks',
+  comparator: 'gt',
+  threshold: 5,
+  value: 9,
+  label: null,
+  ...over,
+})
+
+const alertRule = (over: Partial<PeerSummaryAlertRule> = {}): PeerSummaryAlertRule => ({
+  id: 'asr_1',
+  source: 'local',
+  metric: 'health.suspendedTasks',
+  comparator: 'gt',
+  threshold: 5,
+  label: null,
+  enabled: true,
+  createdAt: 0,
+  updatedAt: 0,
+  ...over,
+})
+
+describe('/api/admin/peer-summary-alerts (v5 Stream F-M5)', () => {
+  let b: Boot
+  afterEach(async () => { await teardown(b) })
+
+  it('503 when the federation surface is not wired', async () => {
+    b = await boot({ withFederation: false })
+    const r = await fetch(`${b.baseUrl}${ALERTS}`, { headers: auth(b) })
+    expect(r.status).toBe(503)
+  })
+
+  it('401 when unauthenticated', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${ALERTS}`)
+    expect(r.status).toBe(401)
+  })
+
+  it('GET returns live breaches + the rule list + metric keys', async () => {
+    b = await boot()
+    b.breaches = [breach({ value: 9 })]
+    b.alertRules = [alertRule()]
+    const r = await fetch(`${b.baseUrl}${ALERTS}`, { headers: auth(b) })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.alerts).toHaveLength(1)
+    expect(j.alerts[0].value).toBe(9)
+    expect(j.rules).toHaveLength(1)
+    expect(j.rules[0].id).toBe('asr_1')
+    expect(j.metrics).toContain('assets.agents')
+  })
+
+  it('GET 500 when evaluation throws', async () => {
+    b = await boot()
+    b.evaluateThrows = true
+    const r = await fetch(`${b.baseUrl}${ALERTS}`, { headers: auth(b) })
+    expect(r.status).toBe(500)
+  })
+
+  it('POST /rules adds a rule and threads the body to the surface', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${RULES}`, {
+      method: 'POST',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        source: 'local',
+        metric: 'health.suspendedTasks',
+        comparator: 'gte',
+        threshold: 3,
+        label: 'watch',
+      }),
+    })
+    expect(r.status).toBe(201)
+    const j = await r.json()
+    expect(j.rule.id).toBe('asr_new')
+    expect(j.rule.comparator).toBe('gte')
+    expect(b.addCalls).toEqual([
+      { source: 'local', metric: 'health.suspendedTasks', comparator: 'gte', threshold: 3, label: 'watch' },
+    ])
+  })
+
+  it('POST /rules 400 on a bad comparator / non-numeric threshold / missing field', async () => {
+    b = await boot()
+    const base = { source: 'local', metric: 'm', comparator: 'gt', threshold: 1 }
+    const post = (body: unknown) =>
+      fetch(`${b.baseUrl}${RULES}`, {
+        method: 'POST',
+        headers: { ...auth(b), 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    expect((await post({ ...base, comparator: 'between' })).status).toBe(400)
+    expect((await post({ ...base, threshold: 'x' })).status).toBe(400)
+    expect((await post({ ...base, source: '' })).status).toBe(400)
+    expect(b.addCalls).toHaveLength(0) // never reached the surface
+  })
+
+  it('POST /rules 409 when the store rejects a duplicate id', async () => {
+    b = await boot()
+    b.addThrowsCode = 'alert_rule_exists'
+    const r = await fetch(`${b.baseUrl}${RULES}`, {
+      method: 'POST',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({ source: 'local', metric: 'm', comparator: 'gt', threshold: 1 }),
+    })
+    expect(r.status).toBe(409)
+  })
+
+  it('PATCH /rules/:id updates and threads the id + patch', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${RULES}/asr_1`, {
+      method: 'PATCH',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({ threshold: 12, enabled: false }),
+    })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.rule.threshold).toBe(12)
+    expect(j.rule.enabled).toBe(false)
+    expect(b.updateCalls).toEqual([{ id: 'asr_1', patch: { threshold: 12, enabled: false } }])
+  })
+
+  it('DELETE /rules/:id removes; 404 when the rule is gone', async () => {
+    b = await boot()
+    const ok = await fetch(`${b.baseUrl}${RULES}/asr_1`, { method: 'DELETE', headers: auth(b) })
+    expect(ok.status).toBe(200)
+    expect(b.removeCalls).toEqual(['asr_1'])
+    b.removeResult = false
+    const gone = await fetch(`${b.baseUrl}${RULES}/asr_x`, { method: 'DELETE', headers: auth(b) })
+    expect(gone.status).toBe(404)
+  })
+
+  it('405 on an unsupported method to the rules collection', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${RULES}`, { method: 'GET', headers: auth(b) })
+    expect(r.status).toBe(405)
   })
 })

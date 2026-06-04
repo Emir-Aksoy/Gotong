@@ -1437,6 +1437,9 @@ async function main(): Promise<void> {
       // plane can draw trends. IdentityStore duck-types the snapshot sink; the
       // history query reads it back. Without this the plane is point-in-time only.
       snapshots: identity,
+      // v5 Stream F-M5 — alert rules + live evaluation. IdentityStore duck-types
+      // the rule sink; the federation exposes CRUD + evaluateAlerts on top.
+      alertRules: identity,
       logger: log,
     })
     // Phase 6 #4 — per-peer resolver is auto-wired by PeerRegistry

@@ -70,6 +70,55 @@ export interface PeerSummaryHistoryQuery {
 }
 
 /**
+ * A configured alert rule (duck-typed mirror of the host's
+ * `PeerSummaryAlertRule`). `source` is `'local'` | a peer id | `'*'`; `metric`
+ * is a `metricKeys()` dotted key; `comparator` ∈ gt/gte/lt/lte.
+ */
+export interface PeerSummaryAlertRule {
+  id: string
+  source: string
+  metric: string
+  comparator: string
+  threshold: number
+  label: string | null
+  enabled: boolean
+  createdAt: number
+  updatedAt: number
+}
+
+/**
+ * A fired alert (duck-typed mirror of the host's `PeerSummaryAlertBreach`): the
+ * rule, the ACTUAL source that breached (never `'*'`), and the value that tripped.
+ */
+export interface PeerSummaryAlertBreach {
+  ruleId: string
+  source: string
+  metric: string
+  comparator: string
+  threshold: number
+  value: number
+  label: string | null
+}
+
+export interface PeerSummaryAlertRuleAddInput {
+  source: string
+  metric: string
+  comparator: string
+  threshold: number
+  label?: string | null
+  enabled?: boolean
+}
+
+export interface PeerSummaryAlertRuleUpdateInput {
+  source?: string
+  metric?: string
+  comparator?: string
+  threshold?: number
+  label?: string | null
+  enabled?: boolean
+}
+
+/**
  * Host-injected control-plane surface. Backed by the peer registry + the
  * `peer.summary` rpc + an in-process cache, plus (v5 Stream F) a persisted
  * snapshot store for trends. Absent (→ 503) when peers are disabled.
@@ -82,6 +131,13 @@ export interface PeerSummaryFederationSurface {
   history(query: PeerSummaryHistoryQuery): Promise<PeerSummaryTrendPoint[]>
   /** The canonical list of trendable metric keys (single source — host owns it). */
   metricKeys(): string[]
+  /** List the configured alert rules (v5 Stream F-M5). */
+  listAlertRules(): PeerSummaryAlertRule[]
+  addAlertRule(input: PeerSummaryAlertRuleAddInput): PeerSummaryAlertRule
+  updateAlertRule(id: string, patch: PeerSummaryAlertRuleUpdateInput): PeerSummaryAlertRule
+  removeAlertRule(id: string): boolean
+  /** Evaluate rules against the current summaries → live breaches. */
+  evaluateAlerts(): Promise<PeerSummaryAlertBreach[]>
 }
 
 export interface PeerSummaryRoutesCtx {
@@ -199,6 +255,234 @@ export async function handlePeerSummaryRoute(
   }
 
   // Path matched a prefix but no method/shape did → 405.
+  sendJson(res, { error: `method ${method} not allowed on ${path}` }, 405)
+  return true
+}
+
+// ─── alert rules (v5 Stream F-M5) ────────────────────────────────────────────
+
+const ALERTS = '/api/admin/peer-summary-alerts'
+const RULES = '/api/admin/peer-summary-alerts/rules'
+
+/** Valid comparators — mirror of the host's `PEER_SUMMARY_ALERT_COMPARATORS`. */
+const COMPARATORS = new Set(['gt', 'gte', 'lt', 'lte'])
+
+const ALERT_ERROR_STATUS: Record<string, number> = {
+  alert_rule_exists: 409,
+  alert_rule_not_found: 404,
+  invalid_input: 400,
+}
+
+/** Map a typed store error (`.code`) to an HTTP status; unknown → 500. */
+function sendAlertStoreError(res: ServerResponse, err: unknown): void {
+  if (
+    err &&
+    typeof err === 'object' &&
+    'code' in err &&
+    typeof (err as { code?: unknown }).code === 'string'
+  ) {
+    const code = (err as { code: string }).code
+    sendJson(res, { error: code }, ALERT_ERROR_STATUS[code] ?? 400)
+    return
+  }
+  const msg = err instanceof Error ? err.message : String(err)
+  log.error('peer-summary-alert store error', { err: msg })
+  sendJson(res, { error: msg }, 500)
+}
+
+function asObject(body: unknown): Record<string, unknown> | null {
+  return body && typeof body === 'object' && !Array.isArray(body)
+    ? (body as Record<string, unknown>)
+    : null
+}
+
+/** label must be string|null; enabled must be boolean (when present). */
+function checkRuleOptionals(o: Record<string, unknown>): string | null {
+  if (o.label !== undefined && o.label !== null && typeof o.label !== 'string') {
+    return 'label must be a string or null'
+  }
+  if (o.enabled !== undefined && typeof o.enabled !== 'boolean') return 'enabled must be a boolean'
+  return null
+}
+
+function pickRuleOptionals(o: Record<string, unknown>): {
+  label?: string | null
+  enabled?: boolean
+} {
+  return {
+    ...(o.label !== undefined ? { label: o.label as string | null } : {}),
+    ...(o.enabled !== undefined ? { enabled: o.enabled as boolean } : {}),
+  }
+}
+
+function coerceAddRule(
+  body: unknown,
+): { value: PeerSummaryAlertRuleAddInput } | { error: string } {
+  const o = asObject(body)
+  if (!o) return { error: 'body must be an object' }
+  for (const f of ['source', 'metric'] as const) {
+    if (typeof o[f] !== 'string' || (o[f] as string).trim().length === 0) {
+      return { error: `${f} must be a non-empty string` }
+    }
+  }
+  if (typeof o.comparator !== 'string' || !COMPARATORS.has(o.comparator)) {
+    return { error: 'comparator must be one of gt/gte/lt/lte' }
+  }
+  if (typeof o.threshold !== 'number' || !Number.isFinite(o.threshold)) {
+    return { error: 'threshold must be a finite number' }
+  }
+  const bad = checkRuleOptionals(o)
+  if (bad) return { error: bad }
+  return {
+    value: {
+      source: o.source as string,
+      metric: o.metric as string,
+      comparator: o.comparator,
+      threshold: o.threshold,
+      ...pickRuleOptionals(o),
+    },
+  }
+}
+
+function coerceUpdateRule(
+  body: unknown,
+): { value: PeerSummaryAlertRuleUpdateInput } | { error: string } {
+  const o = asObject(body)
+  if (!o) return { error: 'body must be an object' }
+  for (const f of ['source', 'metric'] as const) {
+    if (o[f] !== undefined && (typeof o[f] !== 'string' || (o[f] as string).trim().length === 0)) {
+      return { error: `${f} must be a non-empty string` }
+    }
+  }
+  if (o.comparator !== undefined && (typeof o.comparator !== 'string' || !COMPARATORS.has(o.comparator))) {
+    return { error: 'comparator must be one of gt/gte/lt/lte' }
+  }
+  if (o.threshold !== undefined && (typeof o.threshold !== 'number' || !Number.isFinite(o.threshold))) {
+    return { error: 'threshold must be a finite number' }
+  }
+  const bad = checkRuleOptionals(o)
+  if (bad) return { error: bad }
+  return {
+    value: {
+      ...(o.source !== undefined ? { source: o.source as string } : {}),
+      ...(o.metric !== undefined ? { metric: o.metric as string } : {}),
+      ...(o.comparator !== undefined ? { comparator: o.comparator as string } : {}),
+      ...(o.threshold !== undefined ? { threshold: o.threshold as number } : {}),
+      ...pickRuleOptionals(o),
+    },
+  }
+}
+
+/**
+ * Handle the control-plane alert routes (v5 Stream F-M5). Returns `true` if the
+ * request matched a `/api/admin/peer-summary-alerts[...]` path (and was answered).
+ *
+ *   GET    /api/admin/peer-summary-alerts          live breaches + the rule list
+ *   POST   /api/admin/peer-summary-alerts/rules    add a rule
+ *   PATCH  /api/admin/peer-summary-alerts/rules/:id targeted update
+ *   DELETE /api/admin/peer-summary-alerts/rules/:id remove
+ */
+export async function handlePeerSummaryAlertRoute(
+  ctx: PeerSummaryRoutesCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  if (path !== ALERTS && path !== RULES && !path.startsWith(`${RULES}/`)) return false
+
+  const admin = await ctx.requireAdmin(req, res)
+  if (!admin) return true
+  if (!ctx.peerSummaries) {
+    sendJson(res, { error: 'peer federation not enabled on this host' }, 503)
+    return true
+  }
+  const surface = ctx.peerSummaries
+
+  // GET /api/admin/peer-summary-alerts — live breaches + the rule list. One read
+  // gives the UI everything it needs to render the panel (active alerts + rules).
+  if (path === ALERTS && method === 'GET') {
+    try {
+      const [alerts, rules] = await Promise.all([
+        surface.evaluateAlerts(),
+        Promise.resolve(surface.listAlertRules()),
+      ])
+      sendJson(res, { alerts, rules, metrics: surface.metricKeys() })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      log.error('peer-summary-alerts evaluate failed', { by: admin.id, err: msg })
+      sendJson(res, { error: msg }, 500)
+    }
+    return true
+  }
+
+  // Rules collection — add.
+  if (path === RULES) {
+    if (method === 'POST') {
+      let body: unknown
+      try {
+        body = await readJsonBody(req)
+      } catch {
+        sendJson(res, { error: 'invalid json body' }, 400)
+        return true
+      }
+      const parsed = coerceAddRule(body)
+      if ('error' in parsed) {
+        sendJson(res, { error: parsed.error }, 400)
+        return true
+      }
+      try {
+        sendJson(res, { rule: surface.addAlertRule(parsed.value) }, 201)
+      } catch (err) {
+        sendAlertStoreError(res, err)
+      }
+      return true
+    }
+    sendJson(res, { error: `method ${method} not allowed on ${path}` }, 405)
+    return true
+  }
+
+  // Rules item — update / remove. The id is the single segment after /rules.
+  const id = decodeURIComponent(path.slice(RULES.length + 1))
+  if (!id || id.includes('/')) {
+    sendJson(res, { error: 'bad rule id' }, 400)
+    return true
+  }
+
+  if (method === 'PATCH') {
+    let body: unknown
+    try {
+      body = await readJsonBody(req)
+    } catch {
+      sendJson(res, { error: 'invalid json body' }, 400)
+      return true
+    }
+    const parsed = coerceUpdateRule(body)
+    if ('error' in parsed) {
+      sendJson(res, { error: parsed.error }, 400)
+      return true
+    }
+    try {
+      sendJson(res, { rule: surface.updateAlertRule(id, parsed.value) })
+    } catch (err) {
+      sendAlertStoreError(res, err)
+    }
+    return true
+  }
+
+  if (method === 'DELETE') {
+    try {
+      if (!surface.removeAlertRule(id)) {
+        sendJson(res, { error: 'alert_rule_not_found' }, 404)
+        return true
+      }
+      sendJson(res, { ok: true })
+    } catch (err) {
+      sendAlertStoreError(res, err)
+    }
+    return true
+  }
+
   sendJson(res, { error: `method ${method} not allowed on ${path}` }, 405)
   return true
 }
