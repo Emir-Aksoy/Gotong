@@ -46,6 +46,15 @@ import {
 } from './types.js'
 
 /**
+ * "Park forever" sentinel — the resume sweep never reaches it, so the run
+ * stays suspended until an EXPLICIT event resumes it (an inbox resolve's
+ * two-step recovery, or the boot-time `resumeRunningRuns` reconcile).
+ * Mirrors `@aipehub/inbox`'s `NEVER_RESUME_AT`; duplicated as a local
+ * constant rather than taking a cross-package dep (same as `@aipehub/cli-agent`).
+ */
+const NEVER_RESUME_AT = 9_999_999_999_000
+
+/**
  * The minimal Hub surface the runner needs. Defined locally so the
  * `@aipehub/workflow` package doesn't import the full Hub class type
  * (and so tests can pass a stub).
@@ -332,7 +341,13 @@ export class WorkflowRunner extends AgentParticipant {
           keep.push(sr)
           state.steps = keep
           await this.persist(state)
-          this.suspendWorkflow(state, sr.resumeAt ?? this.now() + 1_000)
+          // A genuine wake-time is always stamped when a step suspends
+          // (`record.resumeAt = result.resumeAt`). Reaching the fallback means
+          // it's unknown — a corrupt/legacy record or a vanished child result.
+          // Re-parking a second out would busy-spin the sweep with no recovery
+          // (nothing repopulates the missing wake-time on a timer); park
+          // forever and let an explicit resume drive it instead.
+          this.suspendWorkflow(state, sr.resumeAt ?? NEVER_RESUME_AT)
         }
         if (refreshedStatus === 'done') {
           keep.push(sr)
@@ -429,7 +444,9 @@ export class WorkflowRunner extends AgentParticipant {
       } else if (record.status === 'skipped') {
         ctx.stepOutputs.set(step.id, undefined)
       } else if (record.status === 'suspended') {
-        this.suspendWorkflow(state, record.resumeAt ?? this.now() + 1_000)
+        // See the resume-path note: unknown wake-time → park forever, not a
+        // 1s busy-spin (the sweep would just re-enter with the same gap).
+        this.suspendWorkflow(state, record.resumeAt ?? NEVER_RESUME_AT)
       }
     }
 

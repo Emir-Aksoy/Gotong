@@ -1191,6 +1191,65 @@ workflow:
     expect(calls).toHaveLength(2)
     expect(calls[1]!.payload).toEqual({ long: 'child output' })
   })
+
+  it('re-parks at NEVER_RESUME_AT (not a 1s busy-spin) when a suspended record has no resumeAt', async () => {
+    // A suspended step whose wake-time is unknown — a corrupt/legacy record,
+    // or a child whose result has vanished so `taskResult` returns undefined
+    // (the `!result` branch keeps the step suspended without stamping a
+    // resumeAt). The old fallback re-parked at now+1s, which the resume sweep
+    // would re-enter on a tight loop forever. It must park far out instead and
+    // wait for an explicit resume.
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: editorial
+  trigger: { capability: run-editorial }
+  steps:
+    - id: long
+      dispatch:
+        strategy: { kind: capability, capabilities: [long-running] }
+        payload: $trigger.payload
+`
+    const def = parseWorkflow(yaml)
+    const hub: HubLike = {
+      async dispatch() {
+        throw new Error('resume must not re-dispatch a still-suspended step')
+      },
+      taskResult() {
+        return undefined // child result gone → stays suspended, no resumeAt
+      },
+    }
+    const runner = new WorkflowRunner({ definition: def, hub })
+    const state: RunState = {
+      runId: 'r_corrupt_1',
+      workflowId: 'editorial',
+      triggeredByTaskId: 'task_origin',
+      triggerPayload: { topic: 'tea' },
+      steps: [
+        {
+          stepId: 'long',
+          startedAt: 100,
+          status: 'suspended',
+          attempts: 1,
+          subTaskIds: ['child-long-1'],
+          suspendedTaskIds: ['child-long-1'],
+          // intentionally NO resumeAt — the corrupt/legacy case under test
+        },
+      ],
+      startedAt: 100,
+      status: 'running',
+    }
+
+    let caught: unknown
+    try {
+      await runner.resumeRun(state)
+      throw new Error('expected resumeRun to re-suspend')
+    } catch (err) {
+      caught = err
+    }
+    expect((caught as Error).name).toBe('SuspendTaskError')
+    expect((caught as { resumeAt: number }).resumeAt).toBe(9_999_999_999_000)
+  })
 })
 
 describe('WorkflowRunner — revision binding (Phase 15)', () => {
