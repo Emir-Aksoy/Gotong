@@ -569,6 +569,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 想知道什么 | 读哪 |
 |---|---|
 | 5 分钟总览 | `docs/zh/OVERVIEW.md` |
+| 上手案例 — 5 个开箱即用 hub (3 个人 + 2 组织) 对照表 + 确定性 demo + 真 DeepSeek/Obsidian go-live runbook + 验证锚点分层 | `docs/zh/HANDS-ON-HUBS.md` |
 | 框架设计哲学 + 模块边界 | `docs/zh/ARCHITECTURE.md` |
 | 协议规约(v1.2) | `docs/PROTOCOL.md` |
 | v4 整体架构 + Phase 路线 | `docs/zh/V4-ARCH.md` |

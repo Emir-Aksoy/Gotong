@@ -184,6 +184,26 @@ pnpm demo:open-space
 pnpm demo:federated-team # one Hub joins another Hub as a single agent
 ```
 
+### 上手案例 — 5 个开箱即用的 hub (Hands-on hubs)
+
+Beyond the pattern demos above, five `examples/` cases are **complete, copy-able hubs** —
+each ships a deterministic no-key demo *and* a one-file loadable template (agents + workflows
++ KB wiring). Three personal ("我的 AI 桌面"), two organization (team-mode):
+
+```bash
+# personal hubs (router LLM orchestrates sub-agents / CLIs)
+pnpm demo:personal-coding-hub      # routes Claude Code + Codex on a shared repo
+pnpm demo:personal-research-hub    # compiles raw sources into a linked Obsidian wiki
+pnpm demo:battle-monk-training     # a growth coach writing state into a persistent Codex
+
+# organization hubs (declarative workflows + surface.me self-service + human: HITL approval)
+pnpm demo:cafe-ops                 # 奶茶/咖啡店: onboarding / shifts / overtime, manager approves
+pnpm demo:warband-club             # a fan club collaborating over one shared archive
+```
+
+Pick one, see the deterministic demo, then go live with real DeepSeek + Obsidian —
+the full catalog and go-live runbook is **[`docs/zh/HANDS-ON-HUBS.md`](docs/zh/HANDS-ON-HUBS.md)**.
+
 ## Embedded — everything in one process
 
 ```ts
