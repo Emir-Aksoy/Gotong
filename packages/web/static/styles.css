@@ -1669,6 +1669,26 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .wf-gov[open] > summary { margin-bottom: 4px; }
 .wf-gov .ma-meta { margin: 0; }
 .wf-gov-notes { color: #6b5a44; font-size: 0.72rem; }
+/* Stream G day-2 — cross-hub steps panel (a step routes to a peer hub). Blue,
+   distinct from the amber governance panel — it's "leaves the hub", not "risk". */
+.wf-xhub {
+  margin-top: 8px;
+  border: 1px solid #c5dcf5;
+  border-radius: 5px;
+  background: #f4f9ff;
+  padding: 4px 8px;
+}
+.wf-xhub > summary {
+  cursor: pointer;
+  font-size: 0.74rem;
+  font-weight: 600;
+  color: #1d5fa8;
+  user-select: none;
+}
+.wf-xhub[open] > summary { margin-bottom: 4px; }
+.wf-xhub .ma-meta { margin: 0; }
+.wf-xhub-peer { color: #1d5fa8; font-size: 0.72rem; }
+.wf-xhub-note { color: #1d5fa8; }
 .wf-gov-chip {
   display: inline-block;
   font-size: 0.66rem;

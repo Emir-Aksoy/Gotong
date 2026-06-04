@@ -1178,9 +1178,19 @@ import { createWorkflows } from './workflows.js'
     }
     if (dom.wfStartDesc) {
       const cap = `<code>${escapeHtml(w.triggerCapability)}</code>`
-      dom.wfStartDesc.innerHTML = w.description
-        ? `${escapeHtml(w.description)}<br/><small>派发能力:${cap}</small>`
-        : `派发能力:${cap}`
+      // Stream G day-2 — warn at launch when a step routes to a peer hub. If
+      // that peer set an outbound-approval gate, the run parks an approval in
+      // your inbox before the cross-hub step actually fires.
+      const peers = Array.isArray(w.crossHubSteps) && w.crossHubSteps.length
+        ? Array.from(new Set(w.crossHubSteps.map((s) => s.peerLabel || s.peer)))
+        : []
+      const xhub = peers.length
+        ? `<br/><small class="wf-xhub-note">${escapeHtml(t.workflowCrossHubNote(w.crossHubSteps.length, peers.join(', ')))}</small>`
+        : ''
+      dom.wfStartDesc.innerHTML =
+        (w.description
+          ? `${escapeHtml(w.description)}<br/><small>派发能力:${cap}</small>`
+          : `派发能力:${cap}`) + xhub
     }
     renderWorkflowStartFields(w.payloadSchema)
     if (dom.wfStartMsg) {

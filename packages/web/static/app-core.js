@@ -258,6 +258,11 @@
       workflowGovCost: '预估成本/次',
       workflowGovHumanRoles: '需真人角色',
       workflowGovExternal: '触达外部系统',
+      // Stream G day-2 — cross-hub step indicator on workflow cards / start dialog
+      workflowCrossHubSummary: (n) => `🔗 跨 hub 步骤 (${n})`,
+      workflowCrossHubPeer: (peer) => `→ 对等 hub: ${peer}`,
+      workflowCrossHubNote: (n, peers) =>
+        `注意:本工作流有 ${n} 个步骤会派到对等 hub (${peers})。若对方设了审批闸,需在收件箱批准后才会真正发出。`,
       workflowDeprecateBtn: '弃用',
       workflowRepublishBtn: '重新发布',
       workflowArchiveBtn: '归档',
@@ -651,6 +656,11 @@
       workflowGovCost: 'Est. cost/run',
       workflowGovHumanRoles: 'Human roles required',
       workflowGovExternal: 'External systems',
+      // Stream G day-2 — cross-hub step indicator on workflow cards / start dialog
+      workflowCrossHubSummary: (n) => `🔗 Cross-hub steps (${n})`,
+      workflowCrossHubPeer: (peer) => `→ peer hub: ${peer}`,
+      workflowCrossHubNote: (n, peers) =>
+        `Note: ${n} step${n === 1 ? '' : 's'} in this workflow dispatch to a peer hub (${peers}). If that peer requires approval, the run waits for your inbox sign-off before the step is sent.`,
       workflowDeprecateBtn: 'Deprecate',
       workflowRepublishBtn: 'Re-publish',
       workflowArchiveBtn: 'Archive',

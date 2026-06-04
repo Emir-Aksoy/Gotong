@@ -1178,10 +1178,19 @@
           <li><span class="ma-label">${escapeHtml4(t4.workflowTriggerLabel)}:</span> <code>${escapeHtml4(w.triggerCapability)}</code></li>
           <li>${escapeHtml4(t4.workflowStepsLabel(w.stepCount))}</li>
         </ul>
+        ${crossHubPanel(w.crossHubSteps)}
         ${governancePanel(w.governance)}
         ${file}
       </article>`;
       }).join("");
+    }
+    function crossHubPanel(steps) {
+      if (!Array.isArray(steps) || steps.length === 0) return "";
+      const rows = steps.map((s) => {
+        const peer = s.peerLabel || s.peer;
+        return `<li><code>${escapeHtml4(String(s.stepId))}</code> → <code>${escapeHtml4(String(s.capability))}</code> <span class="wf-xhub-peer">${escapeHtml4(t4.workflowCrossHubPeer(String(peer)))}</span></li>`;
+      });
+      return `<details class="wf-xhub"><summary>${escapeHtml4(t4.workflowCrossHubSummary(steps.length))}</summary><ul class="ma-meta">${rows.join("")}</ul></details>`;
     }
     function govChips(arr) {
       return arr.map((x) => `<span class="wf-gov-chip">${escapeHtml4(String(x))}</span>`).join(" ");
@@ -2575,7 +2584,9 @@
       }
       if (dom.wfStartDesc) {
         const cap = `<code>${escapeHtml5(w.triggerCapability)}</code>`;
-        dom.wfStartDesc.innerHTML = w.description ? `${escapeHtml5(w.description)}<br/><small>派发能力:${cap}</small>` : `派发能力:${cap}`;
+        const peers = Array.isArray(w.crossHubSteps) && w.crossHubSteps.length ? Array.from(new Set(w.crossHubSteps.map((s) => s.peerLabel || s.peer))) : [];
+        const xhub = peers.length ? `<br/><small class="wf-xhub-note">${escapeHtml5(t5.workflowCrossHubNote(w.crossHubSteps.length, peers.join(", ")))}</small>` : "";
+        dom.wfStartDesc.innerHTML = (w.description ? `${escapeHtml5(w.description)}<br/><small>派发能力:${cap}</small>` : `派发能力:${cap}`) + xhub;
       }
       renderWorkflowStartFields(w.payloadSchema);
       if (dom.wfStartMsg) {

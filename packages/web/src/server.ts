@@ -803,6 +803,26 @@ export interface WorkflowSummary {
   state?: WorkflowLifecycleState
   /** Phase 15 — the revision new runs bind to. Absent for a never-published draft. */
   currentRevision?: number
+  /**
+   * Stream G day-2 — pass-through of the host's `crossHubSteps`: the workflow
+   * steps that dispatch to a CONNECTED peer hub (a capability a peer advertises
+   * and no local participant serves). Present (non-empty) only on a multi-hub
+   * host. The admin UI renders it as a "this step leaves the hub" indicator
+   * before launch — pure visibility; the dispatch itself is unchanged.
+   */
+  crossHubSteps?: CrossHubStepView[]
+}
+
+/** Stream G day-2 — one workflow step that dispatches to a connected peer hub. */
+export interface CrossHubStepView {
+  /** The step id (or `${stepId}/${branchId}` for a parallel branch). */
+  stepId: string
+  /** The capability only a peer (not a local participant) serves. */
+  capability: string
+  /** The peer hub's id. */
+  peer: string
+  /** The peer's human label, when set. */
+  peerLabel: string | null
 }
 
 // --- Phase 15 — lifecycle mirror types -------------------------------------

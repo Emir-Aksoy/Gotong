@@ -101,10 +101,33 @@ export function createWorkflows({ wf }) {
           <li><span class="ma-label">${escapeHtml(t.workflowTriggerLabel)}:</span> <code>${escapeHtml(w.triggerCapability)}</code></li>
           <li>${escapeHtml(t.workflowStepsLabel(w.stepCount))}</li>
         </ul>
+        ${crossHubPanel(w.crossHubSteps)}
         ${governancePanel(w.governance)}
         ${file}
       </article>`
     }).join('')
+  }
+
+  // Stream G day-2 — cross-hub steps panel. A step whose capability is served
+  // by a connected PEER hub (not locally) routes across the federation boundary
+  // through the outbound-approval gate; if that peer requires approval,
+  // launching will park an item in your inbox. Surfaced on the card so "this
+  // leaves the hub, and to whom" is visible at the launch decision — not buried
+  // in the YAML. Pure visibility; gates nothing.
+  function crossHubPanel(steps) {
+    if (!Array.isArray(steps) || steps.length === 0) return ''
+    const rows = steps.map((s) => {
+      const peer = s.peerLabel || s.peer
+      return (
+        `<li><code>${escapeHtml(String(s.stepId))}</code> → ` +
+        `<code>${escapeHtml(String(s.capability))}</code> ` +
+        `<span class="wf-xhub-peer">${escapeHtml(t.workflowCrossHubPeer(String(peer)))}</span></li>`
+      )
+    })
+    return (
+      `<details class="wf-xhub"><summary>${escapeHtml(t.workflowCrossHubSummary(steps.length))}</summary>` +
+      `<ul class="ma-meta">${rows.join('')}</ul></details>`
+    )
   }
 
   // Phase 19 P5-M8b — risk summary panel from the workflow's `governance`
