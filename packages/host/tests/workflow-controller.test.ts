@@ -624,4 +624,69 @@ workflow:
       expect(hub.registry.get('workflow:needs-ghost')).toBeUndefined()
     })
   })
+
+  // Stream G G2-M3 — cross-hub step flagging, through the REAL controller path
+  // (importFromText → versioning → summaryFromView → computeCrossHubSteps). The
+  // peer-capability view is an INJECTED stub: it's a duck-typed seam built for
+  // injection, so this proves the projection without standing up a
+  // transport-level 2-hub link (that's covered by cross-hub-workflow-e2e). The
+  // pure detector itself is unit-tested in cross-hub-steps.test.ts.
+  describe('cross-hub step flagging (Stream G G2)', () => {
+    // One LOCAL step (draft-order) + one PEER-only step (supplier.confirm-order).
+    const SUPPLY = `
+schema: aipehub.workflow/v1
+workflow:
+  id: supply
+  name: 补货
+  trigger: { capability: run-supply }
+  steps:
+    - id: draft
+      dispatch:
+        strategy: { kind: capability, capabilities: [draft-order] }
+        payload: {}
+    - id: place
+      dispatch:
+        strategy: { kind: capability, capabilities: [supplier.confirm-order] }
+        payload: {}
+`
+    const peerView = (caps: string[]) => ({
+      peerCapabilities: () => [
+        { peer: 'supplier-hub', label: '供货商', capabilities: caps },
+      ],
+    })
+
+    it('flags the peer-served step, not the locally-served one', async () => {
+      hub.register(new HumanParticipant({ id: 'buyer', capabilities: ['draft-order'] }))
+      const c = new WorkflowController({
+        hub,
+        definitionsDir,
+        spaceRoot: tmp,
+        peerCapabilities: peerView(['supplier.confirm-order']),
+      })
+      const summary = await c.importFromText(SUPPLY)
+      expect(summary.crossHubSteps).toEqual([
+        { stepId: 'place', capability: 'supplier.confirm-order', peer: 'supplier-hub', peerLabel: '供货商' },
+      ])
+    })
+
+    it('does not flag a cap a local participant also serves (routes locally)', async () => {
+      hub.register(new HumanParticipant({ id: 'buyer', capabilities: ['draft-order'] }))
+      hub.register(new HumanParticipant({ id: 'local-supplier', capabilities: ['supplier.confirm-order'] }))
+      const c = new WorkflowController({
+        hub,
+        definitionsDir,
+        spaceRoot: tmp,
+        peerCapabilities: peerView(['supplier.confirm-order']),
+      })
+      const summary = await c.importFromText(SUPPLY)
+      expect(summary.crossHubSteps).toBeUndefined()
+    })
+
+    it('omits the field entirely when no peer view is wired (single-hub)', async () => {
+      hub.register(new HumanParticipant({ id: 'buyer', capabilities: ['draft-order'] }))
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      const summary = await c.importFromText(SUPPLY)
+      expect(summary.crossHubSteps).toBeUndefined()
+    })
+  })
 })
