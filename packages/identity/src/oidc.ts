@@ -230,6 +230,19 @@ export function validateIdToken(input: ValidateIdTokenInput): IdTokenClaims {
   if (!audOk) {
     throw new OidcError('bad_audience', 'id_token aud does not include the client id')
   }
+  // OIDC core §3.1.3.7: when an id_token is issued to multiple audiences the
+  // `azp` (authorized party) claim MUST be present, and whenever `azp` is
+  // present at all it MUST equal our client id. Without this an id_token minted
+  // for a DIFFERENT client that merely also lists ours in a multi-element `aud`
+  // passes the `includes()` check above — a confused-deputy foothold.
+  const multiAud = Array.isArray(claims.aud) && claims.aud.length > 1
+  const azp = claims.azp
+  if (multiAud && typeof azp !== 'string') {
+    throw new OidcError('bad_azp', 'id_token has multiple audiences but no azp claim')
+  }
+  if (typeof azp === 'string' && azp !== input.expectedAudience) {
+    throw new OidcError('bad_azp', 'id_token azp does not match the client id')
+  }
   if (typeof claims.exp !== 'number' || claims.exp + skew < input.now) {
     throw new OidcError('expired', 'id_token is expired')
   }

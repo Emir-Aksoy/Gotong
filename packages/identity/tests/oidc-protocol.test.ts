@@ -177,9 +177,11 @@ describe('validateIdToken (P1-M4b)', () => {
     )
   })
 
-  it('accepts an array aud that CONTAINS the client id', () => {
+  it('accepts an array aud that CONTAINS the client id (with matching azp)', () => {
     const { privateKey, jwks } = makeKey()
-    const token = signJwt(privateKey, validClaims({ aud: ['other', AUD] }))
+    // OIDC core §3.1.3.7: a multi-audience token MUST carry an `azp` that
+    // names us, otherwise it's a token minted for someone else.
+    const token = signJwt(privateKey, validClaims({ aud: ['other', AUD], azp: AUD }))
     const claims = validateIdToken({
       idToken: token,
       expectedIssuer: ISS,
@@ -189,6 +191,58 @@ describe('validateIdToken (P1-M4b)', () => {
       jwks,
     })
     expect(claims.sub).toBe('subject-xyz')
+  })
+
+  it('rejects a multi-audience token with NO azp (confused-deputy)', () => {
+    const { privateKey, jwks } = makeKey()
+    const token = signJwt(privateKey, validClaims({ aud: ['other', AUD] }))
+    expectOidcCode(
+      () =>
+        validateIdToken({
+          idToken: token,
+          expectedIssuer: ISS,
+          expectedAudience: AUD,
+          expectedNonce: NONCE,
+          now: NOW,
+          jwks,
+        }),
+      'bad_azp',
+    )
+  })
+
+  it('rejects a multi-audience token whose azp names a DIFFERENT client', () => {
+    const { privateKey, jwks } = makeKey()
+    const token = signJwt(privateKey, validClaims({ aud: ['other', AUD], azp: 'other' }))
+    expectOidcCode(
+      () =>
+        validateIdToken({
+          idToken: token,
+          expectedIssuer: ISS,
+          expectedAudience: AUD,
+          expectedNonce: NONCE,
+          now: NOW,
+          jwks,
+        }),
+      'bad_azp',
+    )
+  })
+
+  it('rejects a single-audience token whose azp (when present) mismatches', () => {
+    const { privateKey, jwks } = makeKey()
+    // azp is optional for single-aud, but if it's there it must still name us.
+    const token = signJwt(privateKey, validClaims({ aud: AUD, azp: 'other' }))
+    expectOidcCode(
+      () =>
+        validateIdToken({
+          idToken: token,
+          expectedIssuer: ISS,
+          expectedAudience: AUD,
+          expectedNonce: NONCE,
+          now: NOW,
+          jwks,
+        }),
+      'bad_azp',
+    )
   })
 
   it('rejects an expired token (beyond the skew window)', () => {
