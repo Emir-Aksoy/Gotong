@@ -1,0 +1,18 @@
+{
+  "name": "@aipehub/example-tea-supply-link",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "奶茶店 ↔ 供货商 (跨组织供货链接) — an ORGANIZATION hub template whose workflow orchestrates a restock order to a SUPPLIER on another hub through the outbound approval gate (店长 approves before the order leaves the org). The cross-org LINK is runtime peer config, NOT in the template. Deterministic, no API key.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "load-template": "tsx src/load-template.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/workflow": "workspace:*",
+    "@aipehub/inbox": "workspace:*",
+    "yaml": "^2.6.0"
+  }
+}

@@ -1,0 +1,66 @@
+schema: aipehub.workflow/v1
+workflow:
+  id: tea-shop-restock
+  name: 奶茶店补货下单 (跨组织)
+  description: 库存见底 → 助手起草补货单 → 店长批准外发 → 供货商确认价格与货期 → 本地建档。
+  # 这是一条 CROSS-ORG 工作流。`place` 步派的 capability `supplier.confirm-order`
+  # 住在**供货商 (org B)** 的 hub 上,但这份 YAML 里没有任何 peer 的名字 —— 它只是
+  # 一个普通 capability,只不过解析到一条联邦链路上的 peer wrapper。跨组织下单 =
+  # 「能力调度」,那个能力恰好住在另一个 hub 上(同 cross-hub-workflow 先例)。
+  #
+  # 订单「是否准予跨出组织」由**运行时的出站审批闸**决定 —— 供货商 peer 上标了
+  # requireApprovalOutbound,host 把它包一层,出站任务挂起在店长的收件箱,批准了才
+  # 真正越过组织边界。注意它**不是**工作流里的 `human:` 步(那是 cafe-ops 的店内审批):
+  # 这一层是**框架运行时**的事。
+  #
+  # 这正是「模版和框架分离」的教学点:链接(peer + outboundCaps + 审批策略)是
+  # 运行时的 peer 配置,既不在这个工作流里,也不在模板里。模板只带「编排骨架」。
+  governance:
+    data_sensitivity: internal
+    required_credentials: [deepseek]
+    required_human_roles: [店长 (store manager)]
+    external_systems: [供货商 hub (联邦 peer)]
+    notes: 订单外发到供货商需店长在出站审批闸批准;价格 / 货期由供货商确定性返回,助手只起草不定价。
+  trigger:
+    capability: teashop.request-restock
+    payload_schema:
+      - id: items
+        label: 缺货物料 (每行一项,如 "珍珠 20")
+        type: textarea
+        rows: 5
+        required: true
+  surface:
+    me:
+      enabled: true
+      label: 我要申请补货
+      description: 列出见底的物料,店长批准后向供货商下单。
+      allowed_roles: [owner, admin, member]
+      user_scope_field: requested_by
+  steps:
+    - id: draft
+      description: 助手把缺货清单整理成一张补货单 (物料 + 数量)。
+      dispatch:
+        strategy: { kind: capability, capabilities: [teashop.draft-order] }
+        title: 起草补货单
+        payload:
+          items: $trigger.payload.items
+          requested_by: $trigger.payload.requested_by
+    - id: place
+      description: 向供货商下单确认 (跨组织能力;运行时出站审批闸:店长批准才跨出)。
+      dispatch:
+        strategy: { kind: capability, capabilities: [supplier.confirm-order] }
+        title: 向供货商确认订单
+        payload:
+          order: $draft.output
+    - id: record
+      description: 把供货商确认的价格 / 货期建档 (本地)。
+      dispatch:
+        strategy: { kind: capability, capabilities: [teashop.record-order] }
+        title: 建档采购单
+        payload:
+          order: $draft.output
+          confirmation: $place.output
+  output:
+    draft: $draft.output
+    confirmation: $place.output
+    record: $record.output

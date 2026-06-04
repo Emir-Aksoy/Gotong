@@ -39,6 +39,8 @@
     "demo:warband-club": "pnpm --filter @aipehub/example-warband-club start",
     "demo:warband-club:template": "pnpm --filter @aipehub/example-warband-club load-template",
     "demo:cross-hub-workflow": "pnpm --filter @aipehub/example-cross-hub-workflow start",
+    "demo:tea-supply-link": "pnpm --filter @aipehub/example-tea-supply-link start",
+    "demo:tea-supply-link:template": "pnpm --filter @aipehub/example-tea-supply-link load-template",
     "demo:obsidian-kb": "pnpm --filter @aipehub/example-obsidian-kb start",
     "demo:elasticsearch-kb": "pnpm --filter @aipehub/example-elasticsearch-kb start",
     "demo:im-bridge-host": "pnpm --filter @aipehub/example-im-bridge-host start",
