@@ -1,0 +1,39 @@
+# 问询档案库 — 成员向战团共享档案库提问 (surface.me 自助, 无审批)。
+# 这是 "共享资源被复用" 那条:你问的答案可能来自别的兄弟早先的贡献 = 合作。
+schema: aipehub.workflow/v1
+workflow:
+  id: warband-consult
+  name: 问询战团档案库
+  description: 成员向战团共享档案库提问, 司库从全团历史贡献里检索作答。
+  governance:
+    data_sensitivity: internal
+    required_credentials: [deepseek]
+    external_systems: [obsidian (战团共享档案库)]
+    notes: 只读检索共享档案库; 答案来自全团成员的历史贡献。
+  trigger:
+    capability: warband.ask
+    payload_schema:
+      - id: question
+        label: 你的问题 (涂装 / 战术 / 典籍)
+        type: textarea
+        rows: 3
+        required: true
+  surface:
+    me:
+      enabled: true
+      label: 我要问档案库
+      description: 向战团共享档案库提问, 司库从全团历史贡献里检索作答。
+      allowed_roles: [owner, admin, member]
+      user_scope_field: asker_id
+  steps:
+    - id: consult
+      description: 司库检索共享档案库, 给出答案与来源。
+      dispatch:
+        strategy: { kind: capability, capabilities: [warband.consult-archive] }
+        title: 检索档案库
+        payload:
+          question: $trigger.payload.question
+  output:
+    question: $trigger.payload.question
+    answer: $consult.output.answer
+    sources: $consult.output.sources

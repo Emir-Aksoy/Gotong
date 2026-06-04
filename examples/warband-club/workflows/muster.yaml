@@ -1,0 +1,69 @@
+# 提议集结 — 成员发起一次集结 (对战夜 / 涂装会 / 锦标赛), 战团长确认纳入日程 (HITL)。
+# 这是 "合作" 那条:成员发起 → 传令官拟章程 → 战团长 human: 拍板 → 上日程。
+schema: aipehub.workflow/v1
+workflow:
+  id: warband-muster
+  name: 提议集结 + 战团长确认
+  description: 成员发起一次集结, 传令官整理成章程, 战团长确认是否纳入战团日程。
+  governance:
+    data_sensitivity: internal
+    required_credentials: [deepseek]
+    required_human_roles: [战团长 (warband leader)]
+    external_systems: [obsidian (战团共享档案库)]
+    notes: 成员自助发起, 战团长统一确认; 集结章程进共享日程, 不涉敏感个人数据。
+  trigger:
+    capability: warband.propose-muster
+    payload_schema:
+      - id: title
+        label: 集结主题
+        type: text
+        required: true
+      - id: kind
+        label: 集结类型
+        type: select
+        required: true
+        options:
+          - { value: battle-night, label: 对战夜 }
+          - { value: paint-session, label: 涂装会 }
+          - { value: tournament, label: 锦标赛 }
+      - id: when
+        label: 时间 (如 "本周六 19:00")
+        type: text
+        required: true
+      - id: notes
+        label: 补充说明 (规模 / 点数 / 场地)
+        type: textarea
+        rows: 3
+      - id: leader_id
+        label: 确认战团长 (userId)
+        type: text
+        required: true
+  surface:
+    me:
+      enabled: true
+      label: 我要发起集结
+      description: 发起一次对战夜 / 涂装会 / 锦标赛, 战团长确认后纳入日程。
+      allowed_roles: [owner, admin, member]
+      user_scope_field: proposer_id
+  steps:
+    - id: draft
+      description: 传令官把提议整理成一份集结章程。
+      dispatch:
+        strategy: { kind: capability, capabilities: [warband.draft-muster] }
+        title: 拟集结章程
+        payload:
+          title: $trigger.payload.title
+          kind: $trigger.payload.kind
+          when: $trigger.payload.when
+          notes: $trigger.payload.notes
+    - id: leader-confirm
+      description: 战团长确认这次集结是否纳入战团日程。
+      human:
+        assignee: $trigger.payload.leader_id
+        kind: approval
+        title: 集结确认
+        prompt: 请确认这次集结是否纳入战团日程。
+  output:
+    title: $trigger.payload.title
+    draft: $draft.output
+    confirm: $leader-confirm.output

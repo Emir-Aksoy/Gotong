@@ -1,0 +1,18 @@
+{
+  "name": "@aipehub/example-warband-club",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "战团同好会 — an ORGANIZATION hub built on COLLABORATION + a SHARED resource: members contribute paint schemes / battle reports into one shared archive, query it, and propose musters confirmed by the warband leader (human: HITL). Single-hub shared (no federation). Original grimdark-fan homage. Deterministic, no API key.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "load-template": "tsx src/load-template.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/workflow": "workspace:*",
+    "@aipehub/inbox": "workspace:*",
+    "yaml": "^2.6.0"
+  }
+}
