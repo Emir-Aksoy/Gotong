@@ -1,5 +1,7 @@
 # cafe-ops — 门店运营 (奶茶 / 咖啡店) organization hub
 
+> One of the 5 [hands-on hubs](../../docs/zh/HANDS-ON-HUBS.md) (3 personal + 2 org) — comparison catalog + the real DeepSeek/Obsidian go-live runbook.
+
 The first **organization (team-mode) hub** case, and the first whose template
 carries **declarative workflows**.
 

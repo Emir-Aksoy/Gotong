@@ -1,5 +1,7 @@
 # personal-coding-hub — 一个个人 hub 同时管 Claude Code 和 Codex
 
+> 5 个[上手案例 hub](../../docs/zh/HANDS-ON-HUBS.md) 之一(3 个人 + 2 组织)—— 对照总览 + 真 DeepSeek/Obsidian 上线指南见该索引。
+
 > AipeHub **能承担的一个案例**(不是框架功能,代码全在 `examples/`)。一个**个人
 > hub** 里:一个**路由 LLM** 主动决定把编码任务派给 Claude Code 还是 Codex,而两个
 > agent **操作同一个仓库**,因此共享项目级文件 —— `AGENTS.md`(规范)+ `PROGRESS.md`

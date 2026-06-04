@@ -1,5 +1,7 @@
 # warband-club — 战团同好会 (a collaboration-first organization hub)
 
+> One of the 5 [hands-on hubs](../../docs/zh/HANDS-ON-HUBS.md) (3 personal + 2 org) — comparison catalog + the real DeepSeek/Obsidian go-live runbook.
+
 The second **organization (team-mode) hub** case (after `cafe-ops`). Read the two
 together — they cover the two faces of an org:
 

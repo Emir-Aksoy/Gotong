@@ -1,5 +1,7 @@
 # battle-monk-training — 战斗修士锻炼:一个为冷峻者而设的个人成长 hub
 
+> 5 个[上手案例 hub](../../docs/zh/HANDS-ON-HUBS.md) 之一(3 个人 + 2 组织)—— 对照总览 + 真 DeepSeek/Obsidian 上线指南见该索引。
+
 > AipeHub **能承担的一个案例**(不是框架功能,代码全在 `examples/`)。一个**个人
 > 成长 hub**:督修(路由 LLM)评估修士状态,把今日操练派给三柱 —— **肉身 / 心志 /
 > 学识** —— 每柱把状态写进一个持久的修士档案 **Codex**(Obsidian-style vault)。

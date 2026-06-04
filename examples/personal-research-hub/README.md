@@ -1,5 +1,7 @@
 # personal-research-hub — 一个个人 hub 把源材料编译成可问的知识库
 
+> 5 个[上手案例 hub](../../docs/zh/HANDS-ON-HUBS.md) 之一(3 个人 + 2 组织)—— 对照总览 + 真 DeepSeek/Obsidian 上线指南见该索引。
+
 > AipeHub **能承担的一个案例**(不是框架功能,代码全在 `examples/`)。承接
 > personal-coding-hub 里那套 Karpathy「LLM-as-compiler」方法论:一个**个人 hub** 把
 > raw 源材料(剪藏 / PDF / 笔记)用 agent **编译**成互链的 Obsidian wiki,再
