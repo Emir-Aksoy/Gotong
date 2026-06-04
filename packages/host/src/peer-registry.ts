@@ -633,6 +633,14 @@ export class PeerRegistry {
         // Phase 19 P4-M1 — apply the persisted OUTBOUND capability allowlist.
         // null (unset row) → omitted → send-anything (legacy); `[]` → lockdown.
         ...(row.outboundCaps ? { outboundCaps: row.outboundCaps } : {}),
+        // v5 Stream G-M1 — advertise = authorize. The per-link outbound
+        // allowlist doubles as the wrapper's ADVERTISED capabilities, so a local
+        // capability dispatch (e.g. a workflow step) can ROUTE to this peer and
+        // the SAME allowlist then AUTHORIZES the cross. null/unset → advertise
+        // nothing (the wrapper defaults to []) — the secure default; an admin
+        // must curate outboundCaps to orchestrate across this link. Zero
+        // behaviour change for legacy peers (they advertised nothing before).
+        ...(row.outboundCaps ? { remoteCapabilities: row.outboundCaps } : {}),
         // Phase 19 P4-M4 — OUTBOUND data-class contract: a task declaring a
         // class outside this set is refused before the wire. null → unset.
         ...(row.allowedDataClasses ? { allowedDataClasses: row.allowedDataClasses } : {}),
@@ -715,6 +723,10 @@ export class PeerRegistry {
       // Phase 19 P4-M1 — the same outbound allowlist guards a wrapper installed
       // off an inbound-accepted link (we can still dispatch TO this peer).
       ...(row.outboundCaps ? { outboundCaps: row.outboundCaps } : {}),
+      // v5 Stream G-M1 — advertise = authorize (see dialOne). A peer connected
+      // via an inbound-accepted link is just as orchestrable, so its curated
+      // outbound caps are advertised here too. null/unset → advertise nothing.
+      ...(row.outboundCaps ? { remoteCapabilities: row.outboundCaps } : {}),
       // Phase 19 P4-M4 — same data-class contract + per-link quota apply to a
       // wrapper installed off an inbound-accepted link.
       ...(row.allowedDataClasses ? { allowedDataClasses: row.allowedDataClasses } : {}),
