@@ -636,7 +636,22 @@ export class LlmAgent extends AgentParticipant {
     // agent config; we don't try to persist those — they're
     // re-derivable on every resume.
     const baseReq = this.buildRequest(task)
-    return this.runToolLoop(task, { ...baseReq, messages: restored })
+    const work = (): Promise<unknown> =>
+      this.runToolLoop(task, { ...baseReq, messages: restored })
+    // A resumed tool-loop must run inside the toolset's per-task scope
+    // too — mirroring `handleTask`. Without it a tool that reads the
+    // AsyncLocalStorage frame (DispatchToolset) sees no current-task
+    // context on resume and dispatches sub-tasks with a fresh, length-0
+    // ancestry — silently resetting the dispatch depth gate and
+    // blinding the cycle gate across the suspend/resume boundary.
+    // `this.toolset` is non-null here (early-returned above).
+    if (this.toolset.runForTask) {
+      return this.toolset.runForTask(
+        { id: task.id, from: task.from, ancestry: task.ancestry },
+        work,
+      )
+    }
+    return work()
   }
 
   private static extractRestoredMessages(state: unknown): LlmMessage[] | null {
