@@ -126,8 +126,15 @@ export class FileStorage implements Storage {
     // seal (rename) is ordered with respect to the appends around it
     const next = this.writeQueue.then(async () => {
       await this.maybeRotate()
-      await appendFile(this.path, line, 'utf8')
+      // Count the bytes BEFORE the append, not after. If `appendFile` throws
+      // mid-write (disk full, EIO), the bytes may already be partially on
+      // disk — an after-the-await increment would skip them and let
+      // `activeBytes` under-count the real file. Under-counting defers
+      // rotation past the cap, which is the one invariant this class exists to
+      // protect against (an unbounded active file). Over-counting at worst
+      // seals a segment slightly early — the safe direction to err.
       this.activeBytes += bytes
+      await appendFile(this.path, line, 'utf8')
     })
     this.writeQueue = next.catch(() => undefined)
     return next
