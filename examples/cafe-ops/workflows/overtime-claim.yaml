@@ -23,6 +23,14 @@ workflow:
         label: 加班时长 (小时)
         type: number
         required: true
+      - id: day_kind
+        label: 加班日别 (决定加班倍率)
+        type: select
+        required: true
+        options:
+          - { value: normal, label: 工作日 (1.5 倍) }
+          - { value: rest-day, label: 休息日 / 周末 (2 倍) }
+          - { value: public-holiday, label: 法定节假日 (3 倍) }
       - id: reason
         label: 加班事由
         type: textarea
@@ -48,6 +56,7 @@ workflow:
         payload:
           hours: $trigger.payload.hours
           date: $trigger.payload.date
+          day_kind: $trigger.payload.day_kind
     # human: 糖 → 派到 aipehub.human/v1 → HumanInboxParticipant 挂起任务,
     # 落成店长 /me 收件箱里一条 approval, 店长批了才恢复后续 (Phase 16)。
     - id: manager-approval

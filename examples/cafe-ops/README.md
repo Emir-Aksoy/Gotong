@@ -45,14 +45,15 @@ built-in, **not** a template agent.
 
 The money flow is the point. The assistant **suggests** an amount per the store's
 overtime policy; the manager **decides**. Money math is deterministic — never an
-LLM's job:
+LLM's job — and the multiplier is **situational** (结合使用者的情况): the same
+overtime hours pay differently on a workday vs a rest-day vs a public holiday.
 
 ```
-店员 /me 报加班 (3h)
+店员 /me 报加班 (3h, 日别=休息日/周末)
    │  dispatch cafe.claim-overtime
    ▼
-[assess]  运营助手 → 建议金额  (¥22/h × 1.5 × 3h = ¥99, 仅供参考)
-   │
+[assess]  运营助手 → 建议金额  (¥22/h × 2 [休息日] × 3h = ¥132, 仅供参考)
+   │       倍率随日别: 工作日 1.5 / 休息日 2 / 法定节假日 3
    ▼
 [manager-approval]  human: → aipehub.human/v1
    │  broker writes an inbox item for the manager, then SUSPENDS the run
@@ -63,13 +64,16 @@ LLM's job:
    ▼
    ▶  two-step resume (child broker, then parent workflow)
    ▼
-run completes:  { hours: 3, suggestion: {...¥99}, approval: { approved: true } }
+run completes:  { hours: 3, suggestion: {...¥132, dayLabel: 休息日, multiplier: 2}, approval: { approved: true } }
 ```
 
 `src/index.ts` runs exactly this end to end (deterministic, no API key) and
-self-asserts all eight checks. The two-step resume (child broker strictly before
-parent workflow) is hand-rolled in ~30 lines mirroring `HostInboxService.resolve`,
-so the HITL mechanism is visible in example code, not buried in the host.
+self-asserts every check, including a `[B2]` probe that the **same 3 hours** yield
+¥99 / ¥132 / ¥198 across the three day kinds — proof the dispatch's worker fits the
+staffer's situation, not a flat rate. The two-step resume (child broker strictly
+before parent workflow) is hand-rolled in ~30 lines mirroring
+`HostInboxService.resolve`, so the HITL mechanism is visible in example code, not
+buried in the host.
 
 ---
 

@@ -37,8 +37,26 @@ const POSITION_SOP: Record<string, { title: string; steps: string[]; norms: stri
   },
 }
 
-/** Overtime policy: base hourly rate (¥) and the multiplier applied to OT hours. */
-const OVERTIME_POLICY = { baseHourly: 22, multiplier: 1.5, currency: '¥' }
+/**
+ * Overtime policy: base hourly rate (¥) and the multiplier applied to OT hours.
+ * The multiplier is SITUATIONAL (结合使用者的情况) — a weekend rest-day or a
+ * statutory holiday pays more than a normal workday, mirroring real labor rules
+ * (workday 1.5× / rest-day 2× / public holiday 3×). The same overtime hours yield
+ * a different recommendation depending on WHEN they happened. Money stays
+ * deterministic; the manager still confirms the final amount.
+ */
+type DayKind = 'normal' | 'rest-day' | 'public-holiday'
+const OVERTIME_POLICY = {
+  baseHourly: 22,
+  currency: '¥',
+  multiplierByDay: { normal: 1.5, 'rest-day': 2, 'public-holiday': 3 } as Record<DayKind, number>,
+}
+const DAY_LABEL: Record<DayKind, string> = { normal: '工作日', 'rest-day': '休息日', 'public-holiday': '法定节假日' }
+
+/** Normalize a free-text/选项 day kind to a known DayKind (defaults to a workday). */
+function asDayKind(raw: unknown): DayKind {
+  return raw === 'rest-day' || raw === 'public-holiday' ? raw : 'normal'
+}
 
 // --- stand-in participants --------------------------------------------------
 
@@ -79,20 +97,28 @@ export class OvertimePolicyStandin extends AgentParticipant {
     return this.assessOvertime(task)
   }
 
-  /** Deterministic money math — the headline reason money work is NOT done by an LLM. */
+  /**
+   * Deterministic money math — the headline reason money work is NOT done by an
+   * LLM. The multiplier adapts to the day kind (workday / rest-day / holiday), so
+   * the recommendation fits the staffer's actual situation, not a flat rate.
+   */
   private assessOvertime(task: Task): unknown {
-    const { hours, date } = (task.payload ?? {}) as { hours?: number; date?: string }
+    const { hours, date, day_kind } = (task.payload ?? {}) as { hours?: number; date?: string; day_kind?: unknown }
     const h = typeof hours === 'number' && hours > 0 ? hours : 0
-    const { baseHourly, multiplier, currency } = OVERTIME_POLICY
+    const day = asDayKind(day_kind)
+    const { baseHourly, currency, multiplierByDay } = OVERTIME_POLICY
+    const multiplier = multiplierByDay[day]
     const amount = Math.round(h * baseHourly * multiplier * 100) / 100
     return {
       date,
       hours: h,
+      dayKind: day,
+      dayLabel: DAY_LABEL[day],
       rate: baseHourly,
       multiplier,
       currency,
       suggestedAmount: amount,
-      note: `按店面政策: ${currency}${baseHourly}/小时 × ${multiplier} 倍 × ${h} 小时 = ${currency}${amount} (建议, 待店长确认)。`,
+      note: `按店面政策 (${DAY_LABEL[day]} ${multiplier} 倍): ${currency}${baseHourly}/小时 × ${multiplier} × ${h} 小时 = ${currency}${amount} (建议, 待店长确认)。`,
     }
   }
 

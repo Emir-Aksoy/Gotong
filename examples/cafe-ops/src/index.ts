@@ -109,6 +109,7 @@ async function main(): Promise<void> {
     payload: {
       date: '2026-06-02',
       hours: 3,
+      day_kind: 'rest-day', // 周末顶班 = 休息日 → 2 倍 (结合使用者的情况, 不是固定 1.5)
       reason: '周末高峰顶班',
       manager_id: 'u-manager',
       staff_id: 'u-staff',
@@ -135,12 +136,36 @@ async function main(): Promise<void> {
   })
   const otOut = okOutput(result, 'overtime resume') as {
     hours: number
-    suggestion: { suggestedAmount: number; note: string }
+    suggestion: { suggestedAmount: number; note: string; dayLabel: string; multiplier: number }
     approval: { approved: boolean }
   }
   console.log(`  店长批了 → 工作流恢复并完成。`)
   console.log(`  建议金额 (助手按政策算, 待店长确认): ${otOut.suggestion.note}`)
-  console.log(`  最终: ${otOut.hours} 小时, 建议 ¥${otOut.suggestion.suggestedAmount}, approved=${otOut.approval.approved}`)
+  console.log(
+    `  最终: ${otOut.hours} 小时 · ${otOut.suggestion.dayLabel} ×${otOut.suggestion.multiplier}, 建议 ¥${otOut.suggestion.suggestedAmount}, approved=${otOut.approval.approved}`,
+  )
+
+  // --- [B2] the multiplier adapts to the situation (结合使用者的情况) ----------
+  // Same 3 overtime hours, three day kinds → three recommendations. The worker
+  // serves cafe.overtime-policy; we probe it directly (the workflow's assess step
+  // dispatches the same capability). Money stays deterministic; manager still confirms.
+  section('[B2] 同样 3 小时加班, 不同日别 → 不同倍率 (worker 结合情况算)')
+  const dayCases = [
+    { dayKind: 'normal', amount: 99 }, // 3 × ¥22 × 1.5
+    { dayKind: 'rest-day', amount: 132 }, // 3 × ¥22 × 2
+    { dayKind: 'public-holiday', amount: 198 }, // 3 × ¥22 × 3
+  ] as const
+  for (const c of dayCases) {
+    const r = await hub.dispatch({
+      from: 'u-staff' as ParticipantId,
+      strategy: { kind: 'capability', capabilities: ['cafe.overtime-policy'] },
+      payload: { date: '2026-06-02', hours: 3, day_kind: c.dayKind },
+      title: `加班核算 (${c.dayKind})`,
+    })
+    const o = okOutput(r, `overtime ${c.dayKind}`) as { dayLabel: string; multiplier: number; suggestedAmount: number }
+    console.log(`  ${o.dayLabel}: ×${o.multiplier} → 建议 ¥${o.suggestedAmount}`)
+    assert(o.suggestedAmount === c.amount, `3h on ${c.dayKind} → ¥${c.amount}`)
+  }
 
   // --- self-assertions (this demo doubles as a smoke test) --------------------
   section('[verify]')
@@ -149,7 +174,7 @@ async function main(): Promise<void> {
   assert(onboardOut.walkthrough.norms.length > 0, 'trainer returned position norms')
   assert(otFired.kind === 'suspended', 'overtime suspended at the human gate')
   assert(result.kind === 'ok', 'overtime resumed to completion after approval')
-  assert(otOut.suggestion.suggestedAmount === 99, '3h × ¥22 × 1.5 = ¥99 (deterministic money math)')
+  assert(otOut.suggestion.suggestedAmount === 132, '周末顶班 3h × ¥22 × 2 (休息日) = ¥132 (结合日别的确定性金额)')
   assert(otOut.approval.approved === true, "manager's approval flowed into the output")
   const stillPending = await inbox.listPending('u-manager')
   assert(stillPending.length === 0, 'the inbox item is resolved, not pending')

@@ -85,8 +85,10 @@ template:
         你是门店运营助手,处理加班与排班的事务性核算。语气简洁、就事论事。
 
         加班 (capability cafe.overtime-policy):
-        - 从店面运营手册读加班政策(基础时薪、倍率、计薪规则),按申报的时长算出**建议
-          金额**,并写清算式(时薪 × 倍率 × 时长)。
+        - 从店面运营手册读加班政策(基础时薪、倍率、计薪规则)。**倍率结合加班日别**:
+          工作日 1.5 倍、休息日 / 周末 2 倍、法定节假日 3 倍 —— 按申报的 `day_kind` 选
+          对应倍率,算出**建议金额**并写清算式(时薪 × 倍率 × 时长)。同样的时长在不同
+          日别金额不同,别一律按 1.5 倍。
         - 你只给「建议」。最终金额必须由店长在审批步骤里 approve 才算数 —— 钱的事 LLM
           建议、人来定。不要把建议说成已批准。
 
@@ -227,6 +229,14 @@ template:
             label: 加班时长 (小时)
             type: number
             required: true
+          - id: day_kind
+            label: 加班日别 (决定加班倍率)
+            type: select
+            required: true
+            options:
+              - { value: normal, label: 工作日 (1.5 倍) }
+              - { value: rest-day, label: 休息日 / 周末 (2 倍) }
+              - { value: public-holiday, label: 法定节假日 (3 倍) }
           - id: reason
             label: 加班事由
             type: textarea
@@ -252,6 +262,7 @@ template:
             payload:
               hours: $trigger.payload.hours
               date: $trigger.payload.date
+              day_kind: $trigger.payload.day_kind
         - id: manager-approval
           description: 店长复核加班申报与建议金额, 决定是否批准。
           human:
