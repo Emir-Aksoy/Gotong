@@ -1,8 +1,8 @@
 /**
- * Stream G day-2 — unit tests for the pure cross-hub-step detector
+ * Stream G day-2 / H — unit tests for the pure off-hub-step detector
  * (`crossHubStepsOf`). It needs no Hub and no versioning: it's a function over
- * a definition + the local capability set + the connected-peer capability
- * entries, so we exercise the decision logic directly.
+ * a definition + the local capability set + the off-hub capability entries, so
+ * we exercise the decision logic directly.
  *
  * The contract under test:
  *   - a step asking for a capability ONLY a peer serves      → flagged
@@ -11,7 +11,8 @@
  *     (routes locally; flagging it would be a false "goes cross-hub" alarm)
  *   - explicit / unfiltered-broadcast dispatch               → never flagged
  *   - parallel branches addressed `${stepId}/${branchId}`
- *   - two peers advertising the same cap                     → first wins
+ *   - two destinations advertising the same cap              → first wins
+ *   - each result carries its destination `kind` ('peer' default | 'a2a')
  */
 
 import { describe, expect, it } from 'vitest'
@@ -41,7 +42,7 @@ function capStep(id: string, capability: string): Step {
 const PEER = { peer: 'supplier-hub', label: '供货商 Hub', capabilities: ['supplier.confirm-order'] }
 
 describe('crossHubStepsOf', () => {
-  it('flags a step whose cap only a peer serves (with peer + label)', () => {
+  it('flags a step whose cap only a peer serves (with peer + label + kind:peer)', () => {
     const flagged = crossHubStepsOf(
       def([capStep('place', 'supplier.confirm-order')]),
       new Set(['teashop.draft-order']),
@@ -53,6 +54,7 @@ describe('crossHubStepsOf', () => {
         capability: 'supplier.confirm-order',
         peer: 'supplier-hub',
         peerLabel: '供货商 Hub',
+        kind: 'peer',
       },
     ])
   })
@@ -108,6 +110,7 @@ describe('crossHubStepsOf', () => {
         capability: 'supplier.confirm-order',
         peer: 'supplier-hub',
         peerLabel: '供货商 Hub',
+        kind: 'peer',
       },
     ])
   })
@@ -134,5 +137,32 @@ describe('crossHubStepsOf', () => {
       { peer: 'p', label: null, capabilities: ['x.cap'] },
     ])
     expect(flagged[0]?.peerLabel).toBeNull()
+  })
+
+  it('flags an external A2A agent step with kind:a2a (Stream H)', () => {
+    const flagged = crossHubStepsOf(def([capStep('translate', 'external.translate')]), new Set(), [
+      { peer: 'deepl-a2a', label: 'DeepL', capabilities: ['external.translate'], kind: 'a2a' },
+    ])
+    expect(flagged).toEqual([
+      {
+        stepId: 'translate',
+        capability: 'external.translate',
+        peer: 'deepl-a2a',
+        peerLabel: 'DeepL',
+        kind: 'a2a',
+      },
+    ])
+  })
+
+  it('attributes a shared cap to a mesh peer over an A2A agent (peers listed first)', () => {
+    // The host always passes mesh peers before A2A entries; first-wins makes the
+    // mesh peer (which can carry an approval gate) the attributed destination.
+    const flagged = crossHubStepsOf(def([capStep('do', 'shared.cap')]), new Set(), [
+      { peer: 'mesh-hub', label: 'Mesh', capabilities: ['shared.cap'], kind: 'peer' },
+      { peer: 'ext-a2a', label: 'Ext', capabilities: ['shared.cap'], kind: 'a2a' },
+    ])
+    expect(flagged).toHaveLength(1)
+    expect(flagged[0]?.peer).toBe('mesh-hub')
+    expect(flagged[0]?.kind).toBe('peer')
   })
 })

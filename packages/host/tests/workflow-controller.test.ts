@@ -665,7 +665,13 @@ workflow:
       })
       const summary = await c.importFromText(SUPPLY)
       expect(summary.crossHubSteps).toEqual([
-        { stepId: 'place', capability: 'supplier.confirm-order', peer: 'supplier-hub', peerLabel: '供货商' },
+        {
+          stepId: 'place',
+          capability: 'supplier.confirm-order',
+          peer: 'supplier-hub',
+          peerLabel: '供货商',
+          kind: 'peer',
+        },
       ])
     })
 

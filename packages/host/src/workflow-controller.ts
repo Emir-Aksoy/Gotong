@@ -95,41 +95,55 @@ export interface WorkflowSummary {
    */
   currentRevision?: number
   /**
-   * Stream G day-2 — steps whose dispatch asks for a capability that a
-   * connected peer hub advertises (and that no local participant serves), i.e.
-   * they'll route ACROSS the federation boundary. Present (non-empty) only
-   * when the controller is wired with a peer-capability view AND the
-   * definition actually has such a step. The admin UI uses this to warn — before
-   * launch — "this step goes to peer <x>; if they gate it, you'll approve in
-   * your inbox". Pure visibility; the dispatch itself is unchanged.
+   * Stream G day-2 / H — steps whose dispatch asks for a capability that an
+   * OFF-HUB destination serves (and that no local participant does), i.e. they
+   * leave the hub: a connected mesh peer (`kind:'peer'`, Stream G) or an
+   * external A2A agent (`kind:'a2a'`, Stream H). Present (non-empty) only when
+   * the controller is wired with an off-hub capability view AND the definition
+   * actually has such a step. The admin UI uses this to warn — before launch —
+   * "this step goes to <x>" (a mesh peer may gate it → inbox approval; an A2A
+   * agent fires immediately). Pure visibility; the dispatch itself is unchanged.
    */
   crossHubSteps?: CrossHubStep[]
 }
 
-/** One workflow step that dispatches to a connected peer hub. */
+/** One workflow step that dispatches OFF this hub — to a peer hub or an external A2A agent. */
 export interface CrossHubStep {
   /** The step id (or `${stepId}/${branchId}` for a parallel branch). */
   stepId: string
-  /** The capability that only a peer (not a local participant) serves. */
+  /** The capability that no LOCAL participant serves — only an off-hub destination. */
   capability: string
-  /** The peer hub's id (== the peer wrapper participant id). */
+  /** The destination's id (the peer wrapper id, or the outbound A2A agent id). */
   peer: string
-  /** The peer's human label, when set. */
+  /** The destination's human label, when set. */
   peerLabel: string | null
+  /**
+   * What kind of off-hub destination this step reaches:
+   *   - `'peer'` — a connected MESH peer (AipeHub↔AipeHub). It may carry an
+   *     outbound approval gate, so the step can pause for inbox approval.
+   *   - `'a2a'` — an EXTERNAL A2A agent (the Phase 18 C-M4 outbound edge). It
+   *     fires immediately; there is no approval gate.
+   * Optional for back-compat (absent ⇒ treat as `'peer'`); the producer always sets it.
+   */
+  kind?: 'peer' | 'a2a'
 }
 
 /**
- * The connected-peer capability view the controller consults to flag cross-hub
- * steps. Duck-typed and OPTIONAL: a controller built without it (the common
+ * The off-hub capability view the controller consults to flag steps that leave
+ * the hub. Duck-typed and OPTIONAL: a controller built without it (the common
  * single-hub case) flags nothing — zero behavior change. The host builds this
- * from the peer registry's connected links joined with each peer wrapper's
- * advertised capabilities (Stream G G-M1: advertise == authorize).
+ * from two sources, each an entry carrying its `kind`:
+ *   - connected MESH peers joined with each wrapper's advertised capabilities
+ *     (Stream G G-M1: advertise == authorize) → `kind:'peer'`,
+ *   - live EXTERNAL A2A agents (the C-M4 outbound edge) → `kind:'a2a'`.
  */
 export interface PeerCapabilityView {
   peerCapabilities(): Array<{
     peer: string
     label: string | null
     capabilities: readonly string[]
+    /** Off-hub destination kind; defaults to `'peer'` when omitted. */
+    kind?: 'peer' | 'a2a'
   }>
 }
 
@@ -639,11 +653,13 @@ export class WorkflowController {
   }
 
   /**
-   * Resolve which of a definition's steps dispatch to a connected peer hub.
-   * Returns `[]` when no peer-capability view is wired (single-hub case ⇒ zero
-   * cost). The local-capability set EXCLUDES the peer wrapper participants
-   * (their ids == peer ids) so a capability the peer itself advertises isn't
-   * mistaken for "served locally" and thus wrongly suppressed.
+   * Resolve which of a definition's steps dispatch OFF this hub (to a mesh peer
+   * or an external A2A agent). Returns `[]` when no off-hub view is wired
+   * (single-hub case ⇒ zero cost). The local-capability set EXCLUDES the off-hub
+   * destinations' participants (their ids == the entry `peer` ids) so a
+   * capability such a destination itself advertises isn't mistaken for "served
+   * locally" and thus wrongly suppressed — this matters for A2A agents, which
+   * (unlike mesh peer wrappers) ARE registered as ordinary local participants.
    */
   private computeCrossHubSteps(def: WorkflowDefinition): CrossHubStep[] {
     if (!this.peerCapabilities) return []
@@ -686,15 +702,17 @@ function stepDispatchCapabilities(
 }
 
 /**
- * Pure cross-hub-step detection (exported for direct unit testing — no Hub, no
- * versioning needed). A step is "cross-hub" when its dispatch asks for a
- * capability that a connected peer advertises AND no local participant serves.
+ * Pure off-hub-step detection (exported for direct unit testing — no Hub, no
+ * versioning needed). A step leaves the hub when its dispatch asks for a
+ * capability that an off-hub destination (a mesh peer OR an external A2A agent)
+ * advertises AND no local participant serves.
  *
- * The "not local" guard matters: a capability that BOTH a local agent and a
- * peer can serve still routes locally (the capability strategy is satisfied by
- * any local match first), so flagging it would be a false alarm. When two peers
- * advertise the same capability the FIRST in `peerEntries` wins attribution —
- * deterministic; the caller passes a stable order.
+ * The "not local" guard matters: a capability that BOTH a local agent and an
+ * off-hub destination can serve still routes locally (the capability strategy is
+ * satisfied by any local match first), so flagging it would be a false alarm.
+ * When two destinations advertise the same capability the FIRST in `peerEntries`
+ * wins attribution — deterministic; the caller passes a stable order (mesh peers
+ * then A2A agents). Each result carries its destination `kind`.
  */
 export function crossHubStepsOf(
   def: WorkflowDefinition,
@@ -703,12 +721,13 @@ export function crossHubStepsOf(
     peer: string
     label: string | null
     capabilities: readonly string[]
+    kind?: 'peer' | 'a2a'
   }>,
 ): CrossHubStep[] {
-  const peerCap = new Map<string, { peer: string; label: string | null }>()
+  const peerCap = new Map<string, { peer: string; label: string | null; kind: 'peer' | 'a2a' }>()
   for (const e of peerEntries) {
     for (const c of e.capabilities) {
-      if (!peerCap.has(c)) peerCap.set(c, { peer: e.peer, label: e.label })
+      if (!peerCap.has(c)) peerCap.set(c, { peer: e.peer, label: e.label, kind: e.kind ?? 'peer' })
     }
   }
   const out: CrossHubStep[] = []
@@ -717,7 +736,7 @@ export function crossHubStepsOf(
       if (localCapabilities.has(capability)) continue
       const hit = peerCap.get(capability)
       if (!hit) continue
-      out.push({ stepId, capability, peer: hit.peer, peerLabel: hit.label })
+      out.push({ stepId, capability, peer: hit.peer, peerLabel: hit.label, kind: hit.kind })
     }
   }
   return out

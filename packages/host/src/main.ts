@@ -791,6 +791,10 @@ async function main(): Promise<void> {
   // originating user a question, and the dispatch target is a user
   // id over on `task.origin.orgId`.
   let peerRegistryRef: PeerRegistry | undefined
+  // Stream H — forward ref to the outbound A2A manager (built further down,
+  // after createWorkflowController) so the workflow controller's off-hub
+  // capability view can also enumerate live external A2A agents lazily.
+  let a2aOutboundRef: A2aOutboundManager | undefined
   // Phase 11 M2 — when an agent throws SuspendTaskError the scheduler
   // calls this notifier to persist the parked task. Wired only when
   // identity opened successfully (rare boot-time failures fall back
@@ -1161,17 +1165,22 @@ async function main(): Promise<void> {
       hub,
       definitionsDir: workflowsDir,
       spaceRoot: SPACE_DIR,
-      // Stream G day-2 — connected-peer capability view for cross-hub-step
-      // flags on workflow summaries. Read LAZILY via the forward-declared
-      // `peerRegistryRef`: the registry is built further down, but this closure
-      // only fires when an admin summary is projected (an HTTP request long
-      // after boot), so it sees the live registry. A peer's advertised caps ARE
-      // the registered wrapper participant's `.capabilities` (G-M1: outboundCaps
-      // → remoteCapabilities) — the same source dispatch routing consults, so
-      // the flag can't drift from where the step would actually go.
+      // Stream G day-2 / H — off-hub capability view for "this step leaves the
+      // hub" flags on workflow summaries. Read LAZILY via forward-declared refs:
+      // both the peer registry and the A2A manager are built further down, but
+      // this closure only fires when an admin summary is projected (an HTTP
+      // request long after boot), so it sees the live state.
+      //
+      // Two sources, mesh peers FIRST so they win attribution on a shared cap:
+      //   - `kind:'peer'` — a connected peer's advertised caps ARE the registered
+      //     wrapper participant's `.capabilities` (G-M1: outboundCaps →
+      //     remoteCapabilities), the same source dispatch routing consults.
+      //   - `kind:'a2a'` — a live external A2A agent's caps. We list stored agents
+      //     and keep only the ones currently registered (`statusOf().active`), so
+      //     a token-less / disabled row isn't flagged as a reachable destination.
       peerCapabilities: {
-        peerCapabilities: () =>
-          (peerRegistryRef?.status() ?? [])
+        peerCapabilities: () => {
+          const peers = (peerRegistryRef?.status() ?? [])
             .filter((s) => s.connected)
             .map((s) => {
               const wrapper = hub.registry.get(s.peerId)
@@ -1179,8 +1188,15 @@ async function main(): Promise<void> {
                 peer: s.peerId,
                 label: s.label,
                 capabilities: wrapper ? [...wrapper.capabilities] : [],
+                kind: 'peer' as const,
               }
-            }),
+            })
+          const a2a = (a2aOutboundRef?.liveCapabilities() ?? []).map((e) => ({
+            ...e,
+            kind: 'a2a' as const,
+          }))
+          return [...peers, ...a2a]
+        },
       },
     },
     workflowReport,
@@ -1574,6 +1590,9 @@ async function main(): Promise<void> {
   if (identity) {
     a2aOutbound = new A2aOutboundManager({ hub, source: identity, logger: log })
     a2aOutbound.registerAllFromStore()
+    // Stream H — let the workflow controller's off-hub capability view see live
+    // external A2A agents (lazy closure forward-declared above).
+    a2aOutboundRef = a2aOutbound
   }
 
   // Phase 18 C-M3 — inbound A2A message/send endpoint. OFF by default (it

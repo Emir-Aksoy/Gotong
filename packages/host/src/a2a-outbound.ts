@@ -116,6 +116,20 @@ export class A2aOutboundManager {
     return { active: false, reason: 'id_conflict' }
   }
 
+  /**
+   * Stream H — off-hub capability view for the workflow controller: the stored
+   * agents currently LIVE on the hub (`statusOf().active`) with their advertised
+   * capabilities, so a workflow step whose capability only an external A2A agent
+   * serves can be flagged "leaves the hub". Read-only; a disabled / token-less
+   * row is excluded (it's not a reachable destination).
+   */
+  liveCapabilities(): Array<{ peer: string; label: string | null; capabilities: readonly string[] }> {
+    return this.source
+      .listA2aAgents()
+      .filter((a) => this.statusOf(a.id).active)
+      .map((a) => ({ peer: a.id, label: a.label, capabilities: a.capabilities }))
+  }
+
   private unregister(id: string): void {
     if (!this.live.has(id)) return
     this.hub.unregister(id)
