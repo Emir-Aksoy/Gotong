@@ -3,15 +3,15 @@
 > 5 个[上手案例 hub](../../docs/zh/HANDS-ON-HUBS.md) 之一(3 个人 + 2 组织)—— 对照总览 + 真 DeepSeek/Obsidian 上线指南见该索引。
 
 > AipeHub **能承担的一个案例**(不是框架功能,代码全在 `examples/`)。一个**个人
-> hub** 里:一个**路由 LLM** 主动决定把编码任务派给 Claude Code 还是 Codex,而两个
-> agent **操作同一个仓库**,因此共享项目级文件 —— `AGENTS.md`(规范)+ `PROGRESS.md`
-> (进度交接棒)。
+> hub** 里:一个**路由 LLM** 主动决定把编码任务派给 Claude Code 还是 Codex —— **按
+> 目标派合适的 agent**,而不是每次都跑同一条流水线;而两个 agent **操作同一个仓库**,
+> 因此共享项目级文件 —— `AGENTS.md`(规范)+ `PROGRESS.md`(进度交接棒)。
 
 这回答三个诉求:
 
 | 诉求 | 怎么落地 |
 |---|---|
-| **整合 + 主动管理/激活** | 一个 `LlmAgent`(路由)带 `DispatchToolset`,按 `agentId` 决定每一步派给谁 —— claude-code 起草 → codex 实现。**派给谁是模型的决策**,不是写死的顺序。 |
+| **整合 + 结合目标分派** | 一个 `LlmAgent`(路由)带 `DispatchToolset`,**读目标**决定派给谁:琐碎修复 → 只派 codex 直接改;只审查 → 只派 claude-code 不实现;需先设计 → claude-code 起草再 codex 实现。**派给谁是结合目标的判断**,不是写死的顺序。 |
 | **共享项目级规范** | 两个 `CliParticipant` 用**同一个 `cwd`**,所以 `AGENTS.md` 对它俩是同一份磁盘字节。(真实里 `CLAUDE.md` symlink 到 `AGENTS.md`,一份规范喂两个 CLI。) |
 | **共享进度文件** | 同一个 `cwd` 下的 `PROGRESS.md` 是**交接棒**:每个 agent 动手前先读、做完追加一行。demo 里 codex 那一轮打印 `read progress log (1 prior entries)` —— 它**读到了 claude-code 刚写的那条**。 |
 
@@ -30,23 +30,34 @@
 ## 跑起来
 
 ```bash
-pnpm demo:personal-coding-hub            # [A] 路由 + 两 CLI 共享仓库(可跑+自断言)
-pnpm demo:personal-coding-hub:template   # [B] 载入「方法论大脑」模板 + 预览(见下)
+pnpm demo:personal-coding-hub            # 4 个剧情:按目标分派 + 共享仓库 + 安全闸(可跑+自断言)
+pnpm demo:personal-coding-hub:template   # 载入「方法论大脑」模板 + 预览(见下)
 ```
 
-[A] 不需要任何 API key —— 路由用脚本化的 `MockLlmProvider`,两个编码 agent 用确定性的
-mock CLI(`src/mock-coder.mjs`,纯 node)。但**文件共享是真的**:demo 起一个真临时
-仓库,写真 `AGENTS.md` + `PROGRESS.md`,mock CLI 真读真写它们。`index.ts` 会**自断言**
-两个 agent 都写进了同一个 `PROGRESS.md`、且危险任务 fail-closed —— 所以这个 example
-同时是一个 smoke 测试。
+`demo:personal-coding-hub` 不需要任何 API key —— 路由用一个**情境感知的
+`LlmProvider`**(`src/router-provider.ts`,读目标、调纯函数 `planRoute` 决定派谁,真
+LLM 从同一个目标做同样的判断),两个编码 agent 用确定性的 mock CLI
+(`src/mock-coder.mjs`,纯 node)。但**文件共享是真的**:每个剧情起一个真临时仓库,
+写真 `AGENTS.md` + `PROGRESS.md`,mock CLI 真读真写它们。`index.ts` 对**每个剧情**
+都断言「追加到共享 `PROGRESS.md` 的 agent 集合 == 这个目标该路由的集合」、且危险任务
+fail-closed —— 所以这个 example 同时是一个情境路由的 smoke 测试。
 
-## demo 故事(三段)
+## demo 故事(4 个剧情)
 
-| 段 | 演示 | 机制 |
-|---|---|---|
-| **[1] 路由主动管理** | 你把**一个目标**交给路由;它派 claude-code 起草、再派 codex 实现 | `LlmAgent` tool-use loop → `DispatchToolset.dispatch_task({agentId})` |
-| **[2] 共享文件证明** | 最终 `PROGRESS.md` 里**两个 agent 各一条** —— 证明它俩共享同一个文件;codex 读到 `1 prior entries` = 看到了 claude-code 的交接 | 同 `cwd` + `SharedWorkspaceCli` 在 hub 边界注入「先读后写」约定 |
-| **[3] 安全闸** | 一条 `rm -rf` / `git push --force` 的任务在 CLI **还没 spawn 前**就挂起等人批;拒绝 → 任务 fail-closed,CLI 从未跑 | `dangerousCommandGate()`(Phase E2 的 T2 动作闸) |
+前三个剧情把**同一个 hub** 喂**不同目标**,看路由把活派给谁 —— 证明分派结合了目标,
+不是固定流水线:
+
+| 剧情 | 目标 | 分派 | 为什么 |
+|---|---|---|---|
+| **[A] 功能(需先设计)** | `Add OAuth login with refresh tokens…` | claude-code → codex | 要先设计 → Claude Code 起草方案,Codex 据 `PROGRESS.md` 实现 |
+| **[B] 琐碎修复** | `Fix the typo in the README heading.` | 只 codex | 改动琐碎、无需设计 → 直接交 Codex 实现,跳过规划回合 |
+| **[C] 只审查不改** | `Review auth.ts…; do not change code.` | 只 claude-code | 只审查 / 解释、不改代码 → 交善于分析的 Claude Code,不派实现 |
+| **[D] 安全闸** | `rm -rf build && git push --force` | (挂起→拒绝) | 危险命令在 CLI **还没 spawn 前**就挂起等人批;拒绝 → fail-closed,CLI 从未跑 |
+
+机制:[A]/[B]/[C] 都是 `LlmAgent` tool-use loop → `DispatchToolset.dispatch_task({agentId})`,
+派几个、派谁由 `planRoute(goal)` 决定;[A] 里 codex 读到 `1 prior entries` = 看到了
+claude-code 写的交接(同 `cwd` + `SharedWorkspaceCli` 在 hub 边界注入「先读后写」约定);
+[D] 是 `dangerousCommandGate()`(Phase E2 的 T2 动作闸)。
 
 ## 方法论知识库(Karpathy 工作流)+ 可载入模板
 
@@ -137,8 +148,9 @@ const coder = new SharedWorkspaceCli({
 })
 ```
 
-路由的 `provider` 换成真 LLM 后,**派给谁、怎么反馈**就成了模型的判断;脚本里写死的
-两个派发会被模型按你的目标动态生成。
+路由的 `provider` 换成真 LLM 后,**派给谁、怎么反馈**就成了模型的判断 —— demo 里那个
+`planRoute(goal)` 的情境路由(琐碎只派 Codex、审查只派 Claude Code、功能两个都派)正是
+真模型从你的目标该做出的同一个判断,只是这里用纯函数钉死好让 demo 能自断言。
 
 ## 安全须知(真接时务必看)
 
