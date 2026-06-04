@@ -27,6 +27,10 @@
 
 import type { HubLink, Participant, ParticipantId } from '@aipehub/core'
 import type { RpcResponder } from './peer-kb-gate.js'
+import {
+  buildPeerSummaryTrend,
+  type PeerSummaryTrendPoint,
+} from './peer-summary-metrics.js'
 
 /** Wire method names for the peer summary (shared producer/consumer). */
 export const PEER_SUMMARY_METHODS = {
@@ -375,6 +379,39 @@ export interface PeerSummaryRow {
   lastError: string | null
 }
 
+/**
+ * Persistent snapshot sink (v5 Stream F) — the control plane's HISTORY backing.
+ * Duck-typed so the host backs it with `IdentityStore`
+ * (`appendPeerSummarySnapshot` / `listPeerSummarySnapshots`) while peer-summary
+ * keeps zero identity dep. COUNTS-ONLY: it stores the same `PeerSummary` blob
+ * the live cache holds, just stamped + persisted. Optional — without it the
+ * control plane is point-in-time only (the E5 behaviour).
+ */
+export interface PeerSummarySnapshotSink {
+  appendPeerSummarySnapshot(input: {
+    capturedAt?: number
+    source: string
+    summaryJson: string
+  }): unknown
+  listPeerSummarySnapshots(query: {
+    source?: string
+    since?: number
+    until?: number
+    limit?: number
+  }): Array<{ capturedAt: number; summaryJson: string }>
+}
+
+/** A history query: one source's trend of one scalar metric over a window. */
+export interface PeerSummaryHistoryQuery {
+  /** `'local'` or a peer id. */
+  source: string
+  /** A `PEER_SUMMARY_METRIC_KEYS` dotted key (e.g. `health.suspendedTasks`). */
+  metric: string
+  since?: number
+  until?: number
+  limit?: number
+}
+
 export interface PeerSummaryFederation {
   /** The host's OWN footprint — the control plane always shows local first. */
   local(): Promise<PeerSummary>
@@ -382,6 +419,11 @@ export interface PeerSummaryFederation {
   list(): Promise<PeerSummaryRow[]>
   /** Refetch `peer.summary` from connected peers (all, or one by id). */
   refresh(peerId?: string): Promise<void>
+  /**
+   * Trend one scalar metric for one source over a window (v5 Stream F). Reads
+   * persisted snapshots; returns `[]` when no snapshot sink is wired.
+   */
+  history(query: PeerSummaryHistoryQuery): Promise<PeerSummaryTrendPoint[]>
 }
 
 /**
@@ -397,6 +439,13 @@ export function createPeerSummaryFederation(
   opts: {
     /** Thunk that builds the host's own summary (closes over the same deps). */
     buildLocal: () => Promise<PeerSummary>
+    /**
+     * Persistent history backing (v5 Stream F). When wired, every `refresh`
+     * records a counts-only snapshot of the local footprint plus each
+     * successfully-fetched peer, and `history` reads back the trend. Omit it
+     * and the control plane stays point-in-time only (the E5 behaviour).
+     */
+    snapshots?: PeerSummarySnapshotSink
     now?: () => number
     logger?: { warn?: (msg: string, meta?: Record<string, unknown>) => void }
   },
@@ -404,6 +453,23 @@ export function createPeerSummaryFederation(
   const now = opts.now ?? (() => Date.now())
   const cache = new Map<string, { summary: PeerSummary; lastFetchedAt: number }>()
   const errors = new Map<string, string>()
+
+  // Best-effort: a snapshot-store hiccup must never break a user-facing
+  // refresh, so capture is wrapped + logged, not thrown.
+  function capture(source: string, summary: PeerSummary): void {
+    if (!opts.snapshots) return
+    try {
+      opts.snapshots.appendPeerSummarySnapshot({
+        capturedAt: now(),
+        source,
+        summaryJson: JSON.stringify(summary),
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      opts.logger?.warn?.('peer summary: snapshot append failed', { source, err: msg })
+    }
+  }
+
   return {
     async local() {
       return opts.buildLocal()
@@ -435,6 +501,7 @@ export function createPeerSummaryFederation(
             if (summary) {
               cache.set(row.peerId, { summary, lastFetchedAt: now() })
               errors.delete(row.peerId)
+              capture(row.peerId, summary)
             }
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err)
@@ -443,6 +510,27 @@ export function createPeerSummaryFederation(
           }
         }),
       )
+      // Always record a LOCAL reading per refresh — it needs no network and is
+      // the most useful trend (this hub's own footprint over time). A refresh
+      // scoped to one peer still stamps local; finer local granularity is fine.
+      if (opts.snapshots) {
+        try {
+          capture('local', await opts.buildLocal())
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err)
+          opts.logger?.warn?.('peer summary: local snapshot failed', { err: msg })
+        }
+      }
+    },
+    async history(query) {
+      if (!opts.snapshots) return []
+      const rows = opts.snapshots.listPeerSummarySnapshots({
+        source: query.source,
+        since: query.since,
+        until: query.until,
+        limit: query.limit,
+      })
+      return buildPeerSummaryTrend(rows, query.metric)
     },
   }
 }

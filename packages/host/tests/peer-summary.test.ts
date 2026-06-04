@@ -395,4 +395,84 @@ describe('createPeerSummaryFederation (v5 E5-M3)', () => {
     expect(row.lastError).toBeNull()
     expect(row.summary?.hubId).toBe('p1')
   })
+
+  // ── v5 Stream F — control-plane history (snapshots + trend) ──────────────
+
+  function makeFakeSink() {
+    const rows: Array<{ capturedAt: number; source: string; summaryJson: string }> = []
+    return {
+      rows,
+      appendPeerSummarySnapshot(input: {
+        capturedAt?: number
+        source: string
+        summaryJson: string
+      }) {
+        rows.push({
+          capturedAt: input.capturedAt ?? 0,
+          source: input.source,
+          summaryJson: input.summaryJson,
+        })
+      },
+      listPeerSummarySnapshots(q: {
+        source?: string
+        since?: number
+        until?: number
+        limit?: number
+      }) {
+        return rows
+          .filter((r) => q.source === undefined || r.source === q.source)
+          .filter((r) => q.since === undefined || r.capturedAt >= q.since)
+          .filter((r) => q.until === undefined || r.capturedAt < q.until)
+          .sort((a, b) => a.capturedAt - b.capturedAt)
+          .map((r) => ({ capturedAt: r.capturedAt, summaryJson: r.summaryJson }))
+      },
+    }
+  }
+
+  it('refresh with a snapshot sink records local + each fetched peer', async () => {
+    const sink = makeFakeSink()
+    const fed = createPeerSummaryFederation(
+      stub([{ peerId: 'p1', label: null, connected: true }], { p1: summaryLink(summaryFor('p1')) }),
+      { buildLocal: async () => local, snapshots: sink, now: () => 2000 },
+    )
+    await fed.refresh()
+    // one local reading + one per fetched peer, all stamped with the same now().
+    expect(sink.rows.map((r) => r.source).sort()).toEqual(['local', 'p1'])
+    expect(sink.rows.every((r) => r.capturedAt === 2000)).toBe(true)
+    // the blob is a parseable counts-only PeerSummary, not a raw row dump.
+    const localRow = sink.rows.find((r) => r.source === 'local')!
+    expect(JSON.parse(localRow.summaryJson).hubId).toBe('local')
+  })
+
+  it('history projects a scalar metric trend from captured snapshots', async () => {
+    const sink = makeFakeSink()
+    let agents = 1
+    let clock = 1000
+    const fed = createPeerSummaryFederation(stub([], {}), {
+      buildLocal: async () => ({
+        ...summaryFor('local'),
+        assets: { agents, workflows: 0, publishedWorkflows: 0, peers: 0 },
+      }),
+      snapshots: sink,
+      now: () => clock,
+    })
+    await fed.refresh() // local agents=1 @1000
+    agents = 3
+    clock = 2000
+    await fed.refresh() // local agents=3 @2000
+    const trend = await fed.history({ source: 'local', metric: 'assets.agents' })
+    expect(trend).toEqual([
+      { capturedAt: 1000, value: 1 },
+      { capturedAt: 2000, value: 3 },
+    ])
+  })
+
+  it('history returns [] (and refresh captures nothing) without a snapshot sink', async () => {
+    const fed = createPeerSummaryFederation(
+      stub([{ peerId: 'p1', label: null, connected: true }], { p1: summaryLink(summaryFor('p1')) }),
+      { buildLocal: async () => local },
+    )
+    await fed.refresh()
+    expect(await fed.history({ source: 'local', metric: 'assets.agents' })).toEqual([])
+  })
 })

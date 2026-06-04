@@ -112,6 +112,10 @@ import { buildAgentCard } from './agent-card.js'
 import { auditBootSecurity, formatBootSecurityReport, isLoopbackHost } from './boot-security.js'
 import { rotateMasterKey } from './rotate-master-key.js'
 import { applyLedgerRetention, parseLedgerRetention } from './ledger-retention.js'
+import {
+  applyPeerSummaryRetention,
+  parsePeerSummaryRetention,
+} from './peer-summary-retention.js'
 import { recoverMasterKeyRotation } from './master-key-recovery.js'
 import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
@@ -1204,6 +1208,26 @@ async function main(): Promise<void> {
     }
   }
 
+  // v5 Stream F — boot-time control-plane snapshot retention. Same shape as the
+  // ledger above: prune `peer_summary_snapshots` rows older than
+  // AIPE_PEER_SUMMARY_KEEP_DAYS so the trend history stays bounded. OFF by
+  // default (no env ⇒ keep everything). Parse before the identity guard so a
+  // malformed env fails the boot loudly; the prune is best-effort.
+  const peerSummaryRetentionPolicy = parsePeerSummaryRetention(process.env, Date.now())
+  if (peerSummaryRetentionPolicy && identity) {
+    try {
+      const { pruned } = applyPeerSummaryRetention(identity, peerSummaryRetentionPolicy)
+      if (pruned > 0) {
+        log.info('peer summary snapshot retention applied', {
+          pruned,
+          before: peerSummaryRetentionPolicy.before,
+        })
+      }
+    } catch (err) {
+      log.warn('peer summary snapshot retention failed — booting with full history', { err })
+    }
+  }
+
   // Phase 13 M3 — host-built-in workflow assistant agent. Registers a
   // `WorkflowAssistantAgent` on the hub (cap=`workflow:assist`) and
   // exposes a duck-typed surface for the Web layer's
@@ -1409,6 +1433,10 @@ async function main(): Promise<void> {
     // over the same registry; the admin refreshes on demand.
     peerSummaryFederation = createPeerSummaryFederation(fedRegistry, {
       buildLocal: () => buildLocalSummary(summaryDeps),
+      // v5 Stream F — persist a counts-only snapshot per refresh so the control
+      // plane can draw trends. IdentityStore duck-types the snapshot sink; the
+      // history query reads it back. Without this the plane is point-in-time only.
+      snapshots: identity,
       logger: log,
     })
     // Phase 6 #4 — per-peer resolver is auto-wired by PeerRegistry
