@@ -1,0 +1,18 @@
+{
+  "name": "@aipehub/example-tea-chain-hq",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "连锁奶茶店总部 → 门店 (跨组织指令下发) — an ORGANIZATION hub template whose workflow rolls a directive (e.g. a price change) DOWN to a franchise SHOP on another hub through the outbound approval gate (区域经理 approves before the chain-wide directive leaves HQ). Mirror of tea-supply-link, opposite tier. The cross-org LINK is runtime peer config, NOT in the template. Deterministic, no API key.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "load-template": "tsx src/load-template.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/workflow": "workspace:*",
+    "@aipehub/inbox": "workspace:*",
+    "yaml": "^2.6.0"
+  }
+}

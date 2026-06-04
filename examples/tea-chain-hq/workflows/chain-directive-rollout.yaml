@@ -1,0 +1,81 @@
+schema: aipehub.workflow/v1
+workflow:
+  id: chain-directive-rollout
+  name: 连锁指令下发 (总部 → 门店, 跨组织)
+  description: 总部起草指令 (如调价) → 区域经理批准外发 → 下发到加盟门店执行 → 回执建档。
+  # 这是一条 CROSS-ORG 工作流, 但编排方向**朝下**: 连锁总部 (org A) 把一条指令下发到
+  # **加盟门店 (org B)** 的 hub。`rollout` 步派的 capability `shop.apply-directive` 住在
+  # 门店那边, 但这份 YAML 里没有任何 peer 的名字 —— 它只是个普通 capability, 只不过解析到
+  # 一条联邦链路上的 peer wrapper。跨组织下发 = 「能力调度」, 那个能力住在另一个 hub 上。
+  #
+  # 「下发给哪家 / 哪些门店」由**运行时的 peer 链接**决定, 不在这个 YAML 里:
+  #   - 单店: capability 解析到那一条链接的门店;
+  #   - 多店: 总部连多条加盟门店链路 (或 broadcast 策略), 工作流一字不改。
+  #
+  # 指令「是否准予跨出总部」由**运行时的出站审批闸**决定 —— 门店 peer 上标了
+  # requireApprovalOutbound, host 把出站任务挂起在区域经理的收件箱, 批准了才越过组织边界。
+  # 注意它**不是**工作流里的 human: 步 (那是 cafe-ops 的店内审批): 这一层是**框架运行时**的事。
+  # 这正是「模版和框架分离」: 链接 (哪些门店 + outboundCaps + 审批策略) 是运行时 peer 配置。
+  governance:
+    data_sensitivity: internal
+    required_credentials: [deepseek]
+    required_human_roles: [区域经理 (regional manager)]
+    external_systems: [加盟门店 hub (联邦 peer)]
+    notes: 指令外发到加盟门店需区域经理在出站审批闸批准; 调价等敏感指令对客户/加盟商有约束, 须人定。
+  trigger:
+    capability: chainhq.rollout-directive
+    payload_schema:
+      - id: sku
+        label: 商品
+        type: text
+        required: true
+      - id: new_price
+        label: 新价格 (元)
+        type: number
+        required: true
+      - id: effective
+        label: 生效日期 (如 2026-06-10)
+        type: text
+        required: true
+      - id: note
+        label: 备注 (可选)
+        type: textarea
+        rows: 2
+  surface:
+    me:
+      enabled: true
+      label: 我要下发指令
+      description: 起草一条门店指令 (如调价), 区域经理批准后下发到加盟门店。
+      allowed_roles: [owner, admin, member]
+      user_scope_field: initiated_by
+  steps:
+    - id: draft
+      description: 总部协调员把指令整理成一份规范的下发单。
+      dispatch:
+        strategy: { kind: capability, capabilities: [chainhq.draft-directive] }
+        title: 起草下发指令
+        payload:
+          sku: $trigger.payload.sku
+          new_price: $trigger.payload.new_price
+          effective: $trigger.payload.effective
+          note: $trigger.payload.note
+          initiated_by: $trigger.payload.initiated_by
+    - id: rollout
+      description: "下发到加盟门店执行 (跨组织能力; 运行时出站审批闸 — 区域经理批准才跨出)。"
+      dispatch:
+        strategy: { kind: capability, capabilities: [shop.apply-directive] }
+        title: 下发指令到门店
+        payload:
+          directive: $draft.output.directive
+    - id: record
+      description: 把门店回执建档 (本地)。
+      dispatch:
+        strategy: { kind: capability, capabilities: [chainhq.record-rollout] }
+        title: 建档下发记录
+        payload:
+          directive: $draft.output.directive
+          ack: $rollout.output
+  output:
+    directive: $draft.output.directive
+    ack: $rollout.output
+    record: $record.output
