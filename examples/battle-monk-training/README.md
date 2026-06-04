@@ -3,9 +3,10 @@
 > 5 个[上手案例 hub](../../docs/zh/HANDS-ON-HUBS.md) 之一(3 个人 + 2 组织)—— 对照总览 + 真 DeepSeek/Obsidian 上线指南见该索引。
 
 > AipeHub **能承担的一个案例**(不是框架功能,代码全在 `examples/`)。一个**个人
-> 成长 hub**:督修(路由 LLM)评估修士状态,把今日操练派给三柱 —— **肉身 / 心志 /
-> 学识** —— 每柱把状态写进一个持久的修士档案 **Codex**(Obsidian-style vault)。
-> 冷峻、不留情面的 grimdark-monastic 风格,面向战锤 40k 风格的冷淡型男性用户。
+> 成长 hub**:督修(路由 LLM)**结合修士今日的处境**(时间 / 精力 / 伤病 / 专攻),把
+> 今日操练**合适地**派给三柱 —— **肉身 / 心志 / 学识** —— 而不是不顾状态把三柱全压
+> 上;每柱把状态写进一个持久的修士档案 **Codex**(Obsidian-style vault)。冷峻、不留
+> 情面的 grimdark-monastic 风格,面向战锤 40k 风格的冷淡型男性用户。
 
 > **原创同人致敬声明**:本案例的所有文案均为原创,旨在呈现一种「战斗修士」的美学
 > 氛围,**不含任何受版权保护的文本或专有名词**,与 Games Workshop 或任何版权方
@@ -18,11 +19,33 @@
 | **肉身**(body) | `body-drill` 读档案前序状态,给下一阶体能指令(负重 / 耐力 / 力量 / 节制),写回 `codex/body.md`。 |
 | **心志**(mind) | `mind-forge` 给下一阶精神戒律(专注 / 自省 / 抗动摇),写回 `codex/mind.md`。 |
 | **学识**(lore) | `lore-scribe` 给下一阶研习指引(典籍 / 法则 / 复述检验),写回 `codex/lore.md`。 |
-| **主动评估 + 路由** | 督修(`LlmAgent` + `DispatchToolset`)读档案评估,把今日操练按 `agentId` 派给三柱 —— **派哪柱、推多狠是模型的判断**。 |
+| **结合状态 + 路由** | 督修(`LlmAgent` + `DispatchToolset`)读修士**今日状态** + 档案前序阶,**只派合适的柱**(不盲目全压);每柱再**按状态调节强度**。 |
 
 **新东西(对比前两个上手案例)**:这里的知识库存的不是参考资料,而是**用户自己的
 演进状态**。每次操练各柱追加一条 rank 记录、读上一阶续推 —— 连续性(「承前 N 阶」)
 是设计核心,Codex 就是修士的持久档案。
+
+## ★ 结合修士状态分派(本次强化)★
+
+督修**不再不顾状态把三柱全压上**。它先读修士今日的处境(时间 / 精力 / 伤病 / 专攻)
+与档案各柱阶次,再用一个**纯函数**`planSession`(`src/situation.ts`)算出今日**派哪几
+柱、各自多重**。这就是「**结合使用者的情况,能力分派要合适**」落到代码:
+
+| 剧情 | 今日状态 | 分派(能力) | 强度 |
+|---|---|---|---|
+| **[A] 满日** | 60 分钟 / 精力高 | 三柱全开:肉身 + 心志 + 学识 | 满负荷 |
+| **[B] 瘦日** | 15 分钟 / 精力低 | **只取最落后一柱**(学识) | 轻负荷·恢复 |
+| **[C] 伤病** | 45 分钟 / 扭伤脚踝 | **停肉身**,转练心志 + 学识 | 常规 |
+| **[D] 专攻** | 40 分钟 / 点名学识 | **学识优先**,挤掉次要(心志顺延) | 常规 |
+
+规则(`planSession` 纯函数,可断言、确定性):**容量**按时间 × 精力(低/紧 → 1 柱;
+高且长 → 3 柱;其余 2 柱);**伤病**停 `body`;**专攻**那柱排首位;其余按**最落后**
+(rank 最低)先补;超容量的柱顺延。`drillIntensity` 用同样阈值把强度分
+恢复 / 常规 / 满负荷,各柱据此调节负荷。
+
+**为什么是纯函数**:路由决策必须可检查、可复现。督修的 provider(确定性 stand-in)
+读 prompt 里注入的状态 + 档案阶次后调 `planSession` —— **一个真 LLM 督修从同样的上下文
+(修士的消息 + 经 `mcp-obsidian` 读到的档案)会做出同样的判断**,只是少了确定性。
 
 ```
             ┌──────────── 个人成长 hub ────────────┐
@@ -42,22 +65,23 @@
 ## 跑起来
 
 ```bash
-pnpm demo:battle-monk-training            # [A] 督修评估 + 三柱操练 → Codex(可跑+自断言)
-pnpm demo:battle-monk-training:template   # [B] 载入「修士团」模板 + 预览(见下)
+pnpm demo:battle-monk-training            # 4 种状态 → 4 种分派 → Codex(可跑+自断言)
+pnpm demo:battle-monk-training:template   # 载入「修士团」模板 + 预览(见下)
 ```
 
-[A] 不需要任何 API key —— 督修用脚本化的 `MockLlmProvider`,三柱是确定性的 stand-in。
-但**文件 I/O 是真的**:demo 起一个真临时 Codex,种三柱 baseline,agent 真读真写。
-`index.ts` 会**自断言**每柱越过 baseline(≥2 阶记录)、且新记录引用前序阶 —— 所以这
-个 example 同时是一个 smoke 测试。
+不需要任何 API key —— 督修是一个**确定性的情境感知 provider**(读 prompt 里的状态 +
+档案阶次,调 `planSession`),三柱是确定性的 stand-in。但**文件 I/O 是真的**:每个剧情
+起一个真临时 Codex,种三柱 baseline,agent 真读真写。`index.ts` 跑完上面 4 个剧情,每个
+都**快照 `priorSteps` 前后、自断言被派的「柱集合」与强度标签** —— 一柱不该练却练了、
+或该练却没练,集合就变、断言就红。所以这个 example 同时是一个 smoke 测试。
 
-## demo 故事(三段)
+## demo 故事(4 个剧情,见上「结合状态分派」表)
 
-| 段 | 演示 | 机制 |
+| 关注点 | 演示 | 机制 |
 |---|---|---|
-| **[1] 评估 + 路由** | 你把**一次操练**交给督修;它把活派给肉身、心志、学识三柱 | `LlmAgent` tool-use loop → `DispatchToolset.dispatch_task({agentId})` |
-| **[2] 状态持久** | 三柱档案各**多出一条 rank 记录**(`[第1阶] 承前 1 阶 — …`),读 baseline 续推 | `PillarAgent` 真读 `priorSteps` + 写 `codex/<pillar>.md` |
-| **[3] 互链档案** | `index.md` 把三柱链在一起 —— 一份可成长的修士档案 | `setupCodex` 种 index + 三柱 `[[wikilink]]` |
+| **结合状态分派** | 督修读今日状态 + 档案阶次,**只派合适的柱**(满日 3 柱 / 瘦日 1 柱 / 伤病停肉身 / 专攻优先) | `planSession` 纯函数 → `DispatchToolset.dispatch_task({agentId})` 逐柱派 |
+| **按状态调强度** | 各柱条目带强度标签(`[第N阶·满负荷/常规/轻负荷·恢复]`),枯竭日写恢复指令 | `PillarAgent` 从 payload 读 situation → `drillIntensity` |
+| **状态持久 + 续阶** | 被派的柱**多出一条 rank 记录**,读上一阶续推(「承前 N 阶」) | `priorSteps` + 写 `codex/<pillar>.md` |
 
 ## 可载入「修士团」模板
 
@@ -116,9 +140,13 @@ curl -X POST -H "Authorization: Bearer <admin-token>" \
 据此算出**下一阶**并把「承前 N 阶」写进记录。所以**无论督修哪天派哪柱**,每柱都从上次
 停的地方续推 —— 成长的连续性是 Codex(磁盘状态)+ hub 保证的,不是寄希望于模型记得。
 
-真用时把三柱换成**真 `LlmAgent`**(一个 provider 写每阶指令),把督修的 mock provider
-换成真的 —— **hub 接线一字不改**。判断(推哪柱、给什么指令)成了模型的事;读档案、写
-状态、续阶这些机制照旧。
+**路由是真 provider 读输入做的判断,不是固定脚本**:`src/preceptor-provider.ts` 是一个
+真 `LlmProvider`(不是固定 `MockLlmProvider` 脚本)—— 每次 `stream(req)` 读 prompt 里的
+状态 + 档案阶次,调 `planSession` 决定派哪几柱,并靠**数消息里已有的 `tool_use` 块**
+判断当前是第几个派发回合。真用时把三柱换成**真 `LlmAgent`**、把督修这个确定性 provider
+换成真的 —— **hub 接线一字不改**。判断(读状态、推哪柱、给什么强度的指令)成了模型的
+事;`planSession` 的规则就是给真督修的 system prompt 写明的分派原则;读档案、写状态、
+续阶这些机制照旧。
 
 ## 安全 / 边界须知
 
