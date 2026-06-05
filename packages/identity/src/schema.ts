@@ -909,6 +909,40 @@ const MIGRATIONS: Migration[] = [
         ON peer_summary_alert_rules(source, metric);
     `,
   },
+  {
+    // ACP-OUT-M1 — outbound ACP agent registrations. An entry makes a local
+    // capability dispatch SPAWN and drive an external coding agent (Claude Code
+    // / Codex) over ACP, OpenClaw-style: spawn once, hold one session, dispatch
+    // many tasks (the host-side mirror of the inbound `aipehub connect`).
+    // Replaces hand-written example glue with persisted, admin-editable config.
+    //
+    // Like a2a_outbound_agents (v22) there is NO vault pointer — and ACP goes
+    // one further: not even a `token_env`. ACP bridges authenticate with the
+    // underlying agent's OWN login (the hub injects no key), so every column is
+    // non-secret config. A disabled row is persisted-but-inactive.
+    //   id            PK = the LOCAL participant id (dispatch target); unique
+    //                 on the hub, admin-supplied (not synthetic).
+    //   capabilities  JSON string[] advertised on the local hub → routing key.
+    //   command       the ACP bridge command (e.g. `npx`).
+    //   args          JSON string[] args to the bridge (may be empty []).
+    //   cwd           working dir the agent operates in; NULL = host cwd.
+    //   enabled       0 disables without deleting the config.
+    version: 26,
+    name: 'acp-outbound-agents',
+    sql: `
+      CREATE TABLE IF NOT EXISTS acp_outbound_agents (
+        id           TEXT PRIMARY KEY,
+        capabilities TEXT NOT NULL,
+        command      TEXT NOT NULL,
+        args         TEXT NOT NULL,
+        cwd          TEXT,
+        enabled      INTEGER NOT NULL DEFAULT 1,
+        label        TEXT,
+        created_at   INTEGER NOT NULL,
+        updated_at   INTEGER NOT NULL
+      );
+    `,
+  },
 ]
 
 /**

@@ -62,6 +62,7 @@ import { TotpStore, type EnrollTotpInput, type VerifyTotpInput } from './totp-st
 import { OidcProviderStore } from './oidc-provider-store.js'
 import { SamlProviderStore } from './saml-provider-store.js'
 import { A2aAgentStore } from './a2a-agent-store.js'
+import { AcpAgentStore } from './acp-agent-store.js'
 import {
   AUDIT_ACTIONS,
   ROLES,
@@ -100,6 +101,9 @@ import {
   type A2aOutboundAgent,
   type AddA2aOutboundAgentInput,
   type UpdateA2aOutboundAgentInput,
+  type AcpOutboundAgent,
+  type AddAcpOutboundAgentInput,
+  type UpdateAcpOutboundAgentInput,
   type UpdateOidcProviderInput,
   type OwnerKind,
   type ResetUsageInput,
@@ -511,6 +515,10 @@ export class IdentityStore {
   // Route B P1-M11a — outbound A2A agent registry. No vault: the bearer stays
   // in env (token_env names the var), so every column is non-secret config.
   private readonly a2aAgents: A2aAgentStore
+  // ACP-OUT-M1 — outbound ACP agent registry. No vault, not even an env-var
+  // pointer: ACP bridges ride the underlying agent's own login (hub injects no
+  // key), so every column is non-secret config (command/args/cwd).
+  private readonly acpAgents: AcpAgentStore
   // Phase 7 M4 — org_meta kv (org_mode lives here).
   private readonly stmtOrgMetaGet: SqliteStmt
   private readonly stmtOrgMetaUpsert: SqliteStmt
@@ -571,6 +579,8 @@ export class IdentityStore {
     this.samlProviders = new SamlProviderStore(db)
     // Route B P1-M11a — outbound A2A agent registry. No vault (bearer in env).
     this.a2aAgents = new A2aAgentStore(db)
+    // ACP-OUT-M1 — outbound ACP agent registry. No vault (rides agent's login).
+    this.acpAgents = new AcpAgentStore(db)
 
     this.stmtUserById = db.prepare('SELECT * FROM users WHERE id = ?')
     this.stmtUserByEmail = db.prepare('SELECT * FROM users WHERE email = ?')
@@ -2477,6 +2487,35 @@ export class IdentityStore {
   /** Delete the registration. No secret to revoke (bearer lives in env). */
   removeA2aAgent(id: string): boolean {
     return this.a2aAgents.remove(id)
+  }
+
+  // =====================================================================
+  // ACP-OUT-M1 — outbound ACP agent registry. Delegates to AcpAgentStore.
+  // No vault and not even an env-var pointer: ACP bridges ride the underlying
+  // agent's own login, so projections are pure non-secret config.
+  // =====================================================================
+
+  /** Register an outbound ACP agent. Duplicate id → `acp_agent_exists`. */
+  addAcpAgent(input: AddAcpOutboundAgentInput): AcpOutboundAgent {
+    return this.acpAgents.add(input)
+  }
+
+  getAcpAgent(id: string): AcpOutboundAgent | null {
+    return this.acpAgents.get(id)
+  }
+
+  listAcpAgents(): AcpOutboundAgent[] {
+    return this.acpAgents.list()
+  }
+
+  /** Targeted update (id immutable — it's the participant identity). */
+  updateAcpAgent(id: string, patch: UpdateAcpOutboundAgentInput): AcpOutboundAgent {
+    return this.acpAgents.update(id, patch)
+  }
+
+  /** Delete the registration. No secret to revoke (ACP rides the agent's login). */
+  removeAcpAgent(id: string): boolean {
+    return this.acpAgents.remove(id)
   }
 
   /**

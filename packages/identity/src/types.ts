@@ -285,6 +285,51 @@ export interface UpdateA2aOutboundAgentInput {
   enabled?: boolean
 }
 
+/**
+ * ACP-OUT-M1 — a registered OUTBOUND ACP agent (OpenClaw-style coding agent).
+ * A local capability dispatch matching `capabilities` SPAWNS and drives this
+ * coding agent over ACP (Claude Code / Codex via their ACP bridges). There is
+ * NO secret here at all — not even an env-var pointer: ACP bridges authenticate
+ * with the underlying agent's OWN login, so the hub injects no credential. Every
+ * field is non-secret config: the bridge command, its args, the working dir.
+ */
+export interface AcpOutboundAgent {
+  /** The LOCAL participant id (dispatch target) — unique on the hub. */
+  id: string
+  /** Capabilities advertised on the local hub; dispatching these routes here. */
+  capabilities: string[]
+  /** The ACP bridge command (e.g. `npx`). */
+  command: string
+  /** Args to the bridge command (e.g. `['@zed-industries/claude-code-acp']`); may be empty. */
+  args: string[]
+  /** Working directory the agent operates in; null = the host's cwd. */
+  cwd: string | null
+  enabled: boolean
+  label: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+export interface AddAcpOutboundAgentInput {
+  id: string
+  capabilities: string[]
+  command: string
+  args?: string[]
+  cwd?: string | null
+  label?: string | null
+  enabled?: boolean
+}
+
+/** Targeted update — every field optional; `id` is immutable (it's the participant id). */
+export interface UpdateAcpOutboundAgentInput {
+  capabilities?: string[]
+  command?: string
+  args?: string[]
+  cwd?: string | null
+  label?: string | null
+  enabled?: boolean
+}
+
 export interface IssuedAdminToken {
   /** Raw token — shown ONCE. */
   token: string
