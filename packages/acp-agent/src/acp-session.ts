@@ -127,6 +127,14 @@ export type AcpPromptOutcome =
 export interface AcpPromptOptions {
   /** Abort → the underlying `session/prompt` request is abandoned. */
   signal?: AbortSignal
+  /**
+   * Per-turn OBSERVE handler. Scoped to THIS turn and routed via the active-turn
+   * slot, so a participant can close it over the task id without a racy shared
+   * field — and it keeps receiving updates across a park (same turn, same connP).
+   */
+  onUpdate?: AcpUpdateHandler
+  /** Per-turn permission handler — overrides the session-level one for this turn. */
+  onPermission?: AcpPermissionHandler
 }
 
 export type AcpUpdateHandler = (update: AcpSessionUpdate) => void
@@ -154,6 +162,12 @@ export class AcpSession {
   private permCounter = 0
   /** Serializes turns: a new prompt waits on this until the prior turn fully ends. */
   private turnLock: Promise<unknown> = Promise.resolve()
+  /**
+   * The in-flight turn's per-turn handlers. The turn lock guarantees exactly one
+   * active turn, so this is unambiguous; it survives a park (cleared only when the
+   * connection request settles) so resume updates still reach the right handlers.
+   */
+  private active: { onUpdate?: AcpUpdateHandler; onPermission?: AcpPermissionHandler } | null = null
 
   constructor(opts: AcpSpawnOptions) {
     this.opts = opts
@@ -220,6 +234,10 @@ export class AcpSession {
       throw new AcpConnectionError('acp connection not established')
     }
 
+    // Past `await prior` → no other turn is live, so claiming the active slot here
+    // is race-free. Cleared when connP settles (after resume for a parked turn).
+    this.active = { onUpdate: opts.onUpdate, onPermission: opts.onPermission }
+
     const connP = conn.request<SessionPromptResult>(
       ACP_SESSION_PROMPT,
       { sessionId, prompt: [textBlock(text)] },
@@ -228,8 +246,14 @@ export class AcpSession {
     // The turn (and thus the lock) is done only when connP settles. An escalation
     // resolves the OUTER promise early but leaves connP pending → lock stays held.
     connP.then(
-      () => releaseTurn(),
-      () => releaseTurn(),
+      () => {
+        this.active = null
+        releaseTurn()
+      },
+      () => {
+        this.active = null
+        releaseTurn()
+      },
     )
 
     return await new Promise<AcpPromptOutcome>((resolve, reject) => {
@@ -314,7 +338,7 @@ export class AcpSession {
   private onNotification(method: string, params: unknown): void {
     if (method === ACP_SESSION_UPDATE) {
       const p = params as SessionUpdateParams | undefined
-      if (p?.update) this.updateHandler?.(p.update)
+      if (p?.update) (this.active?.onUpdate ?? this.updateHandler)?.(p.update)
     }
   }
 
@@ -330,13 +354,14 @@ export class AcpSession {
   private async handlePermissionRequest(params: RequestPermissionParams, id: JsonRpcId): Promise<void> {
     const conn = this.conn
     if (!conn) return
-    if (!this.permissionHandler) {
+    const handler = this.active?.onPermission ?? this.permissionHandler
+    if (!handler) {
       conn.respondError(id, ACP_ERROR.METHOD_NOT_FOUND, 'no permission handler registered')
       return
     }
     let verdict: AcpPermissionVerdict
     try {
-      verdict = await this.permissionHandler(params)
+      verdict = await handler(params)
     } catch (err) {
       conn.respondError(id, ACP_ERROR.INTERNAL, `permission handler threw: ${errMsg(err)}`)
       return

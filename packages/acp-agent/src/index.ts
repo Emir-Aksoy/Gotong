@@ -12,13 +12,32 @@
  * Built to the AGENT-ADAPTER-CONTRACT five-seam bar (observe / intercept /
  * handoff / resume / terminate), reaching Tier 2 via ACP's natural per-action
  * `session/request_permission` intercept point.
- *
- * Public surface is filled in progressively across milestones M1–M5:
- *   - acp-protocol.ts   (M1) — JSON-RPC + ACP wire types
- *   - acp-connection.ts (M2) — NDJSON framing + request correlation
- *   - acp-session.ts    (M3) — long-lived process engine
- *   - acp-checkpoint.ts (M4) — permission gate primitives (fail-closed)
- *   - acp-participant.ts(M5) — the AcpParticipant adapter (five seams)
  */
 
-export {}
+// M1 — JSON-RPC + ACP wire types, builders, guards
+export * from './acp-protocol.js'
+// M2 — NDJSON framing + request correlation (the only module that touches framing)
+export {
+  AcpConnection,
+  AcpConnectionError,
+  type AcpTransport,
+  type AcpRequestOptions,
+  type AcpRequestHandler,
+  type AcpNotifyHandler,
+  type AcpCloseHandler,
+} from './acp-connection.js'
+// M3 — long-lived process engine (spawn once, hold the session, dispatch many)
+export {
+  AcpSession,
+  type AcpSpawnOptions,
+  type AcpPromptOptions,
+  type AcpPromptOutcome,
+  type AcpPendingPermission,
+  type AcpPermissionVerdict,
+  type AcpPermissionHandler,
+  type AcpUpdateHandler,
+} from './acp-session.js'
+// M4 — permission gate primitives (fail-closed)
+export * from './acp-checkpoint.js'
+// M5 — the AcpParticipant adapter (five seams)
+export { AcpParticipant, payloadToText, type AcpParticipantOptions, type AcpChunk } from './acp-participant.js'
