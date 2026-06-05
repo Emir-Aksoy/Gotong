@@ -72,6 +72,7 @@
     "better-sqlite3": "^12.10.0"
   },
   "devDependencies": {
+    "@aipehub/acp-agent": "workspace:*",
     "@aipehub/cli-agent": "workspace:*",
     "@aipehub/sdk-node": "workspace:*",
     "@types/ws": "^8.5.13",

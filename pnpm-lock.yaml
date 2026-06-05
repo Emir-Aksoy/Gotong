@@ -654,6 +654,9 @@ importers:
         specifier: ^6.38.0
         version: 6.38.0(ws@8.20.1)(zod@4.4.3)
     devDependencies:
+      '@aipehub/acp-agent':
+        specifier: workspace:*
+        version: link:../acp-agent
       '@aipehub/cli-agent':
         specifier: workspace:*
         version: link:../cli-agent
