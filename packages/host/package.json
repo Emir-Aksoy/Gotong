@@ -49,6 +49,7 @@
   },
   "dependencies": {
     "@aipehub/a2a": "workspace:*",
+    "@aipehub/acp-agent": "workspace:*",
     "@aipehub/core": "workspace:*",
     "@aipehub/evals": "workspace:*",
     "@aipehub/identity": "workspace:*",
@@ -72,7 +73,6 @@
     "better-sqlite3": "^12.10.0"
   },
   "devDependencies": {
-    "@aipehub/acp-agent": "workspace:*",
     "@aipehub/cli-agent": "workspace:*",
     "@aipehub/sdk-node": "workspace:*",
     "@types/ws": "^8.5.13",
