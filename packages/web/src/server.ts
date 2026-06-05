@@ -79,6 +79,7 @@ import { handleOidcAdminRoute, type OidcProviderAdminSurface } from './oidc-admi
 import { handleSamlRoute, type SamlLoginSurface } from './saml-routes.js'
 import { handleSamlAdminRoute, type SamlProviderAdminSurface } from './saml-admin-routes.js'
 import { handleA2aAdminRoute, type A2aAgentAdminSurface } from './a2a-admin-routes.js'
+import { handleAcpAdminRoute, type AcpAgentAdminSurface } from './acp-admin-routes.js'
 
 export type { PeerManifestFederationSurface, PeerManifestRow } from './peer-routes.js'
 export type {
@@ -97,6 +98,7 @@ export type { OidcProviderAdminSurface, OidcProviderView } from './oidc-admin-ro
 export type { SamlLoginSurface } from './saml-routes.js'
 export type { SamlProviderAdminSurface, SamlProviderView } from './saml-admin-routes.js'
 export type { A2aAgentAdminSurface, A2aAgentView } from './a2a-admin-routes.js'
+export type { AcpAgentAdminSurface, AcpAgentView } from './acp-admin-routes.js'
 
 export type {
   IdentitySurface,
@@ -512,6 +514,15 @@ export interface WebServerOptions {
    * bearer is read from, and the view also carries host-joined runtime liveness.
    */
   a2aAgents?: A2aAgentAdminSurface
+  /**
+   * ACP-OUT-M3 — host-injected outbound ACP agent registry (admin CRUD). When
+   * wired, `/api/admin/acp-agents[/:id]` lets an admin register the coding agents
+   * (Claude Code / Codex) this hub drives over long-lived ACP sessions. Absent
+   * (no identity store) → those routes 503. There is NO secret in the view at all
+   * (ACP rides the agent's own login); the view carries host-joined runtime
+   * liveness so the UI can show "saved but inactive: disabled" honestly.
+   */
+  acpAgents?: AcpAgentAdminSurface
   /**
    * Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
    * When set, a Prometheus scraper presenting `Authorization: Bearer <token>`
@@ -979,6 +990,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     oidcAdmin: opts.oidcAdmin,
     samlAdmin: opts.samlAdmin,
     a2aAgents: opts.a2aAgents,
+    acpAgents: opts.acpAgents,
     httpStats: new HttpStats(),
     metricsToken: opts.metricsToken,
   }
@@ -1139,6 +1151,8 @@ interface HandlerCtx {
   samlAdmin: SamlProviderAdminSurface | undefined
   /** Route B P1-M11c — see WebServerOptions.a2aAgents doc above. */
   a2aAgents: A2aAgentAdminSurface | undefined
+  /** ACP-OUT-M3 — see WebServerOptions.acpAgents doc above. */
+  acpAgents: AcpAgentAdminSurface | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -2107,6 +2121,18 @@ async function handle(
     const handled = await handleA2aAdminRoute(
       {
         a2aAgents: ctx.a2aAgents,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // ACP-OUT-M3 — admin outbound ACP agent registry CRUD (Claude Code / Codex).
+  if (path === '/api/admin/acp-agents' || path.startsWith('/api/admin/acp-agents/')) {
+    const handled = await handleAcpAdminRoute(
+      {
+        acpAgents: ctx.acpAgents,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
       req, res, method, path,
