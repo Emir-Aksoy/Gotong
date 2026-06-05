@@ -1213,6 +1213,15 @@
            blob). 503 inline when the host wired no identity store. -->
       <section id="a2a-outbound-panel" class="a2a-outbound-panel" data-tab="federation"></section>
 
+      <!-- ACP-OUT-M5 — outbound ACP coding-agent registry. Owner-only, same "联邦"
+           tab, BELOW the A2A panel. Rendered by /acp-ui.js (CRUD over
+           /api/admin/acp-agents): register the Claude Code / Codex bridges this
+           hub drives over long-lived ACP sessions (spawn once → hold session →
+           dispatch many). Unlike A2A there is NO secret to enter — an ACP bridge
+           rides the underlying agent's own login. 503 inline when the host wired
+           no identity store. -->
+      <section id="acp-outbound-panel" class="acp-outbound-panel" data-tab="federation"></section>
+
       <!-- v5 E5-M4 — cross-hub control plane ("控制面"). Owner-only, same "联邦"
            tab, BELOW the other federation panels. Rendered by /peer-summary-ui.js
            (read + refresh over /api/admin/peer-summaries): this hub's own
