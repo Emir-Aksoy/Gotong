@@ -1,7 +1,8 @@
 # v5 Stream E / ACP — 用 ACP 长连接直接驱动 Claude Code / Codex（模仿 OpenClaw）
 
 > Last updated: 2026-06-05 · commit `de36cb6`→`f833c75`（M0-M7）+ M8 真机门 + 收口；
-> **ACP-OUT** `84d6a06`→本提交（折进生产 host：admin-UI 配置 + 持久化，见下文专节）
+> **ACP-OUT** `84d6a06`→`40720a0`（折进生产 host：admin-UI 配置 + 持久化，见下文专节）
+> + `df4cba5`（真机联调验证 + 修复 DELETE 后子进程泄漏）
 
 ---
 
@@ -190,6 +191,35 @@ hub 上注册该 participant（**首个派发时才真 spawn 子进程**，长 s
 才是跨 hub）。破坏性动作仍 fail-closed 当场拒（`onMatch:'deny'`）；把 ACP park 升级成 inbox
 审批（`onMatch:'escalate'` → 两步恢复）是已记录的 follow-up，本纵切先不接线以免出现「无人
 能恢复的挂起」。
+
+### 真机联调验证（2026-06-05，开发机）
+
+把上面这条「从启动到关闭」的闭环在**真生产 host 上真驱动了一遍真 Codex**（`aipehub start`
++ admin API，bridge = `@zed-industries/codex-acp`，走 Codex 自己的 ChatGPT 登录态）：
+
+1. `POST /api/admin/acp-agents`（201）注册 `codex-live` → host 立即在 hub 上 JOIN 该
+   participant（子进程尚未 spawn）。
+2. `POST /api/admin/dispatch`（wait）派一个善意编码任务 → 子进程懒 spawn + ACP 握手
+   （`initialize`+`session/new`）+ `session/prompt`。真 Codex 跑了 248 条 `session/update`
+   块经 `llm_stream_chunk` 在 transcript **实时打字**，`stopReason:end_turn`，真 `sessionId`；
+   它真在 `cwd` 写了 `greet.js`（`node` 真跑出 `Hello, …!`）。
+3. 派**第二个**任务到同实例 → **同一个 `sessionId`**、仅 5.7s（无重新 spawn/握手）、Codex
+   凭 session 记忆答出上一轮的函数名/文件名 = **hold session + 上下文跨任务保留**坐实。
+4. `DELETE /api/admin/acp-agents/codex-live`（200）→ hub `LEAVE`、`GET` 返 `{agents:[]}`。
+
+**真机这一遍逮到一个 mock e2e 永远逮不到的真 bug**：DELETE 后 `codex-acp` **子进程仍存活**。
+根因 = `Hub.unregister` 只把 participant 从 registry 摘除、**从不触发 `onShutdown`**（那只在
+整 hub `stop()` 时跑），而 `AcpOutboundManager.unregister` 当时没补这一刀 → 每次 admin
+delete/disable/edit 都泄漏一个长生命周期子进程。mock e2e 抓不到是因为 vitest 退出时拆掉整个
+进程树、把泄漏的子进程隐藏了。**修复**（`df4cba5`）：manager 现在对 `hub.unregister` 返回的
+participant 调 `onShutdown()`（best-effort + fire-and-forget kill ladder，不阻塞 admin 调用，
+也不阻塞 refresh 立即重注册一个全新独立 session；`terminate()` 在从未启动的 session 上是安全
+no-op）；+3 回归测试断言 remove/refresh 触发 `onShutdown` 且非自己的同 id participant 不被误杀。
+**修复后真机复验**：DELETE 后子进程在 0.5s 内被干净杀掉，无泄漏。
+
+> 本机限制：开发机本身就在一个 Claude Code 会话内（`CLAUDECODE=1`），`claude-code-acp` 会撞
+> 自己的嵌套保护，故真机目标选了 Codex（未嵌套、已登录）。这是**环境约束非 adapter 缺陷**，
+> 普通终端不受影响。
 
 ---
 
