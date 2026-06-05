@@ -6,6 +6,8 @@
   "description": "Personal-hub case — one router LLM actively manages Claude Code + Codex as hub Participants, dispatching coding tasks across them; both operate on the SAME repo (shared cwd) so they share project-level files (AGENTS.md spec + PROGRESS.md handoff log). Deterministic, no API key.",
   "scripts": {
     "start": "tsx src/index.ts",
+    "start:real": "tsx src/index.real.ts",
+    "start:cli": "tsx src/cli.ts",
     "load-template": "tsx src/load-template.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -13,6 +15,7 @@
     "@aipehub/cli-agent": "workspace:*",
     "@aipehub/core": "workspace:*",
     "@aipehub/llm": "workspace:*",
+    "@aipehub/llm-openai": "workspace:*",
     "yaml": "^2.6.0"
   }
 }

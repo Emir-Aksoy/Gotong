@@ -32,6 +32,10 @@
 ```bash
 pnpm demo:personal-coding-hub            # 4 个剧情:按目标分派 + 共享仓库 + 安全闸(可跑+自断言)
 pnpm demo:personal-coding-hub:template   # 载入「方法论大脑」模板 + 预览(见下)
+
+# 真跑(MiniMax 当路由脑 + 真 Claude Code / Codex 各用自己的登录)—— 见「真跑」一节:
+MINIMAX_API_KEY=sk-... pnpm demo:personal-coding-hub:cli              # 交互式命令行(推荐)
+MINIMAX_API_KEY=sk-... pnpm demo:personal-coding-hub:real -- "<目标>"  # 单发一个目标
 ```
 
 `demo:personal-coding-hub` 不需要任何 API key —— 路由用一个**情境感知的
@@ -123,10 +127,54 @@ TASK: <真正的任务>
 日志 —— 协同是 hub 保证的,不是寄希望于模型每次都记得。串行交接(一次一个)天然无
 文件竞争:codex 起步时 claude-code 已经写完进度。
 
-## 指到真 Claude Code / Codex
+## 真跑:交互式命令行(MiniMax 路由 + 真 CLI)
 
-把 mock 换成 `@aipehub/cli-agent` 的 `CLI_PRESETS` 预设,给各自的 key,换一个真
-provider 即可 —— hub 接线一模一样:
+上面的 demo 用 mock。要**真跑**——一个真路由 LLM 决定派活、真 Claude Code / Codex 真改
+你的代码——用这两个入口(`src/cli.ts` 交互式 + `src/index.real.ts` 单发,共用
+`src/real-agents.ts` 的接线):
+
+```bash
+# 交互式(推荐):开一个 readline 循环, 不停地敲目标
+MINIMAX_API_KEY=sk-... pnpm demo:personal-coding-hub:cli
+#   coding-hub> 给 utils.ts 加一个 debounce 函数
+#   coding-hub> 审一下 auth.ts 有没有注入风险, 别改代码
+#   coding-hub> :quit
+# 指到你自己的真仓库(默认是一次性临时 git repo):
+MINIMAX_API_KEY=sk-... pnpm demo:personal-coding-hub:cli -- --cwd /path/to/your/repo
+# 只验路由不真跑 CLI(省钱的空跑, 编码 agent 换成进程内 mock):
+STUB_CODERS=1 MINIMAX_API_KEY=sk-... pnpm demo:personal-coding-hub:cli
+
+# 单发一个目标然后退出(脚本 / CI 友好):
+MINIMAX_API_KEY=sk-... pnpm demo:personal-coding-hub:real -- "给 math.js 加 isEven(n)"
+```
+
+交互里 `:` 开头是 meta 命令:`:help` `:files`(列工作区文件)`:progress`(打印
+`PROGRESS.md` 交接日志)`:quit`。其它任何输入都作为「编码目标」交给路由模型。
+
+**三层独立认证,故意隔开**(这是「整合」的关键 —— 路由脑的 key 绝不漏进编码 agent):
+
+| 层 | 是谁 | 认证 |
+|---|---|---|
+| ① 路由脑 | `LlmAgent` + MiniMax M2.1(`OpenAIProvider` 指向 `api.minimaxi.com`) | `MINIMAX_API_KEY`,**显式**传给 provider —— 绝不导成 `OPENAI_API_KEY`(codex 会读它) |
+| ② claude-code | 真 `claude -p` CLI | 它**自己的登录**(`~/.claude.json`),hub **不注入任何 key** |
+| ③ codex | 真 `codex exec` CLI | 它**自己的登录**(`~/.codex/auth.json`),hub **不注入任何 key** |
+
+所以路由用你的 MiniMax 订阅,两个编码 CLI 各用自己的订阅 —— hub 居中调度,谁的凭证
+都不串台。`MINIMAX_*` 可用 `MINIMAX_MODEL`(默认 `MiniMax-M2.1`)/ `MINIMAX_BASE_URL`
+覆盖。MiniMax 是推理模型,最终一行总结里的 `<think>…</think>` 已被 `stripThink` 滤掉。
+
+> **MiniMax 大陆版 vs 全球版**:本例默认 `api.minimaxi.com`(大陆版,
+> [platform.minimaxi.com](https://platform.minimaxi.com) 拿 key、查 token-plan 余额)。
+> 全球版是 `api.minimax.io`,把 `MINIMAX_BASE_URL` 改过去即可。
+
+**安全默认**:临时一次性 `git init` 的工作区(`--cwd` 指真仓库时不动你已有的文件);
+`dangerousCommandGate()` 常挂;claude 跑 `--permission-mode acceptEdits`、codex 跑
+`--sandbox workspace-write`,都钉在工作区里。
+
+## 指到真 Claude Code / Codex(接线细节)
+
+上面的 `:cli` / `:real` 已经把这套接好了。想自己拼,把 mock 换成 `@aipehub/cli-agent`
+的 `CLI_PRESETS` 预设、给各自的 key、换一个真 provider 即可 —— hub 接线一模一样:
 
 ```ts
 import { CLI_PRESETS } from '@aipehub/cli-agent' // 或本仓库 coding-agent-bridge 的 presets

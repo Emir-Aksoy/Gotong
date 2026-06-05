@@ -346,6 +346,9 @@ importers:
       '@aipehub/llm':
         specifier: workspace:*
         version: link:../../packages/llm
+      '@aipehub/llm-openai':
+        specifier: workspace:*
+        version: link:../../packages/llm-openai
       yaml:
         specifier: ^2.6.0
         version: 2.9.0

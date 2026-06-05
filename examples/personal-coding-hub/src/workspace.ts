@@ -5,6 +5,7 @@
  * literally the same bytes on disk for both of them.
  */
 
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -35,13 +36,19 @@ const PROGRESS_MD = `# Progress log
 
 `
 
-/** Materialise a shared project repo with the spec + progress log on disk. */
-export function setupSharedWorkspace(dir: string): SharedWorkspace {
+/**
+ * Materialise a shared project repo with the spec + progress log on disk.
+ * `overwrite` defaults to true (a throwaway demo dir). Pass `overwrite:false`
+ * when pointing at a REAL repo (the interactive CLI's `--cwd`) so we seed the
+ * two shared files only when absent and never clobber the user's own project.
+ */
+export function setupSharedWorkspace(dir: string, opts: { overwrite?: boolean } = {}): SharedWorkspace {
+  const overwrite = opts.overwrite ?? true
   mkdirSync(dir, { recursive: true })
   const specFile = join(dir, 'AGENTS.md')
   const progressFile = join(dir, 'PROGRESS.md')
-  writeFileSync(specFile, AGENTS_MD)
-  writeFileSync(progressFile, PROGRESS_MD)
+  if (overwrite || !existsSync(specFile)) writeFileSync(specFile, AGENTS_MD)
+  if (overwrite || !existsSync(progressFile)) writeFileSync(progressFile, PROGRESS_MD)
   return { dir, specFile, progressFile }
 }
 
@@ -62,4 +69,25 @@ export function withSharedContext(task: string): string {
 /** Read the shared progress log back — the demo prints it to prove the sharing. */
 export function readProgress(ws: SharedWorkspace): string {
   return existsSync(ws.progressFile) ? readFileSync(ws.progressFile, 'utf8') : ''
+}
+
+/**
+ * Make the workspace a git repo. Claude Code probes git on startup and codex
+ * prefers a repo; without this the real CLIs print a noisy `fatal: not a git
+ * repository` (non-fatal — they still write files — but it muddies the log).
+ * Best-effort: `git init` alone clears the error; the seed commit is skipped if
+ * git has no user.name/email configured (we don't want to fail the run on that).
+ */
+export function initGitRepo(dir: string): void {
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: dir, stdio: 'ignore' })
+  } catch {
+    return // no git on PATH — nothing more we can do, and it's not worth failing
+  }
+  try {
+    execFileSync('git', ['add', '-A'], { cwd: dir, stdio: 'ignore' })
+    execFileSync('git', ['commit', '-q', '-m', 'seed: shared coding workspace'], { cwd: dir, stdio: 'ignore' })
+  } catch {
+    /* no git identity configured — `git init` alone is enough to silence the probe */
+  }
 }
