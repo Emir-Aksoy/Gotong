@@ -1,0 +1,33 @@
+{
+  "name": "@aipehub/acp-agent",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AipeHub outbound ACP adapter — spawns a coding agent (Claude Code / Codex via their ACP bridges) ONCE and holds a long-lived Agent Client Protocol session (JSON-RPC over NDJSON on stdio), dispatching many tasks to the SAME session with context preserved. The OpenClaw-style complement to the one-shot @aipehub/cli-agent. Five seams (observe / intercept / handoff / resume / terminate) with a fail-closed permission gate (AGENT-ADAPTER-CONTRACT).",
+  "license": "MIT",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}
