@@ -34,6 +34,15 @@ importers:
         specifier: workspace:*
         version: link:../../packages/workflow
 
+  examples/acp-coding-bridge:
+    dependencies:
+      '@aipehub/acp-agent':
+        specifier: workspace:*
+        version: link:../../packages/acp-agent
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+
   examples/activepieces-bridge:
     dependencies:
       '@aipehub/core':

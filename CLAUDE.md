@@ -500,6 +500,7 @@ UX 入口都从 admin 视角进。**个人用户应该有 first-class 入口**:
 | 多模态 content | ✓ Phase 9 完 (image / audio / file_ref + workflow upload + admin UI) | — |
 | Agent → 子 agent | ✓ Phase 10 完 (DispatchToolset + ancestry/cycle gate + cross-hub + allow-list + chain UI) | — |
 | 出站驱动外部 agent (hub→CLI) | ✓ v5 Stream E E2 完 (`@aipehub/cli-agent`: `CliParticipant` 驱动 Claude Code/Codex/Aider… 五缝 observe/intercept/handoff/resume/terminate + `dangerousCommandGate` T2 动作闸 + `CLI_PRESETS` 模板 + §5 验收门; `aipehub connect` 入站的镜像, 合成契约「双向」); 详见 [`docs/zh/V5-E2-CLI-ADAPTER.md`](docs/zh/V5-E2-CLI-ADAPTER.md) | — |
+| 出站驱动外部 agent — ACP 长连接 (hub→Claude Code/Codex) | ✓ acp-agent M0-M7 完 (模仿 OpenClaw「从启动→hold session→分派」: `@aipehub/acp-agent` 把编码 agent 当**长生命周期子进程** spawn 一次, ACP=JSON-RPC over NDJSON 握手, **hold 住 session**, 反复 `session/prompt` 到**同一 session** 上下文保留 — 对比 cli-agent 一次性 shell-out; `AcpParticipant` 五缝 (observe `session/update`/intercept `session/request_permission` 逐动作 T2 闸/handoff `SuspendTaskError`+内存权限句柄/resume 答复在飞反向请求无漂移/terminate `session/cancel`+kill) + `dangerousToolGate` + `ACP_PRESETS` (claude-code-acp/codex-acp) + host `acp-agent-e2e.test.ts` §5 验收门 + `examples/acp-coding-bridge` demo; Q2 权限挂起内存耦合 (不跨 hub 重启, stale 句柄 loud fail), M8 真机联调待做) | — |
 | Long-running agent | ✓ Phase 11 完 (SuspendTaskError + suspended_tasks SQLite + resume sweep + LlmAgent working memory) | — |
 | IM bridges | ✓ Phase 12 M1-M8 完 (6 bridge + router + cookbook + im-bridge-host example) | — |
 | AI 辅助 workflow 编辑 | ✓ Phase 13 M1+M3+M4+M5 完 (assistant agent + admin UI 对话框 + deepCheck 黄色 warnings + real-LLM demo + 800 行 release notes); 详见 [`docs/zh/AI-WORKFLOW-EDITOR.md`](docs/zh/AI-WORKFLOW-EDITOR.md) | — |
@@ -613,7 +614,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 ## 六、目录结构速查
 
 ```
-packages/                       31 个包, pnpm workspace
+packages/                       32 个包, pnpm workspace
 ├── protocol/                   wire protocol(v1.2) + wire types, zero runtime
 ├── core/                       Hub, Scheduler, Storage, Participant (依赖 protocol)
 ├── transport-ws/               WebSocket transport + HubLink (federation)
@@ -644,6 +645,7 @@ packages/                       31 个包, pnpm workspace
 ├── inbox/                      Phase 16: 成员任务 inbox — InboxStore / FileInboxStore / HumanInboxParticipant broker (human-in-the-loop, cap aipehub.human/v1), 只依赖 core
 ├── a2a/                        Phase 18 C: A2A (Agent2Agent) interop — message/send wire 类型 + a2aSend client + A2aRemoteParticipant (出站), 入站 A2aServer 在 host; 依赖 core; Route B P1-M8: task lifecycle (A2ATask/tasks/get wire 类型 + workingTask/completedTask/failedTask 构造器 + a2aSendRaw/a2aGetTask client, suspend→Task→轮询)
 ├── cli-agent/                  v5 Stream E E2: 出站 CLI shell-out adapter (hub 驱动 Claude Code/Codex/Aider…) — cli-runner 进程引擎 (spawn/stdin/流式 onChunk/abort SIGTERM→SIGKILL/timeout) + cli-checkpoint 纯原语 (CliCheckpointState/TakeoverController/dangerousCommandGate/CLI_NEVER_RESUME_AT) + CliParticipant (有界 turn 循环, 五缝 observe/intercept/handoff/resume/terminate, 默认 maxTurns:1 单发), 只依赖 core; 验收门在 host (cli-agent-e2e.test.ts), 模板在 examples/coding-agent-bridge
+├── acp-agent/                  acp-agent M0-M7: 出站 ACP (Agent Client Protocol) 长连接 adapter (模仿 OpenClaw, hub 驱动 Claude Code/Codex「从启动→hold session→分派」) — acp-protocol (JSON-RPC + ACP wire 类型/builder/guard) + acp-connection (唯一碰 NDJSON framing, transport 可注入, deferred 反向请求) + acp-session (长生命周期进程引擎: spawn 一次握手缓存, prompt 串行化, cancel/terminate kill ladder) + acp-checkpoint (纯权限闸原语: dangerousToolGate fail-closed/ACP_NEVER_RESUME_AT/pickOptionId/readPermissionDecision 容忍 {decision}+{answer}) + AcpParticipant (五缝 observe `session/update`/intercept `session/request_permission` 逐动作 T2/handoff SuspendTaskError+内存权限句柄/resume 答复在飞反向请求无漂移/terminate), 只依赖 core; 验收门在 host (acp-agent-e2e.test.ts), 模板在 examples/acp-coding-bridge; Q2 权限挂起内存耦合 (不跨 hub 重启, stale 句柄 loud fail)
 ├── saml/                       Route B P1-M5: SAML 2.0 SP 协议核 — AuthnRequest 构造 (HTTP-Redirect deflate) + SAMLResponse 验签/断言解析 + XSW 防御 (pin key/getSignedReferences/禁 DOCTYPE) + SP metadata; 危险 XML-DSig/C14N 交成熟库 (xml-crypto + @xmldom/xmldom), 自写 SP 协议胶水; XML 依赖隔离本包不外溢
 
 ├── mcp-server/                 MCP server (Claude Desktop / Cursor 调 hub)
@@ -664,7 +666,7 @@ packages/                       31 个包, pnpm workspace
 
 python-sdk/                     PyPI `aipehub` (含 adapters/ — Phase 19 P5 LangGraph/CrewAI participant adapter)
 templates/                      agents / teams / workflows / bundles / community
-examples/                       40 个端到端 demo (含 Phase 19 P5 activepieces-bridge / windmill-bridge; v5 Stream E coding-agent-bridge / obsidian-kb / elasticsearch-kb; Stream G cross-hub-workflow; Stream H a2a-workflow-step [外部 A2A agent 当工作流步]; 上手案例 personal-coding-hub + personal-research-hub + battle-monk-training; 组织 hub cafe-ops [管理面] + warband-club [协作面] + tea-supply-link [跨组织面 shop→supplier] + tea-chain-hq [跨组织面 HQ→shop])
+examples/                       41 个端到端 demo (含 Phase 19 P5 activepieces-bridge / windmill-bridge; v5 Stream E coding-agent-bridge / obsidian-kb / elasticsearch-kb; acp-agent acp-coding-bridge [ACP 长连接驱动 Claude Code/Codex, OpenClaw 式]; Stream G cross-hub-workflow; Stream H a2a-workflow-step [外部 A2A agent 当工作流步]; 上手案例 personal-coding-hub + personal-research-hub + battle-monk-training; 组织 hub cafe-ops [管理面] + warband-club [协作面] + tea-supply-link [跨组织面 shop→supplier] + tea-chain-hq [跨组织面 HQ→shop])
 docs/  docs/zh/                 双语文档
 audits/                         外部审计快照按时间归档 (audits/README.md 索引)
 scripts/                        backup / restore / verify / prune
