@@ -77,6 +77,13 @@ export interface AcpSpawnOptions {
    * `command`/`args`/`cwd`/`env` are unused.
    */
   transport?: AcpTransport
+  /**
+   * Observe the child's stderr (the agent's own logging — NOT the OBSERVE stream,
+   * which is `session/update` on stdout). A real bridge writes its diagnostics
+   * here, so routing it to a log sink turns an opaque `-32603` into a debuggable
+   * failure. Unset → stderr is drained silently (so a chatty agent can't wedge).
+   */
+  onStderr?: (chunk: string) => void
   /** ACP protocol version offered at `initialize` (default 1). */
   protocolVersion?: number
   /** Client capabilities advertised at `initialize` (MVP advertises none → agent must not call fs/terminal). */
@@ -323,9 +330,13 @@ export class AcpSession {
       if (this.opts.authMethodId && (initResult.authMethods?.length ?? 0) > 0) {
         await conn.request(ACP_AUTHENTICATE, { methodId: this.opts.authMethodId }, { signal: ac.signal })
       }
+      // ACP `session/new` REQUIRES both an absolute `cwd` AND an `mcpServers`
+      // array (real bridges validate via zod → omitting `mcpServers` rejects
+      // with -32602 Invalid params). Empty array = we proxy no MCP servers into
+      // the agent; cwd defaults to the host's cwd when the caller didn't pin one.
       const newResult = await conn.request<SessionNewResult>(
         ACP_SESSION_NEW,
-        { cwd: this.opts.cwd },
+        { cwd: this.opts.cwd ?? process.cwd(), mcpServers: [] },
         { signal: ac.signal },
       )
       this.sessionIdValue = newResult.sessionId
@@ -410,9 +421,12 @@ export class AcpSession {
     if (!child.stdout || !child.stdin) {
       throw asSpawnError(this.opts.command, new Error('child stdio not available'))
     }
-    // stderr is the agent's own logging, not the OBSERVE stream — drain it so a
-    // chatty agent can't fill the pipe buffer and wedge.
-    child.stderr?.resume()
+    // stderr is the agent's own logging, not the OBSERVE stream. Route it to the
+    // observer if one is set (debuggability), else drain it so a chatty agent
+    // can't fill the pipe buffer and wedge.
+    const onStderr = this.opts.onStderr
+    if (onStderr) child.stderr?.on('data', (d: Buffer | string) => onStderr(d.toString()))
+    else child.stderr?.resume()
     return { input: child.stdout, output: child.stdin }
   }
 

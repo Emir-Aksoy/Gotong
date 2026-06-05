@@ -88,9 +88,49 @@ hub.register(coder)
 > ACP bridge 还年轻，包名 / 二进制名 / 命令形状会变——用前先核对 bridge 自己的 README。
 > 预设是「这是个 config 不是 per-agent code」的示范，不是当前 flag 的权威。
 
-真机联调脚本见 `start:live`（M8 交付，非 hermetic，进不了 CI）。马来西亚网络从国际 CDN
-拉 `npx @zed-industries/claude-code-acp` 偶发 SSL 解密失败，按全局约定带 `--retry` /
-用 brew curl（见根 `CLAUDE.md`）。
+## 真机 LIVE-RUNBOOK（M8，非 hermetic，进不了 CI）
+
+`src/live.ts`（`start:live`）真 spawn 一条真 ACP bridge（**非** mock），跑：spawn 一次 →
+`initialize` → `session/new`（=「从启动」）→ 派一个善意编码任务（建 `greet.js`）→ OBSERVE
+真 `session/update` 流 → 派**第二**个任务到**同一 session** 证上下文保留 → `terminate`。
+跑在 `mkdtemp` 抛弃 repo，`dangerousToolGate` fail-closed（善意写当场放、破坏性升级）。
+
+```bash
+# 前置：装 bridge + 让底层 agent 登录（hub 不注入 key，bridge 用 agent 自己的登录态）
+npx -y @zed-industries/claude-code-acp --help   # 预热缓存；底层先跑一次 `claude` 登录
+
+# 跑（在普通终端，别在 Claude Code 会话里——见下方 ⚠）
+ACP_LIVE=1 ACP_AGENT=claude-code-acp pnpm --filter @aipehub/example-acp-coding-bridge start:live
+# 或 ACP_AGENT=codex-acp（需另装 codex-acp bridge；`codex` CLI 自身没有原生 ACP 模式）
+```
+
+预期：任务 1 流式打出 agent 工作，`ls $cwd` 见 `greet.js`；任务 2 在同 session 上加
+`greetLoudly`（复用任务 1 的成果 = 上下文保留）；`coder.sessionId` 两任务一致。
+
+环境 env 旋钮：`ACP_LIVE=1`（必填守卫）/ `ACP_AGENT`（预设，默认 `claude-code-acp`）/
+`ACP_PROMPT_TIMEOUT_MS`（每轮上限，默认 180000）。
+
+> **⚠ 不要在 Claude Code 会话里跑 `claude-code-acp`。** `claude-code-acp` 检测到
+> `CLAUDECODE=1`（嵌套在另一个 Claude Code 会话内）会**拒绝启动**——「Nested sessions
+> share runtime resources and will crash all active sessions」。`live.ts` 会提前侦测
+> `CLAUDECODE` 并告警。请在**普通终端**跑，或换 `ACP_AGENT`。
+
+> **马来西亚 CDN SSL**：拉 `npx @zed-industries/claude-code-acp` 偶发 SSL 解密失败 /
+> `unexpected eof`，按全局约定带 `--retry` / 用 brew curl（见根 `CLAUDE.md`）。
+
+### 本机已验证（2026-06-05，开发机 = Claude Code 会话内）
+
+真跑 `claude-code-acp`：adapter 把真 bridge 一路驱动过 `initialize` → `session/new`
+（真 NDJSON over stdio，**「从启动 → hold session」在真 Claude Code 基建上跑通**）。
+编码那一轮被 bridge **自己的嵌套保护**挡下（开发机本身就是 Claude Code 会话，
+`CLAUDECODE=1`）——这是**环境**约束、非 adapter 缺陷，普通终端不会撞上。
+
+真机跑这一遍**逮到一个 mock 永远逮不到的真 bug**：`session/new` 漏了 ACP 必填的
+`mcpServers` 数组，真 bridge 用 zod 校验直接 `-32602 Invalid params` 拒掉——这正是
+M8（真机门）相对确定性 mock 门的价值。一并补了两处可观测性：JSON-RPC error 的 `data`
+会折进任务失败信息（不再是裸 `-32603`），以及 `onStderr` 钩子把 bridge 自己的诊断引到
+日志（正是它把上面那条嵌套保护的真因照出来的）。确定性五缝证明仍由 `acp-agent-e2e.test.ts`
+（真 spawn 的 mock ACP server）承担。
 
 ## 持久化边界（诚实的 MVP 边界）
 

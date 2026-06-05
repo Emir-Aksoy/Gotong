@@ -6,6 +6,7 @@
   "description": "acp-agent demo — the hub MANAGES a coding agent from startup, HOLDS one ACP (Agent Client Protocol) session, and dispatches many tasks to it (OpenClaw-style). All five AGENT-ADAPTER-CONTRACT seams (observe+hold / intercept / handoff / resume / terminate) shown against a deterministic mock ACP server. Swap command/args for an ACP_PRESETS entry to drive a real Claude Code / Codex.",
   "scripts": {
     "start": "tsx src/index.ts",
+    "start:live": "tsx src/live.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

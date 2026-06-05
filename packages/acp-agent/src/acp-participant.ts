@@ -94,6 +94,11 @@ export interface AcpParticipantOptions {
    * allow / deny inline or escalate to a human. Default: `dangerousToolGate()`.
    */
   gate?: (ctx: AcpToolContext) => AcpGateVerdict
+  /**
+   * Observe the bridge's stderr (its own diagnostics). Wire to a log sink to make
+   * a `-32603 Internal error` debuggable. Unset → stderr is drained silently.
+   */
+  onStderr?: (chunk: string) => void
 }
 
 export class AcpParticipant extends AgentParticipant {
@@ -130,6 +135,7 @@ export class AcpParticipant extends AgentParticipant {
       ...(opts.cwd ? { cwd: opts.cwd } : {}),
       ...(opts.env ? { env: opts.env } : {}),
       ...(opts.transport ? { transport: opts.transport } : {}),
+      ...(opts.onStderr ? { onStderr: opts.onStderr } : {}),
       ...(opts.protocolVersion !== undefined ? { protocolVersion: opts.protocolVersion } : {}),
       ...(opts.clientCapabilities ? { clientCapabilities: opts.clientCapabilities } : {}),
       ...(opts.authMethodId ? { authMethodId: opts.authMethodId } : {}),
@@ -190,7 +196,7 @@ export class AcpParticipant extends AgentParticipant {
       return this.finish(task.id, stopReason, decision)
     } catch (err) {
       this.taskText.delete(task.id)
-      throw err
+      throw describeAcpError(err)
     } finally {
       this.running.delete(task.id)
     }
@@ -223,7 +229,7 @@ export class AcpParticipant extends AgentParticipant {
         }
         if (ac.signal.aborted) return this.finish(task.id, 'cancelled') // TERMINATE → graceful
         this.taskText.delete(task.id)
-        throw err
+        throw describeAcpError(err)
       }
 
       if (outcome.kind === 'escalated') {
@@ -296,6 +302,32 @@ export class AcpParticipant extends AgentParticipant {
   /** Shutdown → close the connection and kill the child (SIGTERM → SIGKILL). */
   async onShutdown(): Promise<void> {
     await this.session.terminate()
+  }
+}
+
+/**
+ * Fold a JSON-RPC error's `data` into its message. Real bridges hide the human
+ * reason behind a generic message+code (claude-code-acp answers a failed turn
+ * with `-32603 "Internal error"` but puts the actual failing-result text in
+ * `data`), so a bare `err.message` is uselessly opaque. Duck-types `.data` to
+ * avoid a value import of the connection error.
+ */
+function describeAcpError(err: unknown): Error {
+  if (!(err instanceof Error)) return new Error(String(err))
+  const data = (err as { data?: unknown }).data
+  if (data == null || data === '') return err
+  const detail = typeof data === 'string' ? data : safeJson(data)
+  return Object.assign(new Error(`${err.message} — ${detail}`), {
+    code: (err as { code?: unknown }).code,
+    cause: err,
+  })
+}
+
+function safeJson(value: unknown): string {
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
   }
 }
 

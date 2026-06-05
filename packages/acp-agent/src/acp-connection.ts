@@ -52,10 +52,18 @@ export interface AcpTransport {
 /** Typed connection failure so callers can branch on `.code` (a JSON-RPC code when the agent erred). */
 export class AcpConnectionError extends Error {
   readonly code: number | undefined
-  constructor(message: string, code?: number) {
+  /**
+   * The JSON-RPC error `data` payload, when the agent supplied one. Real bridges
+   * stash the human-readable reason here (e.g. claude-code-acp puts the failing
+   * turn's result text in `data` behind a generic "Internal error" message), so
+   * surfacing it is the difference between a debuggable and an opaque failure.
+   */
+  readonly data: unknown
+  constructor(message: string, code?: number, data?: unknown) {
     super(message)
     this.name = 'AcpConnectionError'
     this.code = code
+    this.data = data
   }
 }
 
@@ -196,7 +204,9 @@ export class AcpConnection {
       this.pending.delete(msg.id)
       if (pending.onAbort && pending.signal) pending.signal.removeEventListener('abort', pending.onAbort)
       if (isErrorResponse(msg)) {
-        pending.reject(new AcpConnectionError(`acp error ${msg.error.code}: ${msg.error.message}`, msg.error.code))
+        pending.reject(
+          new AcpConnectionError(`acp error ${msg.error.code}: ${msg.error.message}`, msg.error.code, msg.error.data),
+        )
       } else {
         pending.resolve(msg.result)
       }
