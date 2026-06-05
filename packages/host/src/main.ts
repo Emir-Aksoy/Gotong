@@ -103,6 +103,7 @@ import {
   type IdentityStore,
   type PeerRegistration,
   type A2aOutboundAgent,
+  type AcpOutboundAgent,
 } from '@aipehub/identity'
 
 import { OrgApiPool } from './org-api-pool.js'
@@ -126,6 +127,7 @@ import { serveWebSocket } from '@aipehub/transport-ws'
 import { PeerRegistry, buildPeerTokenResolver } from './peer-registry.js'
 import { A2aServer } from './a2a-server.js'
 import { A2aOutboundManager } from './a2a-outbound.js'
+import { AcpOutboundManager } from './acp-outbound.js'
 import { OidcClient } from './oidc-client.js'
 import { OidcLoginService } from './oidc-login-service.js'
 import { SamlLoginService } from './saml-login-service.js'
@@ -139,6 +141,8 @@ import {
   type SamlProviderAdminSurface,
   type A2aAgentAdminSurface,
   type A2aAgentView,
+  type AcpAgentAdminSurface,
+  type AcpAgentView,
 } from '@aipehub/web'
 
 /**
@@ -1600,6 +1604,20 @@ async function main(): Promise<void> {
     a2aOutboundRef = a2aOutbound
   }
 
+  // ACP-OUT-M2/M4 — OpenClaw-style outbound ACP agents. Each stored row
+  // (identity `acp_outbound_agents`) becomes a local Participant that drives a
+  // coding agent (Claude Code / Codex) over a long-lived ACP session: spawn once,
+  // hold the session, dispatch many tasks. Unlike A2A there is no secret to
+  // resolve — an ACP bridge rides the underlying agent's own login. The manager
+  // also lets the admin CRUD routes push add/update/delete onto the running hub
+  // without a restart. NOTE: ACP agents are LOCAL participants, not cross-hub
+  // destinations, so they are NOT fed into the workflow off-hub capability view.
+  let acpOutbound: AcpOutboundManager | undefined
+  if (identity) {
+    acpOutbound = new AcpOutboundManager({ hub, source: identity, logger: log })
+    acpOutbound.registerAllFromStore()
+  }
+
   // Phase 18 C-M3 — inbound A2A message/send endpoint. OFF by default (it
   // exposes the hub to external A2A callers); enable with
   // AIPE_A2A_INBOUND_ENABLED. Auth reuses the per-peer vault token via
@@ -1767,6 +1785,47 @@ async function main(): Promise<void> {
     }
   }
 
+  // ACP-OUT-M4 — outbound ACP agent registry CRUD (admin). Joins identity's
+  // acp_outbound_agents facade with the AcpOutboundManager so each edit both
+  // PERSISTS and takes effect on the running hub (refresh/remove), and the view
+  // reports honest runtime liveness. There is no secret of any kind: ACP rides
+  // the agent's own login, so the whole record (command/args/cwd) rides the
+  // projection — nothing ever needs hiding.
+  let acpAgentAdmin: AcpAgentAdminSurface | undefined
+  if (identity && acpOutbound) {
+    const idForAcp = identity
+    const mgr = acpOutbound
+    const toView = (a: AcpOutboundAgent, st: { active: boolean; reason?: string }): AcpAgentView => ({
+      id: a.id,
+      capabilities: a.capabilities,
+      command: a.command,
+      args: a.args,
+      cwd: a.cwd,
+      enabled: a.enabled,
+      label: a.label,
+      createdAt: a.createdAt,
+      updatedAt: a.updatedAt,
+      active: st.active,
+      ...(st.reason ? { inactiveReason: st.reason } : {}),
+    })
+    acpAgentAdmin = {
+      list: () => idForAcp.listAcpAgents().map((a) => toView(a, mgr.statusOf(a.id))),
+      add: (input) => {
+        const a = idForAcp.addAcpAgent(input)
+        return toView(a, mgr.refresh(a.id))
+      },
+      update: (id, patch) => {
+        const a = idForAcp.updateAcpAgent(id, patch)
+        return toView(a, mgr.refresh(id))
+      },
+      remove: (id) => {
+        const ok = idForAcp.removeAcpAgent(id)
+        if (ok) mgr.remove(id)
+        return ok
+      },
+    }
+  }
+
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
@@ -1843,6 +1902,8 @@ async function main(): Promise<void> {
     ...(samlAdmin ? { samlAdmin } : {}),
     // Route B P1-M11c — admin outbound A2A agent registry CRUD (undefined → 503).
     ...(a2aAgentAdmin ? { a2aAgents: a2aAgentAdmin } : {}),
+    // ACP-OUT-M4 — admin outbound ACP agent registry CRUD (undefined → 503).
+    ...(acpAgentAdmin ? { acpAgents: acpAgentAdmin } : {}),
     // Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
     // Lets Prometheus pull the same body as /api/admin/metrics without a
     // machine-admin token. Unset/empty (env() already maps '' → undefined) →
