@@ -122,8 +122,23 @@ export class AcpOutboundManager {
 
   private unregister(id: string): void {
     if (!this.live.has(id)) return
-    this.hub.unregister(id)
+    const p = this.hub.unregister(id)
     this.live.delete(id)
+    // Hub.unregister drops the participant from the registry but does NOT fire
+    // its onShutdown hook — that runs only on whole-hub stop(). An outbound ACP
+    // participant holds a long-lived child subprocess (the codex/claude bridge),
+    // so unless we terminate it here, every admin delete/disable/edit leaks the
+    // process. (Caught in real-machine integration: the codex-acp child survived
+    // a DELETE because nothing sent it a signal.) Best-effort + fire-and-forget:
+    // the SIGTERM→SIGKILL ladder runs async, and we must NOT block the admin call
+    // — or a refresh's immediate re-register of a fresh, independent session — on
+    // the old child's death.
+    void Promise.resolve(p?.onShutdown?.()).catch((err) => {
+      this.log.warn('outbound ACP agent shutdown failed', {
+        id,
+        err: err instanceof Error ? err.message : String(err),
+      })
+    })
   }
 
   private tryRegister(agent: AcpOutboundAgent): AcpRegisterResult {

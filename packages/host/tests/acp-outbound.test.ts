@@ -13,9 +13,10 @@
  * not found — never "token unset".
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 import { Hub, AgentParticipant, type Logger, type Task } from '@aipehub/core'
+import { AcpParticipant } from '@aipehub/acp-agent'
 import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
 
 import { AcpOutboundManager } from '../src/acp-outbound.js'
@@ -122,6 +123,61 @@ describe('AcpOutboundManager (ACP-OUT-M2)', () => {
     // pre-existing participant.
     mgr.remove('shared')
     expect(hub.participant('shared')).toBeDefined()
+  })
+
+  // Regression (surfaced by real-machine integration): Hub.unregister drops the
+  // participant from the registry but never fires onShutdown — that runs only on
+  // whole-hub stop(). An outbound ACP participant holds a long-lived child
+  // subprocess (the codex/claude bridge), so the manager MUST terminate it on
+  // remove/refresh or the process leaks after every admin delete/disable/edit.
+  // (terminate() on a never-started session is a safe no-op, so letting the real
+  // onShutdown run here is harmless.)
+  describe('subprocess lifecycle (no leak on remove/edit)', () => {
+    it('remove terminates the held participant (onShutdown), not just unregisters it', () => {
+      const mgr = manager()
+      identity.addAcpAgent({ id: 'gone', capabilities: ['a'], command: 'npx' })
+      mgr.refresh('gone')
+      const shutdown = vi.spyOn(AcpParticipant.prototype, 'onShutdown')
+
+      mgr.remove('gone')
+
+      expect(hub.participant('gone')).toBeUndefined()
+      // The fix: the participant hub.unregister() returns gets onShutdown()'d so
+      // its child subprocess is killed (the call is synchronous; the kill ladder
+      // it kicks off is fire-and-forget).
+      expect(shutdown).toHaveBeenCalledTimes(1)
+      shutdown.mockRestore()
+    })
+
+    it('refresh after an edit terminates the OLD participant before re-registering', () => {
+      const mgr = manager()
+      identity.addAcpAgent({ id: 'editable', capabilities: ['a'], command: 'npx' })
+      mgr.refresh('editable')
+      const shutdown = vi.spyOn(AcpParticipant.prototype, 'onShutdown')
+
+      identity.updateAcpAgent('editable', { command: 'codex-acp' })
+      mgr.refresh('editable')
+
+      // Old wrapper's subprocess terminated exactly once; the fresh wrapper stays
+      // live with its own (lazy, independent) session.
+      expect(shutdown).toHaveBeenCalledTimes(1)
+      expect(mgr.isLive('editable')).toBe(true)
+      shutdown.mockRestore()
+    })
+
+    it('remove of an id we never owned never terminates a foreign participant', () => {
+      hub.register(new StubAgent({ id: 'shared', capabilities: ['x'] }))
+      const mgr = manager()
+      const shutdown = vi.spyOn(AcpParticipant.prototype, 'onShutdown')
+
+      mgr.remove('shared')
+
+      // The early `!live.has(id)` guard returns before touching the hub, so no
+      // onShutdown fires and the pre-existing participant is untouched.
+      expect(shutdown).not.toHaveBeenCalled()
+      expect(hub.participant('shared')).toBeDefined()
+      shutdown.mockRestore()
+    })
   })
 
   it('an id colliding with an existing participant is reported, not thrown', () => {
