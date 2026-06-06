@@ -1001,6 +1001,35 @@ const MIGRATIONS: Migration[] = [
         WHERE resolved_at IS NULL;
     `,
   },
+  {
+    // v5 Stream F day-3 — notification CHANNELS the control plane delivers
+    // alert firings to. The MVP kind is 'webhook' (a fire-and-forget HTTP POST
+    // of the counts-only firing payload); `kind` is left extensible so 'im' /
+    // 'email' can land later without a migration. Modeled on a2a_outbound_agents
+    // (v22): a small config table with full CRUD and NO vault — the only
+    // sensitive bit is an optional `header_env`, which is an ENVIRONMENT
+    // VARIABLE NAME (not the bearer); the host reads the value at delivery time
+    // so the secret never touches the database.
+    //
+    //   kind        'webhook' (MVP). Validated against a closed set on write.
+    //   url         the webhook endpoint (http/https, validated on write).
+    //   header_env  env-var NAME for an Authorization header value; NULL = none.
+    //   enabled     0 disables without deleting the config.
+    version: 29,
+    name: 'peer-summary-alert-channels',
+    sql: `
+      CREATE TABLE IF NOT EXISTS peer_summary_alert_channels (
+        id          TEXT PRIMARY KEY,
+        kind        TEXT NOT NULL,
+        url         TEXT NOT NULL,
+        header_env  TEXT,
+        enabled     INTEGER NOT NULL DEFAULT 1,
+        label       TEXT,
+        created_at  INTEGER NOT NULL,
+        updated_at  INTEGER NOT NULL
+      );
+    `,
+  },
 ]
 
 /**

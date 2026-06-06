@@ -75,6 +75,11 @@ export type IdentityErrorCode =
   //                             with no row.
   | 'alert_firing_open'
   | 'alert_firing_not_found'
+  // v5 Stream F day-3 — control-plane alert notification CHANNELS.
+  //   `alert_channel_exists`     addPeerSummaryAlertChannel reused an explicit id (PK).
+  //   `alert_channel_not_found`  get/update/remove targeted an id with no row.
+  | 'alert_channel_exists'
+  | 'alert_channel_not_found'
   | 'session_expired'
   | 'session_not_found'
   | 'weak_password'

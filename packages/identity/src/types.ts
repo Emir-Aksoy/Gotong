@@ -1229,6 +1229,59 @@ export interface PeerSummaryAlertFiringQuery {
 export const PEER_SUMMARY_ALERT_FIRING_DEFAULT_LIMIT = 200
 export const PEER_SUMMARY_ALERT_FIRING_MAX_LIMIT = 10_000
 
+/**
+ * v5 Stream F day-3 — a notification CHANNEL the control plane delivers alert
+ * firings to. The MVP kind is `'webhook'` (a fire-and-forget HTTP POST of the
+ * counts-only firing payload); the `kind` column is extensible so `'im'` /
+ * `'email'` can land later WITHOUT a migration. Like a2a_outbound_agents (v22)
+ * there is NO secret in the row: an optional `headerEnv` names an ENVIRONMENT
+ * VARIABLE whose value the host reads as an `Authorization` header at delivery
+ * time — the bearer itself never touches the database. Counts-only stays
+ * intact: a channel holds a destination + a toggle, never the data it carries.
+ */
+export type PeerSummaryAlertChannelKind = 'webhook'
+
+/** The closed set of channel kinds, for input validation. */
+export const PEER_SUMMARY_ALERT_CHANNEL_KINDS: PeerSummaryAlertChannelKind[] = ['webhook']
+
+export interface PeerSummaryAlertChannel {
+  /** Stable id (`psac_<hex>`), generated when not supplied. */
+  id: string
+  kind: PeerSummaryAlertChannelKind
+  /** The webhook endpoint (http/https only). */
+  url: string
+  /**
+   * Optional env-var NAME supplying an `Authorization` header value; null =
+   * none. The VALUE is never stored — only the name of the env var to read.
+   */
+  headerEnv: string | null
+  /** Disabled channels persist but are skipped by the delivery dispatcher. */
+  enabled: boolean
+  /** Optional human label; null when absent. */
+  label: string | null
+  createdAt: number
+  updatedAt: number
+}
+
+/** Create shape. `id` is generated when absent; `enabled` defaults to true. */
+export interface AddPeerSummaryAlertChannelInput {
+  id?: string
+  kind: PeerSummaryAlertChannelKind
+  url: string
+  headerEnv?: string | null
+  enabled?: boolean
+  label?: string | null
+}
+
+/** Targeted update — undefined = keep. `id` and `kind`-shape are immutable post-create only by convention. */
+export interface UpdatePeerSummaryAlertChannelInput {
+  kind?: PeerSummaryAlertChannelKind
+  url?: string
+  headerEnv?: string | null
+  enabled?: boolean
+  label?: string | null
+}
+
 // ---------------------------------------------------------------------------
 // D1 (v4 Phase 5) — Peer Registry
 // ---------------------------------------------------------------------------

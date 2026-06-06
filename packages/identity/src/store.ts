@@ -55,6 +55,7 @@ import { LedgerStore } from './ledger-store.js'
 import { PeerSummarySnapshotStore } from './peer-summary-snapshot-store.js'
 import { PeerSummaryAlertRuleStore } from './peer-summary-alert-rule-store.js'
 import { PeerSummaryAlertFiringStore } from './peer-summary-alert-firing-store.js'
+import { PeerSummaryAlertChannelStore } from './peer-summary-alert-channel-store.js'
 import { ResourceGrantStore } from './resource-grant-store.js'
 import { userPrincipal, type Principal } from './principal.js'
 import { PeerStore } from './peer-store.js'
@@ -139,6 +140,10 @@ import {
   type OpenPeerSummaryAlertFiringInput,
   type PeerSummaryAlertFiring,
   type PeerSummaryAlertFiringQuery,
+  // v5 Stream F day-3 — control-plane alert notification CHANNELS.
+  type AddPeerSummaryAlertChannelInput,
+  type PeerSummaryAlertChannel,
+  type UpdatePeerSummaryAlertChannelInput,
   type TotpEnrollment,
   type TotpState,
   type User,
@@ -505,6 +510,7 @@ export class IdentityStore {
   private readonly peerSummarySnapshots: PeerSummarySnapshotStore
   private readonly peerSummaryAlertRules: PeerSummaryAlertRuleStore
   private readonly peerSummaryAlertFirings: PeerSummaryAlertFiringStore
+  private readonly peerSummaryAlertChannels: PeerSummaryAlertChannelStore
   // Phase 19 P2-M5 → v5 A-M1 — resource grants (unified resource-level RBAC,
   // principal → any resource). Owner-as-grant. Generalizes the old
   // workflow-only grant store; the workflow facade methods below delegate here.
@@ -573,6 +579,7 @@ export class IdentityStore {
     this.peerSummarySnapshots = new PeerSummarySnapshotStore(db)
     this.peerSummaryAlertRules = new PeerSummaryAlertRuleStore(db)
     this.peerSummaryAlertFirings = new PeerSummaryAlertFiringStore(db)
+    this.peerSummaryAlertChannels = new PeerSummaryAlertChannelStore(db)
     // Phase 19 P2-M5 → v5 A-M1 — unified resource grants. Eager statements.
     this.resourceGrants = new ResourceGrantStore(db)
     // Route B P1-M3b — MFA TOTP store. Composes `this` for vault ops (the
@@ -2772,6 +2779,34 @@ export class IdentityStore {
    */
   prunePeerSummaryAlertFirings(opts: { before: number }): number {
     return this.peerSummaryAlertFirings.prune(opts)
+  }
+
+  // ---- v5 Stream F day-3 — control-plane alert notification CHANNELS.
+  // Delegated to PeerSummaryAlertChannelStore. A channel is a destination + a
+  // toggle (webhook MVP, kind-extensible); NO secret in the row — `headerEnv`
+  // is an env-var NAME the host reads at delivery time.
+
+  addPeerSummaryAlertChannel(input: AddPeerSummaryAlertChannelInput): PeerSummaryAlertChannel {
+    return this.peerSummaryAlertChannels.add(input)
+  }
+
+  getPeerSummaryAlertChannel(id: string): PeerSummaryAlertChannel | null {
+    return this.peerSummaryAlertChannels.get(id)
+  }
+
+  listPeerSummaryAlertChannels(): PeerSummaryAlertChannel[] {
+    return this.peerSummaryAlertChannels.list()
+  }
+
+  updatePeerSummaryAlertChannel(
+    id: string,
+    patch: UpdatePeerSummaryAlertChannelInput,
+  ): PeerSummaryAlertChannel {
+    return this.peerSummaryAlertChannels.update(id, patch)
+  }
+
+  removePeerSummaryAlertChannel(id: string): boolean {
+    return this.peerSummaryAlertChannels.remove(id)
   }
 
   // =====================================================================
