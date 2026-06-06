@@ -15,13 +15,16 @@
  * `token_env_unset` state here — a row is inactive only because it's `disabled`,
  * its id `id_conflict`s with another participant, or it's `not_found`.
  *
- * Gate posture (MVP, fail-closed): every registered participant gets
- * `dangerousToolGate(undefined, { onMatch: 'deny' })` — benign tool calls (file
- * writes, reads) pass inline; destructive patterns (rm -rf / git push / sudo / …)
- * are DENIED inline rather than escalated. Inline-deny avoids a stuck park,
- * because nothing in the host yet turns an ACP permission park into a `/me` inbox
- * item (that escalate→inbox wiring is the documented follow-up). The agent simply
- * finishes the turn without the denied tool.
+ * Gate posture (fail-closed, configurable): benign tool calls (file writes,
+ * reads) pass inline; destructive patterns (rm -rf / git push / sudo / …) are
+ * gated. `escalateDanger` (set by main.ts when a member inbox + an owner exist)
+ * decides HOW:
+ *   - false → `onMatch:'deny'`: the destructive tool is refused inline; the agent
+ *     finishes the turn without it. The unattended-hub default — no one to ask.
+ *   - true  → `onMatch:'escalate'`: the task PARKS and the host's suspendNotifier
+ *     turns the park into a `/me` approval item (acp-escalation.ts); a person
+ *     approves and the held turn resumes (or rejects → fail-closed). This is the
+ *     OpenClaw-style human-in-the-loop the inbox enables.
  */
 
 import { AcpParticipant, dangerousToolGate } from '@aipehub/acp-agent'
@@ -51,6 +54,13 @@ export interface AcpOutboundManagerOptions {
   hub: Hub
   source: AcpAgentSource
   logger: Logger
+  /**
+   * When true, a destructive tool call ESCALATES (parks for a `/me` approval)
+   * instead of being denied inline. main.ts sets this only when a member inbox +
+   * an owner exist to receive the approval; otherwise it stays false (deny), so a
+   * park can never wait forever for an approver who doesn't exist. Default false.
+   */
+  escalateDanger?: boolean
 }
 
 /**
@@ -62,6 +72,7 @@ export class AcpOutboundManager {
   private readonly hub: Hub
   private readonly source: AcpAgentSource
   private readonly log: Logger
+  private readonly escalateDanger: boolean
   /** ids this manager has live on the hub (a subset of all participant ids). */
   private readonly live = new Set<string>()
 
@@ -69,6 +80,7 @@ export class AcpOutboundManager {
     this.hub = opts.hub
     this.source = opts.source
     this.log = opts.logger
+    this.escalateDanger = opts.escalateDanger ?? false
   }
 
   /** Boot: materialise every stored agent. Returns the count actually registered. */
@@ -151,9 +163,9 @@ export class AcpOutboundManager {
           command: agent.command,
           ...(agent.args.length ? { args: agent.args } : {}),
           ...(agent.cwd ? { cwd: agent.cwd } : {}),
-          // MVP fail-closed: destructive tool calls denied inline (no escalate→park,
-          // since no host wiring turns an ACP park into a /me inbox item yet).
-          gate: dangerousToolGate(undefined, { onMatch: 'deny' }),
+          // Destructive tool calls either park for a /me approval (escalateDanger)
+          // or are denied inline. See the file header's "Gate posture".
+          gate: dangerousToolGate(undefined, { onMatch: this.escalateDanger ? 'escalate' : 'deny' }),
           onChunk: (taskId, chunk) => this.emitChunk(agent.id, taskId, chunk.text),
         }),
       )

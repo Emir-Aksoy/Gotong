@@ -128,6 +128,7 @@ import { PeerRegistry, buildPeerTokenResolver } from './peer-registry.js'
 import { A2aServer } from './a2a-server.js'
 import { A2aOutboundManager } from './a2a-outbound.js'
 import { AcpOutboundManager } from './acp-outbound.js'
+import { acpApprovalItemFor } from './acp-escalation.js'
 import { OidcClient } from './oidc-client.js'
 import { OidcLoginService } from './oidc-login-service.js'
 import { SamlLoginService } from './saml-login-service.js'
@@ -834,6 +835,11 @@ async function main(): Promise<void> {
   }
 
   const identityForSuspend = identity
+  // ACP-HITL — set further down (near the ACP outbound manager) once the member
+  // inbox + an owner are resolved. The notifier funnels every park, so it asks
+  // this sink to turn an ACP permission park into a /me approval item; it is a
+  // no-op for every other kind of park (and unset when escalation isn't wired).
+  let acpEscalationSink: ((task: Task, by: string, state: unknown) => Promise<void>) | undefined
   const hub = new Hub({
     space,
     crossHubResolver: (_to, task) => {
@@ -844,7 +850,7 @@ async function main(): Promise<void> {
     },
     ...(identityForSuspend
       ? {
-          suspendNotifier: (task, by, suspend) => {
+          suspendNotifier: async (task, by, suspend) => {
             // JSON.stringify of `task` may throw on circular payloads;
             // we let it propagate so the scheduler's catch turns the
             // whole suspend into a `failed` result rather than
@@ -858,6 +864,10 @@ async function main(): Promise<void> {
               state: suspend.state,
               taskJson: JSON.stringify(task),
             })
+            // An outbound ACP agent that escalated a destructive tool becomes a
+            // /me approval here (the leaf adapter can't reach the inbox). Awaited
+            // so the item exists before dispatch returns `suspended`.
+            await acpEscalationSink?.(task, by, suspend.state)
           },
         }
       : {}),
@@ -1614,7 +1624,26 @@ async function main(): Promise<void> {
   // destinations, so they are NOT fed into the workflow off-hub capability view.
   let acpOutbound: AcpOutboundManager | undefined
   if (identity) {
-    acpOutbound = new AcpOutboundManager({ hub, source: identity, logger: log })
+    // ACP-HITL — when a member inbox + an owner exist, a destructive coding
+    // action ESCALATES to a /me approval (the sink writes the item; resolve runs
+    // the two-step recovery) instead of being denied inline. AIPE_ACP_DANGER=deny
+    // forces the old hard-deny for unattended hubs (no one to approve → a park
+    // would wait forever). The approver is the org owner, mirroring the Phase 18
+    // outbound cross-org approval gate.
+    const forceDeny = process.env.AIPE_ACP_DANGER === 'deny'
+    const acpApprover = inboxStore && !forceDeny ? findOwnerUserId(identity) : null
+    let escalateDanger = false
+    if (inboxStore && acpApprover) {
+      const store = inboxStore
+      const approver = acpApprover
+      acpEscalationSink = async (task, by, state) => {
+        const item = acpApprovalItemFor(task, by, state, { approver })
+        if (item) await store.write(item)
+      }
+      escalateDanger = true
+      log.info('outbound ACP destructive actions escalate to /me approval', { approver })
+    }
+    acpOutbound = new AcpOutboundManager({ hub, source: identity, logger: log, escalateDanger })
     acpOutbound.registerAllFromStore()
   }
 

@@ -239,8 +239,13 @@ export class HostInboxService {
       this.log?.error('inbox resolve: child task_json corrupt', { itemId: item.itemId, err })
       return false
     }
-    // The broker's handleResume returns `state.answer` as the task's ok output.
-    await this.hub.resumeTask(row.agentId, childTask, { answer: decision })
+    // Merge the persisted park state UNDER `{ answer }`. The human-step broker /
+    // approval gate only read `.answer` (returning the decision / forwarding the
+    // send), so the extra fields are inert for them. But a participant whose
+    // handleResume needs its carried state — the ACP adapter re-finds its
+    // in-memory `permissionToken` from `row.state` to answer a still-open
+    // permission request — gets both the state AND the decision in one payload.
+    await this.hub.resumeTask(row.agentId, childTask, { ...asObject(row.state), answer: decision })
     this.identity.removeSuspendedTask(item.itemId)
     return true
   }
@@ -281,6 +286,11 @@ export class HostInboxService {
     // REPLACE) — removing it here would lose that parking.
     if (result.kind !== 'suspended') this.identity.removeSuspendedTask(parent.taskId)
   }
+}
+
+/** Spread-safe view of a persisted park state (object → itself, else `{}`). */
+function asObject(state: unknown): Record<string, unknown> {
+  return state && typeof state === 'object' ? (state as Record<string, unknown>) : {}
 }
 
 /**
