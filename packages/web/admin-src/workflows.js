@@ -773,10 +773,21 @@ export function createWorkflows({ wf }) {
       // with where it ACTUALLY ran when that was off this hub (resolved from the
       // persisted executedBy). The card's crossHubPanel was the PREDICTION; this
       // badge is what happened.
-      const xhub = s.crossHub
+      //
+      // day-4 — a cross-hub step that is still `suspended` is PARKED at the
+      // outbound-approval gate, not "ran on" yet. Show the awaiting-approval
+      // affordance (amber + inbox deep link) instead of the blue "ran on" badge;
+      // the blue confirmation badge is only honest once the step left suspended.
+      const awaiting = !!s.crossHub && s.status === 'suspended'
+      const dest = s.crossHub ? String(s.crossHub.peerLabel || s.crossHub.peer) : ''
+      const xhub = s.crossHub && !awaiting
         ? `<span class="wf-xhub-peer">${escapeHtml(
-            t.workflowRunCrossHub(String(s.crossHub.peerLabel || s.crossHub.peer), s.crossHub.kind),
+            t.workflowRunCrossHub(dest, s.crossHub.kind),
           )}</span>`
+        : ''
+      const awaitBlock = awaiting
+        ? `<p class="wf-xhub-await">${escapeHtml(t.workflowRunAwaitingApproval(dest))} ` +
+          `<a href="#home" class="wf-xhub-inbox-link">${escapeHtml(t.workflowRunGoToInbox)}</a></p>`
         : ''
       return `<article class="wf-step">
         <header>
@@ -785,6 +796,7 @@ export function createWorkflows({ wf }) {
           <span class="wf-step-meta">${escapeHtml(sDur)} · ${escapeHtml(t.workflowRunAttempts(s.attempts || 1))}</span>
           ${xhub}
         </header>
+        ${awaitBlock}
         ${err}
         ${subtasks}
         ${out}
@@ -793,11 +805,26 @@ export function createWorkflows({ wf }) {
     const payloadBlock = run.triggerPayload !== undefined
       ? `<details><summary>${escapeHtml(t.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>`
       : ''
+    // day-4 — run-level banner when a cross-hub step is parked at the
+    // outbound-approval gate. The run's own status stays `running` (RunStatus
+    // has no `suspended`), so a parked-needing-approval run is otherwise
+    // indistinguishable from one still executing — derive the signal from the
+    // step records instead.
+    const awaitingDests = Array.from(new Set(
+      (run.steps || [])
+        .filter((s) => s.status === 'suspended' && s.crossHub)
+        .map((s) => String(s.crossHub.peerLabel || s.crossHub.peer)),
+    ))
+    const parkedBanner = awaitingDests.length
+      ? `<div class="wf-run-parked-banner">${escapeHtml(t.workflowRunParkedApproval(awaitingDests))} ` +
+        `<a href="#home" class="wf-xhub-inbox-link">${escapeHtml(t.workflowRunGoToInbox)}</a></div>`
+      : ''
     dom.wfRunDetail.innerHTML = `
       <h4>
         <span class="wf-run-status wf-run-${escapeHtml(run.status)}">${escapeHtml(run.status)}</span>
         <code>${escapeHtml(run.runId)}</code>
       </h4>
+      ${parkedBanner}
       <p class="hint">${escapeHtml(t.workflowRunDuration)}: ${escapeHtml(dur)} · ${escapeHtml(t.workflowRunTriggeredBy)}: <code>${escapeHtml(run.triggeredByTaskId)}</code></p>
       ${payloadBlock}
       ${steps || `<p class="empty">${escapeHtml(t.workflowRunNoSteps)}</p>`}

@@ -227,6 +227,12 @@ describe('v5 Stream G-M2 — cross-hub workflow orchestration via the outbound a
     // visible from the moment it parks, not only after it completes.
     expect(parkedReview?.executedBy).toBe('hubB')
     expect(parkedReview?.crossHub).toEqual({ peer: 'hubB', peerLabel: 'Org B', kind: 'peer' })
+    // day-4 UI CONTRACT — these exact two fields together (status === 'suspended'
+    // AND crossHub present) are what the admin run-detail keys on to render the
+    // "awaiting your approval → peer X / go to inbox" affordance. The run-level
+    // status above is still 'running', so this per-step pair is the *only*
+    // signal that distinguishes a parked-needing-approval run from one still
+    // executing. Keep both asserted so a refactor can't silently break the badge.
 
     // Approve as the owner → the two-step resume runs (child gate crosses, then
     // the parent workflow re-reads the child's result and continues).

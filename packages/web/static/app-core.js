@@ -277,6 +277,17 @@
       // opposed to the pre-launch crossHubSteps PREDICTION on the card.
       workflowRunCrossHub: (dest, kind) =>
         kind === 'a2a' ? `🔗 由外部 A2A agent ${dest} 执行` : `🔗 在对等 hub ${dest} 上执行`,
+      // Stream G day-4 — post-launch APPROVAL LOOP: a step that is both
+      // `suspended` and cross-hub is parked at the outbound-approval gate,
+      // waiting for a human to approve the send in their inbox. The run-level
+      // status stays `running` (RunStatus has no `suspended`), so this per-step
+      // signal is the only way to tell a parked-needing-approval run apart from
+      // one that is still genuinely executing.
+      workflowRunAwaitingApproval: (dest) =>
+        `⏸ 等待你批准 — 出站到对等 hub ${dest} 的请求需在收件箱确认后才会真正发出`,
+      workflowRunGoToInbox: '去收件箱批准 →',
+      workflowRunParkedApproval: (dests) =>
+        `这个运行暂停了:有 ${dests.length} 个出站到对等 hub 的请求在等你批准 (${dests.join('、')})。批准后它会接着往下跑。`,
       workflowDeprecateBtn: '弃用',
       workflowRepublishBtn: '重新发布',
       workflowArchiveBtn: '归档',
@@ -689,6 +700,16 @@
       // opposed to the pre-launch crossHubSteps PREDICTION on the card.
       workflowRunCrossHub: (dest, kind) =>
         kind === 'a2a' ? `🔗 ran on external A2A agent ${dest}` : `🔗 ran on peer hub ${dest}`,
+      // Stream G day-4 — post-launch APPROVAL LOOP: a step that is both
+      // `suspended` and cross-hub is parked at the outbound-approval gate,
+      // awaiting a human approval in the inbox. Run-level status stays `running`
+      // (RunStatus has no `suspended`), so this per-step signal is the only way
+      // to tell a parked-needing-approval run from one still executing.
+      workflowRunAwaitingApproval: (dest) =>
+        `⏸ Awaiting your approval — the outbound request to peer hub ${dest} must be confirmed in your inbox before it is sent`,
+      workflowRunGoToInbox: 'Approve in inbox →',
+      workflowRunParkedApproval: (dests) =>
+        `This run is paused: ${dests.length} outbound request(s) to peer hub(s) are waiting for your approval (${dests.join(', ')}). It resumes once you approve.`,
       workflowDeprecateBtn: 'Deprecate',
       workflowRepublishBtn: 'Re-publish',
       workflowArchiveBtn: 'Archive',

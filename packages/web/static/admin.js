@@ -1701,9 +1701,12 @@
         const subtasks = (s.subTaskIds || []).length ? `<small class="hint">${escapeHtml4(t4.workflowRunSubTasks)}: ${s.subTaskIds.map(escapeHtml4).join(", ")}</small>` : "";
         const out = s.output !== void 0 ? `<details><summary>${escapeHtml4(t4.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml4(JSON.stringify(s.output, null, 2))}</pre></details>` : "";
         const err = s.error ? `<p class="form-msg err">${escapeHtml4(s.error)}</p>` : "";
-        const xhub = s.crossHub ? `<span class="wf-xhub-peer">${escapeHtml4(
-          t4.workflowRunCrossHub(String(s.crossHub.peerLabel || s.crossHub.peer), s.crossHub.kind)
+        const awaiting = !!s.crossHub && s.status === "suspended";
+        const dest = s.crossHub ? String(s.crossHub.peerLabel || s.crossHub.peer) : "";
+        const xhub = s.crossHub && !awaiting ? `<span class="wf-xhub-peer">${escapeHtml4(
+          t4.workflowRunCrossHub(dest, s.crossHub.kind)
         )}</span>` : "";
+        const awaitBlock = awaiting ? `<p class="wf-xhub-await">${escapeHtml4(t4.workflowRunAwaitingApproval(dest))} <a href="#home" class="wf-xhub-inbox-link">${escapeHtml4(t4.workflowRunGoToInbox)}</a></p>` : "";
         return `<article class="wf-step">
         <header>
           <span class="wf-run-status wf-run-${escapeHtml4(s.status)}">${escapeHtml4(s.status)}</span>
@@ -1711,17 +1714,23 @@
           <span class="wf-step-meta">${escapeHtml4(sDur)} · ${escapeHtml4(t4.workflowRunAttempts(s.attempts || 1))}</span>
           ${xhub}
         </header>
+        ${awaitBlock}
         ${err}
         ${subtasks}
         ${out}
       </article>`;
       }).join("");
       const payloadBlock = run.triggerPayload !== void 0 ? `<details><summary>${escapeHtml4(t4.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml4(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>` : "";
+      const awaitingDests = Array.from(new Set(
+        (run.steps || []).filter((s) => s.status === "suspended" && s.crossHub).map((s) => String(s.crossHub.peerLabel || s.crossHub.peer))
+      ));
+      const parkedBanner = awaitingDests.length ? `<div class="wf-run-parked-banner">${escapeHtml4(t4.workflowRunParkedApproval(awaitingDests))} <a href="#home" class="wf-xhub-inbox-link">${escapeHtml4(t4.workflowRunGoToInbox)}</a></div>` : "";
       dom.wfRunDetail.innerHTML = `
       <h4>
         <span class="wf-run-status wf-run-${escapeHtml4(run.status)}">${escapeHtml4(run.status)}</span>
         <code>${escapeHtml4(run.runId)}</code>
       </h4>
+      ${parkedBanner}
       <p class="hint">${escapeHtml4(t4.workflowRunDuration)}: ${escapeHtml4(dur)} · ${escapeHtml4(t4.workflowRunTriggeredBy)}: <code>${escapeHtml4(run.triggeredByTaskId)}</code></p>
       ${payloadBlock}
       ${steps || `<p class="empty">${escapeHtml4(t4.workflowRunNoSteps)}</p>`}

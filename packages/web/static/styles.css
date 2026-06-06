@@ -1689,6 +1689,20 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .wf-xhub .ma-meta { margin: 0; }
 .wf-xhub-peer { color: #1d5fa8; font-size: 0.72rem; }
 .wf-xhub-note { color: #1d5fa8; }
+/* Stream G day-4 — outbound-approval-loop affordance. Amber = "needs your
+   action" (mirrors the governance-risk amber convention), distinct from the
+   neutral blue cross-hub "left the hub" / "ran on peer X" badge. */
+.wf-xhub-await { color: #9a6700; font-size: 0.74rem; margin: 4px 0; }
+.wf-xhub-inbox-link { color: #1d5fa8; font-weight: 600; white-space: nowrap; }
+.wf-run-parked-banner {
+  margin: 6px 0;
+  border: 1px solid #f0d48a;
+  border-radius: 6px;
+  background: #fff8e6;
+  color: #7a5800;
+  padding: 6px 10px;
+  font-size: 0.8rem;
+}
 .wf-gov-chip {
   display: inline-block;
   font-size: 0.66rem;
