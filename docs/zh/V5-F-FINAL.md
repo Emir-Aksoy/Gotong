@@ -5,10 +5,17 @@
 > identity v25 + 纯求值器;M5 host 告警 surface + web 规则 CRUD/告警路由;M6 admin UI 趋势
 > sparkline + 告警配置/徽章 + 重建;M7 双 hub E2E 验收门 + 本文档）。
 >
+> **day-3 完**（告警通知投递 + 触发历史持久化, 见 §十二）: M1 identity v28
+> `peer_summary_alert_firings`（open→resolve 边沿触发, 部分唯一索引把「一对 rule+source 至多
+> 一条未解决」钉进 schema）;M2 identity v29 `peer_summary_alert_channels`（无密钥行, `headerEnv`
+> 存环境变量名）;M3 host `peer-summary-alert-delivery.ts` 纯模块（differ + webhook dispatcher,
+> 可注入 fetch）;M4 surface `evaluateAndDeliver` + opt-in sweep;M5 web firing 历史/channel
+> CRUD/test-delivery 路由;M6 admin UI 触发历史 + 通知渠道面板;M7 双 hub 投递验收门。
+>
 > 接 [`V5-E5-FINAL.md`](V5-E5-FINAL.md)（控制面 point-in-time 聚合）。E5 文档 §十明确把
 > 「控制面历史趋势 + 告警阈值」列为 day-2 sanctioned 后续——Stream F 就是把它做实。
 >
-> Last updated: 2026-06-04
+> Last updated: 2026-06-06
 
 ---
 
@@ -32,13 +39,15 @@ Stream F 把这两件事**叠在 E5 之上**, 严守同一条北极星红线:
 - **只存计数, 永不存原始行**。历史快照存的就是 E5 那份 counts-only 的 `PeerSummary` blob,
   只是钉上时间戳落了盘——多一个字段都没有(形状本身没地方放名字/id/payload)。
 - **告警是「此刻」的事实, 不持久化触发记录**(MVP)。规则求值是 live 的, 每次请求按当前摘要
-  重算。存的是**规则**(阈值配置), 不是 firings。
+  重算。存的是**规则**(阈值配置), 不是 firings。〔**day-3 更新**: firings 现在持久化了——但只作为
+  open→resolve 的**边沿触发记账**(让每个 breach 只通知一次), 仍是 counts-only, 见 §十二。〕
 
 > 一句话: E5 是望远镜的「当下一瞥」, Stream F 给它加上「时间轴回放」+「越线时拍你肩膀」——
 > 但镜头里永远只有计数, 望远镜永远不变成缰绳。
 
-**显式推迟**(见 §九): 告警通知投递(webhook/email/IM)、触发历史持久化、跨 hub 告警聚合、
-快照采样/降采样策略、趋势预测。
+**显式推迟**(day-1/2 时, 见 §九): 告警通知投递(webhook/email/IM)、触发历史持久化、跨 hub
+告警聚合、快照采样/降采样策略、趋势预测。其中**告警通知投递(webhook) + 触发历史持久化已在
+day-3 做实**(见 §十二), 余下仍推迟。
 
 ---
 
@@ -221,10 +230,10 @@ host 全量 **699 passed / 1 skipped**, web 全量 **806 passed**, 零回归。
 
 ### 9.2 显式推迟
 
-- **告警通知投递**(webhook / email / IM bridge): 当前只在 admin UI 展示 live breaches, 不主动
-  推送。是 day-3。
-- **触发历史持久化**: MVP 告警是「此刻」, 不存 firings。要趋势化告警(「这条规则本周触发 5 次」)
-  需另起一张表。
+- **告警通知投递**(webhook / email / IM bridge): ✅ **day-3 已做**(webhook kind; email/IM kind 仍
+  推迟)——admin UI 之外现在能主动 POST。见 §十二。
+- **触发历史持久化**: ✅ **day-3 已做**——`peer_summary_alert_firings`(identity v28)存 open→resolve
+  生命周期, 边沿触发让每个 breach 只通知一次。趋势化告警(「这条规则本周触发 N 次」)的聚合查询仍可后续叠。
 - **跨 hub 告警聚合 / 中央告警面板**: 控制面只观察, 每个 hub 自管自己的规则。
 - **快照采样 / 降采样 / 自动保留窗**: `prune` 原语已在(F-M1), 但 host 默认不调(全量保留)。生产
   化时再接一个定时 prune + 保留窗配置。
@@ -248,29 +257,140 @@ host 全量 **699 passed / 1 skipped**, web 全量 **806 passed**, 零回归。
 
 ```
 packages/identity/src/
-  schema.ts                          迁移 v24(snapshots) + v25(alert_rules)
-  peer-summary-snapshot-store.ts     [新] append-only 历史 store
-  peer-summary-alert-rule-store.ts   [新] 规则 CRUD store (asr_<hex> id, rowid tiebreak)
-  types.ts / store.ts / index.ts     类型 + 委托 + 导出
-  errors.ts                          + alert_rule_exists / alert_rule_not_found
+  schema.ts                            迁移 v24(snapshots)+v25(rules) | day-3: v28(firings)+v29(channels)
+  peer-summary-snapshot-store.ts       [新] append-only 历史 store
+  peer-summary-alert-rule-store.ts     [新] 规则 CRUD store (asr_<hex> id, rowid tiebreak)
+  peer-summary-alert-firing-store.ts   [新, day-3] open→resolve 生命周期 (部分唯一索引钉边沿不变量)
+  peer-summary-alert-channel-store.ts  [新, day-3] 投递通道 (无密钥行, headerEnv = 环境变量名)
+  types.ts / store.ts / index.ts       类型 + 委托 + 导出
+  errors.ts                            + alert_rule_*  | day-3: alert_firing_*/alert_channel_*
 
 packages/host/src/
-  peer-summary-metrics.ts            [新] 指标注册表 + projectMetric + buildTrend
-  peer-summary-alerts.ts             [新] 纯求值器 evaluatePeerSummaryAlerts
-  peer-summary.ts                    + snapshots/alertRules sink + history/metricKeys/alert 方法
-  main.ts                            createPeerSummaryFederation({snapshots, alertRules})
+  peer-summary-metrics.ts              [新] 指标注册表 + projectMetric + buildTrend
+  peer-summary-alerts.ts               [新] 纯求值器 evaluatePeerSummaryAlerts
+  peer-summary-alert-delivery.ts       [新, day-3] differ diffAlertFirings + webhook dispatcher (可注入 fetch, best-effort)
+  peer-summary.ts                      + snapshots/alertRules sink + history/alert 方法 | day-3: firings/channels sink + evaluateAndDeliver/testAlertChannel
+  main.ts                              createPeerSummaryFederation({...}) | day-3: + opt-in alert sweep (AIPE_PEER_SUMMARY_ALERT_SWEEP_MS)
 
 packages/web/src/
-  peer-summary-routes.ts             + history 路由 + 告警 CRUD/evaluate 路由
-  server.ts                          dispatch 接线
+  peer-summary-routes.ts               + history 路由 + 告警 CRUD/evaluate | day-3: + firing 历史 GET + channel CRUD + test-delivery POST
+  server.ts                            dispatch 接线 + day-3 类型 re-export
 
 packages/web/static/
-  peer-summary-ui.js                 + 趋势 sparkline + 告警徽章 + 规则配置(F-M6)
-  styles.css                         + .peer-summary-panel scope
-  admin.js / ...                     (经 build:assets 重建)
+  peer-summary-ui.js                   + 趋势 sparkline + 告警徽章 + 规则配置(F-M6) | day-3: + 触发历史表 + 通知渠道面板
+  styles.css                           + .peer-summary-panel scope | day-3: + ps-firing-open / ps-channels
+  admin.js / static-assets.ts          (经 build:assets 重建)
 
 packages/host/tests/
-  stream-f-control-plane-e2e.test.ts [新] 双 hub 验收门 (趋势 + 告警 + no-leak)
+  stream-f-control-plane-e2e.test.ts     [新] 双 hub 验收门 (趋势 + 告警 + no-leak)
+  peer-summary-alert-delivery.test.ts    [新, day-3] 纯 differ + dispatcher 单测
+  peer-summary-alert-delivery-e2e.test.ts[新, day-3] 双 hub 投递验收门 (open/幂等/resolve + best-effort + no-leak)
 
-docs/zh/V5-F-FINAL.md                [新] 本文档
+docs/zh/V5-F-FINAL.md                  [新] 本文档 (含 §十二 day-3)
 ```
+
+---
+
+## 十二、day-3 — 告警通知投递 + 触发历史持久化（`90f167a`→`94d16e3`）
+
+> 状态: **完**（M1-M8）。E5 day-2 §一 把这两件事列为显式推迟; day-3 把它们做实, 仍严守
+> counts-only + 只观察不接管。
+
+### 12.1 为什么（day-1/2 只能「看」, day-3 能「拍肩 + 送信」）
+
+F-M1~M7 的告警是 **point-in-time**: admin UI 打开时按当前摘要 live 求值, 把越线的规则标红。
+但运维不会一直盯着屏幕——越线时得**主动**通知, 且**只通知一次**(不是每次求值都吵)。这要两样
+point-in-time 给不了的东西:
+
+1. **触发历史**: 一个 breach 从「开」到「解决」是一段**有状态**的生命周期, 不是一次快照。记下来
+   才能边沿触发(只在「开」的那一刻通知一次, 在「解决」的那一刻再通知一次)。
+2. **投递通道**: 把 firing POST 到一个 webhook。
+
+> 一句话: day-1/2 是控制面**显示**越线, day-3 是控制面**送信**——但送出去的信仍只装计数。
+
+### 12.2 M1/M2 — 两张 append-only 表（identity v28 / v29）
+
+- **`peer_summary_alert_firings`（v28）**: 一条 breach 的 open→resolve 生命周期。**部分唯一索引**
+  `(rule_id, source) WHERE resolved_at IS NULL` 把「一对(规则, 源)至多一条未解决 firing」钉进
+  **schema**——边沿触发的不变量在数据库层, 不只靠调用方自觉。无 FK(同 ledger/audit), 删规则不删
+  历史。`open` / `listOpen` / `list(query)` / `resolve` 原语。
+- **`peer_summary_alert_channels`（v29）**: 投递目的地。**行里没有密钥**——`headerEnv` 存的是一个
+  **环境变量名**(不是 bearer), host 在投递时现读现用(镜像 `a2a_outbound_agents` v22 的无密钥模式;
+  store 的 `normHeaderEnv` 用 `/^[A-Za-z_][A-Za-z0-9_]*$/` 拒掉粘贴进来的真 bearer)。`kind` 列可扩
+  (`'webhook'` 起步, `'im'`/`'email'` 后续不用迁移)。
+
+两张表都 IdentityStore **鸭子类型**给 host(精确方法名匹配, host↔identity 零依赖)。
+
+### 12.3 M3 — `peer-summary-alert-delivery.ts` 纯模块（differ + dispatcher）
+
+整条投递路径的「纯中段」, 全部纯函数或可注入:
+
+- **`diffAlertFirings(breaches, openFirings) → {toOpen, toResolve}`**: 确定性集合差, 按
+  `ruleId+source` 关联键。已被未解决 firing 覆盖的 breach 是**稳定态**(两列表都不进)——这正是「每个
+  breach 只通知一次」的来源。求值器对每个(规则, 源)至多产一个 breach, 故 `toOpen` 永不撞唯一索引。
+- **`renderWebhookPayload(firing, event)`**: counts-only 载荷(`type`/`event`/`firingId`/`ruleId`/
+  `source`/`metric`/`comparator`/`threshold`/`value`/`label`/`openedAt`/`resolvedAt`)——**结构性**
+  no-leak: 载荷只从 firing 构造, firing 本身只装数字/比较符/metric 键/源 id/规则自己的标签。
+- **`deliverToChannel` / `deliverToEnabledChannels`**: 可注入 `fetchImpl`(镜像 windmill-participant),
+  **best-effort 永不抛**——传输错/非 2xx/超时都收敛成 `{ok:false}` 结果, 一个死 webhook 拖不垮扫描
+  也挡不住下一个 firing。`headerEnv` 在这里现读环境变量当 `Authorization` 头(密钥永不落库)。disabled
+  通道在投递前就被过滤掉。
+
+无任何 identity I/O 住这——M4 才把它接到 store。
+
+### 12.4 M4 — surface `evaluateAndDeliver` + opt-in sweep
+
+- **`evaluateAndDeliver()`**: 先求值(复用 `evaluateAlerts` 读的**同一份缓存摘要**)再持久化 + 投递。
+  `diffAlertFirings` 的 `toOpen` 每条 `open` firing + POST `opened` 一次; `toResolve` 每条 `resolve`
+  firing + POST `resolved` 一次。返回 `{opened, resolved, deliveries}` 报告。**没接 firing sink 时是
+  no-op**(`evaluateAlerts` 仍能 live 显示)——投递是叠加层, 不接就退回 day-1/2 行为。
+- **`testAlertChannel(id)`**: 给一个合成 `opened` 载荷, 让运维在**真 breach 之前**验证可达性——**连
+  disabled 通道也送**(你在打开它之前先测)。
+- **opt-in sweep**(`main.ts`): `AIPE_PEER_SUMMARY_ALERT_SWEEP_MS`(0/未设 = **关**, 默认关), 设正值时
+  clamp 到 `[10s, 1h]`。每拍先 `refresh`(让摘要最新; 单 peer 刷新失败留旧读不中止)再 `evaluateAndDeliver`。
+  重入守卫防慢拍叠加, `.unref()` 不挡进程退出。无通道配置时即便开了也送不出东西(诚实空转)。
+
+### 12.5 M5/M6 — web 路由 + admin UI
+
+- **web**(`peer-summary-routes.ts`): `GET …/alerts/firings`(历史, source/ruleId/state/窗口过滤) +
+  channel CRUD(`GET/POST …/alerts/channels`, `PATCH/DELETE …/alerts/channels/:id`) +
+  `POST …/alerts/channels/:id/test`。错误码 `alert_channel_exists:409` / `alert_channel_not_found:404`。
+  鸭子 surface verbatim echo, web 零 host/identity 运行时依赖。
+- **admin UI**(`peer-summary-ui.js`, 手写 IIFE 同 sibling 面板, 硬编码中文): **触发历史**表(来源/指标/
+  条件/触发值/状态/开启/解决, 🔴 开启中 / 已解决徽章) + **通知渠道**子面板(类型/URL/鉴权环境变量/标签
+  表单 + 测试/启用·停用/删除 + `$NAME` 渲染 headerEnv + sweep 环境变量诚实提示)。
+
+### 12.6 M7 — 双 hub 投递验收门（`peer-summary-alert-delivery-e2e.test.ts`）
+
+day-3 存在的理由那一个测: 真 provider Hub 经真 in-proc HubLink 给真消费控制面, 消费侧 firing/channel
+接**真 IdentityStore**, webhook 传输是**注入的捕获 fetch**(整条路径无 socket)。四件事一次证清:
+
+1. **生命周期**: provider 真足迹变化(第 3 个 agent 加入)把 `assets.agents` 推过阈值 →
+   `evaluateAndDeliver` **开** firing + 投 `opened` 一次; 仍 breaching 时重求值**幂等**(无第二条 firing,
+   无第二次 POST——边沿触发); agent 离开 → firing **解决** + 投 `resolved` 一次。历史经消费 store 持久。
+2. **best-effort**: disabled 通道永不被 POST; failing 通道传输错收敛成 `ok:false` 而**不挡**另一个通道
+   的投递, 也不挡 firing 持久化。
+3. **test-delivery**: `testAlertChannel` 连 disabled 通道也送达, 且把 `headerEnv` 环境变量名在投递时
+   解析进 `Authorization` 头(bearer 从没在行里待过)。
+4. **no-leak**: 每个 webhook body 只携计数/id/比较符/规则标签——provider 的 agent id / capability /
+   parked task id / model 名一个都不过线(继承 E5 counts-only, 在**离开 host 的线缆**上再钉一遍)。
+
+`+3 测试`(host 798 + 1 skipped 绿, 零回归)。另 M3 纯模块 `peer-summary-alert-delivery.test.ts` +14
+单测(differ 边沿/payload counts-only/dispatcher best-effort)。
+
+### 12.7 北极星对账（day-3 增量）
+
+| 红线 | day-3 怎么守 |
+|---|---|
+| 只观察不接管 | 投递是控制面给**自己的运维**送信(webhook 出向自家), **不**向任何 peer 下指令; firing/规则/通道全住观察者本地。 |
+| 计数即隐私契约 | webhook 载荷结构性 counts-only(只从 firing 构造); M7 no-leak 门在**出向线缆**上再证一遍。 |
+| 无密钥落库 | 通道 `headerEnv` 存环境变量名非 bearer; 密钥投递时现读, 数据库里永远没有。 |
+| 节点尽量轻量 | differ/dispatcher 是纯函数 + 可注入 fetch; 接现有 federation surface(不新建); sweep 复用 refresh; UI 复用 E5 面板。 |
+
+### 12.8 仍显式推迟（day-3 之后）
+
+- **email / IM bridge 通道 kind**: `kind` 列已可扩, 但 day-3 只实现 `webhook` 分支。
+- **投递重试 / 退避 / 去重窗**: best-effort 一次性 POST, 失败只记 `ok:false`, 不重投。
+- **跨 hub 告警聚合 / 中央告警面板**: 同 day-2——控制面只观察, 每个 hub 自管规则与投递。
+- **触发历史降采样 / 自动保留窗**: firing 表 append-only, 无自动 prune(同快照表)。
+- **告警分组 / 静默窗 / 升级链**(Alertmanager 式): MVP 一规则一通道一次性投递。
