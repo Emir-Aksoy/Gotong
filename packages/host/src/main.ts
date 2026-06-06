@@ -683,6 +683,11 @@ async function main(): Promise<void> {
   let identityCleanupTimer: NodeJS.Timeout | undefined
   let usageSweepTimer: NodeJS.Timeout | undefined
   let orgQuotaSweepTimer: NodeJS.Timeout | undefined
+  // v5 Stream F day-3 — control-plane alert delivery sweep. OPT-IN: fires every
+  // AIPE_PEER_SUMMARY_ALERT_SWEEP_MS (0 / unset = off) to edge-trigger breaches
+  // into firings + POST webhooks. Off by default — point-in-time evaluation in
+  // the admin UI is unchanged; proactive delivery is a deliberate enable.
+  let alertSweepTimer: NodeJS.Timeout | undefined
   // Phase 11 M3 — resume sweep. Fires every AIPE_RESUME_SWEEP_MS
   // (default 30 s); each tick reads due rows from suspended_tasks
   // and re-dispatches them via Hub.resumeTask.
@@ -1515,8 +1520,64 @@ async function main(): Promise<void> {
       // v5 Stream F-M5 — alert rules + live evaluation. IdentityStore duck-types
       // the rule sink; the federation exposes CRUD + evaluateAlerts on top.
       alertRules: identity,
+      // v5 Stream F day-3 — firing history (edge-trigger open→resolve) + webhook
+      // notification channels. IdentityStore duck-types both. The federation
+      // exposes channel CRUD + `evaluateAndDeliver`; the opt-in alert sweep below
+      // drives proactive delivery. Webhook transport defaults to global fetch +
+      // process.env (the secret in `headerEnv` is read at delivery time).
+      firings: identity,
+      channels: identity,
       logger: log,
     })
+    // v5 Stream F day-3 — proactive alert-delivery sweep. OPT-IN: only runs when
+    // AIPE_PEER_SUMMARY_ALERT_SWEEP_MS is set to a positive value (clamped to
+    // [10s, 1h]). Each tick refreshes peer summaries then edge-triggers breaches
+    // into firings + POSTs webhooks (notify ONCE per breach). A reentrancy guard
+    // prevents a slow tick (many channels / slow webhooks) from overlapping the
+    // next. Off by default: the admin UI's point-in-time evaluation is unchanged,
+    // and a hub with no channels configured delivers nothing even when enabled.
+    {
+      const fed = peerSummaryFederation
+      const rawAlertInterval = Number(process.env.AIPE_PEER_SUMMARY_ALERT_SWEEP_MS ?? '0')
+      const alertIntervalMs =
+        Number.isFinite(rawAlertInterval) && rawAlertInterval >= 10_000
+          ? Math.min(rawAlertInterval, 3_600_000)
+          : 0
+      if (alertIntervalMs > 0) {
+        let alertInflight = false
+        const sweepAlerts = async (): Promise<void> => {
+          if (alertInflight) return
+          alertInflight = true
+          try {
+            // Refresh first so peer summaries are current before we evaluate —
+            // a refresh failure on one peer leaves its last reading (the row's
+            // `stale` flag stays the UI's honesty signal), it never aborts the pass.
+            await fed.refresh()
+            const report = await fed.evaluateAndDeliver()
+            if (report.opened.length > 0 || report.resolved.length > 0) {
+              const failed = report.deliveries.filter((d) => !d.ok).length
+              log.info('peer summary alert sweep', {
+                opened: report.opened.length,
+                resolved: report.resolved.length,
+                deliveries: report.deliveries.length,
+                failedDeliveries: failed,
+              })
+            }
+          } catch (err) {
+            log.error('peer summary alert sweep failed', {
+              err: err instanceof Error ? err.message : String(err),
+            })
+          } finally {
+            alertInflight = false
+          }
+        }
+        alertSweepTimer = setInterval(() => {
+          void sweepAlerts()
+        }, alertIntervalMs)
+        alertSweepTimer.unref?.()
+        log.info('peer summary alert sweep started', { intervalMs: alertIntervalMs })
+      }
+    }
     // Phase 6 #4 — per-peer resolver is auto-wired by PeerRegistry
     // when identity is present (it is here — we only enter this block
     // when identity is wired). The shared token remains as fallback
@@ -2119,6 +2180,10 @@ async function main(): Promise<void> {
     if (resumeSweepTimer) {
       clearInterval(resumeSweepTimer)
       resumeSweepTimer = undefined
+    }
+    if (alertSweepTimer) {
+      clearInterval(alertSweepTimer)
+      alertSweepTimer = undefined
     }
     if (resumeKickoffTimer) {
       clearTimeout(resumeKickoffTimer)

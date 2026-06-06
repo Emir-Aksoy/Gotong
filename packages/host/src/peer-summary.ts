@@ -27,8 +27,14 @@
 
 import type { HubLink, Participant, ParticipantId } from '@aipehub/core'
 import type {
+  AddPeerSummaryAlertChannelInput,
   AddPeerSummaryAlertRuleInput,
+  OpenPeerSummaryAlertFiringInput,
+  PeerSummaryAlertChannel,
+  PeerSummaryAlertFiring,
+  PeerSummaryAlertFiringQuery,
   PeerSummaryAlertRule,
+  UpdatePeerSummaryAlertChannelInput,
   UpdatePeerSummaryAlertRuleInput,
 } from '@aipehub/identity'
 import type { RpcResponder } from './peer-kb-gate.js'
@@ -42,6 +48,15 @@ import {
   type PeerSummaryAlertBreach,
   type PeerSummarySource,
 } from './peer-summary-alerts.js'
+import {
+  deliverToChannel,
+  deliverToEnabledChannels,
+  diffAlertFirings,
+  renderWebhookPayload,
+  type AlertDeliveryResult,
+  type AlertWebhookPayload,
+  type DeliverOptions,
+} from './peer-summary-alert-delivery.js'
 
 /** Wire method names for the peer summary (shared producer/consumer). */
 export const PEER_SUMMARY_METHODS = {
@@ -427,6 +442,56 @@ export interface PeerSummaryAlertRuleSink {
   removePeerSummaryAlertRule(id: string): boolean
 }
 
+/**
+ * Alert-firing store (v5 Stream F day-3) — the open→resolve breach HISTORY the
+ * delivery sweep edge-triggers against. Duck-typed so the host backs it with
+ * `IdentityStore` (the method names mirror it exactly) while peer-summary keeps
+ * zero identity runtime dep. Optional: without it `evaluateAndDeliver` is a
+ * no-op (there is no history to diff against, so nothing to deliver ONCE).
+ */
+export interface PeerSummaryAlertFiringSink {
+  /** Open a firing for a newly-breaching (rule, source). UNIQUE on the open pair. */
+  openPeerSummaryAlertFiring(input: OpenPeerSummaryAlertFiringInput): PeerSummaryAlertFiring
+  /** Currently-open firings — the differ's other input. */
+  listOpenPeerSummaryAlertFirings(): PeerSummaryAlertFiring[]
+  /** Firing history (newest first) with optional source/ruleId/state/window filters. */
+  listPeerSummaryAlertFirings(query: PeerSummaryAlertFiringQuery): PeerSummaryAlertFiring[]
+  /** Mark a firing resolved (metric fell back). Idempotent. */
+  resolvePeerSummaryAlertFiring(id: number, opts?: { resolvedAt?: number }): PeerSummaryAlertFiring
+}
+
+/**
+ * Notification-channel store (v5 Stream F day-3) — webhook destinations the
+ * delivery sweep POSTs firings to. Duck-typed (IdentityStore mirrors it).
+ * Optional: without it firings are still recorded but nothing is delivered.
+ * NO secret lives in a channel — `headerEnv` is an env-var NAME the dispatcher
+ * resolves at delivery time.
+ */
+export interface PeerSummaryAlertChannelSink {
+  listPeerSummaryAlertChannels(): PeerSummaryAlertChannel[]
+  getPeerSummaryAlertChannel(id: string): PeerSummaryAlertChannel | null
+  addPeerSummaryAlertChannel(input: AddPeerSummaryAlertChannelInput): PeerSummaryAlertChannel
+  updatePeerSummaryAlertChannel(
+    id: string,
+    patch: UpdatePeerSummaryAlertChannelInput,
+  ): PeerSummaryAlertChannel
+  removePeerSummaryAlertChannel(id: string): boolean
+}
+
+/**
+ * What one `evaluateAndDeliver` pass did — surfaced to the sweep log and the
+ * admin test endpoint. Counts-only by construction (firings hold only numbers /
+ * ids / a comparator / the rule's own label).
+ */
+export interface AlertDeliveryReport {
+  /** Firings opened this pass (a NEW breach with no open firing). */
+  opened: PeerSummaryAlertFiring[]
+  /** Firings resolved this pass (an open firing whose breach cleared). */
+  resolved: PeerSummaryAlertFiring[]
+  /** Every per-channel webhook result across all opened + resolved events. */
+  deliveries: AlertDeliveryResult[]
+}
+
 /** A history query: one source's trend of one scalar metric over a window. */
 export interface PeerSummaryHistoryQuery {
   /** `'local'` or a peer id. */
@@ -467,6 +532,32 @@ export interface PeerSummaryFederation {
    * sink is wired or no rule breaches.
    */
   evaluateAlerts(): Promise<PeerSummaryAlertBreach[]>
+  /**
+   * Evaluate THEN persist + deliver (v5 Stream F day-3). Edge-triggers the
+   * point-in-time breaches against the open-firing history: opens a firing +
+   * POSTs an `opened` webhook ONCE per new breach, resolves a firing + POSTs a
+   * `resolved` webhook when its breach clears. Best-effort delivery (a dead
+   * webhook never blocks persistence or the next firing). Drives the opt-in
+   * sweep; a no-op (`{opened:[],resolved:[],deliveries:[]}`) without a firing
+   * sink. The PROACTIVE half of the control plane — `evaluateAlerts` only shows.
+   */
+  evaluateAndDeliver(): Promise<AlertDeliveryReport>
+  /** Firing history (newest first) for the admin timeline; `[]` when unwired. */
+  listAlertFirings(query?: PeerSummaryAlertFiringQuery): PeerSummaryAlertFiring[]
+  /** List notification channels (v5 Stream F day-3); `[]` when unwired. */
+  listAlertChannels(): PeerSummaryAlertChannel[]
+  /** Create a webhook channel. Throws when no channel sink is wired. */
+  addAlertChannel(input: AddPeerSummaryAlertChannelInput): PeerSummaryAlertChannel
+  /** Targeted update of a channel (undefined = keep). */
+  updateAlertChannel(id: string, patch: UpdatePeerSummaryAlertChannelInput): PeerSummaryAlertChannel
+  /** Remove a channel; false when no such channel / no sink. */
+  removeAlertChannel(id: string): boolean
+  /**
+   * Send a synthetic `opened` payload to ONE channel so an operator can verify
+   * reachability before a real breach — and even to a DISABLED channel (you test
+   * before you enable). Throws when no sink / no such channel.
+   */
+  testAlertChannel(id: string): Promise<AlertDeliveryResult>
 }
 
 /**
@@ -495,6 +586,25 @@ export function createPeerSummaryFederation(
      * and the control plane reports no rules and no breaches.
      */
     alertRules?: PeerSummaryAlertRuleSink
+    /**
+     * Firing history backing (v5 Stream F day-3). When wired, `evaluateAndDeliver`
+     * edge-triggers breaches into the open→resolve lifecycle so each is notified
+     * ONCE. IdentityStore duck-types it. Omit it and `evaluateAndDeliver` is a
+     * no-op (point-in-time `evaluateAlerts` still works).
+     */
+    firings?: PeerSummaryAlertFiringSink
+    /**
+     * Notification-channel backing (v5 Stream F day-3). When wired, the
+     * federation exposes channel CRUD + delivery. IdentityStore duck-types it.
+     * Omit it and firings are recorded but nothing is delivered.
+     */
+    channels?: PeerSummaryAlertChannelSink
+    /**
+     * Delivery transport for the webhook dispatcher. Defaults to the global
+     * `fetch` + `process.env` (see `deliverToChannel`). Tests inject a fake
+     * `fetchImpl` + `env` so the whole path runs without a socket.
+     */
+    deliver?: DeliverOptions
     now?: () => number
     logger?: { warn?: (msg: string, meta?: Record<string, unknown>) => void }
   },
@@ -535,6 +645,20 @@ export function createPeerSummaryFederation(
         lastError: errors.get(row.peerId) ?? null,
       }
     })
+  }
+
+  // Evaluate the rules against the CURRENT sources (local + each peer's last
+  // cached summary). Shared by `evaluateAlerts` (show) and `evaluateAndDeliver`
+  // (persist + notify) so both see exactly the same breach set.
+  async function computeBreaches(): Promise<PeerSummaryAlertBreach[]> {
+    if (!opts.alertRules) return []
+    const rules = opts.alertRules.listPeerSummaryAlertRules()
+    if (rules.length === 0) return []
+    const sources: PeerSummarySource[] = [{ source: 'local', summary: await opts.buildLocal() }]
+    for (const row of listRows()) {
+      if (row.summary) sources.push({ source: row.peer, summary: row.summary })
+    }
+    return evaluatePeerSummaryAlerts(sources, rules)
   }
 
   return {
@@ -606,17 +730,111 @@ export function createPeerSummaryFederation(
       return opts.alertRules ? opts.alertRules.removePeerSummaryAlertRule(id) : false
     },
     async evaluateAlerts() {
-      if (!opts.alertRules) return []
-      const rules = opts.alertRules.listPeerSummaryAlertRules()
-      if (rules.length === 0) return []
-      // Build the live source set: this hub's freshly-built local summary plus
-      // each peer's LAST-CACHED summary (alerts fire on the last known reading —
-      // the row's `stale` flag is the UI's honesty signal, not a reason to skip).
-      const sources: PeerSummarySource[] = [{ source: 'local', summary: await opts.buildLocal() }]
-      for (const row of listRows()) {
-        if (row.summary) sources.push({ source: row.peer, summary: row.summary })
+      // Show-only: the live breach set (the `stale` flag is the UI's honesty
+      // signal, not a reason to skip a peer's last-known reading).
+      return computeBreaches()
+    },
+    async evaluateAndDeliver() {
+      // No firing sink → no history to edge-trigger against, so nothing to
+      // notify ONCE. (Point-in-time `evaluateAlerts` still works.)
+      if (!opts.firings) return { opened: [], resolved: [], deliveries: [] }
+      const breaches = await computeBreaches()
+      const openFirings = opts.firings.listOpenPeerSummaryAlertFirings()
+      const { toOpen, toResolve } = diffAlertFirings(breaches, openFirings)
+
+      const channels = opts.channels ? opts.channels.listPeerSummaryAlertChannels() : []
+      const opened: PeerSummaryAlertFiring[] = []
+      const resolved: PeerSummaryAlertFiring[] = []
+      const deliveries: AlertDeliveryResult[] = []
+
+      // Open a firing + notify ONCE per new breach. A UNIQUE collision (a
+      // concurrent pass already opened it) is swallowed so we never double-notify.
+      for (const b of toOpen) {
+        let firing: PeerSummaryAlertFiring
+        try {
+          firing = opts.firings.openPeerSummaryAlertFiring({
+            ruleId: b.ruleId,
+            source: b.source,
+            metric: b.metric,
+            comparator: b.comparator,
+            threshold: b.threshold,
+            value: b.value,
+            label: b.label,
+            openedAt: now(),
+          })
+        } catch (err) {
+          opts.logger?.warn?.('peer summary alert: open firing failed', {
+            ruleId: b.ruleId,
+            source: b.source,
+            err: err instanceof Error ? err.message : String(err),
+          })
+          continue
+        }
+        opened.push(firing)
+        deliveries.push(
+          ...(await deliverToEnabledChannels(channels, renderWebhookPayload(firing, 'opened'), opts.deliver)),
+        )
       }
-      return evaluatePeerSummaryAlerts(sources, rules)
+
+      // Resolve a firing + notify when its breach clears.
+      for (const f of toResolve) {
+        let firing: PeerSummaryAlertFiring
+        try {
+          firing = opts.firings.resolvePeerSummaryAlertFiring(f.id, { resolvedAt: now() })
+        } catch (err) {
+          opts.logger?.warn?.('peer summary alert: resolve firing failed', {
+            firingId: f.id,
+            err: err instanceof Error ? err.message : String(err),
+          })
+          continue
+        }
+        resolved.push(firing)
+        deliveries.push(
+          ...(await deliverToEnabledChannels(channels, renderWebhookPayload(firing, 'resolved'), opts.deliver)),
+        )
+      }
+
+      return { opened, resolved, deliveries }
+    },
+    listAlertFirings(query = {}) {
+      return opts.firings ? opts.firings.listPeerSummaryAlertFirings(query) : []
+    },
+    listAlertChannels() {
+      return opts.channels ? opts.channels.listPeerSummaryAlertChannels() : []
+    },
+    addAlertChannel(input) {
+      if (!opts.channels) throw new Error('alert channels not enabled on this host')
+      return opts.channels.addPeerSummaryAlertChannel(input)
+    },
+    updateAlertChannel(id, patch) {
+      if (!opts.channels) throw new Error('alert channels not enabled on this host')
+      return opts.channels.updatePeerSummaryAlertChannel(id, patch)
+    },
+    removeAlertChannel(id) {
+      return opts.channels ? opts.channels.removePeerSummaryAlertChannel(id) : false
+    },
+    async testAlertChannel(id) {
+      if (!opts.channels) throw new Error('alert channels not enabled on this host')
+      const channel = opts.channels.getPeerSummaryAlertChannel(id)
+      if (!channel) throw new Error('alert channel not found')
+      // A synthetic firing-shaped payload (firingId 0, source 'local') — enough
+      // for a receiver to confirm reachability. Delivered even to a DISABLED
+      // channel: an operator tests BEFORE flipping it on.
+      const payload: AlertWebhookPayload = {
+        type: 'aipehub.peer_summary_alert/v1',
+        event: 'opened',
+        firingId: 0,
+        ruleId: 'test',
+        source: 'local',
+        metric: 'test.delivery',
+        comparator: 'gt',
+        threshold: 0,
+        value: 1,
+        label: 'AipeHub control-plane test delivery',
+        openedAt: now(),
+        resolvedAt: null,
+      }
+      return deliverToChannel(channel, payload, opts.deliver)
     },
   }
 }
