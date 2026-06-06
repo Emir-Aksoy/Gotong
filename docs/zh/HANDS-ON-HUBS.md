@@ -158,8 +158,11 @@ curl -X POST -H "Authorization: Bearer <admin-token>" \
 路由 agent 的「派给谁」不写死,而是从**当前情况**算出来。每个个人 hub 因此有一个**可单测的纯
 规划函数**:
 
-- `personal-coding-hub` → `planRoute(goal)`:只读审查类目标只派 `claude-code`;琐碎改动派 `codex`;
-  常规改动两个都派。
+- `personal-coding-hub` → `planRoute(goal, policy)`:**结合「任务分析 × 用户安排」**两件事 ——
+  `analyzeTask(goal)` 读出任务性质(只读审查 / 琐碎 / 需先设计)× 一个声明式 `RoutingPolicy`
+  (谁在岗 `unavailable`、谁善长什么 `profiles`、预算是否限单 `singleCoder`)。所以**同一个目标在
+  不同安排下派得不同**:Codex 在岗 → 功能交 `claude-code` 起草 + `codex` 实现;Codex 不在岗 →
+  `claude-code` 一人包办。理想 coder 不在岗就优雅降级给在岗的顶上,**绝不派一个不在岗的 agent**。
 - `personal-research-hub` → `planResearch(goal, wikiSnapshot)`:**只编译 wiki 里还缺的源**,已编译的
   不重编;纯答问跳过编译直接检索。
 - `battle-monk-training` → `planSession(situation, priorCodex)`:按修士档案(各柱已练阶数)+ 今日意图,
@@ -188,7 +191,7 @@ demo 里把 mock provider 换成一个**情境感知的 `LlmProvider`**:它从 p
 
 | 案例 | 家族 | 结合的「情况」 | 分派 / 适配机制 |
 |---|---|---|---|
-| `personal-coding-hub` | 个人·路由 | 目标性质(只读审查 / 琐碎 / 常规) | `planRoute` → claude-code / codex / 两者 |
+| `personal-coding-hub` | 个人·路由 | 任务性质(只读审查 / 琐碎 / 需先设计)**×** 用户安排(谁在岗 / 善长 / 预算限单) | `planRoute(goal, policy)` → 按角色从**在岗** roster 填,理想 coder 不在岗就降级给在岗的 |
 | `personal-research-hub` | 个人·路由 | wiki 已编译哪些源 + 来意(入库 / 答问) | `planResearch` → 只补缺的源、纯答问跳过编译 |
 | `battle-monk-training` | 个人·路由 | 修士档案(各柱已练阶)+ 今日意图 | `planSession` → 派三柱子集 + 强度 |
 | `cafe-ops` | 组织·工作流 | 加班日别(工作日 / 休息日 / 节假日) | worker 算倍率 1.5/2/3;店长 `human:` 审批 |
