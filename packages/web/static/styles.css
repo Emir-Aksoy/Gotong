@@ -1703,6 +1703,36 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   padding: 6px 10px;
   font-size: 0.8rem;
 }
+/* Stream G day-5 — the transcript-chain viewer on a cross-hub step. Neutral
+   blue like the "ran on peer X" badge: this is the chain of that same hop, not
+   an alert. */
+.wf-peer-tx-box { margin: 4px 0; }
+.wf-peer-tx-btn {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+  color: #1d5fa8;
+  background: #eef4fb;
+  border: 1px solid #cdddf0;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.wf-peer-tx-btn:disabled { opacity: 0.6; cursor: default; }
+.wf-peer-tx-out:not(:empty) {
+  margin-top: 4px;
+  border-left: 2px solid #cdddf0;
+  padding-left: 8px;
+}
+.wf-peer-tx-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.wf-peer-tx-ev { margin: 0 0 4px; }
+.wf-peer-tx-kind {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: #1d5fa8;
+  background: #eef4fb;
+  border-radius: 4px;
+  padding: 0 5px;
+}
 .wf-gov-chip {
   display: inline-block;
   font-size: 0.66rem;

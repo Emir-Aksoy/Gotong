@@ -1707,6 +1707,11 @@
           t4.workflowRunCrossHub(dest, s.crossHub.kind)
         )}</span>` : "";
         const awaitBlock = awaiting ? `<p class="wf-xhub-await">${escapeHtml4(t4.workflowRunAwaitingApproval(dest))} <a href="#home" class="wf-xhub-inbox-link">${escapeHtml4(t4.workflowRunGoToInbox)}</a></p>` : "";
+        const peerTx = s.crossHub && s.crossHub.kind !== "a2a" && !awaiting ? `<div class="wf-peer-tx-box">
+            <button type="button" class="wf-peer-tx-btn" data-act="view-peer-transcript"
+                    data-run-id="${escapeHtml4(run.runId)}" data-step-id="${escapeHtml4(s.stepId)}">${escapeHtml4(t4.workflowRunPeerTranscriptBtn)}</button>
+            <div class="wf-peer-tx-out"></div>
+          </div>` : "";
         return `<article class="wf-step">
         <header>
           <span class="wf-run-status wf-run-${escapeHtml4(s.status)}">${escapeHtml4(s.status)}</span>
@@ -1718,6 +1723,7 @@
         ${err}
         ${subtasks}
         ${out}
+        ${peerTx}
       </article>`;
       }).join("");
       const payloadBlock = run.triggerPayload !== void 0 ? `<details><summary>${escapeHtml4(t4.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml4(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>` : "";
@@ -1737,6 +1743,46 @@
       ${finalBlock}
     `;
     }
+    function renderPeerTranscriptSlice(slice) {
+      if (!slice || !Array.isArray(slice.events) || slice.events.length === 0) {
+        return `<p class="hint">${escapeHtml4(t4.workflowRunPeerTranscriptEmpty)}</p>`;
+      }
+      const head = `<p class="hint">${escapeHtml4(
+        t4.workflowRunPeerTranscriptHead(slice.hubId || "?", slice.taskId || "?")
+      )}${slice.truncated ? " " + escapeHtml4(t4.workflowRunPeerTranscriptTruncated) : ""}</p>`;
+      const rows = slice.events.map((ev) => {
+        const ts = ev && ev.ts ? new Date(ev.ts).toLocaleTimeString() : "";
+        const data = ev && ev.data !== void 0 ? `<pre class="wf-pre">${escapeHtml4(
+          typeof ev.data === "string" ? ev.data : JSON.stringify(ev.data, null, 2)
+        )}</pre>` : "";
+        return `<li class="wf-peer-tx-ev"><span class="wf-peer-tx-kind">${escapeHtml4(
+          String(ev && ev.kind || "")
+        )}</span> <span class="wf-step-meta">${escapeHtml4(ts)}</span>${data}</li>`;
+      }).join("");
+      return head + `<ul class="wf-peer-tx-list">${rows}</ul>`;
+    }
+    async function viewPeerTranscript(runId, stepId, outEl, btnEl) {
+      if (!outEl) return;
+      if (btnEl) btnEl.disabled = true;
+      outEl.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      try {
+        const r = await fetch(
+          `/api/admin/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/peer-transcript`
+        );
+        const body = await r.json().catch(() => ({}));
+        if (r.ok && body && body.ok === true) {
+          outEl.innerHTML = renderPeerTranscriptSlice(body.slice);
+        } else if (body && body.ok === false && body.code) {
+          outEl.innerHTML = `<p class="form-msg err">${escapeHtml4(t4.workflowRunPeerTranscriptFail(body.code))}</p>`;
+        } else {
+          outEl.innerHTML = `<p class="form-msg err">${escapeHtml4(body.error || body.message || `${r.status}`)}</p>`;
+        }
+      } catch (err) {
+        outEl.innerHTML = `<p class="form-msg err">${escapeHtml4(err.message || String(err))}</p>`;
+      } finally {
+        if (btnEl) btnEl.disabled = false;
+      }
+    }
     return {
       setDom,
       refreshWorkflows,
@@ -1755,7 +1801,8 @@
       submitWorkflowImport,
       openWorkflowRunsModal,
       closeWorkflowRunsModal,
-      openWorkflowRunDetail
+      openWorkflowRunDetail,
+      viewPeerTranscript
     };
   }
 
@@ -3337,6 +3384,20 @@
         if (act === "remove-agent-grant") {
           const userId = target.dataset.user;
           if (userId) managedAgents.removeAgentGrant(userId);
+          return;
+        }
+        if (act === "view-peer-transcript") {
+          const runId = target.dataset.runId;
+          const stepId = target.dataset.stepId;
+          const outEl = target.parentElement ? target.parentElement.querySelector(".wf-peer-tx-out") : null;
+          if (runId && stepId && outEl) {
+            workflows.viewPeerTranscript(
+              runId,
+              stepId,
+              outEl,
+              target instanceof HTMLButtonElement ? target : null
+            );
+          }
           return;
         }
         const id = target.dataset.id;

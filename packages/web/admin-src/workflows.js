@@ -789,6 +789,21 @@ export function createWorkflows({ wf }) {
         ? `<p class="wf-xhub-await">${escapeHtml(t.workflowRunAwaitingApproval(dest))} ` +
           `<a href="#home" class="wf-xhub-inbox-link">${escapeHtml(t.workflowRunGoToInbox)}</a></p>`
         : ''
+      // day-5 — the transcript CHAIN. A cross-hub step that ran on a MESH peer
+      // (NOT an external A2A agent — those have no peer.transcript rpc) and is no
+      // longer parked can have the peer's OWN trace of that one task pulled on
+      // demand. The button hits the per-step route; the result (or a fail-closed
+      // reason) renders inline into the sibling .wf-peer-tx-out. Lazy by click so
+      // the run detail stays cheap and we never fan out RPCs the user didn't ask
+      // for. The button is text-only so the global click handler (which reads
+      // e.target.dataset directly, no closest walk) resolves to it.
+      const peerTx = s.crossHub && s.crossHub.kind !== 'a2a' && !awaiting
+        ? `<div class="wf-peer-tx-box">
+            <button type="button" class="wf-peer-tx-btn" data-act="view-peer-transcript"
+                    data-run-id="${escapeHtml(run.runId)}" data-step-id="${escapeHtml(s.stepId)}">${escapeHtml(t.workflowRunPeerTranscriptBtn)}</button>
+            <div class="wf-peer-tx-out"></div>
+          </div>`
+        : ''
       return `<article class="wf-step">
         <header>
           <span class="wf-run-status wf-run-${escapeHtml(s.status)}">${escapeHtml(s.status)}</span>
@@ -800,6 +815,7 @@ export function createWorkflows({ wf }) {
         ${err}
         ${subtasks}
         ${out}
+        ${peerTx}
       </article>`
     }).join('')
     const payloadBlock = run.triggerPayload !== undefined
@@ -832,6 +848,62 @@ export function createWorkflows({ wf }) {
     `
   }
 
+  // day-5 — render one cross-hub step's far-hub transcript slice. The shape is
+  // the host's PeerTranscriptSlice: { hubId, taskId, events:[{seq,ts,kind,data}],
+  // truncated }. We render a thin chronological list; `data` is shown verbatim so
+  // the operator sees exactly what the peer recorded (no client-side reshaping).
+  function renderPeerTranscriptSlice(slice) {
+    if (!slice || !Array.isArray(slice.events) || slice.events.length === 0) {
+      return `<p class="hint">${escapeHtml(t.workflowRunPeerTranscriptEmpty)}</p>`
+    }
+    const head = `<p class="hint">${escapeHtml(
+      t.workflowRunPeerTranscriptHead(slice.hubId || '?', slice.taskId || '?'),
+    )}${slice.truncated ? ' ' + escapeHtml(t.workflowRunPeerTranscriptTruncated) : ''}</p>`
+    const rows = slice.events.map((ev) => {
+      const ts = ev && ev.ts ? new Date(ev.ts).toLocaleTimeString() : ''
+      const data = ev && ev.data !== undefined
+        ? `<pre class="wf-pre">${escapeHtml(
+            typeof ev.data === 'string' ? ev.data : JSON.stringify(ev.data, null, 2),
+          )}</pre>`
+        : ''
+      return `<li class="wf-peer-tx-ev"><span class="wf-peer-tx-kind">${escapeHtml(
+        String((ev && ev.kind) || ''),
+      )}</span> <span class="wf-step-meta">${escapeHtml(ts)}</span>${data}</li>`
+    }).join('')
+    return head + `<ul class="wf-peer-tx-list">${rows}</ul>`
+  }
+
+  // day-5 — lazily pull the far hub's transcript for ONE cross-hub step. Called
+  // by the global click handler with the button's run/step ids + its sibling
+  // output div. The route answers `{ok:true,slice}` or a typed `{ok:false,code}`
+  // (fail-closed when the peer never opted into sharing); both render inline.
+  async function viewPeerTranscript(runId, stepId, outEl, btnEl) {
+    if (!outEl) return
+    if (btnEl) btnEl.disabled = true
+    outEl.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
+    try {
+      const r = await fetch(
+        `/api/admin/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/peer-transcript`,
+      )
+      const body = await r.json().catch(() => ({}))
+      if (r.ok && body && body.ok === true) {
+        outEl.innerHTML = renderPeerTranscriptSlice(body.slice)
+      } else if (body && body.ok === false && body.code) {
+        // Typed verdict (incl. the 404'd unknown_run/unknown_step) — render the
+        // localized reason rather than a bare status code.
+        outEl.innerHTML = `<p class="form-msg err">${escapeHtml(t.workflowRunPeerTranscriptFail(body.code))}</p>`
+      } else {
+        // Host without a peer-link resolver answers 404 {error}; or any other
+        // unexpected non-ok shape.
+        outEl.innerHTML = `<p class="form-msg err">${escapeHtml(body.error || body.message || `${r.status}`)}</p>`
+      }
+    } catch (err) {
+      outEl.innerHTML = `<p class="form-msg err">${escapeHtml(err.message || String(err))}</p>`
+    } finally {
+      if (btnEl) btnEl.disabled = false
+    }
+  }
+
   return {
     setDom,
     refreshWorkflows,
@@ -851,5 +923,6 @@ export function createWorkflows({ wf }) {
     openWorkflowRunsModal,
     closeWorkflowRunsModal,
     openWorkflowRunDetail,
+    viewPeerTranscript,
   }
 }

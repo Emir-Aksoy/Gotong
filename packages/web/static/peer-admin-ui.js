@@ -244,6 +244,11 @@
       '      </select></label>' +
       '    <label class="pa-pol-check"><input class="pa-pol-sharesummary" type="checkbox"' +
       (p.shareSummary ? ' checked' : '') + ' /> 向该对端共享本 hub 摘要 <small>(仅计数, 控制面用)</small></label>' +
+      // Stream G day-5 — opt-in to answer this peer's peer.transcript rpc with
+      // one cross-hub task's execution trace. Strictly more revealing than the
+      // summary's counts, so it is its own fail-closed flag (default off).
+      '    <label class="pa-pol-check"><input class="pa-pol-sharetranscript" type="checkbox"' +
+      (p.shareTranscript ? ' checked' : '') + ' /> 向该对端共享跨 hub 任务轨迹 <small>(逐步 transcript, 比摘要更敏感)</small></label>' +
       '  </div>' +
       '  <button type="button" class="pa-pol-save">保存策略</button>' +
       '</div>'
@@ -273,6 +278,7 @@
       perLinkQuotaBudget: perLinkQuotaBudget,
       revocationState: $('.pa-pol-revstate', detail).value,
       shareSummary: $('.pa-pol-sharesummary', detail).checked,
+      shareTranscript: $('.pa-pol-sharetranscript', detail).checked,
     }
     setStatus(root, '保存策略...', 'loading')
     try {

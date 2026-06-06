@@ -2139,6 +2139,25 @@ import { createWorkflows } from './workflows.js'
         if (userId) managedAgents.removeAgentGrant(userId)
         return
       }
+      // Stream G day-5 — a cross-hub run step's "view peer trace" button carries
+      // data-run-id + data-step-id (no data-id), so handle it before the `!id`
+      // guard below. The output div is the button's sibling .wf-peer-tx-out.
+      if (act === 'view-peer-transcript') {
+        const runId = target.dataset.runId
+        const stepId = target.dataset.stepId
+        const outEl = target.parentElement
+          ? target.parentElement.querySelector('.wf-peer-tx-out')
+          : null
+        if (runId && stepId && outEl) {
+          workflows.viewPeerTranscript(
+            runId,
+            stepId,
+            outEl,
+            target instanceof HTMLButtonElement ? target : null,
+          )
+        }
+        return
+      }
       const id = target.dataset.id
       if (!act || !id) return
       if (act === 'edit-agent') {

@@ -288,6 +288,21 @@
       workflowRunGoToInbox: '去收件箱批准 →',
       workflowRunParkedApproval: (dests) =>
         `这个运行暂停了:有 ${dests.length} 个出站到对等 hub 的请求在等你批准 (${dests.join('、')})。批准后它会接着往下跑。`,
+      // Stream G day-5 — the post-launch transcript CHAIN. A cross-hub step's
+      // viewer pulls the FAR hub's trace of that one dispatched task (opt-in,
+      // fail-closed: a peer that never set share_transcript yields fetch_failed).
+      workflowRunPeerTranscriptBtn: '查看对方执行轨迹 ▾',
+      workflowRunPeerTranscriptHead: (hubId, taskId) =>
+        `对端 hub ${hubId} 对任务 ${taskId} 的执行轨迹`,
+      workflowRunPeerTranscriptTruncated: '(已截断, 完整轨迹请直接到对端查看)',
+      workflowRunPeerTranscriptEmpty: '对端返回了空轨迹 (该任务没有可见事件)。',
+      workflowRunPeerTranscriptFail: (code) =>
+        code === 'fetch_failed' ? '对端未开启轨迹共享, 或暂时取不到 (fail-closed)。'
+        : code === 'no_link' ? '找不到通往该对端的链路。'
+        : code === 'not_cross_hub' ? '该步骤不是跨 hub 执行的, 没有对端轨迹。'
+        : code === 'unknown_step' ? '运行里找不到这个步骤。'
+        : code === 'unknown_run' ? '找不到这个运行。'
+        : `取对端轨迹失败 (${code})。`,
       workflowDeprecateBtn: '弃用',
       workflowRepublishBtn: '重新发布',
       workflowArchiveBtn: '归档',
@@ -710,6 +725,21 @@
       workflowRunGoToInbox: 'Approve in inbox →',
       workflowRunParkedApproval: (dests) =>
         `This run is paused: ${dests.length} outbound request(s) to peer hub(s) are waiting for your approval (${dests.join(', ')}). It resumes once you approve.`,
+      // Stream G day-5 — the post-launch transcript CHAIN. A cross-hub step's
+      // viewer pulls the FAR hub's trace of that one dispatched task (opt-in,
+      // fail-closed: a peer that never set share_transcript yields fetch_failed).
+      workflowRunPeerTranscriptBtn: 'View peer execution trace ▾',
+      workflowRunPeerTranscriptHead: (hubId, taskId) =>
+        `Peer hub ${hubId}'s trace of task ${taskId}`,
+      workflowRunPeerTranscriptTruncated: '(truncated — see the peer directly for the full trace)',
+      workflowRunPeerTranscriptEmpty: 'The peer returned an empty trace (no visible events for this task).',
+      workflowRunPeerTranscriptFail: (code) =>
+        code === 'fetch_failed' ? 'The peer has not opted into transcript sharing, or it is momentarily unavailable (fail-closed).'
+        : code === 'no_link' ? 'No link to that peer was found.'
+        : code === 'not_cross_hub' ? 'This step did not run cross-hub — there is no peer trace.'
+        : code === 'unknown_step' ? 'That step was not found in the run.'
+        : code === 'unknown_run' ? 'That run was not found.'
+        : `Failed to fetch the peer trace (${code}).`,
       workflowDeprecateBtn: 'Deprecate',
       workflowRepublishBtn: 'Re-publish',
       workflowArchiveBtn: 'Archive',
