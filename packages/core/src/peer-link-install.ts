@@ -339,7 +339,13 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
     })
     // The local hub generated a fresh internal task.id; relabel back to
     // the peer's task.id so their pending-dispatch table can match.
-    return relabelTaskId(result, task.id)
+    // v5 Stream G day-5 — also stamp `peerTaskId` = our internal id (captured
+    // BEFORE relabel — `result.taskId` here is the local hub.dispatch id, NOT
+    // the wire id) so the caller keeps a durable handle to fetch THIS task's
+    // transcript from us later (peer.transcript RPC, opt-in). Each relay hop
+    // overwrites it with the current hub's id, so a caller correlates to its
+    // DIRECT peer's trace. Only variants carrying `by` (someone ran) get it.
+    return stampPeerTaskId(relabelTaskId(result, task.id), result.taskId)
   })
 
   opts.link.on('message', (msg) => {
@@ -518,5 +524,24 @@ function relabelTaskId(r: TaskResult, taskId: TaskId): TaskResult {
     // task_result frame on the wire.
     case 'suspended':
       return { ...r, taskId }
+  }
+}
+
+/**
+ * v5 Stream G day-5 — stamp the cross-hub transcript correlation handle on the
+ * result we hand back over the link. `peerTaskId` is OUR (the receiver's)
+ * internal task id, so the caller can later ask us for THIS task's transcript.
+ * Only the variants that carry `by` (a participant actually ran) get it; for
+ * `cancelled` / `no_participant` nothing executed, so there is no trace to
+ * correlate and the result is returned unchanged. See `TaskResult.peerTaskId`.
+ */
+function stampPeerTaskId(r: TaskResult, peerTaskId: TaskId): TaskResult {
+  switch (r.kind) {
+    case 'ok':
+    case 'failed':
+    case 'suspended':
+      return { ...r, peerTaskId }
+    default:
+      return r
   }
 }

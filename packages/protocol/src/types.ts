@@ -173,9 +173,21 @@ export interface Task {
   createdAt: number
 }
 
+/**
+ * v5 Stream G day-5 — `peerTaskId` (optional, only on the variants that carry
+ * `by` = a participant actually ran) is the id under which a CROSS-HUB executor
+ * recorded this task in ITS OWN transcript. The peer-link inbound handler stamps
+ * it BEFORE relabelling the result back to the caller's wire id, so the calling
+ * hub keeps a durable correlation handle — persisted on the workflow StepRecord —
+ * that it can later use to fetch that one task's transcript from the peer
+ * (`peer.transcript` RPC, opt-in). Each relay hop overwrites it with the CURRENT
+ * hub's internal id, so a caller always correlates to its DIRECT peer's trace of
+ * its own task (deeper hops stay each peer's business). Absent for same-hub
+ * results — no relabel happened, nothing to correlate.
+ */
 export type TaskResult =
-  | { kind: 'ok'; taskId: TaskId; by: ParticipantId; output: unknown; ts: number }
-  | { kind: 'failed'; taskId: TaskId; by: ParticipantId; error: string; ts: number }
+  | { kind: 'ok'; taskId: TaskId; by: ParticipantId; output: unknown; ts: number; peerTaskId?: TaskId }
+  | { kind: 'failed'; taskId: TaskId; by: ParticipantId; error: string; ts: number; peerTaskId?: TaskId }
   | { kind: 'cancelled'; taskId: TaskId; reason: string; ts: number }
   | { kind: 'no_participant'; taskId: TaskId; reason: string; ts: number }
   /**
@@ -186,4 +198,4 @@ export type TaskResult =
    * `resumeAt`. Distinct from `failed` so callers/transcript can show a
    * waiting state and the task isn't counted as terminated.
    */
-  | { kind: 'suspended'; taskId: TaskId; by: ParticipantId; resumeAt: number; ts: number }
+  | { kind: 'suspended'; taskId: TaskId; by: ParticipantId; resumeAt: number; ts: number; peerTaskId?: TaskId }
