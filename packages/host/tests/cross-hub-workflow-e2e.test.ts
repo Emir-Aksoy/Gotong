@@ -122,6 +122,20 @@ describe('v5 Stream G-M2 — cross-hub workflow orchestration via the outbound a
       hub: hubA,
       definitionsDir: join(tmp, 'workflows', 'definitions'),
       spaceRoot: tmp,
+      // Stream G day-3 — mirror production: the host builds this off-hub view
+      // from hub A's connected peers + the capabilities each wrapper advertises.
+      // Here that's the 'hubB' wrapper advertising PEER_CAP once
+      // installCrossHubPeer wires the link. Resolved LAZILY (a closure) so it is
+      // honest before/after the peer is installed, and so readRun can confirm a
+      // step's persisted executedBy resolved to this peer.
+      peerCapabilities: {
+        peerCapabilities: () => {
+          const wrapper = hubA.participants().find((p) => p.id === 'hubB')
+          return wrapper
+            ? [{ peer: 'hubB', label: 'Org B', capabilities: [...wrapper.capabilities], kind: 'peer' as const }]
+            : []
+        },
+      },
     })
     service = new HostInboxService({ hub: hubA, store: inboxStore, identity })
   })
@@ -205,7 +219,14 @@ describe('v5 Stream G-M2 — cross-hub workflow orchestration via the outbound a
     const runs = await controller.listRuns({ workflowId: 'cross-hub-flow' })
     const parked = await controller.readRun(runs[0]!.runId)
     expect(parked?.status).toBe('running')
-    expect(parked?.steps.some((s) => s.stepId === 'review' && s.status === 'suspended')).toBe(true)
+    const parkedReview = parked?.steps.find((s) => s.stepId === 'review')
+    expect(parkedReview?.status).toBe('suspended')
+    // Stream G day-3 — even while parked at the gate the step already records WHO
+    // it went to: the persisted executedBy is the peer wrapper id, and readRun
+    // resolves that to a cross-hub CONFIRMATION. So "this step left for Org B" is
+    // visible from the moment it parks, not only after it completes.
+    expect(parkedReview?.executedBy).toBe('hubB')
+    expect(parkedReview?.crossHub).toEqual({ peer: 'hubB', peerLabel: 'Org B', kind: 'peer' })
 
     // Approve as the owner → the two-step resume runs (child gate crosses, then
     // the parent workflow re-reads the child's result and continues).
@@ -224,6 +245,10 @@ describe('v5 Stream G-M2 — cross-hub workflow orchestration via the outbound a
     expect(done?.status).toBe('done')
     const review = done?.steps.find((s) => s.stepId === 'review')
     expect(review?.output).toEqual({ reviewed: true, doc: 'NDA.txt' })
+    // Stream G day-3 — the completed step persists the executor (the peer wrapper
+    // id, carried over from the suspend) and readRun confirms the cross-hub hop.
+    expect(review?.executedBy).toBe('hubB')
+    expect(review?.crossHub).toEqual({ peer: 'hubB', peerLabel: 'Org B', kind: 'peer' })
 
     // Parked rows cleaned up.
     expect(identity.getSuspendedTask(item.itemId)).toBeNull()
@@ -275,5 +300,10 @@ describe('v5 Stream G-M2 — cross-hub workflow orchestration via the outbound a
     expect(run?.status).toBe('done')
     const review = run?.steps.find((s) => s.stepId === 'review')
     expect(review?.output).toEqual({ reviewed: true, doc: 'memo.txt' })
+    // Stream G day-3 — a synchronous (un-gated) cross-hub step still records the
+    // peer wrapper as its executor, and readRun confirms the hop. Same persisted
+    // executedBy as the gated path, just set on the ok branch instead of suspend.
+    expect(review?.executedBy).toBe('hubB')
+    expect(review?.crossHub).toEqual({ peer: 'hubB', peerLabel: 'Org B', kind: 'peer' })
   })
 })
