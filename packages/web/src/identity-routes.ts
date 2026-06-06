@@ -184,6 +184,10 @@ export interface IdentityPeerDTO {
   // v5 E5 — opt-in to expose a privacy-safe footprint summary over peer.summary
   // (always present from a v23 store; default false = fail-closed).
   shareSummary: boolean
+  // v5 Stream G day-5 — opt-in to answer this peer's `peer.transcript` rpc with
+  // the slice of one cross-hub task's trace (always present from a v27 store;
+  // default false = fail-closed). Reveals more than the summary's counts.
+  shareTranscript: boolean
 }
 
 export interface IdentityOrgQuotaDTO {
@@ -294,6 +298,7 @@ export interface IdentitySurface {
     allowedDataClasses?: string[] | null
     allowedKnowledgeBases?: string[] | null
     shareSummary?: boolean
+    shareTranscript?: boolean
   }): IdentityPeerDTO
   listPeers?(): IdentityPeerDTO[]
   updatePeer?(
@@ -312,6 +317,7 @@ export interface IdentitySurface {
       allowedDataClasses?: string[] | null
       allowedKnowledgeBases?: string[] | null
       shareSummary?: boolean
+      shareTranscript?: boolean
     },
   ): IdentityPeerDTO
   removePeer?(id: string): boolean
@@ -2067,6 +2073,8 @@ interface PeerPolicyFields {
   allowedKnowledgeBases?: string[] | null
   // v5 E5 — opt-in to share a privacy-safe footprint summary (fail-closed default).
   shareSummary?: boolean
+  // v5 Stream G day-5 — opt-in to answer peer.transcript (fail-closed default).
+  shareTranscript?: boolean
 }
 
 /**
@@ -2115,6 +2123,7 @@ function parsePeerPolicyFields(b: {
   allowedDataClasses?: unknown
   allowedKnowledgeBases?: unknown
   shareSummary?: unknown
+  shareTranscript?: unknown
 }): { ok: true; value: PeerPolicyFields } | { ok: false; error: string } {
   const value: PeerPolicyFields = {}
   if (b.kind !== undefined) {
@@ -2180,6 +2189,14 @@ function parsePeerPolicyFields(b: {
       return { ok: false, error: 'shareSummary must be a boolean' }
     }
     value.shareSummary = b.shareSummary
+  }
+  // v5 Stream G day-5 — opt into answering peer.transcript (one cross-hub task's
+  // trace, fail-closed default). A plain boolean like shareSummary; no "null".
+  if (b.shareTranscript !== undefined) {
+    if (typeof b.shareTranscript !== 'boolean') {
+      return { ok: false, error: 'shareTranscript must be a boolean' }
+    }
+    value.shareTranscript = b.shareTranscript
   }
   return { ok: true, value }
 }

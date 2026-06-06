@@ -694,6 +694,19 @@ export interface WorkflowSurface {
    * id is unknown / its file is missing. The host reads `definitions/<id>.yaml`.
    */
   exportDefinitionText(id: string): Promise<string | null>
+  /**
+   * v5 Stream G day-5 — fetch the executing peer's transcript of ONE cross-hub
+   * step (the post-launch transcript CHAIN). The host resolves the step's
+   * persisted `executedBy` + `peerTaskId`, reaches the peer link, and calls the
+   * opt-in `peer.transcript` rpc. Returns a duck-typed discriminated verdict:
+   * `{ ok: true, slice }` or `{ ok: false, code, message }` where `code` is one
+   * of `unknown_run` / `unknown_step` / `not_cross_hub` / `no_link` /
+   * `fetch_failed` (the last covers a peer that hasn't opted into sharing). The
+   * Web layer maps the first two to 404 and renders the rest inline. OPTIONAL —
+   * a host built without a peer-link resolver (single-hub) may omit it, and the
+   * route then answers 404.
+   */
+  fetchPeerStepTranscript?(runId: string, stepId: string): Promise<unknown>
 }
 
 /**

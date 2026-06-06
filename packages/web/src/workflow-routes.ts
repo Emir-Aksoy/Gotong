@@ -323,6 +323,42 @@ export async function handleWorkflowRoute(
     return true
   }
 
+  // v5 Stream G day-5 — the cross-hub transcript CHAIN. For one step of a run
+  // that ran on a peer hub, pull the peer's own transcript of that one task
+  // (the opt-in `peer.transcript` rpc). Wired here, under /runs, so the two
+  // path segments never collide with the single-segment workflow routes below.
+  // The host owns the peer link + fetch; the Web layer just forwards the
+  // duck-typed verdict. A host with no peer-link resolver omits the method → 404.
+  const peerTxMatch = path.match(
+    /^\/api\/admin\/workflows\/runs\/([^/]+)\/steps\/([^/]+)\/peer-transcript$/,
+  )
+  if (method === 'GET' && peerTxMatch) {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    if (!ctx.workflows || !ctx.workflows.fetchPeerStepTranscript) {
+      sendJson(res, { error: 'cross-hub transcript chain not enabled on this host' }, 404)
+      return true
+    }
+    const runId = decodeURIComponent(peerTxMatch[1]!)
+    const stepId = decodeURIComponent(peerTxMatch[2]!)
+    try {
+      const out = (await ctx.workflows.fetchPeerStepTranscript(runId, stepId)) as
+        | { ok: true; slice: unknown }
+        | { ok: false; code: string; message: string }
+      // A genuinely-missing run/step is a 404; the soft verdicts (same-hub step,
+      // disconnected peer, peer not sharing) ride back as 200 so the UI renders
+      // the reason inline rather than treating it as an error.
+      if (out && out.ok === false && (out.code === 'unknown_run' || out.code === 'unknown_step')) {
+        sendJson(res, out, 404)
+        return true
+      }
+      sendJson(res, out)
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
+    }
+    return true
+  }
+
   // Phase 15 lifecycle transitions — POST /api/admin/workflows/:id/<action>.
   // Wired before the catch-all DELETE /:id (single-segment) — these all
   // carry a second path segment so they never collide. `publish` accepts an

@@ -1218,6 +1218,12 @@ async function main(): Promise<void> {
           return [...peers, ...a2a]
         },
       },
+      // Stream G day-5 — resolve a cross-hub step's peer-hub id to its live link
+      // so `fetchPeerStepTranscript` can pull the off-hub trace on demand. Same
+      // lazy forward-ref as `peerLinkResolver` above (line ~1142) and the cross-
+      // hub MCP path: read at request time, never at boot. A mesh hop's
+      // `executedBy` IS the peer-hub wire id `linkForHub` keys on.
+      peerLinkResolver: (peerId) => peerRegistryRef?.linkForHub(peerId) ?? null,
     },
     workflowReport,
   )

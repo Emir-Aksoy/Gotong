@@ -756,3 +756,80 @@ describe('peer callable-knowledge-base allowlist (v5 C-M1)', () => {
     expect(b.identity.getPeer(id)!.allowedKnowledgeBases).toBeNull()
   })
 })
+
+describe('peer transcript-sharing opt-in (v5 Stream G day-5)', () => {
+  let b: BootResult
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  it('POST shareTranscript:true persists + round-trips via getPeer', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_tx',
+        endpointUrl: 'wss://tx.example',
+        peerToken: 'tok-tx-12345678',
+        shareTranscript: true,
+      }),
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as { peer: { id: string; shareTranscript: boolean } }
+    expect(j.peer.shareTranscript).toBe(true)
+    expect(b.identity.getPeer(j.peer.id)!.shareTranscript).toBe(true)
+  })
+
+  it('POST without the field → false default (fail-closed, leaks nothing)', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_tx_default',
+        endpointUrl: 'wss://txd.example',
+        peerToken: 'tok-txd-1234567',
+      }),
+    })
+    expect(r.status).toBe(200)
+    const j = (await r.json()) as { peer: { shareTranscript: boolean } }
+    expect(j.peer.shareTranscript).toBe(false)
+  })
+
+  it('PATCH flips shareTranscript on, then off (independent of shareSummary)', async () => {
+    const id = b.identity.addPeer({
+      peerId: 'hub_tx_patch',
+      endpointUrl: 'wss://txp.example',
+      peerToken: 'tok-txp-1234567',
+    }).id
+    expect(b.identity.getPeer(id)!.shareTranscript).toBe(false)
+    let r = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ shareTranscript: true }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.identity.getPeer(id)!.shareTranscript).toBe(true)
+    // shareSummary is a separate opt-in — flipping transcript never touched it.
+    expect(b.identity.getPeer(id)!.shareSummary).toBe(false)
+    r = await fetch(`${b.baseUrl}/api/admin/identity/peers/${id}`, {
+      method: 'PATCH',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ shareTranscript: false }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.identity.getPeer(id)!.shareTranscript).toBe(false)
+  })
+
+  it('POST shareTranscript not a boolean → 400', async () => {
+    const r = await fetch(`${b.baseUrl}/api/admin/identity/peers`, {
+      method: 'POST',
+      headers: { cookie: b.ownerCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        peerId: 'hub_tx_bad',
+        endpointUrl: 'wss://x.example',
+        peerToken: 'tok-txbad-1234',
+        shareTranscript: 'yes',
+      }),
+    })
+    expect(r.status).toBe(400)
+  })
+})

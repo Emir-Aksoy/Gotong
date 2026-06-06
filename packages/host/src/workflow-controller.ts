@@ -27,7 +27,7 @@ import { existsSync, mkdirSync, unlinkSync } from 'node:fs'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
-import { createLogger, extractRequiredCapabilities, type Hub } from '@aipehub/core'
+import { createLogger, extractRequiredCapabilities, type Hub, type HubLink } from '@aipehub/core'
 import { NEVER_RESUME_AT } from '@aipehub/inbox'
 
 const log = createLogger('workflow-ctl')
@@ -60,6 +60,7 @@ import {
   WorkflowVersioning,
   type WorkflowLifecycleView,
 } from './workflow-versioning.js'
+import { fetchPeerTranscript, type PeerTranscriptSlice } from './peer-transcript.js'
 
 export interface WorkflowSummary {
   id: string
@@ -178,6 +179,30 @@ export interface PeerCapabilityView {
   }>
 }
 
+/**
+ * v5 Stream G day-5 — the result of asking a peer for the transcript of one
+ * cross-hub step. A discriminated verdict so the web route maps cleanly to HTTP
+ * without the controller throwing for the EXPECTED non-success cases (a same-hub
+ * step, a disconnected peer, a peer that hasn't opted into sharing). Only a
+ * genuinely-missing run/step is a 404; the soft cases render an inline note.
+ *
+ *   - `unknown_run` / `unknown_step` — no such run / step on disk → 404.
+ *   - `not_cross_hub`  — the step never crossed a boundary (no `peerTaskId`),
+ *     so there is no off-hub trace to fetch.
+ *   - `no_link`        — no peer-link resolver wired (single-hub host) OR the
+ *     peer is configured-but-not-connected right now.
+ *   - `fetch_failed`   — the link rejected the `peer.transcript` rpc. The most
+ *     common cause is the far hub NOT opting into sharing (its gate throws);
+ *     the message carries the peer's reason verbatim.
+ */
+export type PeerStepTranscriptResult =
+  | { ok: true; slice: PeerTranscriptSlice }
+  | {
+      ok: false
+      code: 'unknown_run' | 'unknown_step' | 'not_cross_hub' | 'no_link' | 'fetch_failed'
+      message: string
+    }
+
 export interface WorkflowControllerOptions {
   hub: Hub
   /**
@@ -199,6 +224,15 @@ export interface WorkflowControllerOptions {
    * cross-hub flags (single-hub deployments pay nothing).
    */
   peerCapabilities?: PeerCapabilityView
+  /**
+   * Stream G day-5 — optional resolver from a peer-hub id to its live `HubLink`,
+   * used by {@link WorkflowController.fetchPeerStepTranscript} to pull a peer's
+   * transcript of one cross-hub step on demand. Read LAZILY (a forward-declared
+   * ref in the host); absent ⇒ no off-hub transcript chain (single-hub hosts
+   * return `no_link`). The id passed is a step's `executedBy`, which for a mesh
+   * hop equals the peer-hub wire id `linkForHub` expects.
+   */
+  peerLinkResolver?: (peerId: string) => HubLink | null
 }
 
 /**
@@ -239,6 +273,8 @@ export class WorkflowController {
   private readonly known = new Map<string, { file: string | null }>()
   /** Stream G day-2 — connected-peer caps for cross-hub-step flags (optional). */
   private readonly peerCapabilities?: PeerCapabilityView
+  /** Stream G day-5 — peer-hub id → live HubLink, for the off-hub transcript chain (optional). */
+  private readonly peerLinkResolver?: (peerId: string) => HubLink | null
 
   constructor(opts: WorkflowControllerOptions) {
     this.hub = opts.hub
@@ -246,6 +282,7 @@ export class WorkflowController {
     this.spaceRoot = opts.spaceRoot
     this.runStore = new RunStore(opts.spaceRoot)
     this.peerCapabilities = opts.peerCapabilities
+    this.peerLinkResolver = opts.peerLinkResolver
     this.versioning =
       opts.versioning ??
       new WorkflowVersioning({ hub: opts.hub, spaceRoot: opts.spaceRoot })
@@ -368,6 +405,63 @@ export class WorkflowController {
       return { ...s, crossHub: { peer: s.executedBy, peerLabel: hit.label, kind: hit.kind } }
     })
     return { ...run, steps }
+  }
+
+  /**
+   * v5 Stream G day-5 — fetch the executing peer's transcript of ONE cross-hub
+   * step, on demand. This is the post-launch transcript CHAIN: day-3 records WHO
+   * ran a step (`executedBy`) and the result; this pulls the far hub's own trace
+   * of that one task so run detail can show what the off-hub agent actually did.
+   *
+   * The correlation is the persisted, peer-agnostic pair on the StepRecord:
+   * `executedBy` (the peer-hub wire id `linkForHub` keys on for a mesh hop) +
+   * `peerTaskId` (the id the far hub recorded the task under). We resolve the
+   * link, then call the opt-in `peer.transcript` rpc; the far hub's gate rejects
+   * unless it shares (`share_transcript`), surfaced here as `fetch_failed` with
+   * the peer's reason. Never throws for an expected miss — returns a verdict.
+   *
+   * Only mesh peers answer this (A2A external agents have no HubLink / rpc), and
+   * naturally so: an A2A `executedBy` isn't in the peer registry, so the resolver
+   * returns null → `no_link`.
+   */
+  async fetchPeerStepTranscript(runId: string, stepId: string): Promise<PeerStepTranscriptResult> {
+    const run = await this.runStore.read(runId)
+    if (!run) return { ok: false, code: 'unknown_run', message: `unknown run '${runId}'` }
+    const step = run.steps.find((s) => s.stepId === stepId)
+    if (!step) {
+      return { ok: false, code: 'unknown_step', message: `unknown step '${stepId}' in run '${runId}'` }
+    }
+    // A same-hub step never relabelled its result, so there is no off-hub task to
+    // correlate. Require BOTH the peer id and the opaque handle.
+    if (!step.executedBy || !step.peerTaskId) {
+      return {
+        ok: false,
+        code: 'not_cross_hub',
+        message: 'this step did not cross a hub boundary (no peer task handle recorded)',
+      }
+    }
+    if (!this.peerLinkResolver) {
+      return { ok: false, code: 'no_link', message: 'no peer-link resolver wired (single-hub host)' }
+    }
+    const link = this.peerLinkResolver(step.executedBy)
+    if (!link) {
+      return {
+        ok: false,
+        code: 'no_link',
+        message: `peer '${step.executedBy}' is not connected`,
+      }
+    }
+    try {
+      const slice = await fetchPeerTranscript(link, step.peerTaskId)
+      if (!slice) {
+        return { ok: false, code: 'fetch_failed', message: 'peer returned no transcript' }
+      }
+      return { ok: true, slice }
+    } catch (err) {
+      // The far hub's per-link gate throws when it hasn't opted into sharing;
+      // a closed link throws too. Surface the reason; the UI renders it inline.
+      return { ok: false, code: 'fetch_failed', message: err instanceof Error ? err.message : String(err) }
+    }
   }
 
   /**
