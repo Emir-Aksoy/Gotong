@@ -36,51 +36,91 @@ import { dangerousCommandGate } from '@aipehub/cli-agent'
 import { setupSharedWorkspace, readProgress, type SharedWorkspace } from './workspace.js'
 import { SharedWorkspaceCli } from './shared-workspace-cli.js'
 import { createRouterProvider } from './router-provider.js'
-import { type CodingAgent } from './routing.js'
+import { DEFAULT_CODING_POLICY, type CodingAgent, type RoutingPolicy } from './routing.js'
 
 const MOCK_CODER = fileURLToPath(new URL('./mock-coder.mjs', import.meta.url))
 
 const ROUTER_SYSTEM =
-  'You route a coding goal to the RIGHT agents — NOT a fixed pipeline. ' +
-  'A trivial fix (typo / rename) → codex only, implement directly. ' +
-  'A review/explain ask (do not change code) → claude-code only, no implementation. ' +
-  'Anything that needs design first → claude-code drafts, then codex implements. ' +
+  'You route a coding goal to the RIGHT coders — NOT a fixed pipeline — combining ' +
+  'the task with the user\'s arrangement (the roster, who is on-call, the budget). ' +
+  'A trivial fix (typo / rename) → one implementer, directly. ' +
+  'A review/explain ask (do not change code) → one reviewer, no implementation. ' +
+  'Anything that needs design first → a lead drafts, then an implementer builds. ' +
+  'Never dispatch a coder the user marked unavailable; if the ideal coder is off, ' +
+  'the on-call coder covers the role. If the budget caps to one coder, the lead does both. ' +
   'Dispatch by agentId; let PROGRESS.md carry the handoff.'
 
 interface RoutingScenario {
   label: string
   goal: string
+  /** The user's standing arrangement for this run (defaults to the std roster). */
+  policy?: RoutingPolicy
+  /** A short human label of the arrangement, for the console. */
+  arrangement?: string
   /** The agents we assert appended to the shared PROGRESS.md (the dispatched set). */
   expect: CodingAgent[]
 }
 
+// The SAME two goals are routed under DIFFERENT arrangements below — the proof
+// that dispatch combines 分析任务 with 用户的安排, not a fixed pipeline.
+const FEATURE_GOAL = 'Add OAuth login with refresh tokens to the auth service.'
+const TRIVIAL_GOAL = 'Fix the typo in the README heading.'
+
 const SCENARIOS: RoutingScenario[] = [
+  // —— feature goal, three arrangements ——
   {
-    label: '[A] 功能(需先设计)',
-    goal: 'Add OAuth login with refresh tokens to the auth service.',
+    label: '[A] 功能 · 默认 roster',
+    goal: FEATURE_GOAL,
+    arrangement: 'Claude Code 主理设计 + Codex 实现,都在岗',
     expect: ['claude-code', 'codex'],
   },
   {
-    label: '[B] 琐碎修复',
-    goal: 'Fix the typo in the README heading.',
+    label: '[A2] 功能 · Codex 不在岗',
+    goal: FEATURE_GOAL,
+    policy: { ...DEFAULT_CODING_POLICY, unavailable: ['codex'] },
+    arrangement: 'Codex 已登出 / 限流 → 标记不可用',
+    expect: ['claude-code'], // 同一目标, 安排变了 → 在岗的 Claude Code 一人包办
+  },
+  {
+    label: '[A3] 功能 · 预算限单 coder',
+    goal: FEATURE_GOAL,
+    policy: { ...DEFAULT_CODING_POLICY, singleCoder: true },
+    arrangement: '预算只允许派一个 coder',
+    expect: ['claude-code'], // 同一目标, 预算安排 → 主理独立完成
+  },
+  // —— trivial goal, two arrangements ——
+  {
+    label: '[B] 琐碎 · 默认 roster',
+    goal: TRIVIAL_GOAL,
+    arrangement: '都在岗 → 交给快手 Codex',
     expect: ['codex'],
   },
   {
-    label: '[C] 只审查不改',
+    label: '[B2] 琐碎 · Codex 不在岗',
+    goal: TRIVIAL_GOAL,
+    policy: { ...DEFAULT_CODING_POLICY, unavailable: ['codex'] },
+    arrangement: 'Codex 不在岗 → 小修也得有人接',
+    expect: ['claude-code'], // 同一目标, 安排变了 → 在岗的 Claude Code 接小修
+  },
+  // —— review goal ——
+  {
+    label: '[C] 只审查不改 · 默认 roster',
     goal: 'Review auth.ts for security issues; do not change code.',
+    arrangement: '默认 roster',
     expect: ['claude-code'],
   },
 ]
 
 async function main(): Promise<void> {
   console.log('\n=== AipeHub case: personal-coding-hub ===')
-  console.log('  路由按「目标」分派合适的编码 agent —— 不再每次都 claude-code → codex。\n')
+  console.log('  路由结合「任务分析 × 用户的安排」合理分派编码 agent —— 不是固定 claude-code → codex。\n')
 
   for (const s of SCENARIOS) await runRouting(s)
   await runActionGate()
 
   section('done')
-  console.log('  路由结合了目标:功能派两个、琐碎只派 Codex、审查只派 Claude Code;安全闸照旧。\n')
+  console.log('  同一个目标, 安排变了就派得不同:Codex 不在岗 → Claude Code 一人包办;')
+  console.log('  预算限单 coder → 主理独立完成;小修默认给 Codex、Codex 不在岗就给在岗的。安全闸照旧。\n')
   process.exit(0)
 }
 
@@ -97,7 +137,7 @@ async function runRouting(s: RoutingScenario): Promise<void> {
     new LlmAgent({
       id: routerId,
       capabilities: ['route'],
-      provider: createRouterProvider(),
+      provider: createRouterProvider(s.policy),
       system: ROUTER_SYSTEM,
       tools: DispatchToolset.create({ hub, selfId: routerId, allowedAgents: ['claude-code', 'codex'] }),
     }),
@@ -106,6 +146,7 @@ async function runRouting(s: RoutingScenario): Promise<void> {
   try {
     section(s.label)
     console.log(`  goal: ${s.goal}`)
+    if (s.arrangement) console.log(`  安排: ${s.arrangement}`)
     const result = await hub.dispatch({
       from: 'human',
       strategy: { kind: 'capability', capabilities: ['route'] },

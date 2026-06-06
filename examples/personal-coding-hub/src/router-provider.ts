@@ -1,25 +1,28 @@
 /**
  * The router's "brain" — a deterministic stand-in for the LLM that reads the GOAL
- * and routes the RIGHT coding agents for it. This is the upgrade: 能力分派要合适 —
- * no more fixed claude-code → codex pipeline regardless of what was asked.
+ * and routes the RIGHT coding agents for it, *combined with the user's standing
+ * arrangements*. This is the upgrade: 合理地调度 — no fixed claude-code → codex
+ * pipeline, and no dispatching a coder the user has taken off-call.
  *
  * It is a real `LlmProvider` (not a fixed `MockLlmProvider` script), because the
  * routing now depends on the input the way a real model's would:
  *
+ *   · The provider is constructed with the user's `RoutingPolicy` (the roster +
+ *     who's on-call + budget) — the same arrangement a real hub is configured with.
  *   · Every `stream(req)` call sees the goal (the first user message) + the
- *     dispatch history. It calls the pure `planRoute(goal)` to decide which agents
- *     to dispatch (a trivial fix → Codex only; a review → Claude Code only; a
- *     feature → both), then dispatches one agent per planned step.
+ *     dispatch history. It calls the pure `planRoute(goal, policy)` to combine the
+ *     task analysis with the arrangement, then dispatches one coder per planned step.
  *   · It knows which turn it is on by COUNTING prior `tool_use` blocks in the
  *     history — so turn k dispatches `plan.agents[k]`, then it reports back.
  *
- * Swap this for a real provider (Anthropic / OpenAI / DeepSeek) and the routing
- * judgement becomes the model's; the hub wiring is identical.
+ * Swap this for a real provider (Anthropic / OpenAI / DeepSeek), feed the same
+ * policy in the system prompt, and the routing judgement becomes the model's; the
+ * hub wiring is identical.
  */
 
 import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
 
-import { dispatchPrompt, planRoute, type CodingAgent } from './routing.js'
+import { dispatchPrompt, planRoute, DEFAULT_CODING_POLICY, type CodingAgent, type RoutingPolicy } from './routing.js'
 
 /** Agent → the transcript title for that dispatch. */
 const TITLE: Record<CodingAgent, string> = {
@@ -27,16 +30,19 @@ const TITLE: Record<CodingAgent, string> = {
   codex: 'implement',
 }
 
-export function createRouterProvider(): LlmProvider {
-  return new SituationAwareRouterProvider()
+/** Build the router brain bound to a user arrangement (defaults to the std roster). */
+export function createRouterProvider(policy: RoutingPolicy = DEFAULT_CODING_POLICY): LlmProvider {
+  return new SituationAwareRouterProvider(policy)
 }
 
 class SituationAwareRouterProvider implements LlmProvider {
   readonly name = 'router-situation-aware'
 
+  constructor(private readonly policy: RoutingPolicy) {}
+
   async *stream(req: LlmRequest): AsyncIterable<LlmStreamChunk> {
     const goal = readGoal(req)
-    const plan = planRoute(goal)
+    const plan = planRoute(goal, this.policy)
     const turn = countDispatched(req)
 
     if (turn < plan.agents.length) {
