@@ -100,8 +100,14 @@ export function makeCoder(
     args: spec.args,
     promptVia: 'arg',
     cwd: ws.dir,
-    // No `env`: the CLI inherits ambient env and uses its OWN login. We never set
-    // ANTHROPIC_API_KEY / OPENAI_API_KEY here — the MiniMax key stays the router's.
+    // The real CLI inherits ambient env and uses its OWN login (~/.claude.json /
+    // ~/.codex/auth.json). We inject NO API key — the router's key stays the router's.
+    // BUT we scrub the Claude Code "nesting" markers: this hub may itself be driven
+    // from a Claude Code session (CLAUDECODE=1), and an inherited marker makes a child
+    // `claude` refuse to run ("already inside Claude Code"). Deleting only the markers
+    // (buildEnv treats `undefined` as delete) keeps login resolution intact — login is
+    // file/keychain-based, not env-based. Harmless no-op for codex / the stub.
+    env: stub ? undefined : { CLAUDECODE: undefined, CLAUDE_CODE_ENTRYPOINT: undefined, CLAUDE_CODE_SSE_PORT: undefined },
     gate: dangerousCommandGate(),
     timeoutMs: 240_000,
     onChunk: onChunk ?? ((_taskId, chunk) => process.stdout.write(`        │ ${chunk.text.replace(/\n+$/, '')}\n`)),
