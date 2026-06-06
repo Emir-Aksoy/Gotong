@@ -182,6 +182,7 @@ import {
   type BuildSummaryDeps,
   type PeerSummaryFederation,
 } from './peer-summary.js'
+import { PeerTranscriptHost, PEER_TRANSCRIPT_METHODS } from './peer-transcript.js'
 import { GrowthReportsAdmin } from './services/growth-reports-admin.js'
 import {
   BINARY_SAFE_PLUGINS,
@@ -1407,6 +1408,13 @@ async function main(): Promise<void> {
       identity,
     }
     const peerSummaryHost = new PeerSummaryHost(summaryDeps)
+    // v5 Stream G day-5 — cross-hub transcript chain provider. Answers a peer's
+    // `peer.transcript { taskId }` with the slice of THIS hub's transcript for
+    // that one task (its task / result / llm stream / resume markers — never our
+    // internal sub-dispatches, which carry different ids). Composed onto the
+    // rpcResponder below; the per-link gate in peer-registry denies it unless the
+    // row opted into sharing (`share_transcript`, identity v27).
+    const peerTranscriptHost = new PeerTranscriptHost({ hub, hubId: selfHubId })
     // Phase 18 B-M3 — outbound cross-org approval gate. A peer row flagged
     // `requireApprovalOutbound` has its outbound sender wrapped so a task parks
     // as an approval item in the owner's /me inbox and only crosses the org
@@ -1444,6 +1452,7 @@ async function main(): Promise<void> {
       rpcResponder: (call) => {
         if (call.method.startsWith('mcp.')) return proxyRespond(call)
         if (call.method === PEER_SUMMARY_METHODS.get) return peerSummaryHost.respond(call)
+        if (call.method === PEER_TRANSCRIPT_METHODS.get) return peerTranscriptHost.respond(call)
         return peerManifestHost.respond(call)
       },
       ...(outboundApprovalGate ? { outboundApprovalGate } : {}),

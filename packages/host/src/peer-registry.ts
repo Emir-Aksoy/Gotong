@@ -38,6 +38,7 @@ import type { IdentityStore, PeerRegistration } from '@aipehub/identity'
 import { acceptHubLinks, bearerAuth, connectHubLink } from '@aipehub/transport-ws'
 import { gateKnowledgeBaseRpc, type RpcResponder } from './peer-kb-gate.js'
 import { denyPeerSummaryRpc } from './peer-summary.js'
+import { denyPeerTranscriptRpc } from './peer-transcript.js'
 // `WebSocketServer` is the runtime shape from `ws`. We don't take a
 // runtime dep on the `ws` package here (transport-ws owns that); the
 // caller passes the server instance from their `serveWebSocket` handle
@@ -498,6 +499,10 @@ export class PeerRegistry {
    *   - summary share (v5 E5) — `peer.summary` is OPT-IN: denied unless the row
    *     explicitly shares (`share_summary`), so the default is fail-closed by
    *     omission. We wrap (to deny) only when NOT sharing.
+   *   - transcript share (v5 Stream G day-5) — `peer.transcript` is OPT-IN the
+   *     same way: denied unless the row explicitly shares (`share_transcript`).
+   *     A transcript slice reveals more than the summary's counts (the agent's
+   *     actual work on a task), so fail-closed by omission is the safe default.
    *
    * No shared responder wired → omit entirely (peer has no rpc handler).
    */
@@ -509,6 +514,9 @@ export class PeerRegistry {
     }
     if (!row.shareSummary) {
       responder = denyPeerSummaryRpc(responder)
+    }
+    if (!row.shareTranscript) {
+      responder = denyPeerTranscriptRpc(responder)
     }
     return { rpcResponder: responder }
   }
