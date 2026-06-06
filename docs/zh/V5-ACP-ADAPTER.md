@@ -202,9 +202,9 @@ hub 上注册该 participant（**首个派发时才真 spawn 子进程**，长 s
 
 **诚实边界（与叶包一致）**：ACP agent 是 **本地 participant**（驱动子进程但注册在本地），
 **不是** 跨 hub 目的地——故意 **不** 喂进工作流的「离开本 hub」能力视图（Stream H 的 A2A
-才是跨 hub）。破坏性动作仍 fail-closed 当场拒（`onMatch:'deny'`）；把 ACP park 升级成 inbox
-审批（`onMatch:'escalate'` → 两步恢复）是已记录的 follow-up，本纵切先不接线以免出现「无人
-能恢复的挂起」。
+才是跨 hub）。破坏性动作默认 fail-closed 当场拒（`onMatch:'deny'`）；把 ACP park 升级成 inbox
+审批（`onMatch:'escalate'` → 两步恢复）当时是 follow-up，**现已接线**——见下「ACP-HITL」节
+（main.ts 接好 inbox + owner 时自动翻成 escalate，否则保持 deny，绝不出现「无人能恢复的挂起」）。
 
 ### 真机联调验证（2026-06-05，开发机）
 
@@ -238,6 +238,44 @@ no-op）；+3 回归测试断言 remove/refresh 触发 `onShutdown` 且非自己
 
 ---
 
+## ACP-HITL — 危险动作升级成 /me 收件箱审批（接线，复用 Phase 16）
+
+> commit `86fd77a`（M1）→ 本提交（M2）
+
+ACP-OUT 把破坏性动作做成 **fail-closed deny**：agent 不带那个 tool 把这轮跑完。安全，但
+「**该批准的也没人能批**」——没人值守的 hub 这是对的默认，可一旦有人在 `/me` 值守，就该让他
+**批准 / 拒绝**而不是一刀切拒。这一笔把 ACP park 升级成 `/me` 收件箱审批，是北极星「**人是
+`Participant`，不是 request_human_input tool**」最直接的一笔，也是 ACP-OUT 自己文档里记着的
+follow-up。
+
+**关键：`@aipehub/acp-agent` 叶包零改**——爆炸半径锁在 host。整条流程骑在**已经存在且被测过**的
+设施上：
+
+| 机件 | 之前 | 现在 |
+|---|---|---|
+| `AcpOutboundManager` 闸 | 硬编码 `onMatch:'deny'` | 新 `escalateDanger` 选项：main.ts 接好 inbox + owner 时翻成 `onMatch:'escalate'`，破坏性 tool **park**（`SuspendTaskError`，`ACP_NEVER_RESUME_AT`）扣住子进程阻塞在它**开着的反向权限请求**上 |
+| park → inbox item | 无（叶包没 inbox 依赖，写不了人来解的那条记录） | 新 `acp-escalation.ts` 纯函数 `acpApprovalItemFor`——host 把 ACP park 塑成 `approval` `InboxItem` 的**唯一**一处；**任何非 ACP park 返 null**（broker / approval-gate 的 `{inboxItemId}`、心跳、long-running……），故全局 `suspendNotifier` 能对**每个** suspend 调它而不重写那些 broker 自己写的 item |
+| `suspendNotifier` | 同步 persist | 改 `async`（scheduler **本就 await** 它）：persist park 后跑 sink，**审批 item 在 dispatch 返回 `suspended` 之前就存在**。审批人 = org owner（镜像 `ApprovalGatedParticipant`）；`AIPE_ACP_DANGER=deny` 强制旧的硬拒（给没审批人的无人值守 hub）|
+| `HostInboxService.resumeChild` | 只注入 `{answer:decision}`（broker 约定） | 合并 `{...row.state, answer}`：ACP `handleResume` 从持久 checkpoint state 里**重新找到内存 `permissionToken`**，而 broker / approval-gate 只读 `.answer`（多出的字段惰性无害 → 向后兼容）|
+
+恢复时**无漂移**：权限前的流式工作保留，权限后的工作在**同一 session** 上接着跑。拒绝
+**fail-closed**（破坏性 tool 从不执行；agent 拒掉它、以 `refusal` stopReason 收尾）。
+
+**验收门** `acp-escalation-inbox-e2e.test.ts` 走的是 main.ts 拼的**生产路径**：真 Hub + 异步
+`suspendNotifier` → 真 IdentityStore + main.ts 安装的**那个 sink 闭包** → 真 FileInboxStore；
+`AcpParticipant`（`escalateDanger`）驱动真 spawn 的 mock ACP server；真 `HostInboxService.resolve`：
+① 批准 → 审批 item 出现 + park 在 `NEVER_RESUME_AT`（sweep 取不到）+ resolve 后 held turn 完成
+无漂移（`permissionApproved:true`、输出含 `perm:allowed`）；② 拒绝 → fail-closed（`refusal`、不含
+`perm:allowed`）；③ 非 owner 用户解不了别人的审批（`forbidden`，仍 parked + pending）。另有
+`acp-escalation.test.ts` 纯单测钉死 `acpApprovalItemFor` 的 null 边界 + 从 ancestry 推 `parentKind`。
+
+**诚实边界**：内存权限耦合（Q2）不变——park 扣住的是活阻塞子进程这个内存资源，**不跨 hub
+重启**；hub 死则子进程同死、在飞反向请求丢、`handleResume` 查不到活句柄会 **loud fail**（绝不
+挂死）。escalate→inbox 只是把「谁来按那一下」从 `dangerousToolGate` 的自动判定换成一个在 `/me`
+值守的人。
+
+---
+
 ## 运维须知
 
 - **动作闸是默认推荐**。`dangerousToolGate()` 用一组保守的危险模式（`rm -rf` / `git push` /
@@ -260,8 +298,8 @@ no-op）；+3 回归测试断言 remove/refresh 触发 `onShutdown` 且非自己
 - 同 session 并发轮（显式串行）。
 - ~~ACP agent 的 admin-UI 配置 / 持久化~~ **✓ ACP-OUT 已做**（`acp_outbound_agents` v26 +
   CRUD + admin 面板，见上「折进生产 host」节）。
-- 把 ACP 权限 park 升级成 inbox 审批（`onMatch:'escalate'` → 两步恢复）——ACP-OUT 的 host
-  manager 当前用 `onMatch:'deny'`（fail-closed），escalate→inbox 接线是 follow-up。
+- ~~把 ACP 权限 park 升级成 inbox 审批（`onMatch:'escalate'` → 两步恢复）~~ **✓ ACP-HITL 已做**
+  （main.ts 接好 inbox + owner 时自动 escalate，`AIPE_ACP_DANGER=deny` 强制旧硬拒；见上「ACP-HITL」节）。
 - `tool_call` / `plan` `session/update` 富渲染（MVP 只 message-chunk 文本 OBSERVE）。
 
 ---
