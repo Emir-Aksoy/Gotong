@@ -67,6 +67,14 @@ export type IdentityErrorCode =
   //   `alert_rule_not_found`  get/update/remove targeted an id with no row.
   | 'alert_rule_exists'
   | 'alert_rule_not_found'
+  // v5 Stream F day-3 — control-plane alert FIRINGS (breach history).
+  //   `alert_firing_open`       openPeerSummaryAlertFiring hit the partial
+  //                             unique index — a firing is already OPEN for
+  //                             this (rule, source) (the edge-trigger guard).
+  //   `alert_firing_not_found`  resolvePeerSummaryAlertFiring targeted an id
+  //                             with no row.
+  | 'alert_firing_open'
+  | 'alert_firing_not_found'
   | 'session_expired'
   | 'session_not_found'
   | 'weak_password'

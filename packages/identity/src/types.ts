@@ -1163,6 +1163,72 @@ export interface UpdatePeerSummaryAlertRuleInput {
   enabled?: boolean
 }
 
+/**
+ * v5 Stream F day-3 — a control-plane alert FIRING (the breach history the MVP
+ * deliberately skipped). One row is one open→resolve lifecycle of a (rule,
+ * source) pair: the host OPENS a firing the moment a rule's metric crosses its
+ * threshold (edge-triggered — once per breach, NOT once per evaluation) and
+ * RESOLVES it when the metric falls back. Append-only with a `resolvedAt` stamp,
+ * the same counts-only privacy contract as the rest of this plane: every column
+ * is a number, a comparator, or an id of the alerting hub's OWN config — never
+ * an underlying peer row. `ruleId` is retained verbatim even after the rule is
+ * deleted (forensics, like the ledger keeps a user id past deletion) — no FK.
+ */
+export interface PeerSummaryAlertFiring {
+  /** Monotonic rowid (autoincrement). Stable cursor. */
+  id: number
+  /** The `asr_<hex>` rule that fired; kept even if the rule is later removed. */
+  ruleId: string
+  /** The ACTUAL source that breached — never the `'*'` wildcard. */
+  source: string
+  metric: string
+  comparator: PeerSummaryAlertComparator
+  threshold: number
+  /** The projected metric value at the moment the firing OPENED. */
+  value: number
+  label: string | null
+  /** ms epoch the breach was first observed. */
+  openedAt: number
+  /** ms epoch the metric fell back below threshold; null = still firing. */
+  resolvedAt: number | null
+}
+
+/**
+ * Open shape. `openedAt` defaults to `Date.now()`. Identity enforces
+ * at-most-one OPEN firing per (ruleId, source) via a partial unique index — a
+ * second open while one is unresolved throws `alert_firing_open`, so the
+ * edge-trigger invariant lives in the schema, not just the caller.
+ */
+export interface OpenPeerSummaryAlertFiringInput {
+  ruleId: string
+  source: string
+  metric: string
+  comparator: PeerSummaryAlertComparator
+  threshold: number
+  value: number
+  label?: string | null
+  openedAt?: number
+}
+
+/**
+ * Firing history query. `source` / `ruleId` narrow; `state` filters open vs
+ * resolved; `[since, until)` is a half-open window on `opened_at`. Results are
+ * REVERSE-chronological (newest first) — a "recent firings" list reads
+ * top-down — clamped to {@link PEER_SUMMARY_ALERT_FIRING_MAX_LIMIT}.
+ */
+export interface PeerSummaryAlertFiringQuery {
+  source?: string
+  ruleId?: string
+  state?: 'open' | 'resolved'
+  since?: number
+  until?: number
+  limit?: number
+}
+
+/** Default / max row count for {@link PeerSummaryAlertFiringQuery}. */
+export const PEER_SUMMARY_ALERT_FIRING_DEFAULT_LIMIT = 200
+export const PEER_SUMMARY_ALERT_FIRING_MAX_LIMIT = 10_000
+
 // ---------------------------------------------------------------------------
 // D1 (v4 Phase 5) — Peer Registry
 // ---------------------------------------------------------------------------

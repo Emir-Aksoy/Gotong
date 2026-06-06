@@ -54,6 +54,7 @@ import { SuspendedTaskStore } from './suspended-task-store.js'
 import { LedgerStore } from './ledger-store.js'
 import { PeerSummarySnapshotStore } from './peer-summary-snapshot-store.js'
 import { PeerSummaryAlertRuleStore } from './peer-summary-alert-rule-store.js'
+import { PeerSummaryAlertFiringStore } from './peer-summary-alert-firing-store.js'
 import { ResourceGrantStore } from './resource-grant-store.js'
 import { userPrincipal, type Principal } from './principal.js'
 import { PeerStore } from './peer-store.js'
@@ -134,6 +135,10 @@ import {
   type AddPeerSummaryAlertRuleInput,
   type PeerSummaryAlertRule,
   type UpdatePeerSummaryAlertRuleInput,
+  // v5 Stream F day-3 — control-plane alert FIRINGS (breach history).
+  type OpenPeerSummaryAlertFiringInput,
+  type PeerSummaryAlertFiring,
+  type PeerSummaryAlertFiringQuery,
   type TotpEnrollment,
   type TotpState,
   type User,
@@ -499,6 +504,7 @@ export class IdentityStore {
   // identity never parses the blob (the host owns PeerSummary semantics).
   private readonly peerSummarySnapshots: PeerSummarySnapshotStore
   private readonly peerSummaryAlertRules: PeerSummaryAlertRuleStore
+  private readonly peerSummaryAlertFirings: PeerSummaryAlertFiringStore
   // Phase 19 P2-M5 → v5 A-M1 — resource grants (unified resource-level RBAC,
   // principal → any resource). Owner-as-grant. Generalizes the old
   // workflow-only grant store; the workflow facade methods below delegate here.
@@ -566,6 +572,7 @@ export class IdentityStore {
     this.ledger = new LedgerStore(db)
     this.peerSummarySnapshots = new PeerSummarySnapshotStore(db)
     this.peerSummaryAlertRules = new PeerSummaryAlertRuleStore(db)
+    this.peerSummaryAlertFirings = new PeerSummaryAlertFiringStore(db)
     // Phase 19 P2-M5 → v5 A-M1 — unified resource grants. Eager statements.
     this.resourceGrants = new ResourceGrantStore(db)
     // Route B P1-M3b — MFA TOTP store. Composes `this` for vault ops (the
@@ -2726,6 +2733,45 @@ export class IdentityStore {
 
   removePeerSummaryAlertRule(id: string): boolean {
     return this.peerSummaryAlertRules.remove(id)
+  }
+
+  // ---- v5 Stream F day-3 — control-plane alert FIRINGS (breach history).
+  // Delegated to PeerSummaryAlertFiringStore. The host edge-triggers: opens a
+  // firing the moment a rule breaches, resolves it when the metric falls back.
+  // identity just persists the open→resolve lifecycle (counts-only, no FK).
+
+  openPeerSummaryAlertFiring(
+    input: OpenPeerSummaryAlertFiringInput,
+  ): PeerSummaryAlertFiring {
+    return this.peerSummaryAlertFirings.open(input)
+  }
+
+  /** Currently-firing rows (resolved_at IS NULL) — the edge-trigger differ's input. */
+  listOpenPeerSummaryAlertFirings(): PeerSummaryAlertFiring[] {
+    return this.peerSummaryAlertFirings.listOpen()
+  }
+
+  /** Firing history, newest first, with optional source / ruleId / state / window filters. */
+  listPeerSummaryAlertFirings(
+    query: PeerSummaryAlertFiringQuery = {},
+  ): PeerSummaryAlertFiring[] {
+    return this.peerSummaryAlertFirings.list(query)
+  }
+
+  /** Mark a firing resolved (metric fell back). Idempotent; missing id → throws. */
+  resolvePeerSummaryAlertFiring(
+    id: number,
+    opts: { resolvedAt?: number } = {},
+  ): PeerSummaryAlertFiring {
+    return this.peerSummaryAlertFirings.resolve(id, opts)
+  }
+
+  /**
+   * Prune RESOLVED firings older than `before` (v5 Stream F day-3 retention).
+   * Open firings are never pruned. Host-gated OFF by default.
+   */
+  prunePeerSummaryAlertFirings(opts: { before: number }): number {
+    return this.peerSummaryAlertFirings.prune(opts)
   }
 
   // =====================================================================

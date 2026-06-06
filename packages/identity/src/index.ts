@@ -97,6 +97,10 @@ export type {
   PeerSummaryAlertComparator,
   AddPeerSummaryAlertRuleInput,
   UpdatePeerSummaryAlertRuleInput,
+  // v5 Stream F day-3 — control-plane alert FIRINGS (breach history)
+  PeerSummaryAlertFiring,
+  OpenPeerSummaryAlertFiringInput,
+  PeerSummaryAlertFiringQuery,
   // Phase 11 M2 — Suspended tasks (long-running agent park/resume)
   SuspendedTask,
   PersistSuspendedTaskInput,

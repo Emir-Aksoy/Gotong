@@ -961,6 +961,46 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE peers ADD COLUMN share_transcript INTEGER NOT NULL DEFAULT 0;
     `,
   },
+  {
+    // v5 Stream F day-3 — control-plane alert FIRINGS (breach history). The F
+    // MVP evaluated rules point-in-time and kept no history ("a fired alert is
+    // a fact about NOW"); day-3 persists one row per open→resolve lifecycle so
+    // the control plane shows a timeline AND a delivery dispatcher can
+    // edge-trigger — notify ONCE when a breach opens, not every evaluation.
+    // Append-only + a resolved_at stamp; no FK (rule_id is kept verbatim after
+    // the rule is deleted, like the ledger keeps a user id). Same counts-only
+    // privacy contract as the rest of this plane — every column is a number, a
+    // comparator, or an id of THIS hub's own alert config.
+    //
+    //   rule_id      the asr_<hex> rule that fired (kept even if rule removed).
+    //   source       the ACTUAL source that breached ('local' | a peer id).
+    //   value        the projected metric value when the firing OPENED.
+    //   opened_at    ms epoch the breach was first observed.
+    //   resolved_at  ms epoch the metric fell back; NULL = still firing.
+    // The partial UNIQUE index enforces at-most-one OPEN firing per
+    // (rule_id, source) — the edge-trigger invariant lives in the schema.
+    version: 28,
+    name: 'peer-summary-alert-firings',
+    sql: `
+      CREATE TABLE IF NOT EXISTS peer_summary_alert_firings (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        rule_id      TEXT NOT NULL,
+        source       TEXT NOT NULL,
+        metric       TEXT NOT NULL,
+        comparator   TEXT NOT NULL,
+        threshold    REAL NOT NULL,
+        value        REAL NOT NULL,
+        label        TEXT,
+        opened_at    INTEGER NOT NULL,
+        resolved_at  INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_psaf_opened
+        ON peer_summary_alert_firings(opened_at);
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_psaf_open_unique
+        ON peer_summary_alert_firings(rule_id, source)
+        WHERE resolved_at IS NULL;
+    `,
+  },
 ]
 
 /**
