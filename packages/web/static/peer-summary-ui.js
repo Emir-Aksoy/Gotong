@@ -9,7 +9,7 @@
  * `shareSummary`, fail-closed); otherwise its row carries an honest reason
  * ("未共享" / 离线) instead of fabricated zeros.
  *
- * Stream F layers two day-2 features on top, both reading the same counts-only
+ * Stream F layers day-2 + day-3 features on top, all reading the same counts-only
  * data the live aggregate shows:
  *   - 趋势 (F-M2/M3): a per-source per-metric sparkline read from persisted
  *     snapshots (GET /api/admin/peer-summaries/history). Each "刷新" captures one
@@ -17,7 +17,14 @@
  *     summary fetch succeeds.
  *   - 告警 (F-M4/M5): threshold rules (CRUD over /peer-summary-alerts/rules)
  *     evaluated LIVE against the current summaries — a breach is a fact about NOW,
- *     recomputed each load, no breach history kept.
+ *     recomputed each load.
+ *   - 触发历史 + 通知渠道 (day-3): persisted firing lifecycle (edge-triggered:
+ *     open once on breach, resolve once on clear) read from /firings, and webhook
+ *     channels (CRUD + 测试) over /channels. A channel stores an env-var NAME, not
+ *     a secret; proactive delivery rides an opt-in host sweep
+ *     (AIPE_PEER_SUMMARY_ALERT_SWEEP_MS) — until that's set, channels only fire on
+ *     the 测试 button. Still counts-only end to end: a delivered payload carries
+ *     numbers / ids / threshold, never a name or a row.
  *
  * North-Star honest: a control plane OBSERVES, it never OWNS. We aggregate +
  * trend + alert on what sovereign peers choose to disclose — nothing is pulled
@@ -36,6 +43,8 @@
   const HISTORY_API = '/api/admin/peer-summaries/history'
   const ALERTS_API = '/api/admin/peer-summary-alerts'
   const RULES_API = '/api/admin/peer-summary-alerts/rules'
+  const FIRINGS_API = '/api/admin/peer-summary-alerts/firings'
+  const CHANNELS_API = '/api/admin/peer-summary-alerts/channels'
 
   // JS mirror of the host metric registry (PEER_SUMMARY_METRIC_KEYS). The host
   // is the authority — these are only the labels + the dropdown order; the
@@ -223,6 +232,42 @@
     return readBody(await fetch(RULES_API + '/' + encodeURIComponent(id), { method: 'DELETE' }))
   }
 
+  // Firing history — newest first, bounded so the panel never pulls unbounded.
+  async function apiFirings() {
+    return readBody(await fetch(FIRINGS_API + '?limit=50'))
+  }
+  async function apiChannels() {
+    return readBody(await fetch(CHANNELS_API))
+  }
+  async function apiAddChannel(body) {
+    return readBody(
+      await fetch(CHANNELS_API, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    )
+  }
+  async function apiPatchChannel(id, body) {
+    return readBody(
+      await fetch(CHANNELS_API + '/' + encodeURIComponent(id), {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    )
+  }
+  async function apiDeleteChannel(id) {
+    return readBody(await fetch(CHANNELS_API + '/' + encodeURIComponent(id), { method: 'DELETE' }))
+  }
+  // Synthetic delivery — POSTs a test payload even to a disabled channel, so the
+  // operator can verify reachability without waiting for a real breach.
+  async function apiTestChannel(id) {
+    return readBody(
+      await fetch(CHANNELS_API + '/' + encodeURIComponent(id) + '/test', { method: 'POST' }),
+    )
+  }
+
   // ---- render: shell ----------------------------------------------------
 
   function cmpOptions() {
@@ -260,6 +305,18 @@
       '来源可选「本 hub」「某 peer」或「任意来源 (*)」。</p>' +
       '  <div id="ps-alerts-body"><span class="ps-spark-empty">加载中...</span></div>' +
       '</section>' +
+      // --- 触发历史 (day-3): persisted firing lifecycle, edge-triggered ---
+      '<section class="ps-section ps-firings">' +
+      '  <h3>触发历史</h3>' +
+      '  <p class="pf-meta">每条是一次<strong>开启 → 解决</strong>的完整生命周期(<strong>边沿触发</strong>:' +
+      '越线时记一次、恢复时标记解决,不会每轮求值重复记)。仅计数 —— 阈值、触发值、时间,绝不含原始记录。</p>' +
+      '  <table class="pf-table">' +
+      '    <thead><tr>' +
+      '      <th>来源</th><th>指标</th><th>条件</th><th>触发值</th><th>状态</th><th>开启</th><th>解决</th>' +
+      '    </tr></thead>' +
+      '    <tbody id="ps-firings-rows"><tr><td colspan="7" class="pf-empty">加载中...</td></tr></tbody>' +
+      '  </table>' +
+      '</section>' +
       // --- 趋势 (F-M3): per-source per-metric sparkline from persisted snapshots ---
       '<section class="ps-section ps-trend">' +
       '  <h3>趋势</h3>' +
@@ -288,6 +345,27 @@
       '    </tr></thead>' +
       '    <tbody id="ps-rules-rows"><tr><td colspan="6" class="pf-empty">加载中...</td></tr></tbody>' +
       '  </table>' +
+      '</section>' +
+      // --- 通知渠道 (day-3): webhook delivery channels (no secret in the row) ---
+      '<section class="ps-section ps-channels">' +
+      '  <h3>通知渠道</h3>' +
+      '  <p class="pf-meta">告警越线时把<strong>计数摘要</strong> POST 到 webhook(边沿触发:开启发一次、解决发一次)。' +
+      '渠道只存<strong>环境变量名</strong>(headerEnv),绝不存密钥本身 —— host 在投递时从该环境变量读取 Authorization。' +
+      '<strong>主动投递需开启轮询</strong>:设 <code>AIPE_PEER_SUMMARY_ALERT_SWEEP_MS</code>(≥10000)host 才会定期' +
+      '求值并投递;未设时渠道仅在下方「测试」按钮触发时发出。</p>' +
+      '  <form id="ps-channel-form" class="ps-rule-form" autocomplete="off">' +
+      '    <label>类型 <select id="ps-channel-kind"><option value="webhook">webhook</option></select></label>' +
+      '    <label>URL <input id="ps-channel-url" type="url" required placeholder="https://hooks.example.com/..." /></label>' +
+      '    <label>鉴权环境变量 (可选) <input id="ps-channel-headerenv" type="text" placeholder="如: OPS_WEBHOOK_TOKEN" /></label>' +
+      '    <label>标签 (可选) <input id="ps-channel-label" type="text" placeholder="如: 运维群" /></label>' +
+      '    <button type="submit">添加渠道</button>' +
+      '  </form>' +
+      '  <table class="pf-table">' +
+      '    <thead><tr>' +
+      '      <th>渠道</th><th>类型</th><th>鉴权</th><th>状态</th><th>操作</th>' +
+      '    </tr></thead>' +
+      '    <tbody id="ps-channels-rows"><tr><td colspan="5" class="pf-empty">加载中...</td></tr></tbody>' +
+      '  </table>' +
       '</section>'
 
     $('#ps-refresh-all', root).addEventListener('click', function () {
@@ -302,6 +380,10 @@
     $('#ps-rule-form', root).addEventListener('submit', function (e) {
       e.preventDefault()
       onAddRule(root).catch(function () { /* setStatus handled it */ })
+    })
+    $('#ps-channel-form', root).addEventListener('submit', function (e) {
+      e.preventDefault()
+      onAddChannel(root).catch(function () { /* setStatus handled it */ })
     })
   }
 
@@ -573,6 +655,164 @@
     }
   }
 
+  // ---- render: firings + channels (day-3) -------------------------------
+
+  // A firing is open until resolved — open reads as a live concern (amber),
+  // resolved as a closed lifecycle (green).
+  function firingStateBadge(f) {
+    return f.resolvedAt == null
+      ? '<span class="pf-badge pf-unknown">🔴 开启中</span>'
+      : '<span class="pf-badge pf-online">已解决</span>'
+  }
+
+  function renderFirings(root, firings) {
+    const tbody = $('#ps-firings-rows', root)
+    if (!tbody) return
+    if (!firings.length) {
+      tbody.innerHTML =
+        '<tr><td colspan="7" class="pf-empty">还没有触发记录。规则越线时会在这里留下一条开启→解决的生命周期。</td></tr>'
+      return
+    }
+    tbody.innerHTML = ''
+    for (const f of firings) {
+      const sym = CMP_SYMBOL[f.comparator] || f.comparator
+      const tr = document.createElement('tr')
+      if (f.resolvedAt == null) tr.className = 'ps-firing-open'
+      tr.innerHTML =
+        '<td>' + escHtml(sourceLabelOf(f.source)) + '</td>' +
+        '<td class="pf-caps">' + escHtml(metricLabelOf(f.metric)) +
+        ' <code class="pf-id">' + escHtml(f.metric) + '</code></td>' +
+        '<td>' + escHtml(sym) + ' ' + escHtml(fmtMetric(f.metric, f.threshold)) + '</td>' +
+        '<td>' + escHtml(fmtMetric(f.metric, f.value)) + '</td>' +
+        '<td>' + firingStateBadge(f) + '</td>' +
+        '<td class="pf-time">' + escHtml(fmtTime(f.openedAt)) + '</td>' +
+        '<td class="pf-time">' + (f.resolvedAt == null ? '—' : escHtml(fmtTime(f.resolvedAt))) + '</td>'
+      tbody.appendChild(tr)
+    }
+  }
+
+  function renderChannels(root, channels) {
+    const tbody = $('#ps-channels-rows', root)
+    if (!tbody) return
+    if (!channels.length) {
+      tbody.innerHTML =
+        '<tr><td colspan="5" class="pf-empty">还没有通知渠道。用上面的表单添加一个 webhook。</td></tr>'
+      return
+    }
+    tbody.innerHTML = ''
+    for (const c of channels) {
+      const label = c.label
+        ? escHtml(c.label) + ' <code class="pf-id">' + escHtml(c.url) + '</code>'
+        : '<code class="pf-id">' + escHtml(c.url) + '</code>'
+      // The row carries the env-var NAME ($NAME), never the bearer value.
+      const authCell = c.headerEnv ? '<code class="pf-id">$' + escHtml(c.headerEnv) + '</code>' : '—'
+      const tr = document.createElement('tr')
+      tr.innerHTML =
+        '<td class="pf-peer">' + label + '</td>' +
+        '<td>' + escHtml(c.kind) + '</td>' +
+        '<td>' + authCell + '</td>' +
+        '<td><span class="pf-badge ' + (c.enabled ? 'pf-online' : 'pf-unknown') + '">' +
+        (c.enabled ? '启用' : '停用') + '</span></td>' +
+        '<td class="ps-rule-actions">' +
+        '  <button type="button" class="ps-channel-test">测试</button>' +
+        '  <button type="button" class="ps-channel-toggle">' + (c.enabled ? '停用' : '启用') + '</button>' +
+        '  <button type="button" class="ps-channel-remove">删除</button>' +
+        '</td>'
+      tr.querySelector('.ps-channel-test').addEventListener('click', function () {
+        doChannelTest(root, c.id)
+      })
+      tr.querySelector('.ps-channel-toggle').addEventListener('click', function () {
+        doChannelPatch(root, c.id, { enabled: !c.enabled })
+      })
+      tr.querySelector('.ps-channel-remove').addEventListener('click', function () {
+        if (!window.confirm('删除该通知渠道?')) return
+        doChannelRemove(root, c.id)
+      })
+      tbody.appendChild(tr)
+    }
+  }
+
+  async function loadFiringsAndChannels(root) {
+    try {
+      const [firings, channels] = await Promise.all([apiFirings(), apiChannels()])
+      renderFirings(root, firings.firings || [])
+      renderChannels(root, channels.channels || [])
+    } catch (err) {
+      const fr = $('#ps-firings-rows', root)
+      const cr = $('#ps-channels-rows', root)
+      const msg =
+        err.status === 503 ? 'host 未启用 peer 联邦' : '加载失败: ' + (err.message || String(err))
+      if (fr) fr.innerHTML = '<tr><td colspan="7" class="pf-empty">' + escHtml(msg) + '</td></tr>'
+      if (cr) cr.innerHTML = '<tr><td colspan="5" class="pf-empty">' + escHtml(msg) + '</td></tr>'
+    }
+  }
+
+  // ---- mutations: channels (day-3) --------------------------------------
+
+  async function onAddChannel(root) {
+    const kind = $('#ps-channel-kind', root).value
+    const url = $('#ps-channel-url', root).value.trim()
+    const headerEnv = $('#ps-channel-headerenv', root).value.trim()
+    const label = $('#ps-channel-label', root).value.trim()
+    if (!url) {
+      setStatus(root, 'URL 必填', 'error')
+      return
+    }
+    const body = { kind: kind, url: url }
+    if (headerEnv) body.headerEnv = headerEnv
+    if (label) body.label = label
+    setStatus(root, '添加渠道...', 'loading')
+    try {
+      await apiAddChannel(body)
+      $('#ps-channel-url', root).value = ''
+      $('#ps-channel-headerenv', root).value = ''
+      $('#ps-channel-label', root).value = ''
+      setStatus(root, '渠道已添加', 'ok')
+      await loadFiringsAndChannels(root)
+    } catch (err) {
+      setStatus(root, '添加渠道失败: ' + (err.message || err), 'error')
+    }
+  }
+
+  async function doChannelPatch(root, id, body) {
+    setStatus(root, '保存渠道...', 'loading')
+    try {
+      await apiPatchChannel(id, body)
+      setStatus(root, '渠道已保存', 'ok')
+      await loadFiringsAndChannels(root)
+    } catch (err) {
+      setStatus(root, '保存渠道失败: ' + (err.message || err), 'error')
+    }
+  }
+
+  async function doChannelRemove(root, id) {
+    setStatus(root, '删除渠道...', 'loading')
+    try {
+      await apiDeleteChannel(id)
+      setStatus(root, '渠道已删除', 'ok')
+      await loadFiringsAndChannels(root)
+    } catch (err) {
+      setStatus(root, '删除渠道失败: ' + (err.message || err), 'error')
+    }
+  }
+
+  // Synthetic delivery — surfaces the per-channel result (ok + status, or the
+  // transport/non-2xx error) so the operator sees reachability immediately.
+  async function doChannelTest(root, id) {
+    setStatus(root, '发送测试...', 'loading')
+    try {
+      const data = await apiTestChannel(id)
+      const r = data.result || {}
+      if (r.ok) {
+        setStatus(root, '测试投递成功 (' + (r.status || 'ok') + ')', 'ok')
+      } else {
+        setStatus(root, '测试投递失败: ' + (r.error || 'http ' + (r.status || '?')), 'error')
+      }
+    } catch (err) {
+      setStatus(root, '测试失败: ' + (err.message || err), 'error')
+    }
+  }
+
   // ---- mutations: rules -------------------------------------------------
 
   async function onAddRule(root) {
@@ -641,12 +881,14 @@
       const data = await apiList()
       applyData(root, data)
       setStatus(root, '已加载 ' + ((data.peers || []).length) + ' 个 peer', 'ok')
-      await Promise.all([loadTrend(root), loadAlertsAndRules(root)])
+      await Promise.all([loadTrend(root), loadAlertsAndRules(root), loadFiringsAndChannels(root)])
     } catch (err) {
       if (err.status === 503) {
         applyData(root, {})
         renderAlerts(root, [])
         renderRules(root, [])
+        renderFirings(root, [])
+        renderChannels(root, [])
         setStatus(root, 'host 未启用 peer 联邦', 'error')
         return
       }
@@ -661,8 +903,9 @@
       const data = await apiRefresh(peerId)
       applyData(root, data)
       setStatus(root, '已刷新', 'ok')
-      // A refresh captured a fresh snapshot — re-read the trend + re-evaluate.
-      await Promise.all([loadTrend(root), loadAlertsAndRules(root)])
+      // A refresh captured a fresh snapshot — re-read the trend + re-evaluate +
+      // re-read firings (the opt-in sweep may have opened/resolved in the bg).
+      await Promise.all([loadTrend(root), loadAlertsAndRules(root), loadFiringsAndChannels(root)])
     } catch (err) {
       if (err.status === 503) {
         applyData(root, {})

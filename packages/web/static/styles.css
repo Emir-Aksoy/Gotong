@@ -2360,6 +2360,10 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .peer-summary-panel .ps-rule-form { display: flex; flex-wrap: wrap; gap: 0.5rem 0.9rem; align-items: flex-end; margin-bottom: 0.75rem; padding: 0.6rem 0.75rem; background: #fafafa; border: 1px solid #eee; border-radius: 6px; }
 .peer-summary-panel .ps-rule-actions { white-space: nowrap; }
 .peer-summary-panel .ps-rule-actions button { font-size: 0.78rem; padding: 2px 8px; margin-right: 4px; }
+/* day-3 — firing history + notification channels reuse the section/table/form
+   styles above; an open (unresolved) firing gets a subtle amber row highlight. */
+.peer-summary-panel .ps-firing-open td { background: #fef6ec; }
+.peer-summary-panel .ps-channels .pf-meta code { font-size: 0.78rem; background: #f0f0f0; padding: 0 3px; border-radius: 3px; }
 
 /* Route B P1-M7b — peer onboarding (tab "联邦", panel above manifest browse). */
 .peer-admin-panel { padding: 1rem; }
