@@ -29,6 +29,12 @@ import {
   serveWeb,
   type PeerSummary,
   type PeerSummaryAlertBreach,
+  type PeerSummaryAlertChannel,
+  type PeerSummaryAlertChannelAddInput,
+  type PeerSummaryAlertChannelUpdateInput,
+  type PeerSummaryAlertDeliveryResult,
+  type PeerSummaryAlertFiring,
+  type PeerSummaryAlertFiringQuery,
   type PeerSummaryAlertRule,
   type PeerSummaryAlertRuleAddInput,
   type PeerSummaryAlertRuleUpdateInput,
@@ -69,6 +75,18 @@ interface Boot {
   removeResult: boolean
   addThrowsCode: string | null
   evaluateThrows: boolean
+  // F day-3 firing history + channels
+  firings: PeerSummaryAlertFiring[]
+  firingQueries: Array<PeerSummaryAlertFiringQuery | undefined>
+  channels: PeerSummaryAlertChannel[]
+  channelAddCalls: PeerSummaryAlertChannelAddInput[]
+  channelUpdateCalls: Array<{ id: string; patch: PeerSummaryAlertChannelUpdateInput }>
+  channelRemoveCalls: string[]
+  channelRemoveResult: boolean
+  channelAddThrowsCode: string | null
+  testCalls: string[]
+  testThrowsCode: string | null
+  testResult: PeerSummaryAlertDeliveryResult
 }
 
 async function boot(opts: { withFederation?: boolean } = {}): Promise<Boot> {
@@ -97,6 +115,17 @@ async function boot(opts: { withFederation?: boolean } = {}): Promise<Boot> {
     removeResult: true,
     addThrowsCode: null,
     evaluateThrows: false,
+    firings: [],
+    firingQueries: [],
+    channels: [],
+    channelAddCalls: [],
+    channelUpdateCalls: [],
+    channelRemoveCalls: [],
+    channelRemoveResult: true,
+    channelAddThrowsCode: null,
+    testCalls: [],
+    testThrowsCode: null,
+    testResult: { channelId: 'psac_1', ok: true, status: 200 },
   }
 
   const fedStub: PeerSummaryFederationSurface = {
@@ -159,6 +188,54 @@ async function boot(opts: { withFederation?: boolean } = {}): Promise<Boot> {
     async evaluateAlerts() {
       if (out.evaluateThrows) throw new Error('boom')
       return out.breaches
+    },
+    listAlertFirings(query) {
+      out.firingQueries.push(query)
+      return out.firings
+    },
+    listAlertChannels() {
+      return out.channels
+    },
+    addAlertChannel(input) {
+      out.channelAddCalls.push(input)
+      if (out.channelAddThrowsCode) {
+        throw Object.assign(new Error('store'), { code: out.channelAddThrowsCode })
+      }
+      return {
+        id: 'psac_new',
+        kind: input.kind,
+        url: input.url,
+        headerEnv: input.headerEnv ?? null,
+        enabled: input.enabled ?? true,
+        label: input.label ?? null,
+        createdAt: 0,
+        updatedAt: 0,
+      }
+    },
+    updateAlertChannel(id, patch) {
+      out.channelUpdateCalls.push({ id, patch })
+      return {
+        id,
+        kind: 'webhook',
+        url: 'https://hooks.example.com/x',
+        headerEnv: null,
+        enabled: true,
+        label: null,
+        createdAt: 0,
+        updatedAt: 0,
+        ...patch,
+      }
+    },
+    removeAlertChannel(id) {
+      out.channelRemoveCalls.push(id)
+      return out.channelRemoveResult
+    },
+    async testAlertChannel(id) {
+      out.testCalls.push(id)
+      if (out.testThrowsCode) {
+        throw Object.assign(new Error('store'), { code: out.testThrowsCode })
+      }
+      return out.testResult
     },
   }
 
@@ -490,5 +567,213 @@ describe('/api/admin/peer-summary-alerts (v5 Stream F-M5)', () => {
     b = await boot()
     const r = await fetch(`${b.baseUrl}${RULES}`, { method: 'GET', headers: auth(b) })
     expect(r.status).toBe(405)
+  })
+})
+
+// ── v5 Stream F day-3 — firing history + notification channels ────────────────
+
+const FIRINGS = '/api/admin/peer-summary-alerts/firings'
+const CHANNELS = '/api/admin/peer-summary-alerts/channels'
+
+const firing = (over: Partial<PeerSummaryAlertFiring> = {}): PeerSummaryAlertFiring => ({
+  id: 1,
+  ruleId: 'asr_1',
+  source: 'local',
+  metric: 'health.suspendedTasks',
+  comparator: 'gt',
+  threshold: 5,
+  value: 9,
+  label: null,
+  openedAt: 1000,
+  resolvedAt: null,
+  ...over,
+})
+
+const channel = (over: Partial<PeerSummaryAlertChannel> = {}): PeerSummaryAlertChannel => ({
+  id: 'psac_1',
+  kind: 'webhook',
+  url: 'https://hooks.example.com/x',
+  headerEnv: null,
+  enabled: true,
+  label: null,
+  createdAt: 0,
+  updatedAt: 0,
+  ...over,
+})
+
+describe('/api/admin/peer-summary-alerts/firings (v5 Stream F day-3)', () => {
+  let b: Boot
+  afterEach(async () => { await teardown(b) })
+
+  it('503 when the federation surface is not wired', async () => {
+    b = await boot({ withFederation: false })
+    const r = await fetch(`${b.baseUrl}${FIRINGS}`, { headers: auth(b) })
+    expect(r.status).toBe(503)
+  })
+
+  it('GET returns firing rows + passes an empty query when no filters', async () => {
+    b = await boot()
+    b.firings = [firing({ id: 7, resolvedAt: 2000 }), firing({ id: 8 })]
+    const r = await fetch(`${b.baseUrl}${FIRINGS}`, { headers: auth(b) })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.firings).toHaveLength(2)
+    expect(j.firings[0].id).toBe(7)
+    expect(b.firingQueries).toEqual([{}])
+  })
+
+  it('GET threads source / ruleId / state / since / until / limit as a query', async () => {
+    b = await boot()
+    const r = await fetch(
+      `${b.baseUrl}${FIRINGS}?source=hub_a&ruleId=asr_3&state=resolved&since=100&until=900&limit=20`,
+      { headers: auth(b) },
+    )
+    expect(r.status).toBe(200)
+    expect(b.firingQueries).toEqual([
+      { source: 'hub_a', ruleId: 'asr_3', state: 'resolved', since: 100, until: 900, limit: 20 },
+    ])
+  })
+
+  it('GET 400 on an invalid state', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${FIRINGS}?state=weird`, { headers: auth(b) })
+    expect(r.status).toBe(400)
+    expect(b.firingQueries).toHaveLength(0)
+  })
+
+  it('GET 400 on a non-integer window param', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${FIRINGS}?since=abc`, { headers: auth(b) })
+    expect(r.status).toBe(400)
+    expect(b.firingQueries).toHaveLength(0)
+  })
+
+  it('405 on a non-GET method', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${FIRINGS}`, { method: 'POST', headers: auth(b) })
+    expect(r.status).toBe(405)
+  })
+})
+
+describe('/api/admin/peer-summary-alerts/channels (v5 Stream F day-3)', () => {
+  let b: Boot
+  afterEach(async () => { await teardown(b) })
+
+  it('GET lists channels (no secret in the row — headerEnv is an env name)', async () => {
+    b = await boot()
+    b.channels = [channel({ headerEnv: 'OPS_WEBHOOK_TOKEN' }), channel({ id: 'psac_2', enabled: false })]
+    const r = await fetch(`${b.baseUrl}${CHANNELS}`, { headers: auth(b) })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.channels).toHaveLength(2)
+    expect(j.channels[0].headerEnv).toBe('OPS_WEBHOOK_TOKEN')
+    // the row never carries a bearer — only the env-var NAME
+    expect(Object.keys(j.channels[0])).not.toContain('header')
+  })
+
+  it('POST adds a webhook channel and threads the body', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${CHANNELS}`, {
+      method: 'POST',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'webhook',
+        url: 'https://hooks.example.com/ops',
+        headerEnv: 'OPS_WEBHOOK_TOKEN',
+        label: 'ops',
+      }),
+    })
+    expect(r.status).toBe(201)
+    const j = await r.json()
+    expect(j.channel.id).toBe('psac_new')
+    expect(j.channel.url).toBe('https://hooks.example.com/ops')
+    expect(b.channelAddCalls).toEqual([
+      { kind: 'webhook', url: 'https://hooks.example.com/ops', headerEnv: 'OPS_WEBHOOK_TOKEN', label: 'ops' },
+    ])
+  })
+
+  it('POST 400 on an unknown kind / empty url', async () => {
+    b = await boot()
+    const post = (body: unknown) =>
+      fetch(`${b.baseUrl}${CHANNELS}`, {
+        method: 'POST',
+        headers: { ...auth(b), 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      })
+    expect((await post({ kind: 'email', url: 'x' })).status).toBe(400)
+    expect((await post({ kind: 'webhook', url: '' })).status).toBe(400)
+    expect(b.channelAddCalls).toHaveLength(0)
+  })
+
+  it('POST 409 when the store rejects a duplicate id', async () => {
+    b = await boot()
+    b.channelAddThrowsCode = 'alert_channel_exists'
+    const r = await fetch(`${b.baseUrl}${CHANNELS}`, {
+      method: 'POST',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'webhook', url: 'https://x.example/h' }),
+    })
+    expect(r.status).toBe(409)
+  })
+
+  it('POST 400 when the store rejects a pasted bearer in headerEnv (invalid_input)', async () => {
+    b = await boot()
+    b.channelAddThrowsCode = 'invalid_input'
+    const r = await fetch(`${b.baseUrl}${CHANNELS}`, {
+      method: 'POST',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'webhook', url: 'https://x.example/h', headerEnv: 'Bearer leak' }),
+    })
+    expect(r.status).toBe(400)
+  })
+
+  it('PATCH /:id updates and threads the id + patch', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${CHANNELS}/psac_1`, {
+      method: 'PATCH',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: false, url: 'https://new.example/h' }),
+    })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.channel.enabled).toBe(false)
+    expect(j.channel.url).toBe('https://new.example/h')
+    expect(b.channelUpdateCalls).toEqual([
+      { id: 'psac_1', patch: { enabled: false, url: 'https://new.example/h' } },
+    ])
+  })
+
+  it('DELETE /:id removes; 404 when the channel is gone', async () => {
+    b = await boot()
+    const ok = await fetch(`${b.baseUrl}${CHANNELS}/psac_1`, { method: 'DELETE', headers: auth(b) })
+    expect(ok.status).toBe(200)
+    expect(b.channelRemoveCalls).toEqual(['psac_1'])
+    b.channelRemoveResult = false
+    const gone = await fetch(`${b.baseUrl}${CHANNELS}/psac_x`, { method: 'DELETE', headers: auth(b) })
+    expect(gone.status).toBe(404)
+  })
+
+  it('POST /:id/test sends a synthetic payload and returns the delivery result', async () => {
+    b = await boot()
+    b.testResult = { channelId: 'psac_1', ok: true, status: 204 }
+    const r = await fetch(`${b.baseUrl}${CHANNELS}/psac_1/test`, { method: 'POST', headers: auth(b) })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.result).toEqual({ channelId: 'psac_1', ok: true, status: 204 })
+    expect(b.testCalls).toEqual(['psac_1'])
+  })
+
+  it('POST /:id/test 404 when the channel is missing', async () => {
+    b = await boot()
+    b.testThrowsCode = 'alert_channel_not_found'
+    const r = await fetch(`${b.baseUrl}${CHANNELS}/psac_x/test`, { method: 'POST', headers: auth(b) })
+    expect(r.status).toBe(404)
+  })
+
+  it('405 on a non-POST method to /:id/test', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${CHANNELS}/psac_1/test`, { method: 'GET', headers: auth(b) })
+    expect(r.status).toBe(405)
+    expect(b.testCalls).toHaveLength(0)
   })
 })
