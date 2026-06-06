@@ -1247,6 +1247,16 @@ export interface PeerRegistration {
    */
   shareSummary: boolean
   /**
+   * v5 Stream G day-5 — whether this link is opted in to exposing its task
+   * transcript slices (the events of one dispatched task: chunks, result,
+   * resume markers) over the `peer.transcript` RPC, so the calling hub can
+   * chain the peer's execution trace of a cross-hub workflow step back into
+   * its own run detail. Default false = fail-closed, exactly like
+   * `shareSummary`: a peer that asks for a task's trace is denied unless I
+   * flipped this on for the link to it.
+   */
+  shareTranscript: boolean
+  /**
    * Audit L13 — corruption trail. Present (and non-empty) ONLY when one or
    * more stored policy JSON columns were unparseable or the wrong shape and
    * had to be normalised on read (e.g. `outbound_caps_json` held `"chat"`
@@ -1291,6 +1301,8 @@ export interface AddPeerInput {
   allowedKnowledgeBases?: string[] | null
   // ---- v5 E5 — summary sharing (omitted → 0 = fail-closed, not shared). ----
   shareSummary?: boolean
+  // ---- v5 Stream G day-5 — transcript sharing (omitted → 0 = fail-closed). ----
+  shareTranscript?: boolean
 }
 
 export interface UpdatePeerInput {
@@ -1322,6 +1334,8 @@ export interface UpdatePeerInput {
   allowedKnowledgeBases?: string[] | null
   // ---- v5 E5 — summary sharing. undefined = preserve; explicit bool sets. ----
   shareSummary?: boolean
+  // ---- v5 Stream G day-5 — transcript sharing. undefined = preserve; sets. ----
+  shareTranscript?: boolean
 }
 
 export interface ListPeersQuery {

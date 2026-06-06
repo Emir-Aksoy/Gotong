@@ -943,6 +943,24 @@ const MIGRATIONS: Migration[] = [
       );
     `,
   },
+  {
+    // v5 Stream G day-5 — control-plane transcript chain. Symmetric to
+    // share_summary (v23): default 0 = my execution TRACE of a task this peer
+    // dispatched to me is never returned to it. Set to 1 to opt THIS specific
+    // link into the `peer.transcript` RPC, which lets the caller fetch the
+    // transcript of the ONE task it sent (its task + result + my agent's LLM
+    // stream — never my internal sub-dispatches), so its run detail can chain
+    // the off-hub hop. Fail-closed; one dedicated column per dimension like the
+    // per-link contract columns (v15) and the callable-KB allowlist (v17).
+    //
+    //   share_transcript  0 | 1 — default 0 = my per-task transcript is never
+    //                     returned to this peer. Set to 1 to opt this link in.
+    version: 27,
+    name: 'peer-share-transcript',
+    sql: `
+      ALTER TABLE peers ADD COLUMN share_transcript INTEGER NOT NULL DEFAULT 0;
+    `,
+  },
 ]
 
 /**

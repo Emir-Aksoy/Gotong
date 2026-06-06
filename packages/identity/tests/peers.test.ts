@@ -704,4 +704,48 @@ describe('IdentityStore — peers (D1)', () => {
       expect(u.allowedKnowledgeBases).toEqual(['company_kb']) // untouched
     })
   })
+
+  describe('transcript-sharing opt-in (v5 Stream G day-5)', () => {
+    it('addPeer without the field → false (fail-closed, transcript not shared)', () => {
+      const p = store.addPeer({
+        peerId: 'hub_g5def', endpointUrl: 'wss://g5.example', peerToken: 'tok-g5-1',
+      })
+      expect(p.shareTranscript).toBe(false)
+    })
+
+    it('addPeer round-trips an explicit opt-in', () => {
+      const p = store.addPeer({
+        peerId: 'hub_g5on', endpointUrl: 'wss://g5on.example', peerToken: 'tok-g5on-1',
+        shareTranscript: true,
+      })
+      for (const r of [p, store.getPeerByPeerId('hub_g5on')!]) {
+        expect(r.shareTranscript).toBe(true)
+      }
+    })
+
+    it('updatePeer preserves the opt-in on undefined, sets on explicit bool', () => {
+      const p = store.addPeer({
+        peerId: 'hub_g5upd', endpointUrl: 'wss://g5u.example', peerToken: 'tok-g5u-1',
+        shareTranscript: true,
+      })
+      const preserved = store.updatePeer(p.id, { label: 'renamed' })
+      expect(preserved.shareTranscript).toBe(true) // undefined preserves
+      const off = store.updatePeer(p.id, { shareTranscript: false })
+      expect(off.shareTranscript).toBe(false) // explicit false sets
+    })
+
+    it('transcript and summary sharing are independent dimensions', () => {
+      // Each opt-in is its own column; flipping one must not move the other.
+      const p = store.addPeer({
+        peerId: 'hub_g5iso', endpointUrl: 'wss://g5i.example', peerToken: 'tok-g5i-1',
+        shareSummary: true,
+      })
+      const u = store.updatePeer(p.id, { shareTranscript: true })
+      expect(u.shareTranscript).toBe(true)
+      expect(u.shareSummary).toBe(true) // untouched by the transcript toggle
+      const off = store.updatePeer(p.id, { shareSummary: false })
+      expect(off.shareSummary).toBe(false)
+      expect(off.shareTranscript).toBe(true) // transcript opt-in survives
+    })
+  })
 })

@@ -55,6 +55,9 @@ interface PeerRow {
   allowed_knowledge_bases_json: string | null
   // v5 E5 — per-link opt-in to expose a privacy-safe summary (schema v23).
   share_summary: number
+  // v5 Stream G day-5 — per-link opt-in to expose this link's task transcript
+  // slices via the `peer.transcript` RPC (schema v27, fail-closed default 0).
+  share_transcript: number
 }
 
 export class PeerStore {
@@ -138,6 +141,8 @@ export class PeerStore {
             : null,
           // v5 E5 — summary sharing; omitted → 0 = fail-closed (not shared).
           input.shareSummary ? 1 : 0,
+          // v5 Stream G day-5 — transcript sharing; omitted → 0 = fail-closed.
+          input.shareTranscript ? 1 : 0,
         )
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
@@ -264,6 +269,13 @@ export class PeerStore {
             ? 1
             : 0
           : existing.share_summary
+      // v5 Stream G day-5 — same undefined-preserve contract as shareSummary.
+      const shareTranscript =
+        input.shareTranscript !== undefined
+          ? input.shareTranscript
+            ? 1
+            : 0
+          : existing.share_transcript
       this.stmtPeerUpdate.run(
         endpointUrl,
         label,
@@ -278,6 +290,7 @@ export class PeerStore {
         allowedDataClassesJson,
         allowedKnowledgeBasesJson,
         shareSummary,
+        shareTranscript,
         Date.now(),
         id,
       )
@@ -326,8 +339,8 @@ export class PeerStore {
          created_at, updated_at,
          kind, acl_json, outbound_caps_json, require_approval_outbound,
          revocation_state, per_link_quota_budget, allowed_data_classes_json,
-         allowed_knowledge_bases_json, share_summary
-       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         allowed_knowledge_bases_json, share_summary, share_transcript
+       ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     ))
   }
   private get stmtPeerById(): SqliteStmt {
@@ -358,7 +371,7 @@ export class PeerStore {
              require_approval_outbound = ?,
              revocation_state = ?, per_link_quota_budget = ?,
              allowed_data_classes_json = ?, allowed_knowledge_bases_json = ?,
-             share_summary = ?,
+             share_summary = ?, share_transcript = ?,
              updated_at = ?
        WHERE id = ?`,
     ))
@@ -416,6 +429,8 @@ function rowToPeerRegistration(r: PeerRow): PeerRegistration {
     ),
     // v5 E5 — per-link summary-sharing opt-in projection (default 0 = off).
     shareSummary: r.share_summary !== 0,
+    // v5 Stream G day-5 — per-link transcript-sharing opt-in (default 0 = off).
+    shareTranscript: r.share_transcript !== 0,
   }
   // Omit on healthy rows so the record shape is unchanged for the common case
   // (mirrors `SuspendedTask.corrupt`).
