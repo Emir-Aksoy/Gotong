@@ -1701,11 +1701,15 @@
         const subtasks = (s.subTaskIds || []).length ? `<small class="hint">${escapeHtml4(t4.workflowRunSubTasks)}: ${s.subTaskIds.map(escapeHtml4).join(", ")}</small>` : "";
         const out = s.output !== void 0 ? `<details><summary>${escapeHtml4(t4.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml4(JSON.stringify(s.output, null, 2))}</pre></details>` : "";
         const err = s.error ? `<p class="form-msg err">${escapeHtml4(s.error)}</p>` : "";
+        const xhub = s.crossHub ? `<span class="wf-xhub-peer">${escapeHtml4(
+          t4.workflowRunCrossHub(String(s.crossHub.peerLabel || s.crossHub.peer), s.crossHub.kind)
+        )}</span>` : "";
         return `<article class="wf-step">
         <header>
           <span class="wf-run-status wf-run-${escapeHtml4(s.status)}">${escapeHtml4(s.status)}</span>
           <strong>${escapeHtml4(s.stepId)}</strong>
           <span class="wf-step-meta">${escapeHtml4(sDur)} · ${escapeHtml4(t4.workflowRunAttempts(s.attempts || 1))}</span>
+          ${xhub}
         </header>
         ${err}
         ${subtasks}

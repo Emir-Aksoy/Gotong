@@ -272,6 +272,11 @@
           parts.push(`${a2aDests.length} 个步骤派到外部 A2A agent (${a2aDests.join(', ')});这类步骤无审批闸,会立即发出`)
         return `注意:${parts.join('。')}。`
       },
+      // Stream G day-3 — post-launch CONFIRMATION badge on a run-detail step:
+      // where it ACTUALLY ran (resolved from the persisted executedBy), as
+      // opposed to the pre-launch crossHubSteps PREDICTION on the card.
+      workflowRunCrossHub: (dest, kind) =>
+        kind === 'a2a' ? `🔗 由外部 A2A agent ${dest} 执行` : `🔗 在对等 hub ${dest} 上执行`,
       workflowDeprecateBtn: '弃用',
       workflowRepublishBtn: '重新发布',
       workflowArchiveBtn: '归档',
@@ -679,6 +684,11 @@
           parts.push(`${a2aDests.length} step(s) dispatch to an external A2A agent (${a2aDests.join(', ')}); these have no approval gate and fire immediately`)
         return `Note: ${parts.join('. ')}.`
       },
+      // Stream G day-3 — post-launch CONFIRMATION badge on a run-detail step:
+      // where it ACTUALLY ran (resolved from the persisted executedBy), as
+      // opposed to the pre-launch crossHubSteps PREDICTION on the card.
+      workflowRunCrossHub: (dest, kind) =>
+        kind === 'a2a' ? `🔗 ran on external A2A agent ${dest}` : `🔗 ran on peer hub ${dest}`,
       workflowDeprecateBtn: 'Deprecate',
       workflowRepublishBtn: 'Re-publish',
       workflowArchiveBtn: 'Archive',

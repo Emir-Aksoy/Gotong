@@ -769,11 +769,21 @@ export function createWorkflows({ wf }) {
       const err = s.error
         ? `<p class="form-msg err">${escapeHtml(s.error)}</p>`
         : ''
+      // Stream G day-3 — post-launch CONFIRMATION: the host annotated this step
+      // with where it ACTUALLY ran when that was off this hub (resolved from the
+      // persisted executedBy). The card's crossHubPanel was the PREDICTION; this
+      // badge is what happened.
+      const xhub = s.crossHub
+        ? `<span class="wf-xhub-peer">${escapeHtml(
+            t.workflowRunCrossHub(String(s.crossHub.peerLabel || s.crossHub.peer), s.crossHub.kind),
+          )}</span>`
+        : ''
       return `<article class="wf-step">
         <header>
           <span class="wf-run-status wf-run-${escapeHtml(s.status)}">${escapeHtml(s.status)}</span>
           <strong>${escapeHtml(s.stepId)}</strong>
           <span class="wf-step-meta">${escapeHtml(sDur)} · ${escapeHtml(t.workflowRunAttempts(s.attempts || 1))}</span>
+          ${xhub}
         </header>
         ${err}
         ${subtasks}
