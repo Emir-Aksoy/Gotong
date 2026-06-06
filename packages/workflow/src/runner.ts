@@ -523,6 +523,9 @@ export class WorkflowRunner extends AgentParticipant {
       if (result.kind === 'ok') {
         record.status = 'done'
         record.output = result.output
+        // v5 G day-3 — stamp WHO executed this step (peer-agnostic id). The host
+        // resolves whether it's a peer to render the post-launch cross-hub hop.
+        record.executedBy = result.by
         record.endedAt = this.now()
         return record
       }
@@ -531,6 +534,9 @@ export class WorkflowRunner extends AgentParticipant {
         record.resumeAt = result.resumeAt
         record.error = describeFailure(result)
         record.suspendedTaskIds = [result.taskId]
+        // Record the suspending participant too (e.g. a gated peer wrapper), so a
+        // run parked at an outbound-approval gate already shows its destination.
+        record.executedBy = result.by
         return record
       }
       lastError = describeFailure(result)

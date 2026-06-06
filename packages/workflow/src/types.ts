@@ -440,6 +440,18 @@ export interface StepRecord {
   attempts: number
   /** Sub-task ids dispatched for this step — links to the transcript. */
   subTaskIds: string[]
+  /**
+   * v5 Stream G day-3 — the participant that executed this (simple) step,
+   * taken verbatim from the resolved `TaskResult.by`. Recorded so the run
+   * file itself (not the volatile transcript) carries WHO ran each step —
+   * survives restart, "状态都是磁盘文件". Stays peer-AGNOSTIC on purpose: it
+   * is just a participant id. The HOST decides whether that id is a peer (a
+   * cross-hub hop) when it serves run detail, so the workflow package never
+   * learns about federation. Absent for steps that never resolved a result
+   * (skipped / still-pending) and for parallel steps (per-branch executor
+   * recording is deferred — all shipped cross-hub workflows are simple steps).
+   */
+  executedBy?: string
 }
 
 /**

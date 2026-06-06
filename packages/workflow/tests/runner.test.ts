@@ -377,6 +377,38 @@ describe('WorkflowRunner — file-first persistence', () => {
     expect(body.endedAt).toBeGreaterThan(0)
   })
 
+  it('records executedBy on a step from the resolved TaskResult.by (G day-3)', async () => {
+    const def: WorkflowDefinition = {
+      schema: 'aipehub.workflow/v1',
+      id: 'exec-by-test',
+      trigger: { capability: 'go' },
+      steps: [
+        {
+          id: 's1',
+          dispatch: { strategy: { kind: 'capability', capabilities: ['x'] }, payload: 'in' },
+        },
+      ],
+      onFailure: 'halt',
+    }
+    // The executor id the hub reports back. For a cross-hub step this is the
+    // peer wrapper id; the runner records it VERBATIM (peer-agnostic) so the
+    // run file itself carries who ran each step — the host decides later
+    // whether that id is a peer (a cross-hub hop) to render it post-launch.
+    const { hub } = makeStubHub(() => ok(nextTaskId(), 'out', 'supplier-hub'))
+    const store = new RunStore(tmp)
+    const runner = new WorkflowRunner({
+      definition: def,
+      hub,
+      runStore: store,
+      idGenerator: () => 'run-execby',
+    })
+    const out = await runner.onTask(makeTask({}))
+    if (out.kind !== 'ok') throw new Error('expected ok')
+
+    const body = JSON.parse(readFileSync(store.pathFor('run-execby'), 'utf8')) as RunState
+    expect(body.steps[0]!.executedBy).toBe('supplier-hub')
+  })
+
   it('persists a failed run with the failure reason on disk', async () => {
     const def: WorkflowDefinition = {
       schema: 'aipehub.workflow/v1',
