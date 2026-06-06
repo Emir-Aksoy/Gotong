@@ -109,6 +109,28 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
+  examples/cross-hub-federation:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/inbox':
+        specifier: workspace:*
+        version: link:../../packages/inbox
+      '@aipehub/transport-ws':
+        specifier: workspace:*
+        version: link:../../packages/transport-ws
+      '@aipehub/workflow':
+        specifier: workspace:*
+        version: link:../../packages/workflow
+      ws:
+        specifier: ^8.20.1
+        version: 8.20.1
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
+
   examples/cross-hub-mcp:
     dependencies:
       '@aipehub/core':
@@ -599,6 +621,9 @@ importers:
       '@aipehub/a2a':
         specifier: workspace:*
         version: link:../a2a
+      '@aipehub/acp-agent':
+        specifier: workspace:*
+        version: link:../acp-agent
       '@aipehub/core':
         specifier: workspace:*
         version: link:../core
@@ -663,9 +688,6 @@ importers:
         specifier: ^6.38.0
         version: 6.38.0(ws@8.20.1)(zod@4.4.3)
     devDependencies:
-      '@aipehub/acp-agent':
-        specifier: workspace:*
-        version: link:../acp-agent
       '@aipehub/cli-agent':
         specifier: workspace:*
         version: link:../cli-agent

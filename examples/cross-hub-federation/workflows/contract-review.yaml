@@ -1,0 +1,21 @@
+schema: aipehub.workflow/v1
+workflow:
+  id: cross-hub-contract-review
+  name: cross-org contract review
+  # The orchestrating hub (org A) runs this workflow. Its first step dispatches a
+  # capability that lives on a PEER hub (org B's outside counsel), reached over a
+  # REAL WebSocket link; the second is a local step that files the peer's verdict.
+  # Nothing in the YAML names a peer or a transport — `legal.contract-review` is an
+  # ordinary capability that just happens to resolve to a peer wrapper backed by a
+  # ws link. Cross-hub orchestration is capability dispatch where the capability
+  # lives on another hub; the network is an operator detail, invisible to the YAML.
+  trigger: { capability: legal:start }
+  steps:
+    - id: review
+      dispatch:
+        strategy: { kind: capability, capabilities: [legal.contract-review] }
+        payload: { doc: $trigger.payload.doc }
+    - id: archive
+      dispatch:
+        strategy: { kind: capability, capabilities: [legal.archive] }
+        payload: { doc: $trigger.payload.doc, verdict: $review.output.verdict }

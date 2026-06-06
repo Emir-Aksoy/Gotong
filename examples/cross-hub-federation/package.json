@@ -1,0 +1,21 @@
+{
+  "name": "@aipehub/example-cross-hub-federation",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Cross-hub federation over a REAL WebSocket (跨组织联邦, 真网络). Boots two real hubs in one process, dials org A → org B over a real ws transport with a bearer token on BOTH sides, then runs the full cross-hub workflow + outbound-approval story across the wire — approve crosses the org boundary, reject fails closed, and a WRONG-token peer is rejected at the handshake. The WS-transport twin of cross-hub-workflow (which uses an inproc link). Deterministic, no API key.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/workflow": "workspace:*",
+    "@aipehub/inbox": "workspace:*",
+    "@aipehub/transport-ws": "workspace:*",
+    "ws": "^8.20.1"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.13"
+  }
+}
