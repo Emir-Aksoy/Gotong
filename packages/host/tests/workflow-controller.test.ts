@@ -519,6 +519,85 @@ workflow:
 
       expect(await c.readRun('nope')).toBeNull()
     })
+
+    // Stream G day-3 — readRun() enriches each step with `crossHub` when its
+    // persisted, peer-agnostic `executedBy` resolves to an off-hub destination
+    // in the live federation view. This is the post-launch CONFIRMATION of where
+    // a step actually ran. We drive a REAL controller (not the pure detector) and
+    // inject a stub PeerCapabilityView to prove the wiring resolves ids correctly.
+    async function seedCrossHubRun(): Promise<void> {
+      const store = new RunStore(tmp)
+      store.ensureDirs()
+      await store.write({
+        runId: 'r_xhub',
+        workflowId: 'tea-restock',
+        triggeredByTaskId: 't_xhub',
+        triggerPayload: {},
+        steps: [
+          // ran locally — executedBy is a local agent id, not a peer.
+          { stepId: 'draft', startedAt: 1, endedAt: 2, status: 'done', attempts: 1, executedBy: 'purchasing-agent', output: 'draft' },
+          // ran OFF this hub — executedBy is the peer wrapper id.
+          { stepId: 'place', startedAt: 2, endedAt: 3, status: 'done', attempts: 1, executedBy: 'supplier-hub', output: 'po-99' },
+          // never resolved a result — no executedBy, no crossHub.
+          { stepId: 'record', startedAt: 3, status: 'pending', attempts: 0 },
+        ],
+        startedAt: 1,
+        endedAt: 3,
+        status: 'done',
+      })
+    }
+
+    it('readRun() annotates a step whose executedBy is a peer with crossHub', async () => {
+      await seedCrossHubRun()
+      const c = new WorkflowController({
+        hub,
+        definitionsDir,
+        spaceRoot: tmp,
+        // The off-hub view names supplier-hub a connected mesh peer.
+        peerCapabilities: {
+          peerCapabilities: () => [
+            { peer: 'supplier-hub', label: '供货商 Hub', capabilities: ['supplier.confirm-order'], kind: 'peer' },
+          ],
+        },
+      })
+
+      const run = await c.readRun('r_xhub')
+      expect(run).not.toBeNull()
+      const [draft, place, record] = run!.steps
+      // local step — left verbatim, no crossHub.
+      expect(draft!.executedBy).toBe('purchasing-agent')
+      expect(draft!.crossHub).toBeUndefined()
+      // cross-hub step — annotated from the live view.
+      expect(place!.crossHub).toEqual({ peer: 'supplier-hub', peerLabel: '供货商 Hub', kind: 'peer' })
+      // unresolved step — no executedBy ⇒ no crossHub.
+      expect(record!.executedBy).toBeUndefined()
+      expect(record!.crossHub).toBeUndefined()
+    })
+
+    it('readRun() carries kind:a2a through for an external A2A destination', async () => {
+      await seedCrossHubRun()
+      const c = new WorkflowController({
+        hub,
+        definitionsDir,
+        spaceRoot: tmp,
+        peerCapabilities: {
+          peerCapabilities: () => [
+            { peer: 'supplier-hub', label: 'DeepL', capabilities: ['x'], kind: 'a2a' },
+          ],
+        },
+      })
+      const run = await c.readRun('r_xhub')
+      expect(run!.steps[1]!.crossHub).toEqual({ peer: 'supplier-hub', peerLabel: 'DeepL', kind: 'a2a' })
+    })
+
+    it('readRun() leaves steps verbatim when no off-hub view is wired (single hub)', async () => {
+      await seedCrossHubRun()
+      const c = new WorkflowController({ hub, definitionsDir, spaceRoot: tmp })
+      const run = await c.readRun('r_xhub')
+      // executedBy is still surfaced (it's persisted), but nothing is a peer.
+      expect(run!.steps[1]!.executedBy).toBe('supplier-hub')
+      expect(run!.steps.every((s) => s.crossHub === undefined)).toBe(true)
+    })
   })
 
   // P2-M1 — runtime-aware structural gate on import / draft / publish.

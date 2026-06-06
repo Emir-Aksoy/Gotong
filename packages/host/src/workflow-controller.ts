@@ -45,6 +45,7 @@ import {
   type RunStatusCounts,
   type RunSummary,
   type Step,
+  type StepRecord,
   type WorkflowDefinition,
 } from '@aipehub/workflow'
 import {
@@ -126,6 +127,36 @@ export interface CrossHubStep {
    * Optional for back-compat (absent ⇒ treat as `'peer'`); the producer always sets it.
    */
   kind?: 'peer' | 'a2a'
+}
+
+/**
+ * v5 Stream G day-3 — the post-launch CONFIRMATION counterpart to
+ * {@link CrossHubStep} (which is the pre-launch PREDICTION). Where `CrossHubStep`
+ * says "this step WILL go off-hub" from static analysis of the definition,
+ * `CrossHubStepRef` says "this step DID run off-hub", resolved from the run's
+ * persisted, peer-agnostic `executedBy` participant id. Derived at READ time —
+ * never written back to the run file — so the same run reads as a local hop or a
+ * peer hop purely from the live federation view, and the workflow package stays
+ * federation-blind.
+ */
+export interface CrossHubStepRef {
+  /** The off-hub destination's participant id (== the persisted `StepRecord.executedBy`). */
+  peer: string
+  /** The destination's human label, when the off-hub view carries one. */
+  peerLabel: string | null
+  /** Whether the destination is a connected mesh peer or an external A2A agent. */
+  kind: 'peer' | 'a2a'
+}
+
+/** A persisted run step plus the host's read-time cross-hub annotation (absent for local hops). */
+export interface EnrichedStepRecord extends StepRecord {
+  /** Set only when this step's `executedBy` resolves to an off-hub destination. */
+  crossHub?: CrossHubStepRef
+}
+
+/** A {@link RunState} whose steps carry the host's read-time cross-hub annotations. */
+export interface EnrichedRunState extends Omit<RunState, 'steps'> {
+  steps: EnrichedStepRecord[]
 }
 
 /**
@@ -296,9 +327,47 @@ export class WorkflowController {
     return this.runStore.listByUser(userId, opts)
   }
 
-  /** Load the full `RunState` for one run, or `null` if no such run is recorded. */
-  async readRun(runId: string): Promise<RunState | null> {
-    return this.runStore.read(runId)
+  /**
+   * Load the full run state for one run, or `null` if no such run is recorded.
+   *
+   * v5 Stream G day-3 — each step is enriched at READ time with `crossHub` when
+   * its persisted, peer-agnostic `executedBy` resolves to an off-hub destination
+   * in the live federation view. This is the post-launch CONFIRMATION of where a
+   * step actually ran (the run history's counterpart to the pre-launch
+   * `crossHubSteps` prediction on a workflow summary). The on-disk run file is
+   * never touched — `enrichRunCrossHub` clones the steps it annotates — so the
+   * annotation tracks the CURRENT federation view, and a single-hub controller
+   * (no off-hub view) returns the state verbatim at zero cost.
+   */
+  async readRun(runId: string): Promise<EnrichedRunState | null> {
+    const run = await this.runStore.read(runId)
+    if (!run) return null
+    return this.enrichRunCrossHub(run)
+  }
+
+  /**
+   * Annotate a run's steps with the off-hub destination each one ran on, derived
+   * from `StepRecord.executedBy` (a bare participant id) against the live off-hub
+   * capability view. Returns the state unchanged (only re-typed) when no off-hub
+   * view is wired or no step has a resolvable `executedBy`, and never mutates the
+   * input — only steps that gain a `crossHub` are shallow-cloned.
+   */
+  private enrichRunCrossHub(run: RunState): EnrichedRunState {
+    if (!this.peerCapabilities) return run
+    const entries = this.peerCapabilities.peerCapabilities()
+    if (entries.length === 0) return run
+    // peer id → label/kind. First entry wins a duplicate id (deterministic).
+    const byPeer = new Map<string, { label: string | null; kind: 'peer' | 'a2a' }>()
+    for (const e of entries) {
+      if (!byPeer.has(e.peer)) byPeer.set(e.peer, { label: e.label, kind: e.kind ?? 'peer' })
+    }
+    const steps: EnrichedStepRecord[] = run.steps.map((s) => {
+      if (!s.executedBy) return s
+      const hit = byPeer.get(s.executedBy)
+      if (!hit) return s
+      return { ...s, crossHub: { peer: s.executedBy, peerLabel: hit.label, kind: hit.kind } }
+    })
+    return { ...run, steps }
   }
 
   /**
