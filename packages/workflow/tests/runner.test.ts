@@ -409,6 +409,73 @@ describe('WorkflowRunner — file-first persistence', () => {
     expect(body.steps[0]!.executedBy).toBe('supplier-hub')
   })
 
+  it('records peerTaskId on a cross-hub step from TaskResult.peerTaskId (G day-5)', async () => {
+    const def: WorkflowDefinition = {
+      schema: 'aipehub.workflow/v1',
+      id: 'peer-task-id-test',
+      trigger: { capability: 'go' },
+      steps: [
+        {
+          id: 's1',
+          dispatch: { strategy: { kind: 'capability', capabilities: ['x'] }, payload: 'in' },
+        },
+      ],
+      onFailure: 'halt',
+    }
+    // A cross-hub result: the peer-link inbound handler stamped peerTaskId = the
+    // far hub's internal task id. The runner persists it on the run file next to
+    // executedBy so the host can later fetch THAT one task's transcript from the
+    // peer (peer.transcript RPC) to chain the off-hub trace into run detail.
+    const { hub } = makeStubHub(() => ({
+      ...ok(nextTaskId(), 'out', 'supplier-hub'),
+      peerTaskId: 'peer-internal-99',
+    }))
+    const store = new RunStore(tmp)
+    const runner = new WorkflowRunner({
+      definition: def,
+      hub,
+      runStore: store,
+      idGenerator: () => 'run-peertask',
+    })
+    const out = await runner.onTask(makeTask({}))
+    if (out.kind !== 'ok') throw new Error('expected ok')
+
+    const body = JSON.parse(readFileSync(store.pathFor('run-peertask'), 'utf8')) as RunState
+    expect(body.steps[0]!.executedBy).toBe('supplier-hub')
+    expect(body.steps[0]!.peerTaskId).toBe('peer-internal-99')
+  })
+
+  it('leaves peerTaskId absent for a same-hub step (ok without peerTaskId)', async () => {
+    const def: WorkflowDefinition = {
+      schema: 'aipehub.workflow/v1',
+      id: 'same-hub-test',
+      trigger: { capability: 'go' },
+      steps: [
+        {
+          id: 's1',
+          dispatch: { strategy: { kind: 'capability', capabilities: ['x'] }, payload: 'in' },
+        },
+      ],
+      onFailure: 'halt',
+    }
+    // No cross-hub hop → no peerTaskId on the result → nothing recorded; the run
+    // UI shows no "view peer transcript" affordance for a step that stayed local.
+    const { hub } = makeStubHub(() => ok(nextTaskId(), 'out', 'local-agent'))
+    const store = new RunStore(tmp)
+    const runner = new WorkflowRunner({
+      definition: def,
+      hub,
+      runStore: store,
+      idGenerator: () => 'run-samehub',
+    })
+    const out = await runner.onTask(makeTask({}))
+    if (out.kind !== 'ok') throw new Error('expected ok')
+
+    const body = JSON.parse(readFileSync(store.pathFor('run-samehub'), 'utf8')) as RunState
+    expect(body.steps[0]!.executedBy).toBe('local-agent')
+    expect(body.steps[0]!.peerTaskId).toBeUndefined()
+  })
+
   it('persists a failed run with the failure reason on disk', async () => {
     const def: WorkflowDefinition = {
       schema: 'aipehub.workflow/v1',

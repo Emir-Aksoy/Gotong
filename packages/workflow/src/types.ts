@@ -452,6 +452,17 @@ export interface StepRecord {
    * recording is deferred — all shipped cross-hub workflows are simple steps).
    */
   executedBy?: string
+  /**
+   * v5 Stream G day-5 — opaque correlation handle for a CROSS-HUB step: the id
+   * under which the executing peer recorded this task in ITS OWN transcript
+   * (`TaskResult.peerTaskId`, stamped by the peer-link inbound handler). Like
+   * `executedBy` it is peer-agnostic and persisted on the run file, so the HOST
+   * can later fetch that one task's transcript from the peer (`peer.transcript`
+   * RPC, opt-in) to chain the off-hub execution trace into run detail. Present
+   * only when the resolved result crossed a hub boundary; absent for same-hub
+   * steps (the result never relabelled, so there is nothing to correlate).
+   */
+  peerTaskId?: string
 }
 
 /**

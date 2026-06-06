@@ -526,6 +526,10 @@ export class WorkflowRunner extends AgentParticipant {
         // v5 G day-3 — stamp WHO executed this step (peer-agnostic id). The host
         // resolves whether it's a peer to render the post-launch cross-hub hop.
         record.executedBy = result.by
+        // v5 G day-5 — and the cross-hub correlation handle (present only when
+        // the result crossed a hub boundary), so the host can later fetch this
+        // task's transcript from that peer. undefined for same-hub steps.
+        if (result.peerTaskId !== undefined) record.peerTaskId = result.peerTaskId
         record.endedAt = this.now()
         return record
       }
@@ -537,6 +541,9 @@ export class WorkflowRunner extends AgentParticipant {
         // Record the suspending participant too (e.g. a gated peer wrapper), so a
         // run parked at an outbound-approval gate already shows its destination.
         record.executedBy = result.by
+        // v5 G day-5 — carry the cross-hub handle through a suspend too (e.g. the
+        // peer's own agent parked); same correlation seam as the ok path.
+        if (result.peerTaskId !== undefined) record.peerTaskId = result.peerTaskId
         return record
       }
       lastError = describeFailure(result)
