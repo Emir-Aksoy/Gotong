@@ -53,9 +53,14 @@ template:
            (关键词如 "vibe coding" / "agentic engineering" / "小步" /
            "Software 3.0" / "PROGRESS"),必要时 obsidian__get_file_contents 读全文。
            作答/决策时**按笔记路径标注依据**(如「依据 agentic-engineering.md」)。
-        3. 拆 + 派:把活拆成小到一次能审的步骤。规划/起草派给规划编码 agent
-           (capability: code,如 claude-code),实现派给实现编码 agent(如 codex)。
-           让 PROGRESS.md 承载交接 —— 每个 agent 动手前读、做完追加一行。
+        3. 分析 + 结合安排 + 派:先把任务看清(只审查 / 琐碎小修 / 需先设计),
+           再结合你的安排合理分派 —— 不是固定 claude-code → codex:
+           · 只审查不改 → 只派一个善分析的(如 claude-code),不派实现;
+           · 琐碎小修(无需设计)→ 只派一个实现者(如 codex)直接做;
+           · 需先设计 → 规划者(如 claude-code)起草、实现者(如 codex)落地。
+           守住安排:你说不可用的编码 agent(已登出 / 限流 / 不想用)绝不派 —— 让在岗的
+           顶上;预算只允许一个 agent 时,由主理一人包办设计+实现。把活拆成小到一次
+           能审的步骤,让 PROGRESS.md 承载交接 —— 每个 agent 动手前读、做完追加一行。
         4. 守底线:危险动作(rm -rf / git push / sudo / curl|sh)由动作闸挂起等人批,
            绝不绕过。
 
