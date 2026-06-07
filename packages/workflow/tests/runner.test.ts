@@ -1084,6 +1084,57 @@ workflow:
 `
     expect(() => parseWorkflow(yaml)).toThrow(/branches\[0\]\.when is not a valid predicate/)
   })
+
+  it('branch `when` predicates do not collide for ids containing "::" (P2 regression)', async () => {
+    // Two parallel steps whose (stepId, branchId) pairs aliased under the old
+    // `${stepId}::${branchId}` flat key:
+    //   step 'a'    + branch 'b::c' → "a::b::c"
+    //   step 'a::b' + branch 'c'    → "a::b::c"
+    // The later-compiled predicate clobbered the earlier one, so BOTH branches
+    // were gated by step 'a::b' branch 'c''s `when`. The nested stepId→branchId
+    // map keys them apart. (ID_RE permits ':' incl. '::', so this is reachable.)
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: branch-key-collision
+  trigger: { capability: go }
+  steps:
+    - id: a
+      parallel: true
+      branches:
+        - id: b::c
+          when: $trigger.payload.do_first == true
+          dispatch:
+            strategy: { kind: capability, capabilities: [first] }
+            payload: 1
+    - id: a::b
+      parallel: true
+      branches:
+        - id: c
+          when: $trigger.payload.do_second == true
+          dispatch:
+            strategy: { kind: capability, capabilities: [second] }
+            payload: 1
+`
+    const def = parseWorkflow(yaml)
+    const capsFor = async (payload: Record<string, unknown>): Promise<string[]> => {
+      const { hub, calls } = makeStubHub((c) => {
+        const cap = c.strategy.kind === 'capability' ? c.strategy.capabilities[0] : '?'
+        return ok(nextTaskId(), `${cap}-out`, `${cap}-bot`)
+      })
+      const runner = new WorkflowRunner({ definition: def, hub })
+      const out = await runner.onTask(makeTask(payload))
+      if (out.kind !== 'ok') throw new Error('expected ok')
+      return calls.map((c) => (c.strategy as { capabilities: string[] }).capabilities[0]!)
+    }
+
+    // do_first only → ONLY 'first'. Under the old collision both branches read
+    // do_second (false) → 0 calls.
+    expect(await capsFor({ do_first: true, do_second: false })).toEqual(['first'])
+    // do_second only → ONLY 'second'. Under the old collision both branches read
+    // do_second (true) → 'first' AND 'second' → 2 calls.
+    expect(await capsFor({ do_first: false, do_second: true })).toEqual(['second'])
+  })
 })
 
 // =========================================================================

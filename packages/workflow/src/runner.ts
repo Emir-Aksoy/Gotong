@@ -548,7 +548,7 @@ export class WorkflowRunner extends AgentParticipant {
       now: () => this.now(),
       dispatchOne: (spec) => this.dispatchOne(spec, ctx),
       taskResult: (taskId) => this.hub.taskResult?.(taskId),
-      branchPredicate: (branchId) => rd.branchWhen.get(branchPredicateKey(step.id, branchId)),
+      branchPredicate: (branchId) => rd.branchWhen.get(step.id)?.get(branchId),
     }
   }
 
@@ -652,16 +652,6 @@ function isWorkflowSuspendState(value: unknown): value is WorkflowSuspendState {
 }
 
 /**
- * Compose the lookup key for a branch's compiled `when` predicate.
- * Using `::` keeps it cheap and unambiguous — branch / step ids may
- * contain `:` but never `::` (single colons are reserved inside ids,
- * not adjacent pairs).
- */
-function branchPredicateKey(stepId: string, branchId: string): string {
-  return `${stepId}::${branchId}`
-}
-
-/**
  * The per-run execution bundle: the bound revision, its definition, and the
  * `when` predicates compiled for THAT revision. Threaded through the execute
  * path so a run always reads the steps/predicates of its own revision, not the
@@ -672,24 +662,35 @@ interface RunDefn {
   revision: number
   def: WorkflowDefinition
   when: Map<string, CompiledPredicate>
-  branchWhen: Map<string, CompiledPredicate>
+  // Nested stepId → branchId → predicate. Two-level keying is injective by
+  // construction, so branch predicates can't collide even when ids contain
+  // ':' (the schema's ID_RE permits it) — unlike a flat string-concat key.
+  branchWhen: Map<string, Map<string, CompiledPredicate>>
 }
 
 interface CompiledPredicates {
   when: Map<string, CompiledPredicate>
-  branchWhen: Map<string, CompiledPredicate>
+  // Nested stepId → branchId → predicate. Two-level keying is injective by
+  // construction, so branch predicates can't collide even when ids contain
+  // ':' (the schema's ID_RE permits it) — unlike a flat string-concat key.
+  branchWhen: Map<string, Map<string, CompiledPredicate>>
 }
 
 /** Compile every `when` / branch-`when` predicate in a definition. */
 function compilePredicates(def: WorkflowDefinition): CompiledPredicates {
   const when = new Map<string, CompiledPredicate>()
-  const branchWhen = new Map<string, CompiledPredicate>()
+  const branchWhen = new Map<string, Map<string, CompiledPredicate>>()
   for (const step of def.steps) {
     if (step.when) when.set(step.id, parsePredicate(step.when))
     if (step.kind === 'parallel') {
       for (const branch of step.branches) {
         if (branch.when) {
-          branchWhen.set(branchPredicateKey(step.id, branch.id), parsePredicate(branch.when))
+          let perStep = branchWhen.get(step.id)
+          if (!perStep) {
+            perStep = new Map<string, CompiledPredicate>()
+            branchWhen.set(step.id, perStep)
+          }
+          perStep.set(branch.id, parsePredicate(branch.when))
         }
       }
     }
