@@ -187,8 +187,8 @@ describe('unknown_agent', () => {
       wf({
         steps: [
           {
+            kind: 'parallel',
             id: 'fan',
-            parallel: true,
             branches: [
               {
                 id: 'b1',

@@ -18,6 +18,7 @@ export type {
   WorkflowDefinition,
   TriggerSpec,
   Step,
+  StepKind,
   SimpleStep,
   ParallelStep,
   Branch,
@@ -71,6 +72,12 @@ export type {
   DefinitionResolver,
   ResolvedDefinition,
 } from './runner.js'
+
+// R7 — the step-execution seam. Provide a `StepExecutor` via
+// `WorkflowRunnerOptions.stepExecutors` (plus a parser branch emitting its
+// `kind`) to add a new control flow without touching the runner core.
+export { SimpleStepExecutor, ParallelStepExecutor } from './step-executors.js'
+export type { StepExecutor, StepExecContext } from './step-executors.js'
 
 // Phase 13 M1 — AI-assisted workflow authoring moved out to its own
 // package, `@aipehub/workflow-assistant`, so this runner stays free of

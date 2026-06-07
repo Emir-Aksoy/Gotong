@@ -256,7 +256,31 @@ export interface WorkflowGovernanceSpec {
 
 export type Step = SimpleStep | ParallelStep
 
+/**
+ * Internal discriminant for the step-execution strategy. The runner keys a
+ * `StepExecutor` registry on this (see `runner.ts`), so a new control-flow kind
+ * (debate / swarm / supervisor) is a new executor + parser branch — the runner
+ * core never grows another `if`.
+ *
+ * This is the PARSED discriminant, not the YAML author surface: a parallel step
+ * is still authored as `parallel: true` in YAML; the parser translates that to
+ * `kind: 'parallel'`. Kept open (`string`) at the registry boundary so external
+ * executors register their own kinds.
+ *
+ * `'simple'` is the DEFAULT: it is optional on `SimpleStep` (the parser stamps
+ * it, but a hand-built definition may omit it) and the runner treats an absent
+ * `kind` as `'simple'` — faithfully preserving the pre-seam semantic where
+ * "no parallel marker ⇒ a plain dispatch step".
+ */
+export type StepKind = 'simple' | 'parallel'
+
 export interface SimpleStep {
+  /**
+   * Execution strategy discriminant. A plain capability/explicit dispatch.
+   * Optional: absent ⇒ `'simple'` (the runner defaults it), so hand-built
+   * definitions need not spell it out. The parser always stamps it.
+   */
+  kind?: 'simple'
   id: string
   /** Human-friendly hint. Optional. */
   description?: string
@@ -285,10 +309,13 @@ export interface SimpleStep {
 }
 
 export interface ParallelStep {
+  /**
+   * Execution strategy discriminant. Authored in YAML as `parallel: true`; the
+   * parser translates that to `kind: 'parallel'`.
+   */
+  kind: 'parallel'
   id: string
   description?: string
-  /** True parallel — all branches dispatched concurrently, all awaited. */
-  parallel: true
   branches: Branch[]
   onFailure?: StepFailurePolicy
   /** See `SimpleStep.when` — applies to the whole parallel fan-out. */

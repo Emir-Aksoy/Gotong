@@ -27,7 +27,7 @@ export function assertNoSelfTriggerCycle(def: WorkflowDefinition): void {
 }
 
 function isParallelStep(step: Step): step is ParallelStep {
-  return (step as ParallelStep).parallel === true
+  return step.kind === 'parallel'
 }
 
 function assertStrategyDoesNotTriggerSelf(

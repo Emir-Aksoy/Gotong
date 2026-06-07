@@ -34,6 +34,7 @@ function def(steps: Step[]): WorkflowDefinition {
 /** A simple capability-dispatch step. */
 function capStep(id: string, capability: string): Step {
   return {
+    kind: 'simple',
     id,
     dispatch: { strategy: { kind: 'capability', capabilities: [capability] }, payload: {} },
   }
@@ -81,6 +82,7 @@ describe('crossHubStepsOf', () => {
 
   it('ignores explicit dispatch (un-allowlistable → never cross-hub)', () => {
     const explicit: Step = {
+      kind: 'simple',
       id: 'direct',
       dispatch: { strategy: { kind: 'explicit', to: 'supplier-hub' }, payload: {} },
     }
@@ -90,8 +92,8 @@ describe('crossHubStepsOf', () => {
 
   it('addresses parallel branches as `${stepId}/${branchId}`', () => {
     const fan: Step = {
+      kind: 'parallel',
       id: 'fanout',
-      parallel: true,
       branches: [
         {
           id: 'local',

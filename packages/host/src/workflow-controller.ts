@@ -856,7 +856,7 @@ function stepDispatchCapabilities(
     if (!caps) return
     for (const c of caps) out.push({ stepId, capability: c })
   }
-  if ('parallel' in step) {
+  if (step.kind === 'parallel') {
     for (const b of step.branches) add(`${step.id}/${b.id}`, b.dispatch)
   } else {
     add(step.id, step.dispatch)

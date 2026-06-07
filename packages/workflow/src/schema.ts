@@ -191,7 +191,11 @@ function validateStep(raw: unknown, path: string, seenIds: Set<string>): Step {
     if (s.dispatch !== undefined) {
       throw new WorkflowSchemaError(`${path} cannot have both 'human' and 'dispatch'`)
     }
-    const out: SimpleStep = { id: s.id, dispatch: humanToDispatch(s.human, `${path}.human`) }
+    const out: SimpleStep = {
+      kind: 'simple',
+      id: s.id,
+      dispatch: humanToDispatch(s.human, `${path}.human`),
+    }
     if (typeof s.description === 'string') out.description = s.description
     const fp = parseStepFailurePolicy(s.onFailure, `${path}.onFailure`)
     if (fp) out.onFailure = fp
@@ -214,8 +218,8 @@ function validateStep(raw: unknown, path: string, seenIds: Set<string>): Step {
       )
     }
     const out: ParallelStep = {
+      kind: 'parallel',
       id: s.id,
-      parallel: true,
       branches,
     }
     if (typeof s.description === 'string') out.description = s.description
@@ -232,7 +236,7 @@ function validateStep(raw: unknown, path: string, seenIds: Set<string>): Step {
     )
   }
   const dispatch = validateDispatchSpec(s.dispatch, `${path}.dispatch`)
-  const out: SimpleStep = { id: s.id, dispatch }
+  const out: SimpleStep = { kind: 'simple', id: s.id, dispatch }
   if (typeof s.description === 'string') out.description = s.description
   const fp = parseStepFailurePolicy(s.onFailure, `${path}.onFailure`)
   if (fp) out.onFailure = fp

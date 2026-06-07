@@ -34,13 +34,15 @@ import { parsePredicate, type CompiledPredicate } from './predicate.js'
 import { resolveRefs, type ResolutionContext } from './resolver.js'
 import type { RunStore } from './run-store.js'
 import {
-  type Branch,
+  ParallelStepExecutor,
+  SimpleStepExecutor,
+  type StepExecContext,
+  type StepExecutor,
+} from './step-executors.js'
+import {
   type DispatchSpec,
-  type ParallelStep,
   type RunState,
-  type SimpleStep,
   type Step,
-  type StepFailurePolicy,
   type StepRecord,
   type WorkflowDefinition,
 } from './types.js'
@@ -129,6 +131,14 @@ export interface WorkflowRunnerOptions {
   idGenerator?: () => string
   /** Clock injection for deterministic tests. */
   now?: () => number
+  /**
+   * R7 — extra step-execution strategies, keyed on `Step['kind']`. Registered
+   * after the built-in `simple` / `parallel` executors (a custom executor may
+   * override a built-in by reusing its kind). This is the seam for new control
+   * flows (debate / swarm / supervisor): provide a `StepExecutor` here plus a
+   * parser branch that emits its kind, and the runner core stays untouched.
+   */
+  stepExecutors?: StepExecutor[]
 }
 
 /**
@@ -145,8 +155,11 @@ export class WorkflowRunner extends AgentParticipant {
   private readonly resolver: DefinitionResolver
   private readonly hub: HubLike
   private readonly runStore: RunStore | null
-  private readonly idGen: () => string
-  private readonly now: () => number
+  /** R7 — protected so a runner subclass / custom executor can reuse them. */
+  protected readonly idGen: () => string
+  protected readonly now: () => number
+  /** R7 — step-execution strategies, keyed on `Step['kind']`. */
+  private readonly stepExecutors: Map<string, StepExecutor>
   /**
    * Per-revision compiled `when` predicates, built lazily on first use of a
    * revision and cached. Phase 15: a single runner can execute multiple
@@ -168,6 +181,15 @@ export class WorkflowRunner extends AgentParticipant {
     this.runStore = opts.runStore ?? null
     this.idGen = opts.idGenerator ?? (() => randomUUID())
     this.now = opts.now ?? (() => Date.now())
+    // Built-ins first; custom executors registered after may override a kind.
+    this.stepExecutors = new Map()
+    for (const ex of [
+      new SimpleStepExecutor(),
+      new ParallelStepExecutor(),
+      ...(opts.stepExecutors ?? []),
+    ]) {
+      this.stepExecutors.set(ex.kind, ex)
+    }
   }
 
   /**
@@ -334,7 +356,7 @@ export class WorkflowRunner extends AgentParticipant {
           sr.status = 'failed'
           sr.error = `cannot resume suspended step '${sr.stepId}' — step no longer exists`
         } else {
-          this.refreshSuspendedStepRecord(sr, step)
+          this.refreshSuspendedStepRecord(rd, ctx, sr, step)
         }
         const refreshedStatus = sr.status as StepRecord['status']
         if (refreshedStatus === 'suspended') {
@@ -501,222 +523,36 @@ export class WorkflowRunner extends AgentParticipant {
       }
     }
 
-    if ('parallel' in step && step.parallel === true) {
-      return this.runParallelStep(rd, step, ctx, record)
-    }
-    return this.runSimpleStep(step as SimpleStep, ctx, record)
-  }
-
-  private async runSimpleStep(
-    step: SimpleStep,
-    ctx: ResolutionContext,
-    record: StepRecord,
-  ): Promise<StepRecord> {
-    const policy: StepFailurePolicy = step.onFailure ?? { action: 'halt' }
-    const maxAttempts = policy.action === 'retry' ? policy.max + 1 : 1
-
-    let lastError = 'unknown'
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      record.attempts = attempt
-      const result = await this.dispatchOne(step.dispatch, ctx)
-      record.subTaskIds.push(result.taskId)
-      if (result.kind === 'ok') {
-        record.status = 'done'
-        record.output = result.output
-        // v5 G day-3 — stamp WHO executed this step (peer-agnostic id). The host
-        // resolves whether it's a peer to render the post-launch cross-hub hop.
-        record.executedBy = result.by
-        // v5 G day-5 — and the cross-hub correlation handle (present only when
-        // the result crossed a hub boundary), so the host can later fetch this
-        // task's transcript from that peer. undefined for same-hub steps.
-        if (result.peerTaskId !== undefined) record.peerTaskId = result.peerTaskId
-        record.endedAt = this.now()
-        return record
-      }
-      if (result.kind === 'suspended') {
-        record.status = 'suspended'
-        record.resumeAt = result.resumeAt
-        record.error = describeFailure(result)
-        record.suspendedTaskIds = [result.taskId]
-        // Record the suspending participant too (e.g. a gated peer wrapper), so a
-        // run parked at an outbound-approval gate already shows its destination.
-        record.executedBy = result.by
-        // v5 G day-5 — carry the cross-hub handle through a suspend too (e.g. the
-        // peer's own agent parked); same correlation seam as the ok path.
-        if (result.peerTaskId !== undefined) record.peerTaskId = result.peerTaskId
-        return record
-      }
-      lastError = describeFailure(result)
-    }
-
-    // out of attempts
-    record.endedAt = this.now()
-    if (policy.action === 'continue') {
-      record.status = 'skipped'
-      record.error = lastError
+    // Absent `kind` ⇒ 'simple' (the pre-seam semantic: "no parallel marker ⇒
+    // a plain dispatch step"). The parser always stamps it; hand-built defs may
+    // not. Only an explicitly-set-but-unregistered kind fails closed.
+    const kind = step.kind ?? 'simple'
+    const executor = this.stepExecutors.get(kind)
+    if (!executor) {
+      record.status = 'failed'
+      record.error = `no step executor registered for kind '${kind}'`
+      record.endedAt = this.now()
       return record
     }
-    record.status = 'failed'
-    record.error = lastError
-    return record
-  }
-
-  private async runParallelStep(
-    rd: RunDefn,
-    step: ParallelStep,
-    ctx: ResolutionContext,
-    record: StepRecord,
-  ): Promise<StepRecord> {
-    const policy: StepFailurePolicy = step.onFailure ?? { action: 'halt' }
-    record.attempts = 1
-
-    const results = await Promise.all(
-      step.branches.map((b) => this.runBranch(rd, step.id, b, ctx)),
-    )
-
-    const branchOutputs: Record<string, unknown> = {}
-    const failures: string[] = []
-    const suspended: SuspendedBranchTracker = { taskIds: {} }
-    for (let i = 0; i < step.branches.length; i++) {
-      const branch = step.branches[i]!
-      const outcome = results[i]!
-      this.applyBranchOutcome(branch, outcome, record, branchOutputs, failures, suspended)
-    }
-    if (Object.keys(suspended.taskIds).length > 0) {
-      return this.markParallelSuspended(record, branchOutputs, suspended)
-    }
-    record.endedAt = this.now()
-    record.output = branchOutputs
-
-    if (failures.length === 0) {
-      record.status = 'done'
-      return record
-    }
-
-    // Retry policy at the parallel level retries the whole step. Keep it
-    // simple in v0.1: a parallel `retry` means "re-run the whole fan-out"
-    // — but skipped branches stay skipped (their `when` is still false),
-    // so a retry only ever re-dispatches the branches that ran last time.
-    if (policy.action === 'retry') {
-      let remaining = policy.max
-      while (remaining > 0 && failures.length > 0) {
-        remaining -= 1
-        record.attempts += 1
-        const retrySuspended: SuspendedBranchTracker = { taskIds: {} }
-        const retryResults = await Promise.all(
-          step.branches.map((b) => this.runBranch(rd, step.id, b, ctx)),
-        )
-        failures.length = 0
-        for (let i = 0; i < step.branches.length; i++) {
-          const branch = step.branches[i]!
-          const outcome = retryResults[i]!
-          this.applyBranchOutcome(branch, outcome, record, branchOutputs, failures, retrySuspended)
-        }
-        if (Object.keys(retrySuspended.taskIds).length > 0) {
-          return this.markParallelSuspended(record, branchOutputs, retrySuspended)
-        }
-      }
-      if (failures.length === 0) {
-        record.status = 'done'
-        return record
-      }
-    }
-
-    if (policy.action === 'continue') {
-      record.status = 'skipped'
-      record.error = failures.join('; ')
-      return record
-    }
-    record.status = 'failed'
-    record.error = failures.join('; ')
-    return record
+    return executor.run(step, record, this.execContextFor(rd, step, ctx))
   }
 
   /**
-   * Outcome of running one branch. Three shapes:
-   *   - `ran`         — the branch dispatched and we got a TaskResult
-   *   - `skipped`     — branch-level `when` was false → no dispatch
-   *   - `when-error`  — `when` evaluation threw → treated as a failure
+   * Build the narrow, run-scoped surface a {@link StepExecutor} uses — closing
+   * over this run's resolution context and revision-bound branch predicates so
+   * an executor never touches the runner, the `RunDefn`, or another step.
    */
-  private async runBranch(
-    rd: RunDefn,
-    stepId: string,
-    branch: Branch,
-    ctx: ResolutionContext,
-  ): Promise<BranchOutcome> {
-    const pred = rd.branchWhen.get(branchPredicateKey(stepId, branch.id))
-    if (pred) {
-      let passed: boolean
-      try {
-        passed = pred.eval(ctx)
-      } catch (err) {
-        return {
-          kind: 'when-error',
-          error: `when '${pred.source}' threw: ${err instanceof Error ? err.message : String(err)}`,
-        }
-      }
-      if (!passed) {
-        return { kind: 'skipped' }
-      }
-    }
-    const result = await this.dispatchOne(branch.dispatch, ctx)
-    return { kind: 'ran', result }
-  }
-
-  /**
-   * Funnel a branch outcome into the running parallel-step record:
-   * write to `branchOutputs`, possibly add a sub-task id, possibly log
-   * a failure. Shared between the first attempt and retry passes so the
-   * "skipped branches stay skipped" property holds without copying the
-   * logic.
-   */
-  private applyBranchOutcome(
-    branch: Branch,
-    outcome: BranchOutcome,
-    record: StepRecord,
-    branchOutputs: Record<string, unknown>,
-    failures: string[],
-    suspended: SuspendedBranchTracker,
-  ): void {
-    if (outcome.kind === 'skipped') {
-      branchOutputs[branch.id] = undefined
-      return
-    }
-    if (outcome.kind === 'when-error') {
-      branchOutputs[branch.id] = undefined
-      failures.push(`branch '${branch.id}': ${outcome.error}`)
-      return
-    }
-    const r = outcome.result
-    record.subTaskIds.push(r.taskId)
-    if (r.kind === 'ok') {
-      branchOutputs[branch.id] = r.output
-    } else if (r.kind === 'suspended') {
-      branchOutputs[branch.id] = undefined
-      suspended.taskIds[branch.id] = r.taskId
-      suspended.resumeAt =
-        suspended.resumeAt === undefined ? r.resumeAt : Math.min(suspended.resumeAt, r.resumeAt)
-    } else {
-      branchOutputs[branch.id] = undefined
-      failures.push(`branch '${branch.id}': ${describeFailure(r)}`)
+  private execContextFor(rd: RunDefn, step: Step, ctx: ResolutionContext): StepExecContext {
+    return {
+      ctx,
+      now: () => this.now(),
+      dispatchOne: (spec) => this.dispatchOne(spec, ctx),
+      taskResult: (taskId) => this.hub.taskResult?.(taskId),
+      branchPredicate: (branchId) => rd.branchWhen.get(branchPredicateKey(step.id, branchId)),
     }
   }
 
-  private markParallelSuspended(
-    record: StepRecord,
-    branchOutputs: Record<string, unknown>,
-    suspended: SuspendedBranchTracker,
-  ): StepRecord {
-    record.status = 'suspended'
-    record.output = branchOutputs
-    record.suspendedBranchTaskIds = suspended.taskIds
-    record.suspendedTaskIds = Object.values(suspended.taskIds)
-    if (suspended.resumeAt !== undefined) record.resumeAt = suspended.resumeAt
-    record.error = `parallel step suspended waiting for child task(s): ${record.suspendedTaskIds.join(', ')}`
-    return record
-  }
-
-  private async dispatchOne(
+  protected async dispatchOne(
     spec: DispatchSpec,
     ctx: ResolutionContext,
   ): Promise<TaskResult> {
@@ -750,7 +586,17 @@ export class WorkflowRunner extends AgentParticipant {
     return this.hub.dispatch(opts)
   }
 
-  private refreshSuspendedStepRecord(record: StepRecord, step: Step): void {
+  /**
+   * Re-evaluate a suspended step's child task(s) on resume, delegating the
+   * kind-specific folding to the step's executor. Guards the `hub.taskResult`
+   * pre-condition once here (kind-agnostic) so executors can assume it exists.
+   */
+  private refreshSuspendedStepRecord(
+    rd: RunDefn,
+    ctx: ResolutionContext,
+    record: StepRecord,
+    step: Step,
+  ): void {
     if (!this.hub.taskResult) {
       record.status = 'failed'
       record.error =
@@ -758,111 +604,15 @@ export class WorkflowRunner extends AgentParticipant {
       record.endedAt = this.now()
       return
     }
-
-    if ('parallel' in step && step.parallel === true) {
-      this.refreshSuspendedParallelRecord(record, step)
-      return
-    }
-
-    const taskId = record.suspendedTaskIds?.[0] ?? record.subTaskIds.at(-1)
-    if (!taskId) {
+    const kind = step.kind ?? 'simple'
+    const executor = this.stepExecutors.get(kind)
+    if (!executor) {
       record.status = 'failed'
-      record.error = `cannot resume suspended step '${record.stepId}' — missing child task id`
+      record.error = `no step executor registered for kind '${kind}'`
       record.endedAt = this.now()
       return
     }
-    const result = this.hub.taskResult(taskId)
-    if (!result || result.kind === 'suspended') {
-      record.status = 'suspended'
-      if (result?.kind === 'suspended') record.resumeAt = result.resumeAt
-      record.suspendedTaskIds = [taskId]
-      return
-    }
-
-    const policy: StepFailurePolicy = step.onFailure ?? { action: 'halt' }
-    this.applyChildResultToRecord(record, result, policy)
-  }
-
-  private refreshSuspendedParallelRecord(record: StepRecord, step: ParallelStep): void {
-    const branchTaskIds = record.suspendedBranchTaskIds ?? {}
-    const branchOutputs = asRecord(record.output)
-    const failures: string[] = []
-    let nextResumeAt: number | undefined
-    const stillSuspended: Record<string, string> = {}
-
-    for (const branch of step.branches) {
-      const taskId = branchTaskIds[branch.id]
-      if (!taskId) continue
-      const result = this.hub.taskResult?.(taskId)
-      if (!result || result.kind === 'suspended') {
-        stillSuspended[branch.id] = taskId
-        if (result?.kind === 'suspended') {
-          nextResumeAt =
-            nextResumeAt === undefined ? result.resumeAt : Math.min(nextResumeAt, result.resumeAt)
-        }
-        continue
-      }
-      if (result.kind === 'ok') {
-        branchOutputs[branch.id] = result.output
-      } else {
-        branchOutputs[branch.id] = undefined
-        failures.push(`branch '${branch.id}': ${describeFailure(result)}`)
-      }
-    }
-
-    if (Object.keys(stillSuspended).length > 0) {
-      record.status = 'suspended'
-      record.output = branchOutputs
-      record.suspendedBranchTaskIds = stillSuspended
-      record.suspendedTaskIds = Object.values(stillSuspended)
-      const resumeAt = nextResumeAt ?? record.resumeAt
-      if (resumeAt !== undefined) record.resumeAt = resumeAt
-      return
-    }
-
-    delete record.resumeAt
-    delete record.suspendedTaskIds
-    delete record.suspendedBranchTaskIds
-    record.endedAt = this.now()
-    record.output = branchOutputs
-    if (failures.length === 0) {
-      record.status = 'done'
-      delete record.error
-      return
-    }
-    const policy: StepFailurePolicy = step.onFailure ?? { action: 'halt' }
-    if (policy.action === 'continue') {
-      record.status = 'skipped'
-      record.error = failures.join('; ')
-      return
-    }
-    record.status = 'failed'
-    record.error = failures.join('; ')
-  }
-
-  private applyChildResultToRecord(
-    record: StepRecord,
-    result: TaskResult,
-    policy: StepFailurePolicy,
-  ): void {
-    delete record.resumeAt
-    delete record.suspendedTaskIds
-    delete record.suspendedBranchTaskIds
-    record.endedAt = this.now()
-    if (result.kind === 'ok') {
-      record.status = 'done'
-      record.output = result.output
-      delete record.error
-      return
-    }
-    const error = describeFailure(result)
-    if (policy.action === 'continue') {
-      record.status = 'skipped'
-      record.error = error
-      return
-    }
-    record.status = 'failed'
-    record.error = error
+    executor.refreshSuspended(step, record, this.execContextFor(rd, step, ctx))
   }
 
   private suspendWorkflow(state: RunState, resumeAt: number): never {
@@ -874,19 +624,12 @@ export class WorkflowRunner extends AgentParticipant {
 
   // --- persistence wrapper --------------------------------------------------
 
-  private async persist(state: RunState): Promise<void> {
+  /** R7 — protected so a runner subclass can persist intermediate state. */
+  protected async persist(state: RunState): Promise<void> {
     if (!this.runStore) return
     this.runStore.ensureDirs()
     await this.runStore.write(state)
   }
-}
-
-function describeFailure(r: TaskResult): string {
-  if (r.kind === 'failed') return r.error
-  if (r.kind === 'cancelled') return `cancelled: ${r.reason}`
-  if (r.kind === 'no_participant') return `no participant: ${r.reason}`
-  if (r.kind === 'suspended') return `suspended until ${new Date(r.resumeAt).toISOString()} by ${r.by}`
-  return 'unexpected ok in failure path'
 }
 
 interface WorkflowSuspendState {
@@ -906,25 +649,6 @@ function isWorkflowSuspendState(value: unknown): value is WorkflowSuspendState {
     typeof (value as { runState?: unknown }).runState === 'object' &&
     (value as { runState?: unknown }).runState !== null
   )
-}
-
-function asRecord(value: unknown): Record<string, unknown> {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {}
-  return { ...(value as Record<string, unknown>) }
-}
-
-/**
- * Discriminated outcome of `runBranch`. Kept module-private — the
- * parallel step caller funnels each shape into `applyBranchOutcome`.
- */
-type BranchOutcome =
-  | { kind: 'ran'; result: TaskResult }
-  | { kind: 'skipped' }
-  | { kind: 'when-error'; error: string }
-
-interface SuspendedBranchTracker {
-  taskIds: Record<string, string>
-  resumeAt?: number
 }
 
 /**
@@ -962,7 +686,7 @@ function compilePredicates(def: WorkflowDefinition): CompiledPredicates {
   const branchWhen = new Map<string, CompiledPredicate>()
   for (const step of def.steps) {
     if (step.when) when.set(step.id, parsePredicate(step.when))
-    if ('parallel' in step && step.parallel === true) {
+    if (step.kind === 'parallel') {
       for (const branch of step.branches) {
         if (branch.when) {
           branchWhen.set(branchPredicateKey(step.id, branch.id), parsePredicate(branch.when))

@@ -210,7 +210,7 @@ interface RefCtx {
 }
 
 function isParallelStep(s: Step): s is ParallelStep {
-  return (s as ParallelStep).parallel === true
+  return s.kind === 'parallel'
 }
 
 function checkSimpleStep(step: SimpleStep, path: string, ctx: StepCtx): void {

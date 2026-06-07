@@ -93,8 +93,8 @@ workflow:
     const wf = parseWorkflow(yaml)
     const par = wf.steps[1]
     expect(par).toBeDefined()
-    if (par && 'parallel' in par) {
-      expect(par.parallel).toBe(true)
+    if (par && par.kind === 'parallel') {
+      expect(par.kind).toBe('parallel')
       expect(par.branches).toHaveLength(2)
       expect(par.branches[0]!.id).toBe('a')
       expect(par.branches[1]!.id).toBe('b')
@@ -123,8 +123,8 @@ workflow:
     const wf = parseWorkflow(yaml)
     const s1 = wf.steps[0]!
     const s2 = wf.steps[1]!
-    if ('parallel' in s1) throw new Error('expected simple step')
-    if ('parallel' in s2) throw new Error('expected simple step')
+    if (s1.kind !== 'simple') throw new Error('expected simple step')
+    if (s2.kind !== 'simple') throw new Error('expected simple step')
     expect(s1.dispatch.strategy).toEqual({ kind: 'explicit', to: 'worker-1' })
     expect(s2.dispatch.strategy).toEqual({
       kind: 'broadcast',
@@ -147,7 +147,7 @@ workflow:
 `
     const wf = parseWorkflow(yaml)
     const s1 = wf.steps[0]!
-    if ('parallel' in s1) throw new Error('expected simple step')
+    if (s1.kind !== 'simple') throw new Error('expected simple step')
     expect(s1.onFailure).toEqual({ action: 'retry', max: 2 })
   })
 
