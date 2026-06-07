@@ -7,7 +7,10 @@
  */
 import { describe, expect, it, vi } from 'vitest'
 
-import { ComposedToolset } from '../src/composed-toolset.js'
+import {
+  ComposedToolset,
+  ComposedToolNameCollisionError,
+} from '../src/composed-toolset.js'
 import type {
   LlmAgentToolset,
   LlmToolCallResult,
@@ -106,6 +109,78 @@ describe('ComposedToolset.callTool — name routing', () => {
     const r = await composed.callTool('unknown', {})
     expect(r.isError).toBe(true)
     expect((r.content[0] as { text: string }).text).toMatch(/unknown tool: unknown/)
+  })
+})
+
+// R8 — listTools() is the wiring chokepoint: a name advertised by >1 child
+// means callTool would silently first-match the wrong one. The agent's tool
+// loop calls listTools() at turn start, so a collision fails loud (degrades to
+// a `failed` task) instead of mis-routing at runtime. callTool's low-level
+// first-match primitive (tested above) is unchanged; in the integrated flow it
+// is only reached after listTools() has already gated.
+describe('ComposedToolset.listTools — cross-child name collision (R8)', () => {
+  it('throws a typed error listing the colliding name + child indices', async () => {
+    const a = fakeToolset({ tools: [{ name: 'shared', inputSchema: { type: 'object' } }] })
+    const b = fakeToolset({ tools: [{ name: 'shared', inputSchema: { type: 'object' } }] })
+    const composed = ComposedToolset.of(a, b)
+    await expect(composed.listTools()).rejects.toBeInstanceOf(
+      ComposedToolNameCollisionError,
+    )
+    try {
+      await composed.listTools()
+      throw new Error('should have thrown')
+    } catch (err) {
+      const e = err as ComposedToolNameCollisionError
+      expect(e.name).toBe('ComposedToolNameCollisionError')
+      expect(e.collisions).toEqual([{ name: 'shared', childIndices: [0, 1] }])
+      expect(e.message).toMatch(/shared/)
+    }
+  })
+
+  it('does not throw when every name is distinct', async () => {
+    const a = fakeToolset({ tools: [{ name: 'a1', inputSchema: { type: 'object' } }] })
+    const b = fakeToolset({ tools: [{ name: 'b1', inputSchema: { type: 'object' } }] })
+    const composed = ComposedToolset.of(a, b)
+    const tools = await composed.listTools()
+    expect(tools.map((t) => t.name)).toEqual(['a1', 'b1'])
+  })
+
+  it('reports all child indices when three children share a name', async () => {
+    const mk = () => fakeToolset({ tools: [{ name: 'x', inputSchema: { type: 'object' } }] })
+    const composed = ComposedToolset.of(mk(), mk(), mk())
+    const err = await composed.listTools().then(
+      () => null,
+      (e: ComposedToolNameCollisionError) => e,
+    )
+    expect(err).toBeInstanceOf(ComposedToolNameCollisionError)
+    expect(err!.collisions).toEqual([{ name: 'x', childIndices: [0, 1, 2] }])
+  })
+
+  it('detects collisions across non-adjacent children', async () => {
+    const a = fakeToolset({ tools: [{ name: 'dup', inputSchema: { type: 'object' } }] })
+    const mid = fakeToolset({ tools: [{ name: 'mid', inputSchema: { type: 'object' } }] })
+    const c = fakeToolset({ tools: [{ name: 'dup', inputSchema: { type: 'object' } }] })
+    const composed = ComposedToolset.of(a, mid, c)
+    const err = await composed.listTools().then(
+      () => null,
+      (e: ComposedToolNameCollisionError) => e,
+    )
+    expect(err!.collisions).toEqual([{ name: 'dup', childIndices: [0, 2] }])
+  })
+
+  it('does NOT treat a single child listing a name twice as a collision', async () => {
+    // A child's internal duplicate is its own concern — callTool would route to
+    // that one child anyway, no cross-child mis-route. The composer stays quiet.
+    const a = fakeToolset({
+      tools: [
+        { name: 'twice', inputSchema: { type: 'object' } },
+        { name: 'twice', inputSchema: { type: 'object' } },
+      ],
+    })
+    const b = fakeToolset({ tools: [{ name: 'other', inputSchema: { type: 'object' } }] })
+    const composed = ComposedToolset.of(a, b)
+    const tools = await composed.listTools()
+    expect(tools.map((t) => t.name)).toEqual(['twice', 'twice', 'other'])
   })
 })
 

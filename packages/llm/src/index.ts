@@ -56,4 +56,8 @@ export {
   type DispatchToolsetOptions,
 } from './dispatch-toolset.js'
 // Phase 10 M4 — combine multiple toolsets behind one LlmAgent.tools slot
-export { ComposedToolset } from './composed-toolset.js'
+export {
+  ComposedToolset,
+  ComposedToolNameCollisionError,
+  type ComposedToolCollision,
+} from './composed-toolset.js'

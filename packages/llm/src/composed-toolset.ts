@@ -8,11 +8,19 @@
  * `LlmAgent` accepts one `LlmAgentToolset`. This composer wraps N
  * toolsets behind a single facade:
  *
- *   - `listTools()` concatenates each child's tool list. Name
- *     collisions are NOT resolved here; conventions (`<server>__<tool>`
- *     for MCP, `dispatch_task` for DispatchToolset) keep them apart
- *     in practice. Documented as "first match wins" if anyone breaks
- *     the convention.
+ *   - `listTools()` concatenates each child's tool list. If the SAME
+ *     tool name is advertised by more than one child, that's a wiring
+ *     collision (e.g. two DispatchToolsets, or a DispatchToolset and an
+ *     MCP server exposing the same name) — `callTool` would silently
+ *     first-match-route to the wrong child. R8: rather than mis-route
+ *     at runtime, `listTools()` throws a typed
+ *     `ComposedToolNameCollisionError` so the bug surfaces loudly at the
+ *     start of the agent's tool loop (the scheduler degrades it to a
+ *     `failed` task, visible in the transcript). Conventions
+ *     (`<server>__<tool>` for MCP, `dispatch_task` for DispatchToolset)
+ *     keep names apart in well-formed configs, so this never fires for
+ *     them. A single child advertising a name twice is its own concern
+ *     and is NOT treated as a composer collision.
  *   - `callTool(name, args)` routes the call to the first child whose
  *     `listTools()` advertises that name. An unknown name returns
  *     `isError: true` content rather than throwing — the LLM keeps
@@ -33,6 +41,34 @@ import type {
   LlmToolDefinition,
 } from './types.js'
 
+/** One tool name advertised by two or more children of a ComposedToolset. */
+export interface ComposedToolCollision {
+  readonly name: string
+  /** Indices (into the constructor's toolset array) that all advertise `name`. */
+  readonly childIndices: number[]
+}
+
+/**
+ * Thrown by {@link ComposedToolset.listTools} when more than one child
+ * advertises the same tool name. A collision means `callTool` would
+ * first-match-route to the wrong child — a wiring bug we surface loudly
+ * (R8) instead of mis-routing silently at runtime.
+ */
+export class ComposedToolNameCollisionError extends Error {
+  readonly collisions: ComposedToolCollision[]
+  constructor(collisions: ComposedToolCollision[]) {
+    const detail = collisions
+      .map((c) => `${c.name} (children ${c.childIndices.join(', ')})`)
+      .join('; ')
+    super(
+      `ComposedToolset: tool name(s) advertised by more than one child — ` +
+        `${detail}. Collisions silently mis-route callTool; rename or split the toolsets.`,
+    )
+    this.name = 'ComposedToolNameCollisionError'
+    this.collisions = collisions
+  }
+}
+
 export class ComposedToolset implements LlmAgentToolset {
   static of(...toolsets: LlmAgentToolset[]): ComposedToolset {
     return new ComposedToolset(toolsets)
@@ -46,9 +82,35 @@ export class ComposedToolset implements LlmAgentToolset {
 
   async listTools(): Promise<LlmToolDefinition[]> {
     const all: LlmToolDefinition[] = []
-    for (const t of this.toolsets) {
-      const tools = await t.listTools()
-      for (const td of tools) all.push(td)
+    // name -> first child index that advertised it. A later sighting from a
+    // DIFFERENT index is a cross-child collision; from the SAME index (a child
+    // listing a name twice) it's the child's own concern, not ours.
+    const firstOwner = new Map<string, number>()
+    const collisions = new Map<string, Set<number>>()
+    for (let i = 0; i < this.toolsets.length; i++) {
+      const tools = await this.toolsets[i]!.listTools()
+      for (const td of tools) {
+        const prev = firstOwner.get(td.name)
+        if (prev === undefined) {
+          firstOwner.set(td.name, i)
+        } else if (prev !== i) {
+          let set = collisions.get(td.name)
+          if (!set) {
+            set = new Set<number>([prev])
+            collisions.set(td.name, set)
+          }
+          set.add(i)
+        }
+        all.push(td)
+      }
+    }
+    if (collisions.size > 0) {
+      throw new ComposedToolNameCollisionError(
+        [...collisions.entries()].map(([name, set]) => ({
+          name,
+          childIndices: [...set].sort((a, b) => a - b),
+        })),
+      )
     }
     return all
   }
