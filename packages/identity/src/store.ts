@@ -2982,6 +2982,16 @@ export class IdentityStore {
     return this.suspendedTasks.countSuspendedTasks()
   }
 
+  /** R9 — atomically claim a due suspended row before resuming it. */
+  claimSuspendedTask(taskId: string, claimedAt: number): boolean {
+    return this.suspendedTasks.claimSuspendedTask(taskId, claimedAt)
+  }
+
+  /** R9 — reset claims older than `olderThan` (crashed claimants). */
+  reclaimStaleSuspendedClaims(olderThan: number): number {
+    return this.suspendedTasks.reclaimStaleSuspendedClaims(olderThan)
+  }
+
   // =====================================================================
   // Phase 12 M1 — IM bindings.
   // =====================================================================

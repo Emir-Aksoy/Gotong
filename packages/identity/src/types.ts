@@ -1627,6 +1627,17 @@ export interface SuspendedTask {
   /** Stringified `Task` (JSON.stringify). Resume sweep re-hydrates this. */
   taskJson: string
   createdAt: number
+  /**
+   * R9 (tech-debt) — atomic-claim stamp (epoch ms) or `null` when unclaimed.
+   * The sweep claims a due row (compare-and-set: `SET claimed_at WHERE
+   * claimed_at IS NULL`) before re-entering it, so two ticks / two hosts
+   * can't both resume the same row. A claim older than the reclaimer's TTL
+   * is treated as a crashed claimant and reset to `null`. `listDueSuspendedTasks`
+   * only returns unclaimed rows, so this is `null` for everything it yields;
+   * it surfaces on `getSuspendedTask` / `listSuspendedTasksByAgent` for
+   * diagnostics.
+   */
+  claimedAt: number | null
 }
 
 export interface PersistSuspendedTaskInput {

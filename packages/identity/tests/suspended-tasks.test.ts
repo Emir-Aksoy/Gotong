@@ -375,4 +375,79 @@ describe('IdentityStore — suspended_tasks (Phase 11 M2)', () => {
     store.removeSuspendedTask('s1')
     expect(store.countSuspendedTasks()).toBe(1)
   })
+
+  // --- R9 atomic claim + stale-claim reclaimer ------------------------------
+
+  it('a freshly persisted row is unclaimed (claimedAt null)', () => {
+    store.persistSuspendedTask({ taskId: 'c1', agentId: 'a', resumeAt: 10, state: null, taskJson: '{}' })
+    expect(store.getSuspendedTask('c1')!.claimedAt).toBeNull()
+  })
+
+  it('claimSuspendedTask is compare-and-set — first wins, second loses', () => {
+    store.persistSuspendedTask({ taskId: 'c2', agentId: 'a', resumeAt: 10, state: null, taskJson: '{}' })
+    expect(store.claimSuspendedTask('c2', 5_000)).toBe(true)
+    // Second claimant (a racing tick / another host) is rejected.
+    expect(store.claimSuspendedTask('c2', 6_000)).toBe(false)
+    // The stamp is the FIRST claimant's, untouched by the loser.
+    expect(store.getSuspendedTask('c2')!.claimedAt).toBe(5_000)
+  })
+
+  it('claiming a non-existent row returns false', () => {
+    expect(store.claimSuspendedTask('ghost', 1)).toBe(false)
+  })
+
+  it('listDueSuspendedTasks excludes claimed rows (sweep budget is for the unclaimed)', () => {
+    store.persistSuspendedTask({ taskId: 'd1', agentId: 'a', resumeAt: 1, state: null, taskJson: '{}' })
+    store.persistSuspendedTask({ taskId: 'd2', agentId: 'a', resumeAt: 2, state: null, taskJson: '{}' })
+    expect(store.listDueSuspendedTasks({ now: 100 }).map((r) => r.taskId)).toEqual(['d1', 'd2'])
+    store.claimSuspendedTask('d1', 50)
+    // d1 is now being resumed by its claimant; only d2 is available.
+    expect(store.listDueSuspendedTasks({ now: 100 }).map((r) => r.taskId)).toEqual(['d2'])
+  })
+
+  it('INSERT OR REPLACE (suspend-again) resets the claim to null', () => {
+    store.persistSuspendedTask({ taskId: 'r1', agentId: 'a', resumeAt: 10, state: { n: 1 }, taskJson: '{}' })
+    expect(store.claimSuspendedTask('r1', 5_000)).toBe(true)
+    // The suspend-again notifier path re-writes the row via INSERT OR REPLACE,
+    // which omits claimed_at → the re-parked row is unclaimed again.
+    store.persistSuspendedTask({ taskId: 'r1', agentId: 'a', resumeAt: 20, state: { n: 2 }, taskJson: '{}' })
+    expect(store.getSuspendedTask('r1')!.claimedAt).toBeNull()
+    expect(store.listDueSuspendedTasks({ now: 100 }).map((r) => r.taskId)).toEqual(['r1'])
+  })
+
+  it('removeSuspendedTask drops a claimed row (claim gone with the row)', () => {
+    store.persistSuspendedTask({ taskId: 'x1', agentId: 'a', resumeAt: 10, state: null, taskJson: '{}' })
+    store.claimSuspendedTask('x1', 5_000)
+    expect(store.removeSuspendedTask('x1')).toBe(1)
+    expect(store.getSuspendedTask('x1')).toBeNull()
+  })
+
+  it('reclaimStaleSuspendedClaims resets only claims older than the cutoff', () => {
+    store.persistSuspendedTask({ taskId: 's-old', agentId: 'a', resumeAt: 1, state: null, taskJson: '{}' })
+    store.persistSuspendedTask({ taskId: 's-new', agentId: 'a', resumeAt: 2, state: null, taskJson: '{}' })
+    store.persistSuspendedTask({ taskId: 's-free', agentId: 'a', resumeAt: 3, state: null, taskJson: '{}' })
+    store.claimSuspendedTask('s-old', 1_000) // crashed long ago
+    store.claimSuspendedTask('s-new', 9_000) // claimed recently
+    // Cutoff 5_000: only s-old (1_000 < 5_000) is reclaimed. s-free was never
+    // claimed (claimed_at NULL) so the `IS NOT NULL` guard leaves it alone.
+    expect(store.reclaimStaleSuspendedClaims(5_000)).toBe(1)
+    expect(store.getSuspendedTask('s-old')!.claimedAt).toBeNull()
+    expect(store.getSuspendedTask('s-new')!.claimedAt).toBe(9_000)
+    // The reclaimed row is once again available to the sweep; the recent
+    // claim still hides s-new.
+    expect(store.listDueSuspendedTasks({ now: 100 }).map((r) => r.taskId).sort()).toEqual(['s-free', 's-old'])
+  })
+
+  it('reclaimStaleSuspendedClaims returns 0 when no claim is stale', () => {
+    store.persistSuspendedTask({ taskId: 'n1', agentId: 'a', resumeAt: 1, state: null, taskJson: '{}' })
+    store.claimSuspendedTask('n1', 9_000)
+    expect(store.reclaimStaleSuspendedClaims(5_000)).toBe(0)
+    expect(store.getSuspendedTask('n1')!.claimedAt).toBe(9_000)
+  })
+
+  it('claim / reclaim reject malformed input', () => {
+    expect(() => store.claimSuspendedTask('', 1)).toThrow(IdentityError)
+    expect(() => store.claimSuspendedTask('t', NaN)).toThrow(IdentityError)
+    expect(() => store.reclaimStaleSuspendedClaims(NaN)).toThrow(IdentityError)
+  })
 })

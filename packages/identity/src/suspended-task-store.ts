@@ -30,6 +30,7 @@ interface SuspendedTaskRow {
   state: string | null
   task_json: string
   created_at: number
+  claimed_at: number | null
 }
 
 export class SuspendedTaskStore {
@@ -44,6 +45,9 @@ export class SuspendedTaskStore {
   private readonly stmtSuspendListDue: SqliteStmt
   private readonly stmtSuspendListByAgent: SqliteStmt
   private readonly stmtSuspendCount: SqliteStmt
+  // R9 — atomic claim (compare-and-set) + stale-claim reclaimer.
+  private readonly stmtSuspendClaim: SqliteStmt
+  private readonly stmtSuspendReclaim: SqliteStmt
 
   constructor(db: SqliteDb) {
     // Phase 11 M2 — suspended_tasks. `INSERT OR REPLACE` covers the
@@ -63,9 +67,15 @@ export class SuspendedTaskStore {
     this.stmtSuspendGetById = db.prepare(
       `SELECT * FROM suspended_tasks WHERE task_id = ?`,
     )
+    // R9 — only UNCLAIMED due rows. A claimed row is being resumed by
+    // another claimant (this process's prior tick, or another host sharing
+    // this store); excluding it here keeps the limit budget for rows that
+    // can actually be picked up, and the atomic claim below is the real
+    // race gate. A crashed claim is reset by `reclaimStaleSuspendedClaims`
+    // so it reappears here.
     this.stmtSuspendListDue = db.prepare(
       `SELECT * FROM suspended_tasks
-         WHERE resume_at <= ?
+         WHERE resume_at <= ? AND claimed_at IS NULL
        ORDER BY resume_at ASC
        LIMIT ?`,
     )
@@ -79,6 +89,21 @@ export class SuspendedTaskStore {
     // at NEVER_RESUME_AT included) — "how much work is currently suspended".
     this.stmtSuspendCount = db.prepare(
       `SELECT COUNT(*) AS c FROM suspended_tasks`,
+    )
+    // R9 — compare-and-set claim. Succeeds (changes===1) for exactly one
+    // caller per row; a second caller (or a node racing) sees changes===0.
+    this.stmtSuspendClaim = db.prepare(
+      `UPDATE suspended_tasks
+          SET claimed_at = ?
+        WHERE task_id = ? AND claimed_at IS NULL`,
+    )
+    // R9 — reset claims older than a cutoff (a claimant that crashed between
+    // claim and terminal-remove). Returns them to the unclaimed pool so the
+    // next sweep retries them rather than letting them sit stranded.
+    this.stmtSuspendReclaim = db.prepare(
+      `UPDATE suspended_tasks
+          SET claimed_at = NULL
+        WHERE claimed_at IS NOT NULL AND claimed_at < ?`,
     )
   }
 
@@ -205,6 +230,55 @@ export class SuspendedTaskStore {
     const row = this.stmtSuspendCount.get() as { c: number }
     return row.c
   }
+
+  /**
+   * R9 (tech-debt) — atomically claim a due row before the sweep re-enters
+   * it. Compare-and-set: `SET claimed_at WHERE task_id=? AND claimed_at IS
+   * NULL`. Returns `true` iff THIS caller won the claim (`changes===1`);
+   * `false` means the row was already claimed (another tick / another host)
+   * or no longer exists. The sweep skips the row on `false`.
+   *
+   * The claim is the real race gate (the `listDueSuspendedTasks` filter is
+   * only an optimisation): two hosts can both list the same row, but only
+   * one UPDATE flips `claimed_at` from NULL.
+   */
+  claimSuspendedTask(taskId: string, claimedAt: number): boolean {
+    if (typeof taskId !== 'string' || taskId.length === 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'claimSuspendedTask: taskId is required',
+      })
+    }
+    if (typeof claimedAt !== 'number' || !Number.isFinite(claimedAt)) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `claimSuspendedTask: claimedAt must be a finite number; got ${claimedAt}`,
+      })
+    }
+    const info = this.stmtSuspendClaim.run(claimedAt, taskId)
+    return Number(info.changes) === 1
+  }
+
+  /**
+   * R9 (tech-debt) — reclaim stale claims. Resets `claimed_at` to NULL for
+   * every row claimed strictly before `olderThan` (epoch ms), so a row whose
+   * claimant crashed between claim and terminal-remove returns to the
+   * unclaimed pool and the next sweep retries it. Returns the number of rows
+   * reclaimed. Call with a cutoff comfortably larger than the longest
+   * expected resume so a legitimately slow in-flight resume isn't reclaimed
+   * out from under itself (the worst case if it is: an at-least-once re-run,
+   * which the pre-R9 sweep already had).
+   */
+  reclaimStaleSuspendedClaims(olderThan: number): number {
+    if (typeof olderThan !== 'number' || !Number.isFinite(olderThan)) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `reclaimStaleSuspendedClaims: olderThan must be a finite number; got ${olderThan}`,
+      })
+    }
+    const info = this.stmtSuspendReclaim.run(olderThan)
+    return Number(info.changes)
+  }
 }
 
 function rowToSuspendedTask(r: SuspendedTaskRow): SuspendedTask {
@@ -239,5 +313,8 @@ function rowToSuspendedTask(r: SuspendedTaskRow): SuspendedTask {
     ...(corrupt ? { corrupt: true } : {}),
     taskJson: r.task_json,
     createdAt: r.created_at,
+    // R9 — `?? null` so a row read from a DB migrated before v31 (column
+    // absent on the row object) still yields the `null` sentinel.
+    claimedAt: r.claimed_at ?? null,
   }
 }

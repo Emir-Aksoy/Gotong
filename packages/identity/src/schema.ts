@@ -1043,6 +1043,35 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE peer_summary_alert_channels ADD COLUMN target TEXT;
     `,
   },
+  {
+    // R9 (tech-debt) — atomic claim for the resume sweep. One additive,
+    // nullable column on suspended_tasks.
+    //
+    // Before this, the sweep listed due rows then re-entered each via
+    // `hub.resumeTask` and only removed the row AFTER a terminal result.
+    // That window is at-least-once: crash between re-enter and remove →
+    // restart re-runs the task (and `onResume` isn't required to be
+    // idempotent); two hosts sharing this store both list the same due row
+    // and both resume it. The fix is a compare-and-set claim — the sweep
+    // runs `UPDATE … SET claimed_at=? WHERE task_id=? AND claimed_at IS NULL`
+    // and only proceeds when `changes===1`, so exactly one claimant owns a
+    // due row at a time.
+    //
+    //   claimed_at  NULL = unclaimed (the common state); a non-NULL stamp is
+    //               an in-flight resume. A claim that outlives a generous TTL
+    //               is a crashed claimant and gets reset to NULL by the
+    //               stale-claim reclaimer so the row is retried, not stranded.
+    //
+    // INSERT OR REPLACE on suspend-again omits this column, so a re-parked
+    // row is naturally unclaimed again. No index: the claim is keyed by the
+    // PRIMARY KEY (task_id); the reclaimer's `claimed_at < ?` scan runs over
+    // the handful of in-flight rows, not the whole table.
+    version: 31,
+    name: 'suspended-tasks-claim',
+    sql: `
+      ALTER TABLE suspended_tasks ADD COLUMN claimed_at INTEGER;
+    `,
+  },
 ]
 
 /**

@@ -900,13 +900,46 @@ async function main(): Promise<void> {
     const sweepIntervalMs = Number.isFinite(rawInterval) && rawInterval >= 1_000
       ? Math.min(rawInterval, 600_000)
       : 30_000
+    // R9 — how long a resume claim may be held before the reclaimer treats it
+    // as crashed and returns the row to the unclaimed pool. Must comfortably
+    // exceed the longest plausible single resume (an LLM tool loop can run for
+    // minutes), since reclaiming a still-running resume risks an at-least-once
+    // re-run. Default 10 min; floored at 2 sweep intervals so a claim is never
+    // reclaimed before the next tick even runs; clamped to [1 min, 1 h].
+    const rawClaimTtl = Number(process.env.AIPE_RESUME_CLAIM_TTL_MS ?? '600000')
+    const claimTtlMs = Math.min(
+      Math.max(
+        Number.isFinite(rawClaimTtl) && rawClaimTtl > 0 ? rawClaimTtl : 600_000,
+        sweepIntervalMs * 2,
+        60_000,
+      ),
+      3_600_000,
+    )
     let sweepInflight = false
     const sweepResume = async (): Promise<void> => {
       if (sweepInflight) return
       sweepInflight = true
       try {
+        // R9 — reclaim claims whose owner crashed mid-resume (claimed but
+        // never removed) before listing, so a stranded row reappears as due.
+        // Best-effort: a failure here just means this tick skips reclamation.
+        try {
+          const reclaimed = swept.reclaimStaleSuspendedClaims(Date.now() - claimTtlMs)
+          if (reclaimed > 0) {
+            log.warn('resume sweep: reclaimed stale claims', { count: reclaimed })
+          }
+        } catch (err) {
+          log.error('resume sweep: reclaimStaleSuspendedClaims failed', { err })
+        }
         const due = swept.listDueSuspendedTasks({ now: Date.now(), limit: 100 })
         for (const row of due) {
+          // R9 — atomically claim the row before touching it. If we lost the
+          // race (a concurrent tick, or another host sharing this store, got
+          // there first), skip: the winner owns the resume. This makes the
+          // path multi-node-ready and shrinks the crash-replay window to
+          // "after claim, before terminal remove" (still at-least-once, but
+          // the reclaimer bounds how long such a row stays stranded).
+          if (!swept.claimSuspendedTask(row.taskId, Date.now())) continue
           if (row.corrupt) {
             // Corrupt `state` blob (truncated/garbled write). The store
             // flagged it instead of throwing — which previously aborted
