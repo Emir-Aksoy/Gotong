@@ -215,6 +215,21 @@ export interface LlmTaskOutput {
 }
 
 /**
+ * R11 — schema version for the working-memory blob an `LlmAgent` packs on
+ * suspend (the tool-loop `messages` array stored under `__llmMessages`).
+ *
+ * `packLoopMemoryIntoSuspend` stamps it; `extractRestoredMessages` gates on
+ * it. Bump it whenever the persisted message shape changes incompatibly —
+ * e.g. a multimodal content-block reshape (Phase 9 shapes evolve). A row
+ * written under an older version is then NOT replayed: the resume falls back
+ * to a fresh `handleTask` instead of feeding the provider malformed messages
+ * left over from a now-stale schema. Single source of truth for both the
+ * write and the read keeps the gate honest (a literal `1` in two places
+ * would silently drift).
+ */
+const LLM_AGENT_MEM_VERSION = 1
+
+/**
  * An AgentParticipant that delegates `handleTask` to an LlmProvider.
  *
  * Two extension points for subclasses:
@@ -656,11 +671,28 @@ export class LlmAgent extends AgentParticipant {
 
   private static extractRestoredMessages(state: unknown): LlmMessage[] | null {
     if (!state || typeof state !== 'object') return null
-    const s = state as { __llmMessages?: unknown }
+    const s = state as { __llmMessages?: unknown; __llmAgentMemVersion?: unknown }
     if (!Array.isArray(s.__llmMessages)) return null
-    // We trust the persistence layer — the same code shape wrote it.
-    // A future schema bump would migrate via a version key inside the
-    // packed state (see __llmAgentMemVersion below).
+    // R11 — version gate. The persisted message shape is owned by THIS code
+    // version. A row written before an incompatible bump (e.g. a multimodal
+    // content-block reshape) would otherwise splice malformed messages
+    // straight into `provider.stream`. On mismatch, discard the stale memory
+    // and return null — the caller (`handleResume`) then falls back to a
+    // fresh `handleTask`. Losing the in-flight loop state is strictly better
+    // than replaying a corrupt one. We log it: a mismatch means a deploy
+    // changed the schema out from under parked tasks, which operators should
+    // see (and it's exactly the signal that a memory-version bump is taking
+    // effect). Note the version field has coexisted with `__llmMessages`
+    // since Phase 11, so a blob carrying messages without a matching version
+    // is either a stale-schema row or a malformed one — both fail safe here.
+    if (s.__llmAgentMemVersion !== LLM_AGENT_MEM_VERSION) {
+      console.warn(
+        '[llm-agent] suspended working-memory version mismatch — expected ' +
+          `${LLM_AGENT_MEM_VERSION}, got ${String(s.__llmAgentMemVersion)}; ` +
+          'discarding stale memory and resuming from a fresh task',
+      )
+      return null
+    }
     return s.__llmMessages as LlmMessage[]
   }
 
@@ -674,7 +706,7 @@ export class LlmAgent extends AgentParticipant {
   private packLoopMemoryIntoSuspend(err: SuspendTaskError, messages: LlmMessage[]): SuspendTaskError {
     const userState = err.state
     const packed: Record<string, unknown> = {
-      __llmAgentMemVersion: 1,
+      __llmAgentMemVersion: LLM_AGENT_MEM_VERSION,
       __llmMessages: messages,
     }
     if (userState !== undefined) packed.user = userState

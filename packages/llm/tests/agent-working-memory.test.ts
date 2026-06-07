@@ -24,7 +24,7 @@
  *     is the initial user message
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import {
   Hub,
@@ -222,6 +222,7 @@ describe('LlmAgent — working memory persists across suspend/resume', () => {
       >[0]['provider'],
     })
     const result = await agent.onResume(makeTask(), {
+      __llmAgentMemVersion: 1,
       __llmMessages: [
         { role: 'user', content: [{ type: 'text', text: 'old' }] },
       ],
@@ -280,5 +281,119 @@ describe('LlmAgent — working memory persists across suspend/resume', () => {
     if (result.kind === 'failed') {
       expect(result.error).toBe('rate limited')
     }
+  })
+})
+
+// --- R11 — working-memory schema version gate -------------------------------
+//
+// `extractRestoredMessages` must replay a persisted `__llmMessages` blob ONLY
+// when its `__llmAgentMemVersion` matches the current code's version. A row
+// written under an older (incompatible) schema is discarded — the resume
+// falls back to a fresh `handleTask` rather than splicing now-malformed
+// messages into `provider.stream`. We observe which messages reach the
+// provider on its first call to tell "replayed stale memory" apart from
+// "ran fresh".
+
+// Records the text blocks of every message handed to `stream` on the FIRST
+// call, then completes the turn. A toolset is attached so the resume path
+// goes through the tool loop (where memory would be spliced).
+class FirstCallRecordingProvider {
+  public readonly name = 'recording-mem'
+  public firstCallTexts: string[] | null = null
+  private round = 0
+  async *stream(req: {
+    messages?: Array<{ content?: unknown }>
+  }): AsyncIterable<LlmStreamChunk> {
+    if (this.round === 0) {
+      const texts: string[] = []
+      for (const m of req.messages ?? []) {
+        const content = (m as { content?: unknown }).content
+        if (Array.isArray(content)) {
+          for (const b of content) {
+            const blk = b as { type?: string; text?: string }
+            if (blk.type === 'text' && typeof blk.text === 'string') {
+              texts.push(blk.text)
+            }
+          }
+        } else if (typeof content === 'string') {
+          texts.push(content)
+        }
+      }
+      this.firstCallTexts = texts
+    }
+    this.round++
+    yield { type: 'text', text: 'recorded-done' }
+    yield { type: 'end', stopReason: 'end_turn' }
+  }
+}
+
+const STALE_MARKER = 'STALE-MEMORY-MARKER-DO-NOT-REPLAY'
+
+function staleMemory(): LlmMessage[] {
+  return [{ role: 'user', content: [{ type: 'text', text: STALE_MARKER }] }]
+}
+
+function makeRecordingAgent(provider: FirstCallRecordingProvider): LlmAgent {
+  return new LlmAgent({
+    id: 'mem-agent',
+    capabilities: ['x'],
+    provider: provider as unknown as ConstructorParameters<
+      typeof LlmAgent
+    >[0]['provider'],
+    tools: noopToolset,
+  })
+}
+
+describe('LlmAgent — R11 working-memory version gate', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>
+  beforeEach(() => {
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  })
+  afterEach(() => {
+    warnSpy.mockRestore()
+  })
+
+  it('replays restored memory when the version matches (current = 1)', async () => {
+    const provider = new FirstCallRecordingProvider()
+    const agent = makeRecordingAgent(provider)
+    const result = await agent.onResume(makeTask(), {
+      __llmAgentMemVersion: 1,
+      __llmMessages: staleMemory(),
+    })
+    expect(result.kind).toBe('ok')
+    // The marker message reached the provider → memory WAS replayed.
+    expect(provider.firstCallTexts).toContain(STALE_MARKER)
+    expect(warnSpy).not.toHaveBeenCalled()
+  })
+
+  it('discards memory + falls back to fresh handleTask when version mismatches', async () => {
+    const provider = new FirstCallRecordingProvider()
+    const agent = makeRecordingAgent(provider)
+    const result = await agent.onResume(makeTask(), {
+      __llmAgentMemVersion: 999, // a future, incompatible schema
+      __llmMessages: staleMemory(),
+    })
+    // Fresh run still succeeds — the task is re-executed from scratch.
+    expect(result.kind).toBe('ok')
+    // The stale marker must NOT have reached the provider; the fresh
+    // `buildRequest` seeds messages from the task payload instead.
+    expect(provider.firstCallTexts).not.toContain(STALE_MARKER)
+    expect(provider.firstCallTexts).toContain('do the thing')
+    // Mismatch is logged so operators can see a schema bump took effect.
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(String(warnSpy.mock.calls[0]![0])).toMatch(/version mismatch/i)
+  })
+
+  it('treats a memory blob missing the version field as a mismatch (fail-safe)', async () => {
+    const provider = new FirstCallRecordingProvider()
+    const agent = makeRecordingAgent(provider)
+    const result = await agent.onResume(makeTask(), {
+      // No __llmAgentMemVersion — a malformed or pre-versioning blob.
+      __llmMessages: staleMemory(),
+    })
+    expect(result.kind).toBe('ok')
+    expect(provider.firstCallTexts).not.toContain(STALE_MARKER)
+    expect(provider.firstCallTexts).toContain('do the thing')
+    expect(warnSpy).toHaveBeenCalledTimes(1)
   })
 })
