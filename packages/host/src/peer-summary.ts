@@ -49,6 +49,7 @@ import {
   type PeerSummarySource,
 } from './peer-summary-alerts.js'
 import {
+  createDeliveryDeduper,
   deliverToChannel,
   deliverToEnabledChannels,
   diffAlertFirings,
@@ -600,11 +601,19 @@ export function createPeerSummaryFederation(
      */
     channels?: PeerSummaryAlertChannelSink
     /**
-     * Delivery transport for the webhook dispatcher. Defaults to the global
-     * `fetch` + `process.env` (see `deliverToChannel`). Tests inject a fake
-     * `fetchImpl` + `env` so the whole path runs without a socket.
+     * Delivery transport for the dispatcher. Defaults to the global `fetch` +
+     * `process.env` (see `deliverToChannel`). Tests inject a fake `fetchImpl` +
+     * `env` so the whole path runs without a socket. `deliver.retry` opts into
+     * best-effort retry/backoff per channel.
      */
     deliver?: DeliverOptions
+    /**
+     * Dedup window (ms) for the in-memory delivery deduper, owned for the life
+     * of this federation. Suppresses an identical (channel, firingId, event)
+     * re-send within the window (default 60s; 0 disables). Inject
+     * `deliver.deduper` to manage it externally (tests).
+     */
+    deliverDedupWindowMs?: number
     now?: () => number
     logger?: { warn?: (msg: string, meta?: Record<string, unknown>) => void }
   },
@@ -612,6 +621,11 @@ export function createPeerSummaryFederation(
   const now = opts.now ?? (() => Date.now())
   const cache = new Map<string, { summary: PeerSummary; lastFetchedAt: number }>()
   const errors = new Map<string, string>()
+  // A single deduper for the life of this federation (per process). The firing
+  // lifecycle already notifies ONCE per transition; this is the secondary net
+  // against an identical re-send from overlapping invocations. Inject one via
+  // `deliver.deduper` (tests) or tune the window with `deliverDedupWindowMs`.
+  const deliverDeduper = opts.deliver?.deduper ?? createDeliveryDeduper(opts.deliverDedupWindowMs ?? 60_000)
 
   // Best-effort: a snapshot-store hiccup must never break a user-facing
   // refresh, so capture is wrapped + logged, not thrown.
@@ -743,6 +757,9 @@ export function createPeerSummaryFederation(
       const { toOpen, toResolve } = diffAlertFirings(breaches, openFirings)
 
       const channels = opts.channels ? opts.channels.listPeerSummaryAlertChannels() : []
+      // Carry the long-lived deduper + this pass's clock into delivery (retry
+      // config, if any, rides in opts.deliver). One nowMs for the whole pass.
+      const deliverOpts: DeliverOptions = { ...opts.deliver, deduper: deliverDeduper, nowMs: now() }
       const opened: PeerSummaryAlertFiring[] = []
       const resolved: PeerSummaryAlertFiring[] = []
       const deliveries: AlertDeliveryResult[] = []
@@ -772,7 +789,7 @@ export function createPeerSummaryFederation(
         }
         opened.push(firing)
         deliveries.push(
-          ...(await deliverToEnabledChannels(channels, renderWebhookPayload(firing, 'opened'), opts.deliver)),
+          ...(await deliverToEnabledChannels(channels, renderWebhookPayload(firing, 'opened'), deliverOpts)),
         )
       }
 
@@ -790,7 +807,7 @@ export function createPeerSummaryFederation(
         }
         resolved.push(firing)
         deliveries.push(
-          ...(await deliverToEnabledChannels(channels, renderWebhookPayload(firing, 'resolved'), opts.deliver)),
+          ...(await deliverToEnabledChannels(channels, renderWebhookPayload(firing, 'resolved'), deliverOpts)),
         )
       }
 

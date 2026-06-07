@@ -1511,6 +1511,18 @@ async function main(): Promise<void> {
     // v5 E5-M3 — the control plane: this hub's own footprint (`local`) joined
     // with each connected peer's voluntarily-shared summary. In-process cache
     // over the same registry; the admin refreshes on demand.
+    //
+    // v5 Stream F multi-channel (M3) — opt-in best-effort retry/backoff + a
+    // dedup window for alert delivery. Retry defaults to a single attempt
+    // (behavior unchanged); the dedup window defaults to 60s (the firing
+    // lifecycle already notifies once — this is the secondary net).
+    const clampInt = (raw: string | undefined, def: number, lo: number, hi: number): number => {
+      const n = Number(raw ?? '')
+      return Number.isFinite(n) ? Math.min(hi, Math.max(lo, Math.trunc(n))) : def
+    }
+    const alertRetryAttempts = clampInt(process.env.AIPE_PEER_SUMMARY_ALERT_RETRY_ATTEMPTS, 1, 1, 6)
+    const alertRetryBaseMs = clampInt(process.env.AIPE_PEER_SUMMARY_ALERT_RETRY_BASE_MS, 500, 50, 30_000)
+    const alertDedupWindowMs = clampInt(process.env.AIPE_PEER_SUMMARY_ALERT_DEDUP_MS, 60_000, 0, 3_600_000)
     peerSummaryFederation = createPeerSummaryFederation(fedRegistry, {
       buildLocal: () => buildLocalSummary(summaryDeps),
       // v5 Stream F — persist a counts-only snapshot per refresh so the control
@@ -1527,6 +1539,13 @@ async function main(): Promise<void> {
       // process.env (the secret in `headerEnv` is read at delivery time).
       firings: identity,
       channels: identity,
+      // v5 Stream F multi-channel (M3) — best-effort retry/backoff for the
+      // dispatcher (defaults to a single attempt = unchanged) + the dedup
+      // window for the in-memory deduper (0 disables). Delivery still routes
+      // through global fetch + process.env; the deduper is created and held
+      // by the federation surface.
+      deliver: { retry: { maxAttempts: alertRetryAttempts, baseDelayMs: alertRetryBaseMs } },
+      deliverDedupWindowMs: alertDedupWindowMs,
       logger: log,
     })
     // v5 Stream F day-3 — proactive alert-delivery sweep. OPT-IN: only runs when

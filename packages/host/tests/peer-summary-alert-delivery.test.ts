@@ -1,13 +1,18 @@
 /**
- * v5 Stream F day-3 — pure edge-trigger differ + webhook dispatcher
- * (peer-summary-alert-delivery).
+ * v5 Stream F day-3 + multi-channel — pure edge-trigger differ + multi-channel
+ * dispatcher (peer-summary-alert-delivery).
  *
  * Coverage:
  *   - diffAlertFirings: open new breaches, resolve cleared firings, leave stable
  *   - renderWebhookPayload: shape + counts-only (no leak surface) + opened/resolved
+ *   - renderAlertText / buildDeliveryRequest: per-kind/platform pure builders
  *   - deliverToChannel: POSTs via injected fetch; headerEnv → Authorization;
  *     missing env var still POSTs; transport error / non-2xx never throw
- *   - deliverToEnabledChannels: disabled channels are skipped
+ *   - deliverToChannel retry/backoff: retries a failed attempt with injected
+ *     sleep; default single-shot; under-configured channel never retries
+ *   - createDeliveryDeduper / deliveryDedupKey: in-memory window suppression
+ *   - deliverToEnabledChannels: disabled channels skipped; dedup window skips
+ *     an identical (channel, firing, event); a failed send stays free to retry
  */
 
 import type { PeerSummaryAlertChannel, PeerSummaryAlertFiring } from '@aipehub/identity'
@@ -16,8 +21,10 @@ import { describe, expect, it } from 'vitest'
 import type { PeerSummaryAlertBreach } from '../src/peer-summary-alerts.js'
 import {
   buildDeliveryRequest,
+  createDeliveryDeduper,
   deliverToChannel,
   deliverToEnabledChannels,
+  deliveryDedupKey,
   diffAlertFirings,
   renderAlertText,
   renderWebhookPayload,
@@ -77,6 +84,33 @@ function fakeFetch(resp: { ok: boolean; status: number } = { ok: true, status: 2
     return resp
   }
   return { fn, calls }
+}
+
+/**
+ * A fake fetch that walks a programmed sequence of outcomes (a response or a
+ * thrown Error) — drives retry tests deterministically. After the sequence is
+ * exhausted it repeats the last outcome.
+ */
+function sequenceFetch(results: Array<{ ok: boolean; status: number } | Error>) {
+  const calls: Array<{ url: string; init?: { method?: string; headers?: Record<string, string>; body?: string } }> = []
+  let i = 0
+  const fn: FetchLike = async (url, init) => {
+    calls.push({ url, init })
+    const r = results[Math.min(i, results.length - 1)]
+    i++
+    if (r instanceof Error) throw r
+    return r
+  }
+  return { fn, calls }
+}
+
+/** Injectable sleep that records the requested delays instead of waiting. */
+function recordSleeps() {
+  const delays: number[] = []
+  const sleepImpl = async (ms: number): Promise<void> => {
+    delays.push(ms)
+  }
+  return { delays, sleepImpl }
 }
 
 describe('diffAlertFirings (edge-trigger)', () => {
@@ -246,6 +280,99 @@ describe('deliverToChannel (injectable fetch, best-effort)', () => {
   })
 })
 
+describe('deliverToChannel retry/backoff (best-effort)', () => {
+  const payload = renderWebhookPayload(firing(), 'opened')
+
+  it('retries a failed attempt and reports the eventual success (with doubling backoff)', async () => {
+    const { fn, calls } = sequenceFetch([new Error('boom'), new Error('boom'), { ok: true, status: 200 }])
+    const { delays, sleepImpl } = recordSleeps()
+    const res = await deliverToChannel(channel(), payload, {
+      fetchImpl: fn,
+      retry: { maxAttempts: 3, baseDelayMs: 100, sleepImpl },
+    })
+    expect(res.ok).toBe(true)
+    expect(calls).toHaveLength(3)
+    expect(delays).toEqual([100, 200]) // backoff after attempts 1 and 2, none after the success
+  })
+
+  it('gives up after maxAttempts and returns the last failure', async () => {
+    const { fn, calls } = sequenceFetch([{ ok: false, status: 500 }])
+    const { delays, sleepImpl } = recordSleeps()
+    const res = await deliverToChannel(channel(), payload, {
+      fetchImpl: fn,
+      retry: { maxAttempts: 2, baseDelayMs: 50, sleepImpl },
+    })
+    expect(res.ok).toBe(false)
+    expect(res.status).toBe(500)
+    expect(calls).toHaveLength(2)
+    expect(delays).toEqual([50]) // one backoff between the two attempts
+  })
+
+  it('caps a single backoff at maxDelayMs', async () => {
+    const { fn } = sequenceFetch([new Error('x'), new Error('x'), new Error('x')])
+    const { delays, sleepImpl } = recordSleeps()
+    await deliverToChannel(channel(), payload, {
+      fetchImpl: fn,
+      retry: { maxAttempts: 3, baseDelayMs: 8_000, maxDelayMs: 10_000, sleepImpl },
+    })
+    expect(delays).toEqual([8_000, 10_000]) // 8000, then 16000 clamped to 10000
+  })
+
+  it('default (no retry opts) is a single attempt', async () => {
+    const { fn, calls } = sequenceFetch([new Error('boom')])
+    const res = await deliverToChannel(channel(), payload, { fetchImpl: fn })
+    expect(res.ok).toBe(false)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('an under-configured channel returns immediately — no POST, no retry, no sleep', async () => {
+    const { fn, calls } = fakeFetch()
+    const { delays, sleepImpl } = recordSleeps()
+    const res = await deliverToChannel(channel({ kind: 'email', target: null }), payload, {
+      fetchImpl: fn,
+      retry: { maxAttempts: 3, sleepImpl },
+    })
+    expect(res.ok).toBe(false)
+    expect(res.error).toContain('cannot build delivery')
+    expect(calls).toHaveLength(0)
+    expect(delays).toEqual([])
+  })
+})
+
+describe('createDeliveryDeduper / deliveryDedupKey (in-memory window)', () => {
+  it('suppresses an identical key within the window, allows it once the window elapses', () => {
+    const d = createDeliveryDeduper(1_000)
+    const k = deliveryDedupKey('psac_1', 42, 'opened')
+    expect(d.recentlySent(k, 0)).toBe(false) // never sent
+    d.markSent(k, 0)
+    expect(d.recentlySent(k, 500)).toBe(true) // within window
+    expect(d.recentlySent(k, 1_000)).toBe(false) // window elapsed (age >= window)
+    expect(d.recentlySent(k, 1_500)).toBe(false)
+  })
+
+  it('windowMs<=0 disables it (every send passes)', () => {
+    const d = createDeliveryDeduper(0)
+    const k = deliveryDedupKey('psac_1', 42, 'opened')
+    d.markSent(k, 0)
+    expect(d.recentlySent(k, 0)).toBe(false)
+  })
+
+  it('deliveryDedupKey distinguishes channel, firing, and event', () => {
+    expect(deliveryDedupKey('a', 1, 'opened')).not.toBe(deliveryDedupKey('a', 1, 'resolved'))
+    expect(deliveryDedupKey('a', 1, 'opened')).not.toBe(deliveryDedupKey('a', 2, 'opened'))
+    expect(deliveryDedupKey('a', 1, 'opened')).not.toBe(deliveryDedupKey('b', 1, 'opened'))
+  })
+
+  it('prune drops entries past the window; size reflects the live set', () => {
+    const d = createDeliveryDeduper(1_000)
+    d.markSent('k1', 0)
+    d.markSent('k2', 500)
+    expect(d.size()).toBe(2)
+    d.prune(1_000) // k1 (age 1000 >= window) drops; k2 (age 500) stays
+    expect(d.size()).toBe(1)
+  })
+})
+
 describe('renderAlertText (counts-only)', () => {
   it('renders a firing line from counts-only fields (label + ruleId)', () => {
     const text = renderAlertText(renderWebhookPayload(firing({ label: 'too many parked' }), 'opened'))
@@ -360,5 +487,43 @@ describe('deliverToEnabledChannels', () => {
     )
     expect(results.map((r) => r.channelId).sort()).toEqual(['a', 'c'])
     expect(calls.map((c) => c.url).sort()).toEqual(['https://a.example/x', 'https://c.example/x'])
+  })
+
+  it('skips an identical (channel, firing, event) already sent within the window — no second POST', async () => {
+    const { fn, calls } = fakeFetch()
+    const payload = renderWebhookPayload(firing({ id: 42 }), 'opened')
+    const deduper = createDeliveryDeduper(60_000)
+    // first pass: delivers and records
+    const r1 = await deliverToEnabledChannels([channel({ id: 'a' })], payload, { fetchImpl: fn, deduper, nowMs: 1_000 })
+    expect(r1[0].ok).toBe(true)
+    expect(r1[0].skipped).toBeUndefined()
+    expect(calls).toHaveLength(1)
+    // second pass within the window: suppressed (skipped:true, no new POST)
+    const r2 = await deliverToEnabledChannels([channel({ id: 'a' })], payload, { fetchImpl: fn, deduper, nowMs: 2_000 })
+    expect(r2[0].ok).toBe(true)
+    expect(r2[0].skipped).toBe(true)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('a FAILED send is not recorded — a later pass is free to retry it', async () => {
+    const payload = renderWebhookPayload(firing({ id: 7 }), 'opened')
+    const deduper = createDeliveryDeduper(60_000)
+    const failing = fakeFetch({ ok: false, status: 500 })
+    const r1 = await deliverToEnabledChannels([channel({ id: 'a' })], payload, {
+      fetchImpl: failing.fn,
+      deduper,
+      nowMs: 1_000,
+    })
+    expect(r1[0].ok).toBe(false)
+    // the failure wasn't recorded → a later pass delivers (not skipped)
+    const ok = fakeFetch({ ok: true, status: 200 })
+    const r2 = await deliverToEnabledChannels([channel({ id: 'a' })], payload, {
+      fetchImpl: ok.fn,
+      deduper,
+      nowMs: 2_000,
+    })
+    expect(r2[0].skipped).toBeUndefined()
+    expect(r2[0].ok).toBe(true)
+    expect(ok.calls).toHaveLength(1)
   })
 })
