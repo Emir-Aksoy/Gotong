@@ -31,6 +31,14 @@ import { readJsonBody, sendJson } from './http-helpers.js'
 
 const log = createLogger('a2a-admin-routes')
 
+/** Stream H2-OUT — long-running poll lifecycle (duck-typed mirror of identity's
+ * `A2aOutboundLifecycle`). Both fields optional, so `{}` = lifecycle on with the
+ * participant's defaults; a null `lifecycle` on the view means blocking. */
+export interface A2aLifecycleInput {
+  pollIntervalMs?: number
+  maxAttempts?: number
+}
+
 /** Public projection of a stored outbound A2A agent (duck-typed mirror of the
  * host's `A2aOutboundAgent`), plus host-joined runtime liveness. The bearer is
  * NEVER carried — only `tokenEnv`, the name of the env var it lives in. */
@@ -41,6 +49,8 @@ export interface A2aAgentView {
   tokenEnv: string
   peerId: string | null
   targetSkill: string | null
+  /** Stream H2-OUT — long-running poll lifecycle; null = blocking (legacy). */
+  lifecycle: A2aLifecycleInput | null
   enabled: boolean
   label: string | null
   createdAt: number
@@ -59,6 +69,8 @@ export interface A2aAgentAddInput {
   tokenEnv: string
   peerId?: string | null
   targetSkill?: string | null
+  /** Opt into the long-running lifecycle; null/undefined = blocking (legacy). */
+  lifecycle?: A2aLifecycleInput | null
   label?: string | null
   enabled?: boolean
 }
@@ -69,6 +81,8 @@ export interface A2aAgentUpdateInput {
   tokenEnv?: string
   peerId?: string | null
   targetSkill?: string | null
+  /** undefined = keep; null = turn lifecycle OFF; object = set/replace it. */
+  lifecycle?: A2aLifecycleInput | null
   label?: string | null
   enabled?: boolean
 }
@@ -123,6 +137,31 @@ function coerceCapabilities(v: unknown): { value: string[] } | { error: string }
   return { value: v as string[] }
 }
 
+/**
+ * lifecycle (Stream H2-OUT) shape check: null → clear; an object with optional
+ * positive-number pollIntervalMs/maxAttempts → set; anything else → error. Only
+ * called when the key is present (undefined = "keep" stays out of the patch).
+ * The store re-validates authoritatively; this is the web shape gate.
+ */
+function coerceLifecycle(v: unknown): { value: A2aLifecycleInput | null } | { error: string } {
+  if (v === null) return { value: null }
+  if (typeof v !== 'object' || Array.isArray(v)) {
+    return { error: 'lifecycle must be an object or null' }
+  }
+  const o = v as Record<string, unknown>
+  const out: A2aLifecycleInput = {}
+  for (const f of ['pollIntervalMs', 'maxAttempts'] as const) {
+    if (o[f] !== undefined) {
+      const n = o[f]
+      if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) {
+        return { error: `lifecycle.${f} must be a positive number` }
+      }
+      out[f] = n
+    }
+  }
+  return { value: out }
+}
+
 /** peerId/targetSkill/label must be string|null; enabled must be boolean. */
 function checkOptionalFields(o: Record<string, unknown>): string | null {
   for (const f of ['peerId', 'targetSkill', 'label'] as const) {
@@ -155,12 +194,19 @@ function coerceAdd(body: unknown): { value: A2aAgentAddInput } | { error: string
   if ('error' in caps) return { error: caps.error }
   const bad = checkOptionalFields(o)
   if (bad) return { error: bad }
+  let lifecycle: A2aLifecycleInput | null | undefined
+  if (o.lifecycle !== undefined) {
+    const lc = coerceLifecycle(o.lifecycle)
+    if ('error' in lc) return { error: lc.error }
+    lifecycle = lc.value
+  }
   return {
     value: {
       id: o.id as string,
       capabilities: caps.value,
       url: o.url as string,
       tokenEnv: o.tokenEnv as string,
+      ...(lifecycle !== undefined ? { lifecycle } : {}),
       ...pickOptional(o),
     },
   }
@@ -182,11 +228,18 @@ function coerceUpdate(body: unknown): { value: A2aAgentUpdateInput } | { error: 
   }
   const bad = checkOptionalFields(o)
   if (bad) return { error: bad }
+  let lifecycle: A2aLifecycleInput | null | undefined
+  if (o.lifecycle !== undefined) {
+    const lc = coerceLifecycle(o.lifecycle)
+    if ('error' in lc) return { error: lc.error }
+    lifecycle = lc.value
+  }
   return {
     value: {
       ...(caps !== undefined ? { capabilities: caps } : {}),
       ...(o.url !== undefined ? { url: o.url as string } : {}),
       ...(o.tokenEnv !== undefined ? { tokenEnv: o.tokenEnv as string } : {}),
+      ...(lifecycle !== undefined ? { lifecycle } : {}),
       ...pickOptional(o),
     },
   }

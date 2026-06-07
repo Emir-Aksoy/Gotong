@@ -1917,6 +1917,7 @@ async function main(): Promise<void> {
       tokenEnv: a.tokenEnv,
       peerId: a.peerId,
       targetSkill: a.targetSkill,
+      lifecycle: a.lifecycle, // Stream H2-OUT — null = blocking (legacy)
       enabled: a.enabled,
       label: a.label,
       createdAt: a.createdAt,

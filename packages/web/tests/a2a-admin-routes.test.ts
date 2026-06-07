@@ -51,6 +51,7 @@ function view(over: Partial<A2aAgentView> = {}): A2aAgentView {
     tokenEnv: 'WRITER_A2A_TOKEN',
     peerId: null,
     targetSkill: null,
+    lifecycle: null,
     enabled: true,
     label: null,
     createdAt: 1,
@@ -269,5 +270,82 @@ describe('/api/admin/a2a-agents (Route B P1-M11c)', () => {
     b = await boot()
     const r = await fetch(`${b.baseUrl}${AGENTS}`, { method: 'PUT', headers: auth(b) })
     expect(r.status).toBe(405)
+  })
+
+  // --- Stream H2-OUT: long-running lifecycle (the v32 column reaches the store) ---
+
+  it('GET carries lifecycle in the view (null = blocking, object = long-running)', async () => {
+    b = await boot()
+    b.rows = [
+      view({ id: 'blocking' }), // lifecycle: null by default
+      view({ id: 'long', lifecycle: { pollIntervalMs: 5000, maxAttempts: 40 } }),
+    ]
+    const j = await (await fetch(`${b.baseUrl}${AGENTS}`, { headers: auth(b) })).json()
+    expect(j.agents[0].lifecycle).toBeNull()
+    expect(j.agents[1].lifecycle).toEqual({ pollIntervalMs: 5000, maxAttempts: 40 })
+  })
+
+  it('POST forwards a tuned lifecycle object to the store', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({
+        id: 'long',
+        capabilities: ['review'],
+        url: 'https://r.test/a2a',
+        tokenEnv: 'T',
+        lifecycle: { pollIntervalMs: 5000, maxAttempts: 40 },
+      }),
+    })
+    expect(r.status).toBe(201)
+    const sent = b.addCalls[0] as { lifecycle?: unknown }
+    expect(sent.lifecycle).toEqual({ pollIntervalMs: 5000, maxAttempts: 40 })
+  })
+
+  it('POST forwards a {} lifecycle (opts in with defaults) but omits it when absent', async () => {
+    b = await boot()
+    // `{}` is meaningful (lifecycle ON, defaults) — it must reach the store.
+    await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({ id: 'd', capabilities: ['a'], url: 'https://d.test/a2a', tokenEnv: 'T', lifecycle: {} }),
+    })
+    expect((b.addCalls[0] as { lifecycle?: unknown }).lifecycle).toEqual({})
+    // No lifecycle key → omitted entirely, so the store keeps its NULL default (blocking).
+    await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({ id: 'b', capabilities: ['a'], url: 'https://b.test/a2a', tokenEnv: 'T' }),
+    })
+    expect('lifecycle' in (b.addCalls[1] as object)).toBe(false)
+  })
+
+  it('POST 400 on a non-positive lifecycle field (web shape gate, never reaches the store)', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({
+        id: 'bad',
+        capabilities: ['a'],
+        url: 'https://x.test/a2a',
+        tokenEnv: 'T',
+        lifecycle: { pollIntervalMs: -1 },
+      }),
+    })
+    expect(r.status).toBe(400)
+    expect(b.addCalls).toHaveLength(0)
+  })
+
+  it('PATCH forwards lifecycle: null (turn OFF) to the store', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${AGENTS}/remote-writer`, {
+      method: 'PATCH',
+      headers: jsonAuth(b),
+      body: JSON.stringify({ lifecycle: null }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.updateCalls).toEqual([{ id: 'remote-writer', patch: { lifecycle: null } }])
   })
 })

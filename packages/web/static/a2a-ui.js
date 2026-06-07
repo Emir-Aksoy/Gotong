@@ -72,6 +72,21 @@
     )
   }
 
+  // Stream H2-OUT — dispatch mode. null lifecycle = blocking (remote must answer
+  // in one turn); a lifecycle object = long-running (poll tasks/get while the
+  // remote stays parked). `{}` opts in with the participant's defaults.
+  function lifecycleText(a) {
+    if (!a.lifecycle) return '<span style="color:#888;">阻塞</span>'
+    const lc = a.lifecycle
+    const parts = []
+    if (lc.pollIntervalMs != null) parts.push(lc.pollIntervalMs + 'ms')
+    if (lc.maxAttempts != null) parts.push('×' + lc.maxAttempts)
+    const detail = parts.length ? ' (' + parts.join(' ') + ')' : ' (默认)'
+    return (
+      '<span title="远端返回挂起任务时轮询 tasks/get" style="color:#1e7e34;">长任务' + detail + '</span>'
+    )
+  }
+
   // ---- API --------------------------------------------------------------
 
   async function readJson(r) {
@@ -137,6 +152,10 @@
       '<input name="peerId" type="text" placeholder="X-Aipe-Peer-Id (AipeHub↔AipeHub 时, 可选)" autocomplete="off" />' +
       '<input name="targetSkill" type="text" placeholder="远端 skill (metadata.skill, 可选)" autocomplete="off" style="grid-column:1 / -1;" />' +
       '<label style="grid-column:1 / -1;font-size:0.85rem;color:#555;display:flex;gap:0.4rem;align-items:center;">' +
+      '<input name="lifecycle" type="checkbox" /> 长任务模式 (远端返回挂起任务时轮询 <code>tasks/get</code>; 不勾=阻塞, 远端必须一轮回完)</label>' +
+      '<input name="pollIntervalMs" type="number" min="250" placeholder="轮询间隔 ms (可选, 默认 3000)" autocomplete="off" />' +
+      '<input name="maxAttempts" type="number" min="1" placeholder="最多轮询次数 (可选, 默认 20)" autocomplete="off" />' +
+      '<label style="grid-column:1 / -1;font-size:0.85rem;color:#555;display:flex;gap:0.4rem;align-items:center;">' +
       '<input name="enabled" type="checkbox" checked /> 启用 (令牌环境变量已设则立即上线)</label>' +
       '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">注册</button>' +
       '</form>' +
@@ -148,10 +167,11 @@
       '<th style="padding:0.4rem;">能力</th>' +
       '<th style="padding:0.4rem;">URL</th>' +
       '<th style="padding:0.4rem;">令牌环境变量</th>' +
+      '<th style="padding:0.4rem;">模式</th>' +
       '<th style="padding:0.4rem;">状态</th>' +
       '<th style="padding:0.4rem;">操作</th>' +
       '</tr></thead>' +
-      '<tbody id="a2a-tbody"><tr><td colspan="6" style="padding:0.6rem;color:#888;">载入中…</td></tr></tbody>' +
+      '<tbody id="a2a-tbody"><tr><td colspan="7" style="padding:0.6rem;color:#888;">载入中…</td></tr></tbody>' +
       '</table>' +
       '</div>'
 
@@ -164,7 +184,7 @@
     if (!tbody) return
     if (!agents.length) {
       tbody.innerHTML =
-        '<tr><td colspan="6" style="padding:0.6rem;color:#888;">还没有注册出站 A2A 智能体。' +
+        '<tr><td colspan="7" style="padding:0.6rem;color:#888;">还没有注册出站 A2A 智能体。' +
         '在上面表单注册一个 —— 之后派发它声明的能力就会转发到远端。</td></tr>'
       return
     }
@@ -181,14 +201,27 @@
         '<td style="padding:0.4rem;"><code style="color:#555;">' + caps + '</code></td>' +
         '<td style="padding:0.4rem;"><code style="color:#888;">' + escHtml(a.url) + '</code></td>' +
         '<td style="padding:0.4rem;"><code style="color:#888;">' + escHtml(a.tokenEnv) + '</code></td>' +
+        '<td style="padding:0.4rem;">' + lifecycleText(a) + '</td>' +
         '<td style="padding:0.4rem;">' + statusBadge(a) + '</td>' +
         '<td style="padding:0.4rem;white-space:nowrap;">' +
         '<button type="button" class="a2a-toggle" style="padding:0.25rem 0.5rem;">' +
         (a.enabled ? '停用' : '启用') + '</button> ' +
+        '<button type="button" class="a2a-life" style="padding:0.25rem 0.5rem;">' +
+        (a.lifecycle ? '改阻塞' : '改长任务') + '</button> ' +
         '<button type="button" class="a2a-del" style="padding:0.25rem 0.5rem;color:#c0392b;">删除</button>' +
         '</td>'
       tr.querySelector('.a2a-toggle').addEventListener('click', function () {
         doPatch(root, a.id, { enabled: !a.enabled }, a.enabled ? '已停用' : '已启用')
+      })
+      tr.querySelector('.a2a-life').addEventListener('click', function () {
+        // Flip blocking <-> long-running (defaults). Precise poll tuning is via
+        // re-registration, same as caps/url (the table has no inline field edit).
+        doPatch(
+          root,
+          a.id,
+          { lifecycle: a.lifecycle ? null : {} },
+          a.lifecycle ? '已改为阻塞' : '已改为长任务',
+        )
       })
       tr.querySelector('.a2a-del').addEventListener('click', function () {
         if (!window.confirm('删除出站智能体「' + (a.label || a.id) + '」? 派发它能力的工作流将不再转发到远端。')) return
@@ -241,6 +274,17 @@
     if (targetSkill) body.targetSkill = targetSkill
     const label = str('label')
     if (label) body.label = label
+    // Stream H2-OUT — long-running lifecycle. Unchecked → omit (blocking default).
+    // Checked → send a lifecycle object; empty numbers stay out so `{}` opts in
+    // with the participant's defaults, a number tunes that field.
+    if (fd.get('lifecycle') != null) {
+      const lc = {}
+      const poll = parseInt(str('pollIntervalMs'), 10)
+      if (poll > 0) lc.pollIntervalMs = poll
+      const max = parseInt(str('maxAttempts'), 10)
+      if (max > 0) lc.maxAttempts = max
+      body.lifecycle = lc
+    }
     setStatus(root, '注册…', 'loading')
     try {
       await apiAdd(body)
