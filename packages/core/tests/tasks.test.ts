@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import { Hub } from '../src/hub.js'
 import { AgentParticipant } from '../src/participants/agent.js'
+import { SuspendTaskError } from '../src/suspend.js'
 import type { Task } from '../src/types.js'
 
 class EchoAgent extends AgentParticipant {
@@ -134,6 +135,47 @@ describe('Hub.tasks() + Hub.retry() (v2.0)', () => {
     // dispatch to a missing participant — synchronously a `no_participant` (failed),
     // so to simulate "still pending" we just call retry on a fake id never seen.
     await expect(hub.retry('does-not-exist')).rejects.toThrow(/unknown task/)
+    await hub.stop()
+  })
+
+  it('parks a suspended task as pending (not failed); a resume flips it to done', async () => {
+    // Regression: `tasks()` mapped every non-ok/non-cancelled result through a
+    // catch-all `else → failed`, so a `kind:'suspended'` PARK (long-running
+    // agent / `human:` step / outbound-approval gate) read as `failed` for its
+    // entire park window. A park is in-flight, not a failure → must be pending.
+    class Napper extends AgentParticipant {
+      constructor() {
+        super({ id: 'napper', capabilities: ['nap'] })
+      }
+      protected async handleTask(_t: Task): Promise<unknown> {
+        throw new SuspendTaskError({ resumeAt: 9_999_999_999_000, state: { phase: 'wait' } })
+      }
+      protected async handleResume(_t: Task, _s: unknown): Promise<unknown> {
+        return { woke: true }
+      }
+    }
+
+    const hub = Hub.inMemory({ suspendNotifier: async () => {} })
+    await hub.start()
+    hub.register(new Napper())
+
+    const res = await hub.dispatch({
+      from: 'admin',
+      strategy: { kind: 'capability', capabilities: ['nap'] },
+      payload: { x: 1 },
+    })
+    expect(res.kind).toBe('suspended')
+
+    let view = hub.tasks()[0]!
+    expect(view.status).toBe('pending') // not 'failed'
+    expect(view.result?.kind).toBe('suspended')
+
+    // A resume writes a fresh ok result under the same task id; the replay folds
+    // it in and the view flips to done (proving the park was never terminal).
+    await hub.resumeTask('napper', view.task, { phase: 'wait' })
+    view = hub.tasks()[0]!
+    expect(view.status).toBe('done')
+    expect(view.result?.kind).toBe('ok')
     await hub.stop()
   })
 })

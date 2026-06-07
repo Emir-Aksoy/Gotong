@@ -518,8 +518,12 @@ export class Hub {
    * Derive the current state of every task ever dispatched by replaying
    * the transcript. Pure read — no extra state stored.
    *
-   *   - `pending`     — `task` seen, no `task_result` yet (in flight, queued,
-   *                     or waiting on a human inbox)
+   *   - `pending`     — `task` seen with no terminal `task_result` yet: in
+   *                     flight, queued, OR parked on a `kind: 'suspended'`
+   *                     result (a long-running agent, a `human:` inbox step,
+   *                     or an outbound-approval gate awaiting resume). A parked
+   *                     task is in-flight, not failed — and a later resume
+   *                     overwrites it to `done`/`failed` when it terminates.
    *   - `done`        — `task_result` with `kind: 'ok'`
    *   - `failed`      — `task_result` with `kind: 'failed' | 'no_participant'`
    *   - `cancelled`   — `task_result` with `kind: 'cancelled'`
@@ -544,6 +548,12 @@ export class Hub {
         if (!view) continue
         if (e.data.kind === 'ok') view.status = 'done'
         else if (e.data.kind === 'cancelled') view.status = 'cancelled'
+        // A `suspended` result is a PARK, not a terminal failure: the task is
+        // waiting on a timer / human / peer. Keep it `pending` (the resume
+        // later writes a fresh ok/failed result with the same id, which this
+        // replay then folds in). Without this, every long-running agent / HITL
+        // step / cross-hub approval shows as `failed` for its whole park window.
+        else if (e.data.kind === 'suspended') view.status = 'pending'
         else view.status = 'failed'
         view.result = e.data
         // `completedAt` is the moment the Hub recorded the result, not the
