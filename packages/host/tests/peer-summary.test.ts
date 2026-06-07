@@ -86,6 +86,8 @@ describe('buildLocalSummary (v5 E5-M2)', () => {
     // tokens = (10+5) + 7 = 22; calls = 3; cost = 1500
     expect(s.llm).toEqual({ windowDays: 30, calls: 3, tokens: 22, costMicros: 1500 })
     expect(s.health).toEqual({ suspendedTasks: 4 })
+    // No firing source wired in richDeps → the alerts family defaults to zero.
+    expect(s.alerts).toEqual({ openFirings: 0 })
   })
 
   it('passes a trailing window `since` to the ledger and honours windowDays', async () => {
@@ -142,7 +144,33 @@ describe('buildLocalSummary (v5 E5-M2)', () => {
       runs: { total: 0, byStatus: {} },
       llm: { windowDays: 30, calls: 0, tokens: 0, costMicros: 0 },
       health: { suspendedTasks: 0 },
+      alerts: { openFirings: 0 },
     })
+  })
+
+  it('reports its own open alert firings as a counts-only family (cross-hub-agg M1)', async () => {
+    const s = await buildLocalSummary(
+      richDeps({
+        // Replacing identity drops the other families to 0 — we only assert alerts.
+        // Three currently-open firings → openFirings: 3 (LENGTH only; the firing
+        // rows, their rule labels and payloads never leave this hub).
+        identity: { listOpenPeerSummaryAlertFirings: () => [{}, {}, {}] },
+      }),
+    )
+    expect(s.alerts).toEqual({ openFirings: 3 })
+  })
+
+  it('alerts family is best-effort: a throwing firing source stays at zero', async () => {
+    const s = await buildLocalSummary(
+      richDeps({
+        identity: {
+          listOpenPeerSummaryAlertFirings: () => {
+            throw new Error('boom')
+          },
+        },
+      }),
+    )
+    expect(s.alerts).toEqual({ openFirings: 0 })
   })
 })
 
@@ -202,11 +230,18 @@ describe('normalizePeerSummary (v5 E5-M2, consumer defence)', () => {
       runs: { total: 2, byStatus: { done: 2, weird: 0 } },
       llm: { windowDays: 0, calls: 7, tokens: 0, costMicros: 0 },
       health: { suspendedTasks: 0 },
+      alerts: { openFirings: 0 }, // missing entirely → defaulted
     })
   })
 
   it('defaults hubId to empty string when missing', () => {
     expect(normalizePeerSummary({}).hubId).toBe('')
+  })
+
+  it('coerces the alerts family open-firing count (cross-hub-agg M1)', () => {
+    expect(normalizePeerSummary({ alerts: { openFirings: 5 } }).alerts).toEqual({ openFirings: 5 })
+    expect(normalizePeerSummary({ alerts: { openFirings: 'x' } }).alerts).toEqual({ openFirings: 0 })
+    expect(normalizePeerSummary({}).alerts).toEqual({ openFirings: 0 })
   })
 })
 
@@ -277,6 +312,7 @@ describe('createPeerSummaryFederation (v5 E5-M3)', () => {
     runs: { total: 0, byStatus: {} },
     llm: { windowDays: 30, calls: 0, tokens: 0, costMicros: 0 },
     health: { suspendedTasks: 0 },
+    alerts: { openFirings: 0 },
   })
 
   function summaryLink(s: PeerSummary | null): HubLink {

@@ -166,6 +166,7 @@ describe('v5 Stream F day-3 M7 — control-plane alert delivery over two hubs', 
       runs: { total: 0, byStatus: {} },
       llm: { windowDays: 30, calls: 0, tokens: 0, costMicros: 0 },
       health: { suspendedTasks: 0 },
+      alerts: { openFirings: 0 },
     }
     return createPeerSummaryFederation(registry, {
       buildLocal: async () => ownSummary,

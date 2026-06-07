@@ -28,6 +28,7 @@ const summary = (over: Partial<PeerSummary> = {}): PeerSummary => ({
   runs: { total: 9, byStatus: { completed: 7, failed: 2 } },
   llm: { windowDays: 30, calls: 42, tokens: 1234, costMicros: 5600 },
   health: { suspendedTasks: 5 },
+  alerts: { openFirings: 0 },
   ...over,
 })
 

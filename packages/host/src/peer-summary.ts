@@ -124,6 +124,17 @@ export interface PeerSummary {
     /** Parked tasks awaiting resume (includes NEVER_RESUME_AT human/approval items). */
     suspendedTasks: number
   }
+  /**
+   * Control-plane alerting state — this hub's OWN currently-open firings (the
+   * alerts IT raised against ITS peers). A pure scalar, so a consumer can
+   * aggregate it across the federation into a counts-only "how many alerts are
+   * firing anywhere" view — and (via the metric registry) trend it / meta-alert
+   * on it — without ever seeing an individual firing, rule, or payload.
+   */
+  alerts: {
+    /** Currently-open (unresolved) peer-summary alert firings. */
+    openFirings: number
+  }
 }
 
 // ─── producer side ──────────────────────────────────────────────────────────
@@ -160,6 +171,8 @@ export interface SummaryIdentitySource {
     until?: number
   }): SummaryLedgerRow[]
   listPeers?(): unknown[]
+  /** Currently-open alert firings — its length is this hub's open-firing count. */
+  listOpenPeerSummaryAlertFirings?(): unknown[]
 }
 
 export interface BuildSummaryDeps {
@@ -199,6 +212,7 @@ export async function buildLocalSummary(deps: BuildSummaryDeps): Promise<PeerSum
     runs: { total: 0, byStatus: {} },
     llm: { windowDays, calls: 0, tokens: 0, costMicros: 0 },
     health: { suspendedTasks: 0 },
+    alerts: { openFirings: 0 },
   }
 
   // --- assets.agents — local participants minus peer wrappers (mirror manifest)
@@ -271,6 +285,15 @@ export async function buildLocalSummary(deps: BuildSummaryDeps): Promise<PeerSum
     }
   }
 
+  // --- alerts — this hub's OWN currently-open firings (counts only) -----------
+  if (id && typeof id.listOpenPeerSummaryAlertFirings === 'function') {
+    try {
+      summary.alerts.openFirings = id.listOpenPeerSummaryAlertFirings().length
+    } catch {
+      // leave 0
+    }
+  }
+
   return summary
 }
 
@@ -336,6 +359,7 @@ export function normalizePeerSummary(raw: unknown): PeerSummary {
   const runs = obj(o.runs)
   const llm = obj(o.llm)
   const health = obj(o.health)
+  const alerts = obj(o.alerts)
 
   const byStatus: Record<string, number> = {}
   for (const [k, v] of Object.entries(obj(runs.byStatus))) byStatus[k] = num(v)
@@ -359,6 +383,7 @@ export function normalizePeerSummary(raw: unknown): PeerSummary {
       costMicros: num(llm.costMicros),
     },
     health: { suspendedTasks: num(health.suspendedTasks) },
+    alerts: { openFirings: num(alerts.openFirings) },
   }
 }
 

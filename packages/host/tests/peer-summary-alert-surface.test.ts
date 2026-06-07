@@ -30,6 +30,7 @@ function summaryWith(suspendedTasks: number): PeerSummary {
     runs: { total: 0, byStatus: {} },
     llm: { windowDays: 30, calls: 0, tokens: 0, costMicros: 0 },
     health: { suspendedTasks },
+    alerts: { openFirings: 0 },
   }
 }
 
