@@ -7,10 +7,16 @@
  * `A2aClientError` → `kind: 'failed'`.
  */
 
-import type { Task } from '@aipehub/core'
+import { isSuspendTaskError, type SuspendTaskError, type Task } from '@aipehub/core'
 import { describe, expect, it } from 'vitest'
 
-import { A2aRemoteParticipant, agentMessage } from '../src/index.js'
+import {
+  A2aRemoteParticipant,
+  agentMessage,
+  completedTask,
+  failedTask,
+  workingTask,
+} from '../src/index.js'
 
 /** A capturing fake `fetch`: records calls, returns whatever `handler` builds. */
 function fakeFetch(handler: (url: string, init: RequestInit) => Response) {
@@ -146,5 +152,112 @@ describe('A2aRemoteParticipant (Phase 18 C-M4)', () => {
 
     expect(result.kind).toBe('failed')
     if (result.kind === 'failed') expect(result.error).toMatch(/-32603/)
+  })
+})
+
+describe('A2aRemoteParticipant — long-running task lifecycle (Stream H2)', () => {
+  const send = (obj: unknown): Response => jsonResponse({ jsonrpc: '2.0', id: 1, result: obj })
+
+  /** Run `fn` expecting it to PARK; return the thrown SuspendTaskError. */
+  async function expectPark(fn: () => Promise<unknown>): Promise<SuspendTaskError> {
+    try {
+      await fn()
+    } catch (err) {
+      if (isSuspendTaskError(err)) return err as SuspendTaskError
+      throw err
+    }
+    throw new Error('expected the call to throw SuspendTaskError (a park)')
+  }
+
+  it('WITHOUT lifecycle, a returned Task is still a failed result (opt-in boundary)', async () => {
+    const { fn } = fakeFetch(() => send(workingTask('rt-legacy')))
+    const p = new A2aRemoteParticipant({ id: 'ext', capabilities: ['ask'], url: 'u', token: 't', fetchImpl: fn })
+    const result = await p.onTask(makeTask({ text: 'go' }))
+    expect(result.kind).toBe('failed')
+    if (result.kind === 'failed') expect(result.error).toMatch(/Task/i)
+  })
+
+  it('with lifecycle, a normal Message reply is still ok { text }', async () => {
+    const { fn } = fakeFetch(() => send(agentMessage('hi back', 'm')))
+    const p = new A2aRemoteParticipant({
+      id: 'ext', capabilities: ['ask'], url: 'u', token: 't', lifecycle: {}, fetchImpl: fn,
+    })
+    const result = await p.onTask(makeTask({ text: 'hi' }))
+    expect(result).toMatchObject({ kind: 'ok', output: { text: 'hi back' } })
+  })
+
+  it('a returned working Task PARKS with a finite resumeAt + carried peerTaskId (attempt 1)', async () => {
+    const { fn, calls } = fakeFetch(() => send(workingTask('rt-1')))
+    const p = new A2aRemoteParticipant({
+      id: 'ext', capabilities: ['ask'], url: 'u', token: 't',
+      lifecycle: { pollIntervalMs: 500 }, now: () => 1000, fetchImpl: fn,
+    })
+    const park = await expectPark(() => p.onTask(makeTask({ text: 'long job' })))
+    expect(park.resumeAt).toBe(1500) // now + pollIntervalMs — finite, NOT NEVER_RESUME_AT
+    expect(park.resumeAt).toBeLessThan(9_999_999_999_000)
+    expect(park.state).toMatchObject({ peerTaskId: 'rt-1', attempt: 1 })
+    // The first round-trip was the send (no poll yet).
+    expect(JSON.parse(calls[0]!.init.body as string).method).toBe('message/send')
+  })
+
+  it('resume polls tasks/get; still working → re-parks with attempt+1', async () => {
+    const { fn, calls } = fakeFetch(() => send(workingTask('rt-1')))
+    const p = new A2aRemoteParticipant({
+      id: 'ext', capabilities: ['ask'], url: 'u', token: 't',
+      lifecycle: { pollIntervalMs: 500 }, now: () => 2000, fetchImpl: fn,
+    })
+    const park = await expectPark(() =>
+      p.onResume(makeTask({}), { __a2aLifecycle: 1, peerTaskId: 'rt-1', attempt: 1 }),
+    )
+    const body = JSON.parse(calls[0]!.init.body as string)
+    expect(body.method).toBe('tasks/get') // it polled the opaque remote handle
+    expect(body.params.id).toBe('rt-1')
+    expect(park.resumeAt).toBe(2500)
+    expect(park.state).toMatchObject({ peerTaskId: 'rt-1', attempt: 2 })
+  })
+
+  it('resume polls tasks/get; completed → ok { text } with the reply', async () => {
+    const { fn, calls } = fakeFetch(() => send(completedTask('rt-1', 'all done', 'm')))
+    const p = new A2aRemoteParticipant({
+      id: 'ext', capabilities: ['ask'], url: 'u', token: 't', lifecycle: {}, fetchImpl: fn,
+    })
+    const result = await p.onResume(makeTask({}), { __a2aLifecycle: 1, peerTaskId: 'rt-1', attempt: 3 })
+    expect(result).toMatchObject({ kind: 'ok', by: 'ext', output: { text: 'all done' } })
+    expect(JSON.parse(calls[0]!.init.body as string).params.id).toBe('rt-1')
+  })
+
+  it('resume polls tasks/get; failed Task → failed result', async () => {
+    const { fn } = fakeFetch(() => send(failedTask('rt-1', 'remote blew up', 'm')))
+    const p = new A2aRemoteParticipant({
+      id: 'ext', capabilities: ['ask'], url: 'u', token: 't', lifecycle: {}, fetchImpl: fn,
+    })
+    const result = await p.onResume(makeTask({}), { __a2aLifecycle: 1, peerTaskId: 'rt-1', attempt: 1 })
+    expect(result.kind).toBe('failed')
+    if (result.kind === 'failed') expect(result.error).toMatch(/remote blew up/)
+  })
+
+  it('fails closed after maxAttempts polls (a hung remote never parks forever)', async () => {
+    const { fn } = fakeFetch(() => send(workingTask('rt-1')))
+    const p = new A2aRemoteParticipant({
+      id: 'ext', capabilities: ['ask'], url: 'u', token: 't', lifecycle: { maxAttempts: 2 }, fetchImpl: fn,
+    })
+    // attempt already at the cap → the next non-terminal poll fails closed.
+    const result = await p.onResume(makeTask({}), { __a2aLifecycle: 1, peerTaskId: 'rt-1', attempt: 2 })
+    expect(result.kind).toBe('failed')
+    if (result.kind === 'failed') {
+      expect(result.error).toMatch(/failing closed/)
+      expect(result.error).toMatch(/2 polls/)
+    }
+  })
+
+  it('a malformed resume state fails loudly without touching the network', async () => {
+    const { fn, calls } = fakeFetch(() => send(workingTask('rt-1')))
+    const p = new A2aRemoteParticipant({
+      id: 'ext', capabilities: ['ask'], url: 'u', token: 't', lifecycle: {}, fetchImpl: fn,
+    })
+    const result = await p.onResume(makeTask({}), { nonsense: true })
+    expect(result.kind).toBe('failed')
+    if (result.kind === 'failed') expect(result.error).toMatch(/malformed carried state/)
+    expect(calls).toHaveLength(0) // failed before any tasks/get
   })
 })
