@@ -149,13 +149,17 @@ export interface PeerSummaryAlertFiringQuery {
 /**
  * A notification channel (duck-typed mirror of the host's
  * `PeerSummaryAlertChannel`). NO secret in the row: `headerEnv` is an env-var
- * NAME the host resolves at delivery time, never a bearer value.
+ * NAME the host resolves at delivery time, never a bearer value. `platform`
+ * (im only) selects telegram/slack/discord/lark; `target` is the im chat/room
+ * id or the email recipient. Both are DESTINATION bits, never secrets.
  */
 export interface PeerSummaryAlertChannel {
   id: string
   kind: string
   url: string
   headerEnv: string | null
+  platform: string | null
+  target: string | null
   enabled: boolean
   label: string | null
   createdAt: number
@@ -166,6 +170,8 @@ export interface PeerSummaryAlertChannelAddInput {
   kind: string
   url: string
   headerEnv?: string | null
+  platform?: string | null
+  target?: string | null
   enabled?: boolean
   label?: string | null
 }
@@ -174,6 +180,8 @@ export interface PeerSummaryAlertChannelUpdateInput {
   kind?: string
   url?: string
   headerEnv?: string | null
+  platform?: string | null
+  target?: string | null
   enabled?: boolean
   label?: string | null
 }
@@ -347,7 +355,10 @@ const CHANNELS = '/api/admin/peer-summary-alerts/channels'
 const COMPARATORS = new Set(['gt', 'gte', 'lt', 'lte'])
 
 /** Valid channel kinds — mirror of the host's `PEER_SUMMARY_ALERT_CHANNEL_KINDS`. */
-const CHANNEL_KINDS = new Set(['webhook'])
+const CHANNEL_KINDS = new Set(['webhook', 'im', 'email'])
+
+/** Valid im platforms — mirror of the host's `PEER_SUMMARY_ALERT_IM_PLATFORMS`. */
+const IM_PLATFORMS = new Set(['telegram', 'slack', 'discord', 'lark'])
 
 const ALERT_ERROR_STATUS: Record<string, number> = {
   alert_rule_exists: 409,
@@ -457,10 +468,23 @@ function coerceUpdateRule(
   }
 }
 
-/** kind/url checks for a channel; deep URL + headerEnv validation is the store's. */
+/**
+ * Shape checks for a channel's optionals; the deep cross-field rules (im needs a
+ * platform, email/telegram need a target, URL scheme) are the store's. `platform`
+ * membership IS checked here (a pure enum mirror, like `kind`/`comparator`) so an
+ * out-of-set platform fails fast with a clear message before hitting the store.
+ */
 function checkChannelOptionals(o: Record<string, unknown>): string | null {
   if (o.headerEnv !== undefined && o.headerEnv !== null && typeof o.headerEnv !== 'string') {
     return 'headerEnv must be a string or null'
+  }
+  if (o.platform !== undefined && o.platform !== null) {
+    if (typeof o.platform !== 'string' || !IM_PLATFORMS.has(o.platform)) {
+      return 'platform must be one of: telegram, slack, discord, lark'
+    }
+  }
+  if (o.target !== undefined && o.target !== null && typeof o.target !== 'string') {
+    return 'target must be a string or null'
   }
   if (o.enabled !== undefined && typeof o.enabled !== 'boolean') return 'enabled must be a boolean'
   if (o.label !== undefined && o.label !== null && typeof o.label !== 'string') {
@@ -471,11 +495,15 @@ function checkChannelOptionals(o: Record<string, unknown>): string | null {
 
 function pickChannelOptionals(o: Record<string, unknown>): {
   headerEnv?: string | null
+  platform?: string | null
+  target?: string | null
   enabled?: boolean
   label?: string | null
 } {
   return {
     ...(o.headerEnv !== undefined ? { headerEnv: o.headerEnv as string | null } : {}),
+    ...(o.platform !== undefined ? { platform: o.platform as string | null } : {}),
+    ...(o.target !== undefined ? { target: o.target as string | null } : {}),
     ...(o.enabled !== undefined ? { enabled: o.enabled as boolean } : {}),
     ...(o.label !== undefined ? { label: o.label as string | null } : {}),
   }
@@ -487,7 +515,7 @@ function coerceAddChannel(
   const o = asObject(body)
   if (!o) return { error: 'body must be an object' }
   if (typeof o.kind !== 'string' || !CHANNEL_KINDS.has(o.kind)) {
-    return { error: 'kind must be one of: webhook' }
+    return { error: 'kind must be one of: webhook, im, email' }
   }
   if (typeof o.url !== 'string' || o.url.trim().length === 0) {
     return { error: 'url must be a non-empty string' }
@@ -505,7 +533,7 @@ function coerceUpdateChannel(
   const o = asObject(body)
   if (!o) return { error: 'body must be an object' }
   if (o.kind !== undefined && (typeof o.kind !== 'string' || !CHANNEL_KINDS.has(o.kind))) {
-    return { error: 'kind must be one of: webhook' }
+    return { error: 'kind must be one of: webhook, im, email' }
   }
   if (o.url !== undefined && (typeof o.url !== 'string' || o.url.trim().length === 0)) {
     return { error: 'url must be a non-empty string' }

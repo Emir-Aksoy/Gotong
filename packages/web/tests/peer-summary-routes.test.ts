@@ -206,6 +206,8 @@ async function boot(opts: { withFederation?: boolean } = {}): Promise<Boot> {
         kind: input.kind,
         url: input.url,
         headerEnv: input.headerEnv ?? null,
+        platform: input.platform ?? null,
+        target: input.target ?? null,
         enabled: input.enabled ?? true,
         label: input.label ?? null,
         createdAt: 0,
@@ -219,6 +221,8 @@ async function boot(opts: { withFederation?: boolean } = {}): Promise<Boot> {
         kind: 'webhook',
         url: 'https://hooks.example.com/x',
         headerEnv: null,
+        platform: null,
+        target: null,
         enabled: true,
         label: null,
         createdAt: 0,
@@ -594,6 +598,8 @@ const channel = (over: Partial<PeerSummaryAlertChannel> = {}): PeerSummaryAlertC
   kind: 'webhook',
   url: 'https://hooks.example.com/x',
   headerEnv: null,
+  platform: null,
+  target: null,
   enabled: true,
   label: null,
   createdAt: 0,
@@ -692,7 +698,61 @@ describe('/api/admin/peer-summary-alerts/channels (v5 Stream F day-3)', () => {
     ])
   })
 
-  it('POST 400 on an unknown kind / empty url', async () => {
+  it('POST adds an im channel (telegram) and threads platform + target', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${CHANNELS}`, {
+      method: 'POST',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kind: 'im',
+        url: 'https://api.telegram.org',
+        platform: 'telegram',
+        target: '-1001234567890',
+        headerEnv: 'TG_BOT_TOKEN',
+      }),
+    })
+    expect(r.status).toBe(201)
+    const j = await r.json()
+    expect(j.channel.platform).toBe('telegram')
+    expect(j.channel.target).toBe('-1001234567890')
+    expect(b.channelAddCalls).toEqual([
+      {
+        kind: 'im',
+        url: 'https://api.telegram.org',
+        platform: 'telegram',
+        target: '-1001234567890',
+        headerEnv: 'TG_BOT_TOKEN',
+      },
+    ])
+  })
+
+  it('POST adds an im channel (slack incoming-webhook) without a target', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${CHANNELS}`, {
+      method: 'POST',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'im', url: 'https://hooks.slack.com/services/T/B/x', platform: 'slack' }),
+    })
+    expect(r.status).toBe(201)
+    expect(b.channelAddCalls).toEqual([
+      { kind: 'im', url: 'https://hooks.slack.com/services/T/B/x', platform: 'slack' },
+    ])
+  })
+
+  it('POST adds an email channel and threads target', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${CHANNELS}`, {
+      method: 'POST',
+      headers: { ...auth(b), 'content-type': 'application/json' },
+      body: JSON.stringify({ kind: 'email', url: 'https://api.mailer.example/send', target: 'ops@example.com' }),
+    })
+    expect(r.status).toBe(201)
+    expect(b.channelAddCalls).toEqual([
+      { kind: 'email', url: 'https://api.mailer.example/send', target: 'ops@example.com' },
+    ])
+  })
+
+  it('POST 400 on an unknown kind / empty url / out-of-set im platform', async () => {
     b = await boot()
     const post = (body: unknown) =>
       fetch(`${b.baseUrl}${CHANNELS}`, {
@@ -700,8 +760,10 @@ describe('/api/admin/peer-summary-alerts/channels (v5 Stream F day-3)', () => {
         headers: { ...auth(b), 'content-type': 'application/json' },
         body: JSON.stringify(body),
       })
-    expect((await post({ kind: 'email', url: 'x' })).status).toBe(400)
+    expect((await post({ kind: 'carrier-pigeon', url: 'x' })).status).toBe(400)
     expect((await post({ kind: 'webhook', url: '' })).status).toBe(400)
+    // an out-of-set platform fails fast at the web layer (enum mirror) — no store call
+    expect((await post({ kind: 'im', url: 'https://x.example/h', platform: 'myspace' })).status).toBe(400)
     expect(b.channelAddCalls).toHaveLength(0)
   })
 
