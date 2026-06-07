@@ -326,6 +326,48 @@ describe('WebSocketHubLink (symmetric ws)', () => {
       }),
     ).rejects.toThrow(/handshake|ECONNREFUSED|connect/i)
   })
+
+  it('handshake timeout tears the underlying socket down (no orphan leak)', async () => {
+    // A bare server that ACCEPTS the connection but never completes the
+    // handshake (no HELLO_ACK). The client's handshake timer must fire AND
+    // close the socket — otherwise the socket leaks, and a late-completing one
+    // could finish a handshake on a link nobody holds. We assert from the
+    // server side that it observes the client's close promptly after timeout.
+    const wss = new WebSocketServer({ port: 0 })
+    try {
+      await new Promise<void>((r) => wss.once('listening', () => r()))
+      const addr = wss.address()
+      const port = typeof addr === 'object' && addr ? addr.port : 0
+
+      const serverSawClose = new Promise<void>((resolve) => {
+        wss.on('connection', (sock) => {
+          // Deliberately never reply — force the client's handshake to time out.
+          sock.on('close', () => resolve())
+        })
+      })
+
+      await expect(
+        connectHubLink({
+          url: `ws://127.0.0.1:${port}`,
+          selfId: 'hubA',
+          handshakeTimeoutMs: 100,
+        }),
+      ).rejects.toThrow(/handshake/i)
+
+      // The fix closes the client ws on timeout, so the server sees the close
+      // quickly. Time-box it: a leak (socket left open) makes this reject.
+      await expect(
+        Promise.race([
+          serverSawClose,
+          delay(1500).then(() => {
+            throw new Error('socket left open after handshake timeout — leak')
+          }),
+        ]),
+      ).resolves.toBeUndefined()
+    } finally {
+      wss.close()
+    }
+  })
 })
 
 // ---------------------------------------------------------------------------

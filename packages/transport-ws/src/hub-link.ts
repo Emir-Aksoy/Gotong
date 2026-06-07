@@ -772,15 +772,33 @@ export async function connectHubLink(opts: ConnectHubLinkOptions): Promise<HubLi
   const link = new WebSocketHubLinkImpl(ws, 'out', opts)
   const timeoutMs = opts.handshakeTimeoutMs ?? DEFAULT_HANDSHAKE_TIMEOUT_MS
 
-  await Promise.race([
-    link.waitForHandshake(),
-    new Promise<never>((_, rej) =>
-      setTimeout(
-        () => rej(new Error(`hub-link handshake timeout (${timeoutMs}ms)`)),
-        timeoutMs,
-      ),
-    ),
-  ])
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    await Promise.race([
+      link.waitForHandshake(),
+      new Promise<never>((_, rej) => {
+        timer = setTimeout(
+          () => rej(new Error(`hub-link handshake timeout (${timeoutMs}ms)`)),
+          timeoutMs,
+        )
+      }),
+    ])
+  } catch (err) {
+    // The handshake timed out (or rejected). Tear the socket down before
+    // propagating — otherwise it leaks. Two leaks, actually: (1) PeerRegistry
+    // .dialOne retries on a backoff timer, so each redial would strand one
+    // socket; (2) a still-CONNECTING socket that completes AFTER the timeout
+    // would `sendHello()` and could finish a handshake on a link nobody holds
+    // — a live orphan exchanging frames with no owner and no teardown path.
+    // close() transitions the link closed and closes the ws (idempotent, and a
+    // no-op goodbye on a non-OPEN socket).
+    await link.close().catch(() => {})
+    throw err
+  } finally {
+    // On success the timeout is still armed; clear it so it can't fire later
+    // (rejecting an already-settled race) or keep the event loop alive.
+    if (timer !== undefined) clearTimeout(timer)
+  }
   return link
 }
 
