@@ -34,6 +34,9 @@ export interface PeerSummary {
   runs: { total: number; byStatus: Record<string, number> }
   llm: { windowDays: number; calls: number; tokens: number; costMicros: number }
   health: { suspendedTasks: number }
+  // Cross-hub alert aggregation (Stream F cross-hub-agg M3): this hub's own
+  // currently-open alert-firing count. A pure scalar — web just echoes it.
+  alerts: { openFirings: number }
 }
 
 /**

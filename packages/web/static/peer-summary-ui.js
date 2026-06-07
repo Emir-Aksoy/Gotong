@@ -59,6 +59,7 @@
     'llm.tokens': 'LLM tokens',
     'llm.costMicros': 'LLM 成本 (µ$)',
     'health.suspendedTasks': '挂起任务',
+    'alerts.openFirings': '告警·开启中', // cross-hub-agg M3 — trendable + meta-alertable
   }
   const METRIC_KEYS = Object.keys(METRIC_LABELS)
   const COST_METRIC = 'llm.costMicros'
@@ -167,7 +168,12 @@
     return d ? '近 ' + d + ' 天' : 'LLM'
   }
   function healthText(s) {
-    return '挂起 ' + num(s && s.health && s.health.suspendedTasks)
+    // cross-hub-agg M3: per-hub open-firing count rides in the health cell — its
+    // own alerting state alongside suspended tasks (both pure scalars).
+    return (
+      '挂起 ' + num(s && s.health && s.health.suspendedTasks) +
+      ' · 告警 ' + num(s && s.alerts && s.alerts.openFirings)
+    )
   }
 
   // ---- API --------------------------------------------------------------
@@ -297,6 +303,7 @@
       '    </tr></thead>' +
       '    <tbody id="ps-rows"><tr><td colspan="8" class="pf-empty">加载中...</td></tr></tbody>' +
       '  </table>' +
+      '  <div id="ps-agg" class="ps-agg"></div>' +
       '</section>' +
       // --- 告警 (F-M5): live breaches evaluated against the current summaries ---
       '<section class="ps-section ps-alerts">' +
@@ -450,6 +457,44 @@
       '<td class="pf-caps">' + llmText(s) + '</td>' +
       '<td class="pf-caps">' + healthText(s) + '</td>'
     )
+  }
+
+  // Cross-hub alert aggregation (cross-hub-agg M3): the federation-wide count of
+  // currently-open alert firings — this hub's own plus every peer that shared a
+  // summary. Counts only: a pure sum of scalars, no firing ever crosses the wire.
+  // Honest by construction — peers that didn't share (or are offline) are NOT
+  // counted as zero; we say how many were left out instead of fabricating calm.
+  function renderAggregate(root, data) {
+    const box = $('#ps-agg', root)
+    if (!box) return
+    const local = data.local || null
+    const peers = data.peers || []
+    if (!local && !peers.length) {
+      box.innerHTML = ''
+      return
+    }
+    let total = 0
+    let known = 0
+    let hubs = 0
+    if (local) {
+      total += num(local.alerts && local.alerts.openFirings)
+      known += 1
+      hubs += 1
+    }
+    for (const row of peers) {
+      hubs += 1
+      if (row.summary) {
+        total += num(row.summary.alerts && row.summary.alerts.openFirings)
+        known += 1
+      }
+    }
+    const unknown = hubs - known
+    const cls = total > 0 ? 'ps-agg-firing' : 'ps-agg-calm'
+    const icon = total > 0 ? '🔴' : '✓'
+    box.innerHTML =
+      '<span class="' + cls + '">' + icon + ' 联邦告警聚合: ' + total + ' 条开启中</span>' +
+      ' <small>(跨 ' + known + ' 个已共享 hub' +
+      (unknown > 0 ? ';' + unknown + ' 个未共享/离线未计入' : '') + ')</small>'
   }
 
   // Derive the trend/rule source list from a list() payload (local + peers).
@@ -922,6 +967,7 @@
   // Apply a list()/refresh() payload to the summary table + source dropdowns.
   function applyData(root, data) {
     renderRows(root, data)
+    renderAggregate(root, data)
     sourceList = deriveSources(data)
     populateControls(root)
   }

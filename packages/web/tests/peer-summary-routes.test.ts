@@ -53,6 +53,7 @@ const LOCAL: PeerSummary = {
   runs: { total: 0, byStatus: {} },
   llm: { windowDays: 30, calls: 0, tokens: 0, costMicros: 0 },
   health: { suspendedTasks: 0 },
+  alerts: { openFirings: 0 },
 }
 
 interface Boot {

@@ -2364,6 +2364,12 @@ body.admin[data-active-tab="activity"] main.admin-grid {
    styles above; an open (unresolved) firing gets a subtle amber row highlight. */
 .peer-summary-panel .ps-firing-open td { background: #fef6ec; }
 .peer-summary-panel .ps-channels .pf-meta code { font-size: 0.78rem; background: #f0f0f0; padding: 0 3px; border-radius: 3px; }
+/* cross-hub-agg M3 — federation-wide open-firing aggregate under the table.
+   A pure counts-only sum of each hub's volunteered alerts.openFirings. */
+.peer-summary-panel .ps-agg { font-size: 0.86rem; margin: 0.1rem 0 0.5rem; }
+.peer-summary-panel .ps-agg small { color: #888; font-size: 0.78rem; }
+.peer-summary-panel .ps-agg-firing { color: #a02216; font-weight: 600; }
+.peer-summary-panel .ps-agg-calm { color: #1a6a3a; }
 
 /* Route B P1-M7b — peer onboarding (tab "联邦", panel above manifest browse). */
 .peer-admin-panel { padding: 1rem; }
