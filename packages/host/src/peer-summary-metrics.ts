@@ -42,6 +42,13 @@ export const PEER_SUMMARY_METRICS: Record<string, (s: PeerSummary) => number> = 
   'llm.tokens': (s) => s.llm.tokens,
   'llm.costMicros': (s) => s.llm.costMicros,
   'health.suspendedTasks': (s) => s.health.suspendedTasks,
+  // Cross-hub alert aggregation (Stream F cross-hub-agg M2): registering the
+  // alerts family here makes the federation-wide open-firing count TRENDABLE
+  // (history) and META-ALERTABLE (a rule on this key evaluated against local +
+  // each peer) for free — the registry is the single source both features read.
+  // An old snapshot captured before the field existed simply throws inside the
+  // extractor → projectPeerSummaryMetric skips that point (best-effort).
+  'alerts.openFirings': (s) => s.alerts.openFirings,
 }
 
 /** The full list of valid metric keys (stable order for UI dropdowns). */

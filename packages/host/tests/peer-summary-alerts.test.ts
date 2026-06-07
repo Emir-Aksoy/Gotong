@@ -89,6 +89,20 @@ describe('evaluatePeerSummaryAlerts (v5 Stream F)', () => {
     expect(out).toHaveLength(0)
   })
 
+  it('meta-alerts on a peer open-firing count across the federation (cross-hub-agg M2)', () => {
+    // A `*` rule on the newly-registered alerts metric is how the control plane
+    // alerts on OTHER hubs' alerting state — "some peer has >2 alerts firing".
+    const sources = [
+      src('local', { alerts: { openFirings: 0 } }), // calm
+      src('p1', { alerts: { openFirings: 5 } }), // breaches
+    ]
+    const out = evaluatePeerSummaryAlerts(sources, [
+      rule({ source: '*', metric: 'alerts.openFirings', comparator: 'gt', threshold: 2 }),
+    ])
+    expect(out).toHaveLength(1)
+    expect(out[0]).toMatchObject({ source: 'p1', metric: 'alerts.openFirings', value: 5 })
+  })
+
   it('yields no breach for an unknown / unprojectable metric (never throws)', () => {
     const out = evaluatePeerSummaryAlerts([src('local')], [rule({ metric: 'assets.bogus', threshold: -1 })])
     expect(out).toHaveLength(0)

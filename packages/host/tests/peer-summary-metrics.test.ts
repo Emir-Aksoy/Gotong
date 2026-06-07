@@ -42,6 +42,8 @@ describe('projectPeerSummaryMetric (v5 Stream F)', () => {
     expect(projectPeerSummaryMetric(s, 'llm.calls')).toBe(42)
     expect(projectPeerSummaryMetric(s, 'llm.costMicros')).toBe(5600)
     expect(projectPeerSummaryMetric(s, 'health.suspendedTasks')).toBe(5)
+    // Cross-hub-agg M2: the alerts family is a first-class trendable metric.
+    expect(projectPeerSummaryMetric(summary({ alerts: { openFirings: 3 } }), 'alerts.openFirings')).toBe(3)
   })
 
   it('returns undefined for an unknown metric key', () => {
@@ -96,6 +98,20 @@ describe('buildPeerSummaryTrend (v5 Stream F)', () => {
     ]
     expect(buildPeerSummaryTrend(snaps, 'health.suspendedTasks')).toEqual([
       { capturedAt: 100, value: 5 },
+    ])
+  })
+
+  it('trends the open-firing count, skipping pre-field snapshots (cross-hub-agg M2)', () => {
+    const snaps = [
+      // An OLD snapshot captured before the alerts family existed → no `alerts`
+      // key → extractor throws → that point is dropped, not charted as a hole.
+      { capturedAt: 100, summaryJson: JSON.stringify({ assets: { agents: 1 } }) },
+      { capturedAt: 200, summaryJson: JSON.stringify(summary({ alerts: { openFirings: 2 } })) },
+      { capturedAt: 300, summaryJson: JSON.stringify(summary({ alerts: { openFirings: 5 } })) },
+    ]
+    expect(buildPeerSummaryTrend(snaps, 'alerts.openFirings')).toEqual([
+      { capturedAt: 200, value: 2 },
+      { capturedAt: 300, value: 5 },
     ])
   })
 })

@@ -523,7 +523,8 @@ describe('createPeerSummaryFederation (v5 E5-M3)', () => {
     const keys = fed.metricKeys()
     expect(keys).toContain('assets.agents')
     expect(keys).toContain('health.suspendedTasks')
-    expect(keys.length).toBeGreaterThanOrEqual(9)
+    expect(keys).toContain('alerts.openFirings') // cross-hub-agg M2 — trendable + meta-alertable
+    expect(keys.length).toBeGreaterThanOrEqual(10)
   })
 
   // ── v5 Stream F-M5 — control-plane alert rules + live evaluation ─────────
