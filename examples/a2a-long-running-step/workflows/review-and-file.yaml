@@ -1,0 +1,30 @@
+schema: aipehub.workflow/v1
+workflow:
+  id: a2a-long-review-and-file
+  name: review via a long-running external A2A agent, then file
+  # This hub runs the workflow. Its first step dispatches a capability served by
+  # an EXTERNAL A2A agent — a third-party review service that takes time (long
+  # compute, or its own human-in-the-loop). Over the A2A wire that agent answers
+  # `message/send` with a `working` Task instead of an immediate Message: it has
+  # SUSPENDED. The second step is local and files the verdict once it arrives.
+  #
+  # Nothing in the YAML names the agent OR says "this step might park" —
+  # `external.review` is an ordinary capability that happens to resolve to a
+  # lifecycle-aware A2aRemoteParticipant (a local participant that forwards over
+  # HTTP and, when the remote suspends, parks + polls `tasks/get` until it
+  # settles). Long-running is invisible to the workflow author: same capability
+  # dispatch as any other step.
+  #
+  # Contrast examples/a2a-workflow-step (the BLOCKING sibling): there the
+  # external agent answers in one round-trip, so the run never parks. Here it
+  # suspends, so the whole run parks and the host sweep drives it to completion.
+  trigger: { capability: review:start }
+  steps:
+    - id: review
+      dispatch:
+        strategy: { kind: capability, capabilities: [external.review] }
+        payload: { text: $trigger.payload.text }
+    - id: archive
+      dispatch:
+        strategy: { kind: capability, capabilities: [docs.archive] }
+        payload: { original: $trigger.payload.text, verdict: $review.output.text }

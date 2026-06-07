@@ -1,0 +1,16 @@
+{
+  "name": "@aipehub/example-a2a-long-running-step",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "A LONG-RUNNING external A2A agent as a workflow step (Stream H2) — the sibling of a2a-workflow-step. There the external agent answers message/send in one round-trip; here it SUSPENDS (returns a working Task: long compute / its own HITL), so the whole workflow run parks, polls tasks/get until the remote settles, then feeds the verdict into a local step. The lifecycle A2aRemoteParticipant parks with a FINITE resumeAt, so the host sweep converges the run with NO host/runner change. Deterministic (injected fetch returns working→working→completed + an inlined sweep loop mirroring the host), no API key, no socket.",
+  "scripts": {
+    "start": "tsx src/demo.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/workflow": "workspace:*",
+    "@aipehub/a2a": "workspace:*"
+  }
+}
