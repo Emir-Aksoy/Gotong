@@ -102,8 +102,10 @@ export type {
   OpenPeerSummaryAlertFiringInput,
   PeerSummaryAlertFiringQuery,
   // v5 Stream F day-3 — control-plane alert notification CHANNELS
+  // (multi-channel pass added 'im'/'email' kinds + the im platform union)
   PeerSummaryAlertChannel,
   PeerSummaryAlertChannelKind,
+  PeerSummaryAlertImPlatform,
   AddPeerSummaryAlertChannelInput,
   UpdatePeerSummaryAlertChannelInput,
   // Phase 11 M2 — Suspended tasks (long-running agent park/resume)

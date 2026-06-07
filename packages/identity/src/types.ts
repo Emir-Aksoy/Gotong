@@ -1231,30 +1231,66 @@ export const PEER_SUMMARY_ALERT_FIRING_MAX_LIMIT = 10_000
 
 /**
  * v5 Stream F day-3 — a notification CHANNEL the control plane delivers alert
- * firings to. The MVP kind is `'webhook'` (a fire-and-forget HTTP POST of the
- * counts-only firing payload); the `kind` column is extensible so `'im'` /
- * `'email'` can land later WITHOUT a migration. Like a2a_outbound_agents (v22)
- * there is NO secret in the row: an optional `headerEnv` names an ENVIRONMENT
- * VARIABLE whose value the host reads as an `Authorization` header at delivery
- * time — the bearer itself never touches the database. Counts-only stays
- * intact: a channel holds a destination + a toggle, never the data it carries.
+ * firings to. Kinds: `'webhook'` (fire-and-forget HTTP POST of the counts-only
+ * payload), `'im'` (a stateless send to a {@link PeerSummaryAlertImPlatform}),
+ * and `'email'` (HTTP email API POST); the multi-channel kinds added `platform`
+ * + `target` columns (v30). Like a2a_outbound_agents (v22) there is NO secret
+ * in the row: an optional `headerEnv` names an ENVIRONMENT VARIABLE whose value
+ * the host reads as the auth secret at delivery time — the bearer itself never
+ * touches the database. Counts-only stays intact: a channel holds a destination
+ * + a toggle, never the data it carries.
  */
-export type PeerSummaryAlertChannelKind = 'webhook'
+export type PeerSummaryAlertChannelKind = 'webhook' | 'im' | 'email'
 
 /** The closed set of channel kinds, for input validation. */
-export const PEER_SUMMARY_ALERT_CHANNEL_KINDS: PeerSummaryAlertChannelKind[] = ['webhook']
+export const PEER_SUMMARY_ALERT_CHANNEL_KINDS: PeerSummaryAlertChannelKind[] = [
+  'webhook',
+  'im',
+  'email',
+]
+
+/**
+ * IM platforms the control plane can render a counts-only alert into via a
+ * STATELESS send — a single HTTP POST through the injectable fetch, NOT a
+ * long-lived bridge connection (the bridge's two-way inbound is overkill for a
+ * one-way notification). Slack/Discord/Lark use an incoming-webhook URL (no
+ * token); Telegram uses the bot send API (token via `headerEnv`). Matrix/QQ
+ * land in a later milestone alongside their renderers.
+ */
+export type PeerSummaryAlertImPlatform = 'telegram' | 'slack' | 'discord' | 'lark'
+
+/** The closed set of IM platforms with a delivery renderer, for validation. */
+export const PEER_SUMMARY_ALERT_IM_PLATFORMS: PeerSummaryAlertImPlatform[] = [
+  'telegram',
+  'slack',
+  'discord',
+  'lark',
+]
 
 export interface PeerSummaryAlertChannel {
   /** Stable id (`psac_<hex>`), generated when not supplied. */
   id: string
   kind: PeerSummaryAlertChannelKind
-  /** The webhook endpoint (http/https only). */
+  /**
+   * The delivery endpoint (http/https only). webhook: the webhook URL; im: the
+   * incoming-webhook URL (Slack/Discord/Lark) or the bot API base (Telegram);
+   * email: the HTTP email API endpoint.
+   */
   url: string
   /**
-   * Optional env-var NAME supplying an `Authorization` header value; null =
-   * none. The VALUE is never stored — only the name of the env var to read.
+   * Optional env-var NAME supplying the auth secret read at delivery time — an
+   * `Authorization` header (webhook / email API key) or the bot token
+   * (Telegram). null = none. The VALUE is never stored — only the env-var name.
    */
   headerEnv: string | null
+  /** im only: which platform renderer to use; null for webhook/email. */
+  platform: PeerSummaryAlertImPlatform | null
+  /**
+   * Destination within the endpoint: im → chat/room/group id (null for
+   * incoming-webhook platforms whose URL already targets a channel); email →
+   * recipient address; null for webhook.
+   */
+  target: string | null
   /** Disabled channels persist but are skipped by the delivery dispatcher. */
   enabled: boolean
   /** Optional human label; null when absent. */
@@ -1269,6 +1305,8 @@ export interface AddPeerSummaryAlertChannelInput {
   kind: PeerSummaryAlertChannelKind
   url: string
   headerEnv?: string | null
+  platform?: PeerSummaryAlertImPlatform | null
+  target?: string | null
   enabled?: boolean
   label?: string | null
 }
@@ -1278,6 +1316,8 @@ export interface UpdatePeerSummaryAlertChannelInput {
   kind?: PeerSummaryAlertChannelKind
   url?: string
   headerEnv?: string | null
+  platform?: PeerSummaryAlertImPlatform | null
+  target?: string | null
   enabled?: boolean
   label?: string | null
 }

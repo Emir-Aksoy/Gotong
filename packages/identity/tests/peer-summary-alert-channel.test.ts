@@ -127,10 +127,92 @@ describe('IdentityStore — peer summary alert channels (v5 Stream F day-3)', ()
       url: 'https://a.example/x',
       headerEnv: 'TOKEN',
     })
+    // platform/target are DESTINATION bits (null for webhook), not secrets —
+    // the only sensitive field is headerEnv, and it's an env-var NAME.
     expect(Object.keys(c).sort()).toEqual(
-      ['createdAt', 'enabled', 'headerEnv', 'id', 'kind', 'label', 'updatedAt', 'url'].sort(),
+      ['createdAt', 'enabled', 'headerEnv', 'id', 'kind', 'label', 'platform', 'target', 'updatedAt', 'url'].sort(),
     )
     // headerEnv is the NAME of an env var, not its value.
     expect(c.headerEnv).toBe('TOKEN')
+  })
+
+  // --- multi-channel pass (im / email kinds + platform/target columns) ---
+
+  it('webhook leaves platform and target null', () => {
+    const c = store.addPeerSummaryAlertChannel({ kind: 'webhook', url: 'https://a.example/x' })
+    expect(c.platform).toBeNull()
+    expect(c.target).toBeNull()
+  })
+
+  it('im add requires a platform from the closed set, round-trips an optional target', () => {
+    const c = store.addPeerSummaryAlertChannel({
+      kind: 'im',
+      url: 'https://api.telegram.org/bot/sendMessage',
+      platform: 'telegram',
+      target: '-1001234567890',
+      headerEnv: 'TG_BOT_TOKEN',
+    })
+    expect(c.kind).toBe('im')
+    expect(c.platform).toBe('telegram')
+    expect(c.target).toBe('-1001234567890')
+    expect(c.headerEnv).toBe('TG_BOT_TOKEN')
+
+    // incoming-webhook platforms (slack/discord/lark) target via the url, so
+    // target is optional for im.
+    const slack = store.addPeerSummaryAlertChannel({
+      kind: 'im',
+      url: 'https://hooks.slack.com/services/T/B/x',
+      platform: 'slack',
+    })
+    expect(slack.platform).toBe('slack')
+    expect(slack.target).toBeNull()
+  })
+
+  it('im rejects a missing or out-of-set platform', () => {
+    expect(() =>
+      store.addPeerSummaryAlertChannel({ kind: 'im', url: 'https://a.example/x' }),
+    ).toThrow(IdentityError)
+    expect(() =>
+      // @ts-expect-error — platform outside the closed set
+      store.addPeerSummaryAlertChannel({ kind: 'im', url: 'https://a.example/x', platform: 'myspace' }),
+    ).toThrow(IdentityError)
+  })
+
+  it('email requires a target (the recipient) and forces platform null', () => {
+    expect(() =>
+      store.addPeerSummaryAlertChannel({ kind: 'email', url: 'https://api.mailer.example/send' }),
+    ).toThrow(IdentityError)
+
+    const c = store.addPeerSummaryAlertChannel({
+      kind: 'email',
+      url: 'https://api.mailer.example/send',
+      target: 'ops@example.com',
+      headerEnv: 'MAILER_API_KEY',
+    })
+    expect(c.kind).toBe('email')
+    expect(c.target).toBe('ops@example.com')
+    expect(c.platform).toBeNull() // platform is im-only
+  })
+
+  it('a kind switch scrubs now-irrelevant platform/target', () => {
+    const c = store.addPeerSummaryAlertChannel({
+      kind: 'im',
+      url: 'https://api.telegram.org/bot/sendMessage',
+      platform: 'telegram',
+      target: 'chat-1',
+    })
+    // im → webhook: platform/target become meaningless and are nulled.
+    const w = store.updatePeerSummaryAlertChannel(c.id, { kind: 'webhook' })
+    expect(w.platform).toBeNull()
+    expect(w.target).toBeNull()
+
+    // webhook → email without supplying a recipient must fail (email needs target).
+    expect(() => store.updatePeerSummaryAlertChannel(c.id, { kind: 'email' })).toThrow(IdentityError)
+
+    // webhook → email WITH a recipient succeeds and keeps platform null.
+    const e = store.updatePeerSummaryAlertChannel(c.id, { kind: 'email', target: 'ops@example.com' })
+    expect(e.kind).toBe('email')
+    expect(e.target).toBe('ops@example.com')
+    expect(e.platform).toBeNull()
   })
 })
