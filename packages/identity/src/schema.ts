@@ -1072,6 +1072,27 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE suspended_tasks ADD COLUMN claimed_at INTEGER;
     `,
   },
+  {
+    // Stream H2-OUT — opt-in long-running lifecycle for an outbound A2A agent.
+    // One additive, nullable column so an un-migrated row keeps today's
+    // behaviour: NULL = blocking (a remote that returns a `working` Task is an
+    // error, the Stream H sibling). A JSON object opts in: the participant PARKS
+    // and polls `tasks/get` until the remote settles.
+    //
+    // Stored as JSON in one column, mirroring `capabilities` in this same table
+    // — it maps 1:1 to the @aipehub/a2a participant's `lifecycle?` option object
+    // ({pollIntervalMs?,maxAttempts?}), so `{}` = lifecycle on with defaults.
+    // Identity validates only the structural bits (numeric, positive); the
+    // participant owns the flooring/semantics.
+    //
+    //   lifecycle  NULL = blocking (legacy). JSON {pollIntervalMs?,maxAttempts?}
+    //              = poll the remote until it settles.
+    version: 32,
+    name: 'a2a-outbound-lifecycle',
+    sql: `
+      ALTER TABLE a2a_outbound_agents ADD COLUMN lifecycle TEXT;
+    `,
+  },
 ]
 
 /**

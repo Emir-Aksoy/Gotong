@@ -139,4 +139,98 @@ describe('A2aAgentStore (P1-M11a)', () => {
     expect(store.getA2aAgent('gone')).toBeNull()
     expect(store.removeA2aAgent('gone')).toBe(false)
   })
+
+  // --- Stream H2-OUT: opt-in long-running poll lifecycle (v32 `lifecycle` column) ---
+
+  it('lifecycle defaults to null = blocking (legacy); the column is opt-in', () => {
+    const a = store.addA2aAgent({ id: 'blocking', capabilities: ['chat'], url: URL_A, tokenEnv: 'T' })
+    // Absent in the input → NULL column → null projection → blocking participant.
+    expect(a.lifecycle).toBeNull()
+    expect(store.getA2aAgent('blocking')?.lifecycle).toBeNull()
+  })
+
+  it('a tuned lifecycle object round-trips through the JSON column', () => {
+    const a = store.addA2aAgent({
+      id: 'long-runner',
+      capabilities: ['review'],
+      url: URL_A,
+      tokenEnv: 'T',
+      lifecycle: { pollIntervalMs: 5000, maxAttempts: 40 },
+    })
+    expect(a.lifecycle).toEqual({ pollIntervalMs: 5000, maxAttempts: 40 })
+    // Survives a fresh read (it's persisted, not just echoed).
+    expect(store.getA2aAgent('long-runner')?.lifecycle).toEqual({ pollIntervalMs: 5000, maxAttempts: 40 })
+  })
+
+  it('an empty lifecycle object = lifecycle ON with participant defaults (distinct from null = OFF)', () => {
+    const a = store.addA2aAgent({
+      id: 'defaults-on',
+      capabilities: ['review'],
+      url: URL_A,
+      tokenEnv: 'T',
+      lifecycle: {},
+    })
+    // `{}` is NOT null — it opts into the lifecycle, letting the participant floor
+    // pollIntervalMs/maxAttempts. null would have meant blocking.
+    expect(a.lifecycle).toEqual({})
+    expect(a.lifecycle).not.toBeNull()
+    expect(store.getA2aAgent('defaults-on')?.lifecycle).toEqual({})
+  })
+
+  it('a partial lifecycle keeps only the field given', () => {
+    const a = store.addA2aAgent({
+      id: 'partial',
+      capabilities: ['review'],
+      url: URL_A,
+      tokenEnv: 'T',
+      lifecycle: { maxAttempts: 12 },
+    })
+    expect(a.lifecycle).toEqual({ maxAttempts: 12 })
+  })
+
+  it('rejects a non-positive / non-number lifecycle field (fail-visible, not silently dropped)', () => {
+    const base = { id: 'bad-life', capabilities: ['a'], url: URL_A, tokenEnv: 'T' }
+    expect(() => store.addA2aAgent({ ...base, lifecycle: { pollIntervalMs: 0 } })).toThrow(/pollIntervalMs/)
+    expect(() => store.addA2aAgent({ ...base, lifecycle: { pollIntervalMs: -1 } })).toThrow(/pollIntervalMs/)
+    expect(() => store.addA2aAgent({ ...base, lifecycle: { maxAttempts: -5 } })).toThrow(/maxAttempts/)
+    // a NaN is not a positive finite number → rejected
+    expect(() => store.addA2aAgent({ ...base, lifecycle: { maxAttempts: Number.NaN } })).toThrow(/maxAttempts/)
+    // a non-object non-null value → rejected with the object/null message
+    expect(() => store.addA2aAgent({ ...base, lifecycle: 5 as never })).toThrow(/object or null/)
+  })
+
+  it('update sets a lifecycle on a previously-blocking agent', () => {
+    store.addA2aAgent({ id: 'turn-on', capabilities: ['a'], url: URL_A, tokenEnv: 'T' })
+    expect(store.getA2aAgent('turn-on')?.lifecycle).toBeNull()
+    const u = store.updateA2aAgent('turn-on', { lifecycle: { pollIntervalMs: 2000 } })
+    expect(u.lifecycle).toEqual({ pollIntervalMs: 2000 })
+    expect(store.getA2aAgent('turn-on')?.lifecycle).toEqual({ pollIntervalMs: 2000 })
+  })
+
+  it('update with lifecycle: null turns it OFF (back to blocking)', () => {
+    store.addA2aAgent({
+      id: 'turn-off',
+      capabilities: ['a'],
+      url: URL_A,
+      tokenEnv: 'T',
+      lifecycle: { maxAttempts: 9 },
+    })
+    const u = store.updateA2aAgent('turn-off', { lifecycle: null })
+    expect(u.lifecycle).toBeNull()
+    expect(store.getA2aAgent('turn-off')?.lifecycle).toBeNull()
+  })
+
+  it('update with lifecycle omitted keeps the stored value untouched', () => {
+    store.addA2aAgent({
+      id: 'keep-life',
+      capabilities: ['a'],
+      url: URL_A,
+      tokenEnv: 'T',
+      lifecycle: { pollIntervalMs: 3000, maxAttempts: 20 },
+    })
+    // Change an unrelated field; lifecycle must be preserved (undefined = keep).
+    const u = store.updateA2aAgent('keep-life', { label: 'renamed' })
+    expect(u.label).toBe('renamed')
+    expect(u.lifecycle).toEqual({ pollIntervalMs: 3000, maxAttempts: 20 })
+  })
 })

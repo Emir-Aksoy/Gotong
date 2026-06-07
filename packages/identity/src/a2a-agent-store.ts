@@ -20,6 +20,7 @@ import { type SqliteDb, type SqliteStmt } from './db.js'
 import { IdentityError } from './errors.js'
 import type {
   A2aOutboundAgent,
+  A2aOutboundLifecycle,
   AddA2aOutboundAgentInput,
   UpdateA2aOutboundAgentInput,
 } from './types.js'
@@ -31,6 +32,7 @@ interface A2aAgentRow {
   token_env: string
   peer_id: string | null
   target_skill: string | null
+  lifecycle: string | null
   enabled: number
   label: string | null
   created_at: number
@@ -51,6 +53,73 @@ function parseCapabilities(json: string): string[] {
   }
 }
 
+/**
+ * Read the stored lifecycle JSON back to the participant option shape. Tolerant:
+ * NULL → null (blocking). Corrupt JSON / a non-object (only reachable by
+ * hand-editing the DB) → null, so a bad value is inert-blocking rather than
+ * crashing boot. Only positive-number tuning fields survive; everything else is
+ * dropped. An empty stored object `{}` round-trips to `{}` = lifecycle ON with
+ * the participant's defaults (distinct from NULL = OFF).
+ */
+function parseLifecycle(json: string | null): A2aOutboundLifecycle | null {
+  if (json == null) return null
+  let v: unknown
+  try {
+    v = JSON.parse(json)
+  } catch {
+    return null
+  }
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return null
+  const o = v as Record<string, unknown>
+  const out: A2aOutboundLifecycle = {}
+  if (typeof o.pollIntervalMs === 'number' && Number.isFinite(o.pollIntervalMs) && o.pollIntervalMs > 0) {
+    out.pollIntervalMs = Math.floor(o.pollIntervalMs)
+  }
+  if (typeof o.maxAttempts === 'number' && Number.isFinite(o.maxAttempts) && o.maxAttempts > 0) {
+    out.maxAttempts = Math.floor(o.maxAttempts)
+  }
+  return out
+}
+
+/**
+ * Validate + serialize a lifecycle on the write path. null/undefined → NULL
+ * (blocking). An object validates structurally (each present field a positive
+ * number) and serializes — including `{}` → `'{}'` (lifecycle on, defaults). A
+ * non-object non-null value throws `invalid_input` (fail-visible, not silently
+ * dropped). The participant owns flooring; identity only rejects nonsense.
+ */
+function normLifecycle(value: A2aOutboundLifecycle | null | undefined): string | null {
+  if (value == null) return null
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    throw new IdentityError({
+      code: 'invalid_input',
+      message: 'a2a agent lifecycle must be an object or null',
+    })
+  }
+  const out: A2aOutboundLifecycle = {}
+  if (value.pollIntervalMs !== undefined) {
+    const n = value.pollIntervalMs
+    if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'a2a agent lifecycle.pollIntervalMs must be a positive number',
+      })
+    }
+    out.pollIntervalMs = Math.floor(n)
+  }
+  if (value.maxAttempts !== undefined) {
+    const n = value.maxAttempts
+    if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'a2a agent lifecycle.maxAttempts must be a positive number',
+      })
+    }
+    out.maxAttempts = Math.floor(n)
+  }
+  return JSON.stringify(out)
+}
+
 function rowToAgent(r: A2aAgentRow): A2aOutboundAgent {
   return {
     id: r.id,
@@ -59,6 +128,7 @@ function rowToAgent(r: A2aAgentRow): A2aOutboundAgent {
     tokenEnv: r.token_env,
     peerId: r.peer_id ?? null,
     targetSkill: r.target_skill ?? null,
+    lifecycle: parseLifecycle(r.lifecycle ?? null),
     enabled: r.enabled === 1,
     label: r.label ?? null,
     createdAt: r.created_at,
@@ -108,14 +178,14 @@ export class A2aAgentStore {
   constructor(private readonly db: SqliteDb) {
     this.stmtInsert = db.prepare(
       `INSERT INTO a2a_outbound_agents
-         (id, capabilities, url, token_env, peer_id, target_skill, enabled, label, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, capabilities, url, token_env, peer_id, target_skill, lifecycle, enabled, label, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     this.stmtById = db.prepare('SELECT * FROM a2a_outbound_agents WHERE id = ?')
     this.stmtList = db.prepare('SELECT * FROM a2a_outbound_agents ORDER BY created_at ASC')
     this.stmtUpdate = db.prepare(
       `UPDATE a2a_outbound_agents
-         SET capabilities = ?, url = ?, token_env = ?, peer_id = ?, target_skill = ?, enabled = ?, label = ?, updated_at = ?
+         SET capabilities = ?, url = ?, token_env = ?, peer_id = ?, target_skill = ?, lifecycle = ?, enabled = ?, label = ?, updated_at = ?
          WHERE id = ?`,
     )
     this.stmtDelete = db.prepare('DELETE FROM a2a_outbound_agents WHERE id = ?')
@@ -136,6 +206,7 @@ export class A2aAgentStore {
     const tokenEnv = requireNonEmpty(input.tokenEnv, 'tokenEnv')
     const peerId = normOptional(input.peerId)
     const targetSkill = normOptional(input.targetSkill)
+    const lifecycle = normLifecycle(input.lifecycle)
     const enabled = input.enabled === false ? 0 : 1
     const label = normOptional(input.label)
 
@@ -148,6 +219,7 @@ export class A2aAgentStore {
         tokenEnv,
         peerId,
         targetSkill,
+        lifecycle,
         enabled,
         label,
         now,
@@ -192,6 +264,8 @@ export class A2aAgentStore {
     const tokenEnv = patch.tokenEnv !== undefined ? requireNonEmpty(patch.tokenEnv, 'tokenEnv') : r.token_env
     const peerId = patch.peerId !== undefined ? normOptional(patch.peerId) : r.peer_id
     const targetSkill = patch.targetSkill !== undefined ? normOptional(patch.targetSkill) : r.target_skill
+    // undefined = keep the raw stored value; null = turn lifecycle off; object = set it.
+    const lifecycle = patch.lifecycle !== undefined ? normLifecycle(patch.lifecycle) : r.lifecycle
     const enabled = patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : r.enabled
     const label = patch.label !== undefined ? normOptional(patch.label) : r.label
 
@@ -201,6 +275,7 @@ export class A2aAgentStore {
       tokenEnv,
       peerId,
       targetSkill,
+      lifecycle,
       enabled,
       label,
       Date.now(),

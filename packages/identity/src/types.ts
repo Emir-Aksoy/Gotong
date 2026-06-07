@@ -238,6 +238,23 @@ export interface UpdateSamlProviderInput {
 }
 
 /**
+ * Stream H2-OUT — opt-in long-running lifecycle for an outbound A2A agent.
+ *
+ * When set, a remote that answers `message/send` with a `working` Task (it
+ * SUSPENDED: long compute / its own HITL) makes the outbound participant PARK
+ * and poll `tasks/get` until it settles, instead of failing. Maps 1:1 to the
+ * `@aipehub/a2a` participant's `lifecycle?` option — both fields optional, so
+ * `{}` means "lifecycle on, participant defaults". A NULL column (this whole
+ * object absent) = blocking, the legacy behaviour (a returned Task is an error).
+ */
+export interface A2aOutboundLifecycle {
+  /** ms between `tasks/get` polls; the participant floors it (default ~3000). */
+  pollIntervalMs?: number
+  /** max polls before failing closed; the participant floors it (default ~20). */
+  maxAttempts?: number
+}
+
+/**
  * Route B P1-M11a — a registered OUTBOUND A2A agent. A local capability
  * dispatch matching `capabilities` is forwarded to the remote `url`'s
  * `message/send`. There is NO secret in this projection: `tokenEnv` names the
@@ -257,6 +274,8 @@ export interface A2aOutboundAgent {
   peerId: string | null
   /** `metadata.skill` the remote should dispatch to; null = let the remote default. */
   targetSkill: string | null
+  /** Stream H2-OUT — long-running poll lifecycle; null = blocking (legacy). */
+  lifecycle: A2aOutboundLifecycle | null
   enabled: boolean
   label: string | null
   createdAt: number
@@ -270,6 +289,8 @@ export interface AddA2aOutboundAgentInput {
   tokenEnv: string
   peerId?: string | null
   targetSkill?: string | null
+  /** Opt into long-running poll lifecycle; null/undefined = blocking (legacy). */
+  lifecycle?: A2aOutboundLifecycle | null
   label?: string | null
   enabled?: boolean
 }
@@ -281,6 +302,8 @@ export interface UpdateA2aOutboundAgentInput {
   tokenEnv?: string
   peerId?: string | null
   targetSkill?: string | null
+  /** undefined = keep; null = turn lifecycle OFF; object = set/replace it. */
+  lifecycle?: A2aOutboundLifecycle | null
   label?: string | null
   enabled?: boolean
 }
