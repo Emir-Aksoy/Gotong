@@ -740,17 +740,23 @@ export class Hub {
         ts: this.now(),
       }
     }
+    // R10 — the resumed task must not carry the original dispatch's stale
+    // absolute `deadlineMs`. Strip it once here so every caller (the host
+    // sweep, the inbox two-step resume, the ACP escalation resume) gets a
+    // deadline-free envelope, and so a suspend-again re-persists the same
+    // clean envelope rather than re-stamping the stale value.
+    const resumedTask = stripStaleDeadline(task)
     this.registry.incLoad(agentId)
     try {
       const r = p.onResume
-        ? await p.onResume(task, state)
-        : await p.onTask!(task)
+        ? await p.onResume(resumedTask, state)
+        : await p.onTask!(resumedTask)
       return r
     } catch (err) {
       if (isSuspendTaskError(err)) {
         const resumeAt = err.resumeAt
         try {
-          await this.suspendNotifier?.(task, agentId, {
+          await this.suspendNotifier?.(resumedTask, agentId, {
             resumeAt,
             state: err.state,
           })
@@ -1121,4 +1127,31 @@ function capabilitiesOfStrategy(s: import('./types.js').DispatchStrategy): strin
   if (s.kind === 'capability') return [...s.capabilities]
   if (s.kind === 'broadcast' && s.capabilities) return [...s.capabilities]
   return []
+}
+
+/**
+ * R10 — drop a stale absolute `deadlineMs` from a task about to be resumed.
+ *
+ * `deadlineMs` is an ABSOLUTE wall-clock epoch ("complete by T"), set at the
+ * ORIGINAL dispatch relative to that moment's `now`. Suspend/resume parks a
+ * task for an arbitrary stretch — a human approval that takes two days, a
+ * budget gate that reopens next cycle, a heartbeat interval — so by the time
+ * the task wakes, its original deadline is almost always in the past and
+ * means nothing about the resumed execution window. It's inert today (the
+ * resume path doesn't enforce deadlines), but `DispatchToolset` already
+ * advertises `deadlineMs` to the LLM, and the moment a deadline-enforcing
+ * scheduler/template lands, every long-parked task would resume straight into
+ * `deadline_expired`.
+ *
+ * So we strip it from the resumed envelope (and from the re-persisted
+ * envelope if the participant suspends again, so the staleness can't creep
+ * back across repeated parks). A resumed run that genuinely wants a deadline
+ * should set a FRESH one relative to resume-time, not inherit a wall-clock
+ * value computed for a different, already-elapsed window. Returns the task
+ * unchanged when there's no deadline to drop (the common case).
+ */
+function stripStaleDeadline(task: Task): Task {
+  if (task.deadlineMs === undefined) return task
+  const { deadlineMs: _dropped, ...rest } = task
+  return rest
 }

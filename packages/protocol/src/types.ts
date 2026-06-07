@@ -123,6 +123,12 @@ export interface Task {
    * when the scheduler is about to dispatch (or dequeue) the task, the task
    * resolves with a `failed` TaskResult and `error: 'deadline_expired'`
    * without ever reaching a participant.
+   *
+   * R10 — this is an ABSOLUTE deadline tied to the ORIGINAL dispatch window.
+   * On resume (`Hub.resumeTask`) it is stripped from the task envelope: a
+   * task that parked for an arbitrary stretch (a human approval, a budget
+   * gate) must not inherit a now-elapsed wall-clock budget. A resumed run
+   * that wants a deadline should set a fresh one relative to resume-time.
    */
   deadlineMs?: number
   /**

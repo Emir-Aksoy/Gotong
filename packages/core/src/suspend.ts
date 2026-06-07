@@ -20,7 +20,19 @@
  * place so agent code can be written against it.
  */
 export class SuspendTaskError extends Error {
-  /** Unix epoch ms. The earliest moment the resume sweep may re-dispatch. */
+  /**
+   * Unix epoch ms. The earliest moment the resume sweep may re-dispatch.
+   *
+   * R10 — this is **best-effort wall-clock**, not a monotonic deadline. The
+   * sweep fires on a `Date.now()` comparison, so an NTP step, a manual clock
+   * change, or DST can make a row come due a little early or sit slightly
+   * late. That's immaterial for the current single-node sweep (seconds of
+   * skew on a minutes-to-days park). A future persistent / multi-node mode
+   * that needs firm timing should clamp the due selection against a monotonic
+   * lower bound rather than trusting raw wall-clock. Use a far-future
+   * sentinel (e.g. `9_999_999_999_000`, "never") for parks that only an
+   * external event — an inbox approval, an A2A reply — may resume.
+   */
   readonly resumeAt: number
 
   /**

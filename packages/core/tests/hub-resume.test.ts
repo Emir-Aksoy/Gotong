@@ -103,6 +103,22 @@ class BoomyResumeAgent extends AgentParticipant {
   }
 }
 
+// Captures the exact Task object handed to onResume, so a test can assert
+// what the resume path did (or didn't) carry across — R10 deadline strip.
+class DeadlineRecordingAgent extends AgentParticipant {
+  public resumedWith: Task[] = []
+  constructor(id: string) {
+    super({ id, capabilities: ['nap'] })
+  }
+  protected async handleTask(_t: Task): Promise<unknown> {
+    return null
+  }
+  protected override async handleResume(t: Task, _state: unknown): Promise<unknown> {
+    this.resumedWith.push(t)
+    return { ok: true }
+  }
+}
+
 describe('Hub.resumeTask — happy path', () => {
   it('invokes onResume with the supplied state', async () => {
     const hub = Hub.inMemory()
@@ -280,6 +296,68 @@ describe('Hub.resumeTask — suspend-again', () => {
     if (result.kind === 'suspended') {
       expect(result.resumeAt).toBe(42)
     }
+    await hub.stop()
+  })
+})
+
+describe('Hub.resumeTask — R10 stale deadline strip', () => {
+  it('strips a stale deadlineMs before handing the task to onResume', async () => {
+    const hub = Hub.inMemory()
+    await hub.start()
+    const agent = new DeadlineRecordingAgent('clocky')
+    hub.register(agent)
+
+    // The task parked back when its deadline was still live; by resume time
+    // that absolute epoch is long past. A naive carry-through would let a
+    // deadline-enforcing scheduler instantly read `deadline_expired`.
+    const task: Task = { ...makeTask(), deadlineMs: 1 }
+    const result = await hub.resumeTask('clocky' as ParticipantId, task, {})
+
+    expect(result.kind).toBe('ok')
+    expect(agent.resumedWith).toHaveLength(1)
+    expect(agent.resumedWith[0]!.deadlineMs).toBeUndefined()
+    // The rest of the envelope rides across untouched.
+    expect(agent.resumedWith[0]!.id).toBe(task.id)
+    expect(agent.resumedWith[0]!.payload).toEqual(task.payload)
+    expect(agent.resumedWith[0]!.strategy).toEqual(task.strategy)
+    await hub.stop()
+  })
+
+  it('leaves a deadline-free task unchanged (no-op strip)', async () => {
+    const hub = Hub.inMemory()
+    await hub.start()
+    const agent = new DeadlineRecordingAgent('clocky')
+    hub.register(agent)
+
+    const task = makeTask() // no deadlineMs
+    await hub.resumeTask('clocky' as ParticipantId, task, {})
+
+    expect(agent.resumedWith[0]!.deadlineMs).toBeUndefined()
+    expect(agent.resumedWith[0]!.id).toBe(task.id)
+    await hub.stop()
+  })
+
+  it('re-persists a deadline-free envelope when the participant suspends again', async () => {
+    const notifier = vi.fn().mockResolvedValue(undefined)
+    const hub = Hub.inMemory({ suspendNotifier: notifier })
+    await hub.start()
+    hub.register(new SuspendAgainAgent('chainer', 777, { round: 2 }))
+
+    const task: Task = { ...makeTask(), deadlineMs: 5 }
+    const result = await hub.resumeTask(
+      'chainer' as ParticipantId,
+      task,
+      { round: 1 },
+    )
+
+    expect(result.kind).toBe('suspended')
+    // The task forwarded to the notifier for re-persistence must NOT carry
+    // the stale deadline, so the *next* resume stays clean too — the strip
+    // is durable, not just applied to the in-flight onResume call.
+    expect(notifier).toHaveBeenCalledTimes(1)
+    const persistedTask = notifier.mock.calls[0]![0] as Task
+    expect(persistedTask.deadlineMs).toBeUndefined()
+    expect(persistedTask.id).toBe(task.id)
     await hub.stop()
   })
 })
