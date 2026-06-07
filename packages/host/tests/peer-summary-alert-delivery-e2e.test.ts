@@ -116,6 +116,29 @@ function makeCapturingFetch(opts: { throwUrls?: Set<string>; failUrls?: Set<stri
   return { fetchImpl, calls }
 }
 
+/**
+ * A capturing fake that keeps the RAW body string (im/email bodies are
+ * platform-specific — `{chat_id,text}` / `{content}` / `{to,subject,text}` —
+ * not an `AlertWebhookPayload`). `failFirstN` makes a url fail its first N
+ * attempts then succeed, so a retry path is exercisable end-to-end.
+ */
+function makeRawCapturingFetch(opts: { failFirstN?: Map<string, number> } = {}) {
+  const calls: { url: string; headers: Record<string, string>; raw: string; body: unknown }[] = []
+  const remainingFails = new Map(opts.failFirstN ?? [])
+  const fetchImpl: FetchLike = async (url, init) => {
+    const headers = (init?.headers ?? {}) as Record<string, string>
+    const raw = init?.body ?? '{}'
+    calls.push({ url, headers, raw, body: JSON.parse(raw) })
+    const left = remainingFails.get(url) ?? 0
+    if (left > 0) {
+      remainingFails.set(url, left - 1)
+      return { ok: false, status: 503 }
+    }
+    return { ok: true, status: 200 }
+  }
+  return { fetchImpl, calls }
+}
+
 describe('v5 Stream F day-3 M7 — control-plane alert delivery over two hubs', () => {
   let providerStore: IdentityStore
   let consumerStore: IdentityStore
@@ -405,5 +428,130 @@ describe('v5 Stream F day-3 M7 — control-plane alert delivery over two hubs', 
     expect(body.firingId).toBe(0)
     expectNoLeak(body)
     expect(consumerStore.listPeerSummaryAlertFirings({})).toHaveLength(0)
+  })
+
+  it('multi-channel: a breach fans out to im (telegram + slack) and email with counts-only platform-specific wire', async () => {
+    const { fetchImpl, calls } = makeRawCapturingFetch()
+    // The telegram bot token lives ONLY in env — never in the channel row.
+    const fed = deliverFederation({ fetchImpl, env: { TG_TOKEN: 'tg-bot-secret-987' } })
+
+    const tgUrl = 'https://api.telegram.org'
+    const slackUrl = 'https://hooks.slack.test/xyz'
+    const emailUrl = 'https://email.test/send'
+
+    const tg = fed.addAlertChannel({
+      kind: 'im',
+      platform: 'telegram',
+      url: tgUrl,
+      target: 'chat-555',
+      headerEnv: 'TG_TOKEN',
+      label: 'TG 告警',
+    })
+    fed.addAlertChannel({
+      kind: 'im',
+      platform: 'slack',
+      url: slackUrl, // incoming-webhook: the token lives in the url, no target/secret
+      label: 'Slack 告警',
+    })
+    fed.addAlertChannel({
+      kind: 'email',
+      url: emailUrl,
+      target: 'ops@cp.example',
+      label: 'Email 告警',
+    })
+    fed.addAlertRule({
+      source: 'provider',
+      metric: 'assets.agents',
+      comparator: 'gte',
+      threshold: 3,
+      label: '太多 agent',
+    })
+
+    // The stored telegram row carries the env-var NAME, never the bot token.
+    expect(tg.headerEnv).toBe('TG_TOKEN')
+    expect(JSON.stringify(tg)).not.toContain('tg-bot-secret-987')
+
+    // Drive a real breach: a 3rd provider agent joins.
+    provider.register(new NoopAgent({ id: 'agent-secret-gamma', capabilities: ['confidential-svc-3'] }))
+    consumerClock = 1_000_000
+    await fed.refresh()
+    const report = await fed.evaluateAndDeliver()
+
+    // One firing, fanned out to all three enabled channels, all ok.
+    expect(report.opened).toHaveLength(1)
+    expect(report.deliveries).toHaveLength(3)
+    for (const d of report.deliveries) expect(d.ok).toBe(true)
+    expect(calls).toHaveLength(3)
+
+    const byUrlPrefix = (p: string) => calls.find((c) => c.url.startsWith(p))!
+
+    // --- Telegram: bot token from env goes in the PATH; chat id is `target`. ---
+    const tgCall = byUrlPrefix('https://api.telegram.org')
+    expect(tgCall.url).toBe('https://api.telegram.org/bottg-bot-secret-987/sendMessage')
+    const tgBody = tgCall.body as { chat_id: string; text: string }
+    expect(tgBody.chat_id).toBe('chat-555')
+    expect(tgBody.text.startsWith('[aipehub] alert firing:')).toBe(true)
+    expect(tgBody.text).toContain('太多 agent')
+    expect(tgBody.text).toContain('assets.agents gte 3')
+    expect(tgBody.text).toContain('(observed 3)')
+    expect(tgBody.text).toContain('on source provider')
+
+    // --- Slack: incoming-webhook, body is just `{text}`, url unchanged. ---
+    const slackCall = byUrlPrefix(slackUrl)
+    expect(slackCall.url).toBe(slackUrl)
+    const slackBody = slackCall.body as { text: string }
+    expect(slackBody.text).toBe(tgBody.text) // same counts-only line, re-encoded per platform
+
+    // --- Email: `{to,subject,text}` to the email API, recipient is `target`. ---
+    const emailCall = byUrlPrefix(emailUrl)
+    expect(emailCall.url).toBe(emailUrl)
+    const emailBody = emailCall.body as { to: string; subject: string; text: string }
+    expect(emailBody.to).toBe('ops@cp.example')
+    expect(emailBody.subject).toBe('[aipehub] alert opened: assets.agents')
+    expect(emailBody.text).toBe(tgBody.text)
+
+    // no leak: every platform body carries ONLY counts / ids / the rule label.
+    for (const c of calls) expectNoLeak(c.body)
+
+    // The bearer never crossed the wire as a stored value — it resolved into the
+    // telegram path at delivery time; slack/email bodies never saw it.
+    expect(slackCall.raw).not.toContain('tg-bot-secret-987')
+    expect(emailCall.raw).not.toContain('tg-bot-secret-987')
+  })
+
+  it('retry: a transiently-failing channel succeeds on the second attempt through the surface', async () => {
+    const url = 'https://hook.test/flaky'
+    // Fail the FIRST POST to this url, then succeed.
+    const { fetchImpl, calls } = makeRawCapturingFetch({ failFirstN: new Map([[url, 1]]) })
+    const sleeps: number[] = []
+    const fed = deliverFederation({
+      fetchImpl,
+      env: {},
+      retry: {
+        maxAttempts: 2,
+        baseDelayMs: 1,
+        sleepImpl: async (ms) => {
+          sleeps.push(ms)
+        },
+      },
+    })
+
+    const chan = fed.addAlertChannel({ kind: 'webhook', url, label: '抖动 webhook' })
+    fed.addAlertRule({ source: 'provider', metric: 'assets.agents', comparator: 'gte', threshold: 3 })
+
+    provider.register(new NoopAgent({ id: 'agent-secret-gamma', capabilities: ['confidential-svc-3'] }))
+    await fed.refresh()
+    const report = await fed.evaluateAndDeliver()
+
+    // The firing opened and — despite the first POST failing — delivery
+    // eventually succeeded because the surface threaded retry/backoff through.
+    expect(report.opened).toHaveLength(1)
+    expect(report.deliveries).toHaveLength(1)
+    expect(report.deliveries[0]).toMatchObject({ channelId: chan.id, ok: true, status: 200 })
+
+    // Two POST attempts to the same url; one backoff slept (injected, no real wait).
+    expect(calls.filter((c) => c.url === url)).toHaveLength(2)
+    expect(sleeps).toEqual([1])
+    for (const c of calls) expectNoLeak(c.body)
   })
 })
