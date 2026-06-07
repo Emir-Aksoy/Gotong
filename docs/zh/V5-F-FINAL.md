@@ -12,10 +12,15 @@
 > 可注入 fetch）;M4 surface `evaluateAndDeliver` + opt-in sweep;M5 web firing 历史/channel
 > CRUD/test-delivery 路由;M6 admin UI 触发历史 + 通知渠道面板;M7 双 hub 投递验收门。
 >
+> **多通道完**（im / email + 重试·退避·去重窗, 见 §十三）: MC-M1~M7。
+>
+> **跨 hub 告警聚合完**（见 §十四）: AGG-M1~M5——把告警状态折进 counts-only 摘要的
+> `alerts.openFirings` 计数族, 联邦聚合 + 趋势 + 元告警从既有摘要管线**免费**掉出, 零新 schema。
+>
 > 接 [`V5-E5-FINAL.md`](V5-E5-FINAL.md)（控制面 point-in-time 聚合）。E5 文档 §十明确把
 > 「控制面历史趋势 + 告警阈值」列为 day-2 sanctioned 后续——Stream F 就是把它做实。
 >
-> Last updated: 2026-06-06
+> Last updated: 2026-06-07
 
 ---
 
@@ -498,4 +503,98 @@ web **864 绿**, 零回归。
 - **Matrix / QQ 平台 renderer**: `IM_PLATFORMS` 闭集现 telegram/slack/discord/lark, 加新平台只补一个 builder 分支不迁移。
 - **直连 SMTP email**: 现走 HTTP email API form(`{to,subject,text}` POST), 不直连 SMTP。
 - **死信队列 / 跨进程持久重试**: 重试在单次 `evaluateAndDeliver` 内, 不跨进程持久排队。
-- **跨 hub 告警聚合 / firing 降采样·保留 / Alertmanager 式分组·静默·升级链**: 沿用 day-3 推迟。
+- **跨 hub 告警聚合**: **完**(AGG-M1~M5, 见 §14)——折进 counts-only 摘要的 `alerts.openFirings` 计数族, 自动得到联邦视图 + 趋势 + 元告警。
+- **firing 降采样·保留 / Alertmanager 式分组·静默·升级链**: 沿用 day-3 推迟。
+
+---
+
+## 十四、跨 hub 告警聚合 — `alerts.openFirings` 计数族（AGG-M1→M5）
+
+> 状态: **完**(AGG-M1~M5)。§13.8 把「跨 hub 告警聚合」列为推迟; 本 pass 做实,
+> 严守 counts-only + 只观察不接管 + opt-in fail-closed。commit `816f407`→本提交。
+
+### 14.1 为什么 + 那个让它「免费」的关键决策
+
+day-3/多通道把**单个 hub 自己**的告警 firing 收口(求值 → firing 生命周期 → 投递)。但自由图控制面少了
+一个联邦级问题:「**此刻我所有 peer 加起来有多少条告警开着?**」——一个观察者想一眼看到整片网格的告警体温,
+而不是逐个 peer 点进去数。
+
+**关键决策**: 不另起一套 `peer.alertSummary` RPC + opt-in 列 + 聚合 surface + UI(那会是 day-3 投递管线的
+平行第二套)。而是把告警状态**当成 `PeerSummary` 里又一个 counts-only 字段**——`alerts: { openFirings: number }`。
+就这一个标量。这样:
+
+- **复用 E5 的 `share_summary`(v23) opt-in 闸**——不新增 schema、不新增迁移、不新增 RPC。
+- **自动得到趋势**(F-M2 快照 + F-M3 history 按 metric registry 投影)。
+- **自动得到元告警**(F-M4 求值器按 registry 投影任意 metric → 一条 `metric: 'alerts.openFirings'` 的规则
+  就能在「某 peer 开着的告警 > N」时自己触发, 是告警之上的告警)。
+- **自动得到 no-leak**——`openFirings` 是个**长度**, 摘要 shape 没地方塞 firing id / 规则标签 / 被它 breach
+  的源 peer / 阈值。生产者**按构造**漏不了行。
+
+一句话: **把告警状态折进既有 counts-only 摘要, 联邦聚合就从既有摘要聚合里掉出来了**, 不是新建管线。
+
+### 14.2 AGG-M1 — `PeerSummary.alerts.openFirings` + buildLocalSummary + normalize（`816f407`）
+
+- `PeerSummary` 接口在 `health` 块后加 `alerts: { openFirings: number }`(host `peer-summary.ts`)。
+- `SummaryIdentitySource` 加可选鸭子 `listOpenPeerSummaryAlertFirings?(): unknown[]`——真 `IdentityStore`
+  **零改**即满足(`store.ts:2757` 早有此方法, day-3 firing store 的)。
+- `buildLocalSummary`(**生产者侧**, 答 `peer.summary` 时跑)best-effort 取 `…listOpenPeerSummaryAlertFirings().length`
+  填进去; 这个数 = **本 hub 对它自己的 peer 们**当前开着的 firing 条数(本 hub 自己的告警活动, **只是个长度**)。
+  取不到/抛错 → 留 0(逐族 best-effort, 同 llm/health)。
+- `normalizePeerSummary`(消费者侧防御)对 `alerts.openFirings` 做 `num()` 强转。
+- **零 `main.ts` 改**: `summaryDeps.identity` 本就是整个 `IdentityStore`, 字段自动 populate。
+
+### 14.3 AGG-M2 — 注册成可趋势 + 可元告警的 metric（`9bea66f`）
+
+`peer-summary-metrics.ts` 的 `PEER_SUMMARY_METRICS`(dotted-key → extractor, 趋势投影 + 告警求值器的**单一真相源**)
+加一行 `'alerts.openFirings': (s) => s.alerts.openFirings`。注册**就是**让这个计数:
+
+- 进 `metricKeys()` → admin 趋势下拉框多一项;
+- 被 `projectPeerSummaryMetric` 投影 → 一条 `metric: 'alerts.openFirings'` 的告警规则**能 breach**(没注册的 key
+  投影成 undefined, 永不 breach; 注册把它翻成「可触发」)。
+
+> **诚实**: 字段诞生前拍的老快照里没有 `alerts` → extractor 在老快照上抛 → `projectPeerSummaryMetric` 跳过那个点
+> (best-effort), 趋势线从字段出现那一刻起画。
+
+### 14.4 AGG-M3 — admin 控制面 UI 浮出聚合（`9331096`）
+
+**纯 UI 里程碑**——字段早已端到端流通(没有「消费者侧聚合函数」要打补丁: `createPeerSummaryFederation.listRows()`
+返回整个 summary blob, `history`/`computeBreaches` 经 metric registry 泛化, 告警族顺流而下)。所以只需:
+
+- web 鸭子 `PeerSummary` 镜像加 `alerts: { openFirings }`(verbatim echo 一个标量)。
+- 手写 IIFE `peer-summary-ui.js`: `METRIC_LABELS` 加 `'告警·开启中'`(趋势下拉认得它); 每行 `healthText` 折进
+  `· 告警 N`; 表格下新增 `renderAggregate()` 一行 = **本地 + 每个已共享 peer** 的 `openFirings` 求和,
+  徽章 🔴/✓ + 「跨 K 个已共享 hub; U 个未共享/离线未计入」。
+- **诚实按构造**: 没 opt-in 共享的 peer **不**当 0 计入(那会把联邦体温读低), 显式列为「未计入」。
+- `styles.css` `.ps-agg`/`-firing`/`-calm` + `build:assets` 重嵌入 `static-assets.ts`。
+
+### 14.5 AGG-M4 — 双 hub 聚合验收门（`4ced8dc`, `peer-summary-alert-aggregation-e2e.test.ts`）
+
+逐字镜像 E5-M5 的 harness(一个真 provider Hub + 真 identity store, 消费者经**真**聚合 surface + **真** in-proc
+HubLink + **真** per-link share 闸驱动), 聚焦告警族。一个测一次证四件事:
+
+| claim | 怎么证 |
+|---|---|
+| 真计数 | provider 种 **3 开 + 1 已解决** firing → 共享消费者收到 `openFirings === 3`(证真采样非硬 0, 且**已解决的被排除**——是 `listOpen` 非全部)。 |
+| 聚合 | 控制面联邦总数 = 自己的 `openFirings` **加** 每个已共享 peer 的 = 真求和(2 + 3 = 5), 即 UI `renderAggregate()` 那道算术。 |
+| no-leak | 每条种下的 firing 带秘密金丝雀(规则 id / 被它 breach 的源 peer / metric 名 / 人类标签)。**一个都不过线**——只标量过。断言 `summary.alerts` deep-equal `{ openFirings: 3 }` 且序列化 wire 不含任何金丝雀。 |
+| opt-in + 隔离 | 未共享消费者 fail-closed 被拒, 带「not shared」原因——**不是**伪造的 `openFirings:0`(那会悄悄少算); 诚实聚合只数真共享的(known=1, 被拒 peer 贡献 0)。夹一条边不外溢另一条。 |
+
+### 14.6 北极星对账（聚合增量）
+
+| 红线 | 怎么守 |
+|---|---|
+| 只观察不接管 | `openFirings` 是每个主权 hub **自愿**经 per-link `share_summary` 暴露的自己的告警计数; 控制面只**数**不**接管**任何 peer 的告警/规则/firing。 |
+| 计数即隐私契约 | 折进 counts-only 摘要的就一个**长度**; 摘要 shape 没地方放 firing id / 标签 / 源 peer; M4 no-leak 门钉死。 |
+| opt-in fail-closed | 复用 E5 `share_summary`(v23): 没共享 → 拒 + 诚实原因, 绝不伪造 0; 聚合只数真共享的。 |
+| 自由图非层级树 | 聚合是**观察者本地**把自愿计数求和, **不**建中心化 SaaS 控制面、**不**向 peer 下指令(那是 Route B P2 的另一条 track, 北极星红线外)。 |
+| 节点尽量轻量 | 零新 schema / 零迁移 / 零新 RPC; M1 一个字段 + M2 一行 registry + M3 纯 UI + M4 测试。趋势 + 元告警是既有 F 机制**免费**带出。 |
+
+### 14.7 测试 + 仍显式推迟
+
+- **测试**: host `peer-summary.test.ts`(+default-zero/normalize/best-effort/metricKeys ≥10) + `peer-summary-metrics.test.ts`
+  (+投影/趋势跳老快照) + `peer-summary-alerts.test.ts`(+元告警 breach) + `peer-summary-alert-surface.test.ts` +
+  E5/F/delivery e2e 的 `ownSummary` literal 补 `alerts` + **新 AGG-M4 双 hub 门 4 测**。host **833 + 1 skipped 绿** /
+  web **864 绿**, 零回归。
+- **仍显式推迟**: 跨 hub firing **明细**聚合(只聚合**计数**, 不把各 peer 的 firing 行拉过来——那会破 no-leak);
+  联邦级**静默/升级链**(Alertmanager 式, 沿用 day-3 推迟); 把 `alerts.openFirings` 的**联邦元告警**自动接投递通道
+  (现元告警规则能 breach + 显示, 投递沿用 day-3 single-hub firing 管线)。
