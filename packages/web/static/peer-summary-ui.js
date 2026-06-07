@@ -346,25 +346,38 @@
       '    <tbody id="ps-rules-rows"><tr><td colspan="6" class="pf-empty">加载中...</td></tr></tbody>' +
       '  </table>' +
       '</section>' +
-      // --- 通知渠道 (day-3): webhook delivery channels (no secret in the row) ---
+      // --- 通知渠道 (day-3 + 多通道): webhook / im / email (no secret in the row) ---
       '<section class="ps-section ps-channels">' +
       '  <h3>通知渠道</h3>' +
-      '  <p class="pf-meta">告警越线时把<strong>计数摘要</strong> POST 到 webhook(边沿触发:开启发一次、解决发一次)。' +
-      '渠道只存<strong>环境变量名</strong>(headerEnv),绝不存密钥本身 —— host 在投递时从该环境变量读取 Authorization。' +
+      '  <p class="pf-meta">告警越线时把<strong>计数摘要</strong>投递到 webhook / 即时通讯(IM) / 邮件(边沿触发:开启发一次、解决发一次)。' +
+      '渠道只存<strong>环境变量名</strong>(headerEnv)与目的地,绝不存密钥本身 —— host 在投递时从该环境变量读取令牌。' +
+      'IM 用<strong>无状态平台 send</strong>:slack/discord/lark 是 incoming-webhook(令牌在 URL 里),telegram 走 bot API(令牌从环境变量读、拼进路径)。' +
       '<strong>主动投递需开启轮询</strong>:设 <code>AIPE_PEER_SUMMARY_ALERT_SWEEP_MS</code>(≥10000)host 才会定期' +
       '求值并投递;未设时渠道仅在下方「测试」按钮触发时发出。</p>' +
       '  <form id="ps-channel-form" class="ps-rule-form" autocomplete="off">' +
-      '    <label>类型 <select id="ps-channel-kind"><option value="webhook">webhook</option></select></label>' +
+      '    <label>类型 <select id="ps-channel-kind">' +
+      '      <option value="webhook">webhook</option>' +
+      '      <option value="im">IM (即时通讯)</option>' +
+      '      <option value="email">email (邮件)</option>' +
+      '    </select></label>' +
+      '    <label id="ps-channel-platform-wrap" hidden>平台 <select id="ps-channel-platform">' +
+      '      <option value="telegram">telegram</option>' +
+      '      <option value="slack">slack</option>' +
+      '      <option value="discord">discord</option>' +
+      '      <option value="lark">lark</option>' +
+      '    </select></label>' +
       '    <label>URL <input id="ps-channel-url" type="url" required placeholder="https://hooks.example.com/..." /></label>' +
+      '    <label id="ps-channel-target-wrap" hidden><span id="ps-channel-target-label">目标</span> ' +
+      '      <input id="ps-channel-target" type="text" placeholder="如: -1001234567890 或 ops@example.com" /></label>' +
       '    <label>鉴权环境变量 (可选) <input id="ps-channel-headerenv" type="text" placeholder="如: OPS_WEBHOOK_TOKEN" /></label>' +
       '    <label>标签 (可选) <input id="ps-channel-label" type="text" placeholder="如: 运维群" /></label>' +
       '    <button type="submit">添加渠道</button>' +
       '  </form>' +
       '  <table class="pf-table">' +
       '    <thead><tr>' +
-      '      <th>渠道</th><th>类型</th><th>鉴权</th><th>状态</th><th>操作</th>' +
+      '      <th>渠道</th><th>类型</th><th>目的地</th><th>鉴权</th><th>状态</th><th>操作</th>' +
       '    </tr></thead>' +
-      '    <tbody id="ps-channels-rows"><tr><td colspan="5" class="pf-empty">加载中...</td></tr></tbody>' +
+      '    <tbody id="ps-channels-rows"><tr><td colspan="6" class="pf-empty">加载中...</td></tr></tbody>' +
       '  </table>' +
       '</section>'
 
@@ -385,6 +398,23 @@
       e.preventDefault()
       onAddChannel(root).catch(function () { /* setStatus handled it */ })
     })
+    // Per-kind fields: platform is im-only; target is the im chat/room id OR the
+    // email recipient (so it shows for im + email, with a kind-aware label).
+    $('#ps-channel-kind', root).addEventListener('change', function () {
+      updateChannelFields(root)
+    })
+    updateChannelFields(root)
+  }
+
+  // Show/hide + relabel the platform/target fields to match the chosen kind.
+  function updateChannelFields(root) {
+    const kind = $('#ps-channel-kind', root).value
+    const platWrap = $('#ps-channel-platform-wrap', root)
+    const targetWrap = $('#ps-channel-target-wrap', root)
+    const targetLabel = $('#ps-channel-target-label', root)
+    if (platWrap) platWrap.hidden = kind !== 'im'
+    if (targetWrap) targetWrap.hidden = kind !== 'im' && kind !== 'email'
+    if (targetLabel) targetLabel.textContent = kind === 'email' ? '收件人' : '目标 chat/room id'
   }
 
   // Fill a <select> from [{value,label}], preserving the current selection if it
@@ -691,12 +721,26 @@
     }
   }
 
+  // Destination cell: im shows its platform + (target or "via url"); email shows
+  // the recipient; webhook has no separate destination (the url IS it).
+  function channelDestCell(c) {
+    if (c.kind === 'im') {
+      const plat = c.platform ? '<strong>' + escHtml(c.platform) + '</strong>' : '?'
+      const to = c.target ? ' → <code class="pf-id">' + escHtml(c.target) + '</code>' : ' (via url)'
+      return plat + to
+    }
+    if (c.kind === 'email') {
+      return c.target ? '<code class="pf-id">' + escHtml(c.target) + '</code>' : '?'
+    }
+    return '—'
+  }
+
   function renderChannels(root, channels) {
     const tbody = $('#ps-channels-rows', root)
     if (!tbody) return
     if (!channels.length) {
       tbody.innerHTML =
-        '<tr><td colspan="5" class="pf-empty">还没有通知渠道。用上面的表单添加一个 webhook。</td></tr>'
+        '<tr><td colspan="6" class="pf-empty">还没有通知渠道。用上面的表单添加一个 webhook / IM / 邮件渠道。</td></tr>'
       return
     }
     tbody.innerHTML = ''
@@ -710,6 +754,7 @@
       tr.innerHTML =
         '<td class="pf-peer">' + label + '</td>' +
         '<td>' + escHtml(c.kind) + '</td>' +
+        '<td>' + channelDestCell(c) + '</td>' +
         '<td>' + authCell + '</td>' +
         '<td><span class="pf-badge ' + (c.enabled ? 'pf-online' : 'pf-unknown') + '">' +
         (c.enabled ? '启用' : '停用') + '</span></td>' +
@@ -743,7 +788,7 @@
       const msg =
         err.status === 503 ? 'host 未启用 peer 联邦' : '加载失败: ' + (err.message || String(err))
       if (fr) fr.innerHTML = '<tr><td colspan="7" class="pf-empty">' + escHtml(msg) + '</td></tr>'
-      if (cr) cr.innerHTML = '<tr><td colspan="5" class="pf-empty">' + escHtml(msg) + '</td></tr>'
+      if (cr) cr.innerHTML = '<tr><td colspan="6" class="pf-empty">' + escHtml(msg) + '</td></tr>'
     }
   }
 
@@ -754,11 +799,16 @@
     const url = $('#ps-channel-url', root).value.trim()
     const headerEnv = $('#ps-channel-headerenv', root).value.trim()
     const label = $('#ps-channel-label', root).value.trim()
+    const platform = $('#ps-channel-platform', root).value
+    const target = $('#ps-channel-target', root).value.trim()
     if (!url) {
       setStatus(root, 'URL 必填', 'error')
       return
     }
     const body = { kind: kind, url: url }
+    // platform is im-only; target is the im chat/room id OR the email recipient.
+    if (kind === 'im') body.platform = platform
+    if ((kind === 'im' || kind === 'email') && target) body.target = target
     if (headerEnv) body.headerEnv = headerEnv
     if (label) body.label = label
     setStatus(root, '添加渠道...', 'loading')
@@ -767,6 +817,7 @@
       $('#ps-channel-url', root).value = ''
       $('#ps-channel-headerenv', root).value = ''
       $('#ps-channel-label', root).value = ''
+      $('#ps-channel-target', root).value = ''
       setStatus(root, '渠道已添加', 'ok')
       await loadFiringsAndChannels(root)
     } catch (err) {
