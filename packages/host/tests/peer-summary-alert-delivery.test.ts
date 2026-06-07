@@ -15,9 +15,11 @@ import { describe, expect, it } from 'vitest'
 
 import type { PeerSummaryAlertBreach } from '../src/peer-summary-alerts.js'
 import {
+  buildDeliveryRequest,
   deliverToChannel,
   deliverToEnabledChannels,
   diffAlertFirings,
+  renderAlertText,
   renderWebhookPayload,
   type FetchLike,
 } from '../src/peer-summary-alert-delivery.js'
@@ -57,6 +59,8 @@ function channel(over: Partial<PeerSummaryAlertChannel> = {}): PeerSummaryAlertC
     kind: 'webhook',
     url: 'https://hooks.example.com/x',
     headerEnv: null,
+    platform: null,
+    target: null,
     enabled: true,
     label: null,
     createdAt: 1,
@@ -201,6 +205,143 @@ describe('deliverToChannel (injectable fetch, best-effort)', () => {
     const { fn } = fakeFetch({ ok: false, status: 500 })
     const res = await deliverToChannel(channel(), payload, { fetchImpl: fn })
     expect(res).toEqual({ channelId: 'psac_1', ok: false, status: 500 })
+  })
+
+  it('telegram reads the bot token from env into the path and POSTs {chat_id,text}', async () => {
+    const { fn, calls } = fakeFetch()
+    const res = await deliverToChannel(
+      channel({ kind: 'im', platform: 'telegram', url: 'https://api.telegram.org', target: '-100', headerEnv: 'TG' }),
+      payload,
+      { fetchImpl: fn, env: { TG: '12345:secret' } },
+    )
+    expect(res.ok).toBe(true)
+    expect(calls[0].url).toBe('https://api.telegram.org/bot12345:secret/sendMessage')
+    expect(JSON.parse(calls[0].init!.body!).chat_id).toBe('-100')
+    // the token is path-only, never an Authorization header
+    expect(calls[0].init?.headers?.authorization).toBeUndefined()
+  })
+
+  it('email reads the API key from env into Authorization and POSTs to the endpoint', async () => {
+    const { fn, calls } = fakeFetch()
+    await deliverToChannel(
+      channel({ kind: 'email', url: 'https://api.mailer.example/send', target: 'ops@example.com', headerEnv: 'MAIL' }),
+      payload,
+      { fetchImpl: fn, env: { MAIL: 'Bearer key' } },
+    )
+    expect(calls[0].url).toBe('https://api.mailer.example/send')
+    expect(calls[0].init?.headers?.authorization).toBe('Bearer key')
+    expect(JSON.parse(calls[0].init!.body!).to).toBe('ops@example.com')
+  })
+
+  it('an under-configured channel never POSTs — resolves ok:false (best-effort)', async () => {
+    const { fn, calls } = fakeFetch()
+    const res = await deliverToChannel(
+      channel({ kind: 'email', url: 'https://api.mailer.example/send', target: null }),
+      payload,
+      { fetchImpl: fn },
+    )
+    expect(res.ok).toBe(false)
+    expect(res.error).toContain('cannot build delivery')
+    expect(calls).toHaveLength(0)
+  })
+})
+
+describe('renderAlertText (counts-only)', () => {
+  it('renders a firing line from counts-only fields (label + ruleId)', () => {
+    const text = renderAlertText(renderWebhookPayload(firing({ label: 'too many parked' }), 'opened'))
+    expect(text).toBe(
+      '[aipehub] alert firing: too many parked (asr_1) — health.suspendedTasks gt 5 (observed 9) on source local',
+    )
+  })
+
+  it('uses the ruleId alone when there is no label, and says resolved for a resolved event', () => {
+    const text = renderAlertText(renderWebhookPayload(firing({ resolvedAt: 2000 }), 'resolved'))
+    expect(text).toBe('[aipehub] alert resolved: asr_1 — health.suspendedTasks gt 5 (observed 9) on source local')
+  })
+})
+
+describe('buildDeliveryRequest (per-kind/platform, pure)', () => {
+  const payload = renderWebhookPayload(firing({ label: 'parked' }), 'opened')
+  const text =
+    '[aipehub] alert firing: parked (asr_1) — health.suspendedTasks gt 5 (observed 9) on source local'
+
+  it('webhook → JSON payload body, Authorization from the secret', () => {
+    const req = buildDeliveryRequest(channel({ kind: 'webhook' }), payload, 'Bearer t')
+    expect(req?.url).toBe('https://hooks.example.com/x')
+    expect(req?.headers.authorization).toBe('Bearer t')
+    expect(JSON.parse(req!.body)).toEqual(payload)
+  })
+
+  it('im/telegram → bot token in the path, {chat_id,text} body (token never a header)', () => {
+    const req = buildDeliveryRequest(
+      channel({ kind: 'im', platform: 'telegram', url: 'https://api.telegram.org', target: '-100' }),
+      payload,
+      '12345:secret',
+    )
+    expect(req?.url).toBe('https://api.telegram.org/bot12345:secret/sendMessage')
+    expect(JSON.parse(req!.body)).toEqual({ chat_id: '-100', text })
+    expect(req?.headers.authorization).toBeUndefined()
+  })
+
+  it('im/telegram without a target → null (best-effort skip)', () => {
+    const req = buildDeliveryRequest(
+      channel({ kind: 'im', platform: 'telegram', url: 'https://api.telegram.org', target: null }),
+      payload,
+      'tok',
+    )
+    expect(req).toBeNull()
+  })
+
+  it('im/slack → incoming-webhook {text} body at the channel url', () => {
+    const req = buildDeliveryRequest(
+      channel({ kind: 'im', platform: 'slack', url: 'https://hooks.slack.com/services/T/B/x' }),
+      payload,
+      null,
+    )
+    expect(req?.url).toBe('https://hooks.slack.com/services/T/B/x')
+    expect(JSON.parse(req!.body)).toEqual({ text })
+  })
+
+  it('im/discord → {content} body', () => {
+    const req = buildDeliveryRequest(
+      channel({ kind: 'im', platform: 'discord', url: 'https://discord.com/api/webhooks/x' }),
+      payload,
+      null,
+    )
+    expect(JSON.parse(req!.body)).toEqual({ content: text })
+  })
+
+  it('im/lark → {msg_type,content:{text}} body', () => {
+    const req = buildDeliveryRequest(
+      channel({ kind: 'im', platform: 'lark', url: 'https://open.larksuite.com/x' }),
+      payload,
+      null,
+    )
+    expect(JSON.parse(req!.body)).toEqual({ msg_type: 'text', content: { text } })
+  })
+
+  it('email → {to,subject,text} body + Authorization from the secret', () => {
+    const req = buildDeliveryRequest(
+      channel({ kind: 'email', url: 'https://api.mailer.example/send', target: 'ops@example.com' }),
+      payload,
+      'Bearer key',
+    )
+    expect(req?.url).toBe('https://api.mailer.example/send')
+    expect(req?.headers.authorization).toBe('Bearer key')
+    expect(JSON.parse(req!.body)).toEqual({
+      to: 'ops@example.com',
+      subject: '[aipehub] alert opened: health.suspendedTasks',
+      text,
+    })
+  })
+
+  it('email without a recipient → null', () => {
+    const req = buildDeliveryRequest(
+      channel({ kind: 'email', url: 'https://api.mailer.example/send', target: null }),
+      payload,
+      'k',
+    )
+    expect(req).toBeNull()
   })
 })
 
