@@ -162,6 +162,73 @@ describe('A2aOutboundManager (P1-M11b)', () => {
     expect(res).toEqual({ active: false, reason: 'not_found' })
   })
 
+  // Stream H2-OUT-M2 — a stored `lifecycle` (M1's v32 column) must reach the
+  // constructed A2aRemoteParticipant, or an admin-registered outbound agent can
+  // never talk to a long-running remote. The participant floors the option in
+  // its constructor, so the floored private field is the observable proof the
+  // manager wired it through (behavioral suspend→sweep→settle is the M4 e2e).
+  describe('Stream H2-OUT — long-running lifecycle wiring', () => {
+    /** Read the participant's floored lifecycle (private at compile time, live at runtime). */
+    function lifecycleOf(id: string): { pollIntervalMs: number; maxAttempts: number } | undefined {
+      const p = hub.participant(id) as unknown as {
+        lifecycle?: { pollIntervalMs: number; maxAttempts: number }
+      }
+      return p?.lifecycle
+    }
+
+    it('passes a tuned lifecycle through to the participant (floored by it)', () => {
+      const mgr = manager({ TOK: 'secret' })
+      identity.addA2aAgent({
+        id: 'long',
+        capabilities: ['review'],
+        url: 'https://a/a2a',
+        tokenEnv: 'TOK',
+        lifecycle: { pollIntervalMs: 5000, maxAttempts: 40 },
+      })
+      expect(mgr.refresh('long')).toEqual({ active: true })
+      expect(lifecycleOf('long')).toEqual({ pollIntervalMs: 5000, maxAttempts: 40 })
+    })
+
+    it('a stored {} opts in with the participant defaults (NULL would be blocking)', () => {
+      const mgr = manager({ TOK: 'secret' })
+      identity.addA2aAgent({
+        id: 'defaults-on',
+        capabilities: ['review'],
+        url: 'https://a/a2a',
+        tokenEnv: 'TOK',
+        lifecycle: {},
+      })
+      mgr.refresh('defaults-on')
+      // `{}` reaches the participant truthily → opted in, defaults floored (3000/20).
+      expect(lifecycleOf('defaults-on')).toEqual({ pollIntervalMs: 3000, maxAttempts: 20 })
+    })
+
+    it('a blocking agent (no lifecycle row) constructs a participant without lifecycle', () => {
+      const mgr = manager({ TOK: 'secret' })
+      identity.addA2aAgent({ id: 'blocking', capabilities: ['a'], url: 'https://a/a2a', tokenEnv: 'TOK' })
+      mgr.refresh('blocking')
+      // NULL column → null projection → falsy → omitted → legacy blocking edge.
+      expect(lifecycleOf('blocking')).toBeUndefined()
+    })
+
+    it('turning lifecycle off via update drops it on the re-registered participant', () => {
+      const mgr = manager({ TOK: 'secret' })
+      identity.addA2aAgent({
+        id: 'toggle-life',
+        capabilities: ['a'],
+        url: 'https://a/a2a',
+        tokenEnv: 'TOK',
+        lifecycle: { maxAttempts: 7 },
+      })
+      mgr.refresh('toggle-life')
+      expect(lifecycleOf('toggle-life')).toBeDefined()
+
+      identity.updateA2aAgent('toggle-life', { lifecycle: null })
+      mgr.refresh('toggle-life') // unregister-then-register picks up the cleared column
+      expect(lifecycleOf('toggle-life')).toBeUndefined()
+    })
+  })
+
   // P1-M11c — the admin list reads liveness through statusOf, which must report
   // the SAME reason tryRegister would, WITHOUT mutating the hub.
   describe('statusOf (read-only liveness probe)', () => {

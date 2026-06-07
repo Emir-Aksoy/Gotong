@@ -156,6 +156,11 @@ export class A2aOutboundManager {
           token,
           ...(agent.peerId ? { peerId: agent.peerId } : {}),
           ...(agent.targetSkill ? { targetSkill: agent.targetSkill } : {}),
+          // Stream H2-OUT — opt into the long-running poll lifecycle iff the row
+          // carries it (NULL = blocking, the legacy default). The column maps 1:1
+          // to the participant's `lifecycle?` option ({pollIntervalMs?,maxAttempts?}),
+          // so a stored `{}` reaches here and opts in with participant defaults.
+          ...(agent.lifecycle ? { lifecycle: agent.lifecycle } : {}),
         }),
       )
     } catch (err) {
