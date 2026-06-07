@@ -152,62 +152,77 @@ export class ParallelStepExecutor implements StepExecutor {
     const policy: StepFailurePolicy = s.onFailure ?? { action: 'halt' }
     record.attempts = 1
 
-    const results = await Promise.all(s.branches.map((b) => this.runBranch(b, x)))
-
     const branchOutputs: Record<string, unknown> = {}
-    const failures: string[] = []
     const suspended: SuspendedBranchTracker = { taskIds: {} }
-    for (let i = 0; i < s.branches.length; i++) {
-      const branch = s.branches[i]!
-      const outcome = results[i]!
-      this.applyBranchOutcome(branch, outcome, record, branchOutputs, failures, suspended)
-    }
+
+    let failed = await this.runBranchesInto(s.branches, x, record, branchOutputs, suspended)
     if (Object.keys(suspended.taskIds).length > 0) {
       return this.markParallelSuspended(record, branchOutputs, suspended)
     }
-    record.endedAt = x.now()
-    record.output = branchOutputs
 
-    if (failures.length === 0) {
-      record.status = 'done'
-      return record
-    }
-
-    // Retry policy at the parallel level retries the whole step. Keep it
-    // simple in v0.1: a parallel `retry` means "re-run the whole fan-out"
-    // — but skipped branches stay skipped (their `when` is still false),
-    // so a retry only ever re-dispatches the branches that ran last time.
+    // A parallel `retry` re-runs ONLY the branches that failed last attempt —
+    // never the whole fan-out. Re-dispatching a branch that already succeeded
+    // would fire its side effects twice and could even demote a passed branch
+    // to failed on a flaky second run. Skipped branches (`when:` false) were
+    // never in `failed`, so they stay skipped for free.
     if (policy.action === 'retry') {
       let remaining = policy.max
-      while (remaining > 0 && failures.length > 0) {
+      while (remaining > 0 && failed.length > 0) {
         remaining -= 1
         record.attempts += 1
         const retrySuspended: SuspendedBranchTracker = { taskIds: {} }
-        const retryResults = await Promise.all(s.branches.map((b) => this.runBranch(b, x)))
-        failures.length = 0
-        for (let i = 0; i < s.branches.length; i++) {
-          const branch = s.branches[i]!
-          const outcome = retryResults[i]!
-          this.applyBranchOutcome(branch, outcome, record, branchOutputs, failures, retrySuspended)
-        }
+        failed = await this.runBranchesInto(
+          failed.map((f) => f.branch),
+          x,
+          record,
+          branchOutputs,
+          retrySuspended,
+        )
         if (Object.keys(retrySuspended.taskIds).length > 0) {
           return this.markParallelSuspended(record, branchOutputs, retrySuspended)
         }
       }
-      if (failures.length === 0) {
-        record.status = 'done'
-        return record
-      }
     }
 
+    record.endedAt = x.now()
+    record.output = branchOutputs
+    if (failed.length === 0) {
+      record.status = 'done'
+      return record
+    }
+    const error = failed.map((f) => f.error).join('; ')
     if (policy.action === 'continue') {
       record.status = 'skipped'
-      record.error = failures.join('; ')
+      record.error = error
       return record
     }
     record.status = 'failed'
-    record.error = failures.join('; ')
+    record.error = error
     return record
+  }
+
+  /**
+   * Run `branches` concurrently, fold each outcome into `record` / `branchOutputs`
+   * / `suspended`, and return the branches that FAILED (with their error message)
+   * so a `retry` pass can re-run exactly those — and only those. Shared by the
+   * first attempt and every retry, which is why a retry never touches a branch
+   * that already succeeded or was skipped.
+   */
+  private async runBranchesInto(
+    branches: readonly Branch[],
+    x: StepExecContext,
+    record: StepRecord,
+    branchOutputs: Record<string, unknown>,
+    suspended: SuspendedBranchTracker,
+  ): Promise<Array<{ branch: Branch; error: string }>> {
+    const outcomes = await Promise.all(branches.map((b) => this.runBranch(b, x)))
+    const failed: Array<{ branch: Branch; error: string }> = []
+    for (let i = 0; i < branches.length; i++) {
+      const branch = branches[i]!
+      const error = this.applyBranchOutcome(branch, outcomes[i]!, record, branchOutputs, suspended)
+      if (error !== undefined) failed.push({ branch, error })
+    }
+    return failed
   }
 
   refreshSuspended(step: Step, record: StepRecord, x: StepExecContext): void {
@@ -295,42 +310,42 @@ export class ParallelStepExecutor implements StepExecutor {
   }
 
   /**
-   * Funnel a branch outcome into the running parallel-step record:
-   * write to `branchOutputs`, possibly add a sub-task id, possibly log
-   * a failure. Shared between the first attempt and retry passes so the
-   * "skipped branches stay skipped" property holds without copying the
-   * logic.
+   * Funnel ONE branch outcome into the running parallel-step record: write to
+   * `branchOutputs`, possibly add a sub-task id, possibly record a suspension.
+   * Returns the failure message when the branch failed (so the caller can both
+   * surface it and decide whether to retry that branch), or `undefined` when it
+   * succeeded, was skipped, or suspended. Shared by the first attempt and retry.
    */
   private applyBranchOutcome(
     branch: Branch,
     outcome: BranchOutcome,
     record: StepRecord,
     branchOutputs: Record<string, unknown>,
-    failures: string[],
     suspended: SuspendedBranchTracker,
-  ): void {
+  ): string | undefined {
     if (outcome.kind === 'skipped') {
       branchOutputs[branch.id] = undefined
-      return
+      return undefined
     }
     if (outcome.kind === 'when-error') {
       branchOutputs[branch.id] = undefined
-      failures.push(`branch '${branch.id}': ${outcome.error}`)
-      return
+      return `branch '${branch.id}': ${outcome.error}`
     }
     const r = outcome.result
     record.subTaskIds.push(r.taskId)
     if (r.kind === 'ok') {
       branchOutputs[branch.id] = r.output
-    } else if (r.kind === 'suspended') {
+      return undefined
+    }
+    if (r.kind === 'suspended') {
       branchOutputs[branch.id] = undefined
       suspended.taskIds[branch.id] = r.taskId
       suspended.resumeAt =
         suspended.resumeAt === undefined ? r.resumeAt : Math.min(suspended.resumeAt, r.resumeAt)
-    } else {
-      branchOutputs[branch.id] = undefined
-      failures.push(`branch '${branch.id}': ${describeFailure(r)}`)
+      return undefined
     }
+    branchOutputs[branch.id] = undefined
+    return `branch '${branch.id}': ${describeFailure(r)}`
   }
 
   private markParallelSuspended(

@@ -325,6 +325,65 @@ describe('WorkflowRunner — failure handling', () => {
     expect(out.output).toBe('success-on-3')
     expect(calls).toHaveLength(3) // 1 initial + 2 retries
   })
+
+  it('parallel `retry` re-runs ONLY the failed branch, not the whole fan-out', async () => {
+    // Regression: the retry pass dispatched `s.branches` (every branch) again,
+    // so a branch that already succeeded fired its side effects a second time
+    // and its output could be clobbered by a flaky re-run. The retry must touch
+    // only the branches that failed last attempt.
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: fanout-retry
+  trigger: { capability: go }
+  steps:
+    - id: fan
+      parallel: true
+      onFailure: { action: retry, max: 2 }
+      branches:
+        - id: a
+          dispatch:
+            strategy: { kind: capability, capabilities: [a] }
+            payload: a-in
+        - id: b
+          dispatch:
+            strategy: { kind: capability, capabilities: [b] }
+            payload: b-in
+    - id: collect
+      dispatch:
+        strategy: { kind: capability, capabilities: [collect] }
+        payload:
+          a_out: $fan.a.output
+          b_out: $fan.b.output
+`
+    const def = parseWorkflow(yaml)
+    let aCalls = 0
+    let bCalls = 0
+    const { hub, calls } = makeStubHub((call) => {
+      if (call.payload === 'a-in') {
+        aCalls += 1
+        return ok(nextTaskId(), `A-${aCalls}`, 'a-bot')
+      }
+      if (call.payload === 'b-in') {
+        bCalls += 1
+        // Fail the first attempt, succeed on the retry.
+        if (bCalls < 2) return fail(nextTaskId(), 'b flaked', 'b-bot')
+        return ok(nextTaskId(), `B-${bCalls}`, 'b-bot')
+      }
+      return ok(nextTaskId(), { collected: true }, 'collector')
+    })
+    const runner = new WorkflowRunner({ definition: def, hub })
+    const out = await runner.onTask(makeTask({}))
+    if (out.kind !== 'ok') throw new Error('expected ok')
+
+    // Branch A succeeded on attempt 1 → it must be dispatched EXACTLY once.
+    // The bug re-ran the whole fan-out, so A would be dispatched twice.
+    expect(aCalls).toBe(1)
+    expect(bCalls).toBe(2) // failed once, retried once → ok
+    // The collector sees A's first (and only) output and B's retried output —
+    // A-1 (not A-2) proves A's output was never clobbered by a re-run.
+    expect(calls.at(-1)!.payload).toEqual({ a_out: 'A-1', b_out: 'B-2' })
+  })
 })
 
 describe('WorkflowRunner — file-first persistence', () => {
