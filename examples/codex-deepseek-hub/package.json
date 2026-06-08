@@ -1,0 +1,17 @@
+{
+  "name": "@aipehub/example-codex-deepseek-hub",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Personal-hub case — one router LLM manages Codex + a DeepSeek-backed TUI coding agent as hub Participants, dispatching the right coder per goal; both operate on the SAME repo (shared cwd) so they share AGENTS.md + PROGRESS.md. Deterministic, no API key.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/cli-agent": "workspace:*",
+    "@aipehub/core": "workspace:*",
+    "@aipehub/llm": "workspace:*",
+    "@aipehub/llm-openai": "workspace:*"
+  }
+}

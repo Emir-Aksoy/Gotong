@@ -112,6 +112,21 @@ importers:
         specifier: workspace:*
         version: link:../../packages/llm
 
+  examples/codex-deepseek-hub:
+    dependencies:
+      '@aipehub/cli-agent':
+        specifier: workspace:*
+        version: link:../../packages/cli-agent
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@aipehub/llm-openai':
+        specifier: workspace:*
+        version: link:../../packages/llm-openai
+
   examples/coding-agent-bridge:
     dependencies:
       '@aipehub/cli-agent':
