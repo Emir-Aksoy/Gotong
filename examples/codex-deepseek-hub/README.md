@@ -82,6 +82,52 @@ Each tool authenticates via its own login / key — the hub never sees the coder
 credentials and the coders never see the router's. Three independent auth layers,
 kept apart on purpose.
 
+## Loadable template — 把这套配置做成可导入文件
+
+The hub's **methodology brain** ships as a LOADABLE file, not a built-in TS
+literal: [`template/codex-deepseek-hub.template.yaml`](template/codex-deepseek-hub.template.yaml)
+(`aipehub.template/v1`). Import it into a running host and you get:
+
+- **1 个配对导师 agent** (`pairing-mentor`) — a DeepSeek-backed LLM agent that
+  consults a methodology KB (via `mcp-obsidian`) before routing, then dispatches
+  `deepseek-tui` (reasoning lead) and `codex` (fast implementer).
+- **1 个可寻址 KB 槽位** (`coder_pairing_methodology`) — MCP wiring + a
+  `presetData` **POINTER**, never knowledge content.
+
+### 模版 / 框架结构上分离 (Stream B 决策 #4)
+
+The template carries **structure + references only**. The actual methodology
+**content** lives OUTSIDE it, under [`methodology-vault/`](methodology-vault/)
+(4 原创笔记 — 配对模型 / 按情况路由 / 落地手册 — 聚焦「推理主理 × 快手实现」,
+**不抄** sibling 的 Karpathy 库). You import those notes into your own Obsidian
+vault; AipeHub never touches the knowledge content (queries go through the
+`mcp-obsidian` subprocess → Obsidian's Local REST API plugin).
+
+> Same template SHAPE as [`personal-coding-hub`](../personal-coding-hub) (1
+> mentor + 1 KB slot, no workflow): the two coders are `CliParticipant`s, which
+> can't be managed LLM agents, so they're wired at runtime by `src/real-agents.ts`
+> — only the methodology mentor + KB wiring travel in the template.
+
+### Preview / verify
+
+```bash
+pnpm demo:codex-deepseek-hub:template   # config-preview (does NOT spawn mcp-obsidian)
+```
+
+The rigorous proof is the web anti-corruption test
+(`packages/web/tests/codex-deepseek-hub-template.test.ts`), which runs the
+shipped file through the real `parseTemplate` + the real import route.
+
+Import into a host:
+
+```bash
+curl -X POST -H "Authorization: Bearer <admin-token>" \
+  -H 'content-type: application/json' \
+  -d "$(jq -Rs '{template: .}' \
+    examples/codex-deepseek-hub/template/codex-deepseek-hub.template.yaml)" \
+  http://127.0.0.1:8745/api/admin/templates/import
+```
+
 ## North Star alignment
 
 - The **framework runs no LLM** — the router and the coders are external agents;

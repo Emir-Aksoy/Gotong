@@ -1,0 +1,121 @@
+# 配对编码导师 — 可载入模板 (aipehub.template/v1)
+#
+# codex-deepseek-hub 的「方法论大脑」做成一个**可载入文件**(不是内置 TS):
+#   1 个配对导师 agent  +  1 个可寻址知识库槽位(配对编码方法论 / Obsidian)。
+#
+# 为什么 agents[] 里只有「导师」,没有 codex / deepseek-tui:
+#   模板的 agents 是**托管 LLM agent**(过 parseManifest 校验)。codex 和
+#   deepseek-tui 是终端编码 agent(`CliParticipant`,shell-out 到外部 CLI/TUI),
+#   不是 LLM-provider agent —— 它们由 example 在运行时接线(见 src/real-agents.ts)。
+#   模板携带的是**方法论导师 + KB 接线**,example 在它周围接上两个 coder。
+#
+#   这跟姊妹案例 personal-coding-hub 的模板**结构相同**(也是 1 导师 + 1 KB):
+#   两个 coder 是 CLI/TUI participant,进不了托管 agent 名册,故都在运行时接。
+#
+# 知识内容**不在这个文件里**(Stream B 决策 #4):模板只带「MCP 接线 + presetData
+# 指针」。方法论内容是 ../methodology-vault/ 那些 .md(你导入自己的 Obsidian vault)。
+#
+# 导入:admin UI →「Agents / 工作流」→ 导入,或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/codex-deepseek-hub/template/codex-deepseek-hub.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+schema: aipehub.template/v1
+template:
+  name: 配对编码导师(Codex × DeepSeek TUI)
+  description: |-
+    codex-deepseek-hub 的方法论大脑:一个**配对导师 agent**,在派活前先查一套
+    「配对编码方法论」Obsidian 知识库(推理主理 × 快手实现的分工 / 按情况路由 /
+    本 hub 的落地手册),再决定怎么把任务在两个角色不对称的 coder 之间分派 ——
+    DeepSeek TUI(推理主理)起方案 / 审代码,Codex(快手实现)落地。模板只带
+    接线 + 一份指向方法论 vault 快照的 presetData「指针」;知识内容由你自己的
+    Obsidian vault 提供。
+
+  version: 1
+
+  # ── 1 个 agent:配对导师,挂方法论知识库(mcp-obsidian)──────────────────────
+  # host spawn 时拉起 mcp-obsidian 子进程,把它的工具(coder_pairing_methodology
+  # 槽位背后那台 obsidian server → obsidian__search / obsidian__get_file_contents)
+  # 暴露给导师的 tool-use 循环。导师据此「ask-your-wiki」,再做配对/路由决策。
+  agents:
+    - id: pairing-mentor
+      displayName: 配对导师
+      capabilities: [mentor, route]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是一个配对编码导师 / 路由器。你不亲自写代码 —— 你查方法论、把目标拆成
+        小步、决定每一步派给哪个编码 agent,并守住安全底线。
+
+        你手下有两个**角色不对称**的编码 agent:
+          · deepseek-tui —— 推理主理(the reasoner):审查、分析、设计、跨文件重构、定方案。
+          · codex        —— 快手实现(fast implementer):起脚手架、快速小修、把方案落成代码。
+
+        每接到一个非琐碎的编码目标,按这个循环走:
+
+        1. 读规范:确认目标符合仓库根的 AGENTS.md(两个 coder 共享同一份)。
+        2. 查方法论:先调用 obsidian__search 检索「配对编码方法论」知识库
+           (关键词如 "配对" / "主理" / "实现" / "审查" / "安排" / "在岗"),
+           必要时 obsidian__get_file_contents 读全文。作答/决策时**按笔记路径标注
+           依据**(如「依据 routing-by-situation.md」)。
+        3. 分析 + 结合安排 + 派:先把任务看清(只审查 / 琐碎小修 / 需先设计),
+           再结合你的安排合理分派 —— 不是固定「先想后做」流水线:
+           · 只审查不改 → 只派推理主理 deepseek-tui,报结论不实现;
+           · 琐碎小修(无需设计)→ 只派快手 codex 直接做;
+           · 需先设计 → deepseek-tui 起草方案、codex 落地实现。
+           守住安排:你说不可用的编码 agent(已登出 / 限流 / 不想用)绝不派 ——
+           让在岗的顶上(codex 不在岗 → deepseek-tui 一人包办;预算只允许一个 →
+           主理一人包办设计+实现)。把活拆成小到一次能审的步骤,让 PROGRESS.md
+           承载交接 —— 每个 coder 动手前读、做完追加一行。
+        4. 守底线:危险动作(rm -rf / git push / sudo / curl|sh)由动作闸挂起等人批,
+           绝不绕过。
+
+        核心原则(来自方法论库):两只手角色不对称,别盲目两个都上、别让快手定方向、
+        别让主理闷头量产样板。看清任务大小 + 谁在岗,再在「只主理 / 只实现 /
+        主理→实现」三种配法里选一种。拿不准时,先查库再决定。
+      mcpServers:
+        # 方法论知识库的接线 —— mcp-obsidian 经 Obsidian「Local REST API」插件读你的
+        # vault。server 名 = `obsidian` → 工具命名 obsidian__search 等(与
+        # examples/obsidian-kb 同约定,便于复用那套 Local REST API 配置)。
+        - name: obsidian
+          command: uvx
+          args: [mcp-obsidian]
+          env:
+            OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+            OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+            OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+
+  # ── 1 个可寻址知识库槽位:MCP 接线 + 预置数据「指针」(不是内容!)──────────
+  # 槽位 name(`coder_pairing_methodology`)是 KB 的**可寻址身份**(也是 Stream C
+  # 联邦 per-link 授权的目标);它背后的 mcpServer name(`obsidian`)是**传输**。
+  # 导入时只「上报」不「自动接线」(决策 #4)—— 由你把自己的 Obsidian vault
+  # 接到这个槽位。
+  knowledgeBases:
+    - name: coder_pairing_methodology
+      description: 配对编码方法论知识库(推理主理 × 快手实现, Obsidian vault via mcp-obsidian)
+      mcpServer:
+        name: obsidian
+        command: uvx
+        args: [mcp-obsidian]
+        env:
+          OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+          OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+          OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+      presetData:
+        kind: url
+        ref: https://example.com/codex-deepseek-pairing-methodology-vault.tar.zst
+        description: |-
+          一份方法论 vault 快照(= ../methodology-vault/ 那些 .md 的打包)——
+          注意这是「指针」,不是内容。两种用法:① 把 methodology-vault/ 的笔记直接
+          拷进你的 Obsidian vault;或 ② 把它们打包托管,让这个 ref 指过去再显式拉取。
+          框架永不经手这份知识内容。
+
+  # ── 一键:导入时提示填一次 API key,自动应用到导师 agent ────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek
