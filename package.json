@@ -33,6 +33,8 @@
     "demo:personal-coding-hub:real": "pnpm --filter @aipehub/example-personal-coding-hub start:real",
     "demo:personal-coding-hub:cli": "pnpm --filter @aipehub/example-personal-coding-hub start:cli",
     "demo:personal-coding-hub:template": "pnpm --filter @aipehub/example-personal-coding-hub load-template",
+    "demo:codex-deepseek-hub": "pnpm --filter @aipehub/example-codex-deepseek-hub start",
+    "demo:codex-deepseek-hub:real": "pnpm --filter @aipehub/example-codex-deepseek-hub start:real",
     "demo:personal-research-hub": "pnpm --filter @aipehub/example-personal-research-hub start",
     "demo:personal-research-hub:template": "pnpm --filter @aipehub/example-personal-research-hub load-template",
     "demo:battle-monk-training": "pnpm --filter @aipehub/example-battle-monk-training start",
