@@ -126,6 +126,9 @@ importers:
       '@aipehub/llm-openai':
         specifier: workspace:*
         version: link:../../packages/llm-openai
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.0
 
   examples/coding-agent-bridge:
     dependencies:

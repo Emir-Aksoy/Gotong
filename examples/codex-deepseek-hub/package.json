@@ -7,12 +7,14 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "start:real": "tsx src/index.real.ts",
+    "load-template": "tsx src/load-template.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@aipehub/cli-agent": "workspace:*",
     "@aipehub/core": "workspace:*",
     "@aipehub/llm": "workspace:*",
-    "@aipehub/llm-openai": "workspace:*"
+    "@aipehub/llm-openai": "workspace:*",
+    "yaml": "^2.6.0"
   }
 }
