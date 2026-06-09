@@ -118,18 +118,56 @@ function sameClasses(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((c, i) => c === b[i])
 }
 
+/** The synthetic peer id used to reactivate sticky (offline-peer) egress caps. */
+const STICKY_OFFLINE_PEER = '__aipehub_sticky_offline__'
+
+/**
+ * Reactivate sticky cross-hub capabilities as one synthetic OFFLINE peer entry.
+ *
+ * WHY. Egress is detected against the CURRENTLY-connected peers, so a destination
+ * peer that's offline right now reads as not-cross-hub and its hop would slip the
+ * lock (the WFEDIT MVP gap). The host persists a per-workflow sticky set of
+ * capabilities ever seen leaving the workflow off-hub (`CrossHubMarkerStore`); we
+ * feed them here as a synthetic peer so {@link crossHubStepsOf} re-flags any step
+ * that STILL dispatches such a capability — reusing the EXACT detector (zero
+ * drift) and inheriting its "served locally ⇒ not egress" guard (so a capability
+ * brought in-house auto-deactivates). Appended LAST so a genuinely-online peer
+ * keeps attribution when both advertise the same capability.
+ */
+function withStickyOfflinePeer(
+  peerEntries: ReadonlyArray<PeerCapEntry>,
+  stickyCapabilities?: readonly string[],
+): ReadonlyArray<PeerCapEntry> {
+  if (!stickyCapabilities || stickyCapabilities.length === 0) return peerEntries
+  return [
+    ...peerEntries,
+    { peer: STICKY_OFFLINE_PEER, label: null, capabilities: [...new Set(stickyCapabilities)] },
+  ]
+}
+
 /**
  * Compute a workflow's cross-hub boundary. `egress` is derived via the canonical
  * {@link crossHubStepsOf} detector (so "cross-hub" means exactly what it means
  * everywhere else), then annotated with each node's data classes.
+ *
+ * `stickyCapabilities` (optional) are capabilities the host recorded as off-hub
+ * for THIS workflow while peers were connected; they reactivate the egress lock
+ * even when the destination peer is offline at edit time (see
+ * {@link withStickyOfflinePeer}). Data classes are always read fresh from the
+ * live definition, so the sticky set carries no data-class state.
  */
 export function workflowBoundary(
   def: WorkflowDefinition,
   localCapabilities: ReadonlySet<string>,
   peerEntries: ReadonlyArray<PeerCapEntry>,
+  stickyCapabilities?: readonly string[],
 ): WorkflowBoundary {
   const dispatches = dispatchByStepId(def)
-  const egress: EgressStep[] = crossHubStepsOf(def, localCapabilities, peerEntries).map((e) => ({
+  const egress: EgressStep[] = crossHubStepsOf(
+    def,
+    localCapabilities,
+    withStickyOfflinePeer(peerEntries, stickyCapabilities),
+  ).map((e) => ({
     stepId: e.stepId,
     capability: e.capability,
     dataClasses: canonClasses(dispatches.get(e.stepId)?.dataClasses),
@@ -152,6 +190,7 @@ export function enforceEditBoundary(
   edited: WorkflowDefinition,
   localCapabilities: ReadonlySet<string>,
   peerEntries: ReadonlyArray<PeerCapEntry>,
+  stickyCapabilities?: readonly string[],
 ): EditBoundaryResult {
   const violations: BoundaryViolation[] = []
 
@@ -163,9 +202,10 @@ export function enforceEditBoundary(
     })
   }
 
-  // --- Egress: the set of cross-hub hops must be identical. ---
-  const origEgress = workflowBoundary(original, localCapabilities, peerEntries).egress
-  const editEgress = workflowBoundary(edited, localCapabilities, peerEntries).egress
+  // --- Egress: the set of cross-hub hops must be identical. Sticky caps reactivate
+  //     an egress whose peer is offline at edit time, so the lock holds either way. ---
+  const origEgress = workflowBoundary(original, localCapabilities, peerEntries, stickyCapabilities).egress
+  const editEgress = workflowBoundary(edited, localCapabilities, peerEntries, stickyCapabilities).egress
   const keyOf = (e: EgressStep): string => `${e.stepId}::${e.capability}`
   const origMap = new Map(origEgress.map((e) => [keyOf(e), e]))
   const editMap = new Map(editEgress.map((e) => [keyOf(e), e]))

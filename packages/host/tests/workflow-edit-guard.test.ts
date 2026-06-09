@@ -192,3 +192,85 @@ describe('enforceEditBoundary — boundary changes are rejected', () => {
     }
   })
 })
+
+describe('enforceEditBoundary — sticky offline-peer lock', () => {
+  const before = wf([capStep('place', 'supplier.confirm-order')])
+  const retargeted = wf([capStep('place', 'supplier.express')])
+
+  it('WITHOUT sticky, an offline-peer egress retarget slips the lock (the MVP gap)', () => {
+    // Peer is offline (absent from peerEntries) and no sticky set → the live
+    // detector sees no egress on either side, so only the trigger is enforced.
+    expect(enforceEditBoundary(before, retargeted, new Set(), [])).toEqual({ ok: true })
+  })
+
+  it('reactivates the offline egress so the SAME retarget is caught', () => {
+    // Both caps were ever observed off-hub → sticky reactivates them as a
+    // synthetic offline peer; the retarget now reads exactly like the online case.
+    const r = enforceEditBoundary(before, retargeted, new Set(), [], [
+      'supplier.confirm-order',
+      'supplier.express',
+    ])
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.violations).toHaveLength(1)
+      expect(r.violations[0]?.kind).toBe('egress_retargeted')
+      expect(r.violations[0]?.stepId).toBe('place')
+    }
+  })
+
+  it('catches localizing an offline egress even when only the original cap is sticky', () => {
+    // The member tries to drop the cross-hub hop while the peer is down. With only
+    // the original cap sticky, the edited side has no egress → reads as removed.
+    const localized = wf([capStep('place', 'wf.draft')])
+    const r = enforceEditBoundary(before, localized, LOCAL, [], ['supplier.confirm-order'])
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.violations[0]?.kind).toBe('egress_removed')
+      expect(r.violations[0]?.stepId).toBe('place')
+    }
+  })
+
+  it('auto-deactivates when the capability is now served locally (brought in-house)', () => {
+    // Same cap is now in the local set → crossHubStepsOf skips it (served locally
+    // ⇒ not egress), so the member may freely edit the now-local step.
+    const localCaps = new Set(['wf.draft', 'supplier.confirm-order'])
+    const original = wf([localStep('place', 'supplier.confirm-order', { note: 'old' })])
+    const edited = wf([localStep('place', 'supplier.confirm-order', { note: 'new' })])
+    expect(enforceEditBoundary(original, edited, localCaps, [], ['supplier.confirm-order'])).toEqual({
+      ok: true,
+    })
+  })
+
+  it('does not over-lock a workflow that never dispatches the sticky capability', () => {
+    // A stale sticky cap that no step uses must not manufacture a phantom egress.
+    const b = wf([localStep('draft', 'wf.draft', { a: 1 })])
+    const a = wf([localStep('draft', 'wf.draft', { a: 2 }), localStep('extra', 'wf.draft', {})])
+    expect(enforceEditBoundary(b, a, LOCAL, [], ['supplier.confirm-order'])).toEqual({ ok: true })
+  })
+
+  it('an empty sticky set is identical to no sticky (the gap stays open)', () => {
+    expect(enforceEditBoundary(before, retargeted, new Set(), [], [])).toEqual({ ok: true })
+  })
+})
+
+describe('workflowBoundary — sticky reactivation', () => {
+  it('surfaces an offline egress with data classes read fresh from the definition', () => {
+    const def = wf([capStep('place', 'supplier.confirm-order', ['pii'])])
+    // Peer offline (empty entries), but the cap is sticky → egress is visible,
+    // and its data classes come from the live def (sticky carries no dc state).
+    expect(workflowBoundary(def, new Set(), [], ['supplier.confirm-order'])).toEqual({
+      trigger: 'run-flow',
+      egress: [{ stepId: 'place', capability: 'supplier.confirm-order', dataClasses: ['pii'] }],
+    })
+  })
+
+  it('surfaces the egress exactly once when the peer is BOTH online and sticky', () => {
+    // Sticky is appended last, so a real online peer keeps attribution and there
+    // is no double-count: one egress edge, surfaced once.
+    const def = wf([capStep('place', 'supplier.confirm-order', ['public'])])
+    expect(workflowBoundary(def, new Set(), [PEER], ['supplier.confirm-order'])).toEqual({
+      trigger: 'run-flow',
+      egress: [{ stepId: 'place', capability: 'supplier.confirm-order', dataClasses: ['public'] }],
+    })
+  })
+})
