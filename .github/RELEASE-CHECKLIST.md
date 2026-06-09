@@ -25,10 +25,13 @@ list keeps the checklist honest.
       external reporters.
 - [ ] **Refresh `Expires:` in `security.txt`** to a date < 1 year out
       whenever you update the file. Renewal cadence: every spring.
-- [ ] **Decide PGP policy** — current stance is "no PGP, use GitHub
-      advisory's TLS channel". If you change your mind, publish a key
-      at `https://aipehub.dev/security.asc` and update both
-      `SECURITY.md` and `security.txt`.
+      _Currently `2027-05-12` — RFC 9116-compliant; refresh before
+      spring 2027._
+- [x] **Decide PGP policy** — **Decided: no PGP.** The "no PGP, use
+      GitHub advisory's TLS channel" stance is already shipped in
+      `SECURITY.md` ("What about PGP?") and `.well-known/security.txt`
+      (note 3). If you ever change your mind, publish a key at
+      `https://aipehub.dev/security.asc` and update both files.
 
 ## Domain & DNS
 
@@ -76,16 +79,22 @@ can stay "no" indefinitely:
       registry, doing PyPI alongside keeps consistency.
 - [ ] **Pre-built single-file binaries** for macOS (arm64 + x64) and
       Windows x64. Non-blocking — Docker covers cross-platform
-      "click and run" today. If pursued:
-  - Bun `--compile` is the leading candidate (one cross-compile
-    command per target on a single Mac).
-  - Blocker: `packages/web/src/server.ts` reads static assets via
-    runtime `readFile` from `<package>/static/`. The static files
-    need to be inlined into the bundle (≈100 lines of build-step
-    work) before the binary is self-contained.
-  - Distribution channel: GitHub Releases (no separate hosting
-    needed). Workflow: build on tag push via GitHub Actions matrix
-    (linux/macos/windows runners), upload artifacts to the release.
+      "click and run" today. **Build infrastructure is already in
+      place** — only an actual release tag + (optional) code-signing
+      remain:
+  - ✅ Implemented: [`workflows/release.yml`](workflows/release.yml)
+    cuts binaries for all 5 targets via `bun build … --compile` on a
+    GitHub Actions matrix (`packages/host/bin/aipehub-host.js`), then
+    attaches `SHA256SUMS` + SLSA provenance + a CycloneDX SBOM.
+  - ✅ Blocker resolved: static assets are inlined at build time by
+    `packages/web/scripts/build-static-assets.mjs`, and the host
+    detects binary mode via `isCompiledBinary()` — no companion
+    `static/` directory ships. The old "≈100 lines of build-step
+    work" note is obsolete.
+  - Remaining: ① cut the first GitHub Release tag to trigger the
+    workflow (gated on the GitHub-upload freeze); ② optional macOS +
+    Windows code-signing (paid certs — see the "Deferred" footer in
+    `release.yml`).
 
 ## Documentation polish
 
@@ -93,7 +102,8 @@ can stay "no" indefinitely:
       domain hosts the project's own public-preview / demo deployment.
 - [ ] **Translate** the remaining `docs/zh/` queue —
       see [`docs/zh/README.md`](../docs/zh/README.md) "翻译状态" table.
-      Priority: AGENT → DEPLOY → FEDERATION → LICENSE-FAQ.
+      AGENT + DEPLOY are now done; only **FEDERATION** + **LICENSE-FAQ**
+      remain (ARCHITECTURE / PROTOCOL are intentionally low-priority).
 - [ ] **Refresh `Adapted:` dates** in `templates/community/agents/*.yaml`
       headers if the prompts get a re-pass before launch.
 
@@ -137,4 +147,4 @@ can stay "no" indefinitely:
 Once every box is checked, delete this file. Its absence == "we shipped
 the placeholder cleanup".
 
-Last reviewed: 2026-06-01.
+Last reviewed: 2026-06-08.
