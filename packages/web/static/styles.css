@@ -2172,6 +2172,25 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   line-height: 1.5; text-align: center; color: #fff; background: #1f6feb; border-radius: 999px;
 }
 .me-badge:empty { display: none; }
+/* WFEDIT-M4 — member natural-language workflow editor */
+.me-wf-edit { margin-bottom: 1.5rem; }
+#me-wf-edit-body { margin-top: 0.6rem; }
+.me-wf-edit-locked, .me-wf-edit-local {
+  margin: 0.2rem 0 0.6rem; padding: 0.5rem 0.7rem; font-size: 0.85rem;
+  border-radius: 6px; border: 1px solid transparent;
+}
+.me-wf-edit-locked { color: #7a4b00; background: #fff4e0; border-color: #f0d49a; }
+.me-wf-edit-local { color: #1d6a3a; background: #eaf7ef; border-color: #b6e2c6; }
+.me-wf-edit-locked ul, .me-wf-edit-local ul { margin: 0.35rem 0 0; padding-left: 1.2rem; }
+.me-wf-edit-locked li, .me-wf-edit-local li { margin: 0.15rem 0; }
+.me-wf-edit-yaml { margin: 0.3rem 0 0.6rem; font-size: 0.82rem; }
+.me-wf-edit-yaml summary { cursor: pointer; color: #1f6feb; }
+.me-wf-edit-yaml pre {
+  margin: 0.4rem 0 0; padding: 0.6rem 0.7rem; max-height: 16rem; overflow: auto;
+  background: #f7f7f8; border: 1px solid #e4e4e7; border-radius: 5px;
+  font-size: 0.8rem; line-height: 1.4; white-space: pre;
+}
+#me-wf-edit-status ul { margin: 0.3rem 0 0; padding-left: 1.2rem; }
 /* Phase 19 P1-M5 — member recent runs (status pill) + my AI helpers + uploader */
 .me-run-status {
   display: inline-block; padding: 0 0.5em; font-size: 0.78rem; line-height: 1.7;

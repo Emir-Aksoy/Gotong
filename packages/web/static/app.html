@@ -163,6 +163,20 @@
         <div id="me-dispatch-status" class="me-status"></div>
       </div>
 
+      <!-- WFEDIT-M4 — OpenClaw-style natural-language workflow editing for
+           members. Targets the workflow selected above. For a workflow that
+           connects to another hub, the cross-hub entry/exit (出入口) is locked:
+           members can only reshape their own LOCAL steps. The lock is enforced
+           server-side (host enforceEditBoundary) — this panel just explains it. -->
+      <div class="me-wf-edit">
+        <h2>用大白话改这个工作流</h2>
+        <p class="me-meta">不用写 YAML — 用一句话说你想怎么改上面选中的工作流(例如「把第一步的提示语改得更礼貌些」「加一步先让我确认」)。需要 editor 权限。</p>
+        <p class="me-meta">⚠️ 如果这个工作流连着别的 hub,跨 hub 的<strong>出入口</strong>(谁能触发、发去哪个 hub、带什么数据)锁定不可改 — 你只能改自己这边的步骤。</p>
+        <button id="me-wf-edit-load-btn" type="button" class="me-secondary-btn">打开编辑器</button>
+        <div id="me-wf-edit-body"></div>
+        <div id="me-wf-edit-status" class="me-status"></div>
+      </div>
+
       <div class="me-runs">
         <h2>最近运行</h2>
         <p class="me-meta">你最近发起的工作流运行,只显示你自己的记录。</p>

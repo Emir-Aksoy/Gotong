@@ -383,6 +383,8 @@
     await loadMyOwnAgents()
     await loadMyCredentials()
     document.getElementById('me-dispatch-btn')?.addEventListener('click', submitDispatch)
+    // WFEDIT-M4 — open the NL editor for the currently-selected workflow.
+    document.getElementById('me-wf-edit-load-btn')?.addEventListener('click', loadWorkflowEditor)
     document.getElementById('me-refresh-reports-btn')?.addEventListener('click', loadMyReports)
     document.getElementById('me-runs-refresh-btn')?.addEventListener('click', loadMyRuns)
     document.getElementById('me-agents-refresh-btn')?.addEventListener('click', loadMyAgents)
@@ -457,6 +459,10 @@
     const sel = document.getElementById('me-wf-select')
     const fields = document.getElementById('me-wf-form-fields')
     if (!sel || !fields) return
+    // WFEDIT-M4 — the editor body/status reference the PREVIOUSLY selected
+    // workflow; reset them whenever the selection changes so a stale editor
+    // can't be submitted against the wrong workflow.
+    resetWorkflowEditor()
     const wf = __myWorkflows.find((w) => w.id === sel.value)
     const schema = wf && Array.isArray(wf.inputSchema) ? wf.inputSchema : []
     const desc = wf && wf.description ? `<p class="me-meta">${escape(wf.description)}</p>` : ''
@@ -565,6 +571,205 @@
       status.className = 'me-status error'
       status.textContent = `派发失败: ${err?.message || err}`
     }
+  }
+
+  // ===== WFEDIT-M4 — natural-language workflow editing (OpenClaw-style) =====
+  //
+  // The member describes a change in plain language; the host runs it through
+  // the assistant, RE-PARSES, and enforces the cross-hub entry/exit lock
+  // (enforceEditBoundary) before saving a new revision on the SAME workflow.
+  // This panel just drives `GET .../editable` (show current YAML + the locked
+  // boundary) and `POST .../edit { instruction }` (apply / echo violations).
+  // The boundary is enforced server-side — the 🔒 notice here is honest UX,
+  // not the security control.
+
+  function resetWorkflowEditor() {
+    const body = document.getElementById('me-wf-edit-body')
+    const status = document.getElementById('me-wf-edit-status')
+    if (body) {
+      body.innerHTML = ''
+      delete body.dataset.workflowId
+    }
+    if (status) {
+      status.className = 'me-status'
+      status.textContent = ''
+    }
+  }
+
+  // Render the locked-boundary notice. For a cross-hub workflow this lists the
+  // trigger (ingress) + each off-hub egress step — the parts a member may NOT
+  // touch. For a purely-local one only the trigger is pinned, so the member has
+  // OpenClaw-style freedom over every step's logic.
+  function renderEditBoundary(r) {
+    const b = (r && r.boundary) || { trigger: '', egress: [] }
+    const triggerLi = `<li>入口(触发能力):<code>${escape(b.trigger || '')}</code></li>`
+    if (r && r.crossHub && Array.isArray(b.egress) && b.egress.length) {
+      const egressLis = b.egress
+        .map((e) => {
+          const dc =
+            Array.isArray(e.dataClasses) && e.dataClasses.length
+              ? `(数据分类 ${e.dataClasses.map(escape).join(', ')})`
+              : ''
+          return `<li>出口步骤 <code>${escape(e.stepId || '')}</code> → 跨 hub 能力 <code>${escape(
+            e.capability || '',
+          )}</code>${dc}</li>`
+        })
+        .join('')
+      return (
+        '<div class="me-wf-edit-locked"><strong>🔒 这个工作流连着别的 hub。' +
+        '下面这些跨 hub 的出入口锁定不可改,你只能改自己这边的步骤:</strong>' +
+        `<ul>${triggerLi}${egressLis}</ul></div>`
+      )
+    }
+    return (
+      '<div class="me-wf-edit-local"><strong>✅ 这是只在本 hub 内运行的工作流,' +
+      `你可以自由修改步骤内容。</strong>(只有入口 <code>${escape(b.trigger || '')}</code> 锁定。)</div>`
+    )
+  }
+
+  // Fill the editor body from an `editable` payload (boundary + current YAML +
+  // instruction form). Pure body render — never touches the status line, so the
+  // post-edit refresh can keep the success message while showing new YAML.
+  function renderEditorBody(j) {
+    const body = document.getElementById('me-wf-edit-body')
+    if (!body) return
+    const editable = j && j.editable !== false
+    const yaml = String((j && j.yaml) || '')
+    body.innerHTML =
+      renderEditBoundary(j) +
+      `<details class="me-wf-edit-yaml"><summary>查看当前工作流定义 (YAML)</summary><pre>${escape(
+        yaml,
+      )}</pre></details>` +
+      (editable
+        ? '<label>用一句话说你想怎么改\n' +
+          '<textarea id="me-wf-edit-instruction" rows="3" placeholder="例如:把第一步的提示语改得更礼貌一些"></textarea></label>' +
+          '<button id="me-wf-edit-submit" type="button" class="me-primary-btn">改</button>'
+        : '<p class="me-meta">这个工作流当前状态不可改(审核中或已归档)。</p>')
+    if (j && j.workflowId) body.dataset.workflowId = j.workflowId
+    if (editable) {
+      document.getElementById('me-wf-edit-submit')?.addEventListener('click', submitWorkflowEdit)
+    }
+  }
+
+  async function loadWorkflowEditor() {
+    const sel = document.getElementById('me-wf-select')
+    const status = document.getElementById('me-wf-edit-status')
+    if (!sel || !status) return
+    if (!sel.value) {
+      status.className = 'me-status error'
+      status.textContent = '请先在上面选择一个工作流。'
+      return
+    }
+    resetWorkflowEditor()
+    status.textContent = '加载中…'
+    try {
+      const r = await fetch(`/api/me/workflows/${encodeURIComponent(sel.value)}/editable`)
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || !j || j.ok === false) {
+        status.className = 'me-status error'
+        status.textContent = editorErrorText(r.status, j)
+        return
+      }
+      status.className = 'me-status'
+      status.textContent = ''
+      // editableView returns the workflowId; fall back to the selected one.
+      if (!j.workflowId) j.workflowId = sel.value
+      renderEditorBody(j)
+    } catch (err) {
+      status.className = 'me-status error'
+      status.textContent = `加载失败: ${err?.message || err}`
+    }
+  }
+
+  async function submitWorkflowEdit() {
+    const body = document.getElementById('me-wf-edit-body')
+    const status = document.getElementById('me-wf-edit-status')
+    const ta = document.getElementById('me-wf-edit-instruction')
+    if (!body || !status || !ta) return
+    const workflowId = body.dataset.workflowId
+    const instruction = (ta.value || '').trim()
+    if (!workflowId) {
+      status.className = 'me-status error'
+      status.textContent = '请先打开一个工作流编辑器。'
+      return
+    }
+    if (!instruction) {
+      status.className = 'me-status error'
+      status.textContent = '请用一句话描述你想怎么改。'
+      return
+    }
+    status.className = 'me-status'
+    status.textContent = '正在让 AI 改…(可能要几秒)'
+    try {
+      const r = await fetch(`/api/me/workflows/${encodeURIComponent(workflowId)}/edit`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ instruction }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (r.ok && j && j.ok !== false) {
+        status.className = 'me-status ok'
+        const applied = j.applied === 'published' ? '已发布上线' : '已存为草稿'
+        status.innerHTML = `✅ ${applied}。${j.explanation ? escape(j.explanation) : ''}`
+        // The edit may have changed the inputs — refresh the editor (new YAML)
+        // without clobbering this success message. The dispatch form above is
+        // refreshed on the next home render; we keep the selection stable here.
+        await refreshEditorBody(workflowId)
+        return
+      }
+      // Failure. A boundary_locked rejection gets the per-violation detail list
+      // so the member sees exactly which cross-hub part they tried to move.
+      status.className = 'me-status error'
+      let html = escape(editorErrorText(r.status, j))
+      if (j && Array.isArray(j.violations) && j.violations.length) {
+        html +=
+          '<ul>' +
+          j.violations.map((v) => `<li>${escape((v && (v.detail || v.kind)) || '')}</li>`).join('') +
+          '</ul>'
+      }
+      status.innerHTML = html
+    } catch (err) {
+      status.className = 'me-status error'
+      status.textContent = `保存失败: ${err?.message || err}`
+    }
+  }
+
+  // Re-fetch `editable` for the same workflow and re-render the body only,
+  // leaving the status line (a success message) intact. Best-effort.
+  async function refreshEditorBody(workflowId) {
+    try {
+      const r = await fetch(`/api/me/workflows/${encodeURIComponent(workflowId)}/editable`)
+      const j = await r.json().catch(() => ({}))
+      if (r.ok && j && j.ok !== false) {
+        if (!j.workflowId) j.workflowId = workflowId
+        renderEditorBody(j)
+      }
+    } catch {
+      /* keep the success message; the next manual reload will resync */
+    }
+  }
+
+  // Friendly message for an editor error response. Prefers the server's human
+  // text, then maps a few well-known reason codes, then falls back to status.
+  function editorErrorText(httpStatus, j) {
+    const msg = j && (j.message || j.error)
+    if (msg) return String(msg)
+    const code = j && j.code
+    const byCode = {
+      forbidden: '你没有这个工作流的编辑权限(需要 editor)。',
+      not_found: '找不到这个工作流。',
+      no_source: '这个工作流没有可编辑的源定义。',
+      under_review: '这个工作流正在审核中,暂不可改。',
+      archived: '这个工作流已归档,不可改。',
+      boundary_locked: '这次修改动到了跨 hub 的出入口 — 只能改你自己这边的步骤。',
+      assistant_failed: 'AI 没能生成一个有效的工作流,请换种说法再试。',
+      parse_failed: 'AI 生成的内容解析失败,请换种说法再试。',
+      id_changed: '不能改工作流的 id。',
+      structure_failed: '生成的工作流结构校验没通过。',
+      assistant_unavailable: 'AI 助手当前不可用(管理员未配置)。',
+    }
+    if (code && byCode[code]) return byCode[code]
+    return `操作失败 (HTTP ${httpStatus})`
   }
 
   // Upload a file-type field's selected file to /api/me/uploads and stash the
