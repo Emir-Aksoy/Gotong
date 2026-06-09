@@ -44,7 +44,7 @@
   "devDependencies": {
     "@aipehub/identity": "workspace:*",
     "@aipehub/workflow": "workspace:*",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.0",
     "vitest": "^3.2.4"
   }
 }

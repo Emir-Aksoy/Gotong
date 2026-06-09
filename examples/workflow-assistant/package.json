@@ -17,7 +17,7 @@
     "@aipehub/llm-openai": "workspace:*",
     "@aipehub/workflow": "workspace:*",
     "@aipehub/workflow-assistant": "workspace:*",
-    "@anthropic-ai/sdk": "^0.96.0",
-    "openai": "^6.38.0"
+    "@anthropic-ai/sdk": "^0.102.0",
+    "openai": "^6.42.0"
   }
 }
