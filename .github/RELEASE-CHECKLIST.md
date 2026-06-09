@@ -52,10 +52,24 @@ Distribution). Source-only + Docker now cover both Quick-start paths.
 > pre-built binaries remain independent post-1.0 options — any can stay
 > "no" indefinitely without blocking a release.
 
-Three open decisions remain — each is independent and any of them
-can stay "no" indefinitely:
+> **Distribution review 2026-06-08:** Maintainer affirmed *"no change
+> now."* Through 1.0 — while the repo is private and `main` still changes
+> schema freely — Docker + source-only stay the **only** channel:
+> publishing to any registry would impose a SemVer-compat contract that
+> fights the project's "no backward-compat pre-1.0" stance. At 1.0 (API
+> frozen + repo public) the preferred order is ① **pre-built binaries**
+> (infra already done — highest value for the "5-minutes, no code" end
+> user), ② **JSR** (native TS + GitHub OAuth, no separate npm account/2FA;
+> all 17 publishable packages already ship `exports`/`files`/
+> `publishConfig`), ③ **PyPI** alongside (`pyproject.toml` ready),
+> ④ **npmjs.com** lowest priority. All gated on the repo going public.
 
-- [ ] **Pick a JS registry**:
+Decisions (updated 2026-06-08) — each is independent and any can stay
+"no" indefinitely:
+
+- [x] **Pick a JS registry** — **Decided 2026-06-08:** source-only
+      (Option 1) now, **JSR (Option 2) at 1.0** (see the distribution-review
+      note above). Options kept for reference:
   - **Option 1 — Source-only (status quo).** Users `git clone` +
     `pnpm install && pnpm build`. Zero registry maintenance. README
     Quick-start `B` already documents this. Choose this and delete
@@ -72,8 +86,9 @@ can stay "no" indefinitely:
   - **Option 4 — npmjs.com.** The original plan. Requires npm
     account + 2FA + `@aipehub` org reservation. Best install UX (`pnpm
     add @aipehub/workflow`) but most setup overhead.
-- [ ] **PyPI publish for `aipehub`**: same source-only-vs-published
-      call. Currently `pip install -e python-sdk/` is the only path.
+- [x] **PyPI publish for `aipehub`** — **Decided 2026-06-08:** defer to
+      1.0, publish **alongside JSR** (`pyproject.toml` is already
+      PyPI-ready). Currently `pip install -e python-sdk/` is the only path.
       Referenced in [`python-sdk/README.md`](../python-sdk/README.md)
       and [`docs/AGENT.md`](../docs/AGENT.md). If you publish to a JS
       registry, doing PyPI alongside keeps consistency.
