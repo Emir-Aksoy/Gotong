@@ -195,6 +195,7 @@ import { createUploadSurface } from './uploads.js'
 import { createWorkflowController, type PeerCapabilityView } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 import { HostInboxService } from './inbox-service.js'
+import { FileCrossHubMarkerStore } from './cross-hub-marker.js'
 import { MeWorkflowEditService } from './me-workflow-edit-service.js'
 import { HostMeAgentService } from './me-agent-service.js'
 import { HostMeAgentGrantsService } from './me-agent-grants-service.js'
@@ -1258,12 +1259,20 @@ async function main(): Promise<void> {
     },
   }
 
+  // WFEDIT-S2 — one sticky cross-hub marker store, shared between the controller
+  // (which CAPTURES the off-hub capabilities of a workflow on every write while
+  // peers are connected) and the member edit service (which CONSULTS it so the
+  // boundary lock holds even when the destination peer is offline at edit time).
+  // File-first under <space>/workflows/cross-hub/; no identity table.
+  const crossHubMarkers = new FileCrossHubMarkerStore(SPACE_DIR)
+
   const workflowController = await createWorkflowController(
     {
       hub,
       definitionsDir: workflowsDir,
       spaceRoot: SPACE_DIR,
       peerCapabilities: peerCapabilitiesView,
+      crossHubMarkers,
       // Stream G day-5 — resolve a cross-hub step's peer-hub id to its live link
       // so `fetchPeerStepTranscript` can pull the off-hub trace on demand. Same
       // lazy forward-ref as `peerLinkResolver` above (line ~1142) and the cross-
@@ -1374,6 +1383,9 @@ async function main(): Promise<void> {
           assist: workflowAssist,
           participants: () => hub.participants(),
           peerCapabilities: peerCapabilitiesView,
+          // WFEDIT-S2 — same store the controller captures into, so an offline
+          // peer can't open a window to silently retarget a cross-hub hop.
+          crossHubMarkers,
         })
       : null
 

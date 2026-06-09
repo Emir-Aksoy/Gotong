@@ -122,6 +122,12 @@ interface BuildOpts {
   assist: WorkflowAssistantOutput | Error
   participants?: Array<{ id: string; capabilities: string[] }>
   peerCapabilities?: PeerCapabilityView
+  /**
+   * WFEDIT-S2 — sticky cross-hub caps recorded for this workflow. Present (even
+   * `[]`) wires a marker reader into the service; `undefined` leaves it absent
+   * (pre-S2 behavior: live detection only).
+   */
+  sticky?: string[]
   failPersist?: Error
 }
 
@@ -169,6 +175,9 @@ function buildDeps(opts: BuildOpts) {
     },
     participants: () => opts.participants ?? [{ id: 'local-agent', capabilities: ['wf.draft'] }],
     ...(opts.peerCapabilities ? { peerCapabilities: opts.peerCapabilities } : {}),
+    ...(opts.sticky !== undefined
+      ? { crossHubMarkers: { get: async () => opts.sticky as string[] } }
+      : {}),
   }
   return { service: new MeWorkflowEditService(deps), calls }
 }
@@ -335,6 +344,104 @@ describe('MeWorkflowEditService.edit — the cross-hub boundary lock', () => {
       expect(r.violations?.[0]?.kind).toBe('egress_added')
     }
     expect(calls.publish).toHaveLength(0)
+  })
+})
+
+describe('MeWorkflowEditService — the sticky offline-peer lock (S2)', () => {
+  // The off-hub target retargeting members try when the peer is down. Same shape
+  // as the boundary-lock test above, but with NO `peerCapabilities` (offline).
+  const RETARGET = yamlWf({
+    steps: [
+      { id: 'draft', cap: 'wf.draft', payload: '{ note: old }' },
+      { id: 'place', cap: 'supplier.express', dataClasses: ['public'] },
+    ],
+  })
+
+  it('reactivates an OFFLINE egress via the sticky marker — retarget is caught', async () => {
+    // Peer is down at edit time (no peerCapabilities), so live detection sees a
+    // purely-local workflow. The marker remembers `place` left off-hub before,
+    // so the lock still fires.
+    const { service, calls } = buildDeps({
+      currentYaml: CROSS_HUB_WF,
+      assist: assistOk(RETARGET),
+      sticky: ['supplier.confirm-order', 'supplier.express'],
+      // peerCapabilities intentionally ABSENT
+    })
+    const r = await service.edit({ ...REQ, instruction: '把下单发到加急那个' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.reason).toBe('boundary_locked')
+      expect(r.violations?.[0]?.kind).toBe('egress_retargeted')
+      expect(r.violations?.[0]?.stepId).toBe('place')
+    }
+    expect(calls.publish).toHaveLength(0) // ← still blocked BEFORE persistence
+    expect(calls.saveDraft).toHaveLength(0)
+  })
+
+  it('WITHOUT the marker, the same offline-peer retarget slips through (the gap S2 closes)', async () => {
+    // No marker + no peer view → live detection flags nothing cross-hub (the cap
+    // is served by nobody, so it never reads as egress) → the retarget persists.
+    // This is exactly the hole the sticky marker plugs.
+    const { service, calls } = buildDeps({
+      currentYaml: CROSS_HUB_WF,
+      assist: assistOk(RETARGET),
+      // no sticky, no peerCapabilities
+    })
+    const r = await service.edit({ ...REQ, instruction: '把下单发到加急那个' })
+    expect(r.ok).toBe(true) // ← slips, because nothing flagged it cross-hub
+    expect(calls.publish).toHaveLength(1)
+  })
+
+  it('an empty marker is a no-op (no over-lock when nothing was ever off-hub)', async () => {
+    // sticky: [] wires the reader but records no caps → identical to absent.
+    const edited = yamlWf({ steps: [{ id: 'draft', cap: 'wf.draft', payload: '{ note: NEW-AND-LONGER }' }] })
+    const { service, calls } = buildDeps({ currentYaml: LOCAL_WF, assist: assistOk(edited), sticky: [] })
+    const r = await service.edit({ ...REQ, instruction: '改第一步' })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.boundary.egress).toEqual([])
+    expect(calls.publish).toHaveLength(1)
+  })
+
+  it('auto-deactivates a sticky cap once it is served locally (the cap came in-house)', async () => {
+    // The off-hub cap is now answered by a LOCAL agent → the step is local, so
+    // even with the marker still listing it the lock must not fire. Members can
+    // freely edit a step that no longer leaves the hub.
+    const editedLocalPlace = yamlWf({
+      steps: [
+        { id: 'draft', cap: 'wf.draft', payload: '{ note: old }' },
+        { id: 'place', cap: 'supplier.confirm-order', payload: '{ note: MEMBER-EDIT }' },
+      ],
+    })
+    const { service, calls } = buildDeps({
+      currentYaml: CROSS_HUB_WF,
+      assist: assistOk(editedLocalPlace),
+      sticky: ['supplier.confirm-order'],
+      participants: [
+        { id: 'local-agent', capabilities: ['wf.draft'] },
+        { id: 'in-house', capabilities: ['supplier.confirm-order'] },
+      ],
+    })
+    const r = await service.edit({ ...REQ, instruction: '改下单那步的内容' })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.boundary.egress).toEqual([]) // served locally ⇒ no longer egress
+    expect(calls.publish).toHaveLength(1)
+  })
+
+  it('editableView surfaces an offline cross-hub egress via the sticky marker', async () => {
+    const { service } = buildDeps({
+      currentYaml: CROSS_HUB_WF,
+      sticky: ['supplier.confirm-order'],
+      assist: assistOk(CROSS_HUB_WF),
+      // peer offline
+    })
+    const r = await service.editableView('flow', 'alice')
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.crossHub).toBe(true)
+      expect(r.boundary.egress).toEqual([
+        { stepId: 'place', capability: 'supplier.confirm-order', dataClasses: ['public'] },
+      ])
+    }
   })
 })
 

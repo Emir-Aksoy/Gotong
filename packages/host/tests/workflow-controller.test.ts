@@ -773,5 +773,90 @@ workflow:
       const summary = await c.importFromText(SUPPLY)
       expect(summary.crossHubSteps).toBeUndefined()
     })
+
+    // WFEDIT-S2 — the controller's write path is the SINGLE capture point for the
+    // sticky cross-hub marker (via summary()). It records the caps a workflow
+    // currently sends off-hub, so the `/me` editor's boundary lock still fires
+    // when the destination peer is offline at edit time. The capture inherits
+    // crossHubSteps' "served-locally ⇒ not egress" and "offline ⇒ absent" logic.
+    describe('sticky marker capture', () => {
+      function fakeMarker() {
+        const merges: Array<{ id: string; caps: string[] }> = []
+        const state = new Map<string, string[]>()
+        return {
+          merges,
+          store: {
+            get: async (id: string) => state.get(id) ?? [],
+            merge: async (id: string, caps: string[]) => {
+              merges.push({ id, caps })
+              const prev = state.get(id) ?? []
+              state.set(id, [...new Set([...prev, ...caps])].sort())
+            },
+          },
+        }
+      }
+
+      it('records the off-hub caps on import when a peer serves them', async () => {
+        hub.register(new HumanParticipant({ id: 'buyer', capabilities: ['draft-order'] }))
+        const m = fakeMarker()
+        const c = new WorkflowController({
+          hub,
+          definitionsDir,
+          spaceRoot: tmp,
+          peerCapabilities: peerView(['supplier.confirm-order']),
+          crossHubMarkers: m.store,
+        })
+        await c.importFromText(SUPPLY)
+        expect(m.merges).toEqual([{ id: 'supply', caps: ['supplier.confirm-order'] }])
+        expect(await m.store.get('supply')).toEqual(['supplier.confirm-order'])
+      })
+
+      it('captures nothing when the peer is offline (no peer view ⇒ merge ∅)', async () => {
+        hub.register(new HumanParticipant({ id: 'buyer', capabilities: ['draft-order'] }))
+        const m = fakeMarker()
+        const c = new WorkflowController({
+          hub,
+          definitionsDir,
+          spaceRoot: tmp,
+          crossHubMarkers: m.store, // ← wired, but no peerCapabilities
+        })
+        await c.importFromText(SUPPLY)
+        expect(m.merges).toEqual([]) // crossHubSteps absent ⇒ merge never called
+      })
+
+      it('does not capture a cap a local participant also serves (routes locally)', async () => {
+        hub.register(new HumanParticipant({ id: 'buyer', capabilities: ['draft-order'] }))
+        hub.register(new HumanParticipant({ id: 'local-supplier', capabilities: ['supplier.confirm-order'] }))
+        const m = fakeMarker()
+        const c = new WorkflowController({
+          hub,
+          definitionsDir,
+          spaceRoot: tmp,
+          peerCapabilities: peerView(['supplier.confirm-order']),
+          crossHubMarkers: m.store,
+        })
+        await c.importFromText(SUPPLY)
+        expect(m.merges).toEqual([]) // served locally ⇒ not egress ⇒ not captured
+      })
+
+      it('accumulates across a lifecycle transition (publish re-funnels summary())', async () => {
+        hub.register(new HumanParticipant({ id: 'buyer', capabilities: ['draft-order'] }))
+        const m = fakeMarker()
+        const c = new WorkflowController({
+          hub,
+          definitionsDir,
+          spaceRoot: tmp,
+          peerCapabilities: peerView(['supplier.confirm-order']),
+          crossHubMarkers: m.store,
+        })
+        // import (publishes rev1) → deprecate → publish: each funnels summary().
+        await c.importFromText(SUPPLY)
+        await c.deprecate('supply')
+        await c.publish('supply')
+        // Every transition re-captured the same cap; the union stays a single entry.
+        expect(m.merges.length).toBeGreaterThan(1)
+        expect(await m.store.get('supply')).toEqual(['supplier.confirm-order'])
+      })
+    })
   })
 })

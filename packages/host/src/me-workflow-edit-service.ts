@@ -163,6 +163,16 @@ export interface LocalParticipantView {
   capabilities: Iterable<string>
 }
 
+/**
+ * WFEDIT-S2 — the read slice of the sticky cross-hub marker store the boundary
+ * lock consults. The real `FileCrossHubMarkerStore` satisfies it (the controller
+ * holds the write side). Absent ⇒ the lock falls back to live detection only,
+ * which is the pre-S2 behavior (and the gap S2 closes).
+ */
+export interface CrossHubMarkerReadView {
+  get(workflowId: string): Promise<string[]>
+}
+
 export interface MeWorkflowEditDeps {
   /** RBAC source. */
   grants: WorkflowGrantView
@@ -178,6 +188,13 @@ export interface MeWorkflowEditDeps {
    * cross-hub-step detection uses, so the lock matches what the UI flags.
    */
   peerCapabilities?: PeerCapabilityView
+  /**
+   * WFEDIT-S2 — sticky cross-hub marker reader (optional). Present ⇒ the boundary
+   * lock reactivates any capability ever observed leaving THIS workflow off-hub,
+   * so a member can't repoint/drop/re-classify a cross-hub hop while its peer is
+   * offline at edit time. Absent ⇒ live detection only (the pre-S2 gap).
+   */
+  crossHubMarkers?: CrossHubMarkerReadView
 }
 
 // --- service ----------------------------------------------------------------
@@ -256,8 +273,11 @@ export class MeWorkflowEditService {
     }
 
     // 8. ★ THE BOUNDARY LOCK ★ — cross-hub 入口/出口 must be byte-invariant.
+    //    Sticky caps (S2) reactivate an egress whose peer is offline right now,
+    //    so the lock holds even when the destination hub is down at edit time.
     const { localCapabilities, peerEntries } = this.boundaryInputs()
-    const boundaryCheck = enforceEditBoundary(original, edited, localCapabilities, peerEntries)
+    const sticky = await this.loadSticky(workflowId)
+    const boundaryCheck = enforceEditBoundary(original, edited, localCapabilities, peerEntries, sticky)
     if (!boundaryCheck.ok) {
       return {
         ok: false,
@@ -292,7 +312,7 @@ export class MeWorkflowEditService {
       applied: goLive ? 'published' : 'draft',
       yaml: assist.yaml,
       explanation: assist.explanation,
-      boundary: workflowBoundary(edited, localCapabilities, peerEntries),
+      boundary: workflowBoundary(edited, localCapabilities, peerEntries, sticky),
       ...(assist.deepCheck ? { deepCheck: assist.deepCheck } : {}),
     }
   }
@@ -317,7 +337,8 @@ export class MeWorkflowEditService {
     }
     const original = await this.deps.workflows.versioning.headDefinition(workflowId)
     const { localCapabilities, peerEntries } = this.boundaryInputs()
-    const boundary = workflowBoundary(original, localCapabilities, peerEntries)
+    const sticky = await this.loadSticky(workflowId)
+    const boundary = workflowBoundary(original, localCapabilities, peerEntries, sticky)
     return {
       ok: true,
       workflowId,
@@ -345,6 +366,21 @@ export class MeWorkflowEditService {
       for (const c of p.capabilities) localCapabilities.add(c)
     }
     return { localCapabilities, peerEntries }
+  }
+
+  /**
+   * WFEDIT-S2 — the sticky cross-hub capabilities recorded for this workflow.
+   * Best-effort: a marker read must never block an edit, so a missing store or a
+   * read error yields `[]` (the lock falls back to live-only detection — the
+   * pre-S2 behavior). Empty ⇒ no sticky reactivation.
+   */
+  private async loadSticky(workflowId: string): Promise<string[]> {
+    if (!this.deps.crossHubMarkers) return []
+    try {
+      return await this.deps.crossHubMarkers.get(workflowId)
+    } catch {
+      return []
+    }
   }
 
   /**

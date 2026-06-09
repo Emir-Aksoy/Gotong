@@ -61,6 +61,7 @@ import {
   type WorkflowLifecycleView,
 } from './workflow-versioning.js'
 import { fetchPeerTranscript, type PeerTranscriptSlice } from './peer-transcript.js'
+import type { CrossHubMarkerStore } from './cross-hub-marker.js'
 
 export interface WorkflowSummary {
   id: string
@@ -233,6 +234,14 @@ export interface WorkflowControllerOptions {
    * hop equals the peer-hub wire id `linkForHub` expects.
    */
   peerLinkResolver?: (peerId: string) => HubLink | null
+  /**
+   * WFEDIT-S2 — optional sticky cross-hub marker store. When present, every
+   * write/transition records (monotonic union) the capabilities currently
+   * leaving this workflow off-hub, so the member edit boundary lock stays in
+   * force even when the destination peer is offline at edit time. Absent ⇒ no
+   * capture (single-hub hosts and tests pay nothing).
+   */
+  crossHubMarkers?: CrossHubMarkerStore
 }
 
 /**
@@ -275,6 +284,8 @@ export class WorkflowController {
   private readonly peerCapabilities?: PeerCapabilityView
   /** Stream G day-5 — peer-hub id → live HubLink, for the off-hub transcript chain (optional). */
   private readonly peerLinkResolver?: (peerId: string) => HubLink | null
+  /** WFEDIT-S2 — sticky cross-hub marker store; captured on every write/transition (optional). */
+  private readonly crossHubMarkers?: CrossHubMarkerStore
 
   constructor(opts: WorkflowControllerOptions) {
     this.hub = opts.hub
@@ -283,6 +294,7 @@ export class WorkflowController {
     this.runStore = new RunStore(opts.spaceRoot)
     this.peerCapabilities = opts.peerCapabilities
     this.peerLinkResolver = opts.peerLinkResolver
+    this.crossHubMarkers = opts.crossHubMarkers
     this.versioning =
       opts.versioning ??
       new WorkflowVersioning({ hub: opts.hub, spaceRoot: opts.spaceRoot })
@@ -779,7 +791,26 @@ export class WorkflowController {
   private async summary(id: string): Promise<WorkflowSummary> {
     const view = await this.versioning.getState(id)
     const file = this.known.get(id)?.file ?? null
-    return this.summaryFromView(id, file, view)
+    const out = this.summaryFromView(id, file, view)
+    // WFEDIT-S2: record the capabilities currently leaving this workflow off-hub
+    // into the sticky marker (monotonic union). This is the SINGLE capture point:
+    // every write (import/saveDraft/publish) and lifecycle transition funnels
+    // through summary(), while read paths (list/listAll) use summaryFromView
+    // directly and never capture. When the peer is offline `crossHubSteps` is
+    // absent ⇒ merge ∅ ⇒ no-op, so the marker only grows while peers are
+    // connected and never shrinks. Best-effort — a marker write must never fail
+    // a workflow write.
+    if (this.crossHubMarkers && out.crossHubSteps?.length) {
+      try {
+        await this.crossHubMarkers.merge(id, out.crossHubSteps.map((s) => s.capability))
+      } catch (err) {
+        log.warn('cross-hub marker capture failed', {
+          id,
+          error: err instanceof Error ? err.message : String(err),
+        })
+      }
+    }
+    return out
   }
 
   /** Project a lifecycle view + the relevant revision's definition into a summary. */
