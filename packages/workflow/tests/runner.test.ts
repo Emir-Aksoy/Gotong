@@ -535,6 +535,55 @@ describe('WorkflowRunner — file-first persistence', () => {
     expect(body.steps[0]!.peerTaskId).toBeUndefined()
   })
 
+  it('records per-branch executedBy + peerTaskId for a parallel fan-out (PB)', async () => {
+    // A parallel fan-out where ONE branch crossed a hub boundary. Each branch's
+    // executor is attributed independently — a single step-level `executedBy`
+    // can't describe a fan-out — and only the cross-hub branch carries a peer
+    // handle, so the host can later resolve THAT branch's off-hub transcript.
+    const yaml = `
+schema: aipehub.workflow/v1
+workflow:
+  id: parallel-branch-exec
+  trigger: { capability: go }
+  steps:
+    - id: fan
+      parallel: true
+      branches:
+        - id: local
+          dispatch:
+            strategy: { kind: capability, capabilities: [a] }
+            payload: a-in
+        - id: remote
+          dispatch:
+            strategy: { kind: capability, capabilities: [b] }
+            payload: b-in
+`
+    const def = parseWorkflow(yaml)
+    const { hub } = makeStubHub((call) => {
+      if (call.payload === 'a-in') return ok(nextTaskId(), 'A', 'local-bot')
+      // the remote branch's result was relabelled by the peer-link inbound handler
+      return { ...ok(nextTaskId(), 'B', 'supplier-hub'), peerTaskId: 'peer-internal-7' }
+    })
+    const store = new RunStore(tmp)
+    const runner = new WorkflowRunner({
+      definition: def,
+      hub,
+      runStore: store,
+      idGenerator: () => 'run-pb',
+    })
+    const out = await runner.onTask(makeTask({}))
+    if (out.kind !== 'ok') throw new Error('expected ok')
+
+    const body = JSON.parse(readFileSync(store.pathFor('run-pb'), 'utf8')) as RunState
+    const step = body.steps[0]!
+    // per-branch executor attribution (the parallel analog of executedBy)
+    expect(step.branchExecutedBy).toEqual({ local: 'local-bot', remote: 'supplier-hub' })
+    // only the cross-hub branch carries a peer task handle
+    expect(step.branchPeerTaskIds).toEqual({ remote: 'peer-internal-7' })
+    // the single step-level executedBy stays absent for a parallel step
+    expect(step.executedBy).toBeUndefined()
+  })
+
   it('persists a failed run with the failure reason on disk', async () => {
     const def: WorkflowDefinition = {
       schema: 'aipehub.workflow/v1',

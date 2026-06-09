@@ -475,8 +475,9 @@ export interface StepRecord {
    * is just a participant id. The HOST decides whether that id is a peer (a
    * cross-hub hop) when it serves run detail, so the workflow package never
    * learns about federation. Absent for steps that never resolved a result
-   * (skipped / still-pending) and for parallel steps (per-branch executor
-   * recording is deferred — all shipped cross-hub workflows are simple steps).
+   * (skipped / still-pending) and for PARALLEL steps — a parallel step fans out
+   * to many participants, so its per-branch attribution lives in
+   * `branchExecutedBy` / `branchPeerTaskIds` instead of this single field.
    */
   executedBy?: string
   /**
@@ -490,6 +491,24 @@ export interface StepRecord {
    * steps (the result never relabelled, so there is nothing to correlate).
    */
   peerTaskId?: string
+  /**
+   * v5 Stream G follow-up (PB) — the PARALLEL analog of `executedBy`: maps
+   * `branchId → executing participant id` for a parallel step's branches. A
+   * parallel step fans out to many participants, so a single `executedBy`
+   * cannot attribute the fan-out; this records WHO ran each branch (recorded on
+   * a branch's ok OR suspended outcome, so a branch parked at an outbound-
+   * approval gate already shows its destination). Same peer-AGNOSTIC contract
+   * as `executedBy` — the host resolves which ids are off-hub at read time.
+   * Only branches that resolved a result appear (skipped / `when:`-false omit).
+   */
+  branchExecutedBy?: Record<string, string>
+  /**
+   * v5 Stream G follow-up (PB) — the PARALLEL analog of `peerTaskId`: maps
+   * `branchId → peer task handle` for the branches that crossed a hub boundary.
+   * Present only for off-hub branches (same-hub branches never relabelled), so
+   * the host can fetch ONE parallel branch's off-hub transcript on demand.
+   */
+  branchPeerTaskIds?: Record<string, string>
 }
 
 /**

@@ -247,6 +247,11 @@ export class ParallelStepExecutor implements StepExecutor {
       }
       if (result.kind === 'ok') {
         branchOutputs[branch.id] = result.output
+        // A branch that suspended (e.g. at an outbound-approval gate) and has now
+        // resolved: stamp who ultimately ran it + the cross-hub handle, same as
+        // the first-attempt ok path. This is the parallel analog of the simple
+        // step's resume fold carrying executedBy through.
+        recordBranchExecutor(record, branch.id, result.by, result.peerTaskId)
       } else {
         branchOutputs[branch.id] = undefined
         failures.push(`branch '${branch.id}': ${describeFailure(result)}`)
@@ -335,6 +340,7 @@ export class ParallelStepExecutor implements StepExecutor {
     record.subTaskIds.push(r.taskId)
     if (r.kind === 'ok') {
       branchOutputs[branch.id] = r.output
+      recordBranchExecutor(record, branch.id, r.by, r.peerTaskId)
       return undefined
     }
     if (r.kind === 'suspended') {
@@ -342,6 +348,10 @@ export class ParallelStepExecutor implements StepExecutor {
       suspended.taskIds[branch.id] = r.taskId
       suspended.resumeAt =
         suspended.resumeAt === undefined ? r.resumeAt : Math.min(suspended.resumeAt, r.resumeAt)
+      // Stamp the suspending participant (e.g. a gated peer wrapper) so a branch
+      // parked at an outbound-approval gate already shows its destination —
+      // mirrors the simple step's suspend-path `executedBy` recording.
+      recordBranchExecutor(record, branch.id, r.by, r.peerTaskId)
       return undefined
     }
     branchOutputs[branch.id] = undefined
@@ -390,6 +400,26 @@ function applyChildResultToRecord(
   }
   record.status = 'failed'
   record.error = error
+}
+
+/**
+ * Record one parallel branch's executor attribution onto the step record (PB) —
+ * the parallel analog of the simple step's `executedBy` / `peerTaskId` stamping.
+ * Called for a branch's ok OR suspended outcome so a branch parked at an
+ * outbound-approval gate already shows its destination. Lazily allocates the
+ * per-branch maps (absent until a branch actually resolves a participant), and
+ * the `peerTaskId` handle only when the branch crossed a hub boundary. Stays
+ * peer-AGNOSTIC: just a participant id + opaque handle — the host decides which
+ * ids are off-hub at read time, so the workflow package never learns federation.
+ */
+function recordBranchExecutor(
+  record: StepRecord,
+  branchId: string,
+  by: string,
+  peerTaskId: string | undefined,
+): void {
+  ;(record.branchExecutedBy ??= {})[branchId] = by
+  if (peerTaskId !== undefined) (record.branchPeerTaskIds ??= {})[branchId] = peerTaskId
 }
 
 export function describeFailure(r: TaskResult): string {
