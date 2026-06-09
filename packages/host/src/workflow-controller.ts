@@ -154,6 +154,13 @@ export interface CrossHubStepRef {
 export interface EnrichedStepRecord extends StepRecord {
   /** Set only when this step's `executedBy` resolves to an off-hub destination. */
   crossHub?: CrossHubStepRef
+  /**
+   * PB — the parallel analog of {@link crossHub}: each fan-out branch resolves its
+   * own `branchExecutedBy[branchId]` independently, so one parallel step can have
+   * some branches off-hub and some local. Keyed by branch id; only off-hub
+   * branches appear (a local branch is simply absent, never a null entry).
+   */
+  branchCrossHub?: Record<string, CrossHubStepRef>
 }
 
 /** A {@link RunState} whose steps carry the host's read-time cross-hub annotations. */
@@ -410,11 +417,27 @@ export class WorkflowController {
     for (const e of entries) {
       if (!byPeer.has(e.peer)) byPeer.set(e.peer, { label: e.label, kind: e.kind ?? 'peer' })
     }
+    const resolve = (id: string): CrossHubStepRef | undefined => {
+      const hit = byPeer.get(id)
+      return hit ? { peer: id, peerLabel: hit.label, kind: hit.kind } : undefined
+    }
     const steps: EnrichedStepRecord[] = run.steps.map((s) => {
-      if (!s.executedBy) return s
-      const hit = byPeer.get(s.executedBy)
-      if (!hit) return s
-      return { ...s, crossHub: { peer: s.executedBy, peerLabel: hit.label, kind: hit.kind } }
+      // Simple step: a single `executedBy` resolves to one off-hub destination.
+      const stepRef = s.executedBy ? resolve(s.executedBy) : undefined
+      // Parallel step (PB): each branch's `executedBy` resolves on its own, so a
+      // fan-out can mix off-hub and local branches in the same step.
+      let branchCrossHub: Record<string, CrossHubStepRef> | undefined
+      if (s.branchExecutedBy) {
+        for (const [branchId, by] of Object.entries(s.branchExecutedBy)) {
+          const ref = resolve(by)
+          if (ref) (branchCrossHub ??= {})[branchId] = ref
+        }
+      }
+      if (!stepRef && !branchCrossHub) return s
+      const enriched: EnrichedStepRecord = { ...s }
+      if (stepRef) enriched.crossHub = stepRef
+      if (branchCrossHub) enriched.branchCrossHub = branchCrossHub
+      return enriched
     })
     return { ...run, steps }
   }
@@ -435,36 +458,55 @@ export class WorkflowController {
    * Only mesh peers answer this (A2A external agents have no HubLink / rpc), and
    * naturally so: an A2A `executedBy` isn't in the peer registry, so the resolver
    * returns null → `no_link`.
+   *
+   * PB — pass `branchId` to fetch ONE branch of a parallel step: the executor +
+   * handle then come from the per-branch maps (`branchExecutedBy[branchId]` /
+   * `branchPeerTaskIds[branchId]`) instead of the step-level fields. A simple step
+   * (or the parallel step as a whole) omits `branchId`. A `branchId` that names a
+   * local branch (or no branch) resolves to `not_cross_hub`, same as a same-hub
+   * simple step; the UI only offers this affordance for branches that enrichment
+   * flagged with a `branchCrossHub` ref, so it never asks for a local branch.
    */
-  async fetchPeerStepTranscript(runId: string, stepId: string): Promise<PeerStepTranscriptResult> {
+  async fetchPeerStepTranscript(
+    runId: string,
+    stepId: string,
+    branchId?: string,
+  ): Promise<PeerStepTranscriptResult> {
     const run = await this.runStore.read(runId)
     if (!run) return { ok: false, code: 'unknown_run', message: `unknown run '${runId}'` }
     const step = run.steps.find((s) => s.stepId === stepId)
     if (!step) {
       return { ok: false, code: 'unknown_step', message: `unknown step '${stepId}' in run '${runId}'` }
     }
-    // A same-hub step never relabelled its result, so there is no off-hub task to
-    // correlate. Require BOTH the peer id and the opaque handle.
-    if (!step.executedBy || !step.peerTaskId) {
+    // A same-hub step (or branch) never relabelled its result, so there is no
+    // off-hub task to correlate. Require BOTH the peer id and the opaque handle —
+    // for a parallel branch they live in the per-branch maps; for a simple step
+    // in the step-level fields.
+    const executedBy = branchId !== undefined ? step.branchExecutedBy?.[branchId] : step.executedBy
+    const peerTaskId = branchId !== undefined ? step.branchPeerTaskIds?.[branchId] : step.peerTaskId
+    if (!executedBy || !peerTaskId) {
       return {
         ok: false,
         code: 'not_cross_hub',
-        message: 'this step did not cross a hub boundary (no peer task handle recorded)',
+        message:
+          branchId !== undefined
+            ? `branch '${branchId}' of step '${stepId}' did not cross a hub boundary (no peer task handle recorded)`
+            : 'this step did not cross a hub boundary (no peer task handle recorded)',
       }
     }
     if (!this.peerLinkResolver) {
       return { ok: false, code: 'no_link', message: 'no peer-link resolver wired (single-hub host)' }
     }
-    const link = this.peerLinkResolver(step.executedBy)
+    const link = this.peerLinkResolver(executedBy)
     if (!link) {
       return {
         ok: false,
         code: 'no_link',
-        message: `peer '${step.executedBy}' is not connected`,
+        message: `peer '${executedBy}' is not connected`,
       }
     }
     try {
-      const slice = await fetchPeerTranscript(link, step.peerTaskId)
+      const slice = await fetchPeerTranscript(link, peerTaskId)
       if (!slice) {
         return { ok: false, code: 'fetch_failed', message: 'peer returned no transcript' }
       }

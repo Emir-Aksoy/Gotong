@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { Hub, HumanParticipant, InMemoryStorage } from '@aipehub/core'
+import { Hub, HumanParticipant, InMemoryStorage, type HubLink } from '@aipehub/core'
 import { NEVER_RESUME_AT } from '@aipehub/inbox'
 import { RunStore } from '@aipehub/workflow'
 
@@ -597,6 +597,101 @@ workflow:
       // executedBy is still surfaced (it's persisted), but nothing is a peer.
       expect(run!.steps[1]!.executedBy).toBe('supplier-hub')
       expect(run!.steps.every((s) => s.crossHub === undefined)).toBe(true)
+    })
+
+    // PB — a parallel step fans out to many participants, so a single step-level
+    // `executedBy` can't attribute the fan-out. The runner records a per-branch
+    // map (`branchExecutedBy` / `branchPeerTaskIds`); enrichment must resolve each
+    // branch's destination INDEPENDENTLY (one fan-out can mix off-hub and local
+    // branches), and the on-demand transcript fetch must target one named branch.
+    async function seedParallelCrossHubRun(): Promise<void> {
+      const store = new RunStore(tmp)
+      store.ensureDirs()
+      await store.write({
+        runId: 'r_par',
+        workflowId: 'tea-restock',
+        triggeredByTaskId: 't_par',
+        triggerPayload: {},
+        steps: [
+          // a parallel fan-out: branch `local` ran here, branch `remote` ran OFF
+          // this hub. No step-level executedBy — the per-branch maps carry it.
+          {
+            stepId: 'fan',
+            startedAt: 1,
+            endedAt: 3,
+            status: 'done',
+            attempts: 1,
+            branchExecutedBy: { local: 'local-bot', remote: 'supplier-hub' },
+            branchPeerTaskIds: { remote: 'peer-internal-7' },
+            output: { local: 'A', remote: 'B' },
+          },
+        ],
+        startedAt: 1,
+        endedAt: 3,
+        status: 'done',
+      })
+    }
+
+    it('readRun() resolves branchCrossHub per-branch for a parallel step (PB)', async () => {
+      await seedParallelCrossHubRun()
+      const c = new WorkflowController({
+        hub,
+        definitionsDir,
+        spaceRoot: tmp,
+        peerCapabilities: {
+          peerCapabilities: () => [
+            { peer: 'supplier-hub', label: '供货商 Hub', capabilities: ['supplier.confirm-order'], kind: 'peer' },
+          ],
+        },
+      })
+      const run = await c.readRun('r_par')
+      const fan = run!.steps[0]!
+      // only the off-hub branch is annotated; the local branch is simply absent.
+      expect(fan.branchCrossHub).toEqual({
+        remote: { peer: 'supplier-hub', peerLabel: '供货商 Hub', kind: 'peer' },
+      })
+      // a parallel step carries no step-level executedBy ⇒ no step-level crossHub.
+      expect(fan.executedBy).toBeUndefined()
+      expect(fan.crossHub).toBeUndefined()
+    })
+
+    it('fetchPeerStepTranscript(branchId) targets one branch of a parallel step (PB)', async () => {
+      await seedParallelCrossHubRun()
+      // A stub link whose rpc echoes a minimal transcript slice for the asked task.
+      const linkStub = {
+        rpc: async (_method: string, params: { taskId: string }) => ({
+          hubId: 'supplier-hub',
+          protocolVersion: '1',
+          taskId: params.taskId,
+          events: [{ seq: 1, ts: 1, kind: 'task_received', summary: 'ack' }],
+          truncated: false,
+          generatedAt: 7,
+        }),
+      }
+      const c = new WorkflowController({
+        hub,
+        definitionsDir,
+        spaceRoot: tmp,
+        peerLinkResolver: (peerId) =>
+          peerId === 'supplier-hub' ? (linkStub as unknown as HubLink) : null,
+      })
+
+      // the off-hub branch resolves its executor + handle from the per-branch maps.
+      const remote = await c.fetchPeerStepTranscript('r_par', 'fan', 'remote')
+      expect(remote.ok).toBe(true)
+      if (remote.ok) expect(remote.slice.taskId).toBe('peer-internal-7')
+
+      // the local branch has no peer handle ⇒ not_cross_hub (no off-hub trace).
+      const local = await c.fetchPeerStepTranscript('r_par', 'fan', 'local')
+      expect(local).toMatchObject({ ok: false, code: 'not_cross_hub' })
+
+      // an unknown branch is likewise not_cross_hub (no handle recorded for it).
+      const ghost = await c.fetchPeerStepTranscript('r_par', 'fan', 'nope')
+      expect(ghost).toMatchObject({ ok: false, code: 'not_cross_hub' })
+
+      // omitting branchId on a step with no step-level handle ⇒ not_cross_hub too.
+      const whole = await c.fetchPeerStepTranscript('r_par', 'fan')
+      expect(whole).toMatchObject({ ok: false, code: 'not_cross_hub' })
     })
   })
 
