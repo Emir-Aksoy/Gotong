@@ -407,10 +407,23 @@ jobs:
           # downloads call themselves in the Actions UI).
           output-file: aipehub-sbom.cdx.json
           artifact-name: aipehub-sbom.cdx.json
-          # `dependency-snapshot: true` posts the result to GitHub's
-          # native Dependency Graph too, so the Insights → Dependency
-          # graph view stays current with each release.
-          dependency-snapshot: true
+          # Don't post a GitHub-native Dependency Graph snapshot. This
+          # repo has the Dependency graph feature disabled (it's off by
+          # default on user-owned private repos), so the upload 404s
+          # with "The Dependency graph is disabled for this repository".
+          # The CycloneDX JSON attached to the release below is the
+          # deliverable; flip this back on once the repo is public if
+          # the Insights → Dependency graph view is wanted.
+          dependency-snapshot: false
+          # Don't let sbom-action auto-attach to the release. That path
+          # enumerates and downloads every workflow artifact through the
+          # Actions artifacts API, which needs `actions: read` that the
+          # top-level permissions block doesn't grant — it failed with
+          # "Resource not accessible by integration" and sank the job.
+          # The dedicated softprops step below attaches the on-disk
+          # output-file using the `contents: write` we already hold (the
+          # same action+pattern the build job uses for the binaries).
+          upload-release-assets: false
 
       - name: Attach SBOM to GitHub Release
         if: github.event_name == 'release'
