@@ -8,4 +8,4 @@
 // embedded /$bunfs/ virtual filesystem. main.ts falls back to this
 // constant whenever the disk read throws.
 
-export const BAKED_VERSION = "3.1.0"
+export const BAKED_VERSION = "3.2.0"

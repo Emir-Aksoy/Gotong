@@ -4,11 +4,28 @@ All notable changes to AipeHub are recorded here. The format follows [Keep a Cha
 
 The npm scope is `@aipehub/*`; the PyPI package is `aipehub`. The wire protocol has its own version (currently `1.2`) and is governed by `docs/PROTOCOL.md` — major changes to the wire protocol bump that version, independent of these package versions.
 
-## Unreleased — 2026-05-20 — v3.4 audit hardening (post-3.1.0)
+## 3.2.0 — 2026-06-08 — Federation, identity, and the member workbench
 
-The nine `claude/audit-v3.3-batch*` items from the v3.3 audit that didn't make the 3.1.0 cut. Each batch is a self-contained group of high-severity (`H<n>`) or critical (`C<n>`) findings folded into the codebase as a single commit. Held back from the 3.1.0 release tag so the trial-ready cut stays focused; will roll into the next release (3.1.1 or 3.2.0) once a few have soaked under real traffic.
+The first tagged release since 3.1.0. It folds in months of work spanning three generations of internal planning — v4 Phases 1–19, v5 Streams 0–H2/H2-OUT, and the v6 "Route B" hardening pass. This entry captures the headline themes; the milestone-by-milestone record lives in [`CLAUDE.md`](CLAUDE.md) and the per-phase finals under [`docs/zh/`](docs/zh/) (`V4-PHASE*`, `V5-*-FINAL`, `FEDERATION-RUNBOOK`).
+
+Distribution stays **Docker + source-only**; a JS registry (JSR), PyPI, and public binary downloads are gated on the repo going public (see [`.github/RELEASE-CHECKLIST.md`](.github/RELEASE-CHECKLIST.md)). **No backward-compatibility guarantees** across this release — the project is pre-1.0 internally and changed schemas freely; pin a commit if you need stability.
+
+### Added
+
+- **Cross-organization federation** — peer capability manifests (`peer.manifest`), per-link trust contracts (inbound ACL, outbound capability allowlist, per-link quotas, data-class gating, revocation), and cross-hub workflow orchestration through an outbound approval gate. A2A (Agent2Agent) interop: inbound `message/send` → dispatch, outbound `A2aRemoteParticipant`, and a task lifecycle for long-running steps.
+- **Identity & SSO** — OIDC and SAML 2.0 single sign-on, TOTP MFA, resource-level RBAC (`resource_grants`: viewer/editor/owner over workflows, agents, credentials), and per-user bring-your-own API keys.
+- **Member workbench (`/me`)** — the "my AI desktop": self-serve agent creation, run history, member uploads, and a human-in-the-loop inbox (approval / choice / edit steps) via `@aipehub/inbox`.
+- **Workflow lifecycle & governance** — a draft→review→published→deprecated→archived state machine with immutable revisions (runs pin their revision, eliminating drift), import/publish structural hard-gates, a `governance` metadata block, and an AI workflow-authoring assistant.
+- **Usage & cost ledger** — per-call `usage_ledger`, a host pricing table, token/cost budgets with fail-closed quota peeks, and CSV/JSONL audit + ledger export.
+- **Outbound coding-agent adapters** — drive Claude Code / Codex / Aider from the hub: `@aipehub/cli-agent` (one-shot shell-out) and `@aipehub/acp-agent` (long-lived ACP session, OpenClaw-style), both with a dangerous-action gate that escalates to the `/me` inbox.
+- **Control plane** — opt-in, counts-only peer summaries with history trends, alert rules, and multi-channel alert delivery (webhook / IM / email); privacy-preserving by construction (no raw rows cross the wire).
+- **Entry points** — Telegram / Matrix / Lark / Discord / Slack / QQ IM bridges, an `aipehub repl` interactive shell, a PWA app-shell with a mobile-responsive admin UI, and end-to-end LLM streaming + multimodal content blocks (image / audio / file_ref).
+- **Heartbeat / proactive autonomy** — agents can wake themselves on a fixed interval to run a checklist, reusing the suspend/resume engine with zero new tables or timers.
+- **Hands-on hub templates** — eight ready-to-load `aipehub.template/v1` examples (personal coding / research / growth hubs; café-ops, warband-club, tea-supply-link, tea-chain-HQ organizations) on a loadable template system that ships structure + references but never knowledge content.
 
 ### Security
+
+This release also rolls in the **v3.4 audit-hardening batch** held back from 3.1.0 (`claude/audit-v3.3-batch*`) — self-contained groups of high-severity (`H<n>`) / critical (`C<n>`) findings, plus a later full audit pass (six parallel review lines + high-risk re-verification) folded into the codebase:
 
 - **Batch 1.5** (H7 + H12 + H22) — defence-in-depth pairs for PR #23: workspace symlink + uid-ownership refusal at `Space.init` / `Space.open`; bearer-token leak through error responses; admission-flow logger redaction.
 - **Batch 1.6** (H18 + H19 + H21) — web-server hygiene: stop leaking handler errors via `res.end()`, bound `RateLimiter.hits` Map under IP rotation, plug cookie-sid lookup back into the limiter.
