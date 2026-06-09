@@ -50,6 +50,7 @@ import {
   MeWorkflowEditService,
   type WorkflowAssistView,
 } from '../src/me-workflow-edit-service.js'
+import { FileCrossHubMarkerStore } from '../src/cross-hub-marker.js'
 
 // --- YAML builders (real text → real parseWorkflow, mirrors the M2 unit test) -
 
@@ -169,11 +170,26 @@ interface Rig {
   assist: WorkflowAssistView
   /** Build the service with (or without) the off-hub capability view. */
   makeService: (peer?: PeerCapabilityView) => MeWorkflowEditService
+  /** Present when booted `withMarkers` — the real file-backed sticky store. */
+  markers?: FileCrossHubMarkerStore
+}
+
+/**
+ * WFEDIT-S3 — boot options. Defaults reproduce the M5 rig byte-for-byte (no
+ * controller peer view, no marker store), so the existing tests are untouched.
+ *   - `controllerPeerView`: arm the controller's cross-hub-step detection at
+ *     IMPORT time, so the sticky marker actually captures (the peer is "online").
+ *   - `withMarkers`: share ONE real `FileCrossHubMarkerStore` between the
+ *     controller (capture) and every service `makeService` builds (consult).
+ */
+interface BootOpts {
+  controllerPeerView?: PeerCapabilityView
+  withMarkers?: boolean
 }
 
 const MEMBER = 'alice'
 
-async function boot(): Promise<Rig> {
+async function boot(opts: BootOpts = {}): Promise<Rig> {
   const tmp = await mkdtemp(join(tmpdir(), 'aipe-wfedit-e2e-'))
   const hub = new Hub({ storage: new InMemoryStorage() })
   await hub.start()
@@ -208,10 +224,16 @@ async function boot(): Promise<Rig> {
     },
   }
 
+  // One real file-backed marker store (under <tmp>/workflows/cross-hub/), shared
+  // by the controller's capture and the service's consult — the production wiring.
+  const markers = opts.withMarkers ? new FileCrossHubMarkerStore(tmp) : undefined
+
   const controller = new WorkflowController({
     hub,
     definitionsDir: join(tmp, 'workflows', 'definitions'),
     spaceRoot: tmp,
+    ...(opts.controllerPeerView ? { peerCapabilities: opts.controllerPeerView } : {}),
+    ...(markers ? { crossHubMarkers: markers } : {}),
   })
 
   const identity = openIdentityStore({ dbPath: join(tmp, 'identity.sqlite') })
@@ -223,9 +245,10 @@ async function boot(): Promise<Rig> {
       assist,
       participants: () => hub.participants(),
       ...(peer ? { peerCapabilities: peer } : {}),
+      ...(markers ? { crossHubMarkers: markers } : {}),
     })
 
-  return { tmp, hub, identity, controller, assist, makeService }
+  return { tmp, hub, identity, controller, assist, makeService, ...(markers ? { markers } : {}) }
 }
 
 async function teardown(r: Rig): Promise<void> {
@@ -359,5 +382,100 @@ describe('WFEDIT-M5 — member NL workflow edit, real stack', () => {
     if (!res.ok) expect(res.reason).toBe('forbidden')
     // The local-only workflow stayed at rev1 — nothing was touched.
     expect(await r.controller.listRevisions('local-flow')).toHaveLength(1)
+  })
+})
+
+/**
+ * WFEDIT-S3 — the sticky marker, end to end through the REAL file-backed store.
+ *
+ * The M5 gate above passes the off-hub peer view to the edit SERVICE, so the
+ * lock fires off LIVE detection. But peers come and go: if the destination hub
+ * is offline at edit time, live detection sees a purely-local workflow and the
+ * egress lock can't see the hop. The sticky marker closes that window.
+ *
+ * Here the round-trip is genuinely end to end — no fake store anywhere:
+ *   - the controller (peer ONLINE at import) CAPTURES the off-hub caps into a
+ *     real `FileCrossHubMarkerStore` on disk,
+ *   - the edit service (peer OFFLINE: NO peer view) CONSULTS that same file and
+ *     reactivates the egress lock from it.
+ * The marker file is the only thing connecting the two halves.
+ */
+describe('WFEDIT-S3 — sticky marker survives an offline peer (real file-backed round-trip)', () => {
+  let r: Rig
+  afterEach(() => teardown(r))
+
+  it('★ keeps a cross-hub retarget LOCKED when the peer is offline at edit time', async () => {
+    // Peer ONLINE on the controller at import → the capture half runs for real.
+    r = await boot({ controllerPeerView: PEER_VIEW, withMarkers: true })
+    await r.controller.importFromText(CROSS_FLOW) // rev1 — captures the off-hub cap
+    grantEditor(r, 'cross-flow')
+
+    // The real marker file now records the cap that left the hub.
+    expect(await r.markers!.get('cross-flow')).toEqual(['supplier.confirm-order'])
+    const before = await r.controller.exportDefinitionText('cross-flow')
+
+    // Peer now OFFLINE: the service gets NO peer view. Live detection alone would
+    // read cross-flow as purely-local and wave the retarget through.
+    const svc = r.makeService()
+    const res = await svc.edit({
+      workflowId: 'cross-flow',
+      instruction: `把下单那步改发到加急渠道 ${MARK.retarget}`,
+      userId: MEMBER,
+    })
+
+    // ★ the sticky marker reactivated the egress lock: still rejected, still nothing persisted.
+    expect(res.ok).toBe(false)
+    if (!res.ok) {
+      expect(res.reason).toBe('boundary_locked')
+      // Offline, the marker knows only the ORIGINAL off-hub cap
+      // (supplier.confirm-order), not the retarget's new cap (supplier.express).
+      // So the guard sees the sticky egress cap pulled OFF `place` → egress_removed
+      // (vs the live path's egress_retargeted). Different kind, SAME lock — and it
+      // fails safe: the member still can't touch the hop while the peer is down.
+      expect(res.violations?.[0]?.kind).toBe('egress_removed')
+      expect(res.violations?.[0]?.stepId).toBe('place')
+    }
+    expect(await r.controller.listRevisions('cross-flow')).toHaveLength(1)
+    expect(await r.controller.exportDefinitionText('cross-flow')).toBe(before)
+  })
+
+  it('WITHOUT the marker, the same offline retarget SLIPS THROUGH (proves the marker is what holds the lock)', async () => {
+    // Identical setup but no marker store. Peer offline at edit time + no sticky
+    // record ⇒ nothing flags cross-flow as cross-hub ⇒ the retarget persists.
+    // This is exactly the gap S2/S3 close.
+    r = await boot({ controllerPeerView: PEER_VIEW, withMarkers: false })
+    await r.controller.importFromText(CROSS_FLOW)
+    grantEditor(r, 'cross-flow')
+
+    const svc = r.makeService() // peer offline, no marker
+    const res = await svc.edit({
+      workflowId: 'cross-flow',
+      instruction: `把下单那步改发到加急渠道 ${MARK.retarget}`,
+      userId: MEMBER,
+    })
+    expect(res.ok).toBe(true) // slips
+    expect(await r.controller.listRevisions('cross-flow')).toHaveLength(2)
+    expect(await r.controller.exportDefinitionText('cross-flow')).toContain('supplier.express')
+  })
+
+  it('a purely-local workflow never accrues a marker (no over-lock) — offline edits stay free', async () => {
+    // Even with the capture machinery fully armed (peer online + marker store),
+    // a workflow that never leaves the hub records nothing, so a member can keep
+    // editing it freely while peers are down.
+    r = await boot({ controllerPeerView: PEER_VIEW, withMarkers: true })
+    await r.controller.importFromText(LOCAL_FLOW) // all caps local → nothing captured
+    grantEditor(r, 'local-flow')
+
+    expect(await r.markers!.get('local-flow')).toEqual([]) // ← no sticky egress
+
+    const svc = r.makeService() // peer offline
+    const res = await svc.edit({
+      workflowId: 'local-flow',
+      instruction: `把第一步写详细点 ${MARK.localOnly}`,
+      userId: MEMBER,
+    })
+    expect(res.ok).toBe(true)
+    if (res.ok) expect(res.boundary.egress).toEqual([]) // only the trigger is pinned
+    expect(await r.controller.listRevisions('local-flow')).toHaveLength(2)
   })
 })
