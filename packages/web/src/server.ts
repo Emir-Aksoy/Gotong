@@ -49,6 +49,7 @@ import {
   type MeAgentAdminSurface,
   type MeAgentGrantsSurface,
   type MeCredentialsSurface,
+  type MeWorkflowEditSurface,
 } from './me-routes.js'
 import {
   handleWorkflowRoute,
@@ -317,6 +318,14 @@ export interface WebServerOptions {
    * runtime dep on `@aipehub/inbox` — `InboxSurface` is a duck type.
    */
   inbox?: InboxSurface
+  /**
+   * WFEDIT-M3 — optional member natural-language workflow-edit surface. The
+   * host wires a `MeWorkflowEditService` here. When absent,
+   * `GET /api/me/workflows/:id/editable` and `POST /api/me/workflows/:id/edit`
+   * return 503 so the member UI can hide the "用大白话改这个工作流" panel. Web
+   * has no runtime dep on the host — `MeWorkflowEditSurface` is a duck type.
+   */
+  workflowEdit?: MeWorkflowEditSurface
   /**
    * Optional readiness gate. When set, `GET /readyz` returns 200
    * once `isReady()` first returns true, and 503 with a JSON
@@ -958,6 +967,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     services: opts.services,
     growthReports: opts.growthReports,
     inbox: opts.inbox,
+    workflowEdit: opts.workflowEdit,
     readinessGate: opts.readinessGate,
     identity: opts.identity,
     peerRegistry: opts.peerRegistry,
@@ -1105,6 +1115,8 @@ interface HandlerCtx {
   growthReports: GrowthReportsAdminSurface | undefined
   /** Phase 16 — see WebServerOptions.inbox doc above. */
   inbox: InboxSurface | undefined
+  /** WFEDIT-M3 — see WebServerOptions.workflowEdit doc above. */
+  workflowEdit: MeWorkflowEditSurface | undefined
   readinessGate: { isReady: () => boolean } | undefined
   identity: IdentitySurface | undefined
   /** D1 — see WebServerOptions.peerRegistry doc above. */
@@ -1689,6 +1701,9 @@ async function handle(
         uploads: ctx.uploads,
         // Phase 16 — member task inbox; undefined → /me/inbox degrades.
         inbox: ctx.inbox,
+        // WFEDIT-M3 — member NL workflow editing; undefined → /me/workflows/:id
+        // edit + editable routes return 503.
+        workflowEdit: ctx.workflowEdit,
       },
       req,
       res,

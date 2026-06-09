@@ -542,6 +542,70 @@ export interface InboxSurface {
   }): Promise<void>
 }
 
+// ---------------------------------------------------------------------------
+// WFEDIT — member natural-language workflow editing (the `/me` OpenClaw-style
+// editor) with the cross-hub 出入口 locked. Duck-typed so web carries no host
+// runtime dep: the host's `MeWorkflowEditService` satisfies these structurally.
+// The boundary (`trigger` + cross-hub `egress`) is surfaced verbatim so the UI
+// can render the "🔒 跨 hub 出入口(锁住)" notice; `violations` lists exactly
+// what a rejected edit tried to change.
+// ---------------------------------------------------------------------------
+
+/** The governed cross-hub boundary of a workflow — the part a member can't change. */
+export interface MeWorkflowBoundaryView {
+  /** Ingress: the trigger capability. */
+  trigger: string
+  /** Egress: each cross-hub hop with its data classes (empty ⇒ purely local). */
+  egress: Array<{ stepId: string; capability: string; dataClasses: string[] }>
+}
+
+/** One reason an edit was rejected for touching the cross-hub boundary. */
+export interface MeWorkflowBoundaryViolationView {
+  kind: string
+  stepId?: string
+  /** Human-readable (zh) explanation, shown to the member verbatim. */
+  detail: string
+}
+
+export type MeWorkflowEditableResult =
+  | {
+      ok: true
+      workflowId: string
+      state: string
+      /** False for archived / under-review workflows — the UI disables the box. */
+      editable: boolean
+      yaml: string
+      boundary: MeWorkflowBoundaryView
+      crossHub: boolean
+    }
+  | { ok: false; reason: string; message: string }
+
+export type MeWorkflowEditResult =
+  | {
+      ok: true
+      state: string
+      applied: 'published' | 'draft'
+      yaml: string
+      explanation: string
+      boundary: MeWorkflowBoundaryView
+      deepCheck?: unknown
+    }
+  | {
+      ok: false
+      reason: string
+      message: string
+      violations?: MeWorkflowBoundaryViolationView[]
+      detail?: string
+      draftStatus?: string
+    }
+
+export interface MeWorkflowEditSurface {
+  /** Current YAML + governed boundary + crossHub flag (editor-gated server-side). */
+  editableView(workflowId: string, userId: string): Promise<MeWorkflowEditableResult>
+  /** Apply a member NL edit, boundary-locked + structure-gated (editor-gated server-side). */
+  edit(args: { workflowId: string; instruction: string; userId: string }): Promise<MeWorkflowEditResult>
+}
+
 export interface HandleMeRouteCtx {
   identity: IdentitySurface
   hub: Hub
@@ -606,6 +670,12 @@ export interface HandleMeRouteCtx {
    * the /me/inbox routes then degrade to an empty list / 503.
    */
   inbox: InboxSurface | undefined
+  /**
+   * WFEDIT — member natural-language workflow editing. Undefined when the host
+   * wired no edit service (no AI assistant key / not wired); the
+   * `/api/me/workflows/:id/{editable,edit}` routes then return 503.
+   */
+  workflowEdit: MeWorkflowEditSurface | undefined
 }
 
 export async function handleMeRoute(
@@ -639,6 +709,23 @@ export async function handleMeRoute(
   if (method === 'GET' && path === '/api/me/workflows') {
     await handleMeListWorkflows(ctx, res, userId, v4.role)
     return
+  }
+  // WFEDIT — member natural-language workflow editing. The catalog GET above is
+  // an EXACT match, so these `/:id/{editable,edit}` sub-paths never collide.
+  // `editable` returns the current YAML + the locked cross-hub boundary; `edit`
+  // applies a plain-language change with the 出入口 locked. Both are editor-gated
+  // by the host service (the route just forwards the session userId).
+  {
+    const ed = /^\/api\/me\/workflows\/([^/]+)\/editable$/.exec(path)
+    if (ed && method === 'GET') {
+      await handleMeWorkflowEditable(ctx, res, userId, decodeURIComponent(ed[1]!))
+      return
+    }
+    const edit = /^\/api\/me\/workflows\/([^/]+)\/edit$/.exec(path)
+    if (edit && method === 'POST') {
+      await handleMeWorkflowEdit(ctx, req, res, userId, decodeURIComponent(edit[1]!))
+      return
+    }
   }
   // Phase 19 P1-M2 — "my recent runs". Server-scoped to the caller; a member
   // can never read another user's run history.
@@ -1142,6 +1229,116 @@ interface MeCatalogEntry {
   latestStatus?: string
   /** When that newest run started (ms since epoch). */
   lastRunAt?: number
+}
+
+/**
+ * Map a host edit-service `reason` to an HTTP status. Kept as a string switch
+ * (web carries no host runtime dep) — the host enum and these literals are
+ * pinned together by the route test. `boundary_locked` is a 409 (a conflict
+ * with the governed contract), the assistant/parse/structure failures are 422
+ * (the request was understood but couldn't produce a valid workflow), and an
+ * unavailable assistant is 503 (transient, retry later).
+ */
+function statusForEditReason(reason: string): number {
+  switch (reason) {
+    case 'forbidden':
+      return 403
+    case 'not_found':
+      return 404
+    case 'no_source':
+    case 'under_review':
+    case 'archived':
+    case 'boundary_locked':
+      return 409
+    case 'assistant_failed':
+    case 'parse_failed':
+    case 'id_changed':
+    case 'structure_failed':
+      return 422
+    case 'assistant_unavailable':
+      return 503
+    default:
+      return 400
+  }
+}
+
+/**
+ * WFEDIT — `GET /api/me/workflows/:id/editable`. Returns the current authored
+ * YAML + the governed cross-hub boundary + an `editable` flag, so the UI can
+ * open the editor and render the "🔒 跨 hub 出入口(锁住)" notice. Editor-gated
+ * server-side (the host service refuses non-editors with `forbidden`).
+ */
+async function handleMeWorkflowEditable(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+  workflowId: string,
+): Promise<void> {
+  if (!ctx.workflowEdit) {
+    sendJson(res, { error: '工作流编辑暂未启用(需要 AI 助手)。', code: 'not_wired' }, 503)
+    return
+  }
+  const r = await ctx.workflowEdit.editableView(workflowId, userId)
+  if (r.ok) {
+    sendJson(res, r, 200)
+    return
+  }
+  sendJson(res, { error: r.message, code: r.reason }, statusForEditReason(r.reason))
+}
+
+/**
+ * WFEDIT — `POST /api/me/workflows/:id/edit`, body `{ instruction }`. Applies a
+ * plain-language change with the cross-hub 出入口 locked (boundary lock +
+ * structure hard-gate live in the host service). Rate-limited like
+ * `/api/me/dispatch` because each edit triggers an LLM call (the assistant).
+ */
+async function handleMeWorkflowEdit(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  workflowId: string,
+): Promise<void> {
+  if (!ctx.workflowEdit) {
+    sendJson(res, { error: '工作流编辑暂未启用(需要 AI 助手)。', code: 'not_wired' }, 503)
+    return
+  }
+  // An edit drives one assistant LLM call — same quota concern as dispatch.
+  if (!checkMeRateLimit(ctx, userId, 'me-wf-edit')) {
+    sendRateLimited(res, '改得太频繁了,过一会儿再试。')
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (err) {
+    sendJson(res, { error: (err as Error).message ?? 'bad body', code: 'bad_request' }, 400)
+    return
+  }
+  const instruction =
+    body && typeof body === 'object' && typeof (body as { instruction?: unknown }).instruction === 'string'
+      ? (body as { instruction: string }).instruction.trim()
+      : ''
+  if (!instruction) {
+    sendJson(res, { error: '请用一句话描述你想怎么改这个工作流。', code: 'bad_request' }, 400)
+    return
+  }
+  const r = await ctx.workflowEdit.edit({ workflowId, instruction, userId })
+  if (r.ok) {
+    sendJson(res, r, 200)
+    return
+  }
+  sendJson(
+    res,
+    {
+      error: r.message,
+      code: r.reason,
+      ...(r.violations ? { violations: r.violations } : {}),
+      ...(r.detail ? { detail: r.detail } : {}),
+      ...(r.draftStatus ? { draftStatus: r.draftStatus } : {}),
+    },
+    statusForEditReason(r.reason),
+  )
 }
 
 async function handleMeListWorkflows(

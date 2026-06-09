@@ -192,9 +192,10 @@ import {
   type HubServices,
 } from './services/index.js'
 import { createUploadSurface } from './uploads.js'
-import { createWorkflowController } from './workflow-controller.js'
+import { createWorkflowController, type PeerCapabilityView } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 import { HostInboxService } from './inbox-service.js'
+import { MeWorkflowEditService } from './me-workflow-edit-service.js'
 import { HostMeAgentService } from './me-agent-service.js'
 import { HostMeAgentGrantsService } from './me-agent-grants-service.js'
 import { HostMeCredentialsService } from './me-credentials-service.js'
@@ -1218,44 +1219,51 @@ async function main(): Promise<void> {
   const workflowReport = await loadWorkflows({ dir: workflowsDir })
   const wfMsg = formatLoadReport(workflowReport)
   if (wfMsg) log.info('workflow loader', { report: wfMsg })
+  // Stream G day-2 / H — off-hub capability view for "this step leaves the
+  // hub" flags on workflow summaries. Read LAZILY via forward-declared refs:
+  // both the peer registry and the A2A manager are built further down, but
+  // this closure only fires when an admin summary is projected (an HTTP
+  // request long after boot), so it sees the live state.
+  //
+  // Two sources, mesh peers FIRST so they win attribution on a shared cap:
+  //   - `kind:'peer'` — a connected peer's advertised caps ARE the registered
+  //     wrapper participant's `.capabilities` (G-M1: outboundCaps →
+  //     remoteCapabilities), the same source dispatch routing consults.
+  //   - `kind:'a2a'` — a live external A2A agent's caps. We list stored agents
+  //     and keep only the ones currently registered (`statusOf().active`), so
+  //     a token-less / disabled row isn't flagged as a reachable destination.
+  //
+  // Extracted to a named const (not inlined in the controller config) so the
+  // WFEDIT member-edit service locks the cross-hub 出入口 against the EXACT same
+  // peer view the controller's cross-hub-step detection uses — no drift between
+  // "what the UI flags as cross-hub" and "what the editor refuses to change".
+  const peerCapabilitiesView: PeerCapabilityView = {
+    peerCapabilities: () => {
+      const peers = (peerRegistryRef?.status() ?? [])
+        .filter((s) => s.connected)
+        .map((s) => {
+          const wrapper = hub.registry.get(s.peerId)
+          return {
+            peer: s.peerId,
+            label: s.label,
+            capabilities: wrapper ? [...wrapper.capabilities] : [],
+            kind: 'peer' as const,
+          }
+        })
+      const a2a = (a2aOutboundRef?.liveCapabilities() ?? []).map((e) => ({
+        ...e,
+        kind: 'a2a' as const,
+      }))
+      return [...peers, ...a2a]
+    },
+  }
+
   const workflowController = await createWorkflowController(
     {
       hub,
       definitionsDir: workflowsDir,
       spaceRoot: SPACE_DIR,
-      // Stream G day-2 / H — off-hub capability view for "this step leaves the
-      // hub" flags on workflow summaries. Read LAZILY via forward-declared refs:
-      // both the peer registry and the A2A manager are built further down, but
-      // this closure only fires when an admin summary is projected (an HTTP
-      // request long after boot), so it sees the live state.
-      //
-      // Two sources, mesh peers FIRST so they win attribution on a shared cap:
-      //   - `kind:'peer'` — a connected peer's advertised caps ARE the registered
-      //     wrapper participant's `.capabilities` (G-M1: outboundCaps →
-      //     remoteCapabilities), the same source dispatch routing consults.
-      //   - `kind:'a2a'` — a live external A2A agent's caps. We list stored agents
-      //     and keep only the ones currently registered (`statusOf().active`), so
-      //     a token-less / disabled row isn't flagged as a reachable destination.
-      peerCapabilities: {
-        peerCapabilities: () => {
-          const peers = (peerRegistryRef?.status() ?? [])
-            .filter((s) => s.connected)
-            .map((s) => {
-              const wrapper = hub.registry.get(s.peerId)
-              return {
-                peer: s.peerId,
-                label: s.label,
-                capabilities: wrapper ? [...wrapper.capabilities] : [],
-                kind: 'peer' as const,
-              }
-            })
-          const a2a = (a2aOutboundRef?.liveCapabilities() ?? []).map((e) => ({
-            ...e,
-            kind: 'a2a' as const,
-          }))
-          return [...peers, ...a2a]
-        },
-      },
+      peerCapabilities: peerCapabilitiesView,
       // Stream G day-5 — resolve a cross-hub step's peer-hub id to its live link
       // so `fetchPeerStepTranscript` can pull the off-hub trace on demand. Same
       // lazy forward-ref as `peerLinkResolver` above (line ~1142) and the cross-
@@ -1349,6 +1357,25 @@ async function main(): Promise<void> {
         logger: log,
       })
     : null
+
+  // WFEDIT — the OpenClaw-style member workflow editor. A member describes a
+  // change in plain language; the service runs it through the AI assistant,
+  // locks the cross-hub 出入口 (trigger + egress, via the SAME peer view the
+  // controller uses), and persists as a new revision (publish if live, draft
+  // otherwise). Needs BOTH an LLM assistant (to author the YAML) AND identity
+  // (for per-workflow editor RBAC); absent either → null → the /me edit routes
+  // degrade to 503. Persistence + the structure hard-gate are the controller's
+  // existing publish/saveDraft, so this adds no new write path.
+  const meWorkflowEdit =
+    workflowAssist && identity
+      ? new MeWorkflowEditService({
+          grants: identity,
+          workflows: workflowController,
+          assist: workflowAssist,
+          participants: () => hub.participants(),
+          peerCapabilities: peerCapabilitiesView,
+        })
+      : null
 
   // allowedHosts is resolved earlier (Route B P0-M6 boot self-check).
   const adminRateMax = envInt('AIPE_ADMIN_RATE_MAX', 10)
@@ -2035,6 +2062,9 @@ async function main(): Promise<void> {
     // Phase 16 — member task inbox; undefined when identity is unwired, in
     // which case /me/inbox degrades (empty list / 503).
     ...(inboxService ? { inbox: inboxService } : {}),
+    // WFEDIT — member NL workflow editing; null when no assistant / identity, in
+    // which case /api/me/workflows/:id/{editable,edit} return 503.
+    ...(meWorkflowEdit ? { workflowEdit: meWorkflowEdit } : {}),
     // Phase 13 M3 — null when no API key / disabled. Web responds 503
     // on /api/admin/workflows/assist in that case so the UI can hide
     // the "AI assistant" button cleanly.
