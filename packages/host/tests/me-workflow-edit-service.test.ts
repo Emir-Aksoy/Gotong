@@ -1,0 +1,423 @@
+/**
+ * WFEDIT-M2 — unit tests for the member NL workflow-edit service. Light fakes
+ * for every dep (no Hub, no LLM, no sqlite): we drive the decision pipeline
+ * directly and assert (a) the cross-hub 出入口 lock blocks boundary-touching
+ * edits BEFORE any persistence, (b) local edits flow through to publish/saveDraft
+ * by lifecycle state, and (c) RBAC / state / assistant failures map to typed
+ * reasons.
+ *
+ * The YAML is real (`parseWorkflow` runs on both the "current" and the
+ * "edited" side), so the boundary lock sees genuine `WorkflowDefinition`s — the
+ * same path production takes.
+ */
+
+import { describe, expect, it } from 'vitest'
+
+import { parseWorkflow, type LifecycleState } from '@aipehub/workflow'
+import type { WorkflowAssistantOutput } from '@aipehub/workflow-assistant'
+
+import {
+  MeWorkflowEditService,
+  type MeWorkflowEditDeps,
+} from '../src/me-workflow-edit-service.js'
+import type { PeerCapabilityView } from '../src/workflow-controller.js'
+
+// --- YAML builders (real text → real parseWorkflow) -------------------------
+
+interface StepSpec {
+  id: string
+  cap: string
+  payload?: string
+  dataClasses?: string[]
+}
+
+function yamlStep(s: StepSpec): string {
+  // dataClasses is a sibling of strategy/payload under dispatch → 8-space indent.
+  const dc = s.dataClasses ? `\n        dataClasses: [${s.dataClasses.join(', ')}]` : ''
+  return [
+    `    - id: ${s.id}`,
+    `      dispatch:`,
+    `        strategy: { kind: capability, capabilities: [${s.cap}] }`,
+    `        payload: ${s.payload ?? '{}'}${dc}`,
+  ].join('\n')
+}
+
+function yamlWf(opts: { id?: string; trigger?: string; steps: StepSpec[] }): string {
+  // parseWorkflow wants `schema:` at the top level and everything else nested
+  // under a `workflow:` object (see packages/workflow/src/schema.ts).
+  return [
+    'schema: aipehub.workflow/v1',
+    'workflow:',
+    `  id: ${opts.id ?? 'flow'}`,
+    '  trigger:',
+    `    capability: ${opts.trigger ?? 'run-flow'}`,
+    '  steps:',
+    ...opts.steps.map(yamlStep),
+  ].join('\n')
+}
+
+const LOCAL_WF = yamlWf({ steps: [{ id: 'draft', cap: 'wf.draft', payload: '{ note: old }' }] })
+
+const CROSS_HUB_WF = yamlWf({
+  steps: [
+    { id: 'draft', cap: 'wf.draft', payload: '{ note: old }' },
+    { id: 'place', cap: 'supplier.confirm-order', dataClasses: ['public'] },
+  ],
+})
+
+/** A peer serving two off-hub caps — lets a retarget go cap→cap. */
+const PEER_VIEW: PeerCapabilityView = {
+  peerCapabilities: () => [
+    {
+      peer: 'supplier-hub',
+      label: '供货商 Hub',
+      capabilities: ['supplier.confirm-order', 'supplier.express'],
+    },
+  ],
+}
+
+// --- assistant output fakes -------------------------------------------------
+
+function assistOk(
+  yaml: string,
+  extra?: { explanation?: string; deepCheck?: WorkflowAssistantOutput['deepCheck'] },
+): WorkflowAssistantOutput {
+  return {
+    text: yaml,
+    raw: yaml,
+    stopReason: 'end_turn',
+    by: 'workflow-assistant',
+    yaml,
+    explanation: extra?.explanation ?? '改好了',
+    draftStatus: 'valid',
+    ...(extra?.deepCheck ? { deepCheck: extra.deepCheck } : {}),
+  } as WorkflowAssistantOutput
+}
+
+function assistInvalid(): WorkflowAssistantOutput {
+  return {
+    text: '',
+    raw: '',
+    stopReason: 'end_turn',
+    by: 'workflow-assistant',
+    yaml: '',
+    explanation: '改出来的 YAML 不合法',
+    draftStatus: 'invalid',
+    validationError: 'step "x" references unknown step',
+  } as WorkflowAssistantOutput
+}
+
+// --- fake-deps builder ------------------------------------------------------
+
+type GrantLevel = 'none' | 'viewer' | 'editor' | 'owner'
+const RANK: Record<GrantLevel, number> = { none: 0, viewer: 1, editor: 2, owner: 3 }
+
+interface BuildOpts {
+  currentYaml: string
+  state?: LifecycleState
+  exists?: boolean
+  /** `null` ⇒ no editable source; omitted ⇒ mirrors currentYaml. */
+  source?: string | null
+  grant?: GrantLevel
+  assist: WorkflowAssistantOutput | Error
+  participants?: Array<{ id: string; capabilities: string[] }>
+  peerCapabilities?: PeerCapabilityView
+  failPersist?: Error
+}
+
+function buildDeps(opts: BuildOpts) {
+  const calls = {
+    assist: 0,
+    publish: [] as Array<{ id: string; text?: string; by?: string }>,
+    saveDraft: [] as Array<{ text: string; by?: string }>,
+  }
+  let persistedYaml = opts.currentYaml
+  const grantRank = RANK[opts.grant ?? 'editor']
+
+  const deps: MeWorkflowEditDeps = {
+    grants: {
+      hasWorkflowGrant: (_id, _userId, min) => grantRank >= RANK[min],
+    },
+    workflows: {
+      versioning: {
+        has: async () => opts.exists ?? true,
+        // `original` is read before persist, so this reflects the pre-edit YAML.
+        headDefinition: async () => parseWorkflow(persistedYaml),
+      },
+      getState: async () => ({ state: opts.state ?? 'published' }),
+      exportDefinitionText: async () =>
+        opts.source === undefined ? persistedYaml : opts.source,
+      publish: async (id, o) => {
+        if (opts.failPersist) throw opts.failPersist
+        calls.publish.push({ id, ...o })
+        if (o.text) persistedYaml = o.text
+        return { id }
+      },
+      saveDraft: async (text, o) => {
+        if (opts.failPersist) throw opts.failPersist
+        calls.saveDraft.push({ text, ...o })
+        persistedYaml = text
+        return { id: 'flow' }
+      },
+    },
+    assist: {
+      assist: async () => {
+        calls.assist++
+        if (opts.assist instanceof Error) throw opts.assist
+        return opts.assist
+      },
+    },
+    participants: () => opts.participants ?? [{ id: 'local-agent', capabilities: ['wf.draft'] }],
+    ...(opts.peerCapabilities ? { peerCapabilities: opts.peerCapabilities } : {}),
+  }
+  return { service: new MeWorkflowEditService(deps), calls }
+}
+
+const REQ = { workflowId: 'flow', userId: 'alice' }
+
+// --- tests ------------------------------------------------------------------
+
+describe('MeWorkflowEditService.edit — gates', () => {
+  it('refuses a member without an editor grant (assistant never runs)', async () => {
+    const { service, calls } = buildDeps({ currentYaml: LOCAL_WF, grant: 'viewer', assist: assistOk(LOCAL_WF) })
+    const r = await service.edit({ ...REQ, instruction: '改点东西' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('forbidden')
+    expect(calls.assist).toBe(0)
+  })
+
+  it('returns not_found for an unknown workflow', async () => {
+    const { service } = buildDeps({ currentYaml: LOCAL_WF, exists: false, assist: assistOk(LOCAL_WF) })
+    const r = await service.edit({ ...REQ, instruction: 'x' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('not_found')
+  })
+
+  it('refuses editing a workflow under review', async () => {
+    const { service, calls } = buildDeps({ currentYaml: LOCAL_WF, state: 'review', assist: assistOk(LOCAL_WF) })
+    const r = await service.edit({ ...REQ, instruction: 'x' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('under_review')
+    expect(calls.assist).toBe(0)
+  })
+
+  it('refuses editing an archived workflow', async () => {
+    const { service } = buildDeps({ currentYaml: LOCAL_WF, state: 'archived', assist: assistOk(LOCAL_WF) })
+    const r = await service.edit({ ...REQ, instruction: 'x' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('archived')
+  })
+
+  it('returns no_source when there is no editable YAML mirror', async () => {
+    const { service } = buildDeps({ currentYaml: LOCAL_WF, source: null, assist: assistOk(LOCAL_WF) })
+    const r = await service.edit({ ...REQ, instruction: 'x' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('no_source')
+  })
+})
+
+describe('MeWorkflowEditService.edit — local edits flow through', () => {
+  it('publishes a local-only edit to a live workflow', async () => {
+    const edited = yamlWf({ steps: [{ id: 'draft', cap: 'wf.draft', payload: '{ note: NEW-AND-LONGER }' }] })
+    const { service, calls } = buildDeps({ currentYaml: LOCAL_WF, assist: assistOk(edited, { explanation: '把提示改长了' }) })
+    const r = await service.edit({ ...REQ, instruction: '把第一步的提示写详细点' })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.applied).toBe('published')
+      expect(r.explanation).toBe('把提示改长了')
+      expect(r.boundary.egress).toEqual([]) // purely local
+    }
+    expect(calls.publish).toHaveLength(1)
+    expect(calls.publish[0]?.text).toBe(edited)
+    expect(calls.publish[0]?.by).toBe('alice')
+    expect(calls.saveDraft).toHaveLength(0)
+  })
+
+  it('saves a draft (not publish) when the workflow is a draft', async () => {
+    const edited = yamlWf({ steps: [{ id: 'draft', cap: 'wf.draft', payload: '{ note: NEW }' }] })
+    const { service, calls } = buildDeps({ currentYaml: LOCAL_WF, state: 'draft', assist: assistOk(edited) })
+    const r = await service.edit({ ...REQ, instruction: '改一下' })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.applied).toBe('draft')
+    expect(calls.saveDraft).toHaveLength(1)
+    expect(calls.publish).toHaveLength(0)
+  })
+
+  it('allows editing the LOCAL part of a cross-hub workflow (egress preserved)', async () => {
+    // draft step changes; the cross-hub `place` step is untouched.
+    const edited = yamlWf({
+      steps: [
+        { id: 'draft', cap: 'wf.draft', payload: '{ note: MEMBER-EDIT }' },
+        { id: 'place', cap: 'supplier.confirm-order', dataClasses: ['public'] },
+      ],
+    })
+    const { service, calls } = buildDeps({
+      currentYaml: CROSS_HUB_WF,
+      assist: assistOk(edited),
+      peerCapabilities: PEER_VIEW,
+    })
+    const r = await service.edit({ ...REQ, instruction: '把起草那步改一下' })
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      // The locked boundary is reported back so the member SEES what stayed put.
+      expect(r.boundary.egress).toEqual([
+        { stepId: 'place', capability: 'supplier.confirm-order', dataClasses: ['public'] },
+      ])
+    }
+    expect(calls.publish).toHaveLength(1)
+  })
+
+  it('threads deepCheck warnings through on success', async () => {
+    const edited = yamlWf({ steps: [{ id: 'draft', cap: 'wf.draft', payload: '{ note: x }' }] })
+    const deepCheck = { ok: false, violations: [{ kind: 'unknown_capability', path: 'steps[0]', message: 'no agent serves wf.draft' }] }
+    const { service } = buildDeps({
+      currentYaml: LOCAL_WF,
+      assist: assistOk(edited, { deepCheck: deepCheck as WorkflowAssistantOutput['deepCheck'] }),
+    })
+    const r = await service.edit({ ...REQ, instruction: 'x' })
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.deepCheck).toEqual(deepCheck)
+  })
+})
+
+describe('MeWorkflowEditService.edit — the cross-hub boundary lock', () => {
+  it('rejects retargeting a cross-hub egress step (and never persists)', async () => {
+    const retargeted = yamlWf({
+      steps: [
+        { id: 'draft', cap: 'wf.draft', payload: '{ note: old }' },
+        { id: 'place', cap: 'supplier.express', dataClasses: ['public'] }, // ← off-hub target changed
+      ],
+    })
+    const { service, calls } = buildDeps({
+      currentYaml: CROSS_HUB_WF,
+      assist: assistOk(retargeted),
+      peerCapabilities: PEER_VIEW,
+    })
+    const r = await service.edit({ ...REQ, instruction: '把下单发到加急那个' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.reason).toBe('boundary_locked')
+      expect(r.violations?.[0]?.kind).toBe('egress_retargeted')
+      expect(r.violations?.[0]?.stepId).toBe('place')
+    }
+    expect(calls.publish).toHaveLength(0) // ← blocked BEFORE persistence
+    expect(calls.saveDraft).toHaveLength(0)
+  })
+
+  it('rejects changing the trigger (ingress) capability', async () => {
+    const reTriggered = yamlWf({ trigger: 'run-other', steps: [{ id: 'draft', cap: 'wf.draft' }] })
+    const { service, calls } = buildDeps({ currentYaml: LOCAL_WF, assist: assistOk(reTriggered) })
+    const r = await service.edit({ ...REQ, instruction: '换个触发方式' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.reason).toBe('boundary_locked')
+      expect(r.violations?.map((v) => v.kind)).toEqual(['trigger_changed'])
+    }
+    expect(calls.publish).toHaveLength(0)
+  })
+
+  it('rejects adding a brand-new cross-hub egress step', async () => {
+    const sneaky = yamlWf({
+      steps: [
+        { id: 'draft', cap: 'wf.draft', payload: '{ note: old }' },
+        { id: 'sneak', cap: 'supplier.confirm-order' }, // new off-hub hop the member tried to add
+      ],
+    })
+    const { service, calls } = buildDeps({
+      currentYaml: LOCAL_WF,
+      assist: assistOk(sneaky),
+      peerCapabilities: PEER_VIEW,
+    })
+    const r = await service.edit({ ...REQ, instruction: '加一步发给供货商' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.reason).toBe('boundary_locked')
+      expect(r.violations?.[0]?.kind).toBe('egress_added')
+    }
+    expect(calls.publish).toHaveLength(0)
+  })
+})
+
+describe('MeWorkflowEditService.edit — assistant / structure failures', () => {
+  it('surfaces an invalid assistant draft as assistant_failed', async () => {
+    const { service, calls } = buildDeps({ currentYaml: LOCAL_WF, assist: assistInvalid() })
+    const r = await service.edit({ ...REQ, instruction: 'x' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.reason).toBe('assistant_failed')
+      expect(r.draftStatus).toBe('invalid')
+    }
+    expect(calls.publish).toHaveLength(0)
+  })
+
+  it('surfaces an assist dispatch error as assistant_unavailable', async () => {
+    const { service } = buildDeps({ currentYaml: LOCAL_WF, assist: new Error('no api key') })
+    const r = await service.edit({ ...REQ, instruction: 'x' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('assistant_unavailable')
+  })
+
+  it('rejects an assistant edit that changes the workflow id', async () => {
+    const renamed = yamlWf({ id: 'other-flow', steps: [{ id: 'draft', cap: 'wf.draft' }] })
+    const { service } = buildDeps({ currentYaml: LOCAL_WF, assist: assistOk(renamed) })
+    const r = await service.edit({ ...REQ, instruction: 'x' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('id_changed')
+  })
+
+  it('maps a structure-gate rejection from persist to structure_failed', async () => {
+    const edited = yamlWf({ steps: [{ id: 'draft', cap: 'wf.draft', payload: '{ note: x }' }] })
+    const { service } = buildDeps({
+      currentYaml: LOCAL_WF,
+      assist: assistOk(edited),
+      failPersist: new Error("workflow 'flow' failed structural check — bad_ref @ steps[0]"),
+    })
+    const r = await service.edit({ ...REQ, instruction: 'x' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) {
+      expect(r.reason).toBe('structure_failed')
+      expect(r.detail).toContain('bad_ref')
+    }
+  })
+})
+
+describe('MeWorkflowEditService.editableView', () => {
+  it('returns the current YAML + boundary + crossHub flag for a federated workflow', async () => {
+    const { service } = buildDeps({ currentYaml: CROSS_HUB_WF, peerCapabilities: PEER_VIEW, assist: assistOk(CROSS_HUB_WF) })
+    const r = await service.editableView('flow', 'alice')
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.crossHub).toBe(true)
+      expect(r.editable).toBe(true)
+      expect(r.yaml).toBe(CROSS_HUB_WF)
+      expect(r.boundary).toEqual({
+        trigger: 'run-flow',
+        egress: [{ stepId: 'place', capability: 'supplier.confirm-order', dataClasses: ['public'] }],
+      })
+    }
+  })
+
+  it('marks a purely-local workflow as not cross-hub', async () => {
+    const { service } = buildDeps({ currentYaml: LOCAL_WF, assist: assistOk(LOCAL_WF) })
+    const r = await service.editableView('flow', 'alice')
+    expect(r.ok).toBe(true)
+    if (r.ok) {
+      expect(r.crossHub).toBe(false)
+      expect(r.boundary.egress).toEqual([])
+    }
+  })
+
+  it('refuses the editable view without an editor grant', async () => {
+    const { service } = buildDeps({ currentYaml: LOCAL_WF, grant: 'viewer', assist: assistOk(LOCAL_WF) })
+    const r = await service.editableView('flow', 'alice')
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('forbidden')
+  })
+
+  it('reports an archived workflow as not editable', async () => {
+    const { service } = buildDeps({ currentYaml: LOCAL_WF, state: 'archived', assist: assistOk(LOCAL_WF) })
+    const r = await service.editableView('flow', 'alice')
+    expect(r.ok).toBe(true)
+    if (r.ok) expect(r.editable).toBe(false)
+  })
+})
