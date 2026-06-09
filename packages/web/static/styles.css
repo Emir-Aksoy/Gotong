@@ -1689,6 +1689,12 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .wf-xhub .ma-meta { margin: 0; }
 .wf-xhub-peer { color: #1d5fa8; font-size: 0.72rem; }
 .wf-xhub-note { color: #1d5fa8; }
+/* PB — per-branch cross-hub block on a PARALLEL step: one row per off-hub
+   branch (badge + its own transcript viewer). Indented under a thin blue rule so
+   the fan-out's mixed local+off-hub destinations read as a group, distinct from
+   a simple step's single inline badge. */
+.wf-xhub-branches { margin: 4px 0; padding-left: 8px; border-left: 2px solid #d6e4f5; }
+.wf-xhub-branch { margin: 2px 0; }
 /* Stream G day-4 — outbound-approval-loop affordance. Amber = "needs your
    action" (mirrors the governance-risk amber convention), distinct from the
    neutral blue cross-hub "left the hub" / "ran on peer X" badge. */

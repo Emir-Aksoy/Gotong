@@ -277,6 +277,12 @@
       // opposed to the pre-launch crossHubSteps PREDICTION on the card.
       workflowRunCrossHub: (dest, kind) =>
         kind === 'a2a' ? `🔗 由外部 A2A agent ${dest} 执行` : `🔗 在对等 hub ${dest} 上执行`,
+      // PB — the parallel analog: ONE branch of a fan-out step ran off-hub. Names
+      // the branch so a mixed local+off-hub fan-out reads unambiguously.
+      workflowRunBranchCrossHub: (branchId, dest, kind) =>
+        kind === 'a2a'
+          ? `🔗 分支「${branchId}」由外部 A2A agent ${dest} 执行`
+          : `🔗 分支「${branchId}」在对等 hub ${dest} 上执行`,
       // Stream G day-4 — post-launch APPROVAL LOOP: a step that is both
       // `suspended` and cross-hub is parked at the outbound-approval gate,
       // waiting for a human to approve the send in their inbox. The run-level
@@ -715,6 +721,12 @@
       // opposed to the pre-launch crossHubSteps PREDICTION on the card.
       workflowRunCrossHub: (dest, kind) =>
         kind === 'a2a' ? `🔗 ran on external A2A agent ${dest}` : `🔗 ran on peer hub ${dest}`,
+      // PB — the parallel analog: ONE branch of a fan-out step ran off-hub. Names
+      // the branch so a mixed local+off-hub fan-out reads unambiguously.
+      workflowRunBranchCrossHub: (branchId, dest, kind) =>
+        kind === 'a2a'
+          ? `🔗 branch "${branchId}" ran on external A2A agent ${dest}`
+          : `🔗 branch "${branchId}" ran on peer hub ${dest}`,
       // Stream G day-4 — post-launch APPROVAL LOOP: a step that is both
       // `suspended` and cross-hub is parked at the outbound-approval gate,
       // awaiting a human approval in the inbox. Run-level status stays `running`

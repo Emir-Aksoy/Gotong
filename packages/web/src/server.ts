@@ -685,8 +685,12 @@ export interface WorkflowSurface {
    * Web layer maps the first two to 404 and renders the rest inline. OPTIONAL —
    * a host built without a peer-link resolver (single-hub) may omit it, and the
    * route then answers 404.
+   *
+   * PB — pass `branchId` to target ONE branch of a parallel step (the per-branch
+   * executor/handle maps); omitted ⇒ the step-level fields (a simple step). The
+   * route reads it from the `?branch=` query string.
    */
-  fetchPeerStepTranscript?(runId: string, stepId: string): Promise<unknown>
+  fetchPeerStepTranscript?(runId: string, stepId: string, branchId?: string): Promise<unknown>
 }
 
 /**

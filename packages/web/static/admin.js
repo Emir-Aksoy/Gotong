@@ -1712,6 +1712,17 @@
                     data-run-id="${escapeHtml4(run.runId)}" data-step-id="${escapeHtml4(s.stepId)}">${escapeHtml4(t4.workflowRunPeerTranscriptBtn)}</button>
             <div class="wf-peer-tx-out"></div>
           </div>` : "";
+        const branchBlock = s.branchCrossHub && Object.keys(s.branchCrossHub).length ? `<div class="wf-xhub-branches">${Object.entries(s.branchCrossHub).map(([branchId, ref]) => {
+          const bDest = String(ref.peerLabel || ref.peer);
+          const badge = `<span class="wf-xhub-peer">${escapeHtml4(t4.workflowRunBranchCrossHub(branchId, bDest, ref.kind))}</span>`;
+          const bTx = ref.kind !== "a2a" ? `<div class="wf-peer-tx-box">
+                  <button type="button" class="wf-peer-tx-btn" data-act="view-peer-transcript"
+                          data-run-id="${escapeHtml4(run.runId)}" data-step-id="${escapeHtml4(s.stepId)}"
+                          data-branch-id="${escapeHtml4(branchId)}">${escapeHtml4(t4.workflowRunPeerTranscriptBtn)}</button>
+                  <div class="wf-peer-tx-out"></div>
+                </div>` : "";
+          return `<div class="wf-xhub-branch">${badge}${bTx}</div>`;
+        }).join("")}</div>` : "";
         return `<article class="wf-step">
         <header>
           <span class="wf-run-status wf-run-${escapeHtml4(s.status)}">${escapeHtml4(s.status)}</span>
@@ -1724,6 +1735,7 @@
         ${subtasks}
         ${out}
         ${peerTx}
+        ${branchBlock}
       </article>`;
       }).join("");
       const payloadBlock = run.triggerPayload !== void 0 ? `<details><summary>${escapeHtml4(t4.workflowRunTriggerPayload)}</summary><pre class="wf-pre">${escapeHtml4(JSON.stringify(run.triggerPayload, null, 2))}</pre></details>` : "";
@@ -1761,13 +1773,14 @@
       }).join("");
       return head + `<ul class="wf-peer-tx-list">${rows}</ul>`;
     }
-    async function viewPeerTranscript(runId, stepId, outEl, btnEl) {
+    async function viewPeerTranscript(runId, stepId, outEl, btnEl, branchId) {
       if (!outEl) return;
       if (btnEl) btnEl.disabled = true;
       outEl.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
       try {
+        const q = branchId ? `?branch=${encodeURIComponent(branchId)}` : "";
         const r = await fetch(
-          `/api/admin/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/peer-transcript`
+          `/api/admin/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/peer-transcript${q}`
         );
         const body = await r.json().catch(() => ({}));
         if (r.ok && body && body.ok === true) {
@@ -3389,13 +3402,15 @@
         if (act === "view-peer-transcript") {
           const runId = target.dataset.runId;
           const stepId = target.dataset.stepId;
+          const branchId = target.dataset.branchId;
           const outEl = target.parentElement ? target.parentElement.querySelector(".wf-peer-tx-out") : null;
           if (runId && stepId && outEl) {
             workflows.viewPeerTranscript(
               runId,
               stepId,
               outEl,
-              target instanceof HTMLButtonElement ? target : null
+              target instanceof HTMLButtonElement ? target : null,
+              branchId
             );
           }
           return;

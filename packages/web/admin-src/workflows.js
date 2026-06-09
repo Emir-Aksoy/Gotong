@@ -804,6 +804,28 @@ export function createWorkflows({ wf }) {
             <div class="wf-peer-tx-out"></div>
           </div>`
         : ''
+      // PB — a parallel step has no step-level crossHub; the host resolves each
+      // branch's destination into `branchCrossHub` (keyed by branch id, only
+      // off-hub branches present). Render one badge per off-hub branch + a
+      // per-branch transcript button (mesh peers only — A2A has no peer.transcript
+      // rpc). The button carries data-branch-id so the click handler passes it to
+      // the `?branch=` route. (A parallel step's branches never set step-level
+      // executedBy, so the simple-step xhub/peerTx blocks above stay empty for it.)
+      const branchBlock = s.branchCrossHub && Object.keys(s.branchCrossHub).length
+        ? `<div class="wf-xhub-branches">${Object.entries(s.branchCrossHub).map(([branchId, ref]) => {
+            const bDest = String(ref.peerLabel || ref.peer)
+            const badge = `<span class="wf-xhub-peer">${escapeHtml(t.workflowRunBranchCrossHub(branchId, bDest, ref.kind))}</span>`
+            const bTx = ref.kind !== 'a2a'
+              ? `<div class="wf-peer-tx-box">
+                  <button type="button" class="wf-peer-tx-btn" data-act="view-peer-transcript"
+                          data-run-id="${escapeHtml(run.runId)}" data-step-id="${escapeHtml(s.stepId)}"
+                          data-branch-id="${escapeHtml(branchId)}">${escapeHtml(t.workflowRunPeerTranscriptBtn)}</button>
+                  <div class="wf-peer-tx-out"></div>
+                </div>`
+              : ''
+            return `<div class="wf-xhub-branch">${badge}${bTx}</div>`
+          }).join('')}</div>`
+        : ''
       return `<article class="wf-step">
         <header>
           <span class="wf-run-status wf-run-${escapeHtml(s.status)}">${escapeHtml(s.status)}</span>
@@ -816,6 +838,7 @@ export function createWorkflows({ wf }) {
         ${subtasks}
         ${out}
         ${peerTx}
+        ${branchBlock}
       </article>`
     }).join('')
     const payloadBlock = run.triggerPayload !== undefined
@@ -877,13 +900,16 @@ export function createWorkflows({ wf }) {
   // by the global click handler with the button's run/step ids + its sibling
   // output div. The route answers `{ok:true,slice}` or a typed `{ok:false,code}`
   // (fail-closed when the peer never opted into sharing); both render inline.
-  async function viewPeerTranscript(runId, stepId, outEl, btnEl) {
+  async function viewPeerTranscript(runId, stepId, outEl, btnEl, branchId) {
     if (!outEl) return
     if (btnEl) btnEl.disabled = true
     outEl.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
     try {
+      // PB — a parallel branch's button carries a branchId; forward it as
+      // `?branch=` so the host reads the per-branch executor/handle maps.
+      const q = branchId ? `?branch=${encodeURIComponent(branchId)}` : ''
       const r = await fetch(
-        `/api/admin/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/peer-transcript`,
+        `/api/admin/workflows/runs/${encodeURIComponent(runId)}/steps/${encodeURIComponent(stepId)}/peer-transcript${q}`,
       )
       const body = await r.json().catch(() => ({}))
       if (r.ok && body && body.ok === true) {

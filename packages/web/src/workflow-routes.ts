@@ -341,8 +341,11 @@ export async function handleWorkflowRoute(
     }
     const runId = decodeURIComponent(peerTxMatch[1]!)
     const stepId = decodeURIComponent(peerTxMatch[2]!)
+    // PB — `?branch=<id>` targets ONE branch of a parallel step (the per-branch
+    // executor/handle maps); omitted ⇒ the step-level fields (a simple step).
+    const branch = url.searchParams.get('branch') ?? undefined
     try {
-      const out = (await ctx.workflows.fetchPeerStepTranscript(runId, stepId)) as
+      const out = (await ctx.workflows.fetchPeerStepTranscript(runId, stepId, branch)) as
         | { ok: true; slice: unknown }
         | { ok: false; code: string; message: string }
       // A genuinely-missing run/step is a 404; the soft verdicts (same-hub step,

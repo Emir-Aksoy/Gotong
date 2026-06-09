@@ -26,6 +26,9 @@ import { serveWeb, type WebServerHandle, type WorkflowSurface } from '../src/ser
 interface Call {
   runId: string
   stepId: string
+  // PB — the parallel-branch target. `undefined` when the route saw no
+  // `?branch=` query (a simple step); a string when one fan-out branch is named.
+  branchId: string | undefined
 }
 
 /** Build a WorkflowSurface that only implements what the route touches. */
@@ -35,8 +38,8 @@ function makeStub(opts: {
 }): { surface: WorkflowSurface; calls: Call[] } {
   const calls: Call[] = []
   const base = {
-    async fetchPeerStepTranscript(runId: string, stepId: string) {
-      calls.push({ runId, stepId })
+    async fetchPeerStepTranscript(runId: string, stepId: string, branchId?: string) {
+      calls.push({ runId, stepId, branchId })
       return opts.result
     },
   }
@@ -107,7 +110,25 @@ describe('cross-hub transcript-chain route', () => {
     b = await boot({ result: { ok: true, slice: {} } })
     const r = await authed(b, PATH(encodeURIComponent('run/A'), encodeURIComponent('step b')))
     expect(r.status).toBe(200)
-    expect(b.calls).toEqual([{ runId: 'run/A', stepId: 'step b' }])
+    expect(b.calls).toEqual([{ runId: 'run/A', stepId: 'step b', branchId: undefined }])
+  })
+
+  // PB — a parallel step fans out to many participants, so a single step-level
+  // executor can't attribute the fan-out. The UI names ONE branch via `?branch=`;
+  // the route URL-decodes it and forwards it as the 3rd arg so the surface can
+  // resolve that branch's own `branchExecutedBy` / `branchPeerTaskIds`.
+  it('forwards a URL-decoded ?branch= to the surface as branchId', async () => {
+    b = await boot({ result: { ok: true, slice: {} } })
+    const r = await authed(b, `${PATH('run1', 'fan')}?branch=${encodeURIComponent('branch/2')}`)
+    expect(r.status).toBe(200)
+    expect(b.calls).toEqual([{ runId: 'run1', stepId: 'fan', branchId: 'branch/2' }])
+  })
+
+  it('passes branchId undefined when no ?branch= query is present', async () => {
+    b = await boot({ result: { ok: true, slice: {} } })
+    const r = await authed(b, PATH('run1', 'review'))
+    expect(r.status).toBe(200)
+    expect(b.calls[0]?.branchId).toBeUndefined()
   })
 
   it('maps unknown_run → 404', async () => {

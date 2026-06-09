@@ -2145,6 +2145,9 @@ import { createWorkflows } from './workflows.js'
       if (act === 'view-peer-transcript') {
         const runId = target.dataset.runId
         const stepId = target.dataset.stepId
+        // PB — a parallel branch's button also carries data-branch-id; pass it
+        // through so the per-branch route variant is hit (undefined ⇒ step-level).
+        const branchId = target.dataset.branchId
         const outEl = target.parentElement
           ? target.parentElement.querySelector('.wf-peer-tx-out')
           : null
@@ -2154,6 +2157,7 @@ import { createWorkflows } from './workflows.js'
             stepId,
             outEl,
             target instanceof HTMLButtonElement ? target : null,
+            branchId,
           )
         }
         return
