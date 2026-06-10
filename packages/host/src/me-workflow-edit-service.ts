@@ -143,6 +143,13 @@ export interface MeWorkflowEditRequest {
    * so "再礼貌一点 / 还是改回去" style references resolve.
    */
   history?: ReadonlyArray<MeWorkflowEditTurn>
+  /**
+   * WFEDIT-D4 — live LLM chunks of THIS edit only. The chunks flow up the call
+   * stack of the member's own request (per-call sink in the assist surface),
+   * never via the admin transcript stream — so a member can watch the typing
+   * without a path to anyone else's tasks. Best-effort; absent ⇒ no streaming.
+   */
+  onChunk?: (chunk: string) => void
 }
 
 // --- duck-typed dependencies ------------------------------------------------
@@ -169,7 +176,7 @@ export interface WorkflowEditTarget {
   saveDraft(text: string, opts: { by?: string }): Promise<{ id: string }>
 }
 
-/** Phase 13's assist surface, consumed UNCHANGED. */
+/** Phase 13's assist surface (+ the D4 per-call chunk sink it grew). */
 export interface WorkflowAssistView {
   assist(input: {
     description: string
@@ -178,6 +185,7 @@ export interface WorkflowAssistView {
       existingWorkflowIds?: ReadonlyArray<string>
     }
     by: string
+    onChunk?: (chunk: string) => void
   }): Promise<WorkflowAssistantOutput>
 }
 
@@ -270,6 +278,7 @@ export class MeWorkflowEditService {
         description: composeEditPrompt(currentYaml, instruction, history),
         contextHints: this.contextHints(),
         by: userId,
+        ...(req.onChunk ? { onChunk: req.onChunk } : {}),
       })
     } catch (err) {
       return deny('assistant_unavailable', 'AI 助手暂时不可用,请稍后再试。', { detail: errMsg(err) })

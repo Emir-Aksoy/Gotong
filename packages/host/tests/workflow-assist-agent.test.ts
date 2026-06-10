@@ -191,4 +191,46 @@ describe('createWorkflowAssistAgent', () => {
       surface!.assist({ description: 'after dereg', by: 'admin' }),
     ).rejects.toThrow(/no participant/i)
   })
+
+  // WFEDIT-D4 — per-call chunk sinks. The mock provider streams its reply in 8
+  // chunks, so these exercise the real streaming path end to end.
+  describe('per-call onChunk (WFEDIT-D4)', () => {
+    it('streams THIS call’s chunks into the caller’s sink (joined === raw)', async () => {
+      const surface = createWorkflowAssistAgent({ hub, config: { provider: 'mock' }, logger })
+      const chunks: string[] = []
+      const out = await surface!.assist({
+        description: 'stream me',
+        by: 'member-1',
+        onChunk: (c) => chunks.push(c),
+      })
+      expect(chunks.length).toBeGreaterThan(1)
+      expect(chunks.join('')).toBe(out.raw)
+    })
+
+    it('never leaks a concurrent sibling call’s chunks into the sink', async () => {
+      // A streams into a sink, B (same agent, concurrent) does not. If routing
+      // were keyed on anything global, B's 8 chunks would also land in A's sink
+      // and the joined text would be the reply doubled. Exact equality with A's
+      // own raw proves per-call isolation — the member-safety property.
+      const surface = createWorkflowAssistAgent({ hub, config: { provider: 'mock' }, logger })
+      const chunks: string[] = []
+      const [a] = await Promise.all([
+        surface!.assist({ description: 'call A', by: 'member-a', onChunk: (c) => chunks.push(c) }),
+        surface!.assist({ description: 'call B', by: 'member-b' }),
+      ])
+      expect(chunks.join('')).toBe(a.raw)
+    })
+
+    it('a throwing sink never breaks the assist call', async () => {
+      const surface = createWorkflowAssistAgent({ hub, config: { provider: 'mock' }, logger })
+      const out = await surface!.assist({
+        description: 'sink throws',
+        by: 'member-1',
+        onChunk: () => {
+          throw new Error('client gone')
+        },
+      })
+      expect(out.draftStatus).toBe('valid')
+    })
+  })
 })

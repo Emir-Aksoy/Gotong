@@ -138,6 +138,8 @@ function buildDeps(opts: BuildOpts) {
     assist: 0,
     /** D3 — every prompt the assistant saw (history-folding assertions). */
     assistDescriptions: [] as string[],
+    /** D4 — whether each assist call carried a per-call chunk sink. */
+    assistHadOnChunk: [] as boolean[],
     publish: [] as Array<{ id: string; text?: string; by?: string }>,
     saveDraft: [] as Array<{ text: string; by?: string }>,
   }
@@ -174,6 +176,10 @@ function buildDeps(opts: BuildOpts) {
       assist: async (input) => {
         calls.assist++
         calls.assistDescriptions.push(input.description)
+        calls.assistHadOnChunk.push(typeof input.onChunk === 'function')
+        // D4 — exercise the per-call streaming path when the caller wired one.
+        input.onChunk?.('chunk-1')
+        input.onChunk?.('chunk-2')
         if (opts.assist instanceof Error) throw opts.assist
         return opts.assist
       },
@@ -585,6 +591,25 @@ describe('MeWorkflowEditService — edit conversation history (D3)', () => {
     expect(prompt).not.toContain('turn-2-要求')
     expect(prompt).toContain('turn-3-要求')
     expect(prompt).toContain('turn-8-要求')
+  })
+})
+
+describe('MeWorkflowEditService — streaming edit preview (D4)', () => {
+  it('forwards onChunk to the assist surface; chunks flow up THIS call', async () => {
+    const { service } = buildDeps({ currentYaml: LOCAL_WF, assist: assistOk(LOCAL_WF) })
+    const got: string[] = []
+    const r = await service.edit({ ...REQ, instruction: '改点东西', onChunk: (c) => got.push(c) })
+    expect(r.ok).toBe(true)
+    expect(got).toEqual(['chunk-1', 'chunk-2'])
+  })
+
+  it('omits the onChunk field entirely when the caller did not stream', async () => {
+    // The fake records presence, not just use — a stray always-present field
+    // would silently turn every assist call into a "streaming" one.
+    const { service, calls } = buildDeps({ currentYaml: LOCAL_WF, assist: assistOk(LOCAL_WF) })
+    const r = await service.edit({ ...REQ, instruction: '改点东西' })
+    expect(r.ok).toBe(true)
+    expect(calls.assistHadOnChunk).toEqual([false])
   })
 })
 

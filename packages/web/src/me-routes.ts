@@ -614,6 +614,8 @@ export interface MeWorkflowEditSurface {
     userId: string
     /** WFEDIT-D3 — prior turns of this edit session (client-held; host re-sanitizes + caps). */
     history?: Array<{ instruction: string; outcome?: string }>
+    /** WFEDIT-D4 — live LLM chunks of THIS edit (host routes them per-call; absent ⇒ no streaming). */
+    onChunk?: (chunk: string) => void
   }): Promise<MeWorkflowEditResult>
 }
 
@@ -1352,6 +1354,65 @@ async function handleMeWorkflowEdit(
       instruction: t.instruction,
       ...(typeof t.outcome === 'string' ? { outcome: t.outcome } : {}),
     }))
+  // WFEDIT-D4 — streaming mode (body `stream: true`): NDJSON over THIS response.
+  // Chunks only ever flow into the member's own request/response pair, so the
+  // member-safety property ("you only see your own edit's typing") holds by
+  // construction — no global stream, no taskId keying, nothing to mis-scope.
+  if (body && typeof body === 'object' && (body as { stream?: unknown }).stream === true) {
+    res.writeHead(200, {
+      'content-type': 'application/x-ndjson; charset=utf-8',
+      'cache-control': 'no-store',
+      // Some reverse proxies buffer streamed bodies unless told not to.
+      'x-accel-buffering': 'no',
+    })
+    const writeLine = (obj: unknown) => {
+      // Client may have gone away mid-stream; the edit itself must still finish
+      // (publish/saveDraft are server-side effects, same as non-stream mode).
+      try {
+        res.write(JSON.stringify(obj) + '\n')
+      } catch {
+        /* ignore */
+      }
+    }
+    let r: MeWorkflowEditResult
+    try {
+      r = await ctx.workflowEdit.edit({
+        workflowId,
+        instruction,
+        userId,
+        ...(history.length ? { history } : {}),
+        onChunk: (chunk) => writeLine({ kind: 'chunk', text: chunk }),
+      })
+    } catch (err) {
+      // Headers are already out as 200 — carry the failure in the result line
+      // (mirrors what SSE-style endpoints do once a stream is open).
+      writeLine({
+        kind: 'result',
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        code: 'internal',
+      })
+      res.end()
+      return
+    }
+    if (r.ok) {
+      writeLine({ kind: 'result', ...r })
+    } else {
+      // Same body shape as the non-stream error response (+ ok:false so the
+      // client branches without inspecting an HTTP status it no longer has).
+      writeLine({
+        kind: 'result',
+        ok: false,
+        error: r.message,
+        code: r.reason,
+        ...(r.violations ? { violations: r.violations } : {}),
+        ...(r.detail ? { detail: r.detail } : {}),
+        ...(r.draftStatus ? { draftStatus: r.draftStatus } : {}),
+      })
+    }
+    res.end()
+    return
+  }
   const r = await ctx.workflowEdit.edit({
     workflowId,
     instruction,

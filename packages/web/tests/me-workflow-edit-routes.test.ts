@@ -39,6 +39,12 @@ class FakeWorkflowEdit implements MeWorkflowEditSurface {
     userId: string
     history?: Array<{ instruction: string; outcome?: string }>
   }> = []
+  /** D4 — whether each edit call carried a per-call chunk sink. */
+  readonly editHadOnChunk: boolean[] = []
+  /** D4 — chunks the fake emits into `onChunk` before returning (when wired). */
+  emitChunks: string[] = []
+  /** D4 — when set, `edit` throws instead of returning (mid-stream failure). */
+  editThrows: Error | null = null
   /** What `editableView` returns (default: a happy cross-hub view). */
   editableResult: MeWorkflowEditableResult = {
     ok: true,
@@ -68,8 +74,15 @@ class FakeWorkflowEdit implements MeWorkflowEditSurface {
     instruction: string
     userId: string
     history?: Array<{ instruction: string; outcome?: string }>
+    onChunk?: (chunk: string) => void
   }): Promise<MeWorkflowEditResult> {
-    this.editCalls.push(args)
+    // Record without the function so the older `toEqual` assertions on
+    // editCalls stay byte-stable; presence is tracked separately.
+    const { onChunk, ...rest } = args
+    this.editCalls.push(rest)
+    this.editHadOnChunk.push(typeof onChunk === 'function')
+    if (onChunk) for (const c of this.emitChunks) onChunk(c)
+    if (this.editThrows) throw this.editThrows
     return this.editResult
   }
 }
@@ -387,5 +400,88 @@ describe('/api/me/workflows/:id/edit', () => {
       headers: { cookie: b.memberCookie },
     })
     expect(res.status).toBe(404)
+  })
+})
+
+// WFEDIT-D4 — `stream: true` switches the SAME route to NDJSON: chunk lines
+// while the assistant types, one final result line. Chunks ride the member's
+// own request/response pair, so the isolation property needs no extra test
+// surface — there is simply no channel to anyone else's edit.
+describe('/api/me/workflows/:id/edit — streaming (D4)', () => {
+  let b: Boot
+  beforeEach(async () => {
+    b = await boot()
+  })
+  afterEach(() => teardown(b))
+
+  async function postStream(body: Record<string, unknown>): Promise<{
+    res: Response
+    lines: Array<Record<string, unknown>>
+  }> {
+    const res = await fetch(`${b.server.url}/api/me/workflows/flow/edit`, {
+      method: 'POST',
+      headers: { cookie: b.memberCookie, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const text = await res.text()
+    const lines = text
+      .split('\n')
+      .filter((l) => l.trim())
+      .map((l) => JSON.parse(l) as Record<string, unknown>)
+    return { res, lines }
+  }
+
+  it('streams chunk lines then a result line; surface got a per-call sink', async () => {
+    b.edit.emitChunks = ['schema: aipehub', '.workflow/v1\n']
+    const { res, lines } = await postStream({ instruction: '改点东西', stream: true })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('application/x-ndjson')
+    expect(lines).toEqual([
+      { kind: 'chunk', text: 'schema: aipehub' },
+      { kind: 'chunk', text: '.workflow/v1\n' },
+      expect.objectContaining({ kind: 'result', ok: true, applied: 'published' }),
+    ])
+    expect(b.edit.editHadOnChunk).toEqual([true])
+  })
+
+  it('carries a surface failure in the result line (HTTP stays 200, body shape matches non-stream errors)', async () => {
+    b.edit.editResult = {
+      ok: false,
+      reason: 'boundary_locked',
+      message: '这次修改动到了跨 hub 的出入口。',
+      violations: [{ kind: 'egress_retargeted', stepId: 'place', detail: '出口去哪个 hub 不可改。' }],
+    }
+    const { res, lines } = await postStream({ instruction: '把订单发到另一个供货商', stream: true })
+    expect(res.status).toBe(200)
+    const last = lines.at(-1)!
+    expect(last).toMatchObject({
+      kind: 'result',
+      ok: false,
+      code: 'boundary_locked',
+      error: '这次修改动到了跨 hub 的出入口。',
+    })
+    expect((last.violations as Array<{ kind: string }>)[0]?.kind).toBe('egress_retargeted')
+  })
+
+  it('carries a surface throw as a result line with code=internal', async () => {
+    b.edit.editThrows = new Error('assistant exploded mid-call')
+    const { lines } = await postStream({ instruction: '改点东西', stream: true })
+    expect(lines.at(-1)).toMatchObject({
+      kind: 'result',
+      ok: false,
+      code: 'internal',
+      error: 'assistant exploded mid-call',
+    })
+  })
+
+  it('stream:false (and absent) keeps the plain-JSON contract and passes no sink', async () => {
+    const res = await fetch(`${b.server.url}/api/me/workflows/flow/edit`, {
+      method: 'POST',
+      headers: { cookie: b.memberCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ instruction: '改点东西', stream: false }),
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('content-type')).toContain('application/json')
+    expect(b.edit.editHadOnChunk).toEqual([false])
   })
 })

@@ -32,6 +32,8 @@
  * authoring deserve to show up in the audit trail.
  */
 
+import { randomUUID } from 'node:crypto'
+
 import type { Hub, Logger, ParticipantId } from '@aipehub/core'
 import { MockLlmProvider, type LlmProvider } from '@aipehub/llm'
 import { AnthropicProvider } from '@aipehub/llm-anthropic'
@@ -77,6 +79,14 @@ export interface WorkflowAssistSurface {
     contextHints?: WorkflowAssistantPayload['contextHints']
     /** Caller (admin) participant id — stamped onto the dispatched task's `from`. */
     by: ParticipantId
+    /**
+     * WFEDIT-D4 — live LLM chunks for THIS call only. Routed per-call (a
+     * private key stamped into the dispatched payload), never via the global
+     * transcript stream — so a member-facing caller can relay the typing
+     * without ever seeing another task's chunks. Best-effort: a throwing sink
+     * never breaks the assist call. Optional — absent ⇒ no streaming.
+     */
+    onChunk?: (chunk: string) => void
   }): Promise<WorkflowAssistantOutput>
 }
 
@@ -254,6 +264,14 @@ export function createWorkflowAssistAgent(deps: {
     }
   }
 
+  // WFEDIT-D4 — per-call chunk sinks. An assist caller that wants live typing
+  // registers a sink under a private random key; the key rides inside the
+  // dispatched payload, so the agent's (single, constructor-level) stream hook
+  // can route each chunk back to exactly the call that triggered it. This is
+  // how a MEMBER-facing caller streams safely: chunks flow up the call stack
+  // of its own request, never via the global admin transcript stream.
+  const assistChunkSinks = new Map<string, (chunk: string) => void>()
+
   // Phase 13 follow-up — pipe LLM stream chunks into the transcript so
   // the admin UI's assist modal can show the LLM typing in real time
   // (mirrors what LocalAgentPool does for user-authored managed agents).
@@ -273,6 +291,17 @@ export function createWorkflowAssistAgent(deps: {
         err: err instanceof Error ? err.message : String(err),
       })
     }
+    // Per-call routing: only text deltas — tool_use/usage/end chunks are
+    // protocol bookkeeping a typing preview has no use for. Concatenating the
+    // text chunks reproduces the final response byte-for-byte (llm contract).
+    const sinkKey = (task.payload as { __streamSinkKey?: unknown } | undefined)?.__streamSinkKey
+    if (typeof sinkKey === 'string' && chunk.type === 'text' && chunk.text) {
+      try {
+        assistChunkSinks.get(sinkKey)?.(chunk.text)
+      } catch {
+        /* a throwing caller sink must never break the assist call */
+      }
+    }
   }
 
   const agent = new WorkflowAssistantAgent(agentOpts)
@@ -289,26 +318,40 @@ export function createWorkflowAssistAgent(deps: {
     async assist(input) {
       const payload: WorkflowAssistantPayload = { description: input.description }
       if (input.contextHints) payload.contextHints = input.contextHints
-      const result = await hub.dispatch({
-        from: input.by,
-        strategy: { kind: 'capability', capabilities: [WORKFLOW_ASSISTANT_CAPABILITY] },
-        payload,
-        title: 'workflow:assist',
-      })
-      if (result.kind !== 'ok') {
-        // Surface the failure reason verbatim — the Web layer wraps it
-        // into a 500 response body.
-        const reason =
-          result.kind === 'failed'
-            ? result.error
-            : result.kind === 'cancelled'
-              ? `cancelled: ${result.reason}`
-              : result.kind === 'no_participant'
-                ? `no participant for capability ${WORKFLOW_ASSISTANT_CAPABILITY}: ${result.reason}`
-                : `unexpected result kind: ${result.kind}`
-        throw new Error(`workflow:assist dispatch failed — ${reason}`)
+      // WFEDIT-D4 — one-shot private key ties THIS dispatch's chunks to THIS
+      // caller's sink. The key only ever reaches the sink registry and the
+      // task payload (assistant tolerates extra payload fields), and is
+      // deleted in finally so a sink can never outlive its call.
+      let sinkKey: string | undefined
+      if (input.onChunk) {
+        sinkKey = randomUUID()
+        assistChunkSinks.set(sinkKey, input.onChunk)
+        ;(payload as unknown as Record<string, unknown>).__streamSinkKey = sinkKey
       }
-      return result.output as WorkflowAssistantOutput
+      try {
+        const result = await hub.dispatch({
+          from: input.by,
+          strategy: { kind: 'capability', capabilities: [WORKFLOW_ASSISTANT_CAPABILITY] },
+          payload,
+          title: 'workflow:assist',
+        })
+        if (result.kind !== 'ok') {
+          // Surface the failure reason verbatim — the Web layer wraps it
+          // into a 500 response body.
+          const reason =
+            result.kind === 'failed'
+              ? result.error
+              : result.kind === 'cancelled'
+                ? `cancelled: ${result.reason}`
+                : result.kind === 'no_participant'
+                  ? `no participant for capability ${WORKFLOW_ASSISTANT_CAPABILITY}: ${result.reason}`
+                  : `unexpected result kind: ${result.kind}`
+          throw new Error(`workflow:assist dispatch failed — ${reason}`)
+        }
+        return result.output as WorkflowAssistantOutput
+      } finally {
+        if (sinkKey) assistChunkSinks.delete(sinkKey)
+      }
     },
   }
 }

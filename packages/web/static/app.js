@@ -713,12 +713,27 @@
         headers: { 'content-type': 'application/json' },
         // D3: prior turns (NOT this one) ride along so the AI has the session
         // context. Failed turns included — they say what was rejected.
+        // D4: stream=true asks for NDJSON (live typing). Errors raised before
+        // the stream opens (auth / rate-limit / 503) still come back as plain
+        // JSON, so both shapes are handled below.
         body: JSON.stringify({
           instruction,
+          stream: true,
           history: editChat.map((t) => ({ instruction: t.instruction, outcome: t.outcome })),
         }),
       })
-      const j = await r.json().catch(() => ({}))
+      let j
+      if ((r.headers.get('content-type') || '').includes('application/x-ndjson') && r.body) {
+        j = await readEditStream(r)
+        removeEditStreamPane()
+        if (!j) {
+          status.className = 'me-status error'
+          status.textContent = '连接中断,没有收到结果。改动可能仍在后台保存,请刷新看看。'
+          return
+        }
+      } else {
+        j = await r.json().catch(() => ({}))
+      }
       if (r.ok && j && j.ok !== false) {
         status.className = 'me-status ok'
         const applied = j.applied === 'published' ? '已发布上线' : '已存为草稿'
@@ -758,6 +773,7 @@
       })
       renderEditChat()
     } catch (err) {
+      removeEditStreamPane()
       status.className = 'me-status error'
       status.textContent = `保存失败: ${err?.message || err}`
     }
@@ -776,6 +792,74 @@
     } catch {
       /* keep the success message; the next manual reload will resync */
     }
+  }
+
+  // WFEDIT-D4 — consume the NDJSON edit stream: paint `chunk` lines into the
+  // live-typing pane as they arrive, return the final `result` line (or null
+  // when the connection died before one arrived).
+  async function readEditStream(r) {
+    const reader = r.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    let result = null
+    const handleLine = (line) => {
+      if (!line.trim()) return
+      let msg
+      try {
+        msg = JSON.parse(line)
+      } catch {
+        return
+      }
+      if (msg && msg.kind === 'chunk' && typeof msg.text === 'string') appendEditStreamText(msg.text)
+      else if (msg && msg.kind === 'result') result = msg
+    }
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let nl
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          handleLine(buf.slice(0, nl))
+          buf = buf.slice(nl + 1)
+        }
+      }
+      if (buf) handleLine(buf)
+    } catch {
+      /* dropped mid-stream — caller treats a missing result as the error */
+    }
+    return result
+  }
+
+  // The blue live-typing pane (the /me twin of the admin assist preview).
+  // Created on the first chunk, just above the instruction form; torn down
+  // once the result lands — the diff + chat then carry the durable outcome.
+  function ensureEditStreamPane() {
+    const body = document.getElementById('me-wf-edit-body')
+    if (!body) return null
+    let el = body.querySelector('.me-wf-stream')
+    if (!el) {
+      el = document.createElement('div')
+      el.className = 'me-wf-stream'
+      el.innerHTML = '<div class="me-wf-stream-head">✨ AI 正在打字…</div><pre></pre>'
+      const label = body.querySelector('label')
+      if (label) label.before(el)
+      else body.appendChild(el)
+    }
+    return el
+  }
+
+  function appendEditStreamText(text) {
+    const el = ensureEditStreamPane()
+    if (!el) return
+    const pre = el.querySelector('pre')
+    if (!pre) return
+    pre.textContent += text
+    pre.scrollTop = pre.scrollHeight
+  }
+
+  function removeEditStreamPane() {
+    document.querySelector('#me-wf-edit-body .me-wf-stream')?.remove()
   }
 
   // WFEDIT-D2 — show what the AI actually changed. The host edit pipeline is

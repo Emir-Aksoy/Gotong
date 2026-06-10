@@ -2223,6 +2223,19 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   border: 1px solid #cfe7d8; border-radius: 0 6px 6px 6px; color: #1d6a3a;
 }
 .me-wf-chat-outcome.err { background: #fdf0f0; border-color: #f0cccc; color: #9d2424; }
+/* WFEDIT-D4 — live AI typing pane (the /me twin of the admin assist preview) */
+.me-wf-stream {
+  margin: 0.5rem 0 0.6rem; border: 1px solid #c9dcf7; border-radius: 6px;
+  background: #f3f8ff; overflow: hidden;
+}
+.me-wf-stream-head {
+  padding: 0.25rem 0.55rem; font-size: 0.78rem; color: #1a3e6e;
+  background: #e4eefc; border-bottom: 1px solid #d4e3fb;
+}
+.me-wf-stream pre {
+  margin: 0; padding: 0.45rem 0.55rem; max-height: 14rem; overflow: auto;
+  font-size: 0.76rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+}
 /* Phase 19 P1-M5 — member recent runs (status pill) + my AI helpers + uploader */
 .me-run-status {
   display: inline-block; padding: 0 0.5em; font-size: 0.78rem; line-height: 1.7;
