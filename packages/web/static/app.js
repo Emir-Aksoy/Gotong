@@ -583,7 +583,14 @@
   // The boundary is enforced server-side — the 🔒 notice here is honest UX,
   // not the security control.
 
+  // WFEDIT-D3 — this edit session's conversation (client-held; the hub stores
+  // nothing between requests). Each turn: {instruction, outcome, ok}. Sent with
+  // every edit so the AI resolves "再…一点 / 改回去" references, and rendered as
+  // a chat log. Reset whenever the editor opens (a new selection = new session).
+  let editChat = []
+
   function resetWorkflowEditor() {
+    editChat = []
     const body = document.getElementById('me-wf-edit-body')
     const status = document.getElementById('me-wf-edit-status')
     if (body) {
@@ -704,31 +711,52 @@
       const r = await fetch(`/api/me/workflows/${encodeURIComponent(workflowId)}/edit`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ instruction }),
+        // D3: prior turns (NOT this one) ride along so the AI has the session
+        // context. Failed turns included — they say what was rejected.
+        body: JSON.stringify({
+          instruction,
+          history: editChat.map((t) => ({ instruction: t.instruction, outcome: t.outcome })),
+        }),
       })
       const j = await r.json().catch(() => ({}))
       if (r.ok && j && j.ok !== false) {
         status.className = 'me-status ok'
         const applied = j.applied === 'published' ? '已发布上线' : '已存为草稿'
         status.innerHTML = `✅ ${applied}。${j.explanation ? escape(j.explanation) : ''}`
+        editChat.push({
+          instruction,
+          outcome: `${applied}。${j.explanation || ''}`.trim(),
+          ok: true,
+        })
         // The edit may have changed the inputs — refresh the editor (new YAML)
         // without clobbering this success message. The dispatch form above is
         // refreshed on the next home render; we keep the selection stable here.
         await refreshEditorBody(workflowId)
         appendEditDiff(j.diff)
+        renderEditChat()
         return
       }
       // Failure. A boundary_locked rejection gets the per-violation detail list
       // so the member sees exactly which cross-hub part they tried to move.
       status.className = 'me-status error'
-      let html = escape(editorErrorText(r.status, j))
-      if (j && Array.isArray(j.violations) && j.violations.length) {
-        html +=
-          '<ul>' +
-          j.violations.map((v) => `<li>${escape((v && (v.detail || v.kind)) || '')}</li>`).join('') +
-          '</ul>'
+      const errText = editorErrorText(r.status, j)
+      let html = escape(errText)
+      const violations =
+        j && Array.isArray(j.violations) && j.violations.length
+          ? j.violations.map((v) => (v && (v.detail || v.kind)) || '').filter(Boolean)
+          : []
+      if (violations.length) {
+        html += '<ul>' + violations.map((v) => `<li>${escape(v)}</li>`).join('') + '</ul>'
       }
       status.innerHTML = html
+      // A refused turn is still conversation — "换个说法" needs to know what
+      // was just rejected. (Transport errors below are not: no AI saw them.)
+      editChat.push({
+        instruction,
+        outcome: `失败:${errText}${violations.length ? `(${violations.join('; ')})` : ''}`,
+        ok: false,
+      })
+      renderEditChat()
     } catch (err) {
       status.className = 'me-status error'
       status.textContent = `保存失败: ${err?.message || err}`
@@ -800,6 +828,36 @@
     const kind = l && l.kind === 'add' ? 'add' : l && l.kind === 'del' ? 'del' : 'same'
     const sign = kind === 'add' ? '+' : kind === 'del' ? '-' : ' '
     return `<div class="me-wf-diff-${kind}">${sign} ${escape(String((l && l.text) || ''))}</div>`
+  }
+
+  // WFEDIT-D3 — render the session's conversation just above the instruction
+  // form (chat mental model: history on top, input at the bottom). Creates or
+  // updates in place, so it works on both paths: after a success the body was
+  // re-rendered (div gone, recreate); after a refusal it wasn't (update).
+  function renderEditChat() {
+    const body = document.getElementById('me-wf-edit-body')
+    if (!body) return
+    let el = body.querySelector('.me-wf-chat')
+    if (!editChat.length) {
+      if (el) el.remove()
+      return
+    }
+    if (!el) {
+      el = document.createElement('div')
+      el.className = 'me-wf-chat'
+      const label = body.querySelector('label')
+      if (label) label.before(el)
+      else body.appendChild(el)
+    }
+    el.innerHTML =
+      '<h4>这次会话的修改记录</h4>' +
+      editChat
+        .map(
+          (t) =>
+            `<div class="me-wf-chat-turn"><div class="me-wf-chat-user">你:${escape(t.instruction)}</div>` +
+            `<div class="me-wf-chat-outcome${t.ok ? '' : ' err'}">${escape(t.outcome || '')}</div></div>`,
+        )
+        .join('')
   }
 
   // Friendly message for an editor error response. Prefers the server's human

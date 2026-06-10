@@ -33,7 +33,12 @@ const BOUNDARY = {
 /** Records every call so the tests can assert userId forcing + pass-through. */
 class FakeWorkflowEdit implements MeWorkflowEditSurface {
   readonly editableCalls: Array<{ workflowId: string; userId: string }> = []
-  readonly editCalls: Array<{ workflowId: string; instruction: string; userId: string }> = []
+  readonly editCalls: Array<{
+    workflowId: string
+    instruction: string
+    userId: string
+    history?: Array<{ instruction: string; outcome?: string }>
+  }> = []
   /** What `editableView` returns (default: a happy cross-hub view). */
   editableResult: MeWorkflowEditableResult = {
     ok: true,
@@ -62,6 +67,7 @@ class FakeWorkflowEdit implements MeWorkflowEditSurface {
     workflowId: string
     instruction: string
     userId: string
+    history?: Array<{ instruction: string; outcome?: string }>
   }): Promise<MeWorkflowEditResult> {
     this.editCalls.push(args)
     return this.editResult
@@ -243,6 +249,50 @@ describe('/api/me/workflows/:id/edit', () => {
         { kind: 'add', text: '      payload: { note: new }' },
       ])
     }
+  })
+
+  // WFEDIT-D3 — the client re-sends its conversation each turn. The route only
+  // shape-coerces ({instruction: string} turns survive, garbage drops); the host
+  // service owns trimming/clipping/turn caps.
+  it('POST forwards a shape-coerced history to the surface', async () => {
+    const res = await fetch(`${b.server.url}/api/me/workflows/flow/edit`, {
+      method: 'POST',
+      headers: { cookie: b.memberCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        instruction: '再礼貌一点',
+        history: [
+          { instruction: '把提示语改礼貌', outcome: '已发布上线。' },
+          { instruction: '改出口', outcome: 42 }, // non-string outcome dropped, turn kept
+          { instruction: 7 }, // non-string instruction → turn dropped
+          'garbage', // non-object → dropped
+          null,
+        ],
+      }),
+    })
+    expect(res.status).toBe(200)
+    expect(b.edit.editCalls[0]?.history).toEqual([
+      { instruction: '把提示语改礼貌', outcome: '已发布上线。' },
+      { instruction: '改出口' },
+    ])
+  })
+
+  it('POST with a non-array history → 400 (never calls the surface)', async () => {
+    const res = await fetch(`${b.server.url}/api/me/workflows/flow/edit`, {
+      method: 'POST',
+      headers: { cookie: b.memberCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ instruction: '改点东西', history: 'not-an-array' }),
+    })
+    expect(res.status).toBe(400)
+    expect(b.edit.editCalls).toHaveLength(0)
+  })
+
+  it('POST without history omits the field entirely (no empty array)', async () => {
+    await fetch(`${b.server.url}/api/me/workflows/flow/edit`, {
+      method: 'POST',
+      headers: { cookie: b.memberCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ instruction: '改点东西' }),
+    })
+    expect(b.edit.editCalls[0]).not.toHaveProperty('history')
   })
 
   it('POST trims the instruction and rejects an empty one → 400 (never calls the surface)', async () => {

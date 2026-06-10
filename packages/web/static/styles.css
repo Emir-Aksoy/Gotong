@@ -2210,6 +2210,19 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .me-wf-diff-add { color: #1d6a3a; background: #dcf2e3; }
 .me-wf-diff-del { color: #9d2424; background: #fbe4e4; }
 .me-wf-diff-skip { color: #888; font-style: italic; }
+/* WFEDIT-D3 — per-session edit conversation log */
+.me-wf-chat { margin: 0.5rem 0 0.6rem; font-size: 0.82rem; }
+.me-wf-chat h4 { margin: 0 0 0.3rem; font-size: 0.8rem; color: #666; }
+.me-wf-chat-turn { margin: 0 0 0.45rem; }
+.me-wf-chat-user {
+  padding: 0.3rem 0.55rem; background: #eef4fe; border: 1px solid #d4e3fb;
+  border-radius: 6px 6px 6px 0; color: #1a3e6e;
+}
+.me-wf-chat-outcome {
+  margin: 0.15rem 0 0 1rem; padding: 0.3rem 0.55rem; background: #f2f8f4;
+  border: 1px solid #cfe7d8; border-radius: 0 6px 6px 6px; color: #1d6a3a;
+}
+.me-wf-chat-outcome.err { background: #fdf0f0; border-color: #f0cccc; color: #9d2424; }
 /* Phase 19 P1-M5 — member recent runs (status pill) + my AI helpers + uploader */
 .me-run-status {
   display: inline-block; padding: 0 0.5em; font-size: 0.78rem; line-height: 1.7;

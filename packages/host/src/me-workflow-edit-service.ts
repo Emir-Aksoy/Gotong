@@ -119,12 +119,30 @@ export type MeWorkflowEditableResult =
     }
   | { ok: false; reason: Extract<MeWorkflowEditDenyReason, 'forbidden' | 'not_found' | 'no_source'>; message: string }
 
+/**
+ * WFEDIT-D3 — one prior turn of this member's edit conversation. The CLIENT
+ * holds the conversation (the hub stores nothing between requests, same as the
+ * rest of the stateless editor); each request re-sends it and the server
+ * re-sanitizes. `outcome` carries what happened — a success summary or the
+ * refusal text — so the model knows a rejected approach shouldn't be retried.
+ */
+export interface MeWorkflowEditTurn {
+  instruction: string
+  outcome?: string
+}
+
 export interface MeWorkflowEditRequest {
   workflowId: string
   /** The member's plain-language change request. */
   instruction: string
   /** The authenticated member (server-resolved; NEVER client-supplied). */
   userId: string
+  /**
+   * WFEDIT-D3 — prior turns of this edit session (client-held). Advisory
+   * context only: server-capped + sanitized, folded into the assistant prompt
+   * so "再礼貌一点 / 还是改回去" style references resolve.
+   */
+  history?: ReadonlyArray<MeWorkflowEditTurn>
 }
 
 // --- duck-typed dependencies ------------------------------------------------
@@ -215,6 +233,7 @@ export class MeWorkflowEditService {
    */
   async edit(req: MeWorkflowEditRequest): Promise<MeWorkflowEditResult> {
     const { workflowId, instruction, userId } = req
+    const history = sanitizeEditHistory(req.history)
 
     // 1. RBAC — editor+ on THIS workflow. (owner outranks editor.)
     if (!this.deps.grants.hasWorkflowGrant(workflowId, userId, 'editor')) {
@@ -248,7 +267,7 @@ export class MeWorkflowEditService {
     let assist: WorkflowAssistantOutput
     try {
       assist = await this.deps.assist.assist({
-        description: composeEditPrompt(currentYaml, instruction),
+        description: composeEditPrompt(currentYaml, instruction, history),
         contextHints: this.contextHints(),
         by: userId,
       })
@@ -403,18 +422,67 @@ export class MeWorkflowEditService {
 
 // --- helpers ----------------------------------------------------------------
 
+/** WFEDIT-D3 history caps — advisory context, not a transcript store. */
+const MAX_HISTORY_TURNS = 6
+const MAX_HISTORY_FIELD_CHARS = 500
+
 /**
- * The prompt the assistant sees: the current YAML + the member's request, with
- * a hint to keep schema/id/trigger stable. The hint is belt; the boundary lock
- * is suspenders — a model that ignores the hint is rejected, not trusted.
+ * WFEDIT-D3 — server-authoritative history sanitizer. The client re-sends the
+ * conversation on every request (the hub stores nothing between edits), so
+ * nothing in it is trusted: non-object / blank-instruction turns are dropped,
+ * fields are trimmed + clipped, and only the LAST N turns survive — the recent
+ * turns are the ones "再…一点 / 改回去" style references actually point at.
  */
-function composeEditPrompt(currentYaml: string, instruction: string): string {
+export function sanitizeEditHistory(history: unknown): MeWorkflowEditTurn[] {
+  if (!Array.isArray(history)) return []
+  const out: MeWorkflowEditTurn[] = []
+  for (const t of history) {
+    if (!t || typeof t !== 'object') continue
+    const rawInstruction = (t as { instruction?: unknown }).instruction
+    const instruction = typeof rawInstruction === 'string' ? rawInstruction.trim() : ''
+    if (!instruction) continue
+    const rawOutcome = (t as { outcome?: unknown }).outcome
+    const outcome = typeof rawOutcome === 'string' ? rawOutcome.trim() : ''
+    out.push({ instruction: clip(instruction), ...(outcome ? { outcome: clip(outcome) } : {}) })
+  }
+  return out.slice(-MAX_HISTORY_TURNS)
+}
+
+function clip(s: string): string {
+  return s.length > MAX_HISTORY_FIELD_CHARS ? `${s.slice(0, MAX_HISTORY_FIELD_CHARS)}…` : s
+}
+
+/**
+ * The prompt the assistant sees: the current YAML + (D3) the prior turns of
+ * this edit session + the member's request, with a hint to keep
+ * schema/id/trigger stable. The hint is belt; the boundary lock is suspenders —
+ * a model that ignores the hint is rejected, not trusted.
+ */
+function composeEditPrompt(
+  currentYaml: string,
+  instruction: string,
+  history: ReadonlyArray<MeWorkflowEditTurn> = [],
+): string {
+  // The conversation is context, not instructions to re-apply: the YAML above
+  // ALREADY contains every successful prior edit, and a failed turn documents a
+  // rejected approach (e.g. boundary-locked) the model must not retry verbatim.
+  const conversation = history.length
+    ? [
+        '',
+        '=== 之前的修改对话(仅供理解上下文) ===',
+        '注意:上面的 YAML **已经包含**这些对话里成功的改动;标了失败的要求说明那种改法被拒绝了,不要原样重试。这段对话只用来理解用户这次说法里的指代(比如「再礼貌一点」「还是改回去」)。',
+        ...history.map(
+          (t, i) => `${i + 1}. 用户: ${t.instruction}${t.outcome ? `\n   结果: ${t.outcome}` : ''}`,
+        ),
+      ]
+    : []
   return [
     '下面是一个已经存在的工作流 YAML。请根据用户的修改要求改写它,然后输出**完整的**修改后 YAML(不要只输出改动片段)。',
     '除非用户明确要求,否则保持 schema、工作流 id、trigger(入口能力)不变,也不要新增或改动任何派发到别的 hub 的步骤。',
     '',
     '=== 当前工作流 YAML ===',
     currentYaml.trim(),
+    ...conversation,
     '',
     '=== 用户的修改要求 ===',
     instruction.trim(),

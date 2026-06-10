@@ -18,7 +18,9 @@ import type { WorkflowAssistantOutput } from '@aipehub/workflow-assistant'
 
 import {
   MeWorkflowEditService,
+  sanitizeEditHistory,
   type MeWorkflowEditDeps,
+  type MeWorkflowEditTurn,
 } from '../src/me-workflow-edit-service.js'
 import type { PeerCapabilityView } from '../src/workflow-controller.js'
 
@@ -134,6 +136,8 @@ interface BuildOpts {
 function buildDeps(opts: BuildOpts) {
   const calls = {
     assist: 0,
+    /** D3 — every prompt the assistant saw (history-folding assertions). */
+    assistDescriptions: [] as string[],
     publish: [] as Array<{ id: string; text?: string; by?: string }>,
     saveDraft: [] as Array<{ text: string; by?: string }>,
   }
@@ -167,8 +171,9 @@ function buildDeps(opts: BuildOpts) {
       },
     },
     assist: {
-      assist: async () => {
+      assist: async (input) => {
         calls.assist++
+        calls.assistDescriptions.push(input.description)
         if (opts.assist instanceof Error) throw opts.assist
         return opts.assist
       },
@@ -535,5 +540,84 @@ describe('MeWorkflowEditService.editableView', () => {
     const r = await service.editableView('flow', 'alice')
     expect(r.ok).toBe(true)
     if (r.ok) expect(r.editable).toBe(false)
+  })
+})
+
+// --- D3: edit conversation history ------------------------------------------
+
+describe('MeWorkflowEditService — edit conversation history (D3)', () => {
+  it('folds prior turns into the assistant prompt, before the current request', async () => {
+    const { service, calls } = buildDeps({ currentYaml: LOCAL_WF, assist: assistOk(LOCAL_WF) })
+    const r = await service.edit({
+      ...REQ,
+      instruction: '再礼貌一点',
+      history: [
+        { instruction: '把提示语改得礼貌一些', outcome: '已发布上线。把提示语改礼貌了。' },
+        { instruction: '把出口指到 express', outcome: '失败:跨 hub 出入口不能改。' },
+      ],
+    })
+    expect(r.ok).toBe(true)
+    const prompt = calls.assistDescriptions[0]!
+    expect(prompt).toContain('=== 之前的修改对话')
+    expect(prompt).toContain('1. 用户: 把提示语改得礼貌一些')
+    expect(prompt).toContain('结果: 已发布上线。把提示语改礼貌了。')
+    expect(prompt).toContain('2. 用户: 把出口指到 express')
+    expect(prompt).toContain('结果: 失败:跨 hub 出入口不能改。')
+    // Conversation sits between the YAML and the current request.
+    expect(prompt.indexOf('=== 之前的修改对话')).toBeGreaterThan(prompt.indexOf('=== 当前工作流 YAML ==='))
+    expect(prompt.indexOf('=== 之前的修改对话')).toBeLessThan(prompt.indexOf('=== 用户的修改要求 ==='))
+  })
+
+  it('omits the conversation section when there is no history', async () => {
+    const { service, calls } = buildDeps({ currentYaml: LOCAL_WF, assist: assistOk(LOCAL_WF) })
+    const r = await service.edit({ ...REQ, instruction: '改点东西' })
+    expect(r.ok).toBe(true)
+    expect(calls.assistDescriptions[0]).not.toContain('之前的修改对话')
+  })
+
+  it('caps the prompt at the LAST 6 turns', async () => {
+    const { service, calls } = buildDeps({ currentYaml: LOCAL_WF, assist: assistOk(LOCAL_WF) })
+    const history = Array.from({ length: 8 }, (_, i) => ({ instruction: `turn-${i + 1}-要求` }))
+    const r = await service.edit({ ...REQ, instruction: '继续', history })
+    expect(r.ok).toBe(true)
+    const prompt = calls.assistDescriptions[0]!
+    expect(prompt).not.toContain('turn-1-要求')
+    expect(prompt).not.toContain('turn-2-要求')
+    expect(prompt).toContain('turn-3-要求')
+    expect(prompt).toContain('turn-8-要求')
+  })
+})
+
+describe('sanitizeEditHistory (D3 pure)', () => {
+  it('drops malformed turns and trims fields', () => {
+    const out = sanitizeEditHistory([
+      'just a string',
+      null,
+      42,
+      { instruction: 99 },
+      { instruction: '   ' },
+      { instruction: '  好要求  ', outcome: '  有结果  ' },
+      { instruction: '没结果的要求', outcome: 7 },
+    ])
+    expect(out).toEqual([
+      { instruction: '好要求', outcome: '有结果' },
+      { instruction: '没结果的要求' },
+    ])
+  })
+
+  it('clips over-long fields to 500 chars + ellipsis', () => {
+    const long = 'x'.repeat(600)
+    const out = sanitizeEditHistory([{ instruction: long, outcome: long }])
+    expect(out[0]!.instruction).toHaveLength(501)
+    expect(out[0]!.instruction.endsWith('…')).toBe(true)
+    expect(out[0]!.outcome).toHaveLength(501)
+  })
+
+  it('keeps only the last 6 turns and tolerates non-array input', () => {
+    const turns: MeWorkflowEditTurn[] = Array.from({ length: 9 }, (_, i) => ({ instruction: `t${i + 1}` }))
+    const out = sanitizeEditHistory(turns)
+    expect(out.map((t) => t.instruction)).toEqual(['t4', 't5', 't6', 't7', 't8', 't9'])
+    expect(sanitizeEditHistory(undefined)).toEqual([])
+    expect(sanitizeEditHistory('nope')).toEqual([])
   })
 })

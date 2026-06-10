@@ -608,7 +608,13 @@ export interface MeWorkflowEditSurface {
   /** Current YAML + governed boundary + crossHub flag (editor-gated server-side). */
   editableView(workflowId: string, userId: string): Promise<MeWorkflowEditableResult>
   /** Apply a member NL edit, boundary-locked + structure-gated (editor-gated server-side). */
-  edit(args: { workflowId: string; instruction: string; userId: string }): Promise<MeWorkflowEditResult>
+  edit(args: {
+    workflowId: string
+    instruction: string
+    userId: string
+    /** WFEDIT-D3 — prior turns of this edit session (client-held; host re-sanitizes + caps). */
+    history?: Array<{ instruction: string; outcome?: string }>
+  }): Promise<MeWorkflowEditResult>
 }
 
 export interface HandleMeRouteCtx {
@@ -1328,7 +1334,30 @@ async function handleMeWorkflowEdit(
     sendJson(res, { error: '请用一句话描述你想怎么改这个工作流。', code: 'bad_request' }, 400)
     return
   }
-  const r = await ctx.workflowEdit.edit({ workflowId, instruction, userId })
+  // WFEDIT-D3 — optional conversation history. Web only shape-coerces (duck
+  // discipline): keep `{instruction: string}` turns, drop the rest; the host
+  // service is the authority on trimming/clipping/turn caps.
+  const rawHistory = body && typeof body === 'object' ? (body as { history?: unknown }).history : undefined
+  if (rawHistory !== undefined && !Array.isArray(rawHistory)) {
+    sendJson(res, { error: 'history 必须是一个数组。', code: 'bad_request' }, 400)
+    return
+  }
+  const history = (rawHistory ?? [])
+    .filter(
+      (t): t is { instruction: string; outcome?: unknown } =>
+        !!t && typeof t === 'object' && typeof (t as { instruction?: unknown }).instruction === 'string',
+    )
+    .slice(-12)
+    .map((t) => ({
+      instruction: t.instruction,
+      ...(typeof t.outcome === 'string' ? { outcome: t.outcome } : {}),
+    }))
+  const r = await ctx.workflowEdit.edit({
+    workflowId,
+    instruction,
+    userId,
+    ...(history.length ? { history } : {}),
+  })
   if (r.ok) {
     sendJson(res, r, 200)
     return
