@@ -715,6 +715,7 @@
         // without clobbering this success message. The dispatch form above is
         // refreshed on the next home render; we keep the selection stable here.
         await refreshEditorBody(workflowId)
+        appendEditDiff(j.diff)
         return
       }
       // Failure. A boundary_locked rejection gets the per-violation detail list
@@ -747,6 +748,58 @@
     } catch {
       /* keep the success message; the next manual reload will resync */
     }
+  }
+
+  // WFEDIT-D2 — show what the AI actually changed. The host edit pipeline is
+  // the only place holding both sides of the same run, so the diff arrives in
+  // the response; this stays a dumb renderer. Must run AFTER refreshEditorBody
+  // because that re-render replaces the whole body.
+  function appendEditDiff(diff) {
+    const body = document.getElementById('me-wf-edit-body')
+    if (!body || !Array.isArray(diff)) return
+    if (!diff.some((l) => l && (l.kind === 'add' || l.kind === 'del'))) return
+    const el = document.createElement('details')
+    el.className = 'me-wf-diff'
+    el.open = true
+    el.innerHTML =
+      `<summary>查看这次改动</summary>` +
+      `<div class="me-wf-diff-rows">${renderDiffRows(diff)}</div>`
+    const yamlDetails = body.querySelector('.me-wf-edit-yaml')
+    if (yamlDetails) yamlDetails.before(el)
+    else body.prepend(el)
+  }
+
+  // Collapse long unchanged runs to "… N 行未变 …", keeping 2 context lines
+  // next to each change (none at the very start/end of the file).
+  function renderDiffRows(diff) {
+    const out = []
+    let i = 0
+    while (i < diff.length) {
+      if (!diff[i] || diff[i].kind !== 'same') {
+        out.push(diffRow(diff[i]))
+        i++
+        continue
+      }
+      let j = i
+      while (j < diff.length && diff[j] && diff[j].kind === 'same') j++
+      const keepHead = i === 0 ? 0 : 2
+      const keepTail = j === diff.length ? 0 : 2
+      if (j - i > keepHead + keepTail + 1) {
+        for (let k = i; k < i + keepHead; k++) out.push(diffRow(diff[k]))
+        out.push(`<div class="me-wf-diff-skip">… ${j - i - keepHead - keepTail} 行未变 …</div>`)
+        for (let k = j - keepTail; k < j; k++) out.push(diffRow(diff[k]))
+      } else {
+        for (let k = i; k < j; k++) out.push(diffRow(diff[k]))
+      }
+      i = j
+    }
+    return out.join('')
+  }
+
+  function diffRow(l) {
+    const kind = l && l.kind === 'add' ? 'add' : l && l.kind === 'del' ? 'del' : 'same'
+    const sign = kind === 'add' ? '+' : kind === 'del' ? '-' : ' '
+    return `<div class="me-wf-diff-${kind}">${sign} ${escape(String((l && l.text) || ''))}</div>`
   }
 
   // Friendly message for an editor error response. Prefers the server's human
