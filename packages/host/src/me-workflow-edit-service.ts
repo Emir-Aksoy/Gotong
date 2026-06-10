@@ -46,6 +46,7 @@ import {
   type PeerCapEntry,
   type WorkflowBoundary,
 } from './workflow-edit-guard.js'
+import { computeLineDiff, type WorkflowEditDiffLine } from './workflow-edit-diff.js'
 import type { PeerCapabilityView } from './workflow-controller.js'
 
 /** The reasons a member edit (or editable-view fetch) can be refused. */
@@ -77,6 +78,11 @@ export interface MeWorkflowEditOk {
    * member SEES what stayed locked (empty egress ⇒ a purely-local workflow).
    */
   boundary: WorkflowBoundary
+  /**
+   * WFEDIT-D1 — line diff pre-edit → persisted YAML, so the UI shows exactly
+   * what the AI changed instead of two blobs to eyeball.
+   */
+  diff: WorkflowEditDiffLine[]
   /** Advisory deep-check (unknown agent/capability warnings) — non-blocking. */
   deepCheck?: WorkflowAssistantOutput['deepCheck']
 }
@@ -313,6 +319,7 @@ export class MeWorkflowEditService {
       yaml: assist.yaml,
       explanation: assist.explanation,
       boundary: workflowBoundary(edited, localCapabilities, peerEntries, sticky),
+      diff: computeLineDiff(currentYaml, assist.yaml),
       ...(assist.deepCheck ? { deepCheck: assist.deepCheck } : {}),
     }
   }

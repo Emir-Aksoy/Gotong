@@ -235,6 +235,15 @@ describe('MeWorkflowEditService.edit — local edits flow through', () => {
       expect(r.applied).toBe('published')
       expect(r.explanation).toBe('把提示改长了')
       expect(r.boundary.egress).toEqual([]) // purely local
+      // WFEDIT-D1 — the result carries a line diff of what actually changed:
+      // exactly the payload line was replaced, everything else reads `same`.
+      expect(r.diff.filter((l) => l.kind === 'del').map((l) => l.text)).toEqual([
+        '        payload: { note: old }',
+      ])
+      expect(r.diff.filter((l) => l.kind === 'add').map((l) => l.text)).toEqual([
+        '        payload: { note: NEW-AND-LONGER }',
+      ])
+      expect(r.diff.some((l) => l.kind === 'same')).toBe(true)
     }
     expect(calls.publish).toHaveLength(1)
     expect(calls.publish[0]?.text).toBe(edited)

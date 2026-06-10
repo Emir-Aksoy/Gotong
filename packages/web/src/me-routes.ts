@@ -588,6 +588,11 @@ export type MeWorkflowEditResult =
       yaml: string
       explanation: string
       boundary: MeWorkflowBoundaryView
+      /**
+       * WFEDIT-D1 — line diff pre-edit → persisted YAML (`same`/`add`/`del`),
+       * rendered by the member editor as "这次改了什么". Echoed verbatim.
+       */
+      diff?: Array<{ kind: string; text: string }>
       deepCheck?: unknown
     }
   | {

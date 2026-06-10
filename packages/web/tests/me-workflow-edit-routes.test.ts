@@ -211,6 +211,40 @@ describe('/api/me/workflows/:id/edit', () => {
     ])
   })
 
+  // WFEDIT-D1 — the host result now carries a line diff of what changed; the
+  // route is a verbatim echo, so the rows must ride through untouched for the
+  // member panel to render "这次改了什么".
+  it('POST rides the diff rows back verbatim on success', async () => {
+    b.edit.editResult = {
+      ok: true,
+      state: 'published',
+      applied: 'published',
+      yaml: 'schema: aipehub.workflow/v1\n',
+      explanation: '改了提示语。',
+      boundary: BOUNDARY,
+      diff: [
+        { kind: 'same', text: 'schema: aipehub.workflow/v1' },
+        { kind: 'del', text: '      payload: { note: old }' },
+        { kind: 'add', text: '      payload: { note: new }' },
+      ],
+    }
+    const res = await fetch(`${b.server.url}/api/me/workflows/flow/edit`, {
+      method: 'POST',
+      headers: { cookie: b.memberCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ instruction: '把备注换成 new' }),
+    })
+    expect(res.status).toBe(200)
+    const j = (await res.json()) as MeWorkflowEditResult
+    expect(j.ok).toBe(true)
+    if (j.ok) {
+      expect(j.diff).toEqual([
+        { kind: 'same', text: 'schema: aipehub.workflow/v1' },
+        { kind: 'del', text: '      payload: { note: old }' },
+        { kind: 'add', text: '      payload: { note: new }' },
+      ])
+    }
+  })
+
   it('POST trims the instruction and rejects an empty one → 400 (never calls the surface)', async () => {
     const res = await fetch(`${b.server.url}/api/me/workflows/flow/edit`, {
       method: 'POST',
