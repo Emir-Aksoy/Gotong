@@ -243,7 +243,6 @@ export interface DispatchBody {
   payload?: unknown
   title?: string
   weight?: number
-  priority?: number
   countContribution?: boolean
 }
 

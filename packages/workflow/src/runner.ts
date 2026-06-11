@@ -73,7 +73,6 @@ export interface HubLike {
     payload: unknown
     title?: string
     weight?: number
-    priority?: number
     // v5 C-M2 — per-node I/O data classes; the live Hub.dispatch stamps them
     // onto Task.dataClasses, gating federated dispatch at the node level.
     dataClasses?: readonly string[]
@@ -564,7 +563,6 @@ export class WorkflowRunner extends AgentParticipant {
     }
     if (spec.title !== undefined) opts.title = spec.title
     if (spec.weight !== undefined) opts.weight = spec.weight
-    if (spec.priority !== undefined) opts.priority = spec.priority
     // v5 C-M2 — node-level I/O authorization. Stamp the node's declared data
     // classes onto the task so the per-link outbound contract gates this
     // specific dispatch (a `pii` node refused on a `public`-only link while a

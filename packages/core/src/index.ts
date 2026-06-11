@@ -72,11 +72,6 @@ export type {
   SuspendNotifier,
 } from './scheduler.js'
 
-export {
-  PriorityQueueScheduler,
-  type PriorityQueueSchedulerOptions,
-} from './priority-scheduler.js'
-
 export { Transcript } from './transcript.js'
 
 export { createLogger } from './logger.js'

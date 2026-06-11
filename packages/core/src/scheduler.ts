@@ -7,9 +7,9 @@ const log = createLogger('scheduler')
 
 /**
  * Scheduler routes a Task to one or more Participants according to the task's
- * dispatch strategy and returns the resulting TaskResult. Custom schedulers
- * can implement the Scheduler interface to add policies (cost-aware, priority,
- * etc.) — the Hub will use whatever you give it.
+ * dispatch strategy and returns the resulting TaskResult. `DefaultScheduler`
+ * is the single production implementation; richer policies (cost-aware,
+ * priority queues) are roadmap, not seams.
  */
 
 export interface Scheduler {
@@ -113,6 +113,19 @@ export class DefaultScheduler implements Scheduler {
   ) {}
 
   dispatch(task: Task): Promise<TaskResult> {
+    // `Task.deadlineMs` is an absolute wall-clock deadline: a task already
+    // past it must never reach a participant (the wire-type contract since
+    // v0.7). Enforced here so the promise holds for every production hub —
+    // resumed tasks are immune because `Hub.resumeTask` strips the field (R10).
+    if (task.deadlineMs !== undefined && Date.now() > task.deadlineMs) {
+      return Promise.resolve({
+        kind: 'failed',
+        taskId: task.id,
+        by: 'scheduler',
+        error: 'deadline_expired',
+        ts: Date.now(),
+      })
+    }
     switch (task.strategy.kind) {
       case 'explicit':
         return this.dispatchExplicit(task, task.strategy.to)

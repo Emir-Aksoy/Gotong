@@ -213,4 +213,61 @@ describe('DefaultScheduler', () => {
     expect(result.kind).toBe('no_participant')
     expect(invoke).not.toHaveBeenCalled()
   })
+
+  // Task.deadlineMs is a wire-type contract since v0.7: a task already past
+  // its absolute deadline must NEVER reach a participant. Folded into
+  // DefaultScheduler by the 2026-06 audit (was PriorityQueueScheduler-only).
+  describe('deadlineMs enforcement', () => {
+    it('a task past its deadline fails with deadline_expired before any invoke', async () => {
+      const registry = new Registry()
+      registry.register(makeAgent('a'))
+      const invoke = vi.fn<Parameters<TaskInvoker>, ReturnType<TaskInvoker>>()
+      const s = new DefaultScheduler(registry, invoke, () => {})
+
+      const task = makeTask({ kind: 'explicit', to: 'a' })
+      const expired: Task = { ...task, deadlineMs: Date.now() - 1 }
+      const result = await s.dispatch(expired)
+      expect(result.kind).toBe('failed')
+      if (result.kind === 'failed') {
+        expect(result.error).toBe('deadline_expired')
+        expect(result.by).toBe('scheduler')
+      }
+      expect(invoke).not.toHaveBeenCalled()
+    })
+
+    it('a task with a future deadline dispatches normally', async () => {
+      const registry = new Registry()
+      const agent = makeAgent('a')
+      registry.register(agent)
+      const invoke: TaskInvoker = async (p, task) => ({
+        kind: 'ok',
+        taskId: task.id,
+        by: p.id,
+        output: 'done',
+        ts: Date.now(),
+      })
+      const s = new DefaultScheduler(registry, invoke, () => {})
+
+      const task = makeTask({ kind: 'explicit', to: 'a' })
+      const fresh: Task = { ...task, deadlineMs: Date.now() + 60_000 }
+      const result = await s.dispatch(fresh)
+      expect(result.kind).toBe('ok')
+    })
+
+    it('a task without a deadline is unaffected', async () => {
+      const registry = new Registry()
+      registry.register(makeAgent('a'))
+      const invoke: TaskInvoker = async (p, task) => ({
+        kind: 'ok',
+        taskId: task.id,
+        by: p.id,
+        output: null,
+        ts: Date.now(),
+      })
+      const s = new DefaultScheduler(registry, invoke, () => {})
+
+      const result = await s.dispatch(makeTask({ kind: 'explicit', to: 'a' }))
+      expect(result.kind).toBe('ok')
+    })
+  })
 })

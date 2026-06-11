@@ -84,18 +84,6 @@ export interface HubConfig {
    * must pick a strategy explicitly (or pass `space` and let it pick).
    */
   storage?: Storage
-  /** Replace the default scheduler. Most users don't need this. */
-  schedulerFactory?: (
-    registry: Registry,
-    invoke: TaskInvoker,
-    notifyCancel: CancelNotifier,
-    /**
-     * Phase 11 M2 — handed through from `HubConfig.suspendNotifier`.
-     * Custom schedulers should pass it to whichever inner scheduler
-     * ultimately calls `runOne` if they want suspend persistence.
-     */
-    suspendNotifier?: SuspendNotifier,
-  ) => Scheduler
   /**
    * Phase 11 M2 — host-supplied persistence hook for participants
    * that throw `SuspendTaskError`. The hub itself doesn't open the
@@ -114,10 +102,6 @@ export interface HubConfig {
    * Used for cross-hub HITL: a remote-origin task triggers a local
    * agent which then needs to ask its originating user a question —
    * the resolver maps `task.origin.orgId` to a live HubLink.
-   *
-   * Only consulted when the default scheduler is in use. Custom
-   * schedulers via `schedulerFactory` are responsible for honoring
-   * cross-hub routes themselves if they want them.
    */
   crossHubResolver?: CrossHubExplicitResolver
   idGenerator?: () => string
@@ -268,24 +252,18 @@ export class Hub {
     }
 
     // Inject reputation lookup into the default scheduler so capability
-    // dispatch ranks peers by score (M5b). Custom schedulers passed via
-    // `schedulerFactory` are responsible for using reputation
-    // themselves if they want it.
+    // dispatch ranks peers by score (M5b).
     const crossHubResolver = config.crossHubResolver
     const suspendNotifier = config.suspendNotifier
     if (suspendNotifier) this.suspendNotifier = suspendNotifier
-    const factory =
-      config.schedulerFactory ??
-      ((r, inv, can, sn) =>
-        new DefaultScheduler(
-          r,
-          inv,
-          can,
-          (id) => this.reputation.scoreOf(id),
-          crossHubResolver,
-          sn,
-        ))
-    this.scheduler = factory(this.registry, invoke, notifyCancel, suspendNotifier)
+    this.scheduler = new DefaultScheduler(
+      this.registry,
+      invoke,
+      notifyCancel,
+      (id) => this.reputation.scoreOf(id),
+      crossHubResolver,
+      suspendNotifier,
+    )
   }
 
   /**
@@ -832,7 +810,6 @@ export class Hub {
       strategy: orig.strategy,
       payload,
       title: orig.title ? `retry: ${orig.title}` : undefined,
-      priority: orig.priority,
       weight: orig.weight,
       countContribution: orig.countContribution,
     })
@@ -903,12 +880,6 @@ export class Hub {
     payload: unknown
     title?: string
     deadlineMs?: number
-    /**
-     * Scheduling priority hint, used by priority-aware schedulers (e.g.
-     * `PriorityQueueScheduler`). Higher = more urgent. Default 0.
-     * Ignored by the default scheduler.
-     */
-    priority?: number
     /**
      * Contribution-system weight in [0.1, 10.0], one decimal place; default
      * 1.0 when omitted. Clamped + rounded by the Hub before being written
@@ -982,7 +953,6 @@ export class Hub {
       payload: opts.payload,
       title: opts.title,
       deadlineMs: opts.deadlineMs,
-      priority: opts.priority,
       weight: sanitizeWeight(opts.weight),
       countContribution: opts.countContribution,
       // FED-M2: only attach origin field when actually present, to

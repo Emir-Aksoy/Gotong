@@ -84,7 +84,6 @@ export class HubAsParticipant implements Participant {
       payload: task.payload,
       title: task.title,
       deadlineMs: task.deadlineMs,
-      priority: task.priority,
       weight: task.weight,
       countContribution: task.countContribution,
     })

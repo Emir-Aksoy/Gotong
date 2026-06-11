@@ -2145,7 +2145,6 @@ async function handle(
       strategy?: DispatchStrategy
       payload?: unknown
       title?: string
-      priority?: number
       weight?: number
       countContribution?: boolean
       /**
@@ -2172,7 +2171,6 @@ async function handle(
       strategy: body.strategy,
       payload: body.payload ?? {},
       title: body.title,
-      priority: body.priority,
       weight: body.weight,
       countContribution,
     }

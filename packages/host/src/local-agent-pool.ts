@@ -718,7 +718,6 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
           strategy: opts.strategy,
           payload: opts.payload,
           title: opts.title,
-          priority: opts.priority,
         })
         // Hub returns the full TaskResult; mirror it across to the
         // narrower AgentDispatchResult (drop taskId — agents don't

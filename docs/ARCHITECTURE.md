@@ -11,7 +11,7 @@ This document records the design decisions for the framework. It is the source o
 | v0.4 | Per-agent identity at HELLO — `authenticate` can return `{ ok: true, allowedAgents: ['a1', 'a2'] }` to bind an API key to a specific set of agent ids. A leaked key cannot impersonate any other agent. New `forbidden_agent` REJECT code. Back-compat: boolean return still works. |
 | v0.5 | Python SDK (`python-sdk/`, package name `aipehub`) — second language client. `AgentParticipant` + `connect()` mirror the Node SDK; tests pass against a fake Hub server; `examples/remote-python` runs a Node host + Python worker end-to-end over the same wire protocol. |
 | v0.6 | CLI human adapter — `examples/cli-human` shows the terminal driving a `HumanParticipant`: tasks render to stdout, responses come back through readline (`AIPE_AUTO=1` skips the prompt for CI / non-TTY). Reference pattern for any UI / chat / IM adapter built on `human.next()` / `human.complete()` / `human.reject()`. |
-| v0.7 | **`PriorityQueueScheduler` + deadlines** — wraps an inner scheduler with a global priority queue (`(priority desc, createdAt asc)` ordering), bounded concurrency, and deadline enforcement (`deadlineMs`). Tasks past deadline at submit-time or while-queued resolve as `failed` with `error: 'deadline_expired'` and never reach a participant. `Task.priority` added to the wire type (default 0, ignored by `DefaultScheduler`). |
+| v0.7 | **Deadlines** — `Task.deadlineMs` added to the wire type: tasks past their deadline resolve as `failed` with `error: 'deadline_expired'` and never reach a participant. (Originally shipped behind a `PriorityQueueScheduler` wrapper + `Task.priority`; the 2026-06 audit found zero adoption and folded deadline enforcement into `DefaultScheduler`, removing the wrapper, the `schedulerFactory` seam, and `Task.priority`.) |
 
 ## 1. Philosophy
 
@@ -74,9 +74,7 @@ The first version ships three task-routing strategies, configurable per task:
 - Agent tasks default to `capability`.
 - Human tasks default to either `explicit` (when the dispatcher knows who) or `broadcast` (when any qualified human will do). Configurable per call.
 
-Schedulers are pluggable — `Scheduler` is an interface, and the built-in strategies are three classes implementing it. A custom scheduler can implement any policy (load-balanced, cost-aware, priority queue, etc.).
-
-**`PriorityQueueScheduler`** (v0.7) is a built-in wrapper. Pass it via `Hub({ schedulerFactory: ... })` to add a global priority queue (`(priority desc, createdAt asc)` ordering) plus `maxConcurrent` back-pressure on top of any inner scheduler. It also enforces `Task.deadlineMs`: tasks past their deadline at submit-time or while waiting in the queue resolve as `failed` with `error: 'deadline_expired'` without ever reaching a participant.
+`Scheduler` is an interface and `DefaultScheduler` is its single production implementation (three strategies). It also enforces `Task.deadlineMs`: tasks past their deadline at submit-time resolve as `failed` with `error: 'deadline_expired'` without ever reaching a participant.
 
 ## 5. Transcript
 
@@ -243,7 +241,7 @@ Since v0.2 the project has filled in a number of items that used to be on this "
 | Python SDK | ✅ shipped (v0.5) | `python-sdk/`, package name `aipehub` on PyPI |
 | `SqliteStorage` | ✅ shipped (v0.3) | `packages/core/src/storage/sqlite.ts`, peer dep `better-sqlite3` |
 | Per-agent identity at HELLO | ✅ shipped (v0.4) | `authenticate(apiKey) → { ok, allowedAgents? }`; new `forbidden_agent` REJECT code |
-| Priority queue + deadlines | ✅ shipped (v0.7) | `PriorityQueueScheduler` wraps any inner scheduler; `Task.priority`, `Task.deadlineMs`; `error: 'deadline_expired'` |
+| Deadlines | ✅ shipped (v0.7, folded into `DefaultScheduler` 2026-06) | `Task.deadlineMs`; `error: 'deadline_expired'` |
 | Host-managed LLM agents (no code) | ✅ shipped (v2.1) | `LocalAgentPool` in `@aipehub/host`; YAML/JSON manifest in admin UI |
 | Encrypted API-key storage | ✅ shipped (v2.1) | AES-256-GCM in `<space>/secrets.enc.json`; master key file or `AIPE_SECRET_KEY` env |
 | Contribution scoring + leaderboard | ✅ shipped (v2.1) | `Task.weight`, `Evaluation.rating`, `hub.leaderboard(...)`, per-publisher opt-out |
@@ -253,7 +251,7 @@ Since v0.2 the project has filled in a number of items that used to be on this "
 | **Persistent pending tasks across restarts** | ❌ not yet | Only the transcript is persisted. A pending-tasks table on `SqliteStorage` is sketched but not wired. See §12. |
 | **Reconnect that preserves in-flight tasks** | ❌ not yet | Disconnect fails outstanding tasks as `remote_disconnect`. A `RESUME` frame with prior `sessionId` is reserved on the wire but not implemented. |
 | **Go / Rust / browser SDKs** | ❌ not yet | Wire protocol is stable and language-agnostic — community ports welcome. |
-| **Cost-aware / latency-aware scheduling** | ❌ not yet | `PriorityQueueScheduler` handles ordering and back-pressure; richer policies (cost ceiling, P99-latency target, agent health weighting) are roadmap. |
+| **Cost-aware / latency-aware / priority scheduling** | ❌ not yet | `DefaultScheduler` covers routing + deadlines; richer policies (priority queues, cost ceiling, P99-latency target, agent health weighting) are roadmap. |
 | **Browser automation as a built-in capability** | ❌ not yet | Out of scope for the core; would belong in a separate agent package. |
 
 These cuts are deliberate. The surface stays small until each feature has a concrete use case demanding it.
@@ -266,8 +264,7 @@ packages/core/src/
   hub.ts                Hub facade — the only thing users construct
   bus.ts                MessageBus — pub/sub graph + async dispatch
   registry.ts           Participant registry — who's online, capabilities, load
-  scheduler.ts          Scheduler interface + DefaultScheduler (three strategies)
-  priority-scheduler.ts PriorityQueueScheduler — wraps any Scheduler, adds priority queue + deadline (v0.7)
+  scheduler.ts          Scheduler interface + DefaultScheduler (three strategies + deadline enforcement)
   transcript.ts         append-only event log
   storage/
     index.ts            Storage interface + re-exports

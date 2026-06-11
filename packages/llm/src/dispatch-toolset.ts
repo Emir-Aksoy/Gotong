@@ -59,7 +59,6 @@ export interface DispatchSurface {
     payload: unknown
     title?: string
     deadlineMs?: number
-    priority?: number
     ancestry?: readonly AncestryNode[]
   }): Promise<TaskResult>
 }
@@ -186,11 +185,6 @@ export class DispatchToolset implements LlmAgentToolset {
                 'Wall-clock deadline in ms since epoch. Task fails with ' +
                 "`deadline_expired` if not dispatched by then.",
             },
-            priority: {
-              type: 'number',
-              description:
-                'Higher = more urgent. Ignored by schedulers without a priority queue.',
-            },
           },
           required: ['payload'],
         },
@@ -257,8 +251,6 @@ export class DispatchToolset implements LlmAgentToolset {
         title: typeof args.title === 'string' ? args.title : undefined,
         deadlineMs:
           typeof args.deadlineMs === 'number' ? args.deadlineMs : undefined,
-        priority:
-          typeof args.priority === 'number' ? args.priority : undefined,
         ...(childAncestry.length > 0 ? { ancestry: childAncestry } : {}),
       })
       return mapResultToToolResult(result)

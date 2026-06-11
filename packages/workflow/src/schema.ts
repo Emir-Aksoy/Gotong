@@ -344,9 +344,6 @@ function validateDispatchSpec(raw: unknown, path: string): DispatchSpec {
   const out: DispatchSpec = { strategy, payload: d.payload }
   if (typeof d.title === 'string') out.title = d.title
   if (typeof d.weight === 'number' && Number.isFinite(d.weight)) out.weight = d.weight
-  if (typeof d.priority === 'number' && Number.isFinite(d.priority)) {
-    out.priority = d.priority
-  }
   // v5 C-M2 — node-level I/O data classes, stamped onto Task.dataClasses by the
   // runner so the per-link outbound contract gates federated dispatch per node.
   if (d.dataClasses !== undefined) {

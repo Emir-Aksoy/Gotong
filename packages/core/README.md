@@ -37,8 +37,7 @@ const result = await hub.dispatch({
 - `Hub` — facade over registry + bus + scheduler + transcript + storage.
 - `AgentParticipant` — base class for programmatic agents.
 - `HumanParticipant` — base class for human adapters (UI/CLI/IM).
-- `DefaultScheduler` — three strategies: `explicit`, `capability`, `broadcast`.
-- `PriorityQueueScheduler` — wrap any scheduler with priority + deadlines + bounded concurrency.
+- `DefaultScheduler` — three strategies: `explicit`, `capability`, `broadcast`; enforces `Task.deadlineMs` at submit-time (`deadline_expired`).
 - `InMemoryStorage`, `FileStorage`, `SqliteStorage` (optional peer dep `better-sqlite3`).
 - **Admission gating** (v1.1) — `hub.requestAdmission(...)`, `hub.pendingApplications()`, `hub.approveApplication(...)`, `hub.rejectApplication(...)`. Used by `@aipehub/transport-ws` with `gating: 'admin-approval'` to hold a connecting agent in a pending state until an admin approves. Pair with `@aipehub/web` for the admin UI.
 - **Evaluation** (v1.1) — `hub.evaluate({ taskId, by, rating?, comment? })` writes an append-only verdict on a finished task into the transcript.

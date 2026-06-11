@@ -13,7 +13,7 @@
 | v0.4 | HELLO 时按 agent 鉴权 —— `authenticate` 可以返回 `{ ok: true, allowedAgents: ['a1', 'a2'] }` 把一个 API key 绑到一组指定的 agent id。泄漏的 key 没法假冒任何其他 agent。新 `forbidden_agent` REJECT code。**向后兼容**：boolean 返回仍可用。 |
 | v0.5 | Python SDK（`python-sdk/`，PyPI 名 `aipehub`）—— 第二个语言客户端。`AgentParticipant` + `connect()` 跟 Node SDK 对齐；测试跑通 fake Hub server；`examples/remote-python` 跑 Node host + Python worker 跨语言端到端，走同一套 wire protocol。 |
 | v0.6 | CLI human adapter —— `examples/cli-human` 演示终端驱动一个 `HumanParticipant`：任务渲染到 stdout，回复通过 readline 进入（`AIPE_AUTO=1` 在 CI / 非 TTY 下跳过提示）。可作任何 UI / chat / IM adapter 基于 `human.next()` / `human.complete()` / `human.reject()` 的参考实现。 |
-| v0.7 | **`PriorityQueueScheduler` + 截止时间** —— 用全局优先级队列（`(priority desc, createdAt asc)` 排序）、有界并发、截止时间执行包装一个内层 scheduler。提交时或排队时已过期的任务回 `failed`，`error: 'deadline_expired'`，**永远不会**触达参与者。wire 类型多了 `Task.priority`（默认 0，`DefaultScheduler` 忽略）。 |
+| v0.7 | **截止时间** —— wire 类型加 `Task.deadlineMs`：已过期的任务回 `failed`，`error: 'deadline_expired'`，**永远不会**触达参与者。（最初藏在 `PriorityQueueScheduler` wrapper + `Task.priority` 后面；2026-06 审计发现零采用，把截止时间执行折进 `DefaultScheduler`，删掉了 wrapper、`schedulerFactory` seam 和 `Task.priority`。） |
 
 ## 1. 哲学
 
@@ -95,16 +95,10 @@ Participant
 - human 任务默认 `explicit`（dispatch 方知道是谁）或 `broadcast`
   （任何合格的人都行）。可逐调用配置。
 
-Scheduler **可插拔** —— `Scheduler` 是接口，内建的三种策略是
-三个类。**自定义 scheduler** 可以实现任何策略（按负载均衡、
-按成本、优先级队列 etc.）。
-
-**`PriorityQueueScheduler`**（v0.7）是内建 wrapper。通过
-`Hub({ schedulerFactory: ... })` 传它，给任何内层 scheduler 加上
-全局优先级队列（`(priority desc, createdAt asc)` 排序）和
-`maxConcurrent` 反压。它也**强制 `Task.deadlineMs`**：提交时或
-队列中已过期的任务回 `failed`，`error: 'deadline_expired'`，
-**永远不触达参与者**。
+`Scheduler` 是接口，`DefaultScheduler` 是唯一的生产实现
+（三种策略）。它也**强制 `Task.deadlineMs`**：提交时已过期的
+任务回 `failed`，`error: 'deadline_expired'`，**永远不触达参
+与者**。
 
 ## 5. Transcript
 
@@ -308,7 +302,7 @@ interface LlmResponse {
 | Python SDK | ✅ 已出（v0.5） | `python-sdk/`，PyPI 名 `aipehub` |
 | `SqliteStorage` | ✅ 已出（v0.3） | `packages/core/src/storage/sqlite.ts`，peer dep `better-sqlite3` |
 | HELLO 按 agent 鉴权 | ✅ 已出（v0.4） | `authenticate(apiKey) → { ok, allowedAgents? }`；新 `forbidden_agent` REJECT code |
-| 优先级队列 + 截止时间 | ✅ 已出（v0.7） | `PriorityQueueScheduler` 包装任何内层 scheduler；`Task.priority` / `Task.deadlineMs`；`error: 'deadline_expired'` |
+| 截止时间 | ✅ 已出（v0.7，2026-06 折进 `DefaultScheduler`） | `Task.deadlineMs`；`error: 'deadline_expired'` |
 | Host 托管 LLM agent（无代码） | ✅ 已出（v2.1） | `@aipehub/host` 里的 `LocalAgentPool`；管理 UI 里 YAML/JSON 清单 |
 | 加密 API key 存储 | ✅ 已出（v2.1） | `<space>/secrets.enc.json` 用 AES-256-GCM；master key 文件或 `AIPE_SECRET_KEY` env |
 | 贡献评分 + 榜单 | ✅ 已出（v2.1） | `Task.weight`、`Evaluation.rating`、`hub.leaderboard(...)`、按 publisher 退出 |
@@ -318,7 +312,7 @@ interface LlmResponse {
 | **跨重启的 pending 任务持久化** | ❌ 暂无 | 只持久化 transcript。`SqliteStorage` 上的 pending-tasks 表草图有了，但 Hub 侧没接。见 §12。 |
 | **保留 in-flight 任务的重连** | ❌ 暂无 | 断连用 `remote_disconnect` 失败所有 outstanding 任务。wire 上保留了用之前 `sessionId` 的 `RESUME` frame，没实现。 |
 | **Go / Rust / 浏览器 SDK** | ❌ 暂无 | wire protocol **稳定且语言无关** —— 社区移植欢迎。 |
-| **成本感知 / 延迟感知调度** | ❌ 暂无 | `PriorityQueueScheduler` 搞定排序和反压；更丰富的策略（成本上限、P99 延迟目标、agent 健康度加权）在 roadmap。 |
+| **成本感知 / 延迟感知 / 优先级调度** | ❌ 暂无 | `DefaultScheduler` 覆盖路由 + 截止时间；更丰富的策略（优先级队列、成本上限、P99 延迟目标、agent 健康度加权）在 roadmap。 |
 | **浏览器自动化作为内建 capability** | ❌ 暂无 | core 范围外；应该归到独立 agent 包。 |
 
 这些**裁剪是故意的**。surface 保持小，直到每个特性有具体用例
@@ -332,8 +326,7 @@ packages/core/src/
   hub.ts                Hub 门面 —— 用户唯一会 construct 的东西
   bus.ts                MessageBus —— pub/sub 图 + 异步分发
   registry.ts           参与者 registry —— 谁在线、capabilities、负载
-  scheduler.ts          Scheduler 接口 + DefaultScheduler（三种策略）
-  priority-scheduler.ts PriorityQueueScheduler —— 包装任何 Scheduler，加优先级队列 + 截止时间（v0.7）
+  scheduler.ts          Scheduler 接口 + DefaultScheduler（三种策略 + 截止时间执行）
   transcript.ts         append-only 事件日志
   storage/
     index.ts            Storage 接口 + re-exports

@@ -148,7 +148,6 @@ Cline 的 MCP marketplace UI 接受同样的配置。也可以手编
   "payload": { "topic": "why TypeScript" },  // 自由
   "title": "draft about TS",                 // 可选
   "weight": 2.0,                             // 贡献权重，默认 1.0
-  "priority": 5,                             // scheduler 优先级 hint
   "countContribution": true,                 // 是否计入榜单
   "timeoutMs": 60000                         // 等结果超时
 }

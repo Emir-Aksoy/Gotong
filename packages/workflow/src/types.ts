@@ -362,7 +362,6 @@ export interface DispatchSpec {
   payload: unknown
   title?: string
   weight?: number
-  priority?: number
   /**
    * v5 C-M1/C-M2 — node-level I/O authorization. The data classes THIS node's
    * I/O carries (e.g. `['pii']`, `['public']`). The runner stamps them onto the

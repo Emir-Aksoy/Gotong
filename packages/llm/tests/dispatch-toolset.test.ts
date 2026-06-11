@@ -241,7 +241,6 @@ describe('DispatchToolset.callTool — happy-path dispatch', () => {
       payload: { topic: 'x' },
       title: 'test',
       deadlineMs: 9999,
-      priority: 7,
     })
     expect(r.isError).toBeFalsy()
     expect(textOf(r)).toBe('hello')
@@ -252,7 +251,6 @@ describe('DispatchToolset.callTool — happy-path dispatch', () => {
       payload: { topic: 'x' },
       title: 'test',
       deadlineMs: 9999,
-      priority: 7,
     })
   })
 
@@ -291,7 +289,6 @@ describe('DispatchToolset.callTool — happy-path dispatch', () => {
       payload: 'x',
       title: undefined,
       deadlineMs: undefined,
-      priority: undefined,
     })
   })
 })

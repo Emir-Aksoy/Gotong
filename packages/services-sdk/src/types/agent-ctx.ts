@@ -66,8 +66,6 @@ export interface AgentDispatchOpts {
   strategy: { kind: 'explicit'; to: string }
   payload: unknown
   title?: string
-  /** Optional priority hint; default behaves like 0. */
-  priority?: number
 }
 
 /**

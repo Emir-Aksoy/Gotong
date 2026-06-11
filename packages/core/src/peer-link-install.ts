@@ -312,7 +312,6 @@ export function installPeerLink(opts: InstallPeerLinkOptions): InstalledPeerLink
       payload: task.payload,
       title: task.title,
       deadlineMs: task.deadlineMs,
-      priority: task.priority,
       weight: task.weight,
       countContribution: task.countContribution,
       // FED-M2: preserve federated origin so receiver-side ACL +

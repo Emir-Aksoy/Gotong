@@ -120,9 +120,9 @@ export interface Task {
   title?: string
   /**
    * Wall-clock deadline (ms since epoch). If set and `Date.now() > deadlineMs`
-   * when the scheduler is about to dispatch (or dequeue) the task, the task
-   * resolves with a `failed` TaskResult and `error: 'deadline_expired'`
-   * without ever reaching a participant.
+   * when the scheduler is about to dispatch the task, the task resolves with
+   * a `failed` TaskResult and `error: 'deadline_expired'` without ever
+   * reaching a participant. Enforced by `DefaultScheduler` at submit-time.
    *
    * R10 — this is an ABSOLUTE deadline tied to the ORIGINAL dispatch window.
    * On resume (`Hub.resumeTask`) it is stripped from the task envelope: a
@@ -131,12 +131,6 @@ export interface Task {
    * that wants a deadline should set a fresh one relative to resume-time.
    */
   deadlineMs?: number
-  /**
-   * Relative ordering hint for priority-aware schedulers. Higher = more
-   * urgent. Default is 0. Ignored by `DefaultScheduler`; honored by
-   * `PriorityQueueScheduler` (v0.7).
-   */
-  priority?: number
   /**
    * Contribution-system **weight** for the task — "how much does getting
    * this done count for". A floating-point number in [0.1, 10.0] rounded

@@ -107,10 +107,6 @@ export const DISPATCH_TASK_INPUT_SHAPE = {
     .max(10)
     .optional()
     .describe('Contribution weight in [0.1, 10.0], 1 decimal. Default 1.0.'),
-  priority: z
-    .number()
-    .optional()
-    .describe('Scheduler priority hint. Higher = more urgent. Ignored by the default scheduler.'),
   countContribution: z
     .boolean()
     .optional()
@@ -178,7 +174,6 @@ export function registerTools(server: McpServer, client: HubClient): void {
           payload: input.payload ?? {},
           title: input.title,
           weight: input.weight,
-          priority: input.priority,
           countContribution: input.countContribution,
         },
         input.timeoutMs,

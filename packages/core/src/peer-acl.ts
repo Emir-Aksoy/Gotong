@@ -45,9 +45,6 @@ export function extractRequiredCapabilities(
 /** Verdict on whether a task may leave this hub toward a peer. */
 export type OutboundVerdict = { ok: true } | { ok: false; reason: string }
 
-/** @deprecated Phase 19 P4-M4 generalised this to {@link OutboundVerdict}. */
-export type OutboundCapabilityVerdict = OutboundVerdict
-
 /**
  * Outbound allowlist gate — symmetric to inbound `evaluateAcl`'s capability
  * check, run inside `RemoteHubViaLink.onTask` right before the task crosses
