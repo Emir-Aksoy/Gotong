@@ -20,7 +20,6 @@ export const JSONRPC_VERSION = '2.0'
 export const ACP_INITIALIZE = 'initialize'
 export const ACP_AUTHENTICATE = 'authenticate'
 export const ACP_SESSION_NEW = 'session/new'
-export const ACP_SESSION_LOAD = 'session/load'
 export const ACP_SESSION_PROMPT = 'session/prompt'
 /** `session/cancel` is a NOTIFICATION (no response) per ACP. */
 export const ACP_SESSION_CANCEL = 'session/cancel'
@@ -143,12 +142,6 @@ export interface SessionNewParams {
 
 export interface SessionNewResult {
   sessionId: string
-}
-
-export interface SessionLoadParams {
-  sessionId: string
-  cwd?: string
-  mcpServers?: unknown[]
 }
 
 // --- session prompt --------------------------------------------------------

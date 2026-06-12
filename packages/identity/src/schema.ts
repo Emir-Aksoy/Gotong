@@ -11,7 +11,7 @@
  * everything is already applied.
  */
 
-import { transaction, type SqliteDb } from './db.js'
+import { transactionImmediate, type SqliteDb } from './db.js'
 
 interface Migration {
   version: number
@@ -1122,7 +1122,11 @@ export function applyMigrations(db: SqliteDb): { applied: number[] } {
   const newlyApplied: number[] = []
   for (const m of MIGRATIONS) {
     if (appliedVersions.has(m.version)) continue
-    transaction(db, () => {
+    // BEGIN IMMEDIATE: two hosts sharing one store must not both apply the
+    // same migration — a deferred tx only takes the write lock at first
+    // write, after both already read `appliedVersions` (audit P2; same
+    // reasoning as the invitations cap).
+    transactionImmediate(db, () => {
       db.exec(m.sql)
       db.prepare(
         'INSERT INTO schema_migrations(version, name, applied_at) VALUES(?, ?, ?)',

@@ -277,7 +277,7 @@ export class OrgApiPool {
   private cache = new Map<string, ResolvedLlmKey | null>()
   /**
    * v5 A-M3 — per-user "bring your own key" cache, keyed
-   * `<userId> <provider>`. Separate map so the org hot path is
+   * `<userId>\u0000<provider>`. Separate map so the org hot path is
    * untouched; both are cleared together by `invalidate()` and by the
    * vault-mutation listener (a member rotating their own key must not
    * leave stale plaintext for either dimension).
@@ -392,7 +392,7 @@ export class OrgApiPool {
         'OrgApiPool.resolveUserLlmKey: userId must be a non-empty string',
       )
     }
-    const cacheKey = `${userId} ${provider}`
+    const cacheKey = `${userId}\u0000${provider}`
     if (this.userCache.has(cacheKey)) return this.userCache.get(cacheKey) ?? null
 
     const entries = this.identity

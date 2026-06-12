@@ -42,15 +42,15 @@
 
 两台机器各自：
 
-- 跑起生产 host（`aipehub start`），**接了 identity store**（联邦记录住在 identity 的
-  `peers` 表 + vault）。如何本地起一个带 identity 的生产 host，见 `aipehub start --help`
-  与 [`DEPLOY.md`](DEPLOY.md)。
+- 跑起生产 host（`aipehub-host`，即 `@aipehub/host` 的 bin；源码仓里用 `pnpm host`），
+  **接了 identity store**（联邦记录住在 identity 的 `peers` 表 + vault）。如何本地起一个
+  带 identity 的生产 host，见 [`DEPLOY.md`](DEPLOY.md)。
 - 有一个 **owner** 账号（peer CRUD 与出站审批都需要 owner 权限）。
 - 网络互通：org B 的机器能拨到 org A 暴露的 ws 端点，反之亦然（双向，因为联邦对称）。
 - **强烈建议 TLS**：跨公网时用 `wss://`（反向代理 Caddy / nginx 终止 TLS → 转发到本机
   `AIPE_WS_PORT`）。明文 `ws://` 只在可信内网 / 同机演示用。
 
-相关环境变量（host 侧，`aipehub start` 读）：
+相关环境变量（host 侧，`aipehub-host` 读）：
 
 | 环境变量 | 默认 | 作用 |
 |---|---|---|

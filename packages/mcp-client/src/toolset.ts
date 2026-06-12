@@ -588,18 +588,15 @@ export class McpToolset extends EventEmitter {
   }
 
   private async stopOne(state: ServerState): Promise<void> {
-    if (state.status !== 'live') {
-      // Already idle or dead — nothing to close. Reset the status
-      // so a future connect() can re-spawn.
-      state.status = 'idle'
-      state.client = undefined
-      state.transport = undefined
-      return
-    }
+    // Close even when status is 'dead': the failure paths that mark a server
+    // dead (listTools / mid-RPC errors) leave the client + child process
+    // alive — skipping close there leaks a zombie stdio child (audit P2).
     try {
       await state.client?.close()
     } catch (err) {
-      state.lastError = err instanceof Error ? err.message : String(err)
+      if (state.status === 'live') {
+        state.lastError = err instanceof Error ? err.message : String(err)
+      }
     }
     state.status = 'idle'
     state.client = undefined

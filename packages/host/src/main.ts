@@ -2295,6 +2295,11 @@ async function main(): Promise<void> {
       clearTimeout(resumeKickoffTimer)
       resumeKickoffTimer = undefined
     }
+    if (orgApiPool) {
+      // Unhook the vault-mutation listener before identity goes away
+      // (audit P3 — the pool's cache-flush closure must not outlive it).
+      try { orgApiPool.dispose() } catch (err) { log.error('org api pool dispose error', { err }) }
+    }
     if (identity) {
       try { identity.close() } catch (err) { log.error('identity close error', { err }) }
     }
