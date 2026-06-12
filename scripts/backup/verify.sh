@@ -128,7 +128,41 @@ else
   echo "ℹ runtime/secret.key MISSING — expected. Drop one in before starting the host."
 fi
 
-# 8. services/ — if present, do a shallow shape check on the datastore files
+# 8. identity.sqlite — v4 identity layer (users/sessions/vault/quota/…).
+#    WAL-mode at runtime, so the classic failure here is a torn online
+#    backup: the magic header still reads fine while the b-tree is
+#    shredded. A real integrity_check is the only honest test — run it
+#    whenever the sqlite3 CLI is around.
+if [ -f "$DIR/identity.sqlite" ]; then
+  if head -c 16 "$DIR/identity.sqlite" 2>/dev/null | grep -q "SQLite format"; then
+    echo "✓ identity.sqlite (SQLite, $(du -h "$DIR/identity.sqlite" | awk '{print $1}'))"
+  else
+    echo "✖ identity.sqlite does not look like a valid SQLite file"
+    ERRORS=$((ERRORS + 1))
+  fi
+  if command -v sqlite3 >/dev/null 2>&1; then
+    IC="$(sqlite3 "$DIR/identity.sqlite" "PRAGMA integrity_check;" 2>/dev/null || echo FAILED)"
+    if [ "$IC" = "ok" ]; then
+      echo "  (integrity_check: ok)"
+    else
+      echo "✖ identity.sqlite failed PRAGMA integrity_check — likely a torn online"
+      echo "  backup. Re-run backup.sh with sqlite3 installed (consistent snapshot)"
+      echo "  or with --stop-host."
+      ERRORS=$((ERRORS + 1))
+    fi
+  else
+    echo "ℹ sqlite3 CLI not found — skipped PRAGMA integrity_check on identity.sqlite"
+    WARNS=$((WARNS + 1))
+  fi
+  if [ -s "$DIR/identity.sqlite-wal" ]; then
+    echo "⚠ identity.sqlite-wal present and non-empty — this backup carried the raw"
+    echo "  live files (no consistent snapshot). Recent commits live in the WAL;"
+    echo "  keep the -wal/-shm files next to the db."
+    WARNS=$((WARNS + 1))
+  fi
+fi
+
+# 9. services/ — if present, do a shallow shape check on the datastore files
 if [ -d "$DIR/services" ]; then
   echo "ℹ services/ present:"
   for plugin_dir in "$DIR/services"/*/; do

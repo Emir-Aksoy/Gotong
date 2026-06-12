@@ -17,10 +17,14 @@
 #     re-login on the restored host, which costs ~5 s of UX and gains
 #     a real security boundary.
 #
-#   - Online backup is the default. The host can stay running. Worst
-#     case: a transcript append races the tar and the backup misses
-#     the trailing partial line. Run with --stop-host on the host for
-#     an atomic snapshot when downtime is acceptable.
+#   - Online backup is the default. The host can stay running. The
+#     identity DB (`identity.sqlite`) runs in WAL mode, so a raw copy
+#     under live writes can tear — when the sqlite3 CLI is available we
+#     snapshot it via SQLite's online backup API (`.backup`) and ship
+#     that consistent copy instead of the live db/-wal/-shm trio.
+#     Without sqlite3, worst case: a transcript append or identity
+#     write races the tar. Run with --stop-host on the host for an
+#     atomic snapshot when downtime is acceptable.
 #
 #   - Output filename is deterministic + sortable: includes the
 #     workspace dir name, ISO timestamp (UTC), and `.tar.gz`. Retention
@@ -140,15 +144,58 @@ OUT="$BACKUP_DIR/aipehub-${LABEL}-${TIMESTAMP}.tar.gz"
 PARENT_DIR="$(cd "$SPACE_DIR/.." && pwd)"
 LEAF_NAME="$(basename "$(cd "$SPACE_DIR" && pwd)")"
 
+# identity.sqlite is WAL-mode: tar reads the db and its -wal/-shm
+# companions at different instants, so a write landing mid-archive can
+# produce a torn (unreadable) copy. SQLite's online backup API is the
+# WAL-safe way to copy a live db — snapshot through it when we can.
+SNAP_ROOT=""
+if [ -f "$SPACE_DIR/identity.sqlite" ]; then
+  if command -v sqlite3 >/dev/null 2>&1; then
+    SNAP_ROOT="$(mktemp -d)"
+    mkdir -p "$SNAP_ROOT/$LEAF_NAME"
+    if sqlite3 "$SPACE_DIR/identity.sqlite" ".backup '$SNAP_ROOT/$LEAF_NAME/identity.sqlite'"; then
+      echo "→ identity.sqlite: consistent snapshot via sqlite3 .backup (WAL-safe)"
+    else
+      echo "⚠ sqlite3 .backup failed — falling back to raw file copy (a live write can tear it)"
+      rm -rf "$SNAP_ROOT"
+      SNAP_ROOT=""
+    fi
+  else
+    echo "⚠ identity.sqlite present but no sqlite3 CLI — archiving the raw WAL-mode"
+    echo "  files. A write racing the tar can tear the copy; install sqlite3 or"
+    echo "  use --stop-host for a consistent snapshot."
+  fi
+fi
+
 # Use --exclude in a portable way (works under both GNU tar and BSD tar).
 echo "→ archiving $SPACE_DIR → $OUT"
-tar -czf "$OUT" \
-  -C "$PARENT_DIR" \
-  --exclude="$LEAF_NAME/runtime/secret.key" \
-  --exclude="$LEAF_NAME/runtime/admin-sessions.json" \
-  --exclude="$LEAF_NAME/runtime/worker-sessions.json" \
-  "$LEAF_NAME" \
-  || { echo "✖ tar failed"; exit 3; }
+if [ -n "$SNAP_ROOT" ]; then
+  # Two-step create→append→gzip: tar's --exclude patterns apply to every
+  # member regardless of -C, so a single pass would also strip the
+  # snapshot we're trying to ship under the same archive path.
+  TMP_TAR="${OUT%.gz}"
+  tar -cf "$TMP_TAR" \
+    -C "$PARENT_DIR" \
+    --exclude="$LEAF_NAME/runtime/secret.key" \
+    --exclude="$LEAF_NAME/runtime/admin-sessions.json" \
+    --exclude="$LEAF_NAME/runtime/worker-sessions.json" \
+    --exclude="$LEAF_NAME/identity.sqlite" \
+    --exclude="$LEAF_NAME/identity.sqlite-wal" \
+    --exclude="$LEAF_NAME/identity.sqlite-shm" \
+    "$LEAF_NAME" \
+    && tar -rf "$TMP_TAR" -C "$SNAP_ROOT" "$LEAF_NAME/identity.sqlite" \
+    && gzip -f "$TMP_TAR" \
+    || { rm -f "$TMP_TAR"; rm -rf "$SNAP_ROOT"; echo "✖ tar failed"; exit 3; }
+  rm -rf "$SNAP_ROOT"
+else
+  tar -czf "$OUT" \
+    -C "$PARENT_DIR" \
+    --exclude="$LEAF_NAME/runtime/secret.key" \
+    --exclude="$LEAF_NAME/runtime/admin-sessions.json" \
+    --exclude="$LEAF_NAME/runtime/worker-sessions.json" \
+    "$LEAF_NAME" \
+    || { echo "✖ tar failed"; exit 3; }
+fi
 
 # --- summarise ---------------------------------------------------------------
 
