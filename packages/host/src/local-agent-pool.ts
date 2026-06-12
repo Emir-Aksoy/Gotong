@@ -19,6 +19,7 @@ import {
   MockLlmProvider,
   readMultimodalInlineCapFromEnv,
   type LlmAgentToolset,
+  type LlmArtifactResolver,
   type LlmProvider,
   type LlmUsage,
   type LlmUsageSinkMeta,
@@ -280,6 +281,15 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    */
   private readonly pricingTable: PricingTable
   /**
+   * Phase 9 loop-closer — resolves `artifact_ref` / `file_ref` content
+   * blocks (artifactIds minted by /api/admin/uploads and /api/me/uploads)
+   * to raw bytes for the provider translators. Without it, a multimodal
+   * payload that references an upload fails inside the provider with
+   * "artifact_ref source requires an artifactResolver". The host wires
+   * the shared `uploads` surface's `get`.
+   */
+  private readonly artifactResolver?: LlmArtifactResolver
+  /**
    * Test seam — overrides how a managed spec is turned into a live
    * `LlmProvider`. Defaults to {@link buildProvider} (the only real path:
    * mock + network providers). Tests inject a deterministic provider while
@@ -290,6 +300,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   private readonly providerFactory: (
     spec: ManagedAgentSpec,
     apiKey: string | undefined,
+    artifactResolver?: LlmArtifactResolver,
   ) => LlmProvider
 
   constructor(opts: {
@@ -318,12 +329,19 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
      */
     pricingTable?: PricingTable
     /**
+     * Phase 9 loop-closer (see field doc). The host passes the shared
+     * uploads surface's `get` so providers can resolve upload artifactIds
+     * in multimodal blocks. Omit → artifact_ref blocks fail loudly.
+     */
+    artifactResolver?: LlmArtifactResolver
+    /**
      * Test seam (see field doc). Production never passes this — boot uses
      * the default {@link buildProvider}.
      */
     providerFactory?: (
       spec: ManagedAgentSpec,
       apiKey: string | undefined,
+      artifactResolver?: LlmArtifactResolver,
     ) => LlmProvider
   }) {
     this.hub = opts.hub
@@ -333,6 +351,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     this.identity = opts.identity
     this.peerLinkResolver = opts.peerLinkResolver
     this.pricingTable = opts.pricingTable ?? DEFAULT_PRICING
+    this.artifactResolver = opts.artifactResolver
     this.providerFactory = opts.providerFactory ?? buildProvider
     // Built once: the gate is a stateless closure over `identity`,
     // shared by every managed LlmAgent. Settings (metric/period) are
@@ -626,7 +645,7 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
 
     const resolution = await this.resolveApiKey(record.id, record.managed.provider)
     const apiKey = resolution?.apiKey
-    const provider = this.providerFactory(record.managed, apiKey)
+    const provider = this.providerFactory(record.managed, apiKey, this.artifactResolver)
 
     // If the manifest declared `mcpServers:`, spawn the toolset NOW
     // (before constructing LlmAgent) so the connect()'s child-process
@@ -1441,7 +1460,11 @@ function buildCtx(
  * Map a persisted `ManagedAgentSpec` to a concrete `LlmProvider`,
  * passing the resolved API key. Failure modes are intentionally noisy.
  */
-function buildProvider(spec: ManagedAgentSpec, apiKey: string | undefined): LlmProvider {
+function buildProvider(
+  spec: ManagedAgentSpec,
+  apiKey: string | undefined,
+  artifactResolver?: LlmArtifactResolver,
+): LlmProvider {
   switch (spec.provider) {
     case 'mock':
       // Deterministic echo — fine for demos and "is my agent alive?"
@@ -1458,7 +1481,11 @@ function buildProvider(spec: ManagedAgentSpec, apiKey: string | undefined): LlmP
           `provider 'anthropic' needs an API key — set one in the workspace settings, attach one to this agent, or set ANTHROPIC_API_KEY in the host environment`,
         )
       }
-      return new AnthropicProvider({ apiKey, maxInlineBytes: readMultimodalInlineCapFromEnv() })
+      return new AnthropicProvider({
+        apiKey,
+        maxInlineBytes: readMultimodalInlineCapFromEnv(),
+        ...(artifactResolver ? { artifactResolver } : {}),
+      })
     }
     case 'openai': {
       if (!apiKey) {
@@ -1466,7 +1493,11 @@ function buildProvider(spec: ManagedAgentSpec, apiKey: string | undefined): LlmP
           `provider 'openai' needs an API key — set one in the workspace settings, attach one to this agent, or set OPENAI_API_KEY in the host environment`,
         )
       }
-      return new OpenAIProvider({ apiKey, maxInlineBytes: readMultimodalInlineCapFromEnv() })
+      return new OpenAIProvider({
+        apiKey,
+        maxInlineBytes: readMultimodalInlineCapFromEnv(),
+        ...(artifactResolver ? { artifactResolver } : {}),
+      })
     }
     case 'openai-compatible': {
       // Two hard requirements at spawn time. We fail loudly with a
@@ -1494,6 +1525,7 @@ function buildProvider(spec: ManagedAgentSpec, apiKey: string | undefined): LlmP
         baseURL: spec.baseURL,
         name,
         maxInlineBytes: readMultimodalInlineCapFromEnv(),
+        ...(artifactResolver ? { artifactResolver } : {}),
         // Almost every OpenAI-compatible vendor (DeepSeek, Qwen, Zhipu,
         // Moonshot, Ollama, vLLM, …) speaks the legacy `max_tokens`
         // shape, not the newer `max_completion_tokens` OpenAI reasoning

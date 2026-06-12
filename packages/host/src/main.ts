@@ -1163,12 +1163,39 @@ async function main(): Promise<void> {
   // rather than silently bill at the wrong rate).
   const pricingTable = loadPricingTable(join(SPACE_DIR, 'pricing.json'))
 
+  // Phase 9 M4 — admin/member file uploads. Wires the artifact plugin's
+  // 'file' impl to a system-shared 'uploads' namespace so /api/admin/uploads
+  // can persist a multimodal payload before it lands on a workflow.
+  // The plugin must be loaded (it's in the default seed); attach
+  // failure is non-fatal — `uploads` stays undefined and Web responds
+  // 503 cleanly. Same posture as `services` / `identity` / `peerRegistry`.
+  // Created BEFORE the agent pool so the pool can hand each provider an
+  // `artifactResolver` — without it a multimodal payload referencing an
+  // upload (`file_ref` / `artifact_ref`) fails inside the provider with
+  // "artifact_ref source requires an artifactResolver" (audit P1).
+  let uploads: Awaited<ReturnType<typeof createUploadSurface>> | undefined
+  if (services) {
+    try {
+      uploads = await createUploadSurface({ services, logger: log })
+      log.info('uploads: shared/uploads handle attached')
+    } catch (err) {
+      log.warn('uploads: attach failed — /api/admin/uploads will be 503', { err })
+    }
+  }
+  const uploadsRef = uploads
+
   const localAgents = new LocalAgentPool({
     hub,
     space,
     services,
     orgApiPool,
     pricingTable,
+    // Audit P1 — close the Phase 9 upload → multimodal-input loop: managed
+    // agents' providers resolve `artifact_ref` / `file_ref` blocks against
+    // the same shared uploads handle the upload routes write to.
+    ...(uploadsRef
+      ? { artifactResolver: (artifactId: string) => uploadsRef.get(artifactId) }
+      : {}),
     // Phase 6 #2 — when present, LocalAgentPool wires an onAuthFailure
     // hook for LLM agents whose key came from the vault. A 401 from
     // the provider revokes that vault entry + writes audit + flushes
@@ -1193,22 +1220,6 @@ async function main(): Promise<void> {
       return ctx?.artifact
     },
   })
-
-  // Phase 9 M4 — admin file uploads. Wires the artifact plugin's
-  // 'file' impl to a system-shared 'uploads' namespace so /api/admin/uploads
-  // can persist a multimodal payload before it lands on a workflow.
-  // The plugin must be loaded (it's in the default seed); attach
-  // failure is non-fatal — `uploads` stays undefined and Web responds
-  // 503 cleanly. Same posture as `services` / `identity` / `peerRegistry`.
-  let uploads: Awaited<ReturnType<typeof createUploadSurface>> | undefined
-  if (services) {
-    try {
-      uploads = await createUploadSurface({ services, logger: log })
-      log.info('uploads: shared/uploads handle attached')
-    } catch (err) {
-      log.warn('uploads: attach failed — /api/admin/uploads will be 503', { err })
-    }
-  }
 
   // Workflow runners. Optional — the loader silently no-ops when the
   // directory doesn't exist, so users who aren't using workflows see no
