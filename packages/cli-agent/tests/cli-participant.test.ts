@@ -117,3 +117,58 @@ describe('payloadToText', () => {
     expect(payloadToText({ a: 1 })).toBe(JSON.stringify({ a: 1 }))
   })
 })
+
+describe('CliParticipant — takeover resume still gates (audit P1 regression)', () => {
+  it('a turn resumed from a takeover park must still pass the action gate', async () => {
+    // The takeover checkpoint fires BEFORE the gate (checkpoint 1 vs 2), so the
+    // parked turn was never gated. Resuming it must not inherit the "approval
+    // consumed" skip that an action_gate resume gets — otherwise an operator
+    // takeover quietly bypasses the dangerous-command gate for that turn.
+    const { dangerousCommandGate, TakeoverController } = await import('../src/cli-checkpoint.js')
+    const takeover = new TakeoverController()
+    const p = new CliParticipant({
+      id: 'coder',
+      capabilities: ['code'],
+      command: NODE,
+      args: ['-e', "process.stdout.write('ran')"],
+      gate: dangerousCommandGate(),
+      takeover,
+    })
+
+    // Park via takeover before the first turn (SuspendTaskError propagates out
+    // of the participant envelope — the scheduler is who maps it to 'suspended').
+    takeover.requestTakeover('tk-1')
+    await expect(p.onTask(makeTask({ prompt: 'rm -rf /tmp/x' }, 'tk-1'))).rejects.toMatchObject({
+      state: expect.objectContaining({ kind: 'takeover' }),
+    })
+
+    // Resume with a takeover decision; the dangerous prompt must hit the gate
+    // and park again as action_gate — NOT spawn the CLI.
+    const state = { v: 1, turn: 0, prompt: 'rm -rf /tmp/x', kind: 'takeover', reason: 'takeover requested', transcript: [] }
+    await expect(
+      p.onResume(makeTask({ prompt: 'rm -rf /tmp/x' }, 'tk-1'), {
+        ...state,
+        decision: { approved: true },
+      }),
+    ).rejects.toMatchObject({
+      state: expect.objectContaining({ kind: 'action_gate' }),
+    })
+  })
+
+  it('an action_gate resume with approval still skips re-gating that turn', async () => {
+    const { dangerousCommandGate } = await import('../src/cli-checkpoint.js')
+    const p = new CliParticipant({
+      id: 'coder',
+      capabilities: ['code'],
+      command: NODE,
+      args: ['-e', "process.stdout.write('ran')"],
+      gate: dangerousCommandGate(),
+    })
+    const state = { v: 1, turn: 0, prompt: 'rm -rf /tmp/x', kind: 'action_gate', reason: 'flagged', transcript: [] }
+    const resumed = await p.onResume(makeTask({ prompt: 'rm -rf /tmp/x' }, 'ag-1'), {
+      ...state,
+      decision: { approved: true },
+    })
+    expect(resumed.kind).toBe('ok')
+  })
+})

@@ -154,9 +154,12 @@ export class CliParticipant extends AgentParticipant {
       // A reviewer may steer by editing the prompt (handoff).
       prompt: decision?.prompt ?? carried.prompt,
     }
-    // Approval is consumed for THIS turn — don't re-gate the invocation we just
-    // approved; later turns gate normally.
-    return await this.runLoop(task, resumed, true)
+    // Approval is consumed for THIS turn — don't re-gate the invocation the
+    // reviewer just approved; later turns gate normally. Only an action_gate
+    // park carries that approval: a takeover park happens BEFORE the gate ever
+    // ran (checkpoint 1 precedes checkpoint 2), so its resumed turn — possibly
+    // with a reviewer-steered prompt — must still pass the gate.
+    return await this.runLoop(task, resumed, carried.kind === 'action_gate')
   }
 
   /** The bounded turn loop: checkpoint → spawn → record → continue. */
