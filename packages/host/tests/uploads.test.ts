@@ -30,7 +30,11 @@ import type {
 } from '@aipehub/services-sdk'
 
 import { bootstrapServices, type HubServices } from '../src/services/index.js'
-import { createUploadSurface, UPLOADS_OWNER_REF } from '../src/uploads.js'
+import { createUploadSurface } from '../src/uploads.js'
+
+// Mirrors the (deliberately private) owner uploads.ts scopes its artifact
+// namespace to — tests attach to the same handle the surface writes through.
+const UPLOADS_OWNER = { kind: 'shared', id: 'uploads' } as const
 
 const logger = createLogger('uploads-test', { disabled: true })
 
@@ -60,7 +64,7 @@ function makeFakeServices(calls: FakeHandleCalls): HubServices {
   const attached: AttachedHandle = {
     type: 'artifact',
     impl: 'file',
-    owner: UPLOADS_OWNER_REF,
+    owner: UPLOADS_OWNER,
     handle,
   }
   // We only call `services.attach`; cast through unknown to dodge the
@@ -212,11 +216,6 @@ describe('createUploadSurface (unit)', () => {
     expect(calls.writes).toHaveLength(0)
   })
 
-  it('UPLOADS_OWNER_REF is the shared/uploads owner', () => {
-    const expected: Owner = { kind: 'shared', id: 'uploads' }
-    expect(UPLOADS_OWNER_REF).toEqual(expected)
-  })
-
   it('get() proxies to handle.readBytes', async () => {
     // The fake handle's readBytes was a stub; rewrite it inline to
     // verify the upload surface's `get` delegates with the right
@@ -237,7 +236,7 @@ describe('createUploadSurface (unit)', () => {
     }
     const fakeServices = {
       attach: async () => ({
-        type: 'artifact', impl: 'file', owner: UPLOADS_OWNER_REF, handle,
+        type: 'artifact', impl: 'file', owner: UPLOADS_OWNER, handle,
       }),
     } as unknown as HubServices
     const uploads = await createUploadSurface({ services: fakeServices, logger })
@@ -307,7 +306,7 @@ describe('createUploadSurface (e2e via real artifact-file plugin)', () => {
     const second = await boot.services.attach({
       type: 'artifact',
       impl: 'file',
-      owner: UPLOADS_OWNER_REF,
+      owner: UPLOADS_OWNER,
       config: {
         name: 'system-uploads',
         maxBytesPerFile: 50 * 1024 * 1024,

@@ -173,14 +173,3 @@ function extractSafeExt(filename: string | undefined): string {
   if (safe.length === 0 || safe.length > 8) return ''
   return `.${safe}`
 }
-
-/**
- * Re-export of the path used to attach the uploads namespace, so
- * other host components that want to resolve a `file_ref` artifactId
- * downstream can attach to the same handle with the same owner.
- *
- * Phase 9 M5 (admin UI render) will wire this through to the
- * download endpoint; Phase 10+ (agent dispatch) will hand the same
- * handle to the LlmArtifactResolver path.
- */
-export const UPLOADS_OWNER_REF = UPLOADS_OWNER
