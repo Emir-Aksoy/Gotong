@@ -27,9 +27,9 @@ npm-debug.log*
 .gitignore
 .github
 
-# Tests / examples — Dockerfile copies packages/ explicitly; examples
-# bring extra deps we don't need at runtime
-examples
+# Tests / extras. NOTE: examples/ must NOT be ignored — examples/* are
+# pnpm workspace importers, and `pnpm install --frozen-lockfile` refuses
+# a lockfile whose importers aren't all present in the build context.
 templates
 python-sdk
 docs

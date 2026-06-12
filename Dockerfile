@@ -18,36 +18,26 @@ RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 
 WORKDIR /src
 
-# Copy workspace manifest + each package's package.json first, install
-# dependencies, THEN copy source. Lets Docker cache `pnpm install` across
-# source-only edits.
+# Heavy network layer first: `pnpm fetch` populates the store from the
+# lockfile ALONE, so this layer only re-runs when pnpm-lock.yaml changes.
+# The workspace has 75 importers (packages/* + examples/*) and the old
+# hand-maintained per-package COPY list silently drifted to 17 of them,
+# which made `pnpm install --frozen-lockfile` fail outright (frozen mode
+# refuses a lockfile whose importers aren't all present). Fetch-then-
+# offline-install removes the drift class entirely: no manifest list to
+# keep in sync when a package or example is added.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
-COPY packages/core/package.json            packages/core/package.json
-COPY packages/protocol/package.json        packages/protocol/package.json
-COPY packages/transport-ws/package.json    packages/transport-ws/package.json
-COPY packages/sdk-node/package.json        packages/sdk-node/package.json
-COPY packages/web/package.json             packages/web/package.json
-COPY packages/host/package.json            packages/host/package.json
-COPY packages/llm/package.json             packages/llm/package.json
-COPY packages/llm-anthropic/package.json   packages/llm-anthropic/package.json
-COPY packages/llm-openai/package.json      packages/llm-openai/package.json
-COPY packages/services-sdk/package.json    packages/services-sdk/package.json
-COPY packages/service-memory-file/package.json     packages/service-memory-file/package.json
-COPY packages/service-artifact-file/package.json   packages/service-artifact-file/package.json
-COPY packages/service-datastore-sqlite/package.json packages/service-datastore-sqlite/package.json
-COPY packages/workflow/package.json        packages/workflow/package.json
-COPY packages/cli/package.json             packages/cli/package.json
-COPY packages/mcp-server/package.json      packages/mcp-server/package.json
-COPY packages/mcp-client/package.json      packages/mcp-client/package.json
+RUN pnpm fetch
 
-# Use the lockfile verbatim. We don't add --frozen-lockfile because the
-# image is built from the repo, not from a fresh clone — but pnpm will
-# still refuse divergent lockfiles in CI mode.
-RUN pnpm install --frozen-lockfile
-
-# Now source.
+# Now source (examples are workspace importers too — their manifests must
+# be present for the frozen install, and none of them define a build
+# script, so `pnpm -r build` skips them). Offline install just hardlinks
+# from the already-fetched store — cheap, runs on any source edit.
 COPY packages ./packages
+COPY examples ./examples
 COPY tsconfig*.json ./
+
+RUN pnpm install --frozen-lockfile --offline
 
 RUN pnpm -r build
 
@@ -66,9 +56,12 @@ RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 
 WORKDIR /app
 
-# Copy workspace manifests (pnpm prune needs them).
+# Copy workspace manifests (pnpm prune needs them). examples/ rides along
+# because frozen-lockfile installs validate ALL importers, examples
+# included — they're a few hundred KB of demo source, never executed here.
 COPY --from=build /src/package.json /src/pnpm-workspace.yaml /src/pnpm-lock.yaml ./
 COPY --from=build /src/packages ./packages
+COPY --from=build /src/examples ./examples
 
 # Re-install production-only (no dev deps, no tsx/vitest).
 RUN pnpm install --frozen-lockfile --prod \
