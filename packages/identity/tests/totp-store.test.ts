@@ -85,15 +85,40 @@ describe('IdentityStore — MFA TOTP (P1-M3b)', () => {
 
   it('login verify: correct code passes, wrong fails, ±1 step is tolerated', () => {
     const secret = enroll()
-    store.confirmTotp({ userId, code: codeFor(secret), nowSeconds: NOW })
+    // Confirm well in the past so the confirm code's step doesn't shadow the
+    // window assertions below (confirm records last_step — audit F1).
+    store.confirmTotp({ userId, code: codeFor(secret, NOW - 300), nowSeconds: NOW - 300 })
 
-    expect(store.verifyTotpForLogin({ userId, code: codeFor(secret), nowSeconds: NOW })).toBe(true)
-    expect(store.verifyTotpForLogin({ userId, code: '000000', nowSeconds: NOW })).toBe(false)
-    // previous + next 30s step accepted (clock skew window)
+    // The replay guard is monotonic, so probe the window in ascending step order.
     expect(store.verifyTotpForLogin({ userId, code: codeFor(secret, NOW - 30), nowSeconds: NOW })).toBe(true)
+    expect(store.verifyTotpForLogin({ userId, code: '000000', nowSeconds: NOW })).toBe(false)
+    expect(store.verifyTotpForLogin({ userId, code: codeFor(secret), nowSeconds: NOW })).toBe(true)
     expect(store.verifyTotpForLogin({ userId, code: codeFor(secret, NOW + 30), nowSeconds: NOW })).toBe(true)
-    // two steps away is rejected
-    expect(store.verifyTotpForLogin({ userId, code: codeFor(secret, NOW - 60), nowSeconds: NOW })).toBe(false)
+    // two steps away is rejected (outside the ±1 window)
+    expect(store.verifyTotpForLogin({ userId, code: codeFor(secret, NOW + 90), nowSeconds: NOW })).toBe(false)
+  })
+
+  it('replay guard: an accepted code is dead on re-use, earlier steps die with it (audit F1)', () => {
+    const secret = enroll()
+    store.confirmTotp({ userId, code: codeFor(secret, NOW - 300), nowSeconds: NOW - 300 })
+
+    // First use: accepted.
+    expect(store.verifyTotpForLogin({ userId, code: codeFor(secret), nowSeconds: NOW })).toBe(true)
+    // Immediate re-use of the SAME code, still inside its validity window: rejected.
+    expect(store.verifyTotpForLogin({ userId, code: codeFor(secret), nowSeconds: NOW })).toBe(false)
+    // The previous step's code (would otherwise verify via the ±1 window): also dead.
+    expect(store.verifyTotpForLogin({ userId, code: codeFor(secret, NOW - 30), nowSeconds: NOW })).toBe(false)
+    // The NEXT step's code is fresh and accepted.
+    expect(store.verifyTotpForLogin({ userId, code: codeFor(secret, NOW + 30), nowSeconds: NOW })).toBe(true)
+  })
+
+  it('replay guard: the confirm code cannot double as the first login code (audit F1)', () => {
+    const secret = enroll()
+    expect(store.confirmTotp({ userId, code: codeFor(secret), nowSeconds: NOW })).toBe(true)
+    // Same code, same window — confirm already consumed its step.
+    expect(store.verifyTotpForLogin({ userId, code: codeFor(secret), nowSeconds: NOW })).toBe(false)
+    // The next step works.
+    expect(store.verifyTotpForLogin({ userId, code: codeFor(secret, NOW + 30), nowSeconds: NOW })).toBe(true)
   })
 
   it('login verify is fail-closed before activation (pending secret can never pass)', () => {
@@ -142,7 +167,8 @@ describe('IdentityStore — MFA TOTP (P1-M3b)', () => {
     userId = store.createUser({ email, displayName: 'Member', role: 'member' }).id
     const s2 = enroll()
     store.confirmTotp({ userId, code: codeFor(s2), nowSeconds: NOW })
-    expect(store.verifyTotpForLogin({ userId, code: codeFor(s2), nowSeconds: NOW })).toBe(true)
+    // Next step — the confirm code's own step is replay-guarded (audit F1).
+    expect(store.verifyTotpForLogin({ userId, code: codeFor(s2, NOW + 30), nowSeconds: NOW + 30 })).toBe(true)
   })
 })
 

@@ -41,6 +41,14 @@ describe('renderMetrics', () => {
     expect(text).toMatch(/aipehub_protocol_version\{version="[\d.]+"\} 1/)
   })
 
+  it('emits process_resident_memory_bytes (the series AipehubProcessRssCreep alerts on)', () => {
+    const text = renderMetrics(hub)
+    expect(text).toContain('# TYPE process_resident_memory_bytes gauge')
+    const m = text.match(/^process_resident_memory_bytes (\d+)$/m)
+    expect(m).not.toBeNull()
+    expect(Number(m![1])).toBeGreaterThan(0)
+  })
+
   it('emits aipehub_participants gauge, even when no participants', () => {
     const text = renderMetrics(hub)
     expect(text).toContain('# TYPE aipehub_participants gauge')

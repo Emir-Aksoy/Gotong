@@ -87,6 +87,21 @@ describe('runCliCommand — spawn engine', () => {
     expect(r.exitCode).toBeNull()
   })
 
+  it('settles after exit even when a grandchild holds the stdio pipes (audit B3)', async () => {
+    // The child backgrounds a 5s grandchild with stdio:'inherit' (it keeps
+    // OUR pipes open) and exits immediately. Settling on 'close' alone would
+    // hang ~5s; the 'exit' drain-grace fallback settles well under that.
+    const script =
+      "const{spawn}=require('node:child_process');" +
+      "spawn(process.execPath,['-e','setTimeout(()=>{},5000)'],{stdio:'inherit',detached:true}).unref();" +
+      "console.log('hi')"
+    const t0 = Date.now()
+    const r = await runCliCommand({ command: NODE, args: ['-e', script] })
+    expect(Date.now() - t0).toBeLessThan(3000)
+    expect(r.exitCode).toBe(0)
+    expect(r.stdout).toContain('hi')
+  })
+
   it('merges env overrides and inherits PATH', async () => {
     const script =
       "process.stdout.write(process.env.FOO + ':' + (process.env.PATH ? 'haspath' : 'nopath'))"

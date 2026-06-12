@@ -60,6 +60,14 @@ export interface CliRunResult {
 /** ms to wait after SIGTERM before escalating to SIGKILL. */
 const KILL_GRACE_MS = 2000
 
+/**
+ * ms to wait after the child's `exit` for stdio to drain (`close`) before
+ * settling anyway. `close` is the normal settle path, but a grandchild that
+ * inherited our pipes holds them open past the child's exit — without this
+ * fallback the run would hang until the whole orphaned tree dies (audit B3).
+ */
+const EXIT_DRAIN_GRACE_MS = 500
+
 /** Merge parent env with overrides; an `undefined` override deletes the key. */
 function buildEnv(overrides?: Record<string, string | undefined>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env }
@@ -89,6 +97,10 @@ export async function runCliCommand(opts: CliRunOptions): Promise<CliRunResult> 
         cwd: opts.cwd,
         env: buildEnv(opts.env),
         stdio: ['pipe', 'pipe', 'pipe'],
+        // Own process group (POSIX) so the kill ladder can signal the whole
+        // tree — a CLI that spawned helpers must not leave them orphaned
+        // when we SIGTERM/SIGKILL only the direct child (audit B3).
+        detached: process.platform !== 'win32',
       })
     } catch (err) {
       reject(asSpawnError(opts.command, err))
@@ -102,19 +114,33 @@ export async function runCliCommand(opts: CliRunOptions): Promise<CliRunResult> 
     let settled = false
     let killTimer: NodeJS.Timeout | undefined
     let graceTimer: NodeJS.Timeout | undefined
+    let drainTimer: NodeJS.Timeout | undefined
 
     const cleanup = (): void => {
       if (killTimer) clearTimeout(killTimer)
       if (graceTimer) clearTimeout(graceTimer)
+      if (drainTimer) clearTimeout(drainTimer)
       if (opts.signal) opts.signal.removeEventListener('abort', onAbort)
+    }
+
+    // Signal the whole process group when we own one (negative pid, POSIX);
+    // fall back to the direct child if the group is already gone.
+    const signalTree = (sig: NodeJS.Signals): void => {
+      if (child.pid && process.platform !== 'win32') {
+        try {
+          process.kill(-child.pid, sig)
+          return
+        } catch { /* group gone — fall through to the direct child */ }
+      }
+      try { child.kill(sig) } catch { /* already dead */ }
     }
 
     // SIGTERM first (lets the CLI flush), escalate to SIGKILL if it lingers.
     const kill = (): void => {
       if (settled) return
-      child.kill('SIGTERM')
+      signalTree('SIGTERM')
       graceTimer = setTimeout(() => {
-        if (!settled) child.kill('SIGKILL')
+        if (!settled) signalTree('SIGKILL')
       }, KILL_GRACE_MS)
     }
 
@@ -161,6 +187,20 @@ export async function runCliCommand(opts: CliRunOptions): Promise<CliRunResult> 
       settled = true
       cleanup()
       resolve({ exitCode: code, stdout, stderr, timedOut, aborted })
+    })
+
+    // `close` waits for stdio to fully drain — usually right, but a
+    // grandchild holding our inherited pipes can postpone it indefinitely
+    // after THIS child already exited. Settle from `exit` after a short
+    // drain grace so a backgrounded helper can't wedge the run (audit B3).
+    child.on('exit', (code) => {
+      if (settled) return
+      drainTimer = setTimeout(() => {
+        if (settled) return
+        settled = true
+        cleanup()
+        resolve({ exitCode: code, stdout, stderr, timedOut, aborted })
+      }, EXIT_DRAIN_GRACE_MS)
     })
 
     // Feed stdin then close it. Closing is essential: a CLI that reads stdin

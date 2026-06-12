@@ -148,19 +148,35 @@ export function verifyTotp(
   unixSeconds: number,
   params: VerifyTotpParams = {},
 ): boolean {
+  return matchTotpStep(secret, code, unixSeconds, params) != null
+}
+
+/**
+ * Like `verifyTotp`, but returns the matched absolute TIME STEP (counter)
+ * instead of a boolean — `null` on no match. The step is what a replay guard
+ * persists: RFC 6238 §5.2 says a verifier must not accept a second code for
+ * the same or an earlier step once one has been accepted (audit F1).
+ */
+export function matchTotpStep(
+  secret: Buffer,
+  code: string,
+  unixSeconds: number,
+  params: VerifyTotpParams = {},
+): number | null {
   const digits = params.digits ?? TOTP_DEFAULT_DIGITS
   const candidate = code.replace(/\s+/gu, '')
-  if (!/^\d+$/u.test(candidate) || candidate.length !== digits) return false
+  if (!/^\d+$/u.test(candidate) || candidate.length !== digits) return null
   const window = params.window ?? 1
   const center = timeCounter(unixSeconds, params)
   const candBuf = Buffer.from(candidate, 'utf8')
-  let matched = false
+  let matched: number | null = null
   for (let offset = -window; offset <= window; offset++) {
-    const expected = hotp(secret, center + offset, digits)
+    const step = center + offset
+    const expected = hotp(secret, step, digits)
     const expBuf = Buffer.from(expected, 'utf8')
     // Length is always `digits` for both, so timingSafeEqual is safe to call.
     if (expBuf.length === candBuf.length && timingSafeEqual(expBuf, candBuf)) {
-      matched = true
+      matched = step
     }
   }
   return matched

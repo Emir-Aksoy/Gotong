@@ -37,8 +37,10 @@ interface Boot {
   cookie: string
 }
 
-function liveCode(secret: string): string {
-  return totpCodeAt(base32Decode(secret), Math.floor(Date.now() / 1000))
+// Offset picks a DIFFERENT step when one was already consumed — the replay
+// guard (audit F1) refuses to accept any time step twice.
+function liveCode(secret: string, offsetSeconds = 0): string {
+  return totpCodeAt(base32Decode(secret), Math.floor(Date.now() / 1000) + offsetSeconds)
 }
 
 async function boot(opts: { masterKey?: boolean } = {}): Promise<Boot> {
@@ -155,8 +157,10 @@ describe('/api/me/totp — member MFA self-service (P1-M3e)', () => {
     expect(wrong.status).toBe(400)
     expect(await state()).toBe('active')
 
-    // Correct code → removed.
-    const ok = await me('/api/me/totp/disable', 'POST', { code: liveCode(enroll.secretBase32) })
+    // Correct FRESH code (next step — confirm consumed the current one) → removed.
+    const ok = await me('/api/me/totp/disable', 'POST', {
+      code: liveCode(enroll.secretBase32, 30),
+    })
     expect(ok.status).toBe(200)
     expect(((await ok.json()) as { ok: boolean }).ok).toBe(true)
     expect(await state()).toBe('none')

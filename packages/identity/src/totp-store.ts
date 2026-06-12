@@ -26,7 +26,7 @@ import {
   base32Decode,
   buildOtpauthUri,
   generateTotpSecret,
-  verifyTotp,
+  matchTotpStep,
 } from './totp.js'
 import type { TotpEnrollment, TotpState, VaultEntry } from './types.js'
 
@@ -49,6 +49,8 @@ interface TotpRow {
   confirmed_at: number | null
   created_at: number
   last_used_at: number | null
+  /** Last ACCEPTED time step — the replay high-water mark (audit F1). */
+  last_step: number | null
 }
 
 export interface EnrollTotpInput {
@@ -83,8 +85,12 @@ export class TotpStore {
         (user_id, vault_id, confirmed_at, created_at, last_used_at)
         VALUES (?, ?, NULL, ?, NULL)`,
     )
-    this.stmtConfirm = db.prepare('UPDATE user_totp SET confirmed_at = ? WHERE user_id = ?')
-    this.stmtTouch = db.prepare('UPDATE user_totp SET last_used_at = ? WHERE user_id = ?')
+    this.stmtConfirm = db.prepare(
+      'UPDATE user_totp SET confirmed_at = ?, last_step = ? WHERE user_id = ?',
+    )
+    this.stmtTouch = db.prepare(
+      'UPDATE user_totp SET last_used_at = ?, last_step = ? WHERE user_id = ?',
+    )
     this.stmtDelete = db.prepare('DELETE FROM user_totp WHERE user_id = ?')
   }
 
@@ -155,20 +161,28 @@ export class TotpStore {
     if (r.confirmed_at != null) {
       throw new IdentityError({ code: 'invalid_input', message: 'TOTP already confirmed' })
     }
-    if (!this.verifySecret(r.vault_id, input.code, input.nowSeconds)) return false
-    this.stmtConfirm.run(Date.now(), input.userId)
+    const step = this.verifySecret(r.vault_id, input.code, input.nowSeconds)
+    if (step == null) return false
+    // Record the confirm code's step too — it must not double as the first
+    // login code (audit F1).
+    this.stmtConfirm.run(Date.now(), step, input.userId)
     return true
   }
 
   /**
    * Verify a code at LOGIN. Fail-closed: returns false unless the user has an
-   * ACTIVE factor and the code matches. Bumps last_used_at on success.
+   * ACTIVE factor and the code matches. RFC 6238 §5.2 replay guard: a code at
+   * or before the last ACCEPTED step is rejected even if it would otherwise
+   * still verify — a shoulder-surfed code dies the moment its owner uses it
+   * (audit F1). Bumps last_used_at + last_step on success.
    */
   verifyForLogin(input: VerifyTotpInput): boolean {
     const r = this.row(input.userId)
     if (!r || r.confirmed_at == null) return false
-    if (!this.verifySecret(r.vault_id, input.code, input.nowSeconds)) return false
-    this.stmtTouch.run(Date.now(), input.userId)
+    const step = this.verifySecret(r.vault_id, input.code, input.nowSeconds)
+    if (step == null) return false
+    if (r.last_step != null && step <= r.last_step) return false
+    this.stmtTouch.run(Date.now(), step, input.userId)
     return true
   }
 
@@ -181,10 +195,11 @@ export class TotpStore {
     return true
   }
 
-  private verifySecret(vaultId: string, code: string, nowSeconds?: number): boolean {
+  /** Returns the matched TIME STEP on success, null on a wrong code. */
+  private verifySecret(vaultId: string, code: string, nowSeconds?: number): number | null {
     const base32 = this.vault.readVaultSecret(vaultId)
     const secret = base32Decode(base32)
     const now = nowSeconds ?? Math.floor(Date.now() / 1000)
-    return verifyTotp(secret, code, now)
+    return matchTotpStep(secret, code, now)
   }
 }

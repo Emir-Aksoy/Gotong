@@ -1093,6 +1093,19 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE a2a_outbound_agents ADD COLUMN lifecycle TEXT;
     `,
   },
+  {
+    // Audit F1 — TOTP replay within the accept window. RFC 6238 §5.2: a code
+    // observed over the shoulder stayed valid for the rest of its ±1-step
+    // window even after a successful login. Persist the last ACCEPTED time
+    // step; verifyForLogin rejects any code at or before it.
+    //
+    //   last_step  NULL = nothing accepted yet (legacy rows keep working).
+    version: 33,
+    name: 'totp-last-step',
+    sql: `
+      ALTER TABLE user_totp ADD COLUMN last_step INTEGER;
+    `,
+  },
 ]
 
 /**

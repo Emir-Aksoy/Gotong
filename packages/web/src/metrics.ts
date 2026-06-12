@@ -123,6 +123,17 @@ export function renderMetrics(hub: Hub, opts: RenderMetricsOptions = {}): string
     '',
   )
 
+  // --- process RSS ------------------------------------------------------------
+  // The standard prom-client name, hand-rolled: the shipped alert rule
+  // AipehubProcessRssCreep queries this series, and until now /metrics never
+  // exported it (audit — dead alert).
+  w(
+    '# HELP process_resident_memory_bytes Resident set size of the host process in bytes.',
+    '# TYPE process_resident_memory_bytes gauge',
+    `process_resident_memory_bytes ${process.memoryUsage().rss}`,
+    '',
+  )
+
   // --- participants by kind ---------------------------------------------------
   const participants = hub.participants()
   const byKind: Record<string, number> = {}

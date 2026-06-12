@@ -44,9 +44,14 @@ interface Boot {
   secret: string
 }
 
-/** A code valid for the wall clock (the store verifies against Date.now()). */
-function liveCode(secret: string): string {
-  return totpCodeAt(base32Decode(secret), Math.floor(Date.now() / 1000))
+/**
+ * A code valid for the wall clock + offset (the store verifies against
+ * Date.now(), ±1 step). Login assertions pass +30s — the NEXT step — because
+ * the setup's confirm consumed the current step and the replay guard refuses
+ * to accept any step twice (audit F1).
+ */
+function liveCode(secret: string, offsetSeconds = 0): string {
+  return totpCodeAt(base32Decode(secret), Math.floor(Date.now() / 1000) + offsetSeconds)
 }
 
 async function boot(rateLimit?: { max: number; windowSec: number }): Promise<Boot> {
@@ -126,7 +131,7 @@ describe('login route — TOTP challenge (P1-M3d)', () => {
     const r = await login(b.baseUrl, {
       email: MEMBER_EMAIL,
       password: MEMBER_PASSWORD,
-      totpCode: liveCode(b.secret),
+      totpCode: liveCode(b.secret, 30),
     })
     expect(r.status).toBe(200)
     expect(r.headers.get('set-cookie') ?? '').toContain('aipehub_identity=')
@@ -189,7 +194,7 @@ describe('login route — TOTP challenge does not burn rate-limit budget (P1-M3d
       const good = await login(b.baseUrl, {
         email: MEMBER_EMAIL,
         password: MEMBER_PASSWORD,
-        totpCode: liveCode(b.secret),
+        totpCode: liveCode(b.secret, 30),
       })
       expect(good.status).toBe(200)
 

@@ -42,11 +42,13 @@ describe('authenticatePassword — TOTP login gate (P1-M3c)', () => {
   const email = 'member@team.test'
   const password = 'member-strong-password'
 
-  // A valid code for the current frozen step. The store reads the wall clock
-  // internally for login verify, so we drive the assertions at the live time;
-  // generate the code from the same wall clock to stay in the ±1 window.
-  function liveCode(): string {
-    return totpCodeAt(base32Decode(secret), Math.floor(Date.now() / 1000))
+  // A valid code at the wall clock + optional offset. The store reads
+  // Date.now() internally for login verify, so we generate from the same
+  // clock to stay in the ±1 window. Login tests pass +30s (the NEXT step):
+  // the confirm code in beforeEach consumed the current step, and the replay
+  // guard refuses to accept any step twice (audit F1).
+  function liveCode(offsetSeconds = 0): string {
+    return totpCodeAt(base32Decode(secret), Math.floor(Date.now() / 1000) + offsetSeconds)
   }
 
   beforeEach(() => {
@@ -78,7 +80,7 @@ describe('authenticatePassword — TOTP login gate (P1-M3c)', () => {
     })
 
     it('password + correct code mints a session', () => {
-      const s = store.authenticatePassword({ email, password, totpCode: liveCode() })
+      const s = store.authenticatePassword({ email, password, totpCode: liveCode(30) })
       expect(s.userId).toBe(userId)
       expect(s.token).toMatch(/^ses_/u)
     })
