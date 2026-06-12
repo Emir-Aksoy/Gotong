@@ -61,10 +61,12 @@ jobs:
   node:
     name: Node ${{ matrix.node }} · ${{ matrix.os }} · TS workspace
     runs-on: ${{ matrix.os }}
-    # The slowest leg (Windows × node 22) historically lands ~8min
-    # cold-cache and ~5min warm. 12min gives breathing room without
-    # letting a hang sit for 20min.
-    timeout-minutes: 12
+    # The slowest leg (Windows × node 22) hit the old 12min budget on
+    # 2026-06-12: every package was green and host was still mid-suite
+    # (929 tests, many real-socket e2e) when the job was cut at exactly
+    # 12:00. 20min fits the grown suite cold-cache while still killing
+    # a genuine hang long before the runner default (360min).
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
