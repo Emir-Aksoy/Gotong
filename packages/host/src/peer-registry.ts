@@ -549,6 +549,13 @@ export class PeerRegistry {
     endpointUrl: string
     connected: boolean
     backoffAttempts: number
+    /**
+     * REL-3 — epoch-ms of the most recent frame received from this peer
+     * (any frame, including keepalive pongs). Null when not connected or
+     * when the link transport doesn't track liveness. An honest "is the
+     * other side actually breathing" signal for the control plane.
+     */
+    lastSeenAt: number | null
   }> {
     const rows = this.opts.identity.listPeers()
     return rows.map((row) => ({
@@ -558,6 +565,7 @@ export class PeerRegistry {
       endpointUrl: row.endpointUrl,
       connected: this.installed.has(row.id),
       backoffAttempts: this.backoff.get(row.id)?.attempts ?? 0,
+      lastSeenAt: this.installed.get(row.id)?.link.lastSeenAt ?? null,
     }))
   }
 

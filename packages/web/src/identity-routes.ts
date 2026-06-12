@@ -676,6 +676,12 @@ export interface HandleIdentityRouteCtx {
       endpointUrl: string
       connected: boolean
       backoffAttempts: number
+      /**
+       * REL-3 — epoch-ms of the most recent frame from this peer, or
+       * null when not connected. Optional so an older host registry
+       * without keepalive still satisfies the surface.
+       */
+      lastSeenAt?: number | null
     }>
   }
   /**
@@ -2223,6 +2229,7 @@ function handleListPeers(ctx: HandleIdentityRouteCtx, res: ServerResponse): void
       ...p,
       connected: statusByRow.get(p.id)?.connected ?? false,
       backoffAttempts: statusByRow.get(p.id)?.backoffAttempts ?? 0,
+      lastSeenAt: statusByRow.get(p.id)?.lastSeenAt ?? null,
     }))
     sendJson(res, { peers: out })
   } catch (err) {

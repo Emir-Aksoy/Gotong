@@ -24,6 +24,8 @@
  *   MESH_TASK      {task}                       either direction
  *   MESH_RESULT    {result}                     reply (matched by taskId)
  *   MESH_MESSAGE   {message}                    fire-and-forget
+ *   MESH_PING      {ts}                         keepalive probe (REL-3)
+ *   MESH_PONG      {ts}                         keepalive reply
  *   MESH_GOODBYE   {reason?}                    cooperative close
  */
 
@@ -94,11 +96,23 @@ export type MeshFrame =
       error?: string
     }
   | { type: 'MESH_GOODBYE'; reason?: string }
+  /**
+   * REL-3 (audit debt #1) — symmetric keepalive. Either side may ping;
+   * the other replies with a pong. Any inbound frame (not just pongs)
+   * counts as proof of life, so a busy link never wastes a close on a
+   * late pong. A half-open TCP connection that swallows frames stops
+   * producing ANY inbound traffic and gets closed after
+   * `maxMissedPings` silent intervals instead of lingering as a zombie.
+   */
+  | { type: 'MESH_PING'; ts: number }
+  | { type: 'MESH_PONG'; ts: number }
 
 const DEFAULT_DISPATCH_TIMEOUT_MS = 30_000
 const DEFAULT_PULL_TIMEOUT_MS = 30_000
 const DEFAULT_RPC_TIMEOUT_MS = 30_000
 const DEFAULT_HANDSHAKE_TIMEOUT_MS = 10_000
+const DEFAULT_KEEPALIVE_INTERVAL_MS = 30_000
+const DEFAULT_MAX_MISSED_PINGS = 2
 
 interface PendingDispatch {
   resolve: (r: TaskResult) => void
@@ -142,6 +156,19 @@ export interface WebSocketHubLinkOptions {
   dispatchTimeoutMs?: number
   /** #2-M3 — per-rpc timeout in ms. Default 30s. */
   rpcTimeoutMs?: number
+  /**
+   * REL-3 — keepalive ping interval in ms. Default 30s. Set to 0 to
+   * disable keepalive entirely (inproc-style trust, or tests that
+   * assert exact frame sequences).
+   */
+  keepaliveIntervalMs?: number
+  /**
+   * REL-3 — how many consecutive silent intervals (no inbound frame of
+   * ANY type) before the link is declared dead and closed with reason
+   * `keepalive_timeout`. Default 2 (≈60s of silence at the default
+   * interval, mirroring session.ts's agent-session discipline).
+   */
+  maxMissedPings?: number
 }
 
 class WebSocketHubLinkImpl implements HubLink {
@@ -176,6 +203,15 @@ class WebSocketHubLinkImpl implements HubLink {
   private resolveHandshake!: () => void
   private rejectHandshake!: (err: Error) => void
 
+  // REL-3 — keepalive state. `_lastSeenAt` is stamped on EVERY parsed
+  // inbound frame; `missedPings` counts intervals with zero inbound
+  // traffic and resets the same way.
+  private readonly keepaliveIntervalMs: number
+  private readonly maxMissedPings: number
+  private _lastSeenAt?: number
+  private missedPings = 0
+  private keepaliveTimer?: ReturnType<typeof setInterval>
+
   constructor(
     ws: WebSocket,
     direction: HubLinkDirection,
@@ -190,6 +226,8 @@ class WebSocketHubLinkImpl implements HubLink {
     this.auth = opts.auth
     this.dispatchTimeoutMs = opts.dispatchTimeoutMs ?? DEFAULT_DISPATCH_TIMEOUT_MS
     this.rpcTimeoutMs = opts.rpcTimeoutMs ?? DEFAULT_RPC_TIMEOUT_MS
+    this.keepaliveIntervalMs = opts.keepaliveIntervalMs ?? DEFAULT_KEEPALIVE_INTERVAL_MS
+    this.maxMissedPings = opts.maxMissedPings ?? DEFAULT_MAX_MISSED_PINGS
     this._peerId = opts.expectedPeerId ?? '<pending>'
 
     this.handshakePromise = new Promise<void>((resolve, reject) => {
@@ -220,6 +258,11 @@ class WebSocketHubLinkImpl implements HubLink {
 
   get status(): HubLinkStatus {
     return this._status
+  }
+
+  /** REL-3 — epoch-ms of the most recent inbound frame from the peer. */
+  get lastSeenAt(): number | undefined {
+    return this._lastSeenAt
   }
 
   /** @internal — used by `connectHubLink` / `acceptHubLinks`. */
@@ -274,6 +317,13 @@ class WebSocketHubLinkImpl implements HubLink {
     } catch {
       return // bad frame, ignore
     }
+
+    // REL-3 — any well-formed inbound frame proves the peer (and the
+    // path to it) is alive. Stamping here rather than only on PONG
+    // means a chatty link never pays keepalive overhead beyond the
+    // outbound pings themselves.
+    this._lastSeenAt = Date.now()
+    this.missedPings = 0
 
     switch (frame.type) {
       case 'MESH_HELLO':
@@ -331,6 +381,7 @@ class WebSocketHubLinkImpl implements HubLink {
           ...(ackAuth ? { auth: ackAuth } : {}),
         })
         this._status = 'open'
+        this.startKeepalive()
         this.resolveHandshake()
         return
 
@@ -376,6 +427,7 @@ class WebSocketHubLinkImpl implements HubLink {
         }
         this._peerId = frame.peerId
         this._status = 'open'
+        this.startKeepalive()
         this.resolveHandshake()
         return
 
@@ -528,10 +580,57 @@ class WebSocketHubLinkImpl implements HubLink {
         return
       }
 
+      case 'MESH_PING':
+        // Reply only on an open link — a ping during handshake is a
+        // protocol violation we ignore (the liveness stamp above
+        // already happened, which is harmless).
+        if (this._status === 'open') {
+          this.sendFrame({ type: 'MESH_PONG', ts: frame.ts })
+        }
+        return
+
+      case 'MESH_PONG':
+        // Nothing to do — the liveness stamp above is the whole point.
+        return
+
       case 'MESH_GOODBYE':
         this.transitionToClosed('peer_goodbye')
         return
     }
+  }
+
+  /**
+   * REL-3 — start the symmetric keepalive loop. Called exactly once,
+   * when the handshake transitions the link to 'open' (both the HELLO
+   * and HELLO_ACK branches). Each tick: if the peer produced no inbound
+   * frame for `maxMissedPings` consecutive intervals, the link is a
+   * half-open zombie — close it so PeerRegistry's redial loop can see
+   * the failure and reconnect. Otherwise bill one missed interval and
+   * ping; any inbound frame resets the count.
+   *
+   * `.unref()` keeps the timer from pinning the event loop — a process
+   * with nothing left but keepalive timers should be allowed to exit.
+   */
+  private startKeepalive(): void {
+    if (this.keepaliveIntervalMs <= 0 || this.keepaliveTimer) return
+    this.keepaliveTimer = setInterval(() => {
+      if (this._status !== 'open') return
+      if (this.missedPings >= this.maxMissedPings) {
+        this.transitionToClosed('keepalive_timeout')
+        // A half-open zombie won't complete a graceful close handshake
+        // — terminate() drops the socket immediately so the fd and the
+        // ws 'close' bookkeeping don't linger until the OS notices.
+        try {
+          this.ws.terminate()
+        } catch {
+          /* swallow */
+        }
+        return
+      }
+      this.missedPings += 1
+      this.sendFrame({ type: 'MESH_PING', ts: Date.now() })
+    }, this.keepaliveIntervalMs)
+    this.keepaliveTimer.unref?.()
   }
 
   async dispatch(task: Task): Promise<TaskResult> {
@@ -630,6 +729,12 @@ class WebSocketHubLinkImpl implements HubLink {
     if (this._status === 'closed') return
     const wasConnecting = this._status === 'connecting'
     this._status = 'closed'
+
+    // REL-3 — stop the keepalive loop; a closed link must never ping.
+    if (this.keepaliveTimer) {
+      clearInterval(this.keepaliveTimer)
+      this.keepaliveTimer = undefined
+    }
 
     // FED-M1: if the close happens DURING handshake (e.g. the IN side
     // rejected our bad peerToken and closed the socket), reject the
@@ -832,6 +937,10 @@ export interface AcceptHubLinksOptions {
    * tracks attempts and bills failures heavier than successes.
    */
   onConnectionAttempt?: (sourceIp: string) => boolean
+  /** REL-3 — keepalive ping interval for accepted links. Default 30s; 0 disables. */
+  keepaliveIntervalMs?: number
+  /** REL-3 — consecutive silent intervals before `keepalive_timeout`. Default 2. */
+  maxMissedPings?: number
   /**
    * Audit #142 — when true, prefer the first `X-Forwarded-For` entry
    * as the source IP for `onConnectionAttempt`. Default false: read
@@ -910,6 +1019,12 @@ export function acceptHubLinks(opts: AcceptHubLinksOptions): () => void {
     const link = new WebSocketHubLinkImpl(ws, 'in', {
       selfId: opts.selfId,
       ...(opts.auth ? { auth: opts.auth } : {}),
+      ...(opts.keepaliveIntervalMs !== undefined
+        ? { keepaliveIntervalMs: opts.keepaliveIntervalMs }
+        : {}),
+      ...(opts.maxMissedPings !== undefined
+        ? { maxMissedPings: opts.maxMissedPings }
+        : {}),
     })
     Promise.race([
       link.waitForHandshake(),

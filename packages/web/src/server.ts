@@ -376,6 +376,8 @@ export interface WebServerOptions {
       endpointUrl: string
       connected: boolean
       backoffAttempts: number
+      /** REL-3 — last inbound frame from this peer (epoch-ms), null when down. */
+      lastSeenAt?: number | null
     }>
   }
   /**

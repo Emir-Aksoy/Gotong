@@ -51,6 +51,14 @@ export interface HubLink {
   readonly status: HubLinkStatus
 
   /**
+   * Epoch-ms timestamp of the most recent frame observed FROM the peer
+   * (any frame counts — tasks, results, pongs). Lets operators tell a
+   * live link from a half-open TCP zombie. Optional: transports without
+   * a wire (inproc) leave it undefined.
+   */
+  readonly lastSeenAt?: number
+
+  /**
    * Forward a task to the peer hub for it to dispatch internally.
    * Returns the peer's TaskResult. Caller is responsible for handing
    * the resulting taskId / by back to the originating Hub.
