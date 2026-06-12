@@ -442,7 +442,11 @@ export class AcpSession {
     await new Promise<void>((resolve) => {
       const t = setTimeout(() => {
         try {
-          if (!child.killed) child.kill('SIGKILL')
+          // `child.killed` flips the moment the SIGTERM above is *sent*, not
+          // when the process exits — gating on it made this escalation dead
+          // code and let a SIGTERM-ignoring bridge linger as a zombie. The
+          // real "still alive" condition is "hasn't exited yet."
+          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
         } catch {
           /* already gone */
         }
