@@ -208,12 +208,10 @@ export function generateAuthnRequest(input: AuthnRequestInput): AuthnRequestResu
  */
 export function decodeSamlPostResponse(samlResponseB64: string): string {
   requireStr(samlResponseB64, 'SAMLResponse')
-  let xml: string
-  try {
-    xml = Buffer.from(samlResponseB64, 'base64').toString('utf8')
-  } catch {
-    throw new SamlError('malformed_response', 'SAMLResponse is not valid base64')
-  }
+  // Node's base64 decoder is lenient for string input and never throws —
+  // garbage just decodes to garbage bytes. The look-like-SAML check below
+  // (and the full signature validation after it) is the real gate.
+  const xml = Buffer.from(samlResponseB64, 'base64').toString('utf8')
   if (!xml.includes('Response')) {
     throw new SamlError('malformed_response', 'decoded SAMLResponse does not look like SAML XML')
   }

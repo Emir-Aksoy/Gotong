@@ -48,9 +48,14 @@ import {
   cancelledOutcome,
   type JsonRpcId,
   type AcpClientCapabilities,
+  type InitializeParams,
   type InitializeResult,
+  type AuthenticateParams,
+  type SessionNewParams,
   type SessionNewResult,
+  type SessionPromptParams,
   type SessionPromptResult,
+  type SessionCancelParams,
   type SessionUpdateParams,
   type AcpSessionUpdate,
   type AcpStopReason,
@@ -247,7 +252,7 @@ export class AcpSession {
 
     const connP = conn.request<SessionPromptResult>(
       ACP_SESSION_PROMPT,
-      { sessionId, prompt: [textBlock(text)] },
+      { sessionId, prompt: [textBlock(text)] } satisfies SessionPromptParams,
       opts.signal ? { signal: opts.signal } : {},
     )
     // The turn (and thus the lock) is done only when connP settles. An escalation
@@ -287,7 +292,7 @@ export class AcpSession {
   /** ACP cancel is a NOTIFICATION; the in-flight prompt then ends with stopReason 'cancelled'. */
   cancel(): void {
     if (this.conn && this.sessionIdValue) {
-      this.conn.notify(ACP_SESSION_CANCEL, { sessionId: this.sessionIdValue })
+      this.conn.notify(ACP_SESSION_CANCEL, { sessionId: this.sessionIdValue } satisfies SessionCancelParams)
     }
   }
 
@@ -324,11 +329,11 @@ export class AcpSession {
         {
           protocolVersion: this.opts.protocolVersion ?? DEFAULT_PROTOCOL_VERSION,
           clientCapabilities: this.opts.clientCapabilities ?? {},
-        },
+        } satisfies InitializeParams,
         { signal: ac.signal },
       )
       if (this.opts.authMethodId && (initResult.authMethods?.length ?? 0) > 0) {
-        await conn.request(ACP_AUTHENTICATE, { methodId: this.opts.authMethodId }, { signal: ac.signal })
+        await conn.request(ACP_AUTHENTICATE, { methodId: this.opts.authMethodId } satisfies AuthenticateParams, { signal: ac.signal })
       }
       // ACP `session/new` REQUIRES both an absolute `cwd` AND an `mcpServers`
       // array (real bridges validate via zod → omitting `mcpServers` rejects
@@ -336,7 +341,7 @@ export class AcpSession {
       // the agent; cwd defaults to the host's cwd when the caller didn't pin one.
       const newResult = await conn.request<SessionNewResult>(
         ACP_SESSION_NEW,
-        { cwd: this.opts.cwd ?? process.cwd(), mcpServers: [] },
+        { cwd: this.opts.cwd ?? process.cwd(), mcpServers: [] } satisfies SessionNewParams,
         { signal: ac.signal },
       )
       this.sessionIdValue = newResult.sessionId
