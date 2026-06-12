@@ -9,7 +9,7 @@
  *     invalid code → 'im_binding_code_invalid'; expired code dropped
  *     from codes table + 'im_binding_code_expired'; re-bind same
  *     (platform, platformUserId) overwrites prior user_id
- *   - getUserIdByImBinding / getImBinding: present + absent
+ *   - getUserIdByImBinding: present + absent
  *   - listImBindings: unfiltered + by-platform
  *   - removeImBinding: 1 on hit / 0 on miss / empty arg guards
  *   - sweepExpiredImBindingCodes: deletes expired only / non-finite
@@ -246,9 +246,9 @@ describe('IdentityStore — IM bindings (Phase 12 M1)', () => {
     })
   })
 
-  // --- getUserIdByImBinding / getImBinding ---------------------------------
+  // --- getUserIdByImBinding -------------------------------------------------
 
-  describe('getUserIdByImBinding / getImBinding', () => {
+  describe('getUserIdByImBinding', () => {
     beforeEach(() => {
       const c = store.issueImBindingCode({ userId, code: 'GET001' })
       store.claimImBindingCode({
@@ -267,9 +267,9 @@ describe('IdentityStore — IM bindings (Phase 12 M1)', () => {
       expect(store.getUserIdByImBinding('telegram', 'tg-999')).toBeNull()
     })
 
-    it('returns full binding row via getImBinding', () => {
-      const b = store.getImBinding('telegram', 'tg-1')
-      expect(b).not.toBeNull()
+    it('full binding row is visible via listImBindings', () => {
+      const b = store.listImBindings(userId, { platform: 'telegram' })[0]
+      expect(b).toBeDefined()
       expect(b!.userId).toBe(userId)
       expect(b!.displayName).toBe('Alice')
       expect(b!.createdAt).toBeTypeOf('number')
@@ -278,7 +278,6 @@ describe('IdentityStore — IM bindings (Phase 12 M1)', () => {
     it('returns null for empty / non-string args', () => {
       expect(store.getUserIdByImBinding('', 'x')).toBeNull()
       expect(store.getUserIdByImBinding('telegram', '')).toBeNull()
-      expect(store.getImBinding('', 'x')).toBeNull()
     })
   })
 

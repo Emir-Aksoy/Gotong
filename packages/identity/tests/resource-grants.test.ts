@@ -171,13 +171,13 @@ describe('IdentityStore — resource grants (v5 A-M1)', () => {
   it('workflow facade is a resource grant with a user principal', () => {
     store.setWorkflowGrant({ workflowId: 'wf-a', userId: 'alice', perm: 'owner', grantedAt: 7 })
     // visible through BOTH the legacy facade and the generic view
-    expect(store.getWorkflowGrant('wf-a', 'alice')).toEqual({
+    expect(store.listWorkflowGrants('wf-a')).toEqual([{
       workflowId: 'wf-a',
       userId: 'alice',
       perm: 'owner',
       grantedBy: null,
       grantedAt: 7,
-    })
+    }])
     expect(store.getResourceGrant('workflow', 'wf-a', userPrincipal('alice'))).toEqual({
       resourceKind: 'workflow',
       resourceId: 'wf-a',

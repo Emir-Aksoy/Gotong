@@ -504,16 +504,9 @@ export const AUDIT_ACTIONS = {
   SETUP_OWNER_CREATED: 'setup_owner_created',
   // Phase 5 — vault (A1).
   VAULT_CREATE: 'vault_create',
-  VAULT_READ: 'vault_read',
   VAULT_REVOKE: 'vault_revoke',
   // Phase 5 — API pool (B1+).
-  API_CALL: 'api_call',
   API_QUOTA_DENIED: 'api_quota_denied',
-  // Phase 5 — knowledge (B3+).
-  KNOWLEDGE_INGEST: 'knowledge_ingest',
-  KNOWLEDGE_SEARCH: 'knowledge_search',
-  KNOWLEDGE_GRANT: 'knowledge_grant',
-  KNOWLEDGE_REVOKE: 'knowledge_revoke',
   // Phase 5 — peer registry (D1+).
   PEER_ADD: 'peer_add',
   PEER_REMOVE: 'peer_remove',

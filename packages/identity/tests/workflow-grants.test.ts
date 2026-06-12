@@ -17,7 +17,7 @@
 
 import { describe, expect, it, beforeEach } from 'vitest'
 
-import { IdentityError, IdentityStore, openIdentityStore } from '../src/index.js'
+import { IdentityError, IdentityStore, openIdentityStore, userPrincipal } from '../src/index.js'
 
 describe('IdentityStore — workflow grants (Phase 19 P2-M5)', () => {
   let store: IdentityStore
@@ -40,8 +40,8 @@ describe('IdentityStore — workflow grants (Phase 19 P2-M5)', () => {
       grantedBy: null,
       grantedAt: 1000,
     })
-    expect(store.getWorkflowGrant('wf-a', 'alice')).toEqual(g)
-    expect(store.getWorkflowGrant('wf-a', 'bob')).toBeNull()
+    expect(store.listWorkflowGrants('wf-a')).toEqual([g])
+    expect(store.hasWorkflowGrant('wf-a', 'bob', 'viewer')).toBe(false)
   })
 
   it('set assigns a default grantedAt when omitted', () => {
@@ -53,7 +53,7 @@ describe('IdentityStore — workflow grants (Phase 19 P2-M5)', () => {
   it('set is an upsert — a regrant replaces the perm + granter', () => {
     store.setWorkflowGrant({ workflowId: 'wf-a', userId: 'alice', perm: 'viewer', grantedBy: 'sys' })
     store.setWorkflowGrant({ workflowId: 'wf-a', userId: 'alice', perm: 'editor', grantedBy: 'owner-u' })
-    const g = store.getWorkflowGrant('wf-a', 'alice')
+    const g = store.listWorkflowGrants('wf-a')[0]
     expect(g?.perm).toBe('editor')
     expect(g?.grantedBy).toBe('owner-u')
     // still exactly one row for the pair
@@ -87,8 +87,11 @@ describe('IdentityStore — workflow grants (Phase 19 P2-M5)', () => {
 
     const onA = store.listWorkflowGrants('wf-a')
     expect(onA.map((g) => g.userId)).toEqual(['alice', 'bob']) // oldest-first
-    const aliceHas = store.listUserWorkflowGrants('alice')
-    expect(aliceHas.map((g) => `${g.workflowId}:${g.perm}`)).toEqual([
+    // per-user view goes through the generic resource_grants surface
+    const aliceHas = store
+      .listPrincipalGrants(userPrincipal('alice'))
+      .filter((g) => g.resourceKind === 'workflow')
+    expect(aliceHas.map((g) => `${g.resourceId}:${g.perm}`)).toEqual([
       'wf-a:owner',
       'wf-b:viewer',
     ])
@@ -122,6 +125,6 @@ describe('IdentityStore — workflow grants (Phase 19 P2-M5)', () => {
   it('grants are isolated per workflow', () => {
     store.setWorkflowGrant({ workflowId: 'wf-a', userId: 'alice', perm: 'owner' })
     expect(store.hasWorkflowGrant('wf-b', 'alice', 'viewer')).toBe(false)
-    expect(store.getWorkflowGrant('wf-b', 'alice')).toBeNull()
+    expect(store.listWorkflowGrants('wf-b')).toEqual([])
   })
 })
