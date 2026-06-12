@@ -2196,9 +2196,12 @@ async function handle(
   }
 
   // --- leaderboard (visible to admins AND workers — visibility is the
-  //     point: "everyone sees everyone's contributions"). Optional `from`
-  //     / `to` query params; default = all-time. ------------------------
+  //     point: "everyone sees everyone's contributions"). Signed-in only:
+  //     participant ids + contribution counts are room-internal, not
+  //     public (audit P2 — this route used to answer unauthenticated).
+  //     Optional `from` / `to` query params; default = all-time. --------
   if (method === 'GET' && path === '/api/leaderboard') {
+    if (!(await requireAdminOrWorker(ctx, req, res))) return
     const from = parseTsParam(url.searchParams.get('from'))
     const to = parseTsParam(url.searchParams.get('to'))
     sendJson(res, ctx.hub.leaderboard({ from, to }))

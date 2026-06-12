@@ -158,8 +158,16 @@ export class A2aRemoteParticipant extends AgentParticipant {
     }
     // Non-terminal (working / submitted / input-required) → poll again, unless
     // we've exhausted the safety cap (a hung remote fails closed, never parks
-    // forever).
-    const lc = this.lifecycle!
+    // forever). Guard instead of a `!` assertion: a parked task can be resumed
+    // AFTER the operator toggled lifecycle OFF (H2-OUT re-registers the
+    // participant without it) — fail with a clear message, not a TypeError
+    // (audit P2).
+    const lc = this.lifecycle
+    if (!lc) {
+      throw new Error(
+        `a2a remote task '${t.id}' is still ${state} but lifecycle polling is now disabled on '${this.id}' — failing closed (re-enable lifecycle or re-dispatch)`,
+      )
+    }
     const next = attempt + 1
     if (next > lc.maxAttempts) {
       throw new Error(

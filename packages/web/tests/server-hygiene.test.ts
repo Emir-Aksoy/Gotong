@@ -353,3 +353,30 @@ describe('H22: Bearer path is peek + recordFailure (matches cookie path)', () =>
     expect((await bogus('not-a-real-token-3')).status).toBe(429)
   })
 })
+
+// =========================================================================
+// Audit 2026-06 P2 — GET /api/leaderboard must require a signed-in
+// principal (admin OR worker). It used to answer unauthenticated,
+// leaking participant ids + contribution counts to anyone who could
+// reach the port.
+// =========================================================================
+
+describe('audit P2: /api/leaderboard requires auth', () => {
+  let b: BootResult
+  beforeEach(async () => { b = await boot() })
+  afterEach(async () => { await teardown(b) })
+
+  it('401s without any credential', async () => {
+    const r = await fetch(`${b.baseUrl}/api/leaderboard`)
+    expect(r.status).toBe(401)
+  })
+
+  it('200s for an admin Bearer token', async () => {
+    const r = await fetch(`${b.baseUrl}/api/leaderboard`, {
+      headers: { authorization: `Bearer ${b.adminToken}` },
+    })
+    expect(r.status).toBe(200)
+    const body = (await r.json()) as { entries?: unknown[] }
+    expect(body).toBeTypeOf('object')
+  })
+})
