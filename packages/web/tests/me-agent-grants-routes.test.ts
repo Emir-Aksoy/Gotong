@@ -121,6 +121,9 @@ describe('/api/me/agents/:id/grants — member agent sharing (v5 A-M4)', () => {
 
   afterEach(async () => {
     await b.server.close()
+    // Close the SQLite store before rm — Windows can't unlink an open
+    // database file (EBUSY), unlike Linux/macOS.
+    b.identity.close()
     await rm(b.tmp, { recursive: true, force: true })
   })
 

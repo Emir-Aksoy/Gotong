@@ -117,6 +117,9 @@ describe('/api/me/credentials — member BYO key CRUD (v5 A-M3)', () => {
 
   afterEach(async () => {
     await b.server.close()
+    // Close the SQLite store before rm — Windows can't unlink an open
+    // database file (EBUSY), unlike Linux/macOS.
+    b.identity.close()
     await rm(b.tmp, { recursive: true, force: true })
   })
 

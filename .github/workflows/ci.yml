@@ -288,10 +288,18 @@ jobs:
           # container sticks around long enough to grab logs and an
           # inspect snapshot before we explicitly `docker rm -f` at the
           # end.
+          # The host binds 0.0.0.0 inside the container and (since the
+          # fail-closed security defaults) refuses to start when exposed
+          # without a Host allow-list + Secure cookies. Configure both the
+          # way the deploy docs say to, so this smoke also proves the
+          # documented production env actually boots. /healthz is a GET so
+          # the Host check (state-changing requests only) never blocks it.
           docker run -d \
             --name aipehub-ci \
             -p 13000:3000 \
             -p 14000:4000 \
+            -e AIPE_ALLOWED_HOSTS=127.0.0.1:13000,localhost:3000 \
+            -e AIPE_COOKIE_SECURE=1 \
             aipehub/host:ci
           # The image declares a HEALTHCHECK with 15s start-period; give
           # it 30s to settle, then poll /healthz directly.

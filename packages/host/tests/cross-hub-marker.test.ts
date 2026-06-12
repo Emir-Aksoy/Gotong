@@ -11,11 +11,19 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { FileCrossHubMarkerStore } from '../src/cross-hub-marker.js'
 
+let sandbox: string
 let root: string
 beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), 'aipe-xhub-marker-'))
+  sandbox = await mkdtemp(join(tmpdir(), 'aipe-xhub-marker-'))
+  // Nest the store root two levels deep so the `../../…` traversal probe
+  // below resolves INSIDE the sandbox. With root directly at the tmpdir,
+  // `join(root, '..', '..', 'etc', 'passwd')` lands on the real /etc/passwd
+  // on Linux runners (tmpdir = /tmp/xxx) and the "nothing escaped" read
+  // assertion false-fails.
+  root = join(sandbox, 'space', 'root')
+  await mkdir(root, { recursive: true })
 })
-afterEach(() => rm(root, { recursive: true, force: true }))
+afterEach(() => rm(sandbox, { recursive: true, force: true }))
 
 const markerFile = (id: string) => join(root, 'workflows', 'cross-hub', `${id}.json`)
 
