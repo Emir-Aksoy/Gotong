@@ -61,8 +61,13 @@
  *   AIPE_LEDGER_KEEP_DAYS   prune usage-ledger (billing) rows older than this
  *                           many days at boot, bounding the append-only ledger.
  *                           The retained window stays exportable (Phase 17
- *                           CSV/JSONL) and audit_log is untouched. Unset ⇒ off;
- *                           a malformed value fails the boot loudly.
+ *                           CSV/JSONL). Unset ⇒ off; a malformed value fails
+ *                           the boot loudly. Sibling knobs with the same
+ *                           semantics for the other append-only tables:
+ *   AIPE_AUDIT_KEEP_DAYS            audit_log
+ *   AIPE_PEER_SUMMARY_KEEP_DAYS     peer_summary_snapshots (trend history)
+ *   AIPE_ALERT_FIRINGS_KEEP_DAYS    peer_summary_alert_firings (resolved only;
+ *                                   open firings are never pruned)
  *
  *   --- structured logging (default ON, see @aipehub/core/logger) ---
  *
@@ -112,11 +117,7 @@ import { BAKED_VERSION } from './version.js'
 import { buildAgentCard } from './agent-card.js'
 import { auditBootSecurity, formatBootSecurityReport, isLoopbackHost } from './boot-security.js'
 import { rotateMasterKey } from './rotate-master-key.js'
-import { applyLedgerRetention, parseLedgerRetention } from './ledger-retention.js'
-import {
-  applyPeerSummaryRetention,
-  parsePeerSummaryRetention,
-} from './peer-summary-retention.js'
+import { applyRetentionPolicies, parseRetentionPolicies } from './retention.js'
 import { recoverMasterKeyRotation } from './master-key-recovery.js'
 import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
@@ -445,8 +446,12 @@ ENVIRONMENT
                           (may combine with AIPE_RUN_KEEP; archived runs stay
                           reachable for audit; malformed value fails boot)
   AIPE_LEDGER_KEEP_DAYS   prune usage-ledger (billing) rows older than N days at
-                          boot (retained window stays exportable; audit_log
-                          untouched; unset = off; malformed value fails boot)
+                          boot (retained window stays exportable; unset = off;
+                          malformed value fails boot). Sibling knobs, same
+                          semantics: AIPE_AUDIT_KEEP_DAYS (audit_log),
+                          AIPE_PEER_SUMMARY_KEEP_DAYS (peer_summary_snapshots),
+                          AIPE_ALERT_FIRINGS_KEEP_DAYS (resolved alert firings;
+                          open firings are never pruned)
 
   AIPE_ASSISTANT_PROVIDER 'anthropic' (default) | 'openai' | 'mock' —
                           provider for the host-built-in WorkflowAssistantAgent
@@ -1318,46 +1323,24 @@ async function main(): Promise<void> {
     }
   }
 
-  // Route B P0-M3 (M3-M4) — usage-ledger retention. The ledger is append-only
-  // (one row per LLM call) and grows without bound; prune rows older than
-  // AIPE_LEDGER_KEEP_DAYS so the billing table stays a bounded working set. The
-  // retained window remains exportable via the Phase 17 CSV/JSONL routes, and
-  // `audit_log` is a SEPARATE table this never touches. Parse runs before the
-  // identity guard so a malformed env fails the boot loudly even on a degraded
-  // (no-identity) host; the prune itself is best-effort and skipped without an
-  // identity store (there is no ledger to prune).
-  const ledgerRetentionPolicy = parseLedgerRetention(process.env, Date.now())
-  if (ledgerRetentionPolicy && identity) {
-    try {
-      const { pruned } = applyLedgerRetention(identity, ledgerRetentionPolicy)
-      if (pruned > 0) {
-        log.info('usage ledger retention applied', {
-          pruned,
-          before: ledgerRetentionPolicy.before,
+  // Boot-time retention for the identity store's append-only tables
+  // (usage_ledger / audit_log / peer_summary_snapshots /
+  // peer_summary_alert_firings — one AIPE_*_KEEP_DAYS knob each, all OFF by
+  // default). Parse runs before the identity guard so a malformed env fails
+  // the boot loudly even on a degraded (no-identity) host; the prunes are
+  // best-effort per table and skipped without an identity store. Every
+  // retained window stays exportable via the Phase 17 CSV/JSONL routes.
+  const retentionPolicies = parseRetentionPolicies(process.env, Date.now())
+  if (retentionPolicies.length > 0 && identity) {
+    for (const r of applyRetentionPolicies(identity, retentionPolicies)) {
+      if (r.error !== undefined) {
+        log.warn('retention failed — booting with the full table', {
+          table: r.table,
+          err: r.error,
         })
+      } else if ((r.pruned ?? 0) > 0) {
+        log.info('retention applied', { table: r.table, pruned: r.pruned, before: r.before })
       }
-    } catch (err) {
-      log.warn('usage ledger retention failed — booting with the full ledger', { err })
-    }
-  }
-
-  // v5 Stream F — boot-time control-plane snapshot retention. Same shape as the
-  // ledger above: prune `peer_summary_snapshots` rows older than
-  // AIPE_PEER_SUMMARY_KEEP_DAYS so the trend history stays bounded. OFF by
-  // default (no env ⇒ keep everything). Parse before the identity guard so a
-  // malformed env fails the boot loudly; the prune is best-effort.
-  const peerSummaryRetentionPolicy = parsePeerSummaryRetention(process.env, Date.now())
-  if (peerSummaryRetentionPolicy && identity) {
-    try {
-      const { pruned } = applyPeerSummaryRetention(identity, peerSummaryRetentionPolicy)
-      if (pruned > 0) {
-        log.info('peer summary snapshot retention applied', {
-          pruned,
-          before: peerSummaryRetentionPolicy.before,
-        })
-      }
-    } catch (err) {
-      log.warn('peer summary snapshot retention failed — booting with full history', { err })
     }
   }
 

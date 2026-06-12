@@ -549,6 +549,27 @@ describe('IdentityStore', () => {
       expect(list.map((e) => e.action)).toEqual(['second', 'first'])
     })
 
+    // REL-2 — retention knob for the otherwise-unbounded audit table.
+    it('pruneAuditLog deletes strictly-older rows; the cutoff row is kept (half-open)', async () => {
+      const older = store.writeAuditLog({ action: 'older', actorSource: 'system' })
+      await new Promise((r) => setTimeout(r, 2))
+      const newer = store.writeAuditLog({ action: 'newer', actorSource: 'system' })
+      expect(newer.ts).toBeGreaterThan(older.ts)
+
+      // Cutoff exactly at newer.ts ⇒ only `older` goes; `newer` survives.
+      expect(store.pruneAuditLog({ before: newer.ts })).toBe(1)
+      expect(store.listAuditLog().map((e) => e.action)).toEqual(['newer'])
+
+      // No-op when nothing is older than the cutoff.
+      expect(store.pruneAuditLog({ before: newer.ts })).toBe(0)
+    })
+
+    it('pruneAuditLog rejects a missing / non-integer cutoff', () => {
+      expect(() => store.pruneAuditLog(undefined as never)).toThrow(/before/)
+      expect(() => store.pruneAuditLog({ before: -1 })).toThrow(/non-negative/)
+      expect(() => store.pruneAuditLog({ before: 1.5 })).toThrow(/non-negative integer/)
+    })
+
     it('filters by action / targetUserId / success and respects limit + offset', () => {
       const u1 = store.createUser({ email: 'u1@x.test' })
       const u2 = store.createUser({ email: 'u2@x.test' })

@@ -1716,6 +1716,31 @@ export class IdentityStore {
     return rows.map(rowToAuditLog)
   }
 
+  /**
+   * Prune audit rows older than `before` (half-open: a row exactly at the
+   * cutoff is kept), returning the count removed — the retention knob for a
+   * table that otherwise grows one row per audited action forever. The
+   * retained window stays exportable via the Phase 17 CSV/JSONL routes.
+   * Host-gated OFF by default: with no retention env set this is never
+   * called, and security forensics keep their full uncapped history.
+   */
+  pruneAuditLog(opts: { before: number }): number {
+    if (!opts || typeof opts !== 'object') {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: 'pruneAuditLog: opts object with a `before` cutoff required',
+      })
+    }
+    if (!Number.isInteger(opts.before) || opts.before < 0) {
+      throw new IdentityError({
+        code: 'invalid_input',
+        message: `pruneAuditLog: \`before\` must be a non-negative integer; got ${String(opts.before)}`,
+      })
+    }
+    const res = this.db.prepare('DELETE FROM audit_log WHERE ts < ?').run(opts.before)
+    return Number(res.changes)
+  }
+
   // =====================================================================
   // Invitations (Phase 3 — user invitation flow)
   //
