@@ -2162,6 +2162,24 @@ import { createWorkflows } from './workflows.js'
         }
         return
       }
+      // Audit 2026-06 — these five acts carry no data-id (grants ride
+      // data-user, the audit/grant refresh buttons use modal-held state,
+      // growth reports ride data-path), so they must run before the `!id`
+      // guard below. They previously sat after it and were unreachable.
+      if (act === 'refresh-workflow-audit') { workflows.refreshWorkflowAudit(); return }
+      if (act === 'refresh-workflow-grants') { workflows.refreshWorkflowGrants(); return }
+      if (act === 'add-workflow-grant') { workflows.addWorkflowGrant(); return }
+      if (act === 'remove-workflow-grant') {
+        const userId = target.dataset.user
+        if (userId) workflows.removeWorkflowGrant(userId)
+        return
+      }
+      if (act === 'view-growth-report') {
+        const reportPath = target.dataset.path
+        const when = target.dataset.when || ''
+        if (reportPath) openGrowthReport(reportPath, when)
+        return
+      }
       const id = target.dataset.id
       if (!act || !id) return
       if (act === 'edit-agent') {
@@ -2197,24 +2215,8 @@ import { createWorkflows } from './workflows.js'
       } else if (act === 'rollback-revision') {
         const rev = Number(target.dataset.rev)
         if (Number.isInteger(rev)) workflows.rollbackTo(id, rev)
-      } else if (act === 'refresh-workflow-audit') {
-        // Re-query the governance audit sub-section with the chosen action
-        // filter. The workflow id is held in the revisions modal's state.
-        workflows.refreshWorkflowAudit()
-      } else if (act === 'refresh-workflow-grants') {
-        workflows.refreshWorkflowGrants()
-      } else if (act === 'add-workflow-grant') {
-        workflows.addWorkflowGrant()
-      } else if (act === 'remove-workflow-grant') {
-        // Per-row revoke button; the user id rides on the data attribute.
-        const userId = target.dataset.user
-        if (userId) workflows.removeWorkflowGrant(userId)
       } else if (act === 'start-workflow') {
         openWorkflowStart(id)
-      } else if (act === 'view-growth-report') {
-        const reportPath = actEl?.dataset?.path
-        const when = actEl?.dataset?.when || ''
-        if (reportPath) openGrowthReport(reportPath, when)
       }
     })
     // ESC closes any open modal

@@ -150,11 +150,11 @@ export type IdentityInvitationStatus =
 // Phase 18 B-M1/B-M2 — per-peer cross-org policy (duck-typed mirrors of
 // the identity types; web keeps zero identity runtime dep).
 export type PeerKind = 'personal' | 'organization' | 'project' | 'service'
-export const PEER_KINDS: readonly PeerKind[] = ['personal', 'organization', 'project', 'service']
+const PEER_KINDS: readonly PeerKind[] = ['personal', 'organization', 'project', 'service']
 // Phase 19 P4-M4 — per-link revocation. A revoked peer is refused at every
 // connection gate (no dial, inbound HELLO rejected, live link torn down).
 export type PeerRevocationState = 'active' | 'revoked'
-export const PEER_REVOCATION_STATES: readonly PeerRevocationState[] = ['active', 'revoked']
+const PEER_REVOCATION_STATES: readonly PeerRevocationState[] = ['active', 'revoked']
 export interface PeerInboundAcl {
   capabilities?: string[]
   requireOrigin?: boolean

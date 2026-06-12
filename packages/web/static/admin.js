@@ -3415,6 +3415,29 @@
           }
           return;
         }
+        if (act === "refresh-workflow-audit") {
+          workflows.refreshWorkflowAudit();
+          return;
+        }
+        if (act === "refresh-workflow-grants") {
+          workflows.refreshWorkflowGrants();
+          return;
+        }
+        if (act === "add-workflow-grant") {
+          workflows.addWorkflowGrant();
+          return;
+        }
+        if (act === "remove-workflow-grant") {
+          const userId = target.dataset.user;
+          if (userId) workflows.removeWorkflowGrant(userId);
+          return;
+        }
+        if (act === "view-growth-report") {
+          const reportPath = target.dataset.path;
+          const when = target.dataset.when || "";
+          if (reportPath) openGrowthReport(reportPath, when);
+          return;
+        }
         const id = target.dataset.id;
         if (!act || !id) return;
         if (act === "edit-agent") {
@@ -3450,21 +3473,8 @@
         } else if (act === "rollback-revision") {
           const rev = Number(target.dataset.rev);
           if (Number.isInteger(rev)) workflows.rollbackTo(id, rev);
-        } else if (act === "refresh-workflow-audit") {
-          workflows.refreshWorkflowAudit();
-        } else if (act === "refresh-workflow-grants") {
-          workflows.refreshWorkflowGrants();
-        } else if (act === "add-workflow-grant") {
-          workflows.addWorkflowGrant();
-        } else if (act === "remove-workflow-grant") {
-          const userId = target.dataset.user;
-          if (userId) workflows.removeWorkflowGrant(userId);
         } else if (act === "start-workflow") {
           openWorkflowStart(id);
-        } else if (act === "view-growth-report") {
-          const reportPath = actEl?.dataset?.path;
-          const when = actEl?.dataset?.when || "";
-          if (reportPath) openGrowthReport(reportPath, when);
         }
       });
       document.addEventListener("keydown", (e) => {
@@ -3506,9 +3516,9 @@
       document.addEventListener("click", async (e) => {
         const target = e.target;
         if (!(target instanceof HTMLElement)) return;
-        const actEl2 = target.closest("[data-act]");
-        const act = actEl2 instanceof HTMLElement ? actEl2.dataset.act : void 0;
-        const id = actEl2 instanceof HTMLElement ? actEl2.dataset.id : void 0;
+        const actEl = target.closest("[data-act]");
+        const act = actEl instanceof HTMLElement ? actEl.dataset.act : void 0;
+        const id = actEl instanceof HTMLElement ? actEl.dataset.id : void 0;
         const taskRowEl = target.closest("[data-taskid]");
         if (taskRowEl instanceof HTMLElement && taskRowEl.dataset.taskid) {
           const tid = taskRowEl.dataset.taskid;
@@ -3524,8 +3534,8 @@
           renderTasks();
           return;
         }
-        if (act === "inline-eval-submit" && id && actEl2 instanceof HTMLButtonElement) {
-          await submitInlineEval(id, actEl2);
+        if (act === "inline-eval-submit" && id && actEl instanceof HTMLButtonElement) {
+          await submitInlineEval(id, actEl);
           return;
         }
         if (!id) return;
@@ -3534,12 +3544,12 @@
           gotoTab("tasks");
           return;
         }
-        if (actEl2 instanceof HTMLButtonElement) actEl2.disabled = true;
+        if (actEl instanceof HTMLButtonElement) actEl.disabled = true;
         try {
           if (act === "approve-app") {
             await approveApp(id);
           } else if (act === "reject-app") {
-            const card = actEl2.closest(".pending-app-card");
+            const card = actEl.closest(".pending-app-card");
             const reasonInput = card?.querySelector(".reject-reason");
             const reason = reasonInput?.value?.trim() || "";
             await rejectApp(id, reason);
@@ -3552,7 +3562,7 @@
           }
         } catch (err) {
           alert(t5.failedAlert(err.message || String(err)));
-          if (actEl2 instanceof HTMLButtonElement) actEl2.disabled = false;
+          if (actEl instanceof HTMLButtonElement) actEl.disabled = false;
         }
       });
       onLangChange(() => {

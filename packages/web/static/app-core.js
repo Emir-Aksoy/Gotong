@@ -19,7 +19,6 @@
       unreachable: '无法连接服务器',
       langButton: 'EN',
       langTitle: 'Switch to English',
-      adminBadge: '管理员',
       workerBadge: '工人',
       logout: '退出',
       switchToWorker: '→ 工作台',
@@ -44,7 +43,6 @@
       leaveButton: '离开',
       myTasksLabel: '派给我的任务',
       noMyTasks: '暂无派给你的任务',
-      youAre: '你的身份',
       adminTitle: '管理员控制台',
       // --- admin tab labels ---
       tabOverview: '总览',
@@ -94,7 +92,6 @@
       servicesActions: '操作',
       servicesDelete: '软删',
       servicesDetail: '详情',
-      servicesPreview: '预览',
       servicesTrashTitle: '废纸篓',
       servicesTrashEmpty: '废纸篓为空',
       servicesTrashRestore: '恢复',
@@ -108,7 +105,6 @@
       servicesToastRestored: '已从废纸篓恢复',
       servicesToastHardDeleted: '已永久删除',
       servicesConfirmHardDelete: '确认永久删除？此操作不可撤销。',
-      servicesNoneForAgent: '此智能体未使用任何服务',
       servicesDisabled: '此主机未启用服务功能',
       // --- v1.1 services-over-ws additions ---
       appServicesRequested: '申请使用的服务',
@@ -230,7 +226,6 @@
       workflowRemoveBtn: '移除',
       confirmRemoveWorkflow: (id) =>
         `确定要移除 workflow "${id}" 吗？runner 立刻下线，YAML 文件会被删除（不可恢复）。已派出未完成的任务会照常跑完。`,
-      workflowRemoveDone: (id) => `已移除 workflow:${id}`,
       workflowRunsBtn: '历史',
       workflowRunsTitle: '运行历史',
       workflowRunsEmpty: '还没有跑过这条工作流。',
@@ -394,7 +389,6 @@
       importMenuLabel: '导入 ▾',
       importMenuFile: '上传 / 粘贴 YAML',
       importMenuGithub: '从 GitHub URL',
-      ghImportBtn: '从 GitHub 导入',
       ghImportTitle: '从 GitHub 导入',
       ghImportHint: '粘贴 GitHub 上 agent / team / workflow 的 yaml 链接（blob 或 raw 都行）。如果访问 GitHub 慢，可一键切换到国内镜像源。',
       ghImportUrlLabel: '文件 URL',
@@ -434,7 +428,6 @@
       agentBaseUrlHint: '指向任意 OpenAI 兼容的 /v1/chat/completions 端点：DeepSeek、通义、智谱、Moonshot、Ollama、vLLM 等',
       agentProviderLabel: 'Provider 显示名（可选）',
       failedAlert: (msg) => `失败：${msg}`,
-      errorAlert: (msg) => `错误：${msg}`,
       sumJoined: (id, kind, caps) =>
         `${id}（${(I18N.zh.pKind[kind] || kind)}）能力=[${caps}]`,
       sumLeft: (id) => id,
@@ -463,7 +456,6 @@
       unreachable: 'cannot reach server',
       langButton: '中',
       langTitle: '切换到中文',
-      adminBadge: 'admin',
       workerBadge: 'worker',
       logout: 'log out',
       switchToWorker: '→ Worker',
@@ -488,7 +480,6 @@
       leaveButton: 'Leave',
       myTasksLabel: 'Tasks for you',
       noMyTasks: 'no tasks assigned to you',
-      youAre: 'You are',
       adminTitle: 'Admin console',
       // --- admin tab labels ---
       tabOverview: 'Overview',
@@ -538,7 +529,6 @@
       servicesActions: 'Actions',
       servicesDelete: 'Trash',
       servicesDetail: 'Details',
-      servicesPreview: 'Preview',
       servicesTrashTitle: 'Trash',
       servicesTrashEmpty: 'Trash is empty',
       servicesTrashRestore: 'Restore',
@@ -552,7 +542,6 @@
       servicesToastRestored: 'Restored from trash',
       servicesToastHardDeleted: 'Permanently deleted',
       servicesConfirmHardDelete: 'Delete forever? This cannot be undone.',
-      servicesNoneForAgent: 'This agent uses no services',
       servicesDisabled: 'Hub Services are not enabled on this host',
       // --- v1.1 services-over-ws additions ---
       appServicesRequested: 'Services requested',
@@ -674,7 +663,6 @@
       workflowRemoveBtn: 'Remove',
       confirmRemoveWorkflow: (id) =>
         `Remove workflow "${id}"? The runner goes offline immediately and the YAML file will be deleted (no recovery). In-flight tasks already dispatched finish normally.`,
-      workflowRemoveDone: (id) => `Removed workflow:${id}`,
       workflowRunsBtn: 'History',
       workflowRunsTitle: 'Run history',
       workflowRunsEmpty: 'No runs recorded yet for this workflow.',
@@ -835,7 +823,6 @@
       importMenuLabel: 'Import ▾',
       importMenuFile: 'Upload / paste YAML',
       importMenuGithub: 'From GitHub URL',
-      ghImportBtn: 'Import from GitHub',
       ghImportTitle: 'Import from GitHub',
       ghImportHint: 'Paste a GitHub link to an agent / team / workflow yaml (blob or raw both work). If GitHub is slow from your network, switch the download source below with one click.',
       ghImportUrlLabel: 'File URL',
@@ -875,7 +862,6 @@
       agentBaseUrlHint: 'Any OpenAI-compatible /v1/chat/completions endpoint: DeepSeek, Qwen, Zhipu, Moonshot, Ollama, vLLM, etc.',
       agentProviderLabel: 'Provider label (optional)',
       failedAlert: (msg) => `failed: ${msg}`,
-      errorAlert: (msg) => `error: ${msg}`,
       sumJoined: (id, kind, caps) =>
         `${id} (${(I18N.en.pKind[kind] || kind)}) caps=[${caps}]`,
       sumLeft: (id) => id,
