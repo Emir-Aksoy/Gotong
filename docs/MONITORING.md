@@ -1,7 +1,7 @@
 # Monitoring + alerting
 
 AipeHub ships Prometheus-format metrics at `/api/admin/metrics` (admin-
-gated). This doc covers: what's exposed, how to scrape it, the seven
+gated). This doc covers: what's exposed, how to scrape it, the ten
 recommended alert rules, and what to do when each one fires.
 
 If you only have 30 minutes, do the **minimum viable monitoring**
@@ -21,22 +21,31 @@ common deployment-killing failures, and you can grow from there.
 | `aipehub_service_calls_total` | counter | `type`, `impl`, `outcome` | One row per service-call category. `type` ∈ `memory`/`artifact`/`datastore`/…; `outcome` ∈ `ok`/`forbidden`/`forbidden_method`/`error`/`timeout`. |
 | `aipehub_service_call_duration_ms_sum` | counter | `type`, `impl` | Cumulative ms across all completed SERVICE_CALL frames. Mate of `_count` for computing means. |
 | `aipehub_service_call_duration_ms_count` | counter | `type`, `impl` | Number of completed SERVICE_CALL frames. |
+| `aipehub_http_responses_total` | counter | `class` | HTTP responses from the hub's own web layer, bucketed by status class (`2xx`/`3xx`/`4xx`/`5xx`/`other`). |
+| `aipehub_workflow_runs` | gauge | `status` | Workflow run records on disk, by status (`done`/`failed`/`running`/…). Best-effort: collected from the run store at scrape time. |
+| `aipehub_suspended_tasks` | gauge | — | Tasks currently parked (suspended), awaiting resume — includes human-in-the-loop approvals that never auto-resume. |
+| `aipehub_llm_calls_total` | counter | `model` | LLM calls recorded in the usage ledger. The ledger is append-only, so these survive restarts (unlike `aipehub_tasks_total`). |
+| `aipehub_llm_tokens_total` | counter | `model` | Total LLM tokens (input + output + cache) from the usage ledger. |
+| `aipehub_llm_cost_micros_total` | counter | `model` | LLM cost in integer micro-USD (`1e6` = $1) from the usage ledger. |
+| `process_resident_memory_bytes` | gauge | — | The hub process's own RSS — exported directly, no node_exporter process collector needed. |
+
+The `aipehub_workflow_runs` / `aipehub_suspended_tasks` / `aipehub_llm_*`
+families are best-effort business metrics: each family is collected
+independently at scrape time, and a failure in one (e.g. an unreadable
+run store) drops that family from the output rather than failing the
+whole `/metrics` response.
 
 What's **not** exposed (by design — keeps the binary small + focused):
 
-- HTTP request rate / 5xx rate — for those, put a reverse proxy
-  (Caddy, nginx) in front and scrape its access logs / built-in
-  metrics.
-- Process RSS / CPU / file descriptors — those come from
+- CPU / file descriptors / disk usage — those come from
   [node_exporter](https://github.com/prometheus/node_exporter)
-  running on the same host.
-- Disk usage — same: node_exporter `node_filesystem_avail_bytes`.
+  running on the same host (`node_filesystem_avail_bytes` etc.).
 
 This split is deliberate: the alert rules in
 `monitoring/prometheus/aipehub.alerts.yml` use AipeHub-emitted metrics
 for the application layer and node_exporter metrics (under
-`job="node"`) for the OS layer. Both sides are wired up by the
-`scrape.example.yml` recipe.
+`job="node"`) for the OS-level disk concern. Both sides are wired up
+by the `scrape.example.yml` recipe.
 
 ---
 
@@ -82,8 +91,9 @@ the targets are `UP` in the Prometheus UI under
 ## 3. Alert rules
 
 [`monitoring/prometheus/aipehub.alerts.yml`](../monitoring/prometheus/aipehub.alerts.yml)
-ships **seven rules in two groups**: five `aipehub-core` (Hub-only),
-two `aipehub-host` (OS-level via node_exporter).
+ships **ten rules in two groups**: nine `aipehub-core` (Hub-only —
+including RSS, which the hub exports itself), one `aipehub-host`
+(OS-level disk via node_exporter).
 
 ### `aipehub-core` — application
 
@@ -94,13 +104,16 @@ two `aipehub-host` (OS-level via node_exporter).
 | `AipehubNoMatchingAgent` | ticket | `>5 no_participant` in 15 min | agent went offline silently, mis-typed capability |
 | `AipehubPendingApplicationsStale` | ticket | `>5 pending` for 30 min | admin forgot the admissions tab |
 | `AipehubServiceCallSlow` | ticket | mean latency `>500 ms` for 10 min | SQLite contention, disk full, slow upstream |
+| `AipehubHttp5xxRateHigh` | ticket | 5xx `>0.05/sec` for 10 min | a route is crashing — bad surface wiring, store exception |
+| `AipehubSuspendedTasksBacklog` | ticket | `>20` parked for 2 h | inbox approvals ignored, resume sweep failing |
+| `AipehubLlmSpendBurnHigh` | ticket | `>$5`/hour sustained 30 min | agent retry loop, oversized context, leaked key |
+| `AipehubProcessRssCreep` | ticket | hub RSS `>2 GB` for 30 min | slow leak in a plugin / long-running session |
 
 ### `aipehub-host` — OS (requires node_exporter)
 
 | Alert | Severity | Fires when | Typical cause |
 |---|---|---|---|
-| `AipehubDiskAlmostFull` | page | root fs `<10 %` free for 15 min | transcript growth without retention |
-| `AipehubProcessRssCreep` | ticket | hub process RSS `>2 GB` for 30 min | slow leak in a plugin / long-running session |
+| `AipehubDiskAlmostFull` | page | root fs `<10 %` free for 15 min | transcript / runs / ledger growth without retention knobs |
 
 ---
 
@@ -192,20 +205,61 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 #    in-flight calls are lost).
 ```
 
+### HTTP 5xx (`AipehubHttp5xxRateHigh`)
+
+```bash
+# 1. 5xx means the hub's own web layer threw — not client error.
+#    Check host logs for the stack trace + route:
+ssh hub.example.com 'journalctl -u aipehub-host -n 200 --no-pager | grep -i error'
+
+# 2. Common causes: a surface dependency (identity DB, run store)
+#    went unreadable; disk full; a just-deployed regression.
+# 3. If it started right after a deploy, roll back and file it.
+```
+
+### Suspended backlog (`AipehubSuspendedTasksBacklog`)
+
+```bash
+# 1. Parked tasks fall into two camps:
+#    a) Human-in-the-loop approvals (never auto-resume) — someone
+#       needs to handle their /me inbox. Ping the assignees.
+#    b) Timed resumes (resumeAt in the past but still parked) —
+#       the resume sweep is failing. Check host logs for
+#       "resume" errors. The sweep runs every AIPE_RESUME_SWEEP_MS
+#       (default 30s) whenever identity is wired.
+# 2. The admin UI task list shows which tasks are parked and why.
+```
+
+### LLM burn (`AipehubLlmSpendBurnHigh`)
+
+```bash
+# 1. Open the admin UI → "用量" (Usage) dashboard. Group by
+#    user / agent / workflow / model to find the spender.
+# 2. Agent retry loop → cancel the task, fix the agent.
+# 3. Unknown user/agent → possible leaked key. Rotate the provider
+#    key in the vault and check the audit log.
+# 4. Legitimate growth → raise the alert threshold and, if needed,
+#    set per-user/org token + cost quotas (fail-closed).
+```
+
 ### Disk almost full (`AipehubDiskAlmostFull`)
 
 ```bash
-# 1. Biggest file in .aipehub/ is usually transcript.jsonl.
+# 1. Biggest contributors in .aipehub/ are the transcript, run
+#    records, and the identity DB (append-only ledger/audit).
 ssh hub.example.com 'du -h /var/lib/aipehub/.aipehub/* | sort -h'
 
-# 2. Two retention strategies:
-#    a) Time-windowed compress: rotate transcript on a cron,
-#       compress old segments. The Hub appends only, so a rotated
-#       segment is immutable.
-#    b) Wholesale: stop host, gzip transcript.jsonl, start. The
-#       Hub starts a fresh transcript and the gz is your archive.
+# 2. Built-in retention knobs (set as env, applied at boot):
+#    AIPE_TRANSCRIPT_KEEP_SEGMENTS / AIPE_TRANSCRIPT_ARCHIVE_DAYS
+#    AIPE_RUN_KEEP / AIPE_RUN_ARCHIVE_DAYS
+#    AIPE_LEDGER_KEEP_DAYS / AIPE_AUDIT_KEEP_DAYS
+#    AIPE_ALERT_FIRINGS_KEEP_DAYS / AIPE_PEER_SUMMARY_KEEP_DAYS
+#    See docs/OPERATIONS.md § Retention for semantics.
 
-# 3. After freeing space, confirm `node_filesystem_avail_bytes`
+# 3. Manual fallback: stop host, gzip old transcript segments /
+#    archived runs, start. Archives are immutable once rotated.
+
+# 4. After freeing space, confirm `node_filesystem_avail_bytes`
 #    climbs back above 10 %.
 ```
 
@@ -230,7 +284,7 @@ ssh hub.example.com 'sudo systemctl restart aipehub-host'
 ## 5. Grafana dashboard
 
 [`monitoring/grafana/aipehub-overview.json`](../monitoring/grafana/aipehub-overview.json)
-is a 7-panel single-screen overview:
+is a 12-panel single-screen overview:
 
 | Panel | Query |
 |---|---|
@@ -241,6 +295,11 @@ is a 7-panel single-screen overview:
 | Task failure rate (5m) | `sum(rate(aipehub_tasks_total{kind!="ok"}[5m]))` |
 | Service-call mean latency (5m) | `increase(_sum[5m]) / clamp_min(increase(_count[5m]), 1)` |
 | Service-call outcomes (5m rate) | `sum by (outcome) (rate(aipehub_service_calls_total[5m]))` |
+| HTTP responses by status class (5m rate) | `sum by (class) (rate(aipehub_http_responses_total[5m]))` (5xx forced red) |
+| LLM spend $/hour by model | `sum by (model) (increase(aipehub_llm_cost_micros_total[1h])) / 1e6` |
+| Workflow runs by status | `aipehub_workflow_runs` (stat split by `status`) |
+| Suspended (parked) tasks | `aipehub_suspended_tasks` (stat with thresholds at 10/20) |
+| LLM calls last 1h by model | `sum by (model) (increase(aipehub_llm_calls_total[1h]))` |
 
 Import via **Dashboards → Import → upload JSON** and select your
 Prometheus datasource on the templating prompt.
@@ -259,5 +318,5 @@ three signals running first, and grow over the next few weeks:
 | **Operator forgot the admin tab** | 0 min | `AipehubPendingApplicationsStale` is already covered by the rule file |
 
 If your host has those three covered, you'll catch ~80 % of the
-real-world failure modes for a small-team deployment. The other four
+real-world failure modes for a small-team deployment. The other seven
 rules add coverage but aren't blockers for "good enough to launch."

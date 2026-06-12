@@ -318,3 +318,41 @@ re-save every key through the admin UI. The admins / workers / agents
 means there's a partial line that the Hub's lenient JSONL parser is
 skipping — the data is intact but the file shape isn't. Fix with the
 `head -n -1` recipe above so future verify runs are clean.
+
+---
+
+## 6. Retention
+
+Everything AipeHub persists is append-only by default — the
+transcript, workflow run records, and the identity DB's ledger /
+audit / control-plane tables all grow until you say otherwise. The
+retention knobs below are **all off unless set** (the host never
+silently deletes data), applied once at boot, and a malformed value
+fails the boot loudly instead of being ignored.
+
+| Env | What it bounds | Semantics |
+|---|---|---|
+| `AIPE_TRANSCRIPT_KEEP_SEGMENTS` | transcript boot-load path | Keep the N newest sealed segments active; older ones move to `<AIPE_SPACE>/archive/` (bytes stay on disk for audit/export). |
+| `AIPE_TRANSCRIPT_ARCHIVE_DAYS` | transcript | Archive sealed segments whose newest entry is older than N days. Combinable with `KEEP_SEGMENTS` (both must hold). |
+| `AIPE_RUN_KEEP` | workflow run scans | Keep the N newest **terminal** runs active; older ones move to `workflows/runs/archive/`. A `running` run is never archived. |
+| `AIPE_RUN_ARCHIVE_DAYS` | workflow runs | Archive terminal runs that ended more than N days ago. Combinable with `AIPE_RUN_KEEP`. |
+| `AIPE_LEDGER_KEEP_DAYS` | `usage_ledger` (billing) | Prune rows older than N days at boot. The retained window stays exportable (CSV/JSONL). |
+| `AIPE_AUDIT_KEEP_DAYS` | `audit_log` | Same prune-at-boot semantics. |
+| `AIPE_PEER_SUMMARY_KEEP_DAYS` | `peer_summary_snapshots` | Same — bounds control-plane trend history. |
+| `AIPE_ALERT_FIRINGS_KEEP_DAYS` | `peer_summary_alert_firings` | Same, **resolved firings only** — an open firing is never pruned. |
+
+Practical starting point for a small-team host:
+
+```bash
+AIPE_TRANSCRIPT_KEEP_SEGMENTS=50
+AIPE_RUN_KEEP=2000
+AIPE_LEDGER_KEEP_DAYS=400     # > 1 year for billing reconciliation
+AIPE_AUDIT_KEEP_DAYS=400
+AIPE_PEER_SUMMARY_KEEP_DAYS=90
+AIPE_ALERT_FIRINGS_KEEP_DAYS=90
+```
+
+Archives (`archive/`, `runs/archive/`) are immutable once rotated —
+gzip or ship them to cold storage on your own schedule. The
+`AipehubDiskAlmostFull` alert runbook in
+[`docs/MONITORING.md`](MONITORING.md) points back here.

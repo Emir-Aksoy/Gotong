@@ -144,6 +144,88 @@
       "targets": [
         { "expr": "sum by (outcome) (rate(aipehub_service_calls_total[5m]))", "refId": "A", "legendFormat": "{{outcome}}" }
       ]
+    },
+    {
+      "id": 8,
+      "title": "HTTP responses (5m rate, by status class)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "unit": "ops"
+        },
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "5xx" },
+            "properties": [{ "id": "color", "value": { "mode": "fixed", "fixedColor": "red" } }]
+          }
+        ]
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum by (class) (rate(aipehub_http_responses_total[5m]))", "refId": "A", "legendFormat": "{{class}}" }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "LLM spend ($/hour, by model)",
+      "type": "timeseries",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "fieldConfig": {
+        "defaults": {
+          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10, "stacking": { "mode": "normal" } },
+          "unit": "currencyUSD"
+        }
+      },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom" } },
+      "targets": [
+        { "expr": "sum by (model) (increase(aipehub_llm_cost_micros_total[1h])) / 1e6", "refId": "A", "legendFormat": "{{model}}" }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Workflow runs by status",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 8, "x": 0, "y": 28 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [
+        { "expr": "aipehub_workflow_runs", "refId": "A", "legendFormat": "{{status}}" }
+      ]
+    },
+    {
+      "id": 11,
+      "title": "Suspended (parked) tasks",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 8, "x": 8, "y": 28 },
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "yellow", "value": 10 },
+            { "color": "red", "value": 20 }
+          ] }
+        }
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [
+        { "expr": "aipehub_suspended_tasks", "refId": "A" }
+      ]
+    },
+    {
+      "id": 12,
+      "title": "LLM calls (last 1h, by model)",
+      "type": "stat",
+      "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
+      "gridPos": { "h": 4, "w": 8, "x": 16, "y": 28 },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "textMode": "value_and_name" },
+      "targets": [
+        { "expr": "sum by (model) (increase(aipehub_llm_calls_total[1h]))", "refId": "A", "legendFormat": "{{model}}" }
+      ]
     }
   ],
   "refresh": "30s",

@@ -5,10 +5,11 @@
 # short enough that an operator gets paged within ~10 minutes of a
 # real problem.
 #
-# Three of the five rules use only metrics emitted by AipeHub itself
-# (`aipehub_*`). Two require node_exporter alongside the Hub to cover
-# the OS-level concerns (memory, disk) — those are at the bottom under
-# a clearly-labelled section.
+# All `aipehub-core` rules use only metrics emitted by AipeHub itself
+# (`aipehub_*` plus its own `process_resident_memory_bytes` gauge).
+# One rule requires node_exporter alongside the Hub to cover the
+# OS-level disk concern — that one is at the bottom under a
+# clearly-labelled section.
 #
 # Severity convention used here:
 #   page    — wake someone up (PagerDuty / on-call rotation)
@@ -131,12 +132,97 @@ groups:
             contention, disk full, slow upstream. Runbook:
             docs/MONITORING.md § Service call slow.
 
+      # ----------------------------------------------------------------
+      # 6. HTTP 5xx responses
+      # ----------------------------------------------------------------
+      # The web layer exports its own response counter bucketed by
+      # status class. A sustained stream of 5xx means a route is
+      # crashing (bad surface wiring, store exception) rather than
+      # clients misbehaving (that would be 4xx).
+      - alert: AipehubHttp5xxRateHigh
+        expr: |
+          rate(aipehub_http_responses_total{class="5xx"}[5m]) > 0.05
+        for: 10m
+        labels:
+          severity: ticket
+          component: web
+        annotations:
+          summary: "HTTP 5xx rate {{ printf \"%.2f\" $value }}/sec for 10m"
+          description: >
+            The hub's own HTTP layer has been returning server errors
+            (~3+/minute) for 10 minutes. Check host logs for the route
+            and stack trace. Runbook: docs/MONITORING.md § HTTP 5xx.
+
+      # ----------------------------------------------------------------
+      # 7. Suspended-task backlog
+      # ----------------------------------------------------------------
+      # Parked tasks include human-in-the-loop approvals that only a
+      # person can resume. A persistently high count means inbox items
+      # are not being handled (or a resume sweep is failing).
+      - alert: AipehubSuspendedTasksBacklog
+        expr: aipehub_suspended_tasks > 20
+        for: 2h
+        labels:
+          severity: ticket
+          component: hub
+        annotations:
+          summary: "{{ $value }} suspended tasks parked for 2h+"
+          description: >
+            More than 20 tasks have been sitting suspended for two
+            hours. Either /me inbox approvals are being ignored, or
+            the resume sweep is failing. Check the inbox and host
+            logs. Runbook: docs/MONITORING.md § Suspended backlog.
+
+      # ----------------------------------------------------------------
+      # 8. LLM spend burn rate
+      # ----------------------------------------------------------------
+      # Cost is integer micro-USD (1e6 = $1) from the usage ledger.
+      # $5/hour sustained is well above a small-team baseline — tune
+      # the threshold to your budget. Catches runaway agent loops and
+      # leaked keys before the monthly invoice does.
+      - alert: AipehubLlmSpendBurnHigh
+        expr: |
+          sum(increase(aipehub_llm_cost_micros_total[1h])) > 5 * 1000 * 1000
+        for: 30m
+        labels:
+          severity: ticket
+          component: llm
+        annotations:
+          summary: "LLM spend > $5 in the last hour (sustained 30m)"
+          description: >
+            The usage ledger recorded more than $5 of LLM cost in a
+            one-hour window, sustained for 30 minutes. Check the admin
+            usage dashboard by user/agent/workflow for the source —
+            common causes: an agent retry loop, an oversized context,
+            a leaked key. Runbook: docs/MONITORING.md § LLM burn.
+
+      # ----------------------------------------------------------------
+      # 9. Process RSS creep
+      # ----------------------------------------------------------------
+      # AipeHub exports its own process_resident_memory_bytes gauge,
+      # so this needs no node_exporter. The threshold is generous:
+      # small-team hosts shouldn't cross 2 GB without a reason.
+      - alert: AipehubProcessRssCreep
+        expr: |
+          process_resident_memory_bytes{job="aipehub"} > 2 * 1024 * 1024 * 1024
+        for: 30m
+        labels:
+          severity: ticket
+          component: hub
+        annotations:
+          summary: "AipeHub RSS > 2 GB for 30m (instance={{ $labels.instance }})"
+          description: >
+            Hub process holding > 2 GB resident for 30 min. Most likely
+            a slow leak in a long-running service plugin. Restart will
+            release it (transcript persists). Runbook:
+            docs/MONITORING.md § RSS creep.
+
   # ----------------------------------------------------------------
   # OS-level alerts via node_exporter
   # ----------------------------------------------------------------
-  # These require node_exporter scraped from the same host. They are
-  # not coupled to AipeHub but are part of "is your AipeHub box
-  # healthy" — disk and memory are the most common silent killers.
+  # Requires node_exporter scraped from the same host. Not coupled to
+  # AipeHub but part of "is your AipeHub box healthy" — disk is the
+  # most common silent killer.
   - name: aipehub-host
     interval: 30s
     rules:
@@ -152,25 +238,7 @@ groups:
         annotations:
           summary: "Hub disk < 10% free for 15m (instance={{ $labels.instance }})"
           description: >
-            Root filesystem is below 10% free. `.aipehub/transcript.jsonl`
-            grows monotonically; investigate retention or compress.
-            Runbook: docs/MONITORING.md § Disk almost full.
-
-      - alert: AipehubProcessRssCreep
-        # Use the node_exporter process_resident_memory_bytes for the
-        # aipehub-host process if you've enabled the process collector.
-        # The threshold is generous: small-team hosts shouldn't cross
-        # 2 GB without a reason.
-        expr: |
-          process_resident_memory_bytes{job="aipehub"} > 2 * 1024 * 1024 * 1024
-        for: 30m
-        labels:
-          severity: ticket
-          component: hub
-        annotations:
-          summary: "AipeHub RSS > 2 GB for 30m (instance={{ $labels.instance }})"
-          description: >
-            Hub process holding > 2 GB resident for 30 min. Most likely
-            a slow leak in a long-running service plugin. Restart will
-            release it (transcript persists). Runbook:
-            docs/MONITORING.md § RSS creep.
+            Root filesystem is below 10% free. Transcript / runs /
+            ledger grow without retention knobs set — see
+            docs/OPERATIONS.md § Retention. Runbook:
+            docs/MONITORING.md § Disk almost full.
