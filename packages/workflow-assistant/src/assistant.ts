@@ -212,7 +212,7 @@ workflow:
       dispatch:             # for a simple step
         strategy:           # one of:
           { kind: capability, capabilities: [cap1, cap2] }
-          { kind: explicit, target: agentId }
+          { kind: explicit, to: agentId }
           { kind: broadcast, capabilities: [cap1] }
         title: "..."        # optional, shown in transcript
         payload:            # object with $-ref substitutions (see below)
