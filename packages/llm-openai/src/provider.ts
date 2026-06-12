@@ -261,8 +261,15 @@ export class OpenAIProvider implements LlmProvider {
         }
       }
 
-      // 4) Terminal chunk for THIS choice — emit accumulated tool_uses
-      //    + usage + end, then return.
+      // 4) Terminal chunk for THIS choice — emit accumulated tool_uses,
+      //    then KEEP DRAINING: with include_usage:true, OpenAI sends the
+      //    usage on a trailing chunk with empty choices AFTER the
+      //    finish_reason chunk. Returning here (the old behavior) meant
+      //    genuine-OpenAI streams never reached that chunk, so every
+      //    streamed call hit the Phase 17 ledger/budget with 0 tokens.
+      //    (DeepSeek puts usage alongside finish_reason, which is why
+      //    this never showed up on the default provider.) The usage +
+      //    end pair is emitted after the loop.
       if (choice.finish_reason) {
         stopReason = mapStopReason(choice.finish_reason)
         // Sort by index so multi-tool fan-outs come out in deterministic
@@ -301,13 +308,12 @@ export class OpenAIProvider implements LlmProvider {
             },
           }
         }
-        if (usage) yield { type: 'usage', usage }
-        yield { type: 'end', stopReason }
-        return
+        // Consumed — a (buggy) repeated finish_reason must not re-emit.
+        toolBuffers.clear()
       }
     }
-    // Defensive: stream ended without finish_reason (SDK bug). Still
-    // emit a terminal pair so consumers' iterators don't dangle.
+    // Stream drained (or, defensively, ended without finish_reason) —
+    // emit the terminal pair so consumers' iterators don't dangle.
     if (usage) yield { type: 'usage', usage }
     yield { type: 'end', stopReason }
   }

@@ -85,14 +85,14 @@ async function* synthesizeOpenAIStream(
     if (Object.keys(delta).length > 0) {
       yield { choices: [{ delta }] }
     }
-    // Usage MUST land before the finish_reason chunk — the provider's
-    // streamImpl returns immediately after seeing finish_reason, so any
-    // later chunk is dropped on the floor.
-    if (msg.usage) {
-      yield { choices: [], usage: msg.usage }
-    }
     yield {
       choices: [{ delta: {}, finish_reason: choice.finish_reason ?? 'stop' }],
+    }
+    // Genuine-OpenAI ordering: `stream_options.include_usage` delivers the
+    // usage payload on a trailing empty-choices chunk AFTER finish_reason.
+    // The provider keeps draining past finish_reason to catch it.
+    if (msg.usage) {
+      yield { choices: [], usage: msg.usage }
     }
   }
 }
@@ -696,14 +696,17 @@ describe('OpenAIProvider — native streaming (Phase 8 M3)', () => {
     const chunks = await collect(
       provider.stream({ messages: [{ role: 'user', content: 'hi' }] }),
     )
-    // The terminal `end` arrives on `finish_reason`, BEFORE the usage chunk
-    // OpenAI sends after. That's deliberate — the LlmStreamChunk contract
-    // says `end` is always the LAST chunk for a successful stream, so the
-    // usage chunk that arrives after finish_reason can't be emitted. We
-    // accept losing usage in that ordering (a minor cost vs honoring the
-    // contract). Consumers that need usage can read from `complete()` or
-    // upgrade the provider to emit usage on the same chunk as finish_reason.
-    expect(chunks.map((c) => c.type)).toEqual(['text', 'text', 'end'])
+    // Genuine OpenAI (`stream_options.include_usage`) sends usage on a
+    // trailing EMPTY-choices chunk AFTER finish_reason. The provider must
+    // keep draining past finish_reason to catch it, then emit the terminal
+    // `usage` → `end` pair (audit P1 regression: a `return` at
+    // finish_reason silently dropped streamed usage for genuine OpenAI —
+    // DeepSeek's same-chunk quirk masked it on the default provider).
+    expect(chunks.map((c) => c.type)).toEqual(['text', 'text', 'usage', 'end'])
+    const usageChunk = chunks[2]!
+    if (usageChunk.type === 'usage') {
+      expect(usageChunk.usage).toEqual({ inputTokens: 7, outputTokens: 4 })
+    }
     const text = chunks
       .filter((c): c is { type: 'text'; text: string } => c.type === 'text')
       .map((c) => c.text)
