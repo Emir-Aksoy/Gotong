@@ -273,20 +273,6 @@ export class MultimodalInlineSizeError extends MultimodalNotSupportedError {
 }
 
 /**
- * Type guard — true iff the block is one of the Phase 9 modality
- * blocks (image / audio / file_ref). Useful for provider translators
- * that want a single branch for "needs binary resolution" before
- * shaping to vendor API.
- */
-export function isMultimodalBlock(
-  block: LlmContentBlock,
-): block is LlmImageBlock | LlmAudioBlock | LlmFileRefBlock {
-  return block.type === 'image'
-    || block.type === 'audio'
-    || block.type === 'file_ref'
-}
-
-/**
  * Compute the byte size of an inline base64 payload on the block, if
  * any. Returns 0 for non-multimodal blocks, `url` / `artifact_ref`
  * sources, and missing/malformed base64. Provider translators use

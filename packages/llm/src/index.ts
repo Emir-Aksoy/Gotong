@@ -33,7 +33,6 @@ export {
   DEFAULT_MULTIMODAL_INLINE_BYTE_CAP,
   MultimodalNotSupportedError,
   MultimodalInlineSizeError,
-  isMultimodalBlock,
   extractInlineBase64Size,
   readMultimodalInlineCapFromEnv,
 } from './types.js'

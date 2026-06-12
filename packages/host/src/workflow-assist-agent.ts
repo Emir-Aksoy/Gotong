@@ -35,7 +35,7 @@
 import { randomUUID } from 'node:crypto'
 
 import type { Hub, Logger, ParticipantId } from '@aipehub/core'
-import { MockLlmProvider, type LlmProvider } from '@aipehub/llm'
+import { MockLlmProvider, readMultimodalInlineCapFromEnv, type LlmProvider } from '@aipehub/llm'
 import { AnthropicProvider } from '@aipehub/llm-anthropic'
 import { OpenAIProvider } from '@aipehub/llm-openai'
 import {
@@ -197,14 +197,14 @@ function buildAssistProvider(
           "WorkflowAssistantAgent provider 'anthropic' has no API key — wire one through the org vault or set ANTHROPIC_API_KEY",
         )
       }
-      return new AnthropicProvider({ apiKey })
+      return new AnthropicProvider({ apiKey, maxInlineBytes: readMultimodalInlineCapFromEnv() })
     case 'openai':
       if (!apiKey) {
         throw new Error(
           "WorkflowAssistantAgent provider 'openai' has no API key — wire one through the org vault or set OPENAI_API_KEY",
         )
       }
-      return new OpenAIProvider({ apiKey })
+      return new OpenAIProvider({ apiKey, maxInlineBytes: readMultimodalInlineCapFromEnv() })
   }
 }
 

@@ -17,6 +17,7 @@ import {
   DispatchToolset,
   LlmAgent,
   MockLlmProvider,
+  readMultimodalInlineCapFromEnv,
   type LlmAgentToolset,
   type LlmProvider,
   type LlmUsage,
@@ -1457,7 +1458,7 @@ function buildProvider(spec: ManagedAgentSpec, apiKey: string | undefined): LlmP
           `provider 'anthropic' needs an API key — set one in the workspace settings, attach one to this agent, or set ANTHROPIC_API_KEY in the host environment`,
         )
       }
-      return new AnthropicProvider({ apiKey })
+      return new AnthropicProvider({ apiKey, maxInlineBytes: readMultimodalInlineCapFromEnv() })
     }
     case 'openai': {
       if (!apiKey) {
@@ -1465,7 +1466,7 @@ function buildProvider(spec: ManagedAgentSpec, apiKey: string | undefined): LlmP
           `provider 'openai' needs an API key — set one in the workspace settings, attach one to this agent, or set OPENAI_API_KEY in the host environment`,
         )
       }
-      return new OpenAIProvider({ apiKey })
+      return new OpenAIProvider({ apiKey, maxInlineBytes: readMultimodalInlineCapFromEnv() })
     }
     case 'openai-compatible': {
       // Two hard requirements at spawn time. We fail loudly with a
@@ -1492,6 +1493,7 @@ function buildProvider(spec: ManagedAgentSpec, apiKey: string | undefined): LlmP
         apiKey,
         baseURL: spec.baseURL,
         name,
+        maxInlineBytes: readMultimodalInlineCapFromEnv(),
         // Almost every OpenAI-compatible vendor (DeepSeek, Qwen, Zhipu,
         // Moonshot, Ollama, vLLM, …) speaks the legacy `max_tokens`
         // shape, not the newer `max_completion_tokens` OpenAI reasoning

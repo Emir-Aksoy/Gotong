@@ -4,7 +4,6 @@
  * Tests the additions to `@aipehub/llm/types`:
  *   - LlmImageBlock / LlmAudioBlock / LlmFileRefBlock are valid
  *     LlmContentBlock union members
- *   - isMultimodalBlock type guard
  *   - extractInlineBase64Size byte math + edge cases
  *   - MultimodalNotSupportedError + MultimodalInlineSizeError shape
  *
@@ -18,13 +17,11 @@ import {
   MultimodalInlineSizeError,
   MultimodalNotSupportedError,
   extractInlineBase64Size,
-  isMultimodalBlock,
+  readMultimodalInlineCapFromEnv,
   type LlmAudioBlock,
   type LlmContentBlock,
   type LlmFileRefBlock,
   type LlmImageBlock,
-  type LlmTextBlock,
-  type LlmToolUseBlock,
 } from '../src/index.js'
 
 describe('Phase 9 M1: multimodal content blocks', () => {
@@ -74,58 +71,6 @@ describe('Phase 9 M1: multimodal content blocks', () => {
       }
       const accepted: LlmContentBlock = block
       expect(accepted.type).toBe('file_ref')
-    })
-  })
-
-  describe('isMultimodalBlock', () => {
-    it('returns true for image / audio / file_ref', () => {
-      const image: LlmImageBlock = {
-        type: 'image',
-        source: { kind: 'url', url: 'https://example.com/a.png' },
-      }
-      const audio: LlmAudioBlock = {
-        type: 'audio',
-        source: { kind: 'url', url: 'https://example.com/a.wav' },
-      }
-      const fileRef: LlmFileRefBlock = {
-        type: 'file_ref',
-        artifactId: 'x',
-        mime: 'text/plain',
-      }
-      expect(isMultimodalBlock(image)).toBe(true)
-      expect(isMultimodalBlock(audio)).toBe(true)
-      expect(isMultimodalBlock(fileRef)).toBe(true)
-    })
-
-    it('returns false for text / tool_use / tool_result', () => {
-      const text: LlmTextBlock = { type: 'text', text: 'hi' }
-      const toolUse: LlmToolUseBlock = {
-        type: 'tool_use',
-        id: 'tx',
-        name: 'f',
-        input: {},
-      }
-      expect(isMultimodalBlock(text)).toBe(false)
-      expect(isMultimodalBlock(toolUse)).toBe(false)
-      expect(isMultimodalBlock({
-        type: 'tool_result',
-        toolUseId: 'tx',
-        content: 'ok',
-      })).toBe(false)
-    })
-
-    it('narrows the type on the true branch', () => {
-      const block: LlmContentBlock = {
-        type: 'image',
-        source: { kind: 'url', url: 'https://example.com/a.png' },
-      }
-      if (isMultimodalBlock(block)) {
-        // If the guard narrows correctly, this read is type-safe (no `any`).
-        const t: 'image' | 'audio' | 'file_ref' = block.type
-        expect(t).toBe('image')
-      } else {
-        expect.fail('expected multimodal block')
-      }
     })
   })
 
@@ -279,4 +224,24 @@ describe('Phase 9 M1: multimodal content blocks', () => {
       expect(err.blockType).toBe('image')
     })
   })
+  describe('readMultimodalInlineCapFromEnv', () => {
+    it('returns the default cap when the env var is unset', () => {
+      expect(readMultimodalInlineCapFromEnv({})).toBe(DEFAULT_MULTIMODAL_INLINE_BYTE_CAP)
+    })
+
+    it('parses a positive MB value into floored bytes', () => {
+      expect(
+        readMultimodalInlineCapFromEnv({ AIPE_MULTIMODAL_MAX_INLINE_MB: '2.5' }),
+      ).toBe(Math.floor(2.5 * 1024 * 1024))
+    })
+
+    it('falls back to the default for zero / negative / garbage values', () => {
+      for (const raw of ['0', '-3', 'abc', 'NaN', 'Infinity']) {
+        expect(
+          readMultimodalInlineCapFromEnv({ AIPE_MULTIMODAL_MAX_INLINE_MB: raw }),
+        ).toBe(DEFAULT_MULTIMODAL_INLINE_BYTE_CAP)
+      }
+    })
+  })
+
 })
