@@ -1,0 +1,28 @@
+# gitleaks config — extends the upstream default rule set.
+#
+# Why this file exists:
+#   The full-history scan flags ~42 findings, all of them deterministic
+#   test fixtures (fake peer bearer tokens like `tok-orgx-12345678`,
+#   stub passwords, and a deliberately fake `sk-live-abc123` in the CLI
+#   connect test). Triage 2026-06-12: every finding is the generic
+#   high-entropy rule firing inside a `tests/` directory; none is a
+#   real credential.
+#
+# Why the allowlist is narrow:
+#   It is scoped to the `generic-api-key` rule AND test paths. Every
+#   provider-specific detector (AWS, GitHub PAT, Anthropic, Stripe, …)
+#   stays active everywhere — including test files — so a real key
+#   pasted into a test still sinks the scan. Only the generic
+#   "high-entropy string assigned to a token-ish variable" heuristic is
+#   silenced, and only where fixtures legitimately live.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Deterministic test fixtures (fake tokens/passwords) in test suites"
+targetRules = ["generic-api-key"]
+paths = [
+  '''packages/[^/]+/tests/.*''',
+  '''python-sdk/tests/.*''',
+]
