@@ -80,7 +80,16 @@ export function sanitisePath(userPath: string): string {
   if (norm === '..' || norm.startsWith(`..${sep}`) || norm.startsWith('/')) {
     throw new Error('artifact path traversal blocked')
   }
-  return norm
+  // Return POSIX-separator form. `normalize()` emits the host OS's
+  // separator (`\` on Windows), but the wire / on-disk ref policy is
+  // "ref === sanitised relative path with `/`" (see `handle.list()`):
+  // artifactIds round-trip through URLs and a `uploads/<date>/<rand>`
+  // regex, so a Windows `uploads\2026-..\x.txt` would break callers.
+  // The traversal checks above run on the OS-native `norm`; this only
+  // changes the *string representation* of the safe path. Downstream
+  // `join()`/`resolve()` accept `/` on Windows, so FS ops are unaffected.
+  // On Linux/macOS `\` isn't a separator, so the replace is a no-op.
+  return norm.replace(/\\/g, '/')
 }
 
 /**

@@ -30,6 +30,22 @@ describe('sanitisePath', () => {
     // @ts-expect-error: deliberate
     expect(() => sanitisePath(42)).toThrow(/must be a string/)
   })
+
+  // Cross-platform regression: artifactIds are wire identifiers with `/`
+  // separators (round-trip through URLs + the `uploads/<date>/<rand>`
+  // regex). On Windows `node:path.normalize()` emits `\`, so before the
+  // fix `write()` returned `uploads\2026-..\x.txt` and broke callers.
+  // sanitisePath must always return the POSIX-separator form. Passing a
+  // backslash path here proves the conversion happens on every platform
+  // (on POSIX `\` is a regular char so normalize leaves it; the replace
+  // still POSIX-ifies it — matching what `handle.list()` does).
+  it('returns forward-slash separators regardless of input', () => {
+    expect(sanitisePath('a\\b\\c.txt')).toBe('a/b/c.txt')
+    expect(sanitisePath('uploads\\2026-06-12\\deadbeef.txt')).toBe(
+      'uploads/2026-06-12/deadbeef.txt',
+    )
+    expect(sanitisePath('reports/q1.md')).toBe('reports/q1.md')
+  })
 })
 
 describe('resolveOwnerPath', () => {
