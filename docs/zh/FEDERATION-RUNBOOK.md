@@ -9,6 +9,8 @@
 > （`examples/cross-hub-federation/`）——两个真 hub 过真 ws + bearer auth，确定性、无 key。
 > 本文是把那个 demo 拆到两台真机器上。
 >
+> English version: [`docs/FEDERATION-RUNBOOK.md`](../FEDERATION-RUNBOOK.md)
+>
 > Last updated: 2026-06-06
 
 ---

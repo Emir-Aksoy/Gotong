@@ -1,8 +1,10 @@
 # License FAQ
 
-> **AipeHub 整体使用 [MIT License](../LICENSE)**。这一页用 FAQ 形式回答
+> **AipeHub 整体使用 [MIT License](../../LICENSE)**。这一页用 FAQ 形式回答
 > "我能不能 / 我必须做 / 我注意什么" 几个常见问题。不是法律意见，
 > 真有公司级合规要走，请咨询自己的法务。
+>
+> English version: [`docs/LICENSE-FAQ.md`](../LICENSE-FAQ.md)
 
 ---
 
@@ -29,7 +31,7 @@ NOTICE / Third-Party-Licenses 之类的页面里列出 AipeHub 即可）。
 - 不向上游 PR 也完全可以
 
 但我们当然欢迎你 PR 改进回上游 —— 项目越好，下次升级你越省事。
-PR 流程见 [`CONTRIBUTING.md`](../CONTRIBUTING.md)。
+PR 流程见 [`CONTRIBUTING.md`](../../CONTRIBUTING.md)。
 
 ---
 
@@ -46,9 +48,9 @@ PR 流程见 [`CONTRIBUTING.md`](../CONTRIBUTING.md)。
 
 1. 每个 yaml 文件**头部 4 行注释**：`# Source` / `# Upstream` /
    `# License` / `# Adapted`
-2. 集中文件 [`templates/community/LICENSE-NOTICES.md`](../templates/community/LICENSE-NOTICES.md)
+2. 集中文件 [`templates/community/LICENSE-NOTICES.md`](../../templates/community/LICENSE-NOTICES.md)
    保留 MIT 全文 + CC0 摘要 + 来源仓 URL
-3. 本目录 [`README.md`](../templates/community/README.md)
+3. 本目录 [`README.md`](../../templates/community/README.md)
    说明改造原则和许可矩阵
 
 只要你**保留这三层不动**地把 `templates/community/` 整个分发出去
@@ -129,10 +131,10 @@ license 即可。
 
 ---
 
-## 9. 我看到 `SECURITY.md` 里的邮箱是 placeholder，怎么发 vuln 报告？
+## 9. 怎么发 vuln 报告？
 
-那个文件**就是给将来公开发布前替换用的**。在那一刻之前，请通过
-项目仓库的私有渠道（GitHub Security Advisory 私下提交）联系。
+通过项目仓库的 **GitHub Security Advisory**（私下提交）—— 这是唯一
+的安全渠道，项目**刻意不设安全邮箱**（见 [`SECURITY.md`](../../SECURITY.md)）。
 直接在 public issue 里发漏洞细节是**不可以**的 — 哪怕 license 允许。
 
 ---
