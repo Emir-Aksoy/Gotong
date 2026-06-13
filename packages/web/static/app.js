@@ -20,7 +20,12 @@
 (() => {
   const ROLE_META = document.querySelector('meta[name="x-aipehub-role"]')
   const role = (ROLE_META?.getAttribute('content') || '').trim()
-  const ROLE_LABELS = { owner: '所有者', admin: '管理员', member: '成员', viewer: '只读' }
+  const ROLE_LABELS = () => ({
+    owner: t('meRoleOwner'),
+    admin: t('meRoleAdmin'),
+    member: t('meRoleMember'),
+    viewer: t('meRoleViewer'),
+  })
   const ADMIN_OR_OWNER = role === 'owner' || role === 'admin'
   const SIGNED_IN = role === 'owner' || role === 'admin' || role === 'member' || role === 'viewer'
 
@@ -35,6 +40,28 @@
   // escapeHtml is aliased to the historical local name `escape`; formatBytes
   // is the guarded copy. R14 — these were 3 duplicated local defs.
   const { escapeHtml: escape, formatBytes, formatTs } = window.AipeHub
+
+  // ---- i18n translator (REL-7) -----------------------------------------
+  // Reads window.AipeHub.t on every call (it's a live getter that flips on
+  // setLang), so dynamic panels render in the current language and re-render
+  // correctly when the toggle fires. Function-form keys (interpolation) are
+  // invoked with the passed args; plain-string keys ignore extra args.
+  const t = (key, ...args) => {
+    const v = window.AipeHub.t[key]
+    return typeof v === 'function' ? v(...args) : v ?? key
+  }
+
+  // Bind a listener to a STATIC element exactly once, even if the binding
+  // call runs again (REL-7 — onLangChange re-runs renderHome/renderSettings
+  // to re-render dynamic panels in the new language; without this guard each
+  // toggle would stack a duplicate listener on the static buttons/forms).
+  // Delegated containers (#me-inbox-list etc.) are static too, so the same
+  // single-flag guard fits — each listed element carries exactly one binding.
+  function bindOnce(el, type, handler) {
+    if (!el || el.dataset.boundOnce === '1') return
+    el.dataset.boundOnce = '1'
+    el.addEventListener(type, handler)
+  }
 
   // ---- Apply role visibility filter ------------------------------------
   // Hide every [data-roles] element whose role list doesn't include the
@@ -58,16 +85,16 @@
     const subtitle = $('#role-subtitle')
     if (!SIGNED_IN) {
       if (badge) badge.textContent = ''
-      if (subtitle) subtitle.textContent = '未登录'
+      if (subtitle) subtitle.textContent = t('meNotSignedIn')
       return
     }
     if (badge) {
-      badge.textContent = ROLE_LABELS[role] || role
+      badge.textContent = ROLE_LABELS()[role] || role
       badge.classList.add(`role-${role}`)
     }
     if (subtitle) {
       subtitle.textContent =
-        role === 'owner' || role === 'admin' ? '管理员控制台' : '我的工作流'
+        role === 'owner' || role === 'admin' ? t('meSubtitleAdmin') : t('meSubtitleMember')
     }
   }
 
@@ -102,18 +129,18 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault()
       status.className = 'login-status'
-      status.textContent = '设置中…'
+      status.textContent = t('meSetupSettingUp')
       const fd = new FormData(form)
       const password = String(fd.get('password') || '')
       const confirm = String(fd.get('confirm') || '')
       if (password !== confirm) {
         status.className = 'login-status error'
-        status.textContent = '两次密码不一致'
+        status.textContent = t('meSetupPwMismatch')
         return
       }
       if (password.length < 12) {
         status.className = 'login-status error'
-        status.textContent = '密码至少 12 位'
+        status.textContent = t('meSetupPwTooShort')
         return
       }
       try {
@@ -125,18 +152,18 @@
         if (!r.ok) {
           const j = await r.json().catch(() => ({}))
           status.className = 'login-status error'
-          status.textContent = j?.error || `设置失败 (HTTP ${r.status})`
+          status.textContent = j?.error || t('meSetupFailedHttp', r.status)
           return
         }
         status.className = 'login-status ok'
-        status.textContent = '密码已设,现在去登录…'
+        status.textContent = t('meSetupDone')
         // Swap to the login form so the operator can sign in with the
         // newly-set password. Reload picks up an empty cookie state (no
         // session yet) and renders the login shell.
         setTimeout(() => { window.location.reload() }, 700)
       } catch (err) {
         status.className = 'login-status error'
-        status.textContent = `设置失败: ${err?.message || err}`
+        status.textContent = t('meSetupFailedErr', err?.message || err)
       }
     })
   }
@@ -151,7 +178,7 @@
     form.addEventListener('submit', async (e) => {
       e.preventDefault()
       status.className = 'login-status'
-      status.textContent = '登录中…'
+      status.textContent = t('meLoginLoggingIn')
       const fd = new FormData(form)
       const totpCode = String(fd.get('totpCode') || '').trim()
       const body = JSON.stringify({
@@ -177,7 +204,7 @@
             const codeInput = form.querySelector('[name="totpCode"]')
             status.className = 'login-status'
             // If a code was already supplied and still rejected, say so.
-            status.textContent = totpCode ? '验证码错误,请重试' : '请输入两步验证码'
+            status.textContent = totpCode ? t('meLoginTotpWrong') : t('meLoginTotpNeeded')
             if (codeInput) {
               codeInput.value = ''
               codeInput.focus()
@@ -185,16 +212,16 @@
             return
           }
           status.className = 'login-status error'
-          status.textContent = j?.error || `登录失败 (HTTP ${r.status})`
+          status.textContent = j?.error || t('meLoginFailedHttp', r.status)
           return
         }
         status.className = 'login-status ok'
-        status.textContent = '登录成功,正在加载…'
+        status.textContent = t('meLoginOk')
         // Reload so the server re-renders with the role meta injected.
         window.location.reload()
       } catch (err) {
         status.className = 'login-status error'
-        status.textContent = `登录失败: ${err?.message || err}`
+        status.textContent = t('meLoginFailedErr', err?.message || err)
       }
     })
   }
@@ -216,7 +243,7 @@
       const status = document.getElementById('login-status')
       if (status) {
         status.className = 'login-status error'
-        status.textContent = `单点登录失败: ${ssoError}`
+        status.textContent = t('meSsoFailed', ssoError)
       }
     }
     list.innerHTML = ''
@@ -240,7 +267,7 @@
         const btn = document.createElement('button')
         btn.type = 'button'
         btn.className = 'login-sso-btn'
-        btn.textContent = `用 ${name} 登录`
+        btn.textContent = t('meSsoButton', name)
         btn.addEventListener('click', () => {
           window.location.href = startPath + '?provider=' + encodeURIComponent(p.id)
         })
@@ -382,22 +409,22 @@
     await loadMyAgents()
     await loadMyOwnAgents()
     await loadMyCredentials()
-    document.getElementById('me-dispatch-btn')?.addEventListener('click', submitDispatch)
+    bindOnce(document.getElementById('me-dispatch-btn'), 'click', submitDispatch)
     // WFEDIT-M4 — open the NL editor for the currently-selected workflow.
-    document.getElementById('me-wf-edit-load-btn')?.addEventListener('click', loadWorkflowEditor)
-    document.getElementById('me-refresh-reports-btn')?.addEventListener('click', loadMyReports)
-    document.getElementById('me-runs-refresh-btn')?.addEventListener('click', loadMyRuns)
-    document.getElementById('me-agents-refresh-btn')?.addEventListener('click', loadMyAgents)
-    document.getElementById('me-inbox-refresh-btn')?.addEventListener('click', loadMyInbox)
+    bindOnce(document.getElementById('me-wf-edit-load-btn'), 'click', loadWorkflowEditor)
+    bindOnce(document.getElementById('me-refresh-reports-btn'), 'click', loadMyReports)
+    bindOnce(document.getElementById('me-runs-refresh-btn'), 'click', loadMyRuns)
+    bindOnce(document.getElementById('me-agents-refresh-btn'), 'click', loadMyAgents)
+    bindOnce(document.getElementById('me-inbox-refresh-btn'), 'click', loadMyInbox)
     // Delegated: the list is re-rendered, but #me-inbox-list is stable.
-    document.getElementById('me-inbox-list')?.addEventListener('click', onInboxClick)
+    bindOnce(document.getElementById('me-inbox-list'), 'click', onInboxClick)
     // v5 A-M2 — my own agents: form submit + cancel + delegated edit/delete.
-    document.getElementById('me-own-agent-form')?.addEventListener('submit', submitOwnAgent)
-    document.getElementById('me-own-cancel')?.addEventListener('click', resetOwnForm)
-    document.getElementById('me-own-agents-list')?.addEventListener('click', onOwnAgentsClick)
+    bindOnce(document.getElementById('me-own-agent-form'), 'submit', submitOwnAgent)
+    bindOnce(document.getElementById('me-own-cancel'), 'click', resetOwnForm)
+    bindOnce(document.getElementById('me-own-agents-list'), 'click', onOwnAgentsClick)
     // v5 A-M3 — my API keys (BYO): create form + delegated delete.
-    document.getElementById('me-cred-form')?.addEventListener('submit', submitCredential)
-    document.getElementById('me-cred-list')?.addEventListener('click', onCredListClick)
+    bindOnce(document.getElementById('me-cred-form'), 'submit', submitCredential)
+    bindOnce(document.getElementById('me-cred-list'), 'click', onCredListClick)
   }
 
   async function renderWhoami() {
@@ -405,17 +432,17 @@
     if (!info) return
     try {
       const r = await fetch('/api/admin/identity/me')
-      if (!r.ok) { info.textContent = '加载失败'; return }
+      if (!r.ok) { info.textContent = t('meLoadFailed'); return }
       const j = await r.json()
       const u = j?.user || j
       info.innerHTML = `
         <strong>${escape(u.displayName || u.email || u.id || '')}</strong>
         · ${escape(u.email || '')}
-        · 角色 <code>${escape(u.role || role)}</code>
+        · ${t('meRoleWord')} <code>${escape(u.role || role)}</code>
         ${u.id ? `· userId <code>${escape(u.id)}</code>` : ''}
       `
     } catch (err) {
-      info.textContent = `加载失败: ${err?.message || err}`
+      info.textContent = t('meLoadFailedErr', err?.message || err)
     }
   }
 
@@ -429,29 +456,29 @@
     const sel = document.getElementById('me-wf-select')
     const fields = document.getElementById('me-wf-form-fields')
     if (!sel || !fields) return
-    sel.innerHTML = '<option>加载中…</option>'
+    sel.innerHTML = `<option>${escape(t('meLoading'))}</option>`
     try {
       const r = await fetch('/api/me/workflows')
       if (!r.ok) {
-        sel.innerHTML = '<option value="">无可用工作流</option>'
+        sel.innerHTML = `<option value="">${escape(t('meNoWorkflows'))}</option>`
         fields.innerHTML = ''
         return
       }
       const j = await r.json()
       __myWorkflows = Array.isArray(j?.workflows) ? j.workflows : []
       if (__myWorkflows.length === 0) {
-        sel.innerHTML = '<option value="">暂无可用工作流</option>'
+        sel.innerHTML = `<option value="">${escape(t('meNoWorkflowsYet'))}</option>`
         fields.innerHTML =
-          '<p class="me-meta">还没有面向成员的工作流 — 管理员可在工作流定义里开启 <code>surface.me</code>。</p>'
+          `<p class="me-meta">${t('meNoMemberWorkflowsPre')}<code>surface.me</code>${t('meNoMemberWorkflowsPost')}</p>`
         return
       }
       sel.innerHTML = __myWorkflows
         .map((w) => `<option value="${escape(w.id)}">${escape(w.label || w.id)}</option>`)
         .join('')
-      sel.addEventListener('change', renderWorkflowFields)
+      bindOnce(sel, 'change', renderWorkflowFields)
       renderWorkflowFields()
     } catch (err) {
-      sel.innerHTML = `<option>加载失败: ${escape(err?.message || String(err))}</option>`
+      sel.innerHTML = `<option>${escape(t('meLoadFailedErr', err?.message || String(err)))}</option>`
     }
   }
 
@@ -467,7 +494,7 @@
     const schema = wf && Array.isArray(wf.inputSchema) ? wf.inputSchema : []
     const desc = wf && wf.description ? `<p class="me-meta">${escape(wf.description)}</p>` : ''
     if (schema.length === 0) {
-      fields.innerHTML = desc + '<p class="me-meta">该工作流不需要额外字段。</p>'
+      fields.innerHTML = desc + `<p class="me-meta">${t('meWfNoFields')}</p>`
       return
     }
     fields.innerHTML = desc + schema.map(renderField).join('')
@@ -507,7 +534,7 @@
         // mirroring the admin wf-start form, so a file picked but never
         // submitted leaves no orphan artifact.
         const accept = f.accept ? ` accept="${escape(f.accept)}"` : ''
-        const cap = typeof f.maxSizeMb === 'number' ? `<small class="me-meta">（≤ ${escape(String(f.maxSizeMb))} MB）</small>` : ''
+        const cap = typeof f.maxSizeMb === 'number' ? `<small class="me-meta">${t('meFieldMaxSize', escape(String(f.maxSizeMb)))}</small>` : ''
         control = `<input type="file" name="${idAttr}" data-type="file"${accept}${reqAttr}>${cap}<small class="me-upload-status" data-upload-status></small>`
         break
       }
@@ -524,12 +551,12 @@
     if (!sel || !fields || !status) return
     if (!sel.value) {
       status.className = 'me-status error'
-      status.textContent = '请先选择一个工作流'
+      status.textContent = t('meSelectWfFirst')
       return
     }
     const payload = {}
     status.className = 'me-status'
-    status.textContent = '提交中…'
+    status.textContent = t('meSubmitting')
     // File fields upload at submit time (→ file_ref block), so we can't use a
     // sync forEach: a failed/required-missing upload aborts the whole dispatch.
     for (const el of fields.querySelectorAll('[name]')) {
@@ -557,11 +584,11 @@
       const j = await r.json().catch(() => ({}))
       if (!r.ok) {
         status.className = 'me-status error'
-        status.textContent = j?.error || `派发失败 (HTTP ${r.status})`
+        status.textContent = j?.error || t('meDispatchFailedHttp', r.status)
         return
       }
       status.className = 'me-status ok'
-      status.textContent = `已派发,运行 id: ${j?.runId || j?.taskId || 'ok'}`
+      status.textContent = t('meDispatched', j?.runId || j?.taskId || 'ok')
       // Refresh reports — the new run might already have produced an artifact
       // for fast workflows; for slow ones the user can hit refresh later.
       // Also refresh the runs list so the just-triggered run shows up.
@@ -569,7 +596,7 @@
       setTimeout(loadMyRuns, 800)
     } catch (err) {
       status.className = 'me-status error'
-      status.textContent = `派发失败: ${err?.message || err}`
+      status.textContent = t('meDispatchFailedErr', err?.message || err)
     }
   }
 
@@ -609,28 +636,27 @@
   // OpenClaw-style freedom over every step's logic.
   function renderEditBoundary(r) {
     const b = (r && r.boundary) || { trigger: '', egress: [] }
-    const triggerLi = `<li>入口(触发能力):<code>${escape(b.trigger || '')}</code></li>`
+    const triggerLi = `<li>${t('meWfEditTrigger')}<code>${escape(b.trigger || '')}</code></li>`
     if (r && r.crossHub && Array.isArray(b.egress) && b.egress.length) {
       const egressLis = b.egress
         .map((e) => {
           const dc =
             Array.isArray(e.dataClasses) && e.dataClasses.length
-              ? `(数据分类 ${e.dataClasses.map(escape).join(', ')})`
+              ? t('meWfEditDataClasses', e.dataClasses.map(escape).join(', '))
               : ''
-          return `<li>出口步骤 <code>${escape(e.stepId || '')}</code> → 跨 hub 能力 <code>${escape(
-            e.capability || '',
-          )}</code>${dc}</li>`
+          return `<li>${t('meWfEditEgressStep')}<code>${escape(e.stepId || '')}</code>${t(
+            'meWfEditEgressArrow',
+          )}<code>${escape(e.capability || '')}</code>${dc}</li>`
         })
         .join('')
       return (
-        '<div class="me-wf-edit-locked"><strong>🔒 这个工作流连着别的 hub。' +
-        '下面这些跨 hub 的出入口锁定不可改,你只能改自己这边的步骤:</strong>' +
+        `<div class="me-wf-edit-locked"><strong>${t('meWfEditLockedTitle')}</strong>` +
         `<ul>${triggerLi}${egressLis}</ul></div>`
       )
     }
     return (
-      '<div class="me-wf-edit-local"><strong>✅ 这是只在本 hub 内运行的工作流,' +
-      `你可以自由修改步骤内容。</strong>(只有入口 <code>${escape(b.trigger || '')}</code> 锁定。)</div>`
+      `<div class="me-wf-edit-local"><strong>${t('meWfEditLocalTitlePre')}</strong>` +
+      `${t('meWfEditLocalTitlePost')}<code>${escape(b.trigger || '')}</code>${t('meWfEditLocalTitleEnd')}</div>`
     )
   }
 
@@ -644,14 +670,14 @@
     const yaml = String((j && j.yaml) || '')
     body.innerHTML =
       renderEditBoundary(j) +
-      `<details class="me-wf-edit-yaml"><summary>查看当前工作流定义 (YAML)</summary><pre>${escape(
+      `<details class="me-wf-edit-yaml"><summary>${t('meWfEditViewYaml')}</summary><pre>${escape(
         yaml,
       )}</pre></details>` +
       (editable
-        ? '<label>用一句话说你想怎么改\n' +
-          '<textarea id="me-wf-edit-instruction" rows="3" placeholder="例如:把第一步的提示语改得更礼貌一些"></textarea></label>' +
-          '<button id="me-wf-edit-submit" type="button" class="me-primary-btn">改</button>'
-        : '<p class="me-meta">这个工作流当前状态不可改(审核中或已归档)。</p>')
+        ? `<label>${t('meWfEditInstructionLabel')}\n` +
+          `<textarea id="me-wf-edit-instruction" rows="3" placeholder="${escape(t('meWfEditInstructionPlaceholder'))}"></textarea></label>` +
+          `<button id="me-wf-edit-submit" type="button" class="me-primary-btn">${t('meWfEditApplyBtn')}</button>`
+        : `<p class="me-meta">${t('meWfEditNotEditable')}</p>`)
     if (j && j.workflowId) body.dataset.workflowId = j.workflowId
     if (editable) {
       document.getElementById('me-wf-edit-submit')?.addEventListener('click', submitWorkflowEdit)
@@ -664,11 +690,11 @@
     if (!sel || !status) return
     if (!sel.value) {
       status.className = 'me-status error'
-      status.textContent = '请先在上面选择一个工作流。'
+      status.textContent = t('meWfEditSelectFirst')
       return
     }
     resetWorkflowEditor()
-    status.textContent = '加载中…'
+    status.textContent = t('meLoading')
     try {
       const r = await fetch(`/api/me/workflows/${encodeURIComponent(sel.value)}/editable`)
       const j = await r.json().catch(() => ({}))
@@ -684,7 +710,7 @@
       renderEditorBody(j)
     } catch (err) {
       status.className = 'me-status error'
-      status.textContent = `加载失败: ${err?.message || err}`
+      status.textContent = t('meLoadFailedErr', err?.message || err)
     }
   }
 
@@ -697,16 +723,16 @@
     const instruction = (ta.value || '').trim()
     if (!workflowId) {
       status.className = 'me-status error'
-      status.textContent = '请先打开一个工作流编辑器。'
+      status.textContent = t('meWfEditOpenFirst')
       return
     }
     if (!instruction) {
       status.className = 'me-status error'
-      status.textContent = '请用一句话描述你想怎么改。'
+      status.textContent = t('meWfEditDescribeFirst')
       return
     }
     status.className = 'me-status'
-    status.textContent = '正在让 AI 改…(可能要几秒)'
+    status.textContent = t('meWfEditAiWorking')
     try {
       const r = await fetch(`/api/me/workflows/${encodeURIComponent(workflowId)}/edit`, {
         method: 'POST',
@@ -728,7 +754,7 @@
         removeEditStreamPane()
         if (!j) {
           status.className = 'me-status error'
-          status.textContent = '连接中断,没有收到结果。改动可能仍在后台保存,请刷新看看。'
+          status.textContent = t('meWfEditStreamBroken')
           return
         }
       } else {
@@ -736,11 +762,11 @@
       }
       if (r.ok && j && j.ok !== false) {
         status.className = 'me-status ok'
-        const applied = j.applied === 'published' ? '已发布上线' : '已存为草稿'
-        status.innerHTML = `✅ ${applied}。${j.explanation ? escape(j.explanation) : ''}`
+        const applied = j.applied === 'published' ? t('meWfEditPublished') : t('meWfEditDraftSaved')
+        status.innerHTML = t('meWfEditSuccessLine', applied, j.explanation ? escape(j.explanation) : '')
         editChat.push({
           instruction,
-          outcome: `${applied}。${j.explanation || ''}`.trim(),
+          outcome: t('meWfEditChatSuccess', applied, j.explanation || '').trim(),
           ok: true,
         })
         // The edit may have changed the inputs — refresh the editor (new YAML)
@@ -768,14 +794,14 @@
       // was just rejected. (Transport errors below are not: no AI saw them.)
       editChat.push({
         instruction,
-        outcome: `失败:${errText}${violations.length ? `(${violations.join('; ')})` : ''}`,
+        outcome: t('meWfEditChatFailure', errText, violations.length ? violations.join('; ') : ''),
         ok: false,
       })
       renderEditChat()
     } catch (err) {
       removeEditStreamPane()
       status.className = 'me-status error'
-      status.textContent = `保存失败: ${err?.message || err}`
+      status.textContent = t('meWfEditSaveFailedErr', err?.message || err)
     }
   }
 
@@ -841,7 +867,7 @@
     if (!el) {
       el = document.createElement('div')
       el.className = 'me-wf-stream'
-      el.innerHTML = '<div class="me-wf-stream-head">✨ AI 正在打字…</div><pre></pre>'
+      el.innerHTML = `<div class="me-wf-stream-head">${t('meWfEditAiTyping')}</div><pre></pre>`
       const label = body.querySelector('label')
       if (label) label.before(el)
       else body.appendChild(el)
@@ -874,7 +900,7 @@
     el.className = 'me-wf-diff'
     el.open = true
     el.innerHTML =
-      `<summary>查看这次改动</summary>` +
+      `<summary>${t('meWfEditViewDiff')}</summary>` +
       `<div class="me-wf-diff-rows">${renderDiffRows(diff)}</div>`
     const yamlDetails = body.querySelector('.me-wf-edit-yaml')
     if (yamlDetails) yamlDetails.before(el)
@@ -898,7 +924,7 @@
       const keepTail = j === diff.length ? 0 : 2
       if (j - i > keepHead + keepTail + 1) {
         for (let k = i; k < i + keepHead; k++) out.push(diffRow(diff[k]))
-        out.push(`<div class="me-wf-diff-skip">… ${j - i - keepHead - keepTail} 行未变 …</div>`)
+        out.push(`<div class="me-wf-diff-skip">${escape(t('meWfDiffSkip', j - i - keepHead - keepTail))}</div>`)
         for (let k = j - keepTail; k < j; k++) out.push(diffRow(diff[k]))
       } else {
         for (let k = i; k < j; k++) out.push(diffRow(diff[k]))
@@ -934,12 +960,12 @@
       else body.appendChild(el)
     }
     el.innerHTML =
-      '<h4>这次会话的修改记录</h4>' +
+      `<h4>${t('meWfEditChatHistory')}</h4>` +
       editChat
         .map(
-          (t) =>
-            `<div class="me-wf-chat-turn"><div class="me-wf-chat-user">你:${escape(t.instruction)}</div>` +
-            `<div class="me-wf-chat-outcome${t.ok ? '' : ' err'}">${escape(t.outcome || '')}</div></div>`,
+          (turn) =>
+            `<div class="me-wf-chat-turn"><div class="me-wf-chat-user">${t('meWfEditChatYou')}${escape(turn.instruction)}</div>` +
+            `<div class="me-wf-chat-outcome${turn.ok ? '' : ' err'}">${escape(turn.outcome || '')}</div></div>`,
         )
         .join('')
   }
@@ -951,20 +977,20 @@
     if (msg) return String(msg)
     const code = j && j.code
     const byCode = {
-      forbidden: '你没有这个工作流的编辑权限(需要 editor)。',
-      not_found: '找不到这个工作流。',
-      no_source: '这个工作流没有可编辑的源定义。',
-      under_review: '这个工作流正在审核中,暂不可改。',
-      archived: '这个工作流已归档,不可改。',
-      boundary_locked: '这次修改动到了跨 hub 的出入口 — 只能改你自己这边的步骤。',
-      assistant_failed: 'AI 没能生成一个有效的工作流,请换种说法再试。',
-      parse_failed: 'AI 生成的内容解析失败,请换种说法再试。',
-      id_changed: '不能改工作流的 id。',
-      structure_failed: '生成的工作流结构校验没通过。',
-      assistant_unavailable: 'AI 助手当前不可用(管理员未配置)。',
+      forbidden: t('meWfErrForbidden'),
+      not_found: t('meWfErrNotFound'),
+      no_source: t('meWfErrNoSource'),
+      under_review: t('meWfErrUnderReview'),
+      archived: t('meWfErrArchived'),
+      boundary_locked: t('meWfErrBoundaryLocked'),
+      assistant_failed: t('meWfErrAssistantFailed'),
+      parse_failed: t('meWfErrParseFailed'),
+      id_changed: t('meWfErrIdChanged'),
+      structure_failed: t('meWfErrStructureFailed'),
+      assistant_unavailable: t('meWfErrAssistantUnavailable'),
     }
     if (code && byCode[code]) return byCode[code]
-    return `操作失败 (HTTP ${httpStatus})`
+    return t('meOpFailedHttp', httpStatus)
   }
 
   // Upload a file-type field's selected file to /api/me/uploads and stash the
@@ -983,22 +1009,22 @@
     if (!files || files.length === 0) {
       if (el.hasAttribute('required')) {
         status.className = 'me-status error'
-        status.textContent = `请为「${key}」选择一个文件`
+        status.textContent = t('meUploadSelectFile', key)
         return false
       }
       return true // optional + empty → leave the field unset
     }
     const file = files[0]
     try {
-      setUpload('', '上传中…')
+      setUpload('', t('meUploading'))
       const ref = await uploadMyFile(file)
-      setUpload('ok', `已上传:${file.name}(${formatBytes(ref.size)})`)
+      setUpload('ok', t('meUploaded', file.name, formatBytes(ref.size)))
       payload[key] = { type: 'file_ref', artifactId: ref.artifactId, mime: ref.mime }
       return true
     } catch (err) {
-      setUpload('error', `上传失败:${err?.message || err}`)
+      setUpload('error', t('meUploadFailed', err?.message || err))
       status.className = 'me-status error'
-      status.textContent = `文件上传失败:${err?.message || err}`
+      status.textContent = t('meUploadFailedFile', err?.message || err)
       return false
     }
   }
@@ -1029,17 +1055,17 @@
   async function loadMyRuns() {
     const tbody = document.getElementById('me-runs-tbody')
     if (!tbody) return
-    tbody.innerHTML = '<tr><td colspan="4" class="me-meta">加载中…</td></tr>'
+    tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${t('meLoading')}</td></tr>`
     try {
       const r = await fetch('/api/me/runs')
       if (!r.ok) {
-        tbody.innerHTML = `<tr><td colspan="4" class="me-meta">加载失败 (HTTP ${r.status})</td></tr>`
+        tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${t('meLoadFailedHttp', r.status)}</td></tr>`
         return
       }
       const j = await r.json()
       const runs = Array.isArray(j?.runs) ? j.runs : []
       if (runs.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="me-meta">还没有运行记录 — 上面发起一次工作流试试。</td></tr>'
+        tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${t('meNoRuns')}</td></tr>`
         return
       }
       tbody.innerHTML = runs
@@ -1049,23 +1075,26 @@
               <td>${escape(run.workflowId || '?')}</td>
               <td>${renderRunStatus(run.status)}</td>
               <td>${escape(formatTs(run.startedAt))}</td>
-              <td>${run.endedAt ? escape(formatTs(run.endedAt)) : '<span class="me-meta">进行中</span>'}</td>
+              <td>${run.endedAt ? escape(formatTs(run.endedAt)) : `<span class="me-meta">${t('meInProgress')}</span>`}</td>
             </tr>`,
         )
         .join('')
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="4" class="me-meta">加载失败: ${escape(err?.message || String(err))}</td></tr>`
+      tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${escape(t('meLoadFailedErr', err?.message || String(err)))}</td></tr>`
     }
   }
 
   // Map a RunStatus to a coloured pill. Falls back to the raw status string so a
-  // future status value still renders (just without a dedicated colour).
-  const ME_RUN_STATUS_LABELS = {
-    running: '进行中', done: '已完成', failed: '失败', cancelled: '已取消', suspended: '挂起',
+  // future status value still renders (just without a dedicated colour). Labels
+  // are read through the translator so they follow the active language.
+  const ME_RUN_STATUS_KEYS = {
+    running: 'meRunStatusRunning', done: 'meRunStatusDone', failed: 'meRunStatusFailed',
+    cancelled: 'meRunStatusCancelled', suspended: 'meRunStatusSuspended',
   }
   function renderRunStatus(status) {
     const s = status || 'unknown'
-    const label = ME_RUN_STATUS_LABELS[s] || s
+    const key = ME_RUN_STATUS_KEYS[s]
+    const label = key ? t(key) : s
     return `<span class="me-run-status me-run-${escape(s)}">${escape(label)}</span>`
   }
 
@@ -1075,11 +1104,11 @@
     const list = document.getElementById('me-inbox-list')
     const count = document.getElementById('me-inbox-count')
     if (!list) return
-    list.innerHTML = '<p class="me-meta">加载中…</p>'
+    list.innerHTML = `<p class="me-meta">${t('meLoading')}</p>`
     try {
       const r = await fetch('/api/me/inbox')
       if (!r.ok) {
-        list.innerHTML = `<p class="me-meta">加载失败 (HTTP ${r.status})</p>`
+        list.innerHTML = `<p class="me-meta">${t('meLoadFailedHttp', r.status)}</p>`
         if (count) count.textContent = ''
         return
       }
@@ -1087,12 +1116,12 @@
       const items = Array.isArray(j?.items) ? j.items : []
       if (count) count.textContent = items.length ? String(items.length) : ''
       if (items.length === 0) {
-        list.innerHTML = '<p class="me-meta">暂无待处理任务。</p>'
+        list.innerHTML = `<p class="me-meta">${t('meInboxEmpty')}</p>`
         return
       }
       list.innerHTML = items.map(renderInboxItem).join('')
     } catch (err) {
-      list.innerHTML = `<p class="me-meta">加载失败: ${escape(err?.message || String(err))}</p>`
+      list.innerHTML = `<p class="me-meta">${escape(t('meLoadFailedErr', err?.message || String(err)))}</p>`
     }
   }
 
@@ -1104,20 +1133,20 @@
     const prompt = `<p class="me-inbox-prompt">${escape(item.prompt || '')}</p>`
     // inbox-gov M2 — if this was handed off, show the context the delegator left.
     const handoff = item.handoffNote
-      ? `<p class="me-inbox-handoff">📨 交接说明：${escape(item.handoffNote)}</p>`
+      ? `<p class="me-inbox-handoff">${t('meInboxHandoff', escape(item.handoffNote))}</p>`
       : ''
     let controls = ''
     if (item.kind === 'approval') {
       // inbox-gov M3 — three outcomes. The comment is optional for approve /
-      // reject but REQUIRED for "退回修改" (request changes), validated both
+      // reject but REQUIRED for "request changes", validated both
       // client- and server-side.
       controls = `
         <div class="me-inbox-approval">
-          <textarea data-inbox-approval-comment rows="2" placeholder="意见（退回修改时必填）"></textarea>
+          <textarea data-inbox-approval-comment rows="2" placeholder="${escape(t('meInboxCommentPlaceholder'))}"></textarea>
           <div class="me-inbox-actions">
-            <button type="button" class="me-primary-btn" data-inbox-approve="${id}">批准</button>
-            <button type="button" class="me-secondary-btn" data-inbox-changes="${id}">退回修改</button>
-            <button type="button" class="me-secondary-btn" data-inbox-reject="${id}">拒绝</button>
+            <button type="button" class="me-primary-btn" data-inbox-approve="${id}">${t('meInboxApprove')}</button>
+            <button type="button" class="me-secondary-btn" data-inbox-changes="${id}">${t('meInboxRequestChanges')}</button>
+            <button type="button" class="me-secondary-btn" data-inbox-reject="${id}">${t('meInboxReject')}</button>
           </div>
         </div>`
     } else if (item.kind === 'choice') {
@@ -1135,17 +1164,17 @@
       const control = ef.multiline
         ? `<textarea data-inbox-edit-field rows="4" placeholder="${ph}">${def}</textarea>`
         : `<input type="text" data-inbox-edit-field placeholder="${ph}" value="${def}">`
-      controls = `<div class="me-inbox-edit">${control}<button type="button" class="me-primary-btn" data-inbox-edit="${id}">提交</button></div>`
+      controls = `<div class="me-inbox-edit">${control}<button type="button" class="me-primary-btn" data-inbox-edit="${id}">${t('meInboxSubmit')}</button></div>`
     }
     // inbox-gov M2 — every pending item can be handed off to another member by
     // email (a toggle keeps the form out of the way until needed).
     const delegate = `
       <div class="me-inbox-delegate">
-        <button type="button" class="me-link-btn" data-inbox-delegate-toggle="${id}">转派给他人…</button>
+        <button type="button" class="me-link-btn" data-inbox-delegate-toggle="${id}">${t('meInboxDelegateToggle')}</button>
         <div class="me-inbox-delegate-form" data-inbox-delegate-form hidden>
-          <input type="email" data-inbox-delegate-email placeholder="对方邮箱" autocomplete="off">
-          <input type="text" data-inbox-delegate-note placeholder="交接说明（可选）">
-          <button type="button" class="me-secondary-btn" data-inbox-delegate-submit="${id}">确认转派</button>
+          <input type="email" data-inbox-delegate-email placeholder="${escape(t('meInboxDelegateEmail'))}" autocomplete="off">
+          <input type="text" data-inbox-delegate-note placeholder="${escape(t('meInboxDelegateNote'))}">
+          <button type="button" class="me-secondary-btn" data-inbox-delegate-submit="${id}">${t('meInboxDelegateConfirm')}</button>
         </div>
       </div>`
     return `
@@ -1184,7 +1213,7 @@
       if (!c) {
         const item = t.closest('.me-inbox-item')
         const statusEl = item ? item.querySelector('[data-inbox-status]') : null
-        if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = '退回修改需要填写意见' }
+        if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = window.AipeHub.t.meInboxChangesNeedComment }
         return
       }
       return resolveInbox(changes, { kind: 'approval', approved: false, changesRequested: true, comment: c }, t)
@@ -1222,7 +1251,7 @@
     const setButtons = (disabled) => {
       if (itemEl) itemEl.querySelectorAll('button').forEach((b) => { b.disabled = disabled })
     }
-    if (statusEl) { statusEl.className = 'me-status'; statusEl.textContent = '提交中…' }
+    if (statusEl) { statusEl.className = 'me-status'; statusEl.textContent = t('meSubmitting') }
     setButtons(true) // guard against a double-submit while in flight
     try {
       const r = await fetch(`/api/me/inbox/${encodeURIComponent(itemId)}/resolve`, {
@@ -1232,14 +1261,14 @@
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) {
-        if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = j?.error || `处理失败 (HTTP ${r.status})` }
+        if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = j?.error || t('meInboxProcessFailedHttp', r.status) }
         setButtons(false)
         return
       }
       // Resolved — refresh the list (updates count + empty state).
       await loadMyInbox()
     } catch (err) {
-      if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = `处理失败: ${err?.message || err}` }
+      if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = t('meInboxProcessFailedErr', err?.message || err) }
       setButtons(false)
     }
   }
@@ -1252,13 +1281,13 @@
     const statusEl = itemEl ? itemEl.querySelector('[data-inbox-status]') : null
     const email = (toEmail || '').trim()
     if (!email) {
-      if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = '请填写对方邮箱' }
+      if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = t('meInboxNeedEmail') }
       return
     }
     const setButtons = (disabled) => {
       if (itemEl) itemEl.querySelectorAll('button').forEach((b) => { b.disabled = disabled })
     }
-    if (statusEl) { statusEl.className = 'me-status'; statusEl.textContent = '转派中…' }
+    if (statusEl) { statusEl.className = 'me-status'; statusEl.textContent = t('meInboxDelegating') }
     setButtons(true)
     try {
       const body = { toEmail: email }
@@ -1271,14 +1300,14 @@
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) {
-        if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = j?.error || `转派失败 (HTTP ${r.status})` }
+        if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = j?.error || t('meInboxDelegateFailedHttp', r.status) }
         setButtons(false)
         return
       }
       // Handed off — it's no longer mine; refresh updates count + empty state.
       await loadMyInbox()
     } catch (err) {
-      if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = `转派失败: ${err?.message || err}` }
+      if (statusEl) { statusEl.className = 'me-status error'; statusEl.textContent = t('meInboxDelegateFailedErr', err?.message || err) }
       setButtons(false)
     }
   }
@@ -1286,17 +1315,17 @@
   async function loadMyReports() {
     const tbody = document.getElementById('me-reports-tbody')
     if (!tbody) return
-    tbody.innerHTML = '<tr><td colspan="4" class="me-meta">加载中…</td></tr>'
+    tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${t('meLoading')}</td></tr>`
     try {
       const r = await fetch('/api/me/growth-reports')
       if (!r.ok) {
-        tbody.innerHTML = `<tr><td colspan="4" class="me-meta">加载失败 (HTTP ${r.status})</td></tr>`
+        tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${t('meLoadFailedHttp', r.status)}</td></tr>`
         return
       }
       const j = await r.json()
       const reports = Array.isArray(j?.reports) ? j.reports : []
       if (reports.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" class="me-meta">还没有报告 — 派发一次工作流试试。</td></tr>'
+        tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${t('meNoReports')}</td></tr>`
         return
       }
       tbody.innerHTML = reports
@@ -1306,12 +1335,12 @@
               <td>${escape(r.filename || r.path || '?')}</td>
               <td>${formatBytes(r.size)}</td>
               <td>${escape(formatTs(r.modifiedAt || r.createdAt))}</td>
-              <td><a href="/api/me/growth-reports/download?path=${encodeURIComponent(r.path || '')}" download>下载</a></td>
+              <td><a href="/api/me/growth-reports/download?path=${encodeURIComponent(r.path || '')}" download>${t('meDownload')}</a></td>
             </tr>`,
         )
         .join('')
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="4" class="me-meta">加载失败: ${escape(err?.message || String(err))}</td></tr>`
+      tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${escape(t('meLoadFailedErr', err?.message || String(err)))}</td></tr>`
     }
   }
 
@@ -1321,22 +1350,22 @@
   async function loadMyAgents() {
     const list = document.getElementById('me-agents-list')
     if (!list) return
-    list.innerHTML = '<p class="me-meta">加载中…</p>'
+    list.innerHTML = `<p class="me-meta">${t('meLoading')}</p>`
     try {
       const r = await fetch('/api/me/agents')
       if (!r.ok) {
-        list.innerHTML = `<p class="me-meta">加载失败 (HTTP ${r.status})</p>`
+        list.innerHTML = `<p class="me-meta">${t('meLoadFailedHttp', r.status)}</p>`
         return
       }
       const j = await r.json()
       const agents = Array.isArray(j?.agents) ? j.agents : []
       if (agents.length === 0) {
-        list.innerHTML = '<p class="me-meta">还没有可用的 AI 助手 — 管理员可在「智能体」里创建。</p>'
+        list.innerHTML = `<p class="me-meta">${t('meNoAgents')}</p>`
         return
       }
       list.innerHTML = agents.map(renderAgentCard).join('')
     } catch (err) {
-      list.innerHTML = `<p class="me-meta">加载失败: ${escape(err?.message || String(err))}</p>`
+      list.innerHTML = `<p class="me-meta">${escape(t('meLoadFailedErr', err?.message || String(err)))}</p>`
     }
   }
 
@@ -1344,13 +1373,13 @@
     const caps = Array.isArray(a.capabilities) ? a.capabilities : []
     const capChips = caps.length
       ? caps.map((c) => `<span class="me-cap-chip">${escape(c)}</span>`).join('')
-      : '<span class="me-meta">无</span>'
+      : `<span class="me-meta">${t('meNone')}</span>`
     const desc = a.description ? `<p class="me-meta">${escape(a.description)}</p>` : ''
     const dotCls = a.online ? 'me-agent-online' : 'me-agent-offline'
-    const onlineLabel = a.online ? '在线' : '离线'
+    const onlineLabel = a.online ? t('meOnline') : t('meOffline')
     // v5 D-M4 — read-only "this helper wakes itself on a cadence" badge.
     const heartbeatBadge = a.heartbeat?.enabled
-      ? '<span class="me-heartbeat-badge" title="定时唤醒已开启">⏰ 定时</span>'
+      ? `<span class="me-heartbeat-badge" title="${escape(t('meHeartbeatTitle'))}">${t('meHeartbeatBadge')}</span>`
       : ''
     return `
       <div class="me-agent-card">
@@ -1374,22 +1403,22 @@
     const list = document.getElementById('me-own-agents-list')
     if (!list) return
     await populateProviderSelect()
-    list.innerHTML = '<p class="me-meta">加载中…</p>'
+    list.innerHTML = `<p class="me-meta">${t('meLoading')}</p>`
     try {
       const r = await fetch('/api/me/agents/owned')
       if (!r.ok) {
-        list.innerHTML = `<p class="me-meta">加载失败 (HTTP ${r.status})</p>`
+        list.innerHTML = `<p class="me-meta">${t('meLoadFailedHttp', r.status)}</p>`
         return
       }
       const j = await r.json()
       myOwnAgents = Array.isArray(j?.agents) ? j.agents : []
       if (myOwnAgents.length === 0) {
-        list.innerHTML = '<p class="me-meta">你还没有搭过自己的助手。用上面的表单建一个吧。</p>'
+        list.innerHTML = `<p class="me-meta">${t('meNoOwnAgents')}</p>`
         return
       }
       list.innerHTML = myOwnAgents.map(renderOwnAgentCard).join('')
     } catch (err) {
-      list.innerHTML = `<p class="me-meta">加载失败: ${escape(err?.message || String(err))}</p>`
+      list.innerHTML = `<p class="me-meta">${escape(t('meLoadFailedErr', err?.message || String(err)))}</p>`
     }
   }
 
@@ -1403,7 +1432,7 @@
       if (providers.length === 0) {
         // Never normally hit — 'mock' is always available — but if it is, point
         // at the BYO-key panel below (in personal mode you ARE the admin).
-        sel.innerHTML = '<option value="">（暂无可用模型 — 在下方「我的 API 密钥」里加一把自己的 key）</option>'
+        sel.innerHTML = `<option value="">${escape(t('meNoModels'))}</option>`
         return
       }
       sel.innerHTML = providers.map((p) => `<option value="${escape(p)}">${escape(p)}</option>`).join('')
@@ -1423,22 +1452,22 @@
     const caps = Array.isArray(a.capabilities) ? a.capabilities : []
     const capChips = caps.length
       ? caps.map((c) => `<span class="me-cap-chip">${escape(c)}</span>`).join('')
-      : '<span class="me-meta">无</span>'
+      : `<span class="me-meta">${t('meNone')}</span>`
     const dotCls = a.online ? 'me-agent-online' : 'me-agent-offline'
-    const onlineLabel = a.online ? '在线' : '离线'
+    const onlineLabel = a.online ? t('meOnline') : t('meOffline')
     const model = a.model ? ` · ${escape(a.model)}` : ''
     return `
       <div class="me-agent-card" data-own-id="${escape(a.id)}">
         <div class="me-agent-head">
-          <span class="me-agent-dot ${dotCls}" title="${onlineLabel}"></span>
+          <span class="me-agent-dot ${dotCls}" title="${escape(onlineLabel)}"></span>
           <strong>${escape(a.label || a.id)}</strong>
           <span class="me-meta">${escape(a.provider || '')}${model}</span>
         </div>
         <div class="me-agent-caps">${capChips}</div>
         <div class="me-own-agent-row-actions">
-          <button type="button" class="me-secondary-btn" data-own-edit="${escape(a.id)}">编辑</button>
-          <button type="button" class="me-secondary-btn" data-own-grants="${escape(a.id)}">管理访问</button>
-          <button type="button" class="me-secondary-btn me-danger-btn" data-own-delete="${escape(a.id)}">删除</button>
+          <button type="button" class="me-secondary-btn" data-own-edit="${escape(a.id)}">${t('meEdit')}</button>
+          <button type="button" class="me-secondary-btn" data-own-grants="${escape(a.id)}">${t('meManageAccess')}</button>
+          <button type="button" class="me-secondary-btn me-danger-btn" data-own-delete="${escape(a.id)}">${t('meDelete')}</button>
         </div>
         <div class="me-grants-wrap" data-grants-wrap="${escape(a.id)}" hidden></div>
       </div>`
@@ -1450,7 +1479,7 @@
     form.reset()
     document.getElementById('me-own-editing').value = ''
     document.getElementById('me-own-handle').disabled = false
-    document.getElementById('me-own-submit').textContent = '创建助手'
+    document.getElementById('me-own-submit').textContent = t('meCreateAgent')
     document.getElementById('me-own-cancel').hidden = true
     const status = document.getElementById('me-own-status')
     if (status) { status.textContent = ''; status.className = 'me-status' }
@@ -1468,7 +1497,7 @@
     document.getElementById('me-own-provider').value = agent.provider || ''
     document.getElementById('me-own-model').value = agent.model || ''
     document.getElementById('me-own-system').value = agent.system || ''
-    document.getElementById('me-own-submit').textContent = '保存修改'
+    document.getElementById('me-own-submit').textContent = t('meSaveChanges')
     document.getElementById('me-own-cancel').hidden = false
     document.getElementById('me-own-agent-form')?.scrollIntoView?.({ behavior: 'smooth' })
   }
@@ -1484,7 +1513,7 @@
     e.preventDefault()
     const status = document.getElementById('me-own-status')
     status.className = 'me-status'
-    status.textContent = '提交中…'
+    status.textContent = t('meSubmitting')
     const editingId = document.getElementById('me-own-editing').value
     const body = {
       label: document.getElementById('me-own-label').value.trim(),
@@ -1510,16 +1539,16 @@
       const j = await r.json().catch(() => ({}))
       if (!r.ok) {
         status.className = 'me-status error'
-        status.textContent = `失败: ${escape(j?.error || `HTTP ${r.status}`)}`
+        status.textContent = t('meFailedColon', escape(j?.error || `HTTP ${r.status}`))
         return
       }
       status.className = 'me-status ok'
-      status.textContent = editingId ? '已保存' : '已创建'
+      status.textContent = editingId ? t('meSaved') : t('meCreated')
       resetOwnForm()
       await loadMyOwnAgents()
     } catch (err) {
       status.className = 'me-status error'
-      status.textContent = `失败: ${escape(err?.message || String(err))}`
+      status.textContent = t('meFailedColon', escape(err?.message || String(err)))
     }
   }
 
@@ -1532,17 +1561,17 @@
     }
     const delId = e.target?.getAttribute?.('data-own-delete')
     if (delId) {
-      if (!confirm('确定删除这个助手？此操作不可撤销。')) return
+      if (!confirm(t('meConfirmDeleteAgent'))) return
       try {
         const r = await fetch(`/api/me/agents/${encodeURIComponent(delId)}`, { method: 'DELETE' })
         if (!r.ok) {
           const j = await r.json().catch(() => ({}))
-          alert(`删除失败: ${j?.error || `HTTP ${r.status}`}`)
+          alert(t('meDeleteFailedErr', j?.error || `HTTP ${r.status}`))
           return
         }
         await loadMyOwnAgents()
       } catch (err) {
-        alert(`删除失败: ${err?.message || String(err)}`)
+        alert(t('meDeleteFailedErr', err?.message || String(err)))
       }
       return
     }
@@ -1555,11 +1584,11 @@
       if (!wrap) return
       if (wrap.hidden) {
         wrap.hidden = false
-        e.target.textContent = '收起访问'
+        e.target.textContent = t('meCollapseAccess')
         await loadAgentGrants(grantsId, wrap)
       } else {
         wrap.hidden = true
-        e.target.textContent = '管理访问'
+        e.target.textContent = t('meManageAccess')
       }
       return
     }
@@ -1571,7 +1600,7 @@
     const revokeKey = e.target?.getAttribute?.('data-grant-remove')
     if (revokeKey) {
       const agentId = e.target.getAttribute('data-grant-agent')
-      if (!confirm('撤销这条访问授权？')) return
+      if (!confirm(t('meConfirmRevokeGrant'))) return
       await removeAgentGrant(agentId, revokeKey, e.target.closest('[data-grants-wrap]'))
       return
     }
@@ -1584,58 +1613,60 @@
   // finer agent-level enforcement lands. The host owns the owner gate + the
   // orphan guard (you can't leave an agent with no owner), so the UI just
   // surfaces its errors.
-  const GRANT_KIND_LABELS = { user: '用户', agent: '助手', peer: '对端 hub', hub: '本 hub' }
-  const GRANT_PERM_LABELS = { viewer: '只读', editor: '可编辑', owner: '共同所有者' }
+  const GRANT_KIND_KEYS = { user: 'meGrantKindUser', agent: 'meGrantKindAgent', peer: 'meGrantKindPeer', hub: 'meGrantKindHub' }
+  const GRANT_PERM_KEYS = { viewer: 'meGrantPermViewer', editor: 'meGrantPermEditor', owner: 'meGrantPermOwner' }
+  const grantKindLabel = (k) => (GRANT_KIND_KEYS[k] ? t(GRANT_KIND_KEYS[k]) : k)
+  const grantPermLabel = (p) => (GRANT_PERM_KEYS[p] ? t(GRANT_PERM_KEYS[p]) : p)
 
   async function loadAgentGrants(agentId, wrap) {
     if (!wrap) return
-    wrap.innerHTML = '<p class="me-meta">加载中…</p>'
+    wrap.innerHTML = `<p class="me-meta">${t('meLoading')}</p>`
     try {
       const r = await fetch(`/api/me/agents/${encodeURIComponent(agentId)}/grants`)
       if (!r.ok) {
-        wrap.innerHTML = `<p class="me-meta">加载失败 (HTTP ${r.status})</p>`
+        wrap.innerHTML = `<p class="me-meta">${t('meLoadFailedHttp', r.status)}</p>`
         return
       }
       const j = await r.json()
       const grants = Array.isArray(j?.grants) ? j.grants : []
       wrap.innerHTML = renderGrantsPanel(agentId, grants)
     } catch (err) {
-      wrap.innerHTML = `<p class="me-meta">加载失败: ${escape(err?.message || String(err))}</p>`
+      wrap.innerHTML = `<p class="me-meta">${escape(t('meLoadFailedErr', err?.message || String(err)))}</p>`
     }
   }
 
   function renderGrantsPanel(agentId, grants) {
     const rows = grants.length
       ? grants.map((g) => renderGrantRow(agentId, g)).join('')
-      : '<p class="me-meta">还没有共享给任何人。</p>'
-    const kindOpts = Object.entries(GRANT_KIND_LABELS)
-      .filter(([k]) => k !== 'hub') // member sharing targets a user / agent / peer
-      .map(([k, label]) => `<option value="${k}">${escape(label)}</option>`)
+      : `<p class="me-meta">${t('meNoGrants')}</p>`
+    const kindOpts = Object.keys(GRANT_KIND_KEYS)
+      .filter((k) => k !== 'hub') // member sharing targets a user / agent / peer
+      .map((k) => `<option value="${k}">${escape(grantKindLabel(k))}</option>`)
       .join('')
-    const permOpts = Object.entries(GRANT_PERM_LABELS)
-      .map(([p, label]) => `<option value="${p}">${escape(label)}</option>`)
+    const permOpts = Object.keys(GRANT_PERM_KEYS)
+      .map((p) => `<option value="${p}">${escape(grantPermLabel(p))}</option>`)
       .join('')
     return `
       <div class="me-grants-list">${rows}</div>
       <div class="me-grant-add">
-        <select data-grant-kind aria-label="对方类型">${kindOpts}</select>
-        <input type="text" data-grant-pid placeholder="对方 ID" autocomplete="off" />
-        <select data-grant-perm aria-label="权限">${permOpts}</select>
-        <button type="button" class="me-secondary-btn" data-grant-add="${escape(agentId)}">授权</button>
+        <select data-grant-kind aria-label="${escape(t('meGrantKindAria'))}">${kindOpts}</select>
+        <input type="text" data-grant-pid placeholder="${escape(t('meGrantPidPlaceholder'))}" autocomplete="off" />
+        <select data-grant-perm aria-label="${escape(t('meGrantPermAria'))}">${permOpts}</select>
+        <button type="button" class="me-secondary-btn" data-grant-add="${escape(agentId)}">${t('meGrantAdd')}</button>
       </div>
       <div class="me-status" data-grant-status></div>`
   }
 
   function renderGrantRow(agentId, g) {
-    const kindLabel = GRANT_KIND_LABELS[g.principalKind] || g.principalKind
-    const permLabel = GRANT_PERM_LABELS[g.perm] || g.perm
-    const selfTag = g.isSelf ? ' <span class="me-meta">（你）</span>' : ''
+    const kindLabel = grantKindLabel(g.principalKind)
+    const permLabel = grantPermLabel(g.perm)
+    const selfTag = g.isSelf ? ` <span class="me-meta">${t('meGrantSelf')}</span>` : ''
     return `
       <div class="me-grant-row">
         <span class="me-cap-chip">${escape(permLabel)}</span>
         <span class="me-grant-who">${escape(kindLabel)} · <code>${escape(g.principalId)}</code>${selfTag}</span>
         <button type="button" class="me-secondary-btn me-danger-btn"
-          data-grant-remove="${escape(g.principalKey)}" data-grant-agent="${escape(agentId)}">撤销</button>
+          data-grant-remove="${escape(g.principalKey)}" data-grant-agent="${escape(agentId)}">${t('meRevoke')}</button>
       </div>`
   }
 
@@ -1646,10 +1677,10 @@
     const perm = wrap.querySelector('[data-grant-perm]')?.value
     const status = wrap.querySelector('[data-grant-status]')
     if (!pid) {
-      if (status) { status.textContent = '请填写对方 ID'; status.className = 'me-status error' }
+      if (status) { status.textContent = t('meGrantNeedPid'); status.className = 'me-status error' }
       return
     }
-    if (status) { status.textContent = '授权中…'; status.className = 'me-status' }
+    if (status) { status.textContent = t('meGranting'); status.className = 'me-status' }
     try {
       const r = await fetch(`/api/me/agents/${encodeURIComponent(agentId)}/grants`, {
         method: 'POST',
@@ -1658,12 +1689,12 @@
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) {
-        if (status) { status.textContent = `失败: ${escape(j?.error || `HTTP ${r.status}`)}`; status.className = 'me-status error' }
+        if (status) { status.textContent = t('meFailedColon', escape(j?.error || `HTTP ${r.status}`)); status.className = 'me-status error' }
         return
       }
       await loadAgentGrants(agentId, wrap) // re-render the panel (stays open)
     } catch (err) {
-      if (status) { status.textContent = `失败: ${escape(err?.message || String(err))}`; status.className = 'me-status error' }
+      if (status) { status.textContent = t('meFailedColon', escape(err?.message || String(err))); status.className = 'me-status error' }
     }
   }
 
@@ -1675,12 +1706,12 @@
       )
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
-        alert(`撤销失败: ${j?.error || `HTTP ${r.status}`}`)
+        alert(t('meRevokeFailedErr', j?.error || `HTTP ${r.status}`))
         return
       }
       await loadAgentGrants(agentId, wrap)
     } catch (err) {
-      alert(`撤销失败: ${err?.message || String(err)}`)
+      alert(t('meRevokeFailedErr', err?.message || String(err)))
     }
   }
 
@@ -1693,23 +1724,23 @@
   async function loadMyCredentials() {
     const list = document.getElementById('me-cred-list')
     if (!list) return
-    list.innerHTML = '<p class="me-meta">加载中…</p>'
+    list.innerHTML = `<p class="me-meta">${t('meLoading')}</p>`
     try {
       const r = await fetch('/api/me/credentials')
       if (!r.ok) {
-        list.innerHTML = `<p class="me-meta">加载失败 (HTTP ${r.status})</p>`
+        list.innerHTML = `<p class="me-meta">${t('meLoadFailedHttp', r.status)}</p>`
         return
       }
       const j = await r.json()
       myCredentials = Array.isArray(j?.credentials) ? j.credentials : []
       populateCredProviderSelect(Array.isArray(j?.providers) ? j.providers : [])
       if (myCredentials.length === 0) {
-        list.innerHTML = '<p class="me-meta">你还没有保存自己的密钥。机构配了密钥的话不需要这步。</p>'
+        list.innerHTML = `<p class="me-meta">${t('meNoCreds')}</p>`
         return
       }
       list.innerHTML = myCredentials.map(renderCredCard).join('')
     } catch (err) {
-      list.innerHTML = `<p class="me-meta">加载失败: ${escape(err?.message || String(err))}</p>`
+      list.innerHTML = `<p class="me-meta">${escape(t('meLoadFailedErr', err?.message || String(err)))}</p>`
     }
   }
 
@@ -1717,7 +1748,7 @@
     const sel = document.getElementById('me-cred-provider')
     if (!sel || sel.dataset.loaded === '1') return
     if (providers.length === 0) {
-      sel.innerHTML = '<option value="">（暂无可选供应商）</option>'
+      sel.innerHTML = `<option value="">${escape(t('meNoProviders'))}</option>`
       return
     }
     sel.innerHTML = providers.map((p) => `<option value="${escape(p)}">${escape(p)}</option>`).join('')
@@ -1730,12 +1761,12 @@
     return `
       <div class="me-agent-card" data-cred-id="${escape(c.id)}">
         <div class="me-agent-head">
-          <span class="me-agent-dot me-agent-online" title="已保存"></span>
+          <span class="me-agent-dot me-agent-online" title="${escape(t('meCredSavedTitle'))}"></span>
           <strong>${escape(c.provider || '')}</strong>
           <span class="me-meta">${label}${created ? ' · ' + escape(created) : ''}</span>
         </div>
         <div class="me-own-agent-row-actions">
-          <button type="button" class="me-secondary-btn me-danger-btn" data-cred-delete="${escape(c.id)}">删除</button>
+          <button type="button" class="me-secondary-btn me-danger-btn" data-cred-delete="${escape(c.id)}">${t('meDelete')}</button>
         </div>
       </div>`
   }
@@ -1744,7 +1775,7 @@
     e.preventDefault()
     const status = document.getElementById('me-cred-status')
     status.className = 'me-status'
-    status.textContent = '保存中…'
+    status.textContent = t('meSavingDots')
     const body = {
       provider: document.getElementById('me-cred-provider').value,
       apiKey: document.getElementById('me-cred-key').value,
@@ -1759,37 +1790,37 @@
       const j = await r.json().catch(() => ({}))
       if (!r.ok) {
         status.className = 'me-status error'
-        status.textContent = `失败: ${escape(j?.error || `HTTP ${r.status}`)}`
+        status.textContent = t('meFailedColon', escape(j?.error || `HTTP ${r.status}`))
         return
       }
       status.className = 'me-status ok'
-      status.textContent = '已保存'
+      status.textContent = t('meSaved')
       document.getElementById('me-cred-form').reset()
       await loadMyCredentials()
       // The just-added key may unlock a real provider for the agent picker above.
       await refreshProviderSelect()
     } catch (err) {
       status.className = 'me-status error'
-      status.textContent = `失败: ${escape(err?.message || String(err))}`
+      status.textContent = t('meFailedColon', escape(err?.message || String(err)))
     }
   }
 
   async function onCredListClick(e) {
     const delId = e.target?.getAttribute?.('data-cred-delete')
     if (!delId) return
-    if (!confirm('确定删除这把密钥？依赖它的助手会改用机构密钥（如果有）。')) return
+    if (!confirm(t('meConfirmDeleteCred'))) return
     try {
       const r = await fetch(`/api/me/credentials/${encodeURIComponent(delId)}`, { method: 'DELETE' })
       if (!r.ok) {
         const j = await r.json().catch(() => ({}))
-        alert(`删除失败: ${j?.error || `HTTP ${r.status}`}`)
+        alert(t('meDeleteFailedErr', j?.error || `HTTP ${r.status}`))
         return
       }
       await loadMyCredentials()
       // A removed key may drop its provider from the agent picker above.
       await refreshProviderSelect()
     } catch (err) {
-      alert(`删除失败: ${err?.message || String(err)}`)
+      alert(t('meDeleteFailedErr', err?.message || String(err)))
     }
   }
 
@@ -1804,12 +1835,12 @@
           const j = await r.json()
           const u = j?.user || j
           acct.innerHTML = `
-            ${escape(u.displayName || '')} · ${escape(u.email || '')} · 角色 <code>${escape(u.role || role)}</code>
+            ${escape(u.displayName || '')} · ${escape(u.email || '')} · ${t('meRoleWord')} <code>${escape(u.role || role)}</code>
           `
         }
       } catch { /* meh */ }
     }
-    document.getElementById('settings-password-form')?.addEventListener('submit', submitPasswordChange)
+    bindOnce(document.getElementById('settings-password-form'), 'submit', submitPasswordChange)
     // Route B P1-M3f — two-factor (TOTP) self-service panel.
     renderMfa().catch((err) => console.error('[app] renderMfa failed', err))
   }
@@ -1827,55 +1858,55 @@
     try {
       const r = await fetch('/api/me/totp')
       if (r.status === 503) {
-        host.innerHTML = '<p class="hint">此 Hub 未配置加密,无法使用两步验证。</p>'
+        host.innerHTML = `<p class="hint">${escape(t('meMfaNoCrypto'))}</p>`
         return
       }
       if (r.ok) state = (await r.json())?.state || 'none'
     } catch {
-      host.innerHTML = '<p class="hint">无法加载两步验证状态。</p>'
+      host.innerHTML = `<p class="hint">${escape(t('meMfaLoadFailed'))}</p>`
       return
     }
 
     if (state === 'active') {
       host.innerHTML =
-        '<p>状态: <strong>已启用 ✅</strong></p>' +
-        '<label>停用需输入当前验证码' +
-        '<input id="mfa-disable-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6 位验证码" /></label>' +
-        '<button id="mfa-disable-btn" type="button" class="me-secondary-btn">停用两步验证</button>' +
+        `<p>${escape(t('meMfaStatusWord'))}<strong>${escape(t('meMfaStatusEnabled'))}</strong></p>` +
+        `<label>${escape(t('meMfaDisableLabel'))}` +
+        `<input id="mfa-disable-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="${escape(t('meMfaCodePlaceholder'))}" /></label>` +
+        `<button id="mfa-disable-btn" type="button" class="me-secondary-btn">${escape(t('meMfaDisableBtn'))}</button>` +
         '<div id="mfa-status" class="me-status"></div>'
       document.getElementById('mfa-disable-btn')?.addEventListener('click', () => {
         const code = String(document.getElementById('mfa-disable-code')?.value || '').trim()
-        mfaPost('/api/me/totp/disable', { code }, '已停用两步验证')
+        mfaPost('/api/me/totp/disable', { code }, t('meMfaDisabled'))
       })
       return
     }
 
     if (state === 'pending') {
       host.innerHTML =
-        '<p>状态: <strong>待确认</strong> — 有一个未完成的设置。</p>' +
-        '<label>输入认证器上的验证码以完成启用' +
-        '<input id="mfa-confirm-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6 位验证码" /></label>' +
+        `<p>${escape(t('meMfaStatusWord'))}<strong>${escape(t('meMfaStatusPending'))}</strong>${escape(t('meMfaStatusPendingNote'))}</p>` +
+        `<label>${escape(t('meMfaConfirmLabel'))}` +
+        `<input id="mfa-confirm-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="${escape(t('meMfaCodePlaceholder'))}" /></label>` +
         '<div class="settings-actions">' +
-        '<button id="mfa-confirm-btn" type="button" class="me-primary-btn">确认启用</button>' +
-        '<button id="mfa-restart-btn" type="button" class="me-secondary-btn">重新生成密钥</button>' +
-        '<button id="mfa-cancel-btn" type="button" class="me-secondary-btn">取消</button>' +
+        `<button id="mfa-confirm-btn" type="button" class="me-primary-btn">${escape(t('meMfaConfirmBtn'))}</button>` +
+        `<button id="mfa-restart-btn" type="button" class="me-secondary-btn">${escape(t('meMfaRegenBtn'))}</button>` +
+        `<button id="mfa-cancel-btn" type="button" class="me-secondary-btn">${escape(t('meCancel'))}</button>` +
         '</div><div id="mfa-status" class="me-status"></div>'
       document.getElementById('mfa-confirm-btn')?.addEventListener('click', () => {
         const code = String(document.getElementById('mfa-confirm-code')?.value || '').trim()
-        mfaPost('/api/me/totp/confirm', { code }, '两步验证已启用')
+        mfaPost('/api/me/totp/confirm', { code }, t('meMfaEnabled'))
       })
       document.getElementById('mfa-restart-btn')?.addEventListener('click', () => startMfaEnroll())
       // A pending (never-confirmed) enrollment can be cancelled with no code.
       document.getElementById('mfa-cancel-btn')?.addEventListener('click', () => {
-        mfaPost('/api/me/totp/disable', {}, '已取消设置')
+        mfaPost('/api/me/totp/disable', {}, t('meMfaSetupCancelled'))
       })
       return
     }
 
     // state === 'none'
     host.innerHTML =
-      '<p class="hint">两步验证用一次性验证码为你的账号再加一层保护。</p>' +
-      '<button id="mfa-enroll-btn" type="button" class="me-primary-btn">启用两步验证</button>' +
+      `<p class="hint">${escape(t('meMfaIntro'))}</p>` +
+      `<button id="mfa-enroll-btn" type="button" class="me-primary-btn">${escape(t('meMfaEnrollBtn'))}</button>` +
       '<div id="mfa-status" class="me-status"></div>'
     document.getElementById('mfa-enroll-btn')?.addEventListener('click', () => startMfaEnroll())
   }
@@ -1883,7 +1914,7 @@
   async function startMfaEnroll() {
     const host = document.getElementById('settings-mfa')
     if (!host) return
-    host.innerHTML = '<div id="mfa-status" class="me-status">生成中…</div>'
+    host.innerHTML = `<div id="mfa-status" class="me-status">${escape(t('meMfaGenerating'))}</div>`
     try {
       const r = await fetch('/api/me/totp/enroll', {
         method: 'POST',
@@ -1893,25 +1924,25 @@
       if (!r.ok) {
         host.innerHTML =
           '<div id="mfa-status" class="me-status error">' +
-          escape(j?.error || `启用失败 (HTTP ${r.status})`) +
+          escape(j?.error || t('meMfaEnrollFailedHttp', r.status)) +
           '</div>'
         return
       }
       host.innerHTML =
-        '<p>在认证器 App 里添加这个密钥 (手动输入):</p>' +
+        `<p>${escape(t('meMfaAddKey'))}</p>` +
         `<p><code class="mfa-secret">${escape(j.secretBase32 || '')}</code></p>` +
-        `<p class="hint"><a href="${escape(j.otpauthUri || '')}">otpauth 链接</a> · 二维码渲染待后续</p>` +
-        '<label>输入认证器生成的验证码' +
-        '<input id="mfa-confirm-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6 位验证码" /></label>' +
-        '<button id="mfa-confirm-btn" type="button" class="me-primary-btn">确认启用</button>' +
+        `<p class="hint"><a href="${escape(j.otpauthUri || '')}">${escape(t('meMfaOtpauthLink'))}</a>${escape(t('meMfaQrTodo'))}</p>` +
+        `<label>${escape(t('meMfaEnterCode'))}` +
+        `<input id="mfa-confirm-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="${escape(t('meMfaCodePlaceholder'))}" /></label>` +
+        `<button id="mfa-confirm-btn" type="button" class="me-primary-btn">${escape(t('meMfaConfirmBtn'))}</button>` +
         '<div id="mfa-status" class="me-status"></div>'
       document.getElementById('mfa-confirm-btn')?.addEventListener('click', () => {
         const code = String(document.getElementById('mfa-confirm-code')?.value || '').trim()
-        mfaPost('/api/me/totp/confirm', { code }, '两步验证已启用')
+        mfaPost('/api/me/totp/confirm', { code }, t('meMfaEnabled'))
       })
     } catch (err) {
       host.innerHTML =
-        '<div id="mfa-status" class="me-status error">启用失败: ' + escape(String(err?.message || err)) + '</div>'
+        '<div id="mfa-status" class="me-status error">' + escape(t('meMfaEnrollFailedErr', String(err?.message || err))) + '</div>'
     }
   }
 
@@ -1921,7 +1952,7 @@
     const status = document.getElementById('mfa-status')
     if (status) {
       status.className = 'me-status'
-      status.textContent = '提交中…'
+      status.textContent = t('meSubmitting')
     }
     try {
       const r = await fetch(url, {
@@ -1934,7 +1965,7 @@
         const s = document.getElementById('mfa-status')
         if (s) {
           s.className = 'me-status error'
-          s.textContent = j?.error || `操作失败 (HTTP ${r.status})`
+          s.textContent = j?.error || t('meOpFailedHttp', r.status)
         }
         return
       }
@@ -1943,7 +1974,7 @@
       const s = document.getElementById('mfa-status')
       if (s) {
         s.className = 'me-status error'
-        s.textContent = `操作失败: ${err?.message || err}`
+        s.textContent = t('meOpFailedErr', err?.message || err)
       }
     }
     void okMsg // state change is self-evident after re-render; keep arg for clarity
@@ -1954,7 +1985,7 @@
     const form = e.currentTarget
     const status = document.getElementById('settings-password-status')
     status.className = 'me-status'
-    status.textContent = '提交中…'
+    status.textContent = t('meSubmitting')
     const fd = new FormData(form)
     try {
       const r = await fetch('/api/admin/identity/me/password', {
@@ -1968,15 +1999,15 @@
       const j = await r.json().catch(() => ({}))
       if (!r.ok) {
         status.className = 'me-status error'
-        status.textContent = j?.error || `修改失败 (HTTP ${r.status})`
+        status.textContent = j?.error || t('mePwChangeFailedHttp', r.status)
         return
       }
       status.className = 'me-status ok'
-      status.textContent = '密码已更新'
+      status.textContent = t('mePwUpdated')
       form.reset()
     } catch (err) {
       status.className = 'me-status error'
-      status.textContent = `修改失败: ${err?.message || err}`
+      status.textContent = t('mePwChangeFailedErr', err?.message || err)
     }
   }
 
@@ -2049,6 +2080,20 @@
     renderHome().catch((err) => console.error('[app] renderHome failed', err))
     renderSettings().catch((err) => console.error('[app] renderSettings failed', err))
     loadAdminBundles()
+
+    // REL-7 — re-render the JS-rendered /me panels when the language toggle
+    // fires. applyStaticI18n (in app-core) already handles markup with
+    // [data-i18n]; this covers the dynamic lists/cards. The bindOnce guards
+    // above keep re-running renderHome/renderSettings idempotent (no stacked
+    // listeners on the static buttons/forms). applyOrgMode re-asserts the
+    // personal-mode subtitle, which applyStaticI18n would otherwise reset to
+    // the generic team subtitle.
+    window.AipeHub.onLangChange(() => {
+      if (!SIGNED_IN) return
+      applyOrgMode().catch((err) => console.warn('[app] applyOrgMode (lang) failed', err))
+      renderHome().catch((err) => console.error('[app] renderHome (lang) failed', err))
+      renderSettings().catch((err) => console.error('[app] renderSettings (lang) failed', err))
+    })
   })
 
   // Phase 7 M5 — org mode body-class + upgrade-button wiring.
@@ -2070,7 +2115,7 @@
     // even when they're owner — that's a team concept.
     const subtitle = $('#role-subtitle')
     if (subtitle && info.mode === 'personal') {
-      subtitle.textContent = '我的 AI 桌面'
+      subtitle.textContent = t('meSubtitlePersonal')
     }
     // Upgrade button — injected into settings tab when applicable.
     if (info.canUpgrade) {
@@ -2089,16 +2134,15 @@
     if (slot.dataset.wired === '1') return
     slot.dataset.wired = '1'
     slot.innerHTML =
-      '<button id="upgrade-team-btn" type="button" class="btn-primary">升级到团队模式</button>' +
-      '<p class="hint">升级后 admin 控制台显示完整管理 tab。' +
-      '可以邀请其他用户/接入跨 hub peer/配额管理。不可一键回退。</p>' +
+      `<button id="upgrade-team-btn" type="button" class="btn-primary">${escape(t('meUpgradeBtn'))}</button>` +
+      `<p class="hint">${escape(t('meUpgradeHint'))}</p>` +
       '<span id="upgrade-status" class="login-status"></span>'
     const btn = $('#upgrade-team-btn')
     const status = $('#upgrade-status')
     btn?.addEventListener('click', async () => {
-      if (!window.confirm('确定升级到团队模式? 升级后部分 admin 控件会显示出来。')) return
+      if (!window.confirm(t('meConfirmUpgrade'))) return
       btn.disabled = true
-      status.textContent = '升级中…'
+      status.textContent = t('meUpgrading')
       try {
         const r = await fetch('/api/admin/identity/org-mode', {
           method: 'POST',
@@ -2107,16 +2151,16 @@
         })
         if (!r.ok) {
           const j = await r.json().catch(() => ({}))
-          status.textContent = `失败: ${j?.error || r.status}`
+          status.textContent = t('meUpgradeFailed', j?.error || r.status)
           status.className = 'login-status error'
           btn.disabled = false
           return
         }
-        status.textContent = '升级成功,正在刷新…'
+        status.textContent = t('meUpgradeOk')
         status.className = 'login-status ok'
         setTimeout(() => window.location.reload(), 600)
       } catch (err) {
-        status.textContent = `失败: ${err?.message || err}`
+        status.textContent = t('meUpgradeFailed', err?.message || err)
         status.className = 'login-status error'
         btn.disabled = false
       }
