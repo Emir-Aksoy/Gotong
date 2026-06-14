@@ -25,6 +25,12 @@
 ;(function () {
   'use strict'
 
+  // i18n — read the live dict off window.AipeHub at call time (app-core.js runs
+  // synchronously before this panel is injected, so AipeHub is always defined).
+  // `t()` returns the current-language dict; re-render on language change.
+  const AH = window.AipeHub
+  function t() { return AH.t }
+
   const API = '/api/admin/acp-agents'
 
   function $(sel, root) {
@@ -60,20 +66,21 @@
 
   // Honest liveness badge — green only when actually registered on the hub.
   function statusBadge(a) {
+    const d = t()
     const base =
       'display:inline-block;padding:0.1rem 0.45rem;border-radius:0.25rem;font-size:0.75rem;white-space:nowrap;'
     if (a.active) {
-      return '<span style="' + base + 'background:#e6f4ea;color:#1e7e34;">在跑</span>'
+      return '<span style="' + base + 'background:#e6f4ea;color:#1e7e34;">' + d.acpStRunning + '</span>'
     }
     const reason = a.inactiveReason
     const txt =
       reason === 'disabled'
-        ? '已停用'
+        ? d.acpStDisabled
         : reason === 'id_conflict'
-          ? '未激活·id 冲突'
+          ? d.acpStIdConflict
           : reason === 'not_found'
-            ? '未激活·未找到'
-            : '未激活'
+            ? d.acpStNotFound
+            : d.acpStInactive
     return (
       '<span title="' + escHtml(reason || '') + '" style="' + base + 'background:#fdecea;color:#c0392b;">' +
       txt +
@@ -125,42 +132,38 @@
   // ---- render -----------------------------------------------------------
 
   function buildUi(root) {
+    const d = t()
     root.innerHTML =
       '<div style="padding:1rem;max-width:64rem;">' +
-      '<h2 style="margin-top:0;">出站 ACP 编码智能体</h2>' +
-      '<p style="color:#555;font-size:0.9rem;margin:0 0 0.5rem;">注册本 hub 经 ACP 长连接驱动的编码智能体 ' +
-      '(Claude Code / Codex)。派发某个本地能力 (capability) 时,会把它<strong>启动一次→保持 session→反复派任务</strong>' +
-      '(任务间上下文保留),由它在子进程里跑编码工作。替代旧的 example 胶水,改为持久化 + 即时生效。</p>' +
-      '<p style="color:#555;font-size:0.85rem;margin:0 0 1rem;"><strong>这里无需任何密钥</strong> —— ' +
-      'ACP 桥接复用底层 agent <strong>自己的登录态</strong> (本机已 <code>claude</code> / <code>codex</code> 登录),' +
-      '所以命令 / 参数 / 工作目录都是非密配置,完整存储。某行停用时显示「已停用」;启用后 host 立即在运行的 hub 上注册 (无需重启)。' +
-      '破坏性动作 (改文件/删/push…) 默认 fail-closed 当场拒绝。</p>' +
+      '<h2 style="margin-top:0;">' + d.acpTitle + '</h2>' +
+      '<p style="color:#555;font-size:0.9rem;margin:0 0 0.5rem;">' + d.acpDesc + '</p>' +
+      '<p style="color:#555;font-size:0.85rem;margin:0 0 1rem;">' + d.acpKeyNote + '</p>' +
       '<div id="acp-status" style="margin-bottom:1rem;min-height:1.2em;font-size:0.9rem;color:#555;"></div>' +
       '<details open style="margin-bottom:1.5rem;">' +
-      '<summary style="cursor:pointer;font-weight:bold;">注册出站编码智能体</summary>' +
+      '<summary style="cursor:pointer;font-weight:bold;">' + d.acpAddSummary + '</summary>' +
       '<form id="acp-add-form" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.5rem;margin-top:0.75rem;">' +
-      '<input name="id" type="text" placeholder="本地 participant id (派发目标, 唯一)" required autocomplete="off" />' +
-      '<input name="label" type="text" placeholder="显示名 (可选)" autocomplete="off" />' +
-      '<input name="capabilities" type="text" placeholder="能力 capabilities (逗号分隔, 至少一个)" required autocomplete="off" style="grid-column:1 / -1;" />' +
-      '<input name="command" type="text" placeholder="命令 command (如 npx 或 codex-acp)" required autocomplete="off" />' +
-      '<input name="args" type="text" placeholder="参数 args (空格分隔, 如 @zed-industries/claude-code-acp)" autocomplete="off" />' +
-      '<input name="cwd" type="text" placeholder="工作目录 cwd (可选, 默认 host 进程目录)" autocomplete="off" style="grid-column:1 / -1;" />' +
+      '<input name="id" type="text" placeholder="' + escHtml(d.acpPhId) + '" required autocomplete="off" />' +
+      '<input name="label" type="text" placeholder="' + escHtml(d.acpPhLabel) + '" autocomplete="off" />' +
+      '<input name="capabilities" type="text" placeholder="' + escHtml(d.acpPhCaps) + '" required autocomplete="off" style="grid-column:1 / -1;" />' +
+      '<input name="command" type="text" placeholder="' + escHtml(d.acpPhCommand) + '" required autocomplete="off" />' +
+      '<input name="args" type="text" placeholder="' + escHtml(d.acpPhArgs) + '" autocomplete="off" />' +
+      '<input name="cwd" type="text" placeholder="' + escHtml(d.acpPhCwd) + '" autocomplete="off" style="grid-column:1 / -1;" />' +
       '<label style="grid-column:1 / -1;font-size:0.85rem;color:#555;display:flex;gap:0.4rem;align-items:center;">' +
-      '<input name="enabled" type="checkbox" checked /> 启用 (立即在 hub 上注册, 首个派发时才真正 spawn 子进程)</label>' +
-      '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">注册</button>' +
+      '<input name="enabled" type="checkbox" checked /> ' + d.acpEnabledLabel + '</label>' +
+      '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">' + d.acpBtnRegister + '</button>' +
       '</form>' +
       '</details>' +
-      '<h3 style="margin-bottom:0.5rem;">已注册出站编码智能体</h3>' +
+      '<h3 style="margin-bottom:0.5rem;">' + d.acpRegisteredHeading + '</h3>' +
       '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">' +
       '<thead><tr style="text-align:left;border-bottom:1px solid #ccc;background:#fafafa;">' +
-      '<th style="padding:0.4rem;">id / 显示名</th>' +
-      '<th style="padding:0.4rem;">能力</th>' +
-      '<th style="padding:0.4rem;">命令 + 参数</th>' +
-      '<th style="padding:0.4rem;">工作目录</th>' +
-      '<th style="padding:0.4rem;">状态</th>' +
-      '<th style="padding:0.4rem;">操作</th>' +
+      '<th style="padding:0.4rem;">' + d.acpColIdLabel + '</th>' +
+      '<th style="padding:0.4rem;">' + d.acpColCaps + '</th>' +
+      '<th style="padding:0.4rem;">' + d.acpColCmd + '</th>' +
+      '<th style="padding:0.4rem;">' + d.acpColCwd + '</th>' +
+      '<th style="padding:0.4rem;">' + d.acpColStatus + '</th>' +
+      '<th style="padding:0.4rem;">' + d.acpColActions + '</th>' +
       '</tr></thead>' +
-      '<tbody id="acp-tbody"><tr><td colspan="6" style="padding:0.6rem;color:#888;">载入中…</td></tr></tbody>' +
+      '<tbody id="acp-tbody"><tr><td colspan="6" style="padding:0.6rem;color:#888;">' + d.acpLoading + '</td></tr></tbody>' +
       '</table>' +
       '</div>'
 
@@ -169,12 +172,12 @@
   }
 
   function renderRows(root, agents) {
+    const d = t()
     const tbody = $('#acp-tbody', root)
     if (!tbody) return
     if (!agents.length) {
       tbody.innerHTML =
-        '<tr><td colspan="6" style="padding:0.6rem;color:#888;">还没有注册出站 ACP 编码智能体。' +
-        '在上面表单注册一个 —— 之后派发它声明的能力就会启动并驱动 Claude Code / Codex。</td></tr>'
+        '<tr><td colspan="6" style="padding:0.6rem;color:#888;">' + escHtml(d.acpEmpty) + '</td></tr>'
       return
     }
     tbody.innerHTML = ''
@@ -194,14 +197,14 @@
         '<td style="padding:0.4rem;">' + statusBadge(a) + '</td>' +
         '<td style="padding:0.4rem;white-space:nowrap;">' +
         '<button type="button" class="acp-toggle" style="padding:0.25rem 0.5rem;">' +
-        (a.enabled ? '停用' : '启用') + '</button> ' +
-        '<button type="button" class="acp-del" style="padding:0.25rem 0.5rem;color:#c0392b;">删除</button>' +
+        (a.enabled ? d.acpBtnDisable : d.acpBtnEnable) + '</button> ' +
+        '<button type="button" class="acp-del" style="padding:0.25rem 0.5rem;color:#c0392b;">' + d.acpBtnDelete + '</button>' +
         '</td>'
       tr.querySelector('.acp-toggle').addEventListener('click', function () {
-        doPatch(root, a.id, { enabled: !a.enabled }, a.enabled ? '已停用' : '已启用')
+        doPatch(root, a.id, { enabled: !a.enabled }, a.enabled ? t().acpOkDisabled : t().acpOkEnabled)
       })
       tr.querySelector('.acp-del').addEventListener('click', function () {
-        if (!window.confirm('删除出站编码智能体「' + (a.label || a.id) + '」? 派发它能力的工作流将不再驱动该 agent。')) return
+        if (!window.confirm(t().acpConfirmDelete(a.label || a.id))) return
         doDelete(root, a.id)
       })
       tbody.appendChild(tr)
@@ -213,22 +216,22 @@
   function unwired(root, err) {
     if (err && err.status === 503) {
       renderRows(root, [])
-      setStatus(root, '此主机未启用身份存储 (出站 ACP 不可用)', 'error')
+      setStatus(root, t().acpUnwired, 'error')
       return true
     }
     return false
   }
 
   async function load(root) {
-    setStatus(root, '载入…', 'loading')
+    setStatus(root, t().acpLoadingStatus, 'loading')
     try {
       const agents = await apiList()
       renderRows(root, agents)
       const live = agents.filter(function (a) { return a.active }).length
-      setStatus(root, '共 ' + agents.length + ' 个 (在跑 ' + live + ')', 'ok')
+      setStatus(root, t().acpLoadedStatus(agents.length, live), 'ok')
     } catch (err) {
       if (unwired(root, err)) return
-      setStatus(root, '载入失败:' + (err.message || err), 'error')
+      setStatus(root, t().acpLoadFailed(err.message || err), 'error')
     }
   }
 
@@ -249,39 +252,39 @@
     if (cwd) body.cwd = cwd
     const label = str('label')
     if (label) body.label = label
-    setStatus(root, '注册…', 'loading')
+    setStatus(root, t().acpRegistering, 'loading')
     try {
       await apiAdd(body)
       form.reset()
       await load(root)
-      setStatus(root, '已注册', 'ok')
+      setStatus(root, t().acpRegistered, 'ok')
     } catch (err) {
       if (unwired(root, err)) return
-      setStatus(root, '注册失败:' + (err.message || err), 'error')
+      setStatus(root, t().acpRegisterFailed(err.message || err), 'error')
     }
   }
 
   async function doPatch(root, id, patch, okMsg) {
-    setStatus(root, '保存…', 'loading')
+    setStatus(root, t().acpSaving, 'loading')
     try {
       await apiPatch(id, patch)
       await load(root)
-      setStatus(root, okMsg || '已保存', 'ok')
+      setStatus(root, okMsg || t().acpSaved, 'ok')
     } catch (err) {
       if (unwired(root, err)) return
-      setStatus(root, '保存失败:' + (err.message || err), 'error')
+      setStatus(root, t().acpSaveFailed(err.message || err), 'error')
     }
   }
 
   async function doDelete(root, id) {
-    setStatus(root, '删除…', 'loading')
+    setStatus(root, t().acpDeleting, 'loading')
     try {
       await apiDelete(id)
       await load(root)
-      setStatus(root, '已删除', 'ok')
+      setStatus(root, t().acpDeleted, 'ok')
     } catch (err) {
       if (unwired(root, err)) return
-      setStatus(root, '删除失败:' + (err.message || err), 'error')
+      setStatus(root, t().acpDeleteFailed(err.message || err), 'error')
     }
   }
 
@@ -306,6 +309,12 @@
     }).observe(document.body, {
       attributes: true,
       attributeFilter: ['data-active-tab'],
+    })
+    // Re-render on language switch — relabel the static shell, and reload the
+    // rows when the tab is showing so the live data picks up the new dict too.
+    AH.onLangChange(function () {
+      buildUi(root)
+      if (isActive()) load(root).catch(function () { /* setStatus reported it */ })
     })
     if (isActive()) {
       maybeLoad(root).catch(function () { /* */ })
