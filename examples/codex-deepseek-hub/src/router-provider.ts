@@ -22,7 +22,14 @@
 
 import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
 
-import { dispatchPrompt, planRoute, DEFAULT_CODING_POLICY, type CodingAgent, type RoutingPolicy } from './routing.js'
+import {
+  dispatchPrompt,
+  parseExplicitAssignment,
+  planRoute,
+  DEFAULT_CODING_POLICY,
+  type CodingAgent,
+  type RoutingPolicy,
+} from './routing.js'
 
 /** Agent → the transcript title for that dispatch. */
 const TITLE: Record<CodingAgent, string> = {
@@ -42,7 +49,9 @@ class SituationAwareRouterProvider implements LlmProvider {
 
   async *stream(req: LlmRequest): AsyncIterable<LlmStreamChunk> {
     const goal = readGoal(req)
-    const plan = planRoute(goal, this.policy)
+    // Combine the standing arrangement with any 显式分派 the user named in the goal
+    // itself — naming a coder ("交给 codex …") overrides the role-fill for this task.
+    const plan = planRoute(goal, this.policy, parseExplicitAssignment(goal))
     const turn = countDispatched(req)
 
     if (turn < plan.agents.length) {
