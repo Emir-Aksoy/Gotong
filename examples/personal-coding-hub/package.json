@@ -9,6 +9,7 @@
     "start:real": "tsx src/index.real.ts",
     "start:cli": "tsx src/cli.ts",
     "load-template": "tsx src/load-template.ts",
+    "consult-core": "tsx src/consult.selfcheck.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
