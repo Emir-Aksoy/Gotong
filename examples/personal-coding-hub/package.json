@@ -11,6 +11,7 @@
     "load-template": "tsx src/load-template.ts",
     "consult-core": "tsx src/consult.selfcheck.ts",
     "consult": "tsx src/consult-demo.ts",
+    "consult-flow": "tsx src/consult-flow-demo.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

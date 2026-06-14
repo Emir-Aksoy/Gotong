@@ -138,6 +138,35 @@ export function parseExplicitAssignment(goal: string): ExplicitAssignment {
   return {}
 }
 
+/**
+ * 会诊触发 — does the goal explicitly ask for a multi-agent consult (会诊 / a
+ * second opinion / find the real root cause)? When it does, the flow convenes the
+ * diagnostic panel (blind → cross-examine → converge) INSTEAD of routing a normal
+ * coding task; the real root cause then flows back to a coder as a fix. A real
+ * router reads this intent from the goal the same way. `symptom` is the goal with
+ * the trigger phrasing stripped — display only; the panel keys on a problem id.
+ */
+export interface ConsultRequest {
+  consult: boolean
+  symptom?: string
+}
+
+// `会诊(?:一下)?` swallows the common "会诊一下" particle so the stripped symptom
+// doesn't lead with a dangling "一下:"; the optional group keeps bare "会诊" matching,
+// and it can't over-eat (下午/下游 etc.) because only the full 一下 particle is consumed.
+const CONSULT_TRIGGER = /会诊(?:一下)?|一起诊断|共同诊断|找(出|到)?根因|second opinion|consult\b|root[-\s]?cause/i
+
+/** Detect an explicit 会诊 request in the goal (mirrors parseExplicitAssignment). */
+export function parseConsultRequest(goal: string): ConsultRequest {
+  if (!CONSULT_TRIGGER.test(goal)) return { consult: false }
+  const symptom = goal
+    .replace(CONSULT_TRIGGER, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[\s:：,，.。-]+/, '')
+    .trim()
+  return { consult: true, symptom: symptom || goal.trim() }
+}
+
 /** The strength tag each role looks for when filling from the roster. */
 const ROLE_STRENGTH = {
   reviewer: ['review', 'analysis'],
