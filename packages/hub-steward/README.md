@@ -25,8 +25,12 @@ host classify (server-authoritative)
   conservative risk tiering where the two hard constraints live. Reuses
   `authorizeAgentAction` (`@aipehub/identity`) as a forward-looking backstop for
   the highest-blast-radius verbs.
-- `agent.ts` (SW-M2) — `HubStewardAgent extends LlmAgent`: the prompt + JSON
-  extraction that produces a `StewardProposal`.
+- `prompt.ts` — the system prompt + `parseStewardProposal`: the LLM-reply →
+  `StewardProposal` pipeline. A **security boundary** — only well-formed actions
+  survive validation; malformed ones are dropped (never executed).
+- `agent.ts` — `HubStewardAgent extends LlmAgent`: turns `{instruction, snapshot}`
+  into a `StewardProposal`. Single-shot structured output (no tool loop), so it's
+  deterministically testable with a mock provider.
 
 ## North Star
 

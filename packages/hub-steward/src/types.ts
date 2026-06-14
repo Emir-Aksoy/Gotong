@@ -98,3 +98,89 @@ export interface ClassifiedProposal {
   reply: string
   actions: ClassifiedAction[]
 }
+
+// ---------------------------------------------------------------------------
+// Agent input contract — what the host's `plan()` packs into `Task.payload`
+// when it dispatches to the steward, plus the read-only snapshot of what the
+// member owns. Pure data so the host (which builds the snapshot from
+// `HostMeAgentService.listOwned` + the workflow catalog) and the agent (which
+// renders it into the prompt) share one shape without a dependency cycle.
+// ---------------------------------------------------------------------------
+
+/** One of the member's owned managed agents, as the snapshot describes it. */
+export interface StewardSnapshotAgent {
+  /** The composed participant id, e.g. `me.<userId>.<handle>`. */
+  id: string
+  /** The short handle the member named it (the suffix of `id`). */
+  handle?: string
+  /** Human label. */
+  label?: string
+  /** Capability tags it answers to. */
+  capabilities: ReadonlyArray<string>
+  /** Provider backing it (anthropic / openai / mock) — surfaced for context only. */
+  provider?: string
+}
+
+/** One of the member's workflows the steward may propose edits to. */
+export interface StewardSnapshotWorkflow {
+  id: string
+  name?: string
+  /**
+   * True when this workflow has cross-hub egress steps. The host derives it
+   * from `editableView().crossHub`; the steward uses it to phrase the reply
+   * ("this leaves your hub, I'll prepare it for confirmation") and the host's
+   * classifier independently tiers an `edit_workflow` on it as `cross_hub`.
+   */
+  crossHub?: boolean
+}
+
+/**
+ * A read-only snapshot of what the calling member owns, injected by the host so
+ * the steward proposes against REAL ids / capabilities instead of inventing
+ * plausible-but-nonexistent ones (same discipline as the workflow assistant's
+ * `contextHints`). The steward only ever acts on what's listed here.
+ */
+export interface StewardSnapshot {
+  /** The member's owned managed agents. */
+  agents?: ReadonlyArray<StewardSnapshotAgent>
+  /** The member's editable workflows, each flagged cross-hub or not. */
+  workflows?: ReadonlyArray<StewardSnapshotWorkflow>
+  /** Providers the member may pick (only those with a usable key on this hub). */
+  providers?: ReadonlyArray<StewardAgentProvider>
+}
+
+/** One prior conversational turn, for multi-step ("再礼貌一点") steward edits. */
+export interface StewardTurn {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+/**
+ * What the host packs into `Task.payload` when dispatching to the steward.
+ * The host fills `snapshot` from the member's owned resources; the member only
+ * ever supplies `instruction` (+ the running `history` the SPA keeps).
+ */
+export interface HubStewardPayload {
+  /** Required. The member's plain-language instruction. */
+  instruction: string
+  /** The member's owned-resource snapshot (host-built). */
+  snapshot?: StewardSnapshot
+  /** Prior turns of this conversation, for follow-up instructions. */
+  history?: ReadonlyArray<StewardTurn>
+}
+
+/**
+ * The verdict on extracting a `StewardProposal` from the LLM's raw reply.
+ *
+ *   - `'ok'`      — a JSON object was parsed; `actions` are the well-formed ones
+ *                   (malformed entries are silently dropped — they never execute).
+ *   - `'no_json'` — no JSON-like content; the raw text is a plain reply
+ *                   (chit-chat / clarifying question). `actions` is empty.
+ *   - `'invalid'` — JSON-like content was present but unparseable. `actions` is
+ *                   empty; the raw text rides as the reply.
+ *
+ * Mirrors the workflow assistant's `WorkflowDraftStatus` three-state design so
+ * callers can tell "steward proposed", "steward just chatted", and "steward
+ * botched the JSON" apart without re-parsing.
+ */
+export type StewardParseStatus = 'ok' | 'no_json' | 'invalid'

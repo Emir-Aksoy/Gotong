@@ -1,10 +1,12 @@
 /**
  * @aipehub/hub-steward — public barrel.
  *
- * SW-M1 ships the vocabulary + classifier; SW-M2 adds the `HubStewardAgent`
- * (the LlmAgent that emits a `StewardProposal`). The host wiring (plan / apply /
+ * Ships the vocabulary + classifier (SW-M1) + the `HubStewardAgent` and its
+ * prompt / proposal-extraction pipeline (SW-M2). The host wiring (plan / apply /
  * approval broker) lives in `@aipehub/host`, not here.
  */
 
 export * from './types.js'
 export * from './classify.js'
+export * from './prompt.js'
+export * from './agent.js'
