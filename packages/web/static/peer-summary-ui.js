@@ -38,6 +38,12 @@
 ;(function () {
   'use strict'
 
+  // i18n — read the live dict off window.AipeHub at call time (app-core.js runs
+  // synchronously before this panel is injected, so AipeHub is always defined).
+  // `t()` returns the current-language dict; re-render on language change.
+  const AH = window.AipeHub
+  function t() { return AH.t }
+
   const LIST_API = '/api/admin/peer-summaries'
   const REFRESH_API = '/api/admin/peer-summaries/refresh'
   const HISTORY_API = '/api/admin/peer-summaries/history'
@@ -49,19 +55,23 @@
   // JS mirror of the host metric registry (PEER_SUMMARY_METRIC_KEYS). The host
   // is the authority — these are only the labels + the dropdown order; the
   // route validates the metric. Cost is the one metric rendered as µ$.
-  const METRIC_LABELS = {
-    'assets.agents': 'Agents 数',
-    'assets.workflows': '工作流数',
-    'assets.publishedWorkflows': '已发布工作流',
-    'assets.peers': 'Peer 数',
-    'runs.total': '运行总数',
-    'llm.calls': 'LLM 调用数',
-    'llm.tokens': 'LLM tokens',
-    'llm.costMicros': 'LLM 成本 (µ$)',
-    'health.suspendedTasks': '挂起任务',
-    'alerts.openFirings': '告警·开启中', // cross-hub-agg M3 — trendable + meta-alertable
+  // Labels are read from the live i18n dict at call time (psMetric* keys) so the
+  // dropdowns + table cells relabel on language switch.
+  const METRIC_KEYS = [
+    'assets.agents',
+    'assets.workflows',
+    'assets.publishedWorkflows',
+    'assets.peers',
+    'runs.total',
+    'llm.calls',
+    'llm.tokens',
+    'llm.costMicros',
+    'health.suspendedTasks',
+    'alerts.openFirings', // cross-hub-agg M3 — trendable + meta-alertable
+  ]
+  function metricLabels() {
+    return t().psMetricLabels
   }
-  const METRIC_KEYS = Object.keys(METRIC_LABELS)
   const COST_METRIC = 'llm.costMicros'
   const CMP_SYMBOL = { gt: '>', gte: '≥', lt: '<', lte: '≤' }
 
@@ -113,38 +123,35 @@
   // A peer row's status chip. The whole point of E5 is the opt-in: a peer that
   // hasn't shared must read differently from one that's merely offline.
   function statusOf(row) {
+    const d = t()
     if (row.summary) {
       return row.online
-        ? { cls: 'pf-online', label: '在线' }
-        : { cls: 'pf-stale', label: '离线·缓存' }
+        ? { cls: 'pf-online', label: d.psStOnline }
+        : { cls: 'pf-stale', label: d.psStOfflineCached }
     }
     if (row.lastError && /not shared/i.test(row.lastError)) {
-      return { cls: 'pf-unknown', label: '未共享' }
+      return { cls: 'pf-unknown', label: d.psStNotShared }
     }
-    if (row.online) return { cls: 'pf-stale', label: '在线·无摘要' }
-    return { cls: 'pf-unknown', label: '离线·未知' }
+    if (row.online) return { cls: 'pf-stale', label: d.psStOnlineNoSummary }
+    return { cls: 'pf-unknown', label: d.psStOfflineUnknown }
   }
 
   // A source key → human label (for breaches + rule rows + dropdowns).
   function sourceLabelOf(src) {
-    if (src === '*') return '任意来源'
-    if (src === 'local') return '本 hub'
+    if (src === '*') return t().psSourceAny
+    if (src === 'local') return t().psSourceLocal
     const found = sourceList.filter(function (s) { return s.value === src })[0]
     return found ? found.label : src
   }
   function metricLabelOf(metric) {
-    return METRIC_LABELS[metric] || metric
+    return metricLabels()[metric] || metric
   }
 
   // ---- counts cells (shared by the local footprint + each peer) ----------
 
   function assetsText(s) {
     const a = (s && s.assets) || {}
-    return (
-      'Agents ' + num(a.agents) +
-      ' · 工作流 ' + num(a.workflows) + '(发布 ' + num(a.publishedWorkflows) + ')' +
-      ' · Peers ' + num(a.peers)
-    )
+    return t().psAssetsText(num(a.agents), num(a.workflows), num(a.publishedWorkflows), num(a.peers))
   }
   function runsText(s) {
     const r = (s && s.runs) || {}
@@ -153,26 +160,22 @@
       .sort()
       .map(function (k) { return escHtml(k) + ':' + num(by[k]) })
     const tail = parts.length ? ' <small>(' + parts.join(' ') + ')</small>' : ''
-    return '总 ' + num(r.total) + tail
+    return t().psRunsTotal(num(r.total)) + tail
   }
   function llmText(s) {
     const l = (s && s.llm) || {}
-    return (
-      '调用 ' + num(l.calls) +
-      ' · ' + num(l.tokens) + ' tok' +
-      ' · ' + fmtCost(l.costMicros)
-    )
+    return t().psLlmText(num(l.calls), num(l.tokens), fmtCost(l.costMicros))
   }
   function llmWindow(s) {
-    const d = num(s && s.llm && s.llm.windowDays)
-    return d ? '近 ' + d + ' 天' : 'LLM'
+    const days = num(s && s.llm && s.llm.windowDays)
+    return days ? t().psLlmWindow(days) : 'LLM'
   }
   function healthText(s) {
     // cross-hub-agg M3: per-hub open-firing count rides in the health cell — its
     // own alerting state alongside suspended tasks (both pure scalars).
-    return (
-      '挂起 ' + num(s && s.health && s.health.suspendedTasks) +
-      ' · 告警 ' + num(s && s.alerts && s.alerts.openFirings)
+    return t().psHealthText(
+      num(s && s.health && s.health.suspendedTasks),
+      num(s && s.alerts && s.alerts.openFirings),
     )
   }
 
@@ -277,114 +280,110 @@
   // ---- render: shell ----------------------------------------------------
 
   function cmpOptions() {
+    const d = t()
     return (
-      '<option value="gt">大于 (&gt;)</option>' +
-      '<option value="gte">大于等于 (≥)</option>' +
-      '<option value="lt">小于 (&lt;)</option>' +
-      '<option value="lte">小于等于 (≤)</option>'
+      '<option value="gt">' + d.psCmpGt + ' (&gt;)</option>' +
+      '<option value="gte">' + d.psCmpGte + ' (≥)</option>' +
+      '<option value="lt">' + d.psCmpLt + ' (&lt;)</option>' +
+      '<option value="lte">' + d.psCmpLte + ' (≤)</option>'
     )
   }
 
   function buildUi(root) {
+    const d = t()
     root.innerHTML =
       '<header class="pf-header">' +
-      '  <h2>控制面(cross-hub 摘要聚合)</h2>' +
-      '  <p class="pf-meta">本 hub 的隐私安全 footprint,加上每个已连接 peer <strong>自愿共享</strong>的摘要' +
-      '(<code>peer.summary</code> RPC)。<strong>只有计数</strong> —— 资产 / 运行 / 近窗 LLM 用量 / 挂起任务,' +
-      '绝不含原始记录。peer 必须在其 per-link 策略里勾选「向该对端共享摘要」才会出数字;否则只显示原因。' +
-      '控制面只<strong>观察</strong>,不接管 —— 每个 hub 自主决定披露什么。</p>' +
-      '  <button id="ps-refresh-all" type="button">刷新全部</button>' +
+      '  <h2>' + d.psTitle + '</h2>' +
+      '  <p class="pf-meta">' + d.psDesc + '</p>' +
+      '  <button id="ps-refresh-all" type="button">' + d.psRefreshAll + '</button>' +
       '  <span id="ps-status" class="pf-status"></span>' +
       '</header>' +
       '<section class="pf-list-wrap">' +
       '  <table class="pf-table">' +
       '    <thead><tr>' +
-      '      <th>Hub</th><th>状态</th><th>资产</th><th>运行</th><th id="ps-llm-head">LLM</th><th>健康</th><th>最近刷新</th><th></th>' +
+      '      <th>Hub</th><th>' + d.psColStatus + '</th><th>' + d.psColAssets + '</th><th>' + d.psColRuns +
+      '</th><th id="ps-llm-head">LLM</th><th>' + d.psColHealth + '</th><th>' + d.psColLastRefresh + '</th><th></th>' +
       '    </tr></thead>' +
-      '    <tbody id="ps-rows"><tr><td colspan="8" class="pf-empty">加载中...</td></tr></tbody>' +
+      '    <tbody id="ps-rows"><tr><td colspan="8" class="pf-empty">' + d.psLoading + '</td></tr></tbody>' +
       '  </table>' +
       '  <div id="ps-agg" class="ps-agg"></div>' +
       '</section>' +
       // --- 告警 (F-M5): live breaches evaluated against the current summaries ---
       '<section class="ps-section ps-alerts">' +
-      '  <h3>告警</h3>' +
-      '  <p class="pf-meta">规则对<strong>当前</strong>摘要实时求值,不保存历史触发记录 —— 触发是「此刻」的事实。' +
-      '来源可选「本 hub」「某 peer」或「任意来源 (*)」。</p>' +
-      '  <div id="ps-alerts-body"><span class="ps-spark-empty">加载中...</span></div>' +
+      '  <h3>' + d.psAlertsTitle + '</h3>' +
+      '  <p class="pf-meta">' + d.psAlertsDesc + '</p>' +
+      '  <div id="ps-alerts-body"><span class="ps-spark-empty">' + d.psLoading + '</span></div>' +
       '</section>' +
       // --- 触发历史 (day-3): persisted firing lifecycle, edge-triggered ---
       '<section class="ps-section ps-firings">' +
-      '  <h3>触发历史</h3>' +
-      '  <p class="pf-meta">每条是一次<strong>开启 → 解决</strong>的完整生命周期(<strong>边沿触发</strong>:' +
-      '越线时记一次、恢复时标记解决,不会每轮求值重复记)。仅计数 —— 阈值、触发值、时间,绝不含原始记录。</p>' +
+      '  <h3>' + d.psFiringsTitle + '</h3>' +
+      '  <p class="pf-meta">' + d.psFiringsDesc + '</p>' +
       '  <table class="pf-table">' +
       '    <thead><tr>' +
-      '      <th>来源</th><th>指标</th><th>条件</th><th>触发值</th><th>状态</th><th>开启</th><th>解决</th>' +
+      '      <th>' + d.psColSource + '</th><th>' + d.psColMetric + '</th><th>' + d.psColCondition + '</th><th>' +
+      d.psColFiredValue + '</th><th>' + d.psColStatus + '</th><th>' + d.psColOpened + '</th><th>' + d.psColResolved + '</th>' +
       '    </tr></thead>' +
-      '    <tbody id="ps-firings-rows"><tr><td colspan="7" class="pf-empty">加载中...</td></tr></tbody>' +
+      '    <tbody id="ps-firings-rows"><tr><td colspan="7" class="pf-empty">' + d.psLoading + '</td></tr></tbody>' +
       '  </table>' +
       '</section>' +
       // --- 趋势 (F-M3): per-source per-metric sparkline from persisted snapshots ---
       '<section class="ps-section ps-trend">' +
-      '  <h3>趋势</h3>' +
+      '  <h3>' + d.psTrendTitle + '</h3>' +
       '  <div class="ps-controls">' +
-      '    <label>来源 <select id="ps-trend-source"></select></label>' +
-      '    <label>指标 <select id="ps-trend-metric"></select></label>' +
+      '    <label>' + d.psFieldSource + ' <select id="ps-trend-source"></select></label>' +
+      '    <label>' + d.psFieldMetric + ' <select id="ps-trend-metric"></select></label>' +
       '  </div>' +
-      '  <div id="ps-trend-chart" class="ps-chart"><span class="ps-spark-empty">选择来源与指标</span></div>' +
-      '  <p class="pf-meta">趋势读自持久化的<strong>计数快照</strong> —— 每次「刷新」采集一个数据点' +
-      '(本 hub 总会采,peer 仅在成功拉取摘要时采)。</p>' +
+      '  <div id="ps-trend-chart" class="ps-chart"><span class="ps-spark-empty">' + d.psPickSourceMetric + '</span></div>' +
+      '  <p class="pf-meta">' + d.psTrendDesc + '</p>' +
       '</section>' +
       // --- 告警规则 (F-M5): CRUD over the rule store ---
       '<section class="ps-section ps-rules">' +
-      '  <h3>告警规则</h3>' +
+      '  <h3>' + d.psRulesTitle + '</h3>' +
       '  <form id="ps-rule-form" class="ps-rule-form" autocomplete="off">' +
-      '    <label>来源 <select id="ps-rule-source"></select></label>' +
-      '    <label>指标 <select id="ps-rule-metric"></select></label>' +
-      '    <label>比较 <select id="ps-rule-cmp">' + cmpOptions() + '</select></label>' +
-      '    <label>阈值 <input id="ps-rule-threshold" type="number" step="any" required /></label>' +
-      '    <label>标签 (可选) <input id="ps-rule-label" type="text" placeholder="如: 挂起过多" /></label>' +
-      '    <button type="submit">添加规则</button>' +
+      '    <label>' + d.psFieldSource + ' <select id="ps-rule-source"></select></label>' +
+      '    <label>' + d.psFieldMetric + ' <select id="ps-rule-metric"></select></label>' +
+      '    <label>' + d.psFieldCompare + ' <select id="ps-rule-cmp">' + cmpOptions() + '</select></label>' +
+      '    <label>' + d.psFieldThreshold + ' <input id="ps-rule-threshold" type="number" step="any" required /></label>' +
+      '    <label>' + d.psFieldLabelOpt + ' <input id="ps-rule-label" type="text" placeholder="' + d.psRuleLabelPh + '" /></label>' +
+      '    <button type="submit">' + d.psAddRule + '</button>' +
       '  </form>' +
       '  <table class="pf-table">' +
       '    <thead><tr>' +
-      '      <th>来源</th><th>指标</th><th>条件</th><th>标签</th><th>状态</th><th>操作</th>' +
+      '      <th>' + d.psColSource + '</th><th>' + d.psColMetric + '</th><th>' + d.psColCondition + '</th><th>' +
+      d.psColLabel + '</th><th>' + d.psColStatus + '</th><th>' + d.psColActions + '</th>' +
       '    </tr></thead>' +
-      '    <tbody id="ps-rules-rows"><tr><td colspan="6" class="pf-empty">加载中...</td></tr></tbody>' +
+      '    <tbody id="ps-rules-rows"><tr><td colspan="6" class="pf-empty">' + d.psLoading + '</td></tr></tbody>' +
       '  </table>' +
       '</section>' +
       // --- 通知渠道 (day-3 + 多通道): webhook / im / email (no secret in the row) ---
       '<section class="ps-section ps-channels">' +
-      '  <h3>通知渠道</h3>' +
-      '  <p class="pf-meta">告警越线时把<strong>计数摘要</strong>投递到 webhook / 即时通讯(IM) / 邮件(边沿触发:开启发一次、解决发一次)。' +
-      '渠道只存<strong>环境变量名</strong>(headerEnv)与目的地,绝不存密钥本身 —— host 在投递时从该环境变量读取令牌。' +
-      'IM 用<strong>无状态平台 send</strong>:slack/discord/lark 是 incoming-webhook(令牌在 URL 里),telegram 走 bot API(令牌从环境变量读、拼进路径)。' +
-      '<strong>主动投递需开启轮询</strong>:设 <code>AIPE_PEER_SUMMARY_ALERT_SWEEP_MS</code>(≥10000)host 才会定期' +
-      '求值并投递;未设时渠道仅在下方「测试」按钮触发时发出。</p>' +
+      '  <h3>' + d.psChannelsTitle + '</h3>' +
+      '  <p class="pf-meta">' + d.psChannelsDesc + '</p>' +
       '  <form id="ps-channel-form" class="ps-rule-form" autocomplete="off">' +
-      '    <label>类型 <select id="ps-channel-kind">' +
+      '    <label>' + d.psFieldKind + ' <select id="ps-channel-kind">' +
       '      <option value="webhook">webhook</option>' +
-      '      <option value="im">IM (即时通讯)</option>' +
-      '      <option value="email">email (邮件)</option>' +
+      '      <option value="im">' + d.psKindIm + '</option>' +
+      '      <option value="email">' + d.psKindEmail + '</option>' +
       '    </select></label>' +
-      '    <label id="ps-channel-platform-wrap" hidden>平台 <select id="ps-channel-platform">' +
+      '    <label id="ps-channel-platform-wrap" hidden>' + d.psFieldPlatform + ' <select id="ps-channel-platform">' +
       '      <option value="telegram">telegram</option>' +
       '      <option value="slack">slack</option>' +
       '      <option value="discord">discord</option>' +
       '      <option value="lark">lark</option>' +
       '    </select></label>' +
       '    <label>URL <input id="ps-channel-url" type="url" required placeholder="https://hooks.example.com/..." /></label>' +
-      '    <label id="ps-channel-target-wrap" hidden><span id="ps-channel-target-label">目标</span> ' +
-      '      <input id="ps-channel-target" type="text" placeholder="如: -1001234567890 或 ops@example.com" /></label>' +
-      '    <label>鉴权环境变量 (可选) <input id="ps-channel-headerenv" type="text" placeholder="如: OPS_WEBHOOK_TOKEN" /></label>' +
-      '    <label>标签 (可选) <input id="ps-channel-label" type="text" placeholder="如: 运维群" /></label>' +
-      '    <button type="submit">添加渠道</button>' +
+      '    <label id="ps-channel-target-wrap" hidden><span id="ps-channel-target-label">' + d.psFieldTarget + '</span> ' +
+      '      <input id="ps-channel-target" type="text" placeholder="' + d.psTargetPh + '" /></label>' +
+      '    <label>' + d.psFieldAuthEnvOpt + ' <input id="ps-channel-headerenv" type="text" placeholder="' + d.psAuthEnvPh + '" /></label>' +
+      '    <label>' + d.psFieldLabelOpt + ' <input id="ps-channel-label" type="text" placeholder="' + d.psChannelLabelPh + '" /></label>' +
+      '    <button type="submit">' + d.psAddChannel + '</button>' +
       '  </form>' +
       '  <table class="pf-table">' +
       '    <thead><tr>' +
-      '      <th>渠道</th><th>类型</th><th>目的地</th><th>鉴权</th><th>状态</th><th>操作</th>' +
+      '      <th>' + d.psColChannel + '</th><th>' + d.psFieldKind + '</th><th>' + d.psColDestination + '</th><th>' +
+      d.psColAuth + '</th><th>' + d.psColStatus + '</th><th>' + d.psColActions + '</th>' +
       '    </tr></thead>' +
-      '    <tbody id="ps-channels-rows"><tr><td colspan="6" class="pf-empty">加载中...</td></tr></tbody>' +
+      '    <tbody id="ps-channels-rows"><tr><td colspan="6" class="pf-empty">' + d.psLoading + '</td></tr></tbody>' +
       '  </table>' +
       '</section>'
 
@@ -421,7 +420,7 @@
     const targetLabel = $('#ps-channel-target-label', root)
     if (platWrap) platWrap.hidden = kind !== 'im'
     if (targetWrap) targetWrap.hidden = kind !== 'im' && kind !== 'email'
-    if (targetLabel) targetLabel.textContent = kind === 'email' ? '收件人' : '目标 chat/room id'
+    if (targetLabel) targetLabel.textContent = kind === 'email' ? t().psTargetEmail : t().psTargetChatRoom
   }
 
   // Fill a <select> from [{value,label}], preserving the current selection if it
@@ -438,13 +437,13 @@
       .join('')
   }
   function metricOpt(k) {
-    return { value: k, label: METRIC_LABELS[k] + ' (' + k + ')' }
+    return { value: k, label: metricLabels()[k] + ' (' + k + ')' }
   }
   function populateControls(root) {
     const metricOpts = METRIC_KEYS.map(metricOpt)
     fillSelect($('#ps-trend-source', root), sourceList)
     fillSelect($('#ps-trend-metric', root), metricOpts)
-    fillSelect($('#ps-rule-source', root), [{ value: '*', label: '任意来源 (*)' }].concat(sourceList))
+    fillSelect($('#ps-rule-source', root), [{ value: '*', label: t().psSourceAnyOpt }].concat(sourceList))
     fillSelect($('#ps-rule-metric', root), metricOpts)
   }
 
@@ -491,17 +490,17 @@
     const unknown = hubs - known
     const cls = total > 0 ? 'ps-agg-firing' : 'ps-agg-calm'
     const icon = total > 0 ? '🔴' : '✓'
+    const d = t()
     box.innerHTML =
-      '<span class="' + cls + '">' + icon + ' 联邦告警聚合: ' + total + ' 条开启中</span>' +
-      ' <small>(跨 ' + known + ' 个已共享 hub' +
-      (unknown > 0 ? ';' + unknown + ' 个未共享/离线未计入' : '') + ')</small>'
+      '<span class="' + cls + '">' + icon + ' ' + d.psAggLabel(total) + '</span>' +
+      ' <small>' + d.psAggDetail(known, unknown) + '</small>'
   }
 
   // Derive the trend/rule source list from a list() payload (local + peers).
   function deriveSources(data) {
     const local = data.local || null
     const out = [
-      { value: 'local', label: '本 hub' + (local && local.hubId ? ' (' + local.hubId + ')' : '') },
+      { value: 'local', label: t().psSourceLocal + (local && local.hubId ? ' (' + local.hubId + ')' : '') },
     ]
     for (const row of data.peers || []) {
       out.push({ value: row.peer, label: row.label ? row.label + ' (' + row.peer + ')' : row.peer })
@@ -518,17 +517,18 @@
     const local = data.local || null
     const head = $('#ps-llm-head', root)
     if (head) head.textContent = local ? llmWindow(local) : 'LLM'
+    const d = t()
     const localRow = document.createElement('tr')
     localRow.className = 'ps-local'
     if (local) {
       localRow.innerHTML =
-        '<td class="pf-peer"><strong>本 hub</strong> <code class="pf-id">' + escHtml(local.hubId) + '</code></td>' +
-        '<td><span class="pf-badge pf-online">本地</span></td>' +
+        '<td class="pf-peer"><strong>' + d.psSourceLocal + '</strong> <code class="pf-id">' + escHtml(local.hubId) + '</code></td>' +
+        '<td><span class="pf-badge pf-online">' + d.psBadgeLocal + '</span></td>' +
         dataCells(local) +
         '<td class="pf-time">' + escHtml(fmtTime(local.generatedAt)) + '</td>' +
         '<td></td>'
     } else {
-      localRow.innerHTML = '<td colspan="8" class="pf-cap-empty">本地 footprint 不可用</td>'
+      localRow.innerHTML = '<td colspan="8" class="pf-cap-empty">' + d.psLocalUnavailable + '</td>'
     }
     tbody.appendChild(localRow)
 
@@ -536,8 +536,7 @@
     if (!peers.length) {
       const tr = document.createElement('tr')
       tr.innerHTML =
-        '<td colspan="8" class="pf-empty">还没有已配置的 peer。在本页「对端」面板添加 peer,' +
-        '并在其策略里勾选「向该对端共享摘要」后,这里会聚合它的计数。</td>'
+        '<td colspan="8" class="pf-empty">' + d.psNoPeers + '</td>'
       tbody.appendChild(tr)
       return
     }
@@ -554,16 +553,16 @@
           '<td><span class="pf-badge ' + st.cls + '">' + escHtml(st.label) + '</span></td>' +
           dataCells(row.summary) +
           '<td class="pf-time">' + escHtml(fmtTime(row.lastFetchedAt)) + '</td>' +
-          '<td><button type="button" class="ps-row-refresh">刷新</button></td>'
+          '<td><button type="button" class="ps-row-refresh">' + d.psRefresh + '</button></td>'
       } else {
         // No counts to show — say WHY (not shared / offline) instead of zeros.
-        const reason = row.lastError ? escHtml(row.lastError) : '尚未刷新'
+        const reason = row.lastError ? escHtml(row.lastError) : d.psNotRefreshedYet
         tr.innerHTML =
           '<td class="pf-peer">' + peerCell + '</td>' +
           '<td><span class="pf-badge ' + st.cls + '">' + escHtml(st.label) + '</span></td>' +
           '<td colspan="4" class="pf-cap-empty">' + reason + '</td>' +
           '<td class="pf-time">' + escHtml(fmtTime(row.lastFetchedAt)) + '</td>' +
-          '<td><button type="button" class="ps-row-refresh">刷新</button></td>'
+          '<td><button type="button" class="ps-row-refresh">' + d.psRefresh + '</button></td>'
       }
       tr.querySelector('.ps-row-refresh').addEventListener('click', function () {
         doRefresh(root, row.peer).catch(function () { /* setStatus handled it */ })
@@ -607,9 +606,10 @@
   }
 
   function renderTrend(chart, points, metric) {
+    const d = t()
     if (!points.length) {
       chart.innerHTML =
-        '<span class="ps-spark-empty">暂无快照 —— 「刷新全部」以采集首个数据点</span>'
+        '<span class="ps-spark-empty">' + d.psTrendNoSnapshots + '</span>'
       return
     }
     const vals = points.map(function (p) { return p.value })
@@ -620,11 +620,14 @@
     chart.innerHTML =
       sparklineSvg(points) +
       '<div class="ps-trend-meta">' +
-      points.length + ' 个数据点 · ' +
-      escHtml(fmtTime(first.capturedAt)) + ' → ' + escHtml(fmtTime(last.capturedAt)) +
-      ' · 最新 ' + escHtml(fmtMetric(metric, last.value)) +
-      ' · 最小 ' + escHtml(fmtMetric(metric, min)) +
-      ' · 最大 ' + escHtml(fmtMetric(metric, max)) +
+      d.psTrendMeta(
+        points.length,
+        escHtml(fmtTime(first.capturedAt)),
+        escHtml(fmtTime(last.capturedAt)),
+        escHtml(fmtMetric(metric, last.value)),
+        escHtml(fmtMetric(metric, min)),
+        escHtml(fmtMetric(metric, max)),
+      ) +
       '</div>'
   }
 
@@ -636,20 +639,20 @@
     const source = srcSel.value
     const metric = metSel.value
     if (!source || !metric) {
-      chart.innerHTML = '<span class="ps-spark-empty">选择来源与指标</span>'
+      chart.innerHTML = '<span class="ps-spark-empty">' + t().psPickSourceMetric + '</span>'
       return
     }
-    chart.innerHTML = '<span class="ps-spark-empty">加载趋势...</span>'
+    chart.innerHTML = '<span class="ps-spark-empty">' + t().psTrendLoading + '</span>'
     try {
       const data = await apiHistory(source, metric)
       renderTrend(chart, data.points || [], metric)
     } catch (err) {
       if (err.status === 503) {
-        chart.innerHTML = '<span class="ps-spark-empty">host 未启用 peer 联邦</span>'
+        chart.innerHTML = '<span class="ps-spark-empty">' + t().psHostNoFederation + '</span>'
         return
       }
       chart.innerHTML =
-        '<span class="ps-spark-empty">趋势加载失败: ' + escHtml(err.message || String(err)) + '</span>'
+        '<span class="ps-spark-empty">' + t().psTrendLoadFailed(escHtml(err.message || String(err))) + '</span>'
     }
   }
 
@@ -659,7 +662,7 @@
     const box = $('#ps-alerts-body', root)
     if (!box) return
     if (!breaches.length) {
-      box.innerHTML = '<span class="ps-ok">✓ 当前没有触发的告警</span>'
+      box.innerHTML = '<span class="ps-ok">✓ ' + t().psNoBreaches + '</span>'
       return
     }
     box.innerHTML =
@@ -683,9 +686,10 @@
   function renderRules(root, rules) {
     const tbody = $('#ps-rules-rows', root)
     if (!tbody) return
+    const d = t()
     if (!rules.length) {
       tbody.innerHTML =
-        '<tr><td colspan="6" class="pf-empty">还没有告警规则。用上面的表单添加一条。</td></tr>'
+        '<tr><td colspan="6" class="pf-empty">' + d.psNoRules + '</td></tr>'
       return
     }
     tbody.innerHTML = ''
@@ -699,16 +703,16 @@
         '<td>' + escHtml(sym) + ' ' + escHtml(fmtMetric(r.metric, r.threshold)) + '</td>' +
         '<td>' + (r.label ? escHtml(r.label) : '—') + '</td>' +
         '<td><span class="pf-badge ' + (r.enabled ? 'pf-online' : 'pf-unknown') + '">' +
-        (r.enabled ? '启用' : '停用') + '</span></td>' +
+        (r.enabled ? d.psEnabled : d.psDisabled) + '</span></td>' +
         '<td class="ps-rule-actions">' +
-        '  <button type="button" class="ps-rule-toggle">' + (r.enabled ? '停用' : '启用') + '</button>' +
-        '  <button type="button" class="ps-rule-remove">删除</button>' +
+        '  <button type="button" class="ps-rule-toggle">' + (r.enabled ? d.psDisable : d.psEnable) + '</button>' +
+        '  <button type="button" class="ps-rule-remove">' + d.psDelete + '</button>' +
         '</td>'
       tr.querySelector('.ps-rule-toggle').addEventListener('click', function () {
         doRulePatch(root, r.id, { enabled: !r.enabled })
       })
       tr.querySelector('.ps-rule-remove').addEventListener('click', function () {
-        if (!window.confirm('删除该告警规则?')) return
+        if (!window.confirm(t().psConfirmDeleteRule)) return
         doRuleRemove(root, r.id)
       })
       tbody.appendChild(tr)
@@ -724,7 +728,7 @@
       const box = $('#ps-alerts-body', root)
       const rows = $('#ps-rules-rows', root)
       const msg =
-        err.status === 503 ? 'host 未启用 peer 联邦' : '加载失败: ' + (err.message || String(err))
+        err.status === 503 ? t().psHostNoFederation : t().psLoadFailed(err.message || String(err))
       if (box) box.innerHTML = '<span class="ps-spark-empty">' + escHtml(msg) + '</span>'
       if (rows) rows.innerHTML = '<tr><td colspan="6" class="pf-empty">' + escHtml(msg) + '</td></tr>'
     }
@@ -736,8 +740,8 @@
   // resolved as a closed lifecycle (green).
   function firingStateBadge(f) {
     return f.resolvedAt == null
-      ? '<span class="pf-badge pf-unknown">🔴 开启中</span>'
-      : '<span class="pf-badge pf-online">已解决</span>'
+      ? '<span class="pf-badge pf-unknown">🔴 ' + t().psFiringOpen + '</span>'
+      : '<span class="pf-badge pf-online">' + t().psFiringResolved + '</span>'
   }
 
   function renderFirings(root, firings) {
@@ -745,7 +749,7 @@
     if (!tbody) return
     if (!firings.length) {
       tbody.innerHTML =
-        '<tr><td colspan="7" class="pf-empty">还没有触发记录。规则越线时会在这里留下一条开启→解决的生命周期。</td></tr>'
+        '<tr><td colspan="7" class="pf-empty">' + t().psNoFirings + '</td></tr>'
       return
     }
     tbody.innerHTML = ''
@@ -783,9 +787,10 @@
   function renderChannels(root, channels) {
     const tbody = $('#ps-channels-rows', root)
     if (!tbody) return
+    const d = t()
     if (!channels.length) {
       tbody.innerHTML =
-        '<tr><td colspan="6" class="pf-empty">还没有通知渠道。用上面的表单添加一个 webhook / IM / 邮件渠道。</td></tr>'
+        '<tr><td colspan="6" class="pf-empty">' + d.psNoChannels + '</td></tr>'
       return
     }
     tbody.innerHTML = ''
@@ -802,11 +807,11 @@
         '<td>' + channelDestCell(c) + '</td>' +
         '<td>' + authCell + '</td>' +
         '<td><span class="pf-badge ' + (c.enabled ? 'pf-online' : 'pf-unknown') + '">' +
-        (c.enabled ? '启用' : '停用') + '</span></td>' +
+        (c.enabled ? d.psEnabled : d.psDisabled) + '</span></td>' +
         '<td class="ps-rule-actions">' +
-        '  <button type="button" class="ps-channel-test">测试</button>' +
-        '  <button type="button" class="ps-channel-toggle">' + (c.enabled ? '停用' : '启用') + '</button>' +
-        '  <button type="button" class="ps-channel-remove">删除</button>' +
+        '  <button type="button" class="ps-channel-test">' + d.psTest + '</button>' +
+        '  <button type="button" class="ps-channel-toggle">' + (c.enabled ? d.psDisable : d.psEnable) + '</button>' +
+        '  <button type="button" class="ps-channel-remove">' + d.psDelete + '</button>' +
         '</td>'
       tr.querySelector('.ps-channel-test').addEventListener('click', function () {
         doChannelTest(root, c.id)
@@ -815,7 +820,7 @@
         doChannelPatch(root, c.id, { enabled: !c.enabled })
       })
       tr.querySelector('.ps-channel-remove').addEventListener('click', function () {
-        if (!window.confirm('删除该通知渠道?')) return
+        if (!window.confirm(t().psConfirmDeleteChannel)) return
         doChannelRemove(root, c.id)
       })
       tbody.appendChild(tr)
@@ -831,7 +836,7 @@
       const fr = $('#ps-firings-rows', root)
       const cr = $('#ps-channels-rows', root)
       const msg =
-        err.status === 503 ? 'host 未启用 peer 联邦' : '加载失败: ' + (err.message || String(err))
+        err.status === 503 ? t().psHostNoFederation : t().psLoadFailed(err.message || String(err))
       if (fr) fr.innerHTML = '<tr><td colspan="7" class="pf-empty">' + escHtml(msg) + '</td></tr>'
       if (cr) cr.innerHTML = '<tr><td colspan="6" class="pf-empty">' + escHtml(msg) + '</td></tr>'
     }
@@ -847,7 +852,7 @@
     const platform = $('#ps-channel-platform', root).value
     const target = $('#ps-channel-target', root).value.trim()
     if (!url) {
-      setStatus(root, 'URL 必填', 'error')
+      setStatus(root, t().psUrlRequired, 'error')
       return
     }
     const body = { kind: kind, url: url }
@@ -856,56 +861,56 @@
     if ((kind === 'im' || kind === 'email') && target) body.target = target
     if (headerEnv) body.headerEnv = headerEnv
     if (label) body.label = label
-    setStatus(root, '添加渠道...', 'loading')
+    setStatus(root, t().psAddingChannel, 'loading')
     try {
       await apiAddChannel(body)
       $('#ps-channel-url', root).value = ''
       $('#ps-channel-headerenv', root).value = ''
       $('#ps-channel-label', root).value = ''
       $('#ps-channel-target', root).value = ''
-      setStatus(root, '渠道已添加', 'ok')
+      setStatus(root, t().psChannelAdded, 'ok')
       await loadFiringsAndChannels(root)
     } catch (err) {
-      setStatus(root, '添加渠道失败: ' + (err.message || err), 'error')
+      setStatus(root, t().psAddChannelFailed(err.message || err), 'error')
     }
   }
 
   async function doChannelPatch(root, id, body) {
-    setStatus(root, '保存渠道...', 'loading')
+    setStatus(root, t().psSavingChannel, 'loading')
     try {
       await apiPatchChannel(id, body)
-      setStatus(root, '渠道已保存', 'ok')
+      setStatus(root, t().psChannelSaved, 'ok')
       await loadFiringsAndChannels(root)
     } catch (err) {
-      setStatus(root, '保存渠道失败: ' + (err.message || err), 'error')
+      setStatus(root, t().psSaveChannelFailed(err.message || err), 'error')
     }
   }
 
   async function doChannelRemove(root, id) {
-    setStatus(root, '删除渠道...', 'loading')
+    setStatus(root, t().psDeletingChannel, 'loading')
     try {
       await apiDeleteChannel(id)
-      setStatus(root, '渠道已删除', 'ok')
+      setStatus(root, t().psChannelDeleted, 'ok')
       await loadFiringsAndChannels(root)
     } catch (err) {
-      setStatus(root, '删除渠道失败: ' + (err.message || err), 'error')
+      setStatus(root, t().psDeleteChannelFailed(err.message || err), 'error')
     }
   }
 
   // Synthetic delivery — surfaces the per-channel result (ok + status, or the
   // transport/non-2xx error) so the operator sees reachability immediately.
   async function doChannelTest(root, id) {
-    setStatus(root, '发送测试...', 'loading')
+    setStatus(root, t().psSendingTest, 'loading')
     try {
       const data = await apiTestChannel(id)
       const r = data.result || {}
       if (r.ok) {
-        setStatus(root, '测试投递成功 (' + (r.status || 'ok') + ')', 'ok')
+        setStatus(root, t().psTestDeliverOk(r.status || 'ok'), 'ok')
       } else {
-        setStatus(root, '测试投递失败: ' + (r.error || 'http ' + (r.status || '?')), 'error')
+        setStatus(root, t().psTestDeliverFailed(r.error || 'http ' + (r.status || '?')), 'error')
       }
     } catch (err) {
-      setStatus(root, '测试失败: ' + (err.message || err), 'error')
+      setStatus(root, t().psTestFailed(err.message || err), 'error')
     }
   }
 
@@ -918,47 +923,47 @@
     const thresholdRaw = $('#ps-rule-threshold', root).value.trim()
     const label = $('#ps-rule-label', root).value.trim()
     if (!source || !metric) {
-      setStatus(root, '来源 / 指标必填', 'error')
+      setStatus(root, t().psSourceMetricRequired, 'error')
       return
     }
     const threshold = Number(thresholdRaw)
     if (thresholdRaw === '' || !Number.isFinite(threshold)) {
-      setStatus(root, '阈值必须是数字', 'error')
+      setStatus(root, t().psThresholdNumber, 'error')
       return
     }
     const body = { source: source, metric: metric, comparator: comparator, threshold: threshold }
     if (label) body.label = label
-    setStatus(root, '添加规则...', 'loading')
+    setStatus(root, t().psAddingRule, 'loading')
     try {
       await apiAddRule(body)
       $('#ps-rule-threshold', root).value = ''
       $('#ps-rule-label', root).value = ''
-      setStatus(root, '规则已添加', 'ok')
+      setStatus(root, t().psRuleAdded, 'ok')
       await loadAlertsAndRules(root)
     } catch (err) {
-      setStatus(root, '添加规则失败: ' + (err.message || err), 'error')
+      setStatus(root, t().psAddRuleFailed(err.message || err), 'error')
     }
   }
 
   async function doRulePatch(root, id, body) {
-    setStatus(root, '保存规则...', 'loading')
+    setStatus(root, t().psSavingRule, 'loading')
     try {
       await apiPatchRule(id, body)
-      setStatus(root, '规则已保存', 'ok')
+      setStatus(root, t().psRuleSaved, 'ok')
       await loadAlertsAndRules(root)
     } catch (err) {
-      setStatus(root, '保存规则失败: ' + (err.message || err), 'error')
+      setStatus(root, t().psSaveRuleFailed(err.message || err), 'error')
     }
   }
 
   async function doRuleRemove(root, id) {
-    setStatus(root, '删除规则...', 'loading')
+    setStatus(root, t().psDeletingRule, 'loading')
     try {
       await apiDeleteRule(id)
-      setStatus(root, '规则已删除', 'ok')
+      setStatus(root, t().psRuleDeleted, 'ok')
       await loadAlertsAndRules(root)
     } catch (err) {
-      setStatus(root, '删除规则失败: ' + (err.message || err), 'error')
+      setStatus(root, t().psDeleteRuleFailed(err.message || err), 'error')
     }
   }
 
@@ -973,11 +978,11 @@
   }
 
   async function load(root) {
-    setStatus(root, '加载...', 'loading')
+    setStatus(root, t().psLoadingStatus, 'loading')
     try {
       const data = await apiList()
       applyData(root, data)
-      setStatus(root, '已加载 ' + ((data.peers || []).length) + ' 个 peer', 'ok')
+      setStatus(root, t().psLoaded((data.peers || []).length), 'ok')
       await Promise.all([loadTrend(root), loadAlertsAndRules(root), loadFiringsAndChannels(root)])
     } catch (err) {
       if (err.status === 503) {
@@ -986,30 +991,30 @@
         renderRules(root, [])
         renderFirings(root, [])
         renderChannels(root, [])
-        setStatus(root, 'host 未启用 peer 联邦', 'error')
+        setStatus(root, t().psHostNoFederation, 'error')
         return
       }
-      setStatus(root, '加载失败:' + (err.message || err), 'error')
+      setStatus(root, t().psLoadFailed(err.message || err), 'error')
       throw err
     }
   }
 
   async function doRefresh(root, peerId) {
-    setStatus(root, peerId ? '刷新 ' + peerId + '...' : '刷新全部...', 'loading')
+    setStatus(root, peerId ? t().psRefreshingOne(peerId) : t().psRefreshingAll, 'loading')
     try {
       const data = await apiRefresh(peerId)
       applyData(root, data)
-      setStatus(root, '已刷新', 'ok')
+      setStatus(root, t().psRefreshed, 'ok')
       // A refresh captured a fresh snapshot — re-read the trend + re-evaluate +
       // re-read firings (the opt-in sweep may have opened/resolved in the bg).
       await Promise.all([loadTrend(root), loadAlertsAndRules(root), loadFiringsAndChannels(root)])
     } catch (err) {
       if (err.status === 503) {
         applyData(root, {})
-        setStatus(root, 'host 未启用 peer 联邦', 'error')
+        setStatus(root, t().psHostNoFederation, 'error')
         return
       }
-      setStatus(root, '刷新失败:' + (err.message || err), 'error')
+      setStatus(root, t().psRefreshFailed(err.message || err), 'error')
       throw err
     }
   }
@@ -1032,6 +1037,12 @@
     }).observe(document.body, {
       attributes: true,
       attributeFilter: ['data-active-tab'],
+    })
+    // Re-render on language switch — relabel the static shell, and reload the
+    // rows when the tab is showing so the live data picks up the new dict too.
+    AH.onLangChange(function () {
+      buildUi(root)
+      if (isActive()) load(root).catch(function () { /* setStatus reported it */ })
     })
     if (isActive()) {
       maybeLoad(root).catch(function () { /* */ })
