@@ -18,6 +18,9 @@
 
   const API = '/api/admin/identity/reputation'
 
+  const AH = window.AipeHub
+  function t() { return AH.t }
+
   function $(sel, root) {
     return (root || document).querySelector(sel)
   }
@@ -83,19 +86,21 @@
   }
 
   function buildUi(root) {
+    const d = t()
     root.innerHTML =
       '<header class="rep-header">' +
-      '  <h2>Peer 信誉(reputation)</h2>' +
-      '  <p class="rep-meta">EWMA(α=0.7)的滑动平均,从 hub.feedback ledger 派生。范围 <code>[-1, +1]</code>;调度器按分数降序排候选 peer(详见 <code>docs/zh/REPUTATION-ROUTING.md</code>)。本面板只读 — 想压低评分请写负反馈,不要手动重置。</p>' +
-      '  <button id="rep-refresh" type="button">刷新</button>' +
+      '  <h2>' + escHtml(d.repTitle) + '</h2>' +
+      '  <p class="rep-meta">' + d.repMeta + '</p>' +
+      '  <button id="rep-refresh" type="button">' + escHtml(d.repRefresh) + '</button>' +
       '  <span id="rep-status" class="rep-status"></span>' +
       '</header>' +
       '<section class="rep-list-wrap">' +
       '  <table class="rep-table">' +
       '    <thead><tr>' +
-      '      <th>Peer</th><th>Score</th><th>样本数</th><th>最近更新</th>' +
+      '      <th>' + escHtml(d.repColPeer) + '</th><th>' + escHtml(d.repColScore) + '</th>' +
+      '      <th>' + escHtml(d.repColSamples) + '</th><th>' + escHtml(d.repColUpdated) + '</th>' +
       '    </tr></thead>' +
-      '    <tbody id="rep-rows"><tr><td colspan="4" class="rep-empty">加载中...</td></tr></tbody>' +
+      '    <tbody id="rep-rows"><tr><td colspan="4" class="rep-empty">' + escHtml(d.repLoadingCell) + '</td></tr></tbody>' +
       '  </table>' +
       '</section>'
 
@@ -105,19 +110,19 @@
   }
 
   async function refresh(root) {
-    setStatus(root, '加载...', 'loading')
+    setStatus(root, t().repLoadingStatus, 'loading')
     try {
       const out = await fetchSnapshot()
       renderRows(root, out.reputation || [])
       const n = (out.reputation || []).length
-      setStatus(root, '已加载 ' + n + ' 个 peer', 'ok')
+      setStatus(root, t().repLoadedN(n), 'ok')
     } catch (err) {
       if (err.status === 503) {
         renderRows(root, [])
-        setStatus(root, 'host 未启用 reputation snapshot', 'error')
+        setStatus(root, t().repNotEnabled, 'error')
         return
       }
-      setStatus(root, '加载失败:' + (err.message || err), 'error')
+      setStatus(root, t().repLoadFailed(err.message || err), 'error')
       throw err
     }
   }
@@ -127,9 +132,7 @@
     if (!tbody) return
     if (items.length === 0) {
       tbody.innerHTML =
-        '<tr><td colspan="4" class="rep-empty">还没有反馈数据。' +
-        '一旦跨 hub 任务跑过 + feedback ledger 有写入,这里会自动出现。' +
-        '</td></tr>'
+        '<tr><td colspan="4" class="rep-empty">' + escHtml(t().repEmpty) + '</td></tr>'
       return
     }
     tbody.innerHTML = items.map(function (r) {
@@ -180,6 +183,10 @@
     }).observe(document.body, {
       attributes: true,
       attributeFilter: ['data-active-tab'],
+    })
+    AH.onLangChange(function () {
+      buildUi(root)
+      maybeRefresh(root).catch(function () { /* setStatus reported it */ })
     })
     if (isActive()) {
       maybeRefresh(root).catch(function () { /* */ })
