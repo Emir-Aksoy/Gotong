@@ -35,6 +35,20 @@
     const { dom, state, ma, wf, refreshWorkflows } = deps
     const fetchFn = deps.fetch || window.fetch.bind(window)
 
+    // window.AipeHub is fully populated by the time install() runs (app-core.js
+    // ran first). AH.t is a LIVE getter returning the currently-active dict —
+    // read t().<key> at CALL TIME inside every render/message function so each
+    // fresh action paints in the current language.
+    const AH = window.AipeHub
+    function t() {
+      return AH.t
+    }
+
+    // Track the last result render so a language flip while the modal is OPEN
+    // can repaint it. Set whenever renderResult paints the assist output; the
+    // onLangChange subscriber below re-invokes it if the modal is still up.
+    let lastRender = null
+
     function open() {
       dom.wfAssistDescription.value = ''
       dom.wfAssistMsg.textContent = ''
@@ -52,12 +66,15 @@
       // Defensive: if a previous run's watcher leaked (modal closed
       // before fetch resolved), clear it so it can't taint this run.
       state.assistWatcher = null
+      // Nothing rendered yet this session — drop any stale re-render closure.
+      lastRender = null
       dom.wfAssistModal.hidden = false
       setTimeout(() => dom.wfAssistDescription?.focus(), 0)
     }
 
     function close() {
       dom.wfAssistModal.hidden = true
+      lastRender = null
       // If the user closes mid-stream the fetch is still in flight, but
       // the modal is gone — drop the watcher so its callbacks don't poke
       // hidden DOM nodes. The fetch resolve path also clears it, so this
@@ -79,24 +96,24 @@
         // doesn't actually have, so it'd fail at runtime.
         if (deepCheck && deepCheck.ok === false) {
           const n = (deepCheck.violations || []).length
-          chip.textContent = `⚠ schema 通过，但有 ${n} 项深度警告`
+          chip.textContent = t().wfaChipWarnN(n)
           chip.style.background = '#fef3c7'
           chip.style.color = '#92400e'
         } else {
-          chip.textContent = '✓ 校验通过 (可保存)'
+          chip.textContent = t().wfaChipValid
           chip.style.background = '#d1fae5'
           chip.style.color = '#065f46'
         }
       } else if (status === 'invalid') {
-        chip.textContent = '✗ YAML 不合 v1 schema'
+        chip.textContent = t().wfaChipInvalid
         chip.style.background = '#fee2e2'
         chip.style.color = '#991b1b'
       } else if (status === 'no_yaml') {
-        chip.textContent = '— LLM 没生成 YAML'
+        chip.textContent = t().wfaChipNoYaml
         chip.style.background = '#e5e7eb'
         chip.style.color = '#374151'
       } else {
-        chip.textContent = status || '(未知)'
+        chip.textContent = status || t().wfaChipUnknown
         chip.style.background = '#e5e7eb'
         chip.style.color = '#374151'
       }
@@ -107,19 +124,19 @@
     function deepCheckKindLabel(kind) {
       switch (kind) {
         case 'unknown_agent':
-          return '指向不存在的 agent'
+          return t().wfaViolUnknownAgent
         case 'unknown_capability':
-          return '当前 hub 没 agent 提供该 capability'
+          return t().wfaViolUnknownCapability
         case 'bad_ref':
-          return '$ref 指向不存在的 step'
+          return t().wfaViolBadRef
         case 'forward_ref':
-          return '$ref 指向更晚执行的 step'
+          return t().wfaViolForwardRef
         case 'self_trigger_cycle':
-          return '会触发自己 — 死循环'
+          return t().wfaViolSelfTriggerCycle
         case 'id_collision':
-          return 'workflow.id 已存在'
+          return t().wfaViolIdCollision
         default:
-          return kind || '(unknown)'
+          return kind || t().wfaViolUnknownKind
       }
     }
 
@@ -140,14 +157,14 @@
         // so it doesn't compete with the YAML preview for attention.
         details.hidden = false
         details.open = false
-        summary.textContent = '深度检查通过 (0 项警告)'
+        summary.textContent = t().wfaDeepOk
         summary.style.color = '#065f46'
         return
       }
       const violations = deepCheck.violations || []
       details.hidden = false
       details.open = true
-      summary.textContent = `深度检查警告 — ${violations.length} 项 (workflow 可保存，但运行时可能失败)`
+      summary.textContent = t().wfaDeepWarnN(violations.length)
       summary.style.color = '#92400e'
       for (const v of violations) {
         const li = document.createElement('li')
@@ -168,10 +185,13 @@
     }
 
     function renderResult(result) {
+      // Capture the data so a language flip while the modal is open can repaint
+      // the result in the new language (see onLangChange wiring below).
+      lastRender = () => renderResult(result)
       dom.wfAssistResult.hidden = false
       renderStatusChip(result.draftStatus, result.deepCheck)
       dom.wfAssistExplanation.textContent = result.explanation || ''
-      dom.wfAssistYaml.textContent = result.yaml || '(空 — LLM 没生成 YAML fence)'
+      dom.wfAssistYaml.textContent = result.yaml || t().wfaYamlEmpty
       if (result.draftStatus === 'invalid' && result.validationError) {
         dom.wfAssistErrorDetails.hidden = false
         dom.wfAssistValidationError.textContent = result.validationError
@@ -199,13 +219,13 @@
       dom.wfAssistMsg.textContent = ''
       dom.wfAssistMsg.classList.remove('ok', 'err')
       if (!description) {
-        dom.wfAssistMsg.textContent = '请先填一句描述'
+        dom.wfAssistMsg.textContent = t().wfaNeedDescription
         dom.wfAssistMsg.classList.add('err')
         return
       }
       dom.wfAssistGenerate.disabled = true
-      dom.wfAssistGenerate.textContent = '生成中…'
-      dom.wfAssistMsg.textContent = '正在生成,通常 5-20 秒…'
+      dom.wfAssistGenerate.textContent = t().wfaGenerating
+      dom.wfAssistMsg.textContent = t().wfaGeneratingMsg
 
       // Phase 13 follow-up — open the streaming preview pane and install
       // a watcher that listens on the existing SSE feed for matching
@@ -216,13 +236,13 @@
       if (dom.wfAssistStreaming) {
         dom.wfAssistStreaming.hidden = false
         dom.wfAssistStreamingText.textContent = ''
-        dom.wfAssistStreamingMeta.textContent = '等待 LLM 第一个 chunk…'
+        dom.wfAssistStreamingMeta.textContent = t().wfaWaitingChunk
       }
       state.assistWatcher = {
         taskId: null,
         onTask: (taskId) => {
           if (dom.wfAssistStreamingMeta) {
-            dom.wfAssistStreamingMeta.textContent = `task=${String(taskId).slice(0, 8)}…`
+            dom.wfAssistStreamingMeta.textContent = t().wfaStreamTask(String(taskId).slice(0, 8))
           }
         },
         onChunk: (text, meta) => {
@@ -231,14 +251,16 @@
           // Keep the latest characters in view as text grows.
           dom.wfAssistStreamingText.scrollTop = dom.wfAssistStreamingText.scrollHeight
           if (dom.wfAssistStreamingMeta && meta) {
-            const tools = meta.toolUses ? ` · 🔧 ${meta.toolUses}` : ''
-            dom.wfAssistStreamingMeta.textContent =
-              (meta.isDone ? '✓ 流结束' : '● 生成中') + ` · ${text.length} chars${tools}`
+            dom.wfAssistStreamingMeta.textContent = t().wfaStreamProgress(
+              !!meta.isDone,
+              text.length,
+              meta.toolUses || 0,
+            )
           }
         },
         onEnd: () => {
           if (dom.wfAssistStreamingMeta) {
-            dom.wfAssistStreamingMeta.textContent = '✓ 流结束 — 等待 schema 校验 + 深度检查…'
+            dom.wfAssistStreamingMeta.textContent = t().wfaStreamEnd
           }
         },
       }
@@ -268,24 +290,23 @@
         })
         const json = await r.json().catch(() => ({}))
         if (r.status === 503) {
-          dom.wfAssistMsg.textContent =
-            'AI 助手未启用 — 设置 AIPE_ASSISTANT_PROVIDER + 对应 API key 后重启 host'
+          dom.wfAssistMsg.textContent = t().wfaAssistDisabled
           dom.wfAssistMsg.classList.add('err')
           return
         }
         if (!r.ok) {
-          dom.wfAssistMsg.textContent = '生成失败:' + (json.error || `HTTP ${r.status}`)
+          dom.wfAssistMsg.textContent = t().wfaGenFailed(json.error || `HTTP ${r.status}`)
           dom.wfAssistMsg.classList.add('err')
           return
         }
         dom.wfAssistMsg.textContent = ''
         renderResult(json)
       } catch (err) {
-        dom.wfAssistMsg.textContent = '生成失败:' + (err.message || String(err))
+        dom.wfAssistMsg.textContent = t().wfaGenFailed(err.message || String(err))
         dom.wfAssistMsg.classList.add('err')
       } finally {
         dom.wfAssistGenerate.disabled = false
-        dom.wfAssistGenerate.textContent = '生成草稿'
+        dom.wfAssistGenerate.textContent = t().wfaGenerateBtn
         // Tear down the streaming watcher + collapse the live preview.
         // The result panel (with final yaml + deep-check) is now the
         // canonical view — the streaming pane was only useful while
@@ -298,7 +319,7 @@
     async function save() {
       const yaml = dom.wfAssistSave.dataset.yaml
       if (!yaml) return
-      dom.wfAssistMsg.textContent = '保存中…'
+      dom.wfAssistMsg.textContent = t().wfaSaving
       dom.wfAssistMsg.classList.remove('ok', 'err')
       try {
         // 走现有 /import route — 同一段 schema 验证 + 落盘 + register
@@ -310,20 +331,30 @@
         })
         const body = await r.json().catch(() => ({}))
         if (!r.ok) {
-          dom.wfAssistMsg.textContent = '保存失败:' + (body.error || `HTTP ${r.status}`)
+          dom.wfAssistMsg.textContent = t().wfaSaveFailed(body.error || `HTTP ${r.status}`)
           dom.wfAssistMsg.classList.add('err')
           return
         }
         const id = body.workflow?.id || '?'
-        dom.wfAssistMsg.textContent = `已保存 workflow ${id}`
+        dom.wfAssistMsg.textContent = t().wfaSavedOk(id)
         dom.wfAssistMsg.classList.add('ok')
         await refreshWorkflows()
         setTimeout(close, 900)
       } catch (err) {
-        dom.wfAssistMsg.textContent = '保存失败:' + (err.message || String(err))
+        dom.wfAssistMsg.textContent = t().wfaSaveFailed(err.message || String(err))
         dom.wfAssistMsg.classList.add('err')
       }
     }
+
+    // Live re-render: if the language flips while the assist modal is OPEN,
+    // repaint the last rendered result in the new language. "Modal open" =
+    // the modal element not hidden. Static-message-only states (e.g. an error
+    // toast with no result rendered) keep their current text and pick up the
+    // new language on the next action — acceptable best-effort.
+    AH.onLangChange(() => {
+      if (!dom.wfAssistModal || dom.wfAssistModal.hidden) return
+      if (lastRender) lastRender()
+    })
 
     return { open, close, submit, save }
   }
