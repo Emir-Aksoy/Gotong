@@ -37,7 +37,7 @@
       <span class="subtitle" id="role-subtitle" data-i18n="adminTitle">管理员控制台</span>
       <span id="conn" class="conn" data-status="pending" data-i18n="connecting">连接中…</span>
       <span class="role-badge" id="role-badge"></span>
-      <label id="contrib-toggle" class="contrib-toggle" data-roles="owner,admin" title="是否将我派发的任务计入贡献榜" hidden>
+      <label id="contrib-toggle" class="contrib-toggle" data-roles="owner,admin" data-i18n-title="contribToggleTitle" title="是否将我派发的任务计入贡献榜" hidden>
         <input type="checkbox" id="contrib-toggle-input" />
         <span class="contrib-toggle-label" data-i18n="contribToggleLabel">我派发的任务计入贡献榜</span>
       </label>
@@ -54,22 +54,22 @@
          to the CLI fallback. -->
     <section id="setup-wizard" hidden>
       <div class="login-card">
-        <h2>首次设置 — 给 owner 设密码</h2>
-        <p class="login-meta">
+        <h2 data-i18n="setupTitle">首次设置 — 给 owner 设密码</h2>
+        <p class="login-meta" data-i18n-html="setupIntro">
           host 已启动,但 owner 账号还没设密码。在<strong>本机</strong>(<code>127.0.0.1</code>)
           上设置一次,以后用 Email + 密码登录。<br>
           反向代理后的部署请改用 CLI: <code>aipehub-host mint-admin-token</code>。
         </p>
         <form id="setup-form">
-          <label>新密码 (至少 12 位)
+          <label><span data-i18n="setupPwNew">新密码 (至少 12 位)</span>
             <input name="password" type="password" required minlength="12" autocomplete="new-password" />
           </label>
-          <label>再输一次
+          <label><span data-i18n="setupPwConfirm">再输一次</span>
             <input name="confirm" type="password" required minlength="12" autocomplete="new-password" />
           </label>
           <div class="login-row">
-            <button type="submit">设置密码</button>
-            <span class="login-meta">完成后页面自动跳到登录。</span>
+            <button type="submit" data-i18n="setupSubmit">设置密码</button>
+            <span class="login-meta" data-i18n="setupSubmitMeta">完成后页面自动跳到登录。</span>
           </div>
           <div id="setup-status" class="login-status"></div>
         </form>
@@ -82,23 +82,23 @@
          re-inject the role meta on the next render. -->
     <section id="login-shell" data-roles="anonymous" hidden>
       <div class="login-card">
-        <h2>登录 AipeHub</h2>
+        <h2 data-i18n="loginTitle">登录 AipeHub</h2>
         <form id="login-form">
           <label>Email
             <input name="email" type="email" required autocomplete="username" placeholder="you@example.com" />
           </label>
-          <label>密码
+          <label><span data-i18n="loginPassword">密码</span>
             <input name="password" type="password" required autocomplete="current-password" />
           </label>
           <!-- Route B P1-M3f — revealed only after the server replies with a
                totp challenge (401 {challenge:'totp'}). Hidden on first attempt
                so users without MFA never see it. -->
-          <label id="login-totp-label" hidden>两步验证码
-            <input name="totpCode" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="8" placeholder="6 位验证码" />
+          <label id="login-totp-label" hidden><span data-i18n="loginTotp">两步验证码</span>
+            <input name="totpCode" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]*" maxlength="8" data-i18n-placeholder="loginTotpPlaceholder" placeholder="6 位验证码" />
           </label>
           <div class="login-row">
-            <button type="submit">登录</button>
-            <span class="login-meta">还没有账号? 联系 owner 给你创建,或者用收到的邀请链接 (<code>/invite/&lt;token&gt;</code>) 注册。</span>
+            <button type="submit" data-i18n="loginSubmit">登录</button>
+            <span class="login-meta" data-i18n-html="loginNoAccount">还没有账号? 联系 owner 给你创建,或者用收到的邀请链接 (<code>/invite/&lt;token&gt;</code>) 注册。</span>
           </div>
           <div id="login-status" class="login-status"></div>
         </form>
@@ -106,7 +106,7 @@
              from GET /api/auth/{oidc,saml}/providers; stays hidden when the host
              has no enabled IdP registered, so password-only hubs see nothing. -->
         <div id="login-sso" class="login-sso" hidden>
-          <div class="login-sso-sep"><span>或</span></div>
+          <div class="login-sso-sep"><span data-i18n="loginSsoOr">或</span></div>
           <div id="login-sso-buttons" class="login-sso-buttons"></div>
         </div>
       </div>
@@ -121,7 +121,7 @@
          `data-roles` is the per-tab visibility filter. app.js hides any
          tab button whose role list doesn't contain the viewer's role,
          then mirrors the hide to the corresponding <section>. -->
-    <nav id="admin-tabbar" class="tabbar" aria-label="主导航" hidden>
+    <nav id="admin-tabbar" class="tabbar" data-i18n-aria="navMain" aria-label="主导航" hidden>
       <button class="tabbar-btn" type="button" data-tab="home"      data-roles="owner,admin,member,viewer" data-i18n="tabHome">我的</button>
       <button class="tabbar-btn" type="button" data-tab="overview"  data-roles="owner,admin" data-i18n="tabOverview">总览</button>
       <button class="tabbar-btn" type="button" data-tab="agents"    data-roles="owner,admin" data-i18n="tabAgents">智能体</button>
