@@ -39,6 +39,33 @@ const WF_ASSIST_JS = readFileSync(
   'utf8',
 )
 const APP_HTML = readFileSync(join(HERE, '..', 'static', 'app.html'), 'utf8')
+const APP_CORE_JS = readFileSync(join(HERE, '..', 'static', 'app-core.js'), 'utf8')
+
+// The factory now reads its user-facing strings from the live i18n dict
+// (`window.AipeHub.t`) and re-renders on `window.AipeHub.onLangChange` —
+// both provided in production by app-core.js. Pull the real `I18N.zh`
+// off disk and inject it so this headless smoke exercises the true
+// render path (and its Chinese-text assertions stay meaningful) instead
+// of a hollow stub. Default language is zh, matching app-core.js.
+function extractI18nZh(): Record<string, unknown> {
+  const start = APP_CORE_JS.indexOf('const I18N = {')
+  let i = APP_CORE_JS.indexOf('{', start)
+  let depth = 0
+  let end = -1
+  for (; i < APP_CORE_JS.length; i++) {
+    const c = APP_CORE_JS[i]
+    if (c === '{') depth++
+    else if (c === '}') {
+      depth--
+      if (depth === 0) { end = i; break }
+    }
+  }
+  const literal = APP_CORE_JS.slice(APP_CORE_JS.indexOf('{', start), end + 1)
+  // eslint-disable-next-line no-eval
+  const I18N = (0, eval)('(' + literal + ')') as { zh: Record<string, unknown> }
+  return I18N.zh
+}
+const I18N_ZH = extractI18nZh()
 
 // ---------------------------------------------------------------------------
 // Hand-rolled minimal DOM. Each created node returns an object with just
@@ -103,7 +130,9 @@ function loadFactory(): (deps: unknown) => {
   submit: () => Promise<void>
   save: () => Promise<void>
 } {
-  const fakeWindow: { AipeHub: Record<string, unknown> } = { AipeHub: {} }
+  const fakeWindow: { AipeHub: Record<string, unknown> } = {
+    AipeHub: { t: I18N_ZH, onLangChange: () => {} },
+  }
   const ctx = {
     window: fakeWindow,
     document: {
