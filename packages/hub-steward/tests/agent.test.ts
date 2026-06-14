@@ -17,10 +17,12 @@ import { Hub } from '@aipehub/core'
 import { MockLlmProvider } from '@aipehub/llm'
 
 import {
+  buildOperatorStewardSystemPrompt,
   buildStewardSystemPrompt,
   HUB_STEWARD_CAPABILITY,
   HUB_STEWARD_DEFAULT_ID,
   HubStewardAgent,
+  OPERATOR_STEWARD_SYSTEM_PROMPT,
   parseStewardProposal,
   renderStewardUserMessage,
   STEWARD_SYSTEM_PROMPT,
@@ -75,6 +77,76 @@ describe('buildStewardSystemPrompt', () => {
 
   it('honours an override', () => {
     expect(buildStewardSystemPrompt('custom')).toBe('custom')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Operator console prompt variant (SW-M9 A-M5). Same output contract + hard
+// rules as the member prompt (so the ONE parser handles both), but framed
+// site-wide with a VERBATIM create_agent handle. The two properties that must
+// hold: the operator prompt still honours the ```json fence contract, and the
+// MEMBER prompt is untouched.
+// ---------------------------------------------------------------------------
+
+describe('buildOperatorStewardSystemPrompt (A-M5)', () => {
+  it('returns the operator prompt and keeps the SAME hard rules as the member prompt', () => {
+    const p = buildOperatorStewardSystemPrompt()
+    expect(p).toBe(OPERATOR_STEWARD_SYSTEM_PROMPT)
+    // The dangerous/cross-hub second-confirmation contract is identical — the
+    // host re-classifies both prompts' output through the same gate.
+    expect(p).toContain('second human confirmation')
+    expect(p).toContain('OUT OF SCOPE')
+    expect(p).toContain('delete_agent')
+    expect(p).toContain('CROSS-HUB')
+  })
+
+  it('still honours the ```json fence OUTPUT CONTRACT (one parser for both prompts)', () => {
+    // The operator prompt documents the exact same single-fence shape, so a
+    // reply produced under it parses through the shared security gate. The
+    // create_agent handle here is a VERBATIM site-wide id ("support-bot"), which
+    // the validator accepts as a plain string — the operator's documented shape.
+    const p = buildOperatorStewardSystemPrompt()
+    expect(p).toContain('```json')
+    expect(p).toContain('exactly one')
+
+    const proposal: StewardProposal = {
+      reply: '我来为这个 hub 建一个客服助手。',
+      actions: [
+        {
+          kind: 'create_agent',
+          handle: 'support-bot', // a full site-wide id, used verbatim — not me.<user>.<slug>
+          label: '客服助手',
+          provider: 'anthropic',
+          system: '你负责回答客服问题。',
+          capabilities: ['support'],
+        },
+      ],
+    }
+    const { proposal: got, status } = parseStewardProposal(
+      '```json\n' + JSON.stringify(proposal) + '\n```',
+    )
+    expect(status).toBe('ok')
+    expect(got).toEqual(proposal)
+  })
+
+  it('diverges from the member prompt in the site-wide / verbatim-handle framing', () => {
+    // Operator-only framing.
+    expect(OPERATOR_STEWARD_SYSTEM_PROMPT).not.toBe(STEWARD_SYSTEM_PROMPT)
+    expect(OPERATOR_STEWARD_SYSTEM_PROMPT).toContain('OPERATOR console')
+    expect(OPERATOR_STEWARD_SYSTEM_PROMPT).toContain("WHOLE HUB'S resources")
+    expect(OPERATOR_STEWARD_SYSTEM_PROMPT).toContain('VERBATIM')
+    // The member prompt must NOT have leaked operator framing.
+    expect(STEWARD_SYSTEM_PROMPT).not.toContain('OPERATOR console')
+    expect(STEWARD_SYSTEM_PROMPT).not.toContain('VERBATIM')
+  })
+
+  it('leaves the MEMBER prompt unchanged (THEIR OWN resources, host-namespaced handle)', () => {
+    // Regression guard: A-M5 only ADDS the operator variant. The member prompt
+    // still frames per-member ownership and the host-namespaced handle.
+    expect(buildStewardSystemPrompt()).toBe(STEWARD_SYSTEM_PROMPT)
+    expect(STEWARD_SYSTEM_PROMPT).toContain('THEIR OWN resources')
+    expect(STEWARD_SYSTEM_PROMPT).toContain('short slug')
+    expect(STEWARD_SYSTEM_PROMPT).toContain('turns it into the real id')
   })
 })
 
