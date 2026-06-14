@@ -52,6 +52,7 @@
     "@aipehub/acp-agent": "workspace:*",
     "@aipehub/core": "workspace:*",
     "@aipehub/evals": "workspace:*",
+    "@aipehub/hub-steward": "workspace:*",
     "@aipehub/identity": "workspace:*",
     "@aipehub/inbox": "workspace:*",
     "@aipehub/llm": "workspace:*",

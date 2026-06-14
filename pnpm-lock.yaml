@@ -660,6 +660,9 @@ importers:
       '@aipehub/evals':
         specifier: workspace:*
         version: link:../evals
+      '@aipehub/hub-steward':
+        specifier: workspace:*
+        version: link:../hub-steward
       '@aipehub/identity':
         specifier: workspace:*
         version: link:../identity
