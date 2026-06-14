@@ -27,6 +27,12 @@
 ;(function () {
   'use strict'
 
+  // i18n — read the live dict off window.AipeHub at call time. `t()` returns
+  // the current-language dict; render/handler functions read t().<key> at call
+  // time, and we re-render on language change.
+  const AH = window.AipeHub
+  function t() { return AH.t }
+
   const API = '/api/admin/identity/org-quotas'
   const PERIODS = ['hourly', 'daily', 'monthly', 'total']
 
@@ -73,24 +79,25 @@
   // ---- rendering --------------------------------------------------------
 
   function buildUi(root) {
+    const d = t()
     root.innerHTML =
       '<header class="q-header">' +
-      '  <h2>组织配额(软上限)</h2>' +
-      '  <p class="q-meta">阈值跨越时会写入审计日志(<code>org_quota_warn</code> / <code>org_quota_over</code> / <code>org_quota_recover</code>)。配额为软限,不阻断 LLM 调用;真正硬阻断由 per-user 配额负责。</p>' +
-      '  <button id="q-refresh" type="button">刷新</button>' +
+      '  <h2>' + escHtml(d.qtaTitle) + '</h2>' +
+      '  <p class="q-meta">' + d.qtaIntro + '</p>' +
+      '  <button id="q-refresh" type="button">' + escHtml(d.qtaRefreshBtn) + '</button>' +
       '  <span id="q-status" class="q-status"></span>' +
       '</header>' +
       '<section class="q-list-wrap">' +
       '  <table class="q-table">' +
       '    <thead><tr>' +
-      '      <th>Metric</th><th>Period</th><th>用量 / 配额</th><th>%</th><th>State</th><th>warnPct</th><th>last sweep</th><th></th>' +
+      '      <th>' + escHtml(d.qtaColMetric) + '</th><th>' + escHtml(d.qtaColPeriod) + '</th><th>' + escHtml(d.qtaColUsageQuota) + '</th><th>' + escHtml(d.qtaColPct) + '</th><th>' + escHtml(d.qtaColState) + '</th><th>' + escHtml(d.qtaColWarnPct) + '</th><th>' + escHtml(d.qtaColLastSweep) + '</th><th></th>' +
       '    </tr></thead>' +
-      '    <tbody id="q-rows"><tr><td colspan="8" class="q-empty">加载中...</td></tr></tbody>' +
+      '    <tbody id="q-rows"><tr><td colspan="8" class="q-empty">' + escHtml(d.qtaLoadingCell) + '</td></tr></tbody>' +
       '  </table>' +
       '</section>' +
       '<section class="q-form-wrap">' +
-      '  <h3>新增 / 修改配额</h3>' +
-      '  <p class="q-meta">同 (metric, period) 再次提交即覆盖既有值;不重置已累计的用量。</p>' +
+      '  <h3>' + escHtml(d.qtaFormTitle) + '</h3>' +
+      '  <p class="q-meta">' + escHtml(d.qtaFormHint) + '</p>' +
       '  <div class="q-form">' +
       '    <label>metric<input id="q-form-metric" placeholder="llm_requests" maxlength="64"></label>' +
       '    <label>period<select id="q-form-period">' +
@@ -98,7 +105,7 @@
       '    </select></label>' +
       '    <label>quota<input id="q-form-quota" type="number" min="0" step="1" placeholder="1000"></label>' +
       '    <label>warnPct<input id="q-form-warn" type="number" min="1" max="99" step="1" placeholder="80"></label>' +
-      '    <button id="q-form-save" type="button" class="q-primary">保存</button>' +
+      '    <button id="q-form-save" type="button" class="q-primary">' + escHtml(d.qtaSaveBtn) + '</button>' +
       '  </div>' +
       '</section>'
 
@@ -111,22 +118,23 @@
   }
 
   async function refresh(root) {
-    setStatus(root, '加载...', 'loading')
+    setStatus(root, t().qtaLoading, 'loading')
     try {
       const out = await api('GET', '')
       renderRows(root, out.quotas || [])
-      setStatus(root, '已加载 ' + (out.quotas?.length ?? 0) + ' 条', 'ok')
+      setStatus(root, t().qtaLoadedN(out.quotas?.length ?? 0), 'ok')
     } catch (err) {
-      setStatus(root, '加载失败:' + err.message, 'error')
+      setStatus(root, t().qtaLoadFailed(err.message), 'error')
       throw err
     }
   }
 
   function renderRows(root, quotas) {
+    const d = t()
     const tbody = $('#q-rows', root)
     if (!tbody) return
     if (quotas.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="8" class="q-empty">还没有配额。在下方表单新增。</td></tr>'
+      tbody.innerHTML = '<tr><td colspan="8" class="q-empty">' + escHtml(d.qtaEmpty) + '</td></tr>'
       return
     }
     tbody.innerHTML = quotas.map(function (q) {
@@ -136,9 +144,9 @@
       const stateLabel = q.state
       const sweepBehind = q.state !== q.lastState
       const sweepTip = sweepBehind
-        ? 'host sweep 还没跑到这个状态(实时:' + q.state + ' / 上次扫描:' + q.lastState + ');审计日志要等下次 sweep 才补上'
+        ? d.qtaSweepTip(q.state, q.lastState)
         : ''
-      const denomCell = q.quota === 0 ? '0 (禁用)' : String(q.quota)
+      const denomCell = q.quota === 0 ? d.qtaDisabledDenom : String(q.quota)
       const m = encodeURIComponent(q.metric)
       const p = encodeURIComponent(q.period)
       return (
@@ -153,13 +161,13 @@
         '  </div>' +
         '</td>' +
         '<td><span class="q-state q-state-' + stateLabel + '">' + escHtml(stateLabel) + '</span>' +
-        (sweepBehind ? ' <span class="q-state-stale" title="' + escHtml(sweepTip) + '">⚠ sweep stale</span>' : '') +
+        (sweepBehind ? ' <span class="q-state-stale" title="' + escHtml(sweepTip) + '">' + escHtml(d.qtaSweepStale) + '</span>' : '') +
         '</td>' +
         '<td>' + q.warnPct + '%</td>' +
         '<td class="q-time">' + escHtml(fmtTime(q.lastChecked)) + '</td>' +
         '<td>' +
-        '  <button type="button" data-act="edit" data-m="' + m + '" data-p="' + p + '">编辑</button>' +
-        '  <button type="button" data-act="del" data-m="' + m + '" data-p="' + p + '">删除</button>' +
+        '  <button type="button" data-act="edit" data-m="' + m + '" data-p="' + p + '">' + escHtml(d.qtaEditBtn) + '</button>' +
+        '  <button type="button" data-act="del" data-m="' + m + '" data-p="' + p + '">' + escHtml(d.qtaDelBtn) + '</button>' +
         '</td>' +
         '</tr>'
       )
@@ -185,14 +193,14 @@
         })
       } else if (act === 'del') {
         btn.addEventListener('click', function () {
-          if (!confirm('删除 ' + metric + ' / ' + period + ' 的配额?')) return
+          if (!confirm(t().qtaConfirmDelete(metric, period))) return
           api('DELETE', '/' + encodeURIComponent(metric) + '/' + period)
             .then(function () {
-              setStatus(root, '已删除', 'ok')
+              setStatus(root, t().qtaDeleted, 'ok')
               return refresh(root)
             })
             .catch(function (err) {
-              setStatus(root, '删除失败:' + err.message, 'error')
+              setStatus(root, t().qtaDeleteFailed(err.message), 'error')
             })
         })
       }
@@ -205,29 +213,29 @@
     const quotaStr = $('#q-form-quota', root).value
     const warnStr = $('#q-form-warn', root).value
     if (!metric) {
-      setStatus(root, 'metric 必填', 'error')
+      setStatus(root, t().qtaMetricRequired, 'error')
       return
     }
     const quota = Number(quotaStr)
     if (!Number.isFinite(quota) || !Number.isInteger(quota) || quota < 0) {
-      setStatus(root, 'quota 必须是非负整数', 'error')
+      setStatus(root, t().qtaQuotaInvalid, 'error')
       return
     }
     const body = { metric: metric, period: period, quota: quota }
     if (warnStr) {
       const warn = Number(warnStr)
       if (!Number.isFinite(warn) || !Number.isInteger(warn) || warn < 1 || warn > 99) {
-        setStatus(root, 'warnPct 必须是 1~99 的整数', 'error')
+        setStatus(root, t().qtaWarnPctInvalid, 'error')
         return
       }
       body.warnPct = warn
     }
     try {
       await api('POST', '', body)
-      setStatus(root, '已保存', 'ok')
+      setStatus(root, t().qtaSaved, 'ok')
       await refresh(root)
     } catch (err) {
-      setStatus(root, '保存失败:' + err.message, 'error')
+      setStatus(root, t().qtaSaveFailed(err.message), 'error')
     }
   }
 
@@ -251,6 +259,24 @@
     }).observe(document.body, {
       attributes: true,
       attributeFilter: ['data-active-tab'],
+    })
+    // Re-render on language switch — relabel the static shell while preserving
+    // any in-progress form input, then reload the rows when the tab is showing
+    // so the empty/state labels and sweep tips pick up the new dict too.
+    AH.onLangChange(function () {
+      const keep = {
+        metric: ($('#q-form-metric', root) || {}).value || '',
+        period: ($('#q-form-period', root) || {}).value || '',
+        quota: ($('#q-form-quota', root) || {}).value || '',
+        warn: ($('#q-form-warn', root) || {}).value || '',
+      }
+      buildUi(root)
+      const setVal = function (sel, v) { const el = $(sel, root); if (el) el.value = v }
+      setVal('#q-form-metric', keep.metric)
+      if (keep.period) setVal('#q-form-period', keep.period)
+      setVal('#q-form-quota', keep.quota)
+      setVal('#q-form-warn', keep.warn)
+      if (isActive()) refresh(root).catch(function () { /* setStatus reported it */ })
     })
     if (isActive()) {
       maybeRefresh(root).catch(function () { /* */ })
