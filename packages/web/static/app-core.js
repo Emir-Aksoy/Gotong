@@ -2,12 +2,18 @@
  *
  * "File-first" mindset extends to the browser: NO localStorage, NO
  * sessionStorage. The only state the browser keeps is HttpOnly cookies
- * set by the server (admin / worker session pointers, opaque to JS).
- * Everything else round-trips to the server and back.
+ * set by the server (admin / worker session pointers, opaque to JS) — plus
+ * one small NON-HttpOnly `lang` cookie this engine writes when the user
+ * toggles language (see below). Everything else round-trips to the server.
  *
- * Language preference defaults to the value the server returns in
- * /api/state.config.defaultLang; switching it is a per-tab, non-persistent
- * toggle. This is intentional.
+ * Language precedence (REL-9): explicit `lang` cookie (a prior toggle) >
+ * navigator.language (first-visit seed) > server /api/state.config.defaultLang
+ * (operator fallback) > 'zh'. The cookie persists the choice across reloads
+ * AND is honored by the standalone invite/offline pages (which read the same
+ * cookie without loading this engine), so a member's language choice follows
+ * them everywhere. Precedence is resolved entirely client-side — there is no
+ * SSR, so the client is the rendering authority and a server-side cookie read
+ * would be redundant.
  */
 (() => {
   const I18N = {
@@ -2933,15 +2939,48 @@
     },
   }
 
-  // The default lang comes from the server (space config.defaultLang); the
-  // toggle is per-tab and non-persistent.
-  let lang = 'zh'
+  // --- language precedence (REL-9) ---------------------------------------
+  // cookie (explicit toggle) > navigator.language (first-visit) >
+  // config.defaultLang (applied later via syncLangFromConfig) > 'zh'.
+  function readLangCookie() {
+    try {
+      const m = /(?:^|;\s*)lang=([^;]+)/.exec(document.cookie || '')
+      if (m) {
+        const v = decodeURIComponent(m[1]).toLowerCase()
+        if (v === 'zh' || v === 'en') return v
+      }
+    } catch (e) { /* no cookie access */ }
+    return null
+  }
+  function writeLangCookie(v) {
+    // Non-HttpOnly (JS-set) so it survives reloads and the standalone
+    // invite/offline pages read the same choice. Lax + 1-year; no Secure
+    // flag so it still works over plain http on localhost / self-host.
+    try {
+      document.cookie = 'lang=' + encodeURIComponent(v) + '; path=/; max-age=31536000; samesite=lax'
+    } catch (e) { /* */ }
+  }
+  function navigatorSeed() {
+    try {
+      const n = (navigator.language || navigator.userLanguage || '').toLowerCase()
+      if (!n) return null
+      return n.indexOf('zh') === 0 ? 'zh' : 'en'
+    } catch (e) { return null }
+  }
+
+  // Seed at module load: cookie, else browser language, else 'zh' (config
+  // from the server arrives later and only fills in when neither applies).
+  let lang = readLangCookie() || navigatorSeed() || 'zh'
   let t = I18N[lang]
 
-  function setLang(next) {
+  // persist=true writes the cookie (a deliberate user toggle); programmatic
+  // callers (syncLangFromConfig) leave it falsy so config never overwrites a
+  // real choice.
+  function setLang(next, persist) {
     if (next !== 'zh' && next !== 'en') return
     lang = next
     t = I18N[lang]
+    if (persist) writeLangCookie(lang)
     document.documentElement.setAttribute('lang', lang)
     applyStaticI18n()
     for (const fn of langSubscribers) {
@@ -3406,8 +3445,16 @@
     /**
      * Synchronise language with what the server says is the space default.
      * Pages call this once on boot after fetching /api/state.
+     *
+     * Precedence (REL-9): an explicit `lang` cookie or a navigator-language
+     * seed already decided things at module load, so config.defaultLang is
+     * an OPERATOR FALLBACK only — it applies solely when the visitor has
+     * neither a saved choice nor a recognisable browser language. We never
+     * persist here (persist omitted), so a config flip can't overwrite a
+     * member's real toggle on their next visit.
      */
     syncLangFromConfig(defaultLang) {
+      if (readLangCookie() || navigatorSeed()) return
       if (defaultLang === 'zh' || defaultLang === 'en') {
         if (defaultLang !== lang) setLang(defaultLang)
       }
@@ -3419,7 +3466,10 @@
     applyStaticI18n()
     const btn = $('lang-toggle')
     if (btn) {
-      btn.addEventListener('click', () => setLang(lang === 'zh' ? 'en' : 'zh'))
+      // persist=true: a deliberate toggle writes the `lang` cookie so the
+      // choice survives reloads and follows the member to the standalone
+      // invite/offline pages (which read the same cookie).
+      btn.addEventListener('click', () => setLang(lang === 'zh' ? 'en' : 'zh', true))
     }
   })
 })()

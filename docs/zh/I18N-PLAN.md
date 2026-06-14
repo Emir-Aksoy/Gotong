@@ -94,3 +94,31 @@ i18n 引擎已经存在，住在 [`packages/web/static/app-core.js`](../../packa
 ## 六、顺序
 
 REL-7（成员 SPA，用户首屏，优先）→ REL-8（admin，按用户面优先级：登录/核心 chrome → 企业/联邦深面板）→ REL-9（检测 + cookie + 收口验证）→ REL-10（发布动作清单）。一文件一小 commit。
+
+## 七、REL-9 收口实况（已落地）
+
+§四 的检测/切换决策落地了，但**实现位置比 §四 草稿更纯**：§四 设想「服务器 boot 时读 `lang` cookie 优先于 `config.defaultLang`」，实际**全部在客户端裁决**——本项目**没有 SSR**（`app.html` 是静态壳，渲染权在浏览器里的 `app-core.js`），让服务器读 cookie 再回吐是多余的一跳。优先级在 `app-core.js` 模块加载期一次算清。
+
+**优先级（客户端权威）**：`lang` cookie（显式 toggle，持久）> `navigator.language`（首访种子）> `config.defaultLang`（运营兜底，仅前两者都缺时生效）> `'zh'`。
+
+**四处代码改动**（`packages/web/static/app-core.js`，admin.js 逐字节不变）：
+
+1. `readLangCookie()` / `writeLangCookie(v)` / `navigatorSeed()` 三个纯辅助 + `let lang = readLangCookie() || navigatorSeed() || 'zh'` 取代旧的 `let lang = 'zh'`。
+2. `setLang(next, persist)` 加 `persist` 形参——`persist===true` 才写 cookie（`path=/; max-age=31536000; samesite=lax`，无 `Secure` 让 localhost/自托管的纯 http 也工作）。
+3. toggle 点击 handler 传 `persist=true`（刻意 toggle 才落 cookie）。
+4. `syncLangFromConfig(defaultLang)` 开头加 `if (readLangCookie() || navigatorSeed()) return`——config 仅当**既无 cookie 又无可识别浏览器语言**时才应用，且**永不持久化**（config flip 翻不掉成员的真实选择）。
+
+**跨表面一致**：独立的 invite/offline/worker 页（REL-8e）读的是**同一个** `lang` cookie（同款正则，`decodeURIComponent` + 小写），故成员的语言选择跟着他们走遍所有页面。cookie 值由 `encodeURIComponent('zh'|'en')` 写、`decodeURIComponent` 读，两端格式一致。
+
+**PWA 缓存**：`sw.js` 的 `CACHE` 从 `aipehub-shell-v1` → `v2`。精简壳（`app-core.js`/`app.js`/`offline.html`）现内嵌完整双语引擎 + cookie 优先级；bump 让返客越过 stale-while-revalidate 窗口，在下一次 activate 就拿到新语言机制，而非晚一个 load。
+
+**验证结果**：
+- `lang` 优先级 11/11 用例过（直接驱动 `app-core.js` 里**真实**的 `readLangCookie`/`navigatorSeed`/`setLang`/`syncLangFromConfig`，mock `document.cookie`+`navigator.language`：cookie 压一切 / nav 压 config / config 仅兜底 / toggle 写 cookie / config 不写 cookie）。
+- i18n parity：`zh = 1290  en = 1290`，PARITY OK；app.html `data-i18n*` refcheck 274 个引用两侧全解析，无 MISSING。
+- 英文模式残留中文扫描：`en` 字典 1463 行里仅 2 处 CJK——`langButton: '中'` / `langTitle: '切换到中文'`，**刻意**（toggle 永远以目标语言的字形显示「切到那门语言」），非漏译。
+- `admin.js` 逐字节不变（`git hash-object` = `2bff187ae65b7f022f236e599865e3096e428378`，build 前后一致）。
+- `pnpm -C packages/web test` → 900 passed（61 files），零回归（含 PWA 测试，未断言旧 cache 名字面量）。
+
+> 对 app-core.js 头注释「NO localStorage」立场的最小让步如 §四 所述兑现：写的是非 HttpOnly `lang` cookie（≠ localStorage，且头注释已更新说明这一个 cookie 的用途与优先级）。
+
+**REL-9 完。** 剩 REL-10（发布动作清单 + 最终「上公开 + 打 1.0 tag」确认点，属用户动作）。
