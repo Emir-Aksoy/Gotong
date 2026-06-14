@@ -410,6 +410,12 @@
     await loadMyOwnAgents()
     await loadMyCredentials()
     bindOnce(document.getElementById('me-dispatch-btn'), 'click', submitDispatch)
+    // SW-M7 — the hub steward ("管家"): one chat box drives plan → preview →
+    // apply. The send button asks for a proposal; clicks inside the output area
+    // (apply / submit-for-approval / go-to-inbox) are delegated since the cards
+    // are re-rendered, but #me-steward-output is stable.
+    bindOnce(document.getElementById('me-steward-send'), 'click', submitStewardPlan)
+    bindOnce(document.getElementById('me-steward-output'), 'click', onStewardOutputClick)
     // WFEDIT-M4 — open the NL editor for the currently-selected workflow.
     bindOnce(document.getElementById('me-wf-edit-load-btn'), 'click', loadWorkflowEditor)
     bindOnce(document.getElementById('me-refresh-reports-btn'), 'click', loadMyReports)
@@ -991,6 +997,248 @@
     }
     if (code && byCode[code]) return byCode[code]
     return t('meOpFailedHttp', httpStatus)
+  }
+
+  // ===== SW-M7 — hub steward ("管家") chat panel =============================
+  //
+  // A member describes what they want; the steward PROPOSES classified actions
+  // (the host LLM call + server-side tiering). Each action is previewed with a
+  // tier badge, then the member applies it: a SAFE action runs inline, a
+  // DANGEROUS (delete) / CROSS-HUB workflow edit is parked in the inbox for a
+  // second confirmation (the user's two hard constraints — enforced server-side;
+  // this panel only previews + drives plan/apply). The tier the client shows is
+  // advisory UI; `apply` re-derives it server-side and never trusts the client.
+
+  // The classified actions from the LAST plan, indexed so an apply click can
+  // forward the chosen action VERBATIM to the server (which re-validates it).
+  let stewardActions = []
+  // This steward conversation (client-held; the hub stores nothing between
+  // requests). Sent with each plan so follow-ups like "再简单点" resolve.
+  let stewardChat = []
+
+  async function submitStewardPlan() {
+    const input = document.getElementById('me-steward-input')
+    const status = document.getElementById('me-steward-status')
+    const output = document.getElementById('me-steward-output')
+    if (!input || !status || !output) return
+    const instruction = (input.value || '').trim()
+    if (!instruction) {
+      status.className = 'me-status error'
+      status.textContent = t('meStewardEmptyInput')
+      return
+    }
+    status.className = 'me-status'
+    status.textContent = t('meStewardThinking')
+    try {
+      const r = await fetch('/api/me/steward/plan', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ instruction, history: stewardChat.slice(-12) }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || !j || typeof j !== 'object' || !Array.isArray(j.actions)) {
+        status.className = 'me-status error'
+        status.textContent = (j && (j.error || j.message)) || t('meOpFailedHttp', r.status)
+        return
+      }
+      status.className = 'me-status'
+      status.textContent = ''
+      // Multi-step memory: record the turn so the next instruction can refer back.
+      stewardChat.push({ role: 'user', content: instruction })
+      if (j.reply) stewardChat.push({ role: 'assistant', content: String(j.reply) })
+      input.value = ''
+      renderStewardProposal(j)
+    } catch (err) {
+      status.className = 'me-status error'
+      status.textContent = t('meStewardPlanFailed', err?.message || err)
+    }
+  }
+
+  // Render the steward's reply + one card per proposed action. `stewardActions`
+  // is replaced so the apply handler reads the actions THIS proposal carried.
+  function renderStewardProposal(j) {
+    const out = document.getElementById('me-steward-output')
+    if (!out) return
+    stewardActions = Array.isArray(j.actions) ? j.actions : []
+    const reply = j && j.reply ? `<div class="me-steward-reply">${escape(String(j.reply))}</div>` : ''
+    const cards = stewardActions.map((ca, idx) => stewardActionCard(ca, idx)).join('')
+    const note = stewardActions.length === 0 ? `<p class="me-meta">${t('meStewardNoActions')}</p>` : ''
+    out.innerHTML = reply + cards + note
+  }
+
+  // One proposed action as a card. `inspect` is a read-only answer (no button);
+  // `refuse` / forbidden is a grey out-of-scope note (no button); everything else
+  // gets an apply button labelled by tier (safe → 执行 / gated → 提交审批).
+  function stewardActionCard(ca, idx) {
+    const action = (ca && ca.action) || {}
+    const kind = action.kind
+    const tier = (ca && ca.tier) || 'safe'
+    const summary = (ca && ca.summary) || ''
+    if (kind === 'inspect') {
+      return `<div class="me-steward-card inspect"><div class="me-steward-answer">${escape(String(action.answer || summary))}</div></div>`
+    }
+    if (kind === 'refuse' || tier === 'forbidden') {
+      const reason = String(action.reason || summary)
+      return (
+        `<div class="me-steward-card forbidden">${stewardTierBadge('forbidden')}` +
+        `<div class="me-steward-summary">${escape(t('meStewardForbiddenNote'))}${escape(reason)}</div></div>`
+      )
+    }
+    const gated = tier === 'dangerous' || tier === 'cross_hub'
+    const label = gated ? t('meStewardSubmitApproval') : t('meStewardApply')
+    return (
+      `<div class="me-steward-card" data-idx="${idx}">` +
+      stewardTierBadge(tier) +
+      `<div class="me-steward-summary">${escape(summary)}</div>` +
+      `<button type="button" class="me-primary-btn me-steward-apply-btn" data-idx="${idx}">${escape(label)}</button>` +
+      `<div class="me-steward-result"></div></div>`
+    )
+  }
+
+  function stewardTierBadge(tier) {
+    const map = {
+      safe: ['safe', t('meStewardTierSafe')],
+      dangerous: ['dangerous', t('meStewardTierDangerous')],
+      cross_hub: ['cross-hub', t('meStewardTierCrossHub')],
+      forbidden: ['forbidden', t('meStewardTierForbidden')],
+    }
+    const pair = map[tier] || map.safe
+    return `<span class="me-steward-tier ${pair[0]}">${escape(pair[1])}</span>`
+  }
+
+  // Delegated: an apply/submit button inside a card, or a go-to-inbox link.
+  function onStewardOutputClick(ev) {
+    const applyBtn = ev.target.closest && ev.target.closest('.me-steward-apply-btn')
+    if (applyBtn) {
+      applyStewardAction(applyBtn)
+      return
+    }
+    const inboxBtn = ev.target.closest && ev.target.closest('.me-steward-goto-inbox')
+    if (inboxBtn) gotoMyInbox()
+  }
+
+  async function applyStewardAction(btn) {
+    const idx = Number(btn.dataset.idx)
+    const ca = stewardActions[idx]
+    if (!ca || !ca.action) return
+    const card = btn.closest('.me-steward-card')
+    const resultEl = card && card.querySelector('.me-steward-result')
+    const prev = btn.textContent
+    btn.disabled = true
+    btn.textContent = t('meStewardApplying')
+    try {
+      const r = await fetch('/api/me/steward/apply', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        // The action is forwarded VERBATIM — the server re-validates + re-tiers it.
+        body: JSON.stringify({ action: ca.action }),
+      })
+      const j = await r.json().catch(() => ({}))
+      renderStewardResult(resultEl, btn, r, j)
+    } catch (err) {
+      if (resultEl) {
+        resultEl.className = 'me-steward-result error'
+        resultEl.textContent = t('meStewardApplyFailed', err?.message || err)
+      }
+      btn.disabled = false
+      btn.textContent = prev
+    }
+  }
+
+  // Render the outcome of an apply into the card, and retire the button on a
+  // terminal result (done / parked / refused) so it can't be double-fired. An
+  // `invalid` / transport error leaves the button live to retry.
+  function renderStewardResult(resultEl, btn, r, j) {
+    if (!resultEl) return
+    const status = j && j.status
+    if (r.ok && status === 'done') {
+      const res = (j && j.result) || {}
+      if (res.kind === 'create_agent' || res.kind === 'edit_agent') {
+        resultEl.className = 'me-steward-result ok'
+        const label = (res.agent && (res.agent.label || res.agent.id)) || ''
+        resultEl.textContent =
+          res.kind === 'create_agent' ? t('meStewardCreated', label) : t('meStewardEditedAgent', label)
+        btn.remove()
+        loadMyOwnAgents() // the new/changed helper shows up below
+      } else if (res.kind === 'edit_workflow') {
+        renderStewardWorkflowEdit(resultEl, res.edit)
+        btn.remove()
+      } else {
+        resultEl.className = 'me-steward-result ok'
+        resultEl.textContent = t('meStewardDone')
+        btn.remove()
+      }
+      return
+    }
+    if (status === 'pending_approval') {
+      resultEl.className = 'me-steward-result pending'
+      resultEl.innerHTML =
+        `${escape(t('meStewardPending'))} ` +
+        `<button type="button" class="me-secondary-btn me-steward-goto-inbox">${escape(t('meStewardGoInbox'))}</button>`
+      btn.remove()
+      loadMyInbox() // refresh the inbox badge so the parked item is visible
+      return
+    }
+    if (status === 'needs_approval') {
+      resultEl.className = 'me-steward-result pending'
+      resultEl.textContent = t('meStewardNeedsApproval')
+      btn.remove()
+      return
+    }
+    if (status === 'refused') {
+      resultEl.className = 'me-steward-result error'
+      resultEl.textContent = (j && j.reason) || t('meStewardForbiddenNote')
+      btn.remove()
+      return
+    }
+    // `invalid` (HTTP 400) or any {error}/{message} failure — keep the button live.
+    resultEl.className = 'me-steward-result error'
+    resultEl.textContent =
+      (status === 'invalid' && j && j.reason) || (j && (j.error || j.message)) || t('meOpFailedHttp', r.status)
+    btn.disabled = false
+    btn.textContent =
+      stewardActions[Number(btn.dataset.idx)] &&
+      (stewardActions[Number(btn.dataset.idx)].tier === 'dangerous' ||
+        stewardActions[Number(btn.dataset.idx)].tier === 'cross_hub')
+        ? t('meStewardSubmitApproval')
+        : t('meStewardApply')
+  }
+
+  // An `edit_workflow` outcome reuses the WFEDIT row diff. A locally-safe edit
+  // can still come back `ok === false` (the assistant failed / boundary locked) —
+  // an honest outcome, surfaced with the reason + any violations.
+  function renderStewardWorkflowEdit(resultEl, edit) {
+    if (!edit) {
+      resultEl.className = 'me-steward-result ok'
+      resultEl.textContent = t('meStewardDone')
+      return
+    }
+    if (edit.ok === false) {
+      resultEl.className = 'me-steward-result error'
+      let html = escape(String(edit.message || edit.detail || t('meWfErrAssistantFailed')))
+      const violations = Array.isArray(edit.violations)
+        ? edit.violations.map((v) => (v && (v.detail || v.kind)) || '').filter(Boolean)
+        : []
+      if (violations.length) html += '<ul>' + violations.map((v) => `<li>${escape(v)}</li>`).join('') + '</ul>'
+      resultEl.innerHTML = html
+      return
+    }
+    resultEl.className = 'me-steward-result ok'
+    const applied = edit.applied === 'published' ? t('meWfEditPublished') : t('meWfEditDraftSaved')
+    let html = `<div>${escape(t('meStewardWorkflowEdited', applied, edit.explanation || ''))}</div>`
+    if (Array.isArray(edit.diff) && edit.diff.some((l) => l && (l.kind === 'add' || l.kind === 'del'))) {
+      html += `<div class="me-wf-diff-rows">${renderDiffRows(edit.diff)}</div>`
+    }
+    resultEl.innerHTML = html
+  }
+
+  // Scroll the member to the inbox panel (same home tab) + refresh it, so a
+  // parked steward action is one click from the second confirmation.
+  function gotoMyInbox() {
+    if (window.AipeHub && typeof window.AipeHub.gotoTab === 'function') window.AipeHub.gotoTab('home')
+    const inbox = document.querySelector('.me-inbox')
+    if (inbox && inbox.scrollIntoView) inbox.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    loadMyInbox()
   }
 
   // Upload a file-type field's selected file to /api/me/uploads and stash the

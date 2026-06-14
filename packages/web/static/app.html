@@ -152,6 +152,23 @@
         <div id="me-info" class="meta-line"></div>
       </div>
 
+      <!-- SW-M7 — the hub steward ("管家"). An OpenClaw-style chat front door:
+           a member describes what they want in plain language; the steward
+           PROPOSES classified actions (build/edit an agent, change a workflow).
+           The member previews each, then applies it. Safe actions run inline;
+           DANGEROUS (delete) + CROSS-HUB workflow edits need a SECOND
+           confirmation — they're parked in the 待处理任务 inbox below (the
+           user's two hard constraints). The tier + execution are decided
+           SERVER-SIDE; this panel only previews + drives plan/apply. -->
+      <div class="me-steward">
+        <h2 data-i18n="meStewardTitle">管家</h2>
+        <p class="me-meta" data-i18n="meStewardHint">用大白话跟管家说你想做什么 — 它能帮你搭 / 改自己的 AI 助手,或按你的说法改你的工作流。管家只会「提议」,你预览后再决定执行;删除助手、跨 hub 的工作流改动会送到下面「待处理任务」里让你再确认一次。</p>
+        <textarea id="me-steward-input" rows="3" data-i18n-placeholder="meStewardPlaceholder" placeholder="例如:帮我建一个把每天工单总结成一段中文的助手"></textarea>
+        <button id="me-steward-send" type="button" class="me-primary-btn" data-i18n="meStewardSend">问管家</button>
+        <div id="me-steward-status" class="me-status"></div>
+        <div id="me-steward-output" class="me-steward-output"></div>
+      </div>
+
       <div class="me-dispatch">
         <h2 data-i18n="meDispatchTitle">触发新一次工作流</h2>
         <p class="me-meta" data-i18n="meDispatchHint">你只能为自己发起:归属字段由系统自动绑定到你的 userId,你看不到也改不了 — 不同用户的记录互不可见。</p>

@@ -2109,7 +2109,7 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   max-width: 48rem;
   padding: 1rem 1.25rem 1.5rem;
 }
-.me-whoami, .me-dispatch, .me-runs, .me-inbox, .me-reports, .me-agents, .settings-actions, .settings-form {
+.me-whoami, .me-steward, .me-dispatch, .me-runs, .me-inbox, .me-reports, .me-agents, .settings-actions, .settings-form {
   margin-bottom: 1.5rem;
 }
 #home-panel h2, #settings-panel h2 {
@@ -2236,6 +2236,36 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   margin: 0; padding: 0.45rem 0.55rem; max-height: 14rem; overflow: auto;
   font-size: 0.76rem; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
 }
+/* SW-M7 — hub steward ("管家") chat panel: reply + per-action proposal cards
+   with a tier badge (safe green / dangerous red / cross-hub amber / forbidden
+   grey). The tier colour echoes the existing run-status / wf-edit palette. */
+.me-steward-output { margin-top: 0.6rem; display: flex; flex-direction: column; gap: 0.6rem; }
+.me-steward-reply { white-space: pre-wrap; color: #333; font-size: 0.92rem; line-height: 1.5; }
+.me-steward-card {
+  border: 1px solid #e2e2e2; border-left: 3px solid #1f6feb;
+  border-radius: 6px; padding: 0.6rem 0.8rem; background: #fafbfc;
+}
+.me-steward-card.inspect { border-left-color: #888; }
+.me-steward-card.forbidden { border-left-color: #999; background: #f6f6f6; }
+.me-steward-answer { white-space: pre-wrap; color: #333; font-size: 0.9rem; line-height: 1.5; }
+.me-steward-summary { margin: 0.1rem 0 0; color: #333; font-size: 0.9rem; }
+.me-steward-tier {
+  display: inline-block; padding: 0.05rem 0.5rem; font-size: 0.74rem; line-height: 1.6;
+  border-radius: 999px; color: #fff; background: #888; margin-bottom: 0.35rem;
+}
+.me-steward-tier.safe { background: #27ae60; }
+.me-steward-tier.dangerous { background: #c0392b; }
+.me-steward-tier.cross-hub { background: #d29922; }
+.me-steward-tier.forbidden { background: #999; }
+.me-steward-card .me-primary-btn { margin-top: 0.4rem; }
+.me-steward-result { margin-top: 0.45rem; font-size: 0.88rem; min-height: 0; }
+.me-steward-result:empty { display: none; }
+.me-steward-result.ok { color: #1d6a3a; }
+.me-steward-result.error { color: #c0392b; }
+.me-steward-result.pending { color: #7a4b00; }
+.me-steward-result ul { margin: 0.3rem 0 0; padding-left: 1.2rem; }
+.me-steward-result .me-wf-diff-rows { margin-top: 0.4rem; }
+.me-steward-result .me-secondary-btn { margin-top: 0.3rem; margin-left: 0.4rem; }
 /* Phase 19 P1-M5 — member recent runs (status pill) + my AI helpers + uploader */
 .me-run-status {
   display: inline-block; padding: 0 0.5em; font-size: 0.78rem; line-height: 1.7;
