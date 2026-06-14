@@ -22,6 +22,12 @@
 ;(function () {
   'use strict'
 
+  // i18n — read the live dict off window.AipeHub at call time (app-core.js runs
+  // synchronously before this panel is injected, so AipeHub is always defined).
+  // `t()` returns the current-language dict; re-render on language change.
+  const AH = window.AipeHub
+  function t() { return AH.t }
+
   const API_BASE = '/api/admin/identity'
   const ROLES = ['owner', 'admin', 'member', 'viewer']
   // Owner is intentionally NOT here — the store refuses owner invites
@@ -73,7 +79,7 @@
       '',
       body,
       '',
-      '要继续,请输入: ' + phrase,
+      t().idnConfirmPrompt(phrase),
     ]
     const typed = prompt(lines.join('\n'))
     if (typed == null) return false
@@ -122,24 +128,24 @@
     if (!meEl) return
     try {
       const me = await api('GET', '/me')
-      const who = me.user ? me.user.email : '(v3 admin · 无 v4 user 绑定)'
+      const who = me.user ? me.user.email : t().idnNoV4Binding
       const display = me.user && me.user.displayName ? ' / ' + me.user.displayName : ''
-      meEl.textContent = '当前: ' + who + display + ' · 角色 ' + me.role + ' · 来源 ' + me.authSource
+      meEl.textContent = t().idnMeLine(who, display, me.role, me.authSource)
     } catch (err) {
-      meEl.textContent = '无法读取当前用户: ' + err.message
+      meEl.textContent = t().idnMeReadFailed(err.message)
     }
   }
 
   async function refreshUsers() {
     const tbody = $('#id-users-tbody')
     if (!tbody) return
-    tbody.innerHTML = '<tr><td colspan="6">载入中…</td></tr>'
+    tbody.innerHTML = '<tr><td colspan="6">' + escHtml(t().idnLoading) + '</td></tr>'
     try {
       const data = await api('GET', '/users')
       renderUserRows(tbody, data.users || [])
     } catch (err) {
       tbody.innerHTML = ''
-      setStatus('用户列表加载失败: ' + err.message, true)
+      setStatus(t().idnUsersLoadFailed(err.message), true)
     }
   }
 
@@ -148,7 +154,7 @@
   async function refreshAudit() {
     const tbody = $('#id-audit-tbody')
     if (!tbody) return
-    tbody.innerHTML = '<tr><td colspan="6">载入中…</td></tr>'
+    tbody.innerHTML = '<tr><td colspan="6">' + escHtml(t().idnLoading) + '</td></tr>'
     try {
       const params = new URLSearchParams()
       const limit = $('#id-audit-limit')
@@ -163,7 +169,7 @@
       renderAuditRows(tbody, entries)
     } catch (err) {
       tbody.innerHTML = ''
-      setStatus('审计日志加载失败: ' + err.message, true)
+      setStatus(t().idnAuditLoadFailed(err.message), true)
     }
   }
 
@@ -171,7 +177,7 @@
     tbody.innerHTML = ''
     if (entries.length === 0) {
       tbody.innerHTML =
-        '<tr><td colspan="6" style="text-align:center;color:#888;padding:1rem;">没有匹配的审计记录</td></tr>'
+        '<tr><td colspan="6" style="text-align:center;color:#888;padding:1rem;">' + escHtml(t().idnAuditEmpty) + '</td></tr>'
       return
     }
     for (const e of entries) {
@@ -212,7 +218,7 @@
   function renderUserRows(tbody, items) {
     tbody.innerHTML = ''
     if (items.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;padding:1rem;">还没有用户</td></tr>'
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#888;padding:1rem;">' + escHtml(t().idnUsersEmpty) + '</td></tr>'
       return
     }
     for (const item of items) {
@@ -241,9 +247,9 @@
         escHtml(fmtTime(u.lastLoginAt)) +
         '</td>' +
         '<td class="id-actions">' +
-        '<button type="button" data-act="creds" title="查看 / 撤销凭证">凭证</button>' +
-        '<button type="button" data-act="pw" title="改密码">改密码</button>' +
-        '<button type="button" data-act="key" title="发放 API key">发 API key</button>' +
+        '<button type="button" data-act="creds" title="' + escHtml(t().idnBtnCredsTitle) + '">' + escHtml(t().idnBtnCreds) + '</button>' +
+        '<button type="button" data-act="pw" title="' + escHtml(t().idnBtnPwTitle) + '">' + escHtml(t().idnBtnPw) + '</button>' +
+        '<button type="button" data-act="key" title="' + escHtml(t().idnBtnKeyTitle) + '">' + escHtml(t().idnBtnKey) + '</button>' +
         '</td>'
       tbody.appendChild(tr)
     }
@@ -268,14 +274,13 @@
           // not a casual click.
           if (newRole === 'owner' && originalRole !== 'owner') {
             const ok = confirmDanger(
-              '⚠ 授予 owner 角色',
-              '将会授予完整管理权 (可创建/删除用户、撤销凭证、修改任意用户密码)。\n' +
-                '该操作会写入审计日志,但不会自动告警。',
+              t().idnGrantOwnerTitle,
+              t().idnGrantOwnerBody,
               'GRANT OWNER',
             )
             if (!ok) {
               sel.value = originalRole
-              setStatus('已取消 owner 授予', false)
+              setStatus(t().idnGrantOwnerCancelled, false)
               return
             }
           }
@@ -283,31 +288,31 @@
             await api('PATCH', '/users/' + encodeURIComponent(userId), {
               role: newRole,
             })
-            setStatus('角色已更新为 ' + newRole)
+            setStatus(t().idnRoleUpdated(newRole))
           } catch (err) {
             // Revert dropdown on backend rejection (e.g. last-owner protection)
             sel.value = originalRole
-            setStatus('改角色失败: ' + err.message, true)
+            setStatus(t().idnRoleUpdateFailed(err.message), true)
           }
         })
       }
       const pwBtn = $('button[data-act="pw"]', tr)
       if (pwBtn) {
         pwBtn.addEventListener('click', async function () {
-          const pw = prompt('新密码 (至少 8 个字符):')
+          const pw = prompt(t().idnPwPrompt)
           if (pw == null) return
           try {
             await api('PATCH', '/users/' + encodeURIComponent(userId), { password: pw })
-            setStatus('密码已更新')
+            setStatus(t().idnPwUpdated)
           } catch (err) {
-            setStatus('改密码失败: ' + err.message, true)
+            setStatus(t().idnPwUpdateFailed(err.message), true)
           }
         })
       }
       const keyBtn = $('button[data-act="key"]', tr)
       if (keyBtn) {
         keyBtn.addEventListener('click', async function () {
-          const label = prompt('API key 标签 (可选,便于以后识别):')
+          const label = prompt(t().idnKeyLabelPrompt)
           if (label === null) return
           try {
             const body = label ? { label: label } : {}
@@ -316,12 +321,12 @@
             // a fancy modal would risk getting dismissed by an accidental
             // background click and the key would be irrecoverable.
             window.prompt(
-              'API key 仅显示一次,请立即复制保存 (Ctrl/Cmd+C):',
+              t().idnKeyShowOnce,
               out.key,
             )
-            setStatus('已发放 API key, credentialId=' + out.credentialId)
+            setStatus(t().idnKeyIssued(out.credentialId))
           } catch (err) {
-            setStatus('发 API key 失败: ' + err.message, true)
+            setStatus(t().idnKeyIssueFailed(err.message), true)
           }
         })
       }
@@ -332,23 +337,23 @@
             const out = await api('GET', '/users/' + encodeURIComponent(userId) + '/credentials')
             const creds = out.credentials || []
             if (creds.length === 0) {
-              alert('该用户没有任何凭证')
+              alert(t().idnNoCreds)
               return
             }
             const lines = creds.map(function (c) {
               const label =
                 c.label ||
-                (c.kind === 'password' ? c.identifier : '(' + c.kind + ' 凭证)') ||
+                (c.kind === 'password' ? c.identifier : t().idnCredKindLabel(c.kind)) ||
                 c.id
               return c.id + ' · ' + c.kind + ' · ' + label + ' · created ' + fmtTime(c.createdAt)
             })
             const toRevoke = prompt(
-              '凭证列表 (输入要撤销的 credential id, 留空取消):\n\n' + lines.join('\n'),
+              t().idnCredListPrompt + lines.join('\n'),
             )
             if (!toRevoke) return
             const target = creds.find(function (c) { return c.id === toRevoke })
             if (!target) {
-              setStatus('未找到匹配的 credential id', true)
+              setStatus(t().idnCredNotFound, true)
               return
             }
             // V4-AUDIT-09: revoking a `password` credential locks that
@@ -358,22 +363,21 @@
             // key), so the lighter native confirm is enough.
             if (target.kind === 'password') {
               const ok = confirmDanger(
-                '⚠ 撤销 password 凭证',
-                '该用户将立即无法用密码登录 (' + (target.identifier || target.id) + ').\n' +
-                  '该用户需 owner 重新设置密码或发放 token 才能恢复访问。',
+                t().idnRevokePwTitle,
+                t().idnRevokePwBody(target.identifier || target.id),
                 'REVOKE PASSWORD',
               )
               if (!ok) {
-                setStatus('已取消撤销密码凭证', false)
+                setStatus(t().idnRevokePwCancelled, false)
                 return
               }
             } else {
-              if (!confirm('确认撤销 ' + target.kind + ' 凭证 ' + toRevoke + '?')) return
+              if (!confirm(t().idnConfirmRevokeCred(target.kind, toRevoke))) return
             }
             await api('DELETE', '/credentials/' + encodeURIComponent(toRevoke))
-            setStatus('credential 已撤销')
+            setStatus(t().idnCredRevoked)
           } catch (err) {
-            setStatus('凭证操作失败: ' + err.message, true)
+            setStatus(t().idnCredOpFailed(err.message), true)
           }
         })
       }
@@ -401,7 +405,7 @@
   async function refreshInvites() {
     const tbody = $('#id-invites-tbody')
     if (!tbody) return
-    tbody.innerHTML = '<tr><td colspan="6">载入中…</td></tr>'
+    tbody.innerHTML = '<tr><td colspan="6">' + escHtml(t().idnLoading) + '</td></tr>'
     try {
       const params = new URLSearchParams()
       const status = $('#id-invites-status')
@@ -411,7 +415,7 @@
       renderInviteRows(tbody, (data && data.invitations) || [])
     } catch (err) {
       tbody.innerHTML = ''
-      setStatus('邀请列表加载失败: ' + err.message, true)
+      setStatus(t().idnInvitesLoadFailed(err.message), true)
     }
   }
 
@@ -419,7 +423,7 @@
     tbody.innerHTML = ''
     if (items.length === 0) {
       tbody.innerHTML =
-        '<tr><td colspan="6" style="text-align:center;color:#888;padding:1rem;">没有匹配的邀请</td></tr>'
+        '<tr><td colspan="6" style="text-align:center;color:#888;padding:1rem;">' + escHtml(t().idnInvitesEmpty) + '</td></tr>'
       return
     }
     for (const inv of items) {
@@ -442,7 +446,7 @@
       // click; the column then shows '—'.
       const canRevoke = inv.status === 'pending' || inv.status === 'expired'
       const actionCell = canRevoke
-        ? '<button type="button" data-act="revoke" title="撤销邀请">撤销</button>'
+        ? '<button type="button" data-act="revoke" title="' + escHtml(t().idnBtnRevokeTitle) + '">' + escHtml(t().idnBtnRevoke) + '</button>'
         : '—'
       tr.innerHTML =
         '<td>' + escHtml(inv.email) + '</td>' +
@@ -464,13 +468,13 @@
       const btn = $('button[data-act="revoke"]', tr)
       if (!btn) return
       btn.addEventListener('click', async function () {
-        if (!confirm('撤销给 ' + invEmail + ' 的邀请?')) return
+        if (!confirm(t().idnConfirmRevokeInvite(invEmail))) return
         try {
           await api('DELETE', '/invites/' + encodeURIComponent(invId))
-          setStatus('邀请已撤销')
+          setStatus(t().idnInviteRevoked)
           await refreshInvites()
         } catch (err) {
-          setStatus('撤销失败: ' + err.message, true)
+          setStatus(t().idnInviteRevokeFailed(err.message), true)
         }
       })
     })
@@ -481,14 +485,14 @@
     const form = e.target
     const email = (form.email.value || '').trim()
     if (!email) {
-      setStatus('email 必填', true)
+      setStatus(t().idnEmailRequired, true)
       return
     }
     const role = form.role.value || 'member'
     const ttlHoursRaw = form.ttlHours.value
     const ttlHours = ttlHoursRaw ? Number(ttlHoursRaw) : 24
     if (!Number.isFinite(ttlHours) || ttlHours <= 0) {
-      setStatus('TTL 必须是正数小时', true)
+      setStatus(t().idnTtlPositive, true)
       return
     }
     const body = {
@@ -505,12 +509,10 @@
       // prompt's auto-select lets the operator hit Ctrl/Cmd+C
       // immediately, no clicking around to highlight.
       window.prompt(
-        '邀请链接仅显示一次,请立即复制后通过私密渠道(Signal/1Password/纸条)发给 ' +
-          email +
-          '。\n\n链接 24 小时内 (或你设置的 TTL) 有效,点击后由受邀人设置自己的密码。',
+        t().idnInviteShowOnce(email),
         url,
       )
-      setStatus('已为 ' + email + ' 创建邀请')
+      setStatus(t().idnInviteCreated(email))
       form.reset()
       // Set the TTL input back to the default after reset (form.reset
       // clears even the default value attribute on type=number).
@@ -518,7 +520,7 @@
       if (ttlInput) ttlInput.value = '24'
       await refreshInvites()
     } catch (err) {
-      setStatus('创建邀请失败: ' + err.message, true)
+      setStatus(t().idnInviteCreateFailed(err.message), true)
     }
   }
 
@@ -527,7 +529,7 @@
     const form = e.target
     const email = (form.email.value || '').trim()
     if (!email) {
-      setStatus('email 必填', true)
+      setStatus(t().idnEmailRequired, true)
       return
     }
     const body = { email: email, role: form.role.value || 'member' }
@@ -536,13 +538,12 @@
     // a typed confirmation, same standard as the role-change path.
     if (body.role === 'owner') {
       const ok = confirmDanger(
-        '⚠ 创建新 owner 用户',
-        '将创建一个拥有完整管理权的用户: ' + email + '\n' +
-          '该用户可创建/删除任意用户、撤销凭证、修改任意密码。',
+        t().idnCreateOwnerTitle,
+        t().idnCreateOwnerBody(email),
         'CREATE OWNER',
       )
       if (!ok) {
-        setStatus('已取消创建 owner', false)
+        setStatus(t().idnCreateOwnerCancelled, false)
         return
       }
     }
@@ -552,11 +553,11 @@
     if (pw) body.password = pw
     try {
       const out = await api('POST', '/users', body)
-      setStatus('用户 ' + (out.user && out.user.email) + ' 已创建')
+      setStatus(t().idnUserCreated(out.user && out.user.email))
       form.reset()
       await refreshUsers()
     } catch (err) {
-      setStatus('创建用户失败: ' + err.message, true)
+      setStatus(t().idnUserCreateFailed(err.message), true)
     }
   }
 
@@ -567,51 +568,51 @@
     }).join('')
     root.innerHTML =
       '<div style="padding:1rem;max-width:64rem;">' +
-      '<h2 style="margin-top:0;">用户管理 / Users</h2>' +
+      '<h2 style="margin-top:0;">' + escHtml(t().idnHeading) + '</h2>' +
       '<div id="id-me" style="margin-bottom:0.75rem;color:#555;font-size:0.9rem;">…</div>' +
       '<div id="id-status" style="margin-bottom:1rem;min-height:1.2em;font-size:0.9rem;"></div>' +
       '<details open style="margin-bottom:1.5rem;">' +
-      '<summary style="cursor:pointer;font-weight:bold;">新建用户</summary>' +
+      '<summary style="cursor:pointer;font-weight:bold;">' + escHtml(t().idnNewUser) + '</summary>' +
       '<form id="id-create-form" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.5rem;margin-top:0.75rem;">' +
       '<input name="email" type="email" placeholder="email" required autocomplete="off" />' +
-      '<input name="displayName" type="text" placeholder="显示名 (可选)" autocomplete="off" />' +
-      '<input name="password" type="password" placeholder="密码 (可选, 8+ 字符)" minlength="8" autocomplete="new-password" />' +
+      '<input name="displayName" type="text" placeholder="' + escHtml(t().idnPhDisplayName) + '" autocomplete="off" />' +
+      '<input name="password" type="password" placeholder="' + escHtml(t().idnPhPassword) + '" minlength="8" autocomplete="new-password" />' +
       '<select name="role">' +
       roleOptions +
       '</select>' +
-      '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">创建用户</button>' +
+      '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">' + escHtml(t().idnBtnCreateUser) + '</button>' +
       '</form>' +
       '</details>' +
-      '<h3 style="margin-bottom:0.5rem;">用户列表</h3>' +
+      '<h3 style="margin-bottom:0.5rem;">' + escHtml(t().idnUserList) + '</h3>' +
       '<table style="width:100%;border-collapse:collapse;font-size:0.9rem;">' +
       '<thead><tr style="text-align:left;border-bottom:1px solid #ccc;background:#fafafa;">' +
       '<th style="padding:0.4rem;">Email</th>' +
-      '<th style="padding:0.4rem;">显示名</th>' +
-      '<th style="padding:0.4rem;">角色</th>' +
-      '<th style="padding:0.4rem;">创建</th>' +
-      '<th style="padding:0.4rem;">上次登录</th>' +
-      '<th style="padding:0.4rem;">操作</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(t().idnColDisplayName) + '</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(t().idnColRole) + '</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(t().idnColCreated) + '</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(t().idnColLastLogin) + '</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(t().idnColActions) + '</th>' +
       '</tr></thead>' +
       '<tbody id="id-users-tbody"></tbody>' +
       '</table>' +
       // Phase 3 — invitation panel. Open-by-default because "invite a
       // teammate" is the headline owner action on a fresh install.
       '<details open style="margin-top:2rem;">' +
-      '<summary style="cursor:pointer;font-weight:bold;">邀请 / Invitations</summary>' +
+      '<summary style="cursor:pointer;font-weight:bold;">' + escHtml(t().idnInvitations) + '</summary>' +
       '<form id="id-invite-form" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0.5rem;margin:0.75rem 0;">' +
       '<input name="email" type="email" placeholder="email" required autocomplete="off" />' +
-      '<input name="displayName" type="text" placeholder="显示名 (可选)" autocomplete="off" />' +
+      '<input name="displayName" type="text" placeholder="' + escHtml(t().idnPhDisplayName) + '" autocomplete="off" />' +
       '<select name="role">' +
       INVITE_ROLES.map(function (r) {
         const sel = r === 'member' ? ' selected' : ''
         return '<option value="' + r + '"' + sel + '>' + r + '</option>'
       }).join('') +
       '</select>' +
-      '<input name="ttlHours" type="number" min="1" max="720" value="24" title="链接有效期 (小时); 最长 30 天" />' +
-      '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">创建邀请链接</button>' +
+      '<input name="ttlHours" type="number" min="1" max="720" value="24" title="' + escHtml(t().idnTtlTitle) + '" />' +
+      '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">' + escHtml(t().idnBtnCreateInvite) + '</button>' +
       '</form>' +
       '<p style="font-size:0.8rem;color:#666;margin:0.25rem 0 0.75rem;">' +
-      '链接含一次性 token,创建后会弹窗显示请立即复制。owner 不能通过邀请创建,需先邀请普通角色再 setRole 提升。' +
+      escHtml(t().idnInviteHint) +
       '</p>' +
       '<div style="display:flex;gap:0.5rem;align-items:end;flex-wrap:wrap;margin:0.5rem 0;">' +
       '<label style="display:flex;flex-direction:column;font-size:0.8rem;color:#555;">status' +
@@ -622,16 +623,16 @@
       }).join('') +
       '</select>' +
       '</label>' +
-      '<button id="id-invites-refresh" type="button" style="padding:0.4rem 0.75rem;">刷新</button>' +
+      '<button id="id-invites-refresh" type="button" style="padding:0.4rem 0.75rem;">' + escHtml(t().idnBtnRefresh) + '</button>' +
       '</div>' +
       '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">' +
       '<thead><tr style="text-align:left;border-bottom:1px solid #ccc;background:#fafafa;">' +
       '<th style="padding:0.4rem;">Email</th>' +
-      '<th style="padding:0.4rem;">角色</th>' +
-      '<th style="padding:0.4rem;">状态</th>' +
-      '<th style="padding:0.4rem;">创建</th>' +
-      '<th style="padding:0.4rem;">过期</th>' +
-      '<th style="padding:0.4rem;">操作</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(t().idnColRole) + '</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(t().idnColStatus) + '</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(t().idnColCreated) + '</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(t().idnColExpires) + '</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(t().idnColActions) + '</th>' +
       '</tr></thead>' +
       '<tbody id="id-invites-tbody"></tbody>' +
       '</table>' +
@@ -640,7 +641,7 @@
       // (the route is gated; the panel is hidden from UI when the host
       // didn't wire identity at all — the section never renders then).
       '<details style="margin-top:2rem;">' +
-      '<summary style="cursor:pointer;font-weight:bold;">审计日志 / Audit log</summary>' +
+      '<summary style="cursor:pointer;font-weight:bold;">' + escHtml(t().idnAuditLog) + '</summary>' +
       '<div style="display:flex;gap:0.5rem;align-items:end;flex-wrap:wrap;margin:0.75rem 0;">' +
       '<label style="display:flex;flex-direction:column;font-size:0.8rem;color:#555;">action' +
       '<input id="id-audit-action" type="text" placeholder="(any)" style="padding:0.25rem;font-family:monospace;" />' +
@@ -655,11 +656,11 @@
       '<label style="display:flex;flex-direction:column;font-size:0.8rem;color:#555;">limit' +
       '<input id="id-audit-limit" type="number" min="1" max="1000" value="100" style="padding:0.25rem;width:6rem;" />' +
       '</label>' +
-      '<button id="id-audit-refresh" type="button" style="padding:0.4rem 0.75rem;">刷新</button>' +
+      '<button id="id-audit-refresh" type="button" style="padding:0.4rem 0.75rem;">' + escHtml(t().idnBtnRefresh) + '</button>' +
       '</div>' +
       '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">' +
       '<thead><tr style="text-align:left;border-bottom:1px solid #ccc;background:#fafafa;">' +
-      '<th style="padding:0.4rem;">时间</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(t().idnColTime) + '</th>' +
       '<th style="padding:0.4rem;">ok</th>' +
       '<th style="padding:0.4rem;">action</th>' +
       '<th style="padding:0.4rem;">actor</th>' +
@@ -712,6 +713,14 @@
     }).observe(document.body, {
       attributes: true,
       attributeFilter: ['data-active-tab'],
+    })
+    // Re-render on language switch — relabel the static shell, and reload the
+    // dynamic sections (me / users / invites / audit) when the tab is showing
+    // so the live rows pick up the new dict too. maybeRefresh() self-gates on
+    // the active tab, so it's a no-op when another tab is in front.
+    AH.onLangChange(function () {
+      buildUi(root)
+      maybeRefresh().catch(function () { /* setStatus reported it */ })
     })
     // If the user deep-linked to #users, render immediately.
     if (isUsersTabActive()) {
