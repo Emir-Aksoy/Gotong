@@ -619,6 +619,58 @@ export interface MeWorkflowEditSurface {
   }): Promise<MeWorkflowEditResult>
 }
 
+// ---------------------------------------------------------------------------
+// SW-M6 — the hub steward ("管家"). A member manages THEIR OWN agents +
+// workflows by talking to it in plain language. Duck-typed so the web layer
+// takes NO runtime dep on `@aipehub/hub-steward` (mirroring InboxSurface /
+// MeWorkflowEditSurface); the host's `HubStewardSurface` satisfies it.
+//
+//   - `plan`  turns one instruction into a classified proposal with ZERO side
+//             effects — the member previews it, then applies the actions they
+//             accept;
+//   - `apply` executes ONE accepted action. The action rides as `unknown`: the
+//             HOST surface is the validation + classification authority
+//             (`validateStewardAction` + re-tiering), so web forwards it
+//             verbatim and never trusts the client's tier. Dangerous / cross-hub
+//             actions route to the approval inbox (the user's two hard
+//             constraints — 「跨 hub + 危险动作都再次确认」).
+// ---------------------------------------------------------------------------
+
+/** One proposed action + the HOST-assigned tier + a member-readable summary. */
+export interface MeHubStewardClassifiedAction {
+  /** The raw action object — echoed verbatim back on `apply`. */
+  action: unknown
+  /** 'safe' | 'dangerous' | 'cross_hub' | 'forbidden' (host-authoritative). */
+  tier: string
+  summary: string
+}
+
+export interface MeHubStewardPlanResult {
+  reply: string
+  actions: MeHubStewardClassifiedAction[]
+}
+
+/** What `apply` resolves to — each variant carries its own `status` so the UI
+ *  branches without inspecting an HTTP code (only `invalid` is an HTTP error). */
+export type MeHubStewardApplyResult =
+  | { status: 'done'; tier: string; result: unknown }
+  | { status: 'refused'; reason: string }
+  | { status: 'invalid'; reason: string }
+  | { status: 'pending_approval'; tier: string; inboxItemId: string }
+  | { status: 'needs_approval'; tier: string }
+
+export interface MeHubStewardSurface {
+  /** Propose: ZERO side effects. Throws iff the underlying dispatch failed. */
+  plan(input: {
+    userId: string
+    instruction: string
+    /** Prior turns of this steward conversation (multi-step follow-ups). */
+    history?: Array<{ role: 'user' | 'assistant'; content: string }>
+  }): Promise<MeHubStewardPlanResult>
+  /** Apply ONE accepted action (validated + re-classified server-side). */
+  apply(input: { userId: string; action: unknown }): Promise<MeHubStewardApplyResult>
+}
+
 export interface HandleMeRouteCtx {
   identity: IdentitySurface
   hub: Hub
@@ -689,6 +741,13 @@ export interface HandleMeRouteCtx {
    * `/api/me/workflows/:id/{editable,edit}` routes then return 503.
    */
   workflowEdit: MeWorkflowEditSurface | undefined
+  /**
+   * SW-M6 — the hub steward ("管家"). Undefined when the host wired no steward
+   * service (disabled, or no LLM key for the configured provider); the
+   * `/api/me/steward/{plan,apply}` routes then return 503 so the member UI can
+   * hide the 管家 panel.
+   */
+  hubSteward: MeHubStewardSurface | undefined
 }
 
 export async function handleMeRoute(
@@ -739,6 +798,19 @@ export async function handleMeRoute(
       await handleMeWorkflowEdit(ctx, req, res, userId, decodeURIComponent(edit[1]!))
       return
     }
+  }
+  // SW-M6 — the hub steward ("管家"): a member manages THEIR OWN agents +
+  // workflows by talking to it. `plan` proposes (zero side effects); `apply`
+  // executes ONE accepted action, validated + re-classified server-side, routing
+  // dangerous / cross-hub actions to the approval inbox (the two hard
+  // constraints). Both are exact-path POSTs, so they never collide.
+  if (method === 'POST' && path === '/api/me/steward/plan') {
+    await handleMeStewardPlan(ctx, req, res, userId)
+    return
+  }
+  if (method === 'POST' && path === '/api/me/steward/apply') {
+    await handleMeStewardApply(ctx, req, res, userId)
+    return
   }
   // Phase 19 P1-M2 — "my recent runs". Server-scoped to the caller; a member
   // can never read another user's run history.
@@ -1434,6 +1506,121 @@ async function handleMeWorkflowEdit(
     },
     statusForEditReason(r.reason),
   )
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/me/steward/plan  +  POST /api/me/steward/apply  (SW-M6)
+// The hub steward ("管家"): a member talks to it to manage THEIR OWN agents +
+// workflows. `plan` proposes (zero side effects); `apply` executes ONE accepted
+// action, validated + re-classified server-side, routing dangerous / cross-hub
+// actions to the approval inbox. userId is server-forced (never client-supplied).
+// ---------------------------------------------------------------------------
+
+async function handleMeStewardPlan(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.hubSteward) {
+    sendJson(res, { error: '管家暂未启用(需要 AI 助手)。', code: 'not_wired' }, 503)
+    return
+  }
+  // A plan drives one steward LLM call — same quota concern as dispatch / edit.
+  if (!checkMeRateLimit(ctx, userId, 'me-steward-plan')) {
+    sendRateLimited(res, '问得太频繁了,过一会儿再试。')
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (err) {
+    sendJson(res, { error: (err as Error).message ?? 'bad body', code: 'bad_request' }, 400)
+    return
+  }
+  const instruction =
+    body && typeof body === 'object' && typeof (body as { instruction?: unknown }).instruction === 'string'
+      ? (body as { instruction: string }).instruction.trim()
+      : ''
+  if (!instruction) {
+    sendJson(res, { error: '请用一句话告诉管家你想做什么。', code: 'bad_request' }, 400)
+    return
+  }
+  // Optional conversation history. Web only shape-coerces (duck discipline): keep
+  // `{role:'user'|'assistant', content:string}` turns, drop the rest, clip to the
+  // last 12; the host service is the authority on any further trimming.
+  const rawHistory = body && typeof body === 'object' ? (body as { history?: unknown }).history : undefined
+  if (rawHistory !== undefined && !Array.isArray(rawHistory)) {
+    sendJson(res, { error: 'history 必须是一个数组。', code: 'bad_request' }, 400)
+    return
+  }
+  const history = (rawHistory ?? [])
+    .filter(
+      (t): t is { role: 'user' | 'assistant'; content: string } =>
+        !!t &&
+        typeof t === 'object' &&
+        ((t as { role?: unknown }).role === 'user' || (t as { role?: unknown }).role === 'assistant') &&
+        typeof (t as { content?: unknown }).content === 'string',
+    )
+    .slice(-12)
+    .map((t) => ({ role: t.role, content: t.content }))
+  try {
+    const out = await ctx.hubSteward.plan({
+      userId,
+      instruction,
+      ...(history.length ? { history } : {}),
+    })
+    sendJson(res, out, 200)
+  } catch (err) {
+    // plan throws only when hub.dispatch resolved non-ok (the steward LLM failed
+    // outright) — a server-side fault, not the member's, so 500.
+    sendJson(res, { error: err instanceof Error ? err.message : String(err), code: 'steward_failed' }, 500)
+  }
+}
+
+async function handleMeStewardApply(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.hubSteward) {
+    sendJson(res, { error: '管家暂未启用(需要 AI 助手)。', code: 'not_wired' }, 503)
+    return
+  }
+  // Apply can drive an LLM call too (a safe `edit_workflow` runs the WFEDIT
+  // assistant), so it shares the member rate limit.
+  if (!checkMeRateLimit(ctx, userId, 'me-steward-apply')) {
+    sendRateLimited(res, '操作太频繁了,过一会儿再试。')
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (err) {
+    sendJson(res, { error: (err as Error).message ?? 'bad body', code: 'bad_request' }, 400)
+    return
+  }
+  // The action is forwarded VERBATIM as `unknown` — the host's `apply` is the
+  // validation authority (validateStewardAction → `invalid` on a bad shape), so
+  // the web layer only checks it's present at all.
+  const action = body && typeof body === 'object' ? (body as { action?: unknown }).action : undefined
+  if (action === undefined || action === null) {
+    sendJson(res, { error: '缺少要执行的动作(action)。', code: 'bad_request' }, 400)
+    return
+  }
+  try {
+    const out = await ctx.hubSteward.apply({ userId, action })
+    // The body always carries `status`; the SPA branches on it. A malformed /
+    // unrecognized action shape → 400 (it never came from a real proposal); every
+    // other status (done / refused / pending_approval / needs_approval) is a
+    // well-formed 200 the client renders.
+    sendJson(res, out, out.status === 'invalid' ? 400 : 200)
+  } catch (err) {
+    // The member services throw `{ status: 4xx }` on RBAC / not-found / validation
+    // (403/404/400); meAgentErrStatus reads it, else 500.
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
 }
 
 async function handleMeListWorkflows(

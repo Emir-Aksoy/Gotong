@@ -38,6 +38,7 @@ import {
   HUB_STEWARD_CAPABILITY,
   HUB_STEWARD_DEFAULT_ID,
   classifyStewardAction,
+  validateStewardAction,
   type ClassifiedAction,
   type ClassifiedProposal,
   type HubStewardOutput,
@@ -165,11 +166,15 @@ export interface HubStewardApplyInput {
   /** The authenticated member (server-resolved; NEVER client-supplied). */
   userId: string
   /**
-   * The action to apply. The Web layer SHAPE-validates it, but its TIER is
-   * re-derived server-side here — the client's classification is never trusted,
-   * and the member services re-check RBAC, so a forged action can't escalate.
+   * The action to apply, forwarded VERBATIM from the request body — hence
+   * `unknown`. `apply` is the validation authority: it runs the action through
+   * `validateStewardAction` (the ONE validation contract, shared with the
+   * LLM-reply parser + the approval broker) before doing anything, then
+   * re-derives the TIER server-side (the client's classification is never
+   * trusted) and the member services re-check RBAC — so neither a malformed nor
+   * a forged action can escalate.
    */
-  action: StewardAction
+  action: unknown
 }
 
 /** What `performStewardAction` produces for a successfully executed action. */
@@ -188,6 +193,9 @@ export type StewardActionResult =
  *                        `edit_workflow` — a locally-safe edit can still come
  *                        back `edit.ok === false`, e.g. the assistant failed).
  *   - `refused`         — a FORBIDDEN action; nothing executed, `reason` explains.
+ *   - `invalid`         — the action didn't pass `validateStewardAction` (a
+ *                         malformed / unrecognized shape from the request body);
+ *                         nothing executed. The Web layer maps it to HTTP 400.
  *   - `pending_approval`— a DANGEROUS / CROSS_HUB action dispatched to the
  *                         approval broker: parked in the member's inbox, NOT
  *                         executed. The member's `/me` resolve later runs it (the
@@ -202,6 +210,7 @@ export type StewardActionResult =
 export type StewardApplyResult =
   | { status: 'done'; tier: StewardActionTier; result: StewardActionResult }
   | { status: 'refused'; reason: string }
+  | { status: 'invalid'; reason: string }
   | { status: 'pending_approval'; tier: 'dangerous' | 'cross_hub'; inboxItemId: string }
   | { status: 'needs_approval'; tier: 'dangerous' | 'cross_hub' }
 
@@ -219,8 +228,10 @@ export interface HubStewardSurface {
   plan(input: HubStewardPlanInput): Promise<ClassifiedProposal>
 
   /**
-   * Apply ONE action the member accepted from a prior `plan`. Re-classifies the
-   * action server-side (never the client's tier) and:
+   * Apply ONE action the member accepted from a prior `plan`. The action arrives
+   * `unknown` (forwarded verbatim from the body): `apply` first VALIDATES it via
+   * `validateStewardAction` (→ `invalid` on a bad shape), then re-classifies it
+   * server-side (never the client's tier) and:
    *   - SAFE → executes inline via `performStewardAction` (reusing the member
    *     services, so their RBAC + member limits apply);
    *   - FORBIDDEN → refuses without executing;
@@ -508,7 +519,21 @@ export function createHubStewardService(deps: {
     },
 
     async apply(input) {
-      const { userId, action } = input
+      const { userId } = input
+
+      // The action arrives VERBATIM from the request body (typed `unknown`).
+      // `validateStewardAction` is the ONE validation contract — the same the
+      // LLM-reply parser and the approval broker use — so a malformed /
+      // unrecognized shape is rejected uniformly HERE, before it can reach a
+      // member service half-formed. (TS method bivariance would let a bad shape
+      // typecheck through the duck-typed web surface; this is the runtime guard.)
+      const action = validateStewardAction(input.action)
+      if (!action) {
+        return {
+          status: 'invalid',
+          reason: '这个动作的格式不对(可能不是管家提议过的动作),没有执行。',
+        }
+      }
 
       // Re-derive the tier server-side. An `edit_workflow`'s cross-hub-ness comes
       // from the SAME `listForUser` the plan snapshot + the editor lock use, so

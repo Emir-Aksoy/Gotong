@@ -50,6 +50,7 @@ import {
   type MeAgentGrantsSurface,
   type MeCredentialsSurface,
   type MeWorkflowEditSurface,
+  type MeHubStewardSurface,
 } from './me-routes.js'
 import {
   handleWorkflowRoute,
@@ -326,6 +327,14 @@ export interface WebServerOptions {
    * has no runtime dep on the host — `MeWorkflowEditSurface` is a duck type.
    */
   workflowEdit?: MeWorkflowEditSurface
+  /**
+   * SW-M6 — optional hub steward ("管家") surface. The host wires a
+   * `HostStewardService` here. When absent, `POST /api/me/steward/plan` and
+   * `/apply` return 503 so the member UI can hide the "管家" chat panel. Web has
+   * no runtime dep on `@aipehub/hub-steward` — `MeHubStewardSurface` is a duck
+   * type, and the action it forwards is `unknown` (the host validates it).
+   */
+  hubSteward?: MeHubStewardSurface
   /**
    * Optional readiness gate. When set, `GET /readyz` returns 200
    * once `isReady()` first returns true, and 503 with a JSON
@@ -974,6 +983,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     growthReports: opts.growthReports,
     inbox: opts.inbox,
     workflowEdit: opts.workflowEdit,
+    hubSteward: opts.hubSteward,
     readinessGate: opts.readinessGate,
     identity: opts.identity,
     peerRegistry: opts.peerRegistry,
@@ -1123,6 +1133,8 @@ interface HandlerCtx {
   inbox: InboxSurface | undefined
   /** WFEDIT-M3 — see WebServerOptions.workflowEdit doc above. */
   workflowEdit: MeWorkflowEditSurface | undefined
+  /** SW-M6 — see WebServerOptions.hubSteward doc above. */
+  hubSteward: MeHubStewardSurface | undefined
   readinessGate: { isReady: () => boolean } | undefined
   identity: IdentitySurface | undefined
   /** D1 — see WebServerOptions.peerRegistry doc above. */
@@ -1710,6 +1722,8 @@ async function handle(
         // WFEDIT-M3 — member NL workflow editing; undefined → /me/workflows/:id
         // edit + editable routes return 503.
         workflowEdit: ctx.workflowEdit,
+        // SW-M6 — the hub steward ("管家"); undefined → /me/steward/* returns 503.
+        hubSteward: ctx.hubSteward,
       },
       req,
       res,
