@@ -52,9 +52,17 @@ import {
   type StewardTurn,
 } from '@aipehub/hub-steward'
 
+import type { InboxStore } from '@aipehub/inbox'
+
 import type { OrgApiPool } from './org-api-pool.js'
 import type { HostMeAgentService } from './me-agent-service.js'
 import type { MeWorkflowEditResult, MeWorkflowEditService } from './me-workflow-edit-service.js'
+import {
+  StewardApprovalBroker,
+  STEWARD_EXEC_CAPABILITY,
+  STEWARD_EXEC_PARTICIPANT_ID,
+  type StewardExecPayload,
+} from './steward-approval.js'
 
 /** Concrete provider choice for the host-built-in steward. */
 export type StewardProviderKind = 'anthropic' | 'openai' | 'mock'
@@ -179,14 +187,22 @@ export type StewardActionResult =
  *                        per-kind outcome (incl. the WFEDIT diff / denial for an
  *                        `edit_workflow` — a locally-safe edit can still come
  *                        back `edit.ok === false`, e.g. the assistant failed).
- *   - `refused`        — a FORBIDDEN action; nothing executed, `reason` explains.
- *   - `needs_approval` — a DANGEROUS / CROSS_HUB action: NOT executed here. M4
- *                        returns this verbatim; M5 turns it into a real inbox
- *                        approval (the user's two hard constraints).
+ *   - `refused`         — a FORBIDDEN action; nothing executed, `reason` explains.
+ *   - `pending_approval`— a DANGEROUS / CROSS_HUB action dispatched to the
+ *                         approval broker: parked in the member's inbox, NOT
+ *                         executed. The member's `/me` resolve later runs it (the
+ *                         user's two hard constraints — 「跨 hub + 危险动作都再次确认」).
+ *                         `inboxItemId` is the parked item to confirm.
+ *   - `needs_approval`  — the SAME tier but NO approval inbox is wired (a unit
+ *                         test, or steward-without-inbox mode): the need for a
+ *                         second confirmation is surfaced without parking
+ *                         anything. Production always wires the broker, so this
+ *                         is the graceful-degradation fallback, not the hot path.
  */
 export type StewardApplyResult =
   | { status: 'done'; tier: StewardActionTier; result: StewardActionResult }
   | { status: 'refused'; reason: string }
+  | { status: 'pending_approval'; tier: 'dangerous' | 'cross_hub'; inboxItemId: string }
   | { status: 'needs_approval'; tier: 'dangerous' | 'cross_hub' }
 
 /** Duck-typed surface the Web layer consumes via `serveWeb({ hubSteward })`. */
@@ -208,8 +224,10 @@ export interface HubStewardSurface {
    *   - SAFE → executes inline via `performStewardAction` (reusing the member
    *     services, so their RBAC + member limits apply);
    *   - FORBIDDEN → refuses without executing;
-   *   - DANGEROUS / CROSS_HUB → returns `needs_approval` (M5 routes these to the
-   *     approval inbox — the user's "跨 hub + 危险动作都再次确认").
+   *   - DANGEROUS / CROSS_HUB → dispatches to the approval broker, which parks
+   *     the action in the member's inbox and returns `pending_approval` (the
+   *     user's "跨 hub + 危险动作都再次确认"). With no inbox wired it degrades to
+   *     `needs_approval` (nothing parked).
    *
    * The member services throw `{ status: 4xx }` on RBAC / not-found / validation;
    * those propagate for the Web layer to map.
@@ -322,6 +340,13 @@ export function createHubStewardService(deps: {
   workflows: StewardWorkflowDirectory
   /** Executes an `edit_workflow` action — the member's OpenClaw-style editor. */
   workflowEditor: StewardWorkflowEditor
+  /**
+   * The member inbox store. When present, a `StewardApprovalBroker` is built +
+   * registered so DANGEROUS / CROSS_HUB actions route through the Phase 16
+   * approval inbox (the user's two hard constraints). Absent (a unit test) ⇒
+   * `apply` degrades those tiers to `needs_approval` without parking anything.
+   */
+  inbox?: InboxStore
   orgApiPool?: OrgApiPool
   logger: Logger
   /**
@@ -398,6 +423,22 @@ export function createHubStewardService(deps: {
     provider: config.provider,
     model: config.model ?? '(provider default)',
   })
+
+  // SW-M5 — the approval broker that turns a DANGEROUS / CROSS_HUB action into a
+  // second confirmation in the member's inbox (the user's two hard constraints).
+  // Only wired when an inbox store is supplied; absent ⇒ `apply` degrades those
+  // tiers to `needs_approval`. The broker reuses the SAME executor deps as the
+  // safe inline path, so an approved action runs `performStewardAction` exactly
+  // as a safe one does.
+  let broker: StewardApprovalBroker | null = null
+  if (deps.inbox) {
+    broker = new StewardApprovalBroker({ store: deps.inbox, agents, workflowEditor })
+    hub.register(broker)
+    logger.info('hub-steward: approval broker registered', {
+      id: STEWARD_EXEC_PARTICIPANT_ID,
+      capability: STEWARD_EXEC_CAPABILITY,
+    })
+  }
 
   return {
     async plan(input) {
@@ -495,10 +536,36 @@ export function createHubStewardService(deps: {
                 : '这个动作超出管家的范围(凭证 / peer / 安全 / 权限),请到对应的设置面板手动操作。',
           }
         case 'dangerous':
-        case 'cross_hub':
-          // M4 surfaces the need for a SECOND confirmation but does NOT execute;
-          // M5 wires the real approval inbox (the user's two hard constraints).
-          return { status: 'needs_approval', tier }
+        case 'cross_hub': {
+          // The user's two hard constraints: a delete / a cross-hub workflow edit
+          // gets a SECOND confirmation. Dispatch to the approval broker, which
+          // parks the action in the member's inbox and suspends — NOTHING runs
+          // until they resolve it in `/me`. With no inbox wired, degrade to
+          // `needs_approval` (surface the requirement without parking).
+          if (!broker) return { status: 'needs_approval', tier }
+          const execPayload: StewardExecPayload = { userId, action }
+          const result = await hub.dispatch({
+            from: userId,
+            strategy: { kind: 'capability', capabilities: [STEWARD_EXEC_CAPABILITY] },
+            payload: execPayload,
+            origin: { orgId: 'local', userId },
+            title: `hub:steward exec (${tier})`,
+          })
+          if (result.kind === 'suspended') {
+            return { status: 'pending_approval', tier, inboxItemId: result.taskId }
+          }
+          // The broker ALWAYS suspends a gated action. Any other terminal result
+          // is a wiring fault — surface it rather than silently dropping the ask.
+          const detail =
+            result.kind === 'failed'
+              ? result.error
+              : result.kind === 'no_participant'
+                ? result.reason
+                : result.kind
+          throw new Error(
+            `hub:steward approval dispatch did not suspend — got ${result.kind}: ${detail}`,
+          )
+        }
         case 'safe': {
           const result = await performStewardAction(userId, action, { agents, workflowEditor })
           return { status: 'done', tier, result }
