@@ -106,13 +106,12 @@ export function readAllDiagnoses(board: ConsultBoard): Diagnosis[] {
 }
 
 /**
- * Format the OTHER panelists' diagnoses for the cross-examination round — what
- * the moderator hands each agent so it can rebut or corroborate. Blind-round
- * isolation lives here: an agent only ever sees peers via THIS function, in the
- * cross-examination round, never in the blind round.
+ * Render a peer-diagnoses digest from a LIST. The moderator hands this to each
+ * agent in the cross-examination round as a SNAPSHOT of the previous round, so
+ * parallel writes within a round never change what a peer sees mid-round.
  */
-export function formatPeerDiagnoses(board: ConsultBoard, exclude: string): string {
-  const peers = readAllDiagnoses(board).filter((d) => d.agent !== exclude)
+export function peerDigest(diagnoses: Diagnosis[], exclude: string): string {
+  const peers = diagnoses.filter((d) => d.agent !== exclude)
   if (!peers.length) return '(no peer diagnoses yet)'
   return peers
     .map(
@@ -121,4 +120,14 @@ export function formatPeerDiagnoses(board: ConsultBoard, exclude: string): strin
         (d.detail ? `: ${d.detail.split('\n')[0]}` : ''),
     )
     .join('\n')
+}
+
+/**
+ * Format the OTHER panelists' diagnoses currently on the board — what the
+ * moderator hands each agent so it can rebut or corroborate. Blind-round
+ * isolation lives in the caller: an agent only ever sees peers via this digest,
+ * in the cross-examination round, never in the blind round.
+ */
+export function formatPeerDiagnoses(board: ConsultBoard, exclude: string): string {
+  return peerDigest(readAllDiagnoses(board), exclude)
 }

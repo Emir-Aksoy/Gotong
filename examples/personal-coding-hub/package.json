@@ -10,6 +10,7 @@
     "start:cli": "tsx src/cli.ts",
     "load-template": "tsx src/load-template.ts",
     "consult-core": "tsx src/consult.selfcheck.ts",
+    "consult": "tsx src/consult-demo.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
