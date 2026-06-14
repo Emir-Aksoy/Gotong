@@ -148,18 +148,18 @@
          only see their own dispatches and reports. -->
     <section id="home-panel" class="managed-agents" data-tab="home" data-roles="owner,admin,member,viewer" hidden>
       <div class="me-whoami">
-        <h2>当前用户</h2>
+        <h2 data-i18n="meWhoami">当前用户</h2>
         <div id="me-info" class="meta-line"></div>
       </div>
 
       <div class="me-dispatch">
-        <h2>触发新一次工作流</h2>
-        <p class="me-meta">你只能为自己发起:归属字段由系统自动绑定到你的 userId,你看不到也改不了 — 不同用户的记录互不可见。</p>
-        <label>选择工作流
+        <h2 data-i18n="meDispatchTitle">触发新一次工作流</h2>
+        <p class="me-meta" data-i18n="meDispatchHint">你只能为自己发起:归属字段由系统自动绑定到你的 userId,你看不到也改不了 — 不同用户的记录互不可见。</p>
+        <label><span data-i18n="meSelectWorkflow">选择工作流</span>
           <select id="me-wf-select"></select>
         </label>
         <div id="me-wf-form-fields"></div>
-        <button id="me-dispatch-btn" type="button" class="me-primary-btn">发起</button>
+        <button id="me-dispatch-btn" type="button" class="me-primary-btn" data-i18n="meDispatchBtn">发起</button>
         <div id="me-dispatch-status" class="me-status"></div>
       </div>
 
@@ -169,52 +169,52 @@
            members can only reshape their own LOCAL steps. The lock is enforced
            server-side (host enforceEditBoundary) — this panel just explains it. -->
       <div class="me-wf-edit">
-        <h2>用大白话改这个工作流</h2>
-        <p class="me-meta">不用写 YAML — 用一句话说你想怎么改上面选中的工作流(例如「把第一步的提示语改得更礼貌些」「加一步先让我确认」)。需要 editor 权限。</p>
-        <p class="me-meta">⚠️ 如果这个工作流连着别的 hub,跨 hub 的<strong>出入口</strong>(谁能触发、发去哪个 hub、带什么数据)锁定不可改 — 你只能改自己这边的步骤。</p>
-        <button id="me-wf-edit-load-btn" type="button" class="me-secondary-btn">打开编辑器</button>
+        <h2 data-i18n="meWfEditTitle">用大白话改这个工作流</h2>
+        <p class="me-meta" data-i18n="meWfEditHint1">不用写 YAML — 用一句话说你想怎么改上面选中的工作流(例如「把第一步的提示语改得更礼貌些」「加一步先让我确认」)。需要 editor 权限。</p>
+        <p class="me-meta" data-i18n-html="meWfEditHint2">⚠️ 如果这个工作流连着别的 hub,跨 hub 的<strong>出入口</strong>(谁能触发、发去哪个 hub、带什么数据)锁定不可改 — 你只能改自己这边的步骤。</p>
+        <button id="me-wf-edit-load-btn" type="button" class="me-secondary-btn" data-i18n="meWfEditLoadBtn">打开编辑器</button>
         <div id="me-wf-edit-body"></div>
         <div id="me-wf-edit-status" class="me-status"></div>
       </div>
 
       <div class="me-runs">
-        <h2>最近运行</h2>
-        <p class="me-meta">你最近发起的工作流运行,只显示你自己的记录。</p>
-        <button id="me-runs-refresh-btn" type="button" class="me-secondary-btn">刷新</button>
+        <h2 data-i18n="meRunsTitle">最近运行</h2>
+        <p class="me-meta" data-i18n="meRunsHint">你最近发起的工作流运行,只显示你自己的记录。</p>
+        <button id="me-runs-refresh-btn" type="button" class="me-secondary-btn" data-i18n="refresh">刷新</button>
         <table class="me-table">
           <thead>
-            <tr><th>工作流</th><th>状态</th><th>开始</th><th>结束</th></tr>
+            <tr><th data-i18n="meColWorkflow">工作流</th><th data-i18n="meColStatus">状态</th><th data-i18n="meColStart">开始</th><th data-i18n="meColEnd">结束</th></tr>
           </thead>
           <tbody id="me-runs-tbody">
-            <tr><td colspan="4" class="me-meta">尚未加载</td></tr>
+            <tr><td colspan="4" class="me-meta" data-i18n="meNotLoaded">尚未加载</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="me-inbox">
-        <h2>待处理任务 <span id="me-inbox-count" class="me-badge"></span></h2>
-        <p class="me-meta">工作流在某一步需要你拍板时,会出现在这里。处理后工作流会带着你的决定继续往下走。</p>
-        <button id="me-inbox-refresh-btn" type="button" class="me-secondary-btn">刷新</button>
+        <h2><span data-i18n="meInboxTitle">待处理任务</span> <span id="me-inbox-count" class="me-badge"></span></h2>
+        <p class="me-meta" data-i18n="meInboxHint">工作流在某一步需要你拍板时,会出现在这里。处理后工作流会带着你的决定继续往下走。</p>
+        <button id="me-inbox-refresh-btn" type="button" class="me-secondary-btn" data-i18n="refresh">刷新</button>
         <div id="me-inbox-list" class="me-inbox-list"></div>
       </div>
 
       <div class="me-reports">
-        <h2>我的报告</h2>
-        <button id="me-refresh-reports-btn" type="button" class="me-secondary-btn">刷新</button>
+        <h2 data-i18n="meReportsTitle">我的报告</h2>
+        <button id="me-refresh-reports-btn" type="button" class="me-secondary-btn" data-i18n="refresh">刷新</button>
         <table class="me-table">
           <thead>
-            <tr><th>文件</th><th>大小</th><th>时间</th><th></th></tr>
+            <tr><th data-i18n="meColFile">文件</th><th data-i18n="meColSize">大小</th><th data-i18n="meColTime">时间</th><th></th></tr>
           </thead>
           <tbody id="me-reports-tbody">
-            <tr><td colspan="4" class="me-meta">尚未加载</td></tr>
+            <tr><td colspan="4" class="me-meta" data-i18n="meNotLoaded">尚未加载</td></tr>
           </tbody>
         </table>
       </div>
 
       <div class="me-agents">
-        <h2>我的 AI 助手</h2>
-        <p class="me-meta">管理员配置好、你可以通过上面的工作流间接调用的智能体。系统提示词 / 密钥等敏感配置不会展示。</p>
-        <button id="me-agents-refresh-btn" type="button" class="me-secondary-btn">刷新</button>
+        <h2 data-i18n="meAgentsTitle">我的 AI 助手</h2>
+        <p class="me-meta" data-i18n="meAgentsHint">管理员配置好、你可以通过上面的工作流间接调用的智能体。系统提示词 / 密钥等敏感配置不会展示。</p>
+        <button id="me-agents-refresh-btn" type="button" class="me-secondary-btn" data-i18n="refresh">刷新</button>
         <div id="me-agents-list" class="me-agents-list"></div>
       </div>
 
@@ -222,37 +222,37 @@
            in resource_grants; the server composes the agent id from the session
            user, so a member can only ever touch their own. -->
       <div class="me-own-agents">
-        <h2>我自己搭的助手</h2>
-        <p class="me-meta">用你的话搭一个属于你自己的 AI 助手。优先用机构配置的模型额度（按用量计费）；机构没配的话，就用你在下方「我的 API 密钥」里加的自带 key。只有你能看到 / 修改 / 删除它。</p>
+        <h2 data-i18n="meOwnTitle">我自己搭的助手</h2>
+        <p class="me-meta" data-i18n="meOwnHint">用你的话搭一个属于你自己的 AI 助手。优先用机构配置的模型额度（按用量计费）；机构没配的话，就用你在下方「我的 API 密钥」里加的自带 key。只有你能看到 / 修改 / 删除它。</p>
         <form id="me-own-agent-form" class="me-own-agent-form" autocomplete="off">
           <input type="hidden" id="me-own-editing" value="" />
           <div class="me-field">
-            <label for="me-own-handle">短名（英文/数字，创建后不可改）</label>
+            <label for="me-own-handle" data-i18n="meOwnHandle">短名（英文/数字，创建后不可改）</label>
             <input type="text" id="me-own-handle" name="handle" maxlength="48" placeholder="my-writer" required />
           </div>
           <div class="me-field">
-            <label for="me-own-label">显示名</label>
-            <input type="text" id="me-own-label" name="label" placeholder="我的中文写手" required />
+            <label for="me-own-label" data-i18n="meOwnLabel">显示名</label>
+            <input type="text" id="me-own-label" name="label" data-i18n-placeholder="meOwnLabelPh" placeholder="我的中文写手" required />
           </div>
           <div class="me-field">
-            <label for="me-own-caps">能力标签（逗号或空格分隔）</label>
+            <label for="me-own-caps" data-i18n="meOwnCaps">能力标签（逗号或空格分隔）</label>
             <input type="text" id="me-own-caps" name="capabilities" placeholder="write-zh, summarize" required />
           </div>
           <div class="me-field">
-            <label for="me-own-provider">模型供应商</label>
+            <label for="me-own-provider" data-i18n="meProvider">模型供应商</label>
             <select id="me-own-provider" name="provider" required></select>
           </div>
           <div class="me-field">
-            <label for="me-own-model">模型（可选，留空用默认）</label>
+            <label for="me-own-model" data-i18n="meOwnModel">模型（可选，留空用默认）</label>
             <input type="text" id="me-own-model" name="model" placeholder="" />
           </div>
           <div class="me-field">
-            <label for="me-own-system">系统提示词（告诉它你要它做什么）</label>
-            <textarea id="me-own-system" name="system" rows="4" placeholder="你是我的中文写作助手……" required></textarea>
+            <label for="me-own-system" data-i18n="meOwnSystem">系统提示词（告诉它你要它做什么）</label>
+            <textarea id="me-own-system" name="system" rows="4" data-i18n-placeholder="meOwnSystemPh" placeholder="你是我的中文写作助手……" required></textarea>
           </div>
           <div class="me-own-agent-actions">
-            <button type="submit" id="me-own-submit" class="me-primary-btn">创建助手</button>
-            <button type="button" id="me-own-cancel" class="me-secondary-btn" hidden>取消编辑</button>
+            <button type="submit" id="me-own-submit" class="me-primary-btn" data-i18n="meCreateAgent">创建助手</button>
+            <button type="button" id="me-own-cancel" class="me-secondary-btn" data-i18n="meOwnCancel" hidden>取消编辑</button>
             <span id="me-own-status" class="me-status"></span>
           </div>
         </form>
@@ -265,23 +265,23 @@
            org configured no key for the provider. The secret is never shown
            again after saving. -->
       <div class="me-credentials">
-        <h2>我的 API 密钥</h2>
-        <p class="me-meta">给你自己的助手配一把你自己的模型密钥（自带 key）。当机构没有为该供应商配置密钥时，你的助手会用这把。密钥加密保存，存进去后不再显示；只有你能管理。</p>
+        <h2 data-i18n="meCredTitle">我的 API 密钥</h2>
+        <p class="me-meta" data-i18n="meCredHint">给你自己的助手配一把你自己的模型密钥（自带 key）。当机构没有为该供应商配置密钥时，你的助手会用这把。密钥加密保存，存进去后不再显示；只有你能管理。</p>
         <form id="me-cred-form" class="me-own-agent-form" autocomplete="off">
           <div class="me-field">
-            <label for="me-cred-provider">模型供应商</label>
+            <label for="me-cred-provider" data-i18n="meProvider">模型供应商</label>
             <select id="me-cred-provider" name="provider" required></select>
           </div>
           <div class="me-field">
-            <label for="me-cred-key">API 密钥</label>
+            <label for="me-cred-key" data-i18n="meCredKey">API 密钥</label>
             <input type="password" id="me-cred-key" name="apiKey" placeholder="sk-..." autocomplete="off" required />
           </div>
           <div class="me-field">
-            <label for="me-cred-label">备注（可选）</label>
-            <input type="text" id="me-cred-label" name="label" placeholder="我的个人 key" />
+            <label for="me-cred-label" data-i18n="meCredLabel">备注（可选）</label>
+            <input type="text" id="me-cred-label" name="label" data-i18n-placeholder="meCredLabelPh" placeholder="我的个人 key" />
           </div>
           <div class="me-own-agent-actions">
-            <button type="submit" id="me-cred-submit" class="me-primary-btn">保存密钥</button>
+            <button type="submit" id="me-cred-submit" class="me-primary-btn" data-i18n="meCredSubmit">保存密钥</button>
             <span id="me-cred-status" class="me-status"></span>
           </div>
         </form>
@@ -293,27 +293,27 @@
          the "change password" + "logout" primitives; A2.3 setup-wizard
          re-run lands here in C1b, quota panel in C2. -->
     <section id="settings-panel" class="managed-agents" data-tab="settings" data-roles="owner,admin,member,viewer" hidden>
-      <h2>账号</h2>
+      <h2 data-i18n="setAccount">账号</h2>
       <div id="settings-account" class="meta-line"></div>
       <div class="settings-actions">
-        <button id="settings-logout-btn" type="button" class="me-secondary-btn">登出</button>
+        <button id="settings-logout-btn" type="button" class="me-secondary-btn" data-i18n="setLogout">登出</button>
       </div>
 
-      <h2 style="margin-top:1.5rem;">修改密码</h2>
+      <h2 style="margin-top:1.5rem;" data-i18n="setChangePw">修改密码</h2>
       <form id="settings-password-form" class="settings-form">
-        <label>当前密码
+        <label><span data-i18n="setCurrentPw">当前密码</span>
           <input name="current" type="password" required autocomplete="current-password" />
         </label>
-        <label>新密码 (至少 12 位)
+        <label><span data-i18n="setNewPw">新密码 (至少 12 位)</span>
           <input name="next" type="password" required minlength="12" autocomplete="new-password" />
         </label>
-        <button type="submit" class="me-primary-btn">提交</button>
+        <button type="submit" class="me-primary-btn" data-i18n="setSubmit">提交</button>
         <div id="settings-password-status" class="me-status"></div>
       </form>
 
       <!-- Route B P1-M3f — two-factor (TOTP) self-service. app.js renders the
            current state + enroll / confirm / disable controls into here. -->
-      <h2 style="margin-top:1.5rem;">两步验证 (2FA)</h2>
+      <h2 style="margin-top:1.5rem;" data-i18n="setMfa">两步验证 (2FA)</h2>
       <div id="settings-mfa" class="settings-form"></div>
 
       <!-- Phase 7 M5 — owner-only "升级到团队模式" 注入点. app.js
@@ -321,8 +321,8 @@
            wrapping section is hidden unless body.mode-personal is set
            (CSS rule in styles.css). -->
       <section class="settings-upgrade" data-mode-personal-only>
-        <h2 style="margin-top:1.5rem;">个人模式</h2>
-        <p class="hint">当前是个人模式 (1 用户, 简化界面)。升级后开放完整 admin 控件 — 用户管理 / 邀请 / peer / 配额。</p>
+        <h2 style="margin-top:1.5rem;" data-i18n="setPersonalMode">个人模式</h2>
+        <p class="hint" data-i18n="setPersonalModeHint">当前是个人模式 (1 用户, 简化界面)。升级后开放完整 admin 控件 — 用户管理 / 邀请 / peer / 配额。</p>
         <div id="settings-upgrade-slot"></div>
       </section>
     </section>
