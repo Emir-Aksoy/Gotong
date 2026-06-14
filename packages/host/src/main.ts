@@ -104,6 +104,7 @@ import {
   AUDIT_ACTIONS,
   openIdentityStore,
   principalKey,
+  userPrincipal,
   resolveMasterKeyProvider,
   type IdentityStore,
   type PeerRegistration,
@@ -216,6 +217,11 @@ import {
   createWorkflowAssistAgent,
   resolveWorkflowAssistConfig,
 } from './workflow-assist-agent.js'
+import {
+  createHubStewardService,
+  resolveStewardConfig,
+  type StewardWorkflowDirectory,
+} from './hub-steward-service.js'
 
 // CLI flags handled before any work — keep these cheap and side-effect free
 // so `npx @aipehub/host --help` exits in milliseconds without trying to
@@ -1857,6 +1863,59 @@ async function main(): Promise<void> {
     ? new HostMeAgentGrantsService({ identity })
     : undefined
 
+  // SW (hub-steward, 管家) — the OpenClaw-style steward. A member types plain
+  // language in the /me SPA; the steward PROPOSES a structured action, the host
+  // re-classifies it server-side (the client tier is never trusted), and runs it
+  // through the SAME member services (HostMeAgentService + MeWorkflowEditService),
+  // so RBAC + member limits + the cross-hub 出入口 lock are reused by construction.
+  // DANGEROUS (delete_agent) + CROSS_HUB (cross-hub workflow edit) tiers route to
+  // the Phase 16 inbox for the user's mandated second confirmation. Wired only
+  // when the member agent service + the workflow editor + identity are all present
+  // (and a steward LLM key resolves); absent any → null → /api/me/steward/* 503s.
+  const stewardConfig = resolveStewardConfig()
+  const hubSteward =
+    stewardConfig && meAgentAdmin && meWorkflowEdit && identity
+      ? (() => {
+          // `identity` is a `let` (narrowing doesn't cross the closure) — capture
+          // a const so the directory's grant check stays type-sound.
+          const identityStore = identity
+          // The steward's workflow snapshot: the member's editor-grantable
+          // workflows, each flagged cross-hub from the SAME `crossHubSteps` the
+          // WFEDIT editor + the admin "leaves your hub" preview use (no drift).
+          const stewardWorkflows: StewardWorkflowDirectory = {
+            async listForUser(userId) {
+              const all = await workflowController.listAll()
+              return all
+                .filter((s) =>
+                  identityStore.hasResourceGrant(
+                    'workflow',
+                    s.id,
+                    userPrincipal(userId),
+                    'editor',
+                  ),
+                )
+                .map((s) => ({
+                  id: s.id,
+                  ...(s.name ? { name: s.name } : {}),
+                  crossHub: (s.crossHubSteps?.length ?? 0) > 0,
+                }))
+            },
+          }
+          return createHubStewardService({
+            hub,
+            config: stewardConfig,
+            agents: meAgentAdmin,
+            workflows: stewardWorkflows,
+            workflowEditor: meWorkflowEdit,
+            // When present, DANGEROUS / CROSS_HUB tiers park at the approval
+            // broker; absent (no inbox) they degrade to `needs_approval`.
+            inbox: inboxStore,
+            orgApiPool,
+            logger: log,
+          })
+        })()
+      : null
+
   // Route B P1-M4e — browser SSO via configured OIDC IdPs. Wired only when
   // identity is present (the provider registry + (issuer,sub)→user links + the
   // session it mints all live there). Absent → /api/auth/oidc/* degrades: the
@@ -2071,6 +2130,10 @@ async function main(): Promise<void> {
     // WFEDIT — member NL workflow editing; null when no assistant / identity, in
     // which case /api/me/workflows/:id/{editable,edit} return 503.
     ...(meWorkflowEdit ? { workflowEdit: meWorkflowEdit } : {}),
+    // SW (hub-steward) — the 管家 conversational surface; null when the member
+    // agent service / workflow editor / identity / steward key is missing, in
+    // which case /api/me/steward/{plan,apply} return 503.
+    ...(hubSteward ? { hubSteward } : {}),
     // Phase 13 M3 — null when no API key / disabled. Web responds 503
     // on /api/admin/workflows/assist in that case so the UI can hide
     // the "AI assistant" button cleanly.
