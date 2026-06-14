@@ -65,6 +65,46 @@ import {
   type StewardExecPayload,
 } from './steward-approval.js'
 
+/**
+ * The four ids that distinguish ONE steward instance on the hub (A-M1). The
+ * member-facing steward (`/api/me/steward/*`) and the operator console steward
+ * (`/api/admin/steward/*`, SW-M9) are two instances of `createHubStewardService`
+ * on the SAME hub; they coexist ONLY because each registers under a DISJOINT set
+ * of these ids, so capability dispatch never crosses between them. The privilege
+ * boundary is the REGISTERED identity + the host surface that built it — NEVER a
+ * payload flag a member could forge (chat input is untrusted data).
+ */
+export interface StewardServiceIds {
+  /** The `HubStewardAgent` participant id + the capability `plan` dispatches to. */
+  agentId: string
+  capability: string
+  /** The `StewardApprovalBroker` participant id + the capability `apply` gates to. */
+  brokerId: string
+  brokerCapability: string
+}
+
+/** The member-facing steward's ids — the existing constants, byte-for-byte. */
+export const DEFAULT_STEWARD_IDS: StewardServiceIds = {
+  agentId: HUB_STEWARD_DEFAULT_ID,
+  capability: HUB_STEWARD_CAPABILITY,
+  brokerId: STEWARD_EXEC_PARTICIPANT_ID,
+  brokerCapability: STEWARD_EXEC_CAPABILITY,
+}
+
+/**
+ * The operator console steward's ids — disjoint from the member set so both
+ * register on one hub without collision (SW-M9). `apply` on the operator surface
+ * dispatches to `brokerCapability` here, landing on the operator broker; a parked
+ * operator action's suspended-task row carries `brokerId`, so the inbox resolve
+ * resumes the OPERATOR broker, never the member's (R1).
+ */
+export const OPERATOR_STEWARD_IDS: StewardServiceIds = {
+  agentId: 'hub-steward-operator',
+  capability: 'hub:steward:operator',
+  brokerId: 'aipehub:steward-exec:operator',
+  brokerCapability: 'aipehub.steward.exec.operator/v1',
+}
+
 /** Concrete provider choice for the host-built-in steward. */
 export type StewardProviderKind = 'anthropic' | 'openai' | 'mock'
 
@@ -367,8 +407,21 @@ export function createHubStewardService(deps: {
    * a host pass a provider it built itself; absent ⇒ the normal env/key path.
    */
   provider?: LlmProvider
+  /**
+   * The id set this instance registers under (A-M1). Default = the member-facing
+   * `DEFAULT_STEWARD_IDS`; the operator console passes `OPERATOR_STEWARD_IDS` so
+   * both stewards coexist on one hub without dispatch crossing between them.
+   */
+  ids?: StewardServiceIds
+  /**
+   * Replace the agent's built-in system prompt (A-M5). The operator steward
+   * passes its own prompt (knows it manages SITE-WIDE resources + sensitive
+   * writes always re-confirm); absent ⇒ the member prompt.
+   */
+  systemOverride?: string
 }): HubStewardSurface | null {
   const { hub, config, agents, workflows, workflowEditor, orgApiPool, logger } = deps
+  const ids = deps.ids ?? DEFAULT_STEWARD_IDS
 
   let provider: LlmProvider
   if (deps.provider) {
@@ -400,6 +453,9 @@ export function createHubStewardService(deps: {
   const chunkSinks = new Map<string, (chunk: string) => void>()
 
   const agentOpts: ConstructorParameters<typeof HubStewardAgent>[0] = { provider }
+  agentOpts.id = ids.agentId
+  agentOpts.capabilities = [ids.capability]
+  if (deps.systemOverride) agentOpts.systemOverride = deps.systemOverride
   if (config.model) agentOpts.model = config.model
   agentOpts.maxTokens = config.maxTokens ?? 2048
   agentOpts.onStreamChunk = (chunk, task) => {
@@ -409,7 +465,7 @@ export function createHubStewardService(deps: {
       hub.transcript.append({
         ts: Date.now(),
         kind: 'llm_stream_chunk',
-        data: { taskId: task.id, agentId: HUB_STEWARD_DEFAULT_ID, chunk },
+        data: { taskId: task.id, agentId: ids.agentId, chunk },
       })
     } catch (err) {
       logger.warn('hub-steward: transcript append failed for llm_stream_chunk', {
@@ -429,8 +485,8 @@ export function createHubStewardService(deps: {
   const agent = new HubStewardAgent(agentOpts)
   hub.register(agent)
   logger.info('hub-steward: registered', {
-    id: HUB_STEWARD_DEFAULT_ID,
-    capability: HUB_STEWARD_CAPABILITY,
+    id: ids.agentId,
+    capability: ids.capability,
     provider: config.provider,
     model: config.model ?? '(provider default)',
   })
@@ -443,11 +499,17 @@ export function createHubStewardService(deps: {
   // as a safe one does.
   let broker: StewardApprovalBroker | null = null
   if (deps.inbox) {
-    broker = new StewardApprovalBroker({ store: deps.inbox, agents, workflowEditor })
+    broker = new StewardApprovalBroker({
+      store: deps.inbox,
+      agents,
+      workflowEditor,
+      id: ids.brokerId,
+      capability: ids.brokerCapability,
+    })
     hub.register(broker)
     logger.info('hub-steward: approval broker registered', {
-      id: STEWARD_EXEC_PARTICIPANT_ID,
-      capability: STEWARD_EXEC_CAPABILITY,
+      id: ids.brokerId,
+      capability: ids.brokerCapability,
     })
   }
 
@@ -487,10 +549,10 @@ export function createHubStewardService(deps: {
       try {
         const result = await hub.dispatch({
           from: userId,
-          strategy: { kind: 'capability', capabilities: [HUB_STEWARD_CAPABILITY] },
+          strategy: { kind: 'capability', capabilities: [ids.capability] },
           payload,
           origin: { orgId: 'local', userId },
-          title: 'hub:steward',
+          title: ids.capability,
         })
         if (result.kind !== 'ok') {
           const reason =
@@ -499,7 +561,7 @@ export function createHubStewardService(deps: {
               : result.kind === 'cancelled'
                 ? `cancelled: ${result.reason}`
                 : result.kind === 'no_participant'
-                  ? `no participant for capability ${HUB_STEWARD_CAPABILITY}: ${result.reason}`
+                  ? `no participant for capability ${ids.capability}: ${result.reason}`
                   : `unexpected result kind: ${result.kind}`
           throw new Error(`hub:steward dispatch failed — ${reason}`)
         }
@@ -512,7 +574,7 @@ export function createHubStewardService(deps: {
       //    trusted) and attach a member-readable summary.
       const classified: ClassifiedAction[] = output.actions.map((action) => ({
         action,
-        tier: classifyStewardAction(action, { crossHubWorkflowIds, stewardId: HUB_STEWARD_DEFAULT_ID }),
+        tier: classifyStewardAction(action, { crossHubWorkflowIds, stewardId: ids.agentId }),
         summary: summarizeStewardAction(action),
       }))
       return { reply: output.reply, actions: classified }
@@ -547,7 +609,7 @@ export function createHubStewardService(deps: {
           : EMPTY_CROSS_HUB
       const tier = classifyStewardAction(action, {
         crossHubWorkflowIds,
-        stewardId: HUB_STEWARD_DEFAULT_ID,
+        stewardId: ids.agentId,
       })
 
       switch (tier) {
@@ -571,7 +633,7 @@ export function createHubStewardService(deps: {
           const execPayload: StewardExecPayload = { userId, action }
           const result = await hub.dispatch({
             from: userId,
-            strategy: { kind: 'capability', capabilities: [STEWARD_EXEC_CAPABILITY] },
+            strategy: { kind: 'capability', capabilities: [ids.brokerCapability] },
             payload: execPayload,
             origin: { orgId: 'local', userId },
             title: `hub:steward exec (${tier})`,

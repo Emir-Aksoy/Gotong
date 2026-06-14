@@ -85,12 +85,26 @@ export interface StewardApprovalBrokerOptions {
   workflowEditor: StewardWorkflowEditor
   /** Clock injection for deterministic tests. */
   now?: () => number
+  /**
+   * Override the registered participant id. A SECOND steward instance (the
+   * operator console, SW-M9) coexists with the member one by using a DISJOINT
+   * id so a parked operator action resumes its OWN broker, never the member's.
+   * Default `STEWARD_EXEC_PARTICIPANT_ID`. (A-M1.)
+   */
+  id?: ParticipantId
+  /**
+   * Override the capability the broker answers to. MUST be disjoint from the
+   * other instance's — `apply` dispatches a gated action by capability, so two
+   * brokers under the SAME capability would cross-talk. Default
+   * `STEWARD_EXEC_CAPABILITY`. (A-M1.)
+   */
+  capability?: string
 }
 
 export class StewardApprovalBroker implements Participant {
   readonly kind = 'agent' as const
-  readonly id: ParticipantId = STEWARD_EXEC_PARTICIPANT_ID
-  readonly capabilities: readonly string[] = [STEWARD_EXEC_CAPABILITY]
+  readonly id: ParticipantId
+  readonly capabilities: readonly string[]
 
   private readonly store: InboxStore
   private readonly deps: { agents: StewardAgentDirectory; workflowEditor: StewardWorkflowEditor }
@@ -100,6 +114,8 @@ export class StewardApprovalBroker implements Participant {
     this.store = opts.store
     this.deps = { agents: opts.agents, workflowEditor: opts.workflowEditor }
     this.now = opts.now ?? (() => Date.now())
+    this.id = opts.id ?? STEWARD_EXEC_PARTICIPANT_ID
+    this.capabilities = [opts.capability ?? STEWARD_EXEC_CAPABILITY]
   }
 
   async onTask(task: Task): Promise<TaskResult> {
