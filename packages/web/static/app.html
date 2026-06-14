@@ -348,6 +348,14 @@
          settings sections live OUTSIDE <main> above so member/viewer
          get a coherent surface even when the admin shell is hidden. -->
     <main id="main-grid" class="admin-grid" data-roles="owner,admin" hidden>
+      <!-- SW-M9 A-M8 — the OPERATOR-console hub steward ("站点管家"). The
+           site-wide twin of the member steward (which sits atop the "我的" home
+           tab). Owner/admin only (gated by main[data-roles] above) + the
+           /api/admin/steward routes; rendered by /operator-steward-ui.js. A
+           dangerous / cross-hub action parks an approval into the operator's
+           own "我的" inbox (deep-linked), not an inline admin inbox. -->
+      <section id="operator-steward-panel" class="operator-steward-panel" data-tab="overview"></section>
+
       <!-- Room health banner — single-glance signal of "is the room
            healthy right now?" Numbers come from /api/state +
            /api/leaderboard?from=<7d>; no new backend endpoint. -->

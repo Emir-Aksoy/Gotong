@@ -582,6 +582,12 @@
       meStewardGoInbox: '去收件箱',
       meStewardApplyFailed: (e) => `执行失败:${e}`,
       meStewardPlanFailed: (e) => `问管家失败:${e}`,
+      // SW-M9 A-M8 — operator-console steward (site-wide twin of the member one)
+      opStewardTitle: '站点管家',
+      opStewardHint:
+        '用大白话管理整个站点 — 建 / 改 / 删任意托管助手,或按你的说法改任意工作流。管家只会「提议」,你预览后再决定执行;删除助手、跨 hub 的工作流改动(以及后续的凭证 / 对端 / 安全设置)都会送到你「我的」收件箱里再确认一次。',
+      opStewardPlaceholder: '例如:建一个把每天工单总结成一段中文的站点助手',
+      opStewardPending: '已送你「我的」收件箱待确认 — 去那边批准后才会真正执行。',
       // File upload
       meUploadSelectFile: (k) => `请为「${k}」选择一个文件`,
       meUploading: '上传中…',
@@ -2064,6 +2070,12 @@
       meStewardGoInbox: 'Go to inbox',
       meStewardApplyFailed: (e) => `Apply failed: ${e}`,
       meStewardPlanFailed: (e) => `Ask failed: ${e}`,
+      // SW-M9 A-M8 — operator-console steward (site-wide twin of the member one)
+      opStewardTitle: 'Site steward',
+      opStewardHint:
+        'Manage the whole site in plain language — create / edit / delete any managed agent, or edit any workflow by describing it. The steward only PROPOSES; you preview, then decide. Deleting an agent, cross-hub workflow edits (and, later, credential / peer / security changes) are sent to your inbox under “Home” for a second confirmation.',
+      opStewardPlaceholder: 'e.g. create a site agent that summarizes each day’s tickets into one Chinese paragraph',
+      opStewardPending: 'Sent to your inbox under “Home” for confirmation — it only runs after you approve it there.',
       // File upload
       meUploadSelectFile: (k) => `Pick a file for “${k}”`,
       meUploading: 'Uploading…',
