@@ -12,7 +12,7 @@
  * Pure — no host / hub state beyond the small `ctx` the host supplies.
  */
 
-import { agentPrincipal, authorizeAgentAction } from '@aipehub/identity'
+import { agentPrincipal, authorizeAgentAction, type AgentHumanConfirmAction } from '@aipehub/identity'
 
 import type { StewardAction, StewardActionTier } from './types.js'
 
@@ -31,22 +31,38 @@ export interface StewardClassifyContext {
    * actions alone).
    */
   stewardId: string
+  /**
+   * Whether THIS steward instance is the OPERATOR console (B-M2). The privilege
+   * boundary is the registered participant identity + the host surface that
+   * built it — NEVER a member-forgeable payload field — so the host passes this
+   * per instance: the member steward omits it (`false`), the operator steward
+   * passes `true`. It only changes how the four SENSITIVE writes tier: a member
+   * can never do them (`forbidden`); an operator routes every one through the
+   * approval inbox (`dangerous`).
+   */
+  operator: boolean
 }
 
 /**
  * Map a steward action to the abstract authority verb it would perform, IFF that
- * verb is one of the human-confirm-required ones (`agent-authority.ts`). The MVP
- * action set touches only member agents + workflows — none of which map to
- * `modify_owner_grant` / `delete_audit` / `change_security` — so this returns
- * `null` for every MVP action today. It is a FORWARD-LOOKING backstop: the day a
- * steward action whose verb lands in that closed set is added, it is
- * auto-escalated to a human here, exactly as `agent-authority.ts` predicted
- * ("the actual wiring … lands … when agent-owned resources first exist").
+ * verb is one of the human-confirm-required ones (`agent-authority.ts`), else
+ * `null`. The four SENSITIVE writes (credentials / peer / security quota) are all
+ * hub-safety settings, so they map to `change_security` — its reason text spells
+ * out the exact surface: "peer trust, vault master key, security-relevant quotas".
+ * Every other kind touches only a member's own agents / workflows → `null`.
+ *
+ * Exported so the floor is unit-testable directly, and so a future
+ * highest-blast-radius kind wires its verb here (`agent-authority.ts` predicted
+ * "the actual wiring … lands … when agent-owned resources first exist").
  */
-function authorityVerbFor(action: StewardAction): string | null {
+export function authorityVerbFor(action: StewardAction): AgentHumanConfirmAction | null {
   switch (action.kind) {
-    // No MVP action maps to a human-confirm verb. Future sensitive actions
-    // (e.g. an `add_owner` / `change_security` kind) add their case here.
+    case 'set_credential_ref':
+    case 'revoke_credential':
+    case 'set_peer_policy':
+    case 'set_security_quota':
+      // Vault credential write / peer trust / security quota — all `change_security`.
+      return 'change_security'
     default:
       return null
   }
@@ -55,22 +71,30 @@ function authorityVerbFor(action: StewardAction): string | null {
 /**
  * Classify a proposed action into one of four risk tiers.
  *
- * The order matters: the authority backstop runs FIRST so a future
- * highest-blast-radius action can't slip through as `safe`. Then the explicit
- * per-kind tiering: only `inspect` / `create_agent` / `edit_agent` / a
- * purely-local `edit_workflow` are `safe`; `delete_agent` is `dangerous`; a
- * cross-hub `edit_workflow` is `cross_hub`; `refuse` is `forbidden`.
+ * The per-kind {@link baseTierForAction} decision is AUTHORITATIVE; the authority
+ * backstop then runs as a forward-looking net — if a verb-bearing action somehow
+ * came back as `safe`, it is RAISED to `dangerous` (an agent-principal steward may
+ * not do a `change_security` verb alone). The backstop only ever raises a `safe`
+ * result, so it never weakens a member's `forbidden` or an explicit inbox tier —
+ * the per-kind decision stays the source of truth while a future mis-tiered kind
+ * still can't slip through as safe.
  */
 export function classifyStewardAction(
   action: StewardAction,
   ctx: StewardClassifyContext,
 ): StewardActionTier {
-  const verb = authorityVerbFor(action)
-  if (verb && authorizeAgentAction(agentPrincipal(ctx.stewardId), verb).kind === 'requires_human') {
-    // An agent-principal steward may not do this alone → at least a human gate.
-    return 'dangerous'
+  const tier = baseTierForAction(action, ctx)
+  if (tier === 'safe') {
+    const verb = authorityVerbFor(action)
+    if (verb && authorizeAgentAction(agentPrincipal(ctx.stewardId), verb).kind === 'requires_human') {
+      return 'dangerous'
+    }
   }
+  return tier
+}
 
+/** The per-kind tier decision (before the authority backstop). */
+function baseTierForAction(action: StewardAction, ctx: StewardClassifyContext): StewardActionTier {
   switch (action.kind) {
     case 'inspect':
       return 'safe' // read-only answer; nothing to execute
@@ -86,11 +110,13 @@ export function classifyStewardAction(
     case 'revoke_credential':
     case 'set_peer_policy':
     case 'set_security_quota':
-      // Phase B sensitive writes. B-M1 ships them FAIL-CLOSED as `forbidden` (no
-      // operator context exists here yet — a member must never reach them). B-M2
-      // adds the `operator` flag to `ctx` that tiers them to the highest second-
-      // confirmation tier for an operator while keeping `forbidden` for a member.
-      return 'forbidden'
+      // ★ OPERATOR-ONLY sensitive writes. A member steward never proposes these —
+      // `forbidden` (the steward only explains + points to the settings panel). An
+      // operator steward tiers every one to `dangerous` → ALWAYS through the
+      // approval inbox (B-M4 makes this stricter than `delete_agent`: never an
+      // inline path). The `authorityVerbFor` backstop guarantees this can never be
+      // downgraded to `safe`.
+      return ctx.operator ? 'dangerous' : 'forbidden'
     case 'refuse':
       return 'forbidden' // out-of-scope / sensitive — never executed
   }

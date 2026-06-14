@@ -1958,6 +1958,10 @@ async function main(): Promise<void> {
           logger: log,
           ids: OPERATOR_STEWARD_IDS,
           systemOverride: buildOperatorStewardSystemPrompt(),
+          // B-M2 — this is the operator console: the four sensitive writes
+          // (credentials / peer / security) tier as `dangerous` (always inbox)
+          // instead of `forbidden`. The member steward above omits this flag.
+          operator: true,
         })
       : null
 

@@ -419,9 +419,18 @@ export function createHubStewardService(deps: {
    * writes always re-confirm); absent ⇒ the member prompt.
    */
   systemOverride?: string
+  /**
+   * Whether THIS instance is the OPERATOR console (B-M2). Flows into the
+   * classifier `ctx.operator`, which is the ONLY thing that lets the four
+   * sensitive writes (credentials / peer / security) tier as `dangerous` (inbox)
+   * instead of `forbidden`. The privilege boundary is THIS host-side flag, not a
+   * member-forgeable payload field. Default `false` (member steward).
+   */
+  operator?: boolean
 }): HubStewardSurface | null {
   const { hub, config, agents, workflows, workflowEditor, orgApiPool, logger } = deps
   const ids = deps.ids ?? DEFAULT_STEWARD_IDS
+  const operator = deps.operator ?? false
 
   let provider: LlmProvider
   if (deps.provider) {
@@ -574,7 +583,7 @@ export function createHubStewardService(deps: {
       //    trusted) and attach a member-readable summary.
       const classified: ClassifiedAction[] = output.actions.map((action) => ({
         action,
-        tier: classifyStewardAction(action, { crossHubWorkflowIds, stewardId: ids.agentId }),
+        tier: classifyStewardAction(action, { crossHubWorkflowIds, stewardId: ids.agentId, operator }),
         summary: summarizeStewardAction(action),
       }))
       return { reply: output.reply, actions: classified }
@@ -610,6 +619,7 @@ export function createHubStewardService(deps: {
       const tier = classifyStewardAction(action, {
         crossHubWorkflowIds,
         stewardId: ids.agentId,
+        operator,
       })
 
       switch (tier) {
