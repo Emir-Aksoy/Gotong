@@ -388,7 +388,7 @@
         <div class="modal-card" role="dialog" aria-modal="true">
           <header class="modal-head">
             <h3 data-i18n="apiKeysModalTitle">工作区 API Key</h3>
-            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div class="dispatch-form">
             <p class="hint" data-i18n="apiKeysHint">这里设置的 key 会被加密存到 <code>&lt;space&gt;/secrets.enc.json</code>；明文不写回任何 GET 响应。每个 agent 也可在自己的「编辑」表单里配私有 key，会优先生效。</p>
@@ -404,7 +404,7 @@
         <div class="modal-card" role="dialog" aria-modal="true">
           <header class="modal-head">
             <h3 id="ma-form-title" data-i18n="newAgent">创建智能体</h3>
-            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <form id="ma-form" class="dispatch-form">
             <p id="ma-form-edit-warning" class="form-msg" hidden data-i18n="editWarning">⚠️ 修改已存在的智能体可能影响进行中的会话；建议先停止再修改。</p>
@@ -496,11 +496,11 @@
         <h2>
           <span data-i18n="workflowsTitle">工作流</span>
           <span id="wf-summary" class="lb-summary"></span>
-          <button type="button" id="bundle-import-btn" class="ma-btn">导入团队 (bundle)</button>
+          <button type="button" id="bundle-import-btn" class="ma-btn" data-i18n="importBundle">导入团队 (bundle)</button>
           <button type="button" id="wf-import-btn" class="ma-btn ma-btn-secondary" data-i18n="importWorkflow">导入工作流</button>
           <!-- Phase 13 M3 — AI 助手按钮; 不可用时(host 没装 assistant)点击会
                提示 503, 暂不在前端 probe 隐藏(避免 boot 时多一个 round-trip) -->
-          <button type="button" id="wf-assist-btn" class="ma-btn ma-btn-secondary">AI 助手 (beta)</button>
+          <button type="button" id="wf-assist-btn" class="ma-btn ma-btn-secondary" data-i18n="wfAssistBtn">AI 助手 (beta)</button>
         </h2>
         <div id="workflows-list" class="managed-agents-list"></div>
         <p class="hint">
@@ -519,22 +519,22 @@
         <div class="modal-backdrop"></div>
         <div class="modal-card" role="dialog" aria-modal="true" style="max-width: 36rem;">
           <header class="modal-head">
-            <h3>欢迎使用 AipeHub · 先看几条</h3>
+            <h3 data-i18n="disclaimerTitle">欢迎使用 AipeHub · 先看几条</h3>
           </header>
           <div class="dispatch-form" style="line-height: 1.7;">
-            <p><strong>1. 这是个人本地工具,不是云服务。</strong>你的对话、画像、报告、API key 都存在你这台机器的 <code>.aipehub-*</code> 目录里。我们不收集任何数据,host 也不上报任何遥测。</p>
-            <p><strong>2. LLM 推理走第三方 API。</strong>你的 4 段自述会发给你配置的模型供应商(DeepSeek / Anthropic / OpenAI 等)做推理。供应商各自有自己的数据政策,看他们的隐私条款。如果有顾虑,可以用 mock provider 或本地 LLM。</p>
-            <p><strong>3. 这不是医生 / 心理咨询师 / 财务顾问 / 关系治疗师的替代品。</strong>个人成长教练们都被设计成"有边界的陪伴者"——触及红旗信号会让你去找专业人。不要把它们当成诊断或处方。</p>
-            <p><strong>4. 如果你正在心理危机中,请立即联系:</strong></p>
+            <p data-i18n-html="disclaimerP1"><strong>1. 这是个人本地工具,不是云服务。</strong>你的对话、画像、报告、API key 都存在你这台机器的 <code>.aipehub-*</code> 目录里。我们不收集任何数据,host 也不上报任何遥测。</p>
+            <p data-i18n-html="disclaimerP2"><strong>2. LLM 推理走第三方 API。</strong>你的 4 段自述会发给你配置的模型供应商(DeepSeek / Anthropic / OpenAI 等)做推理。供应商各自有自己的数据政策,看他们的隐私条款。如果有顾虑,可以用 mock provider 或本地 LLM。</p>
+            <p data-i18n-html="disclaimerP3"><strong>3. 这不是医生 / 心理咨询师 / 财务顾问 / 关系治疗师的替代品。</strong>个人成长教练们都被设计成"有边界的陪伴者"——触及红旗信号会让你去找专业人。不要把它们当成诊断或处方。</p>
+            <p data-i18n-html="disclaimerP4"><strong>4. 如果你正在心理危机中,请立即联系:</strong></p>
             <ul style="margin: 0.2rem 0 0.5rem 1.2rem;">
-              <li>🇨🇳 北京心理危机研究与干预中心:<strong>010-82951332</strong></li>
-              <li>🇨🇳 全国心理援助热线:<strong>400-161-9995</strong></li>
+              <li data-i18n-html="disclaimerCrisisCn1">🇨🇳 北京心理危机研究与干预中心:<strong>010-82951332</strong></li>
+              <li data-i18n-html="disclaimerCrisisCn2">🇨🇳 全国心理援助热线:<strong>400-161-9995</strong></li>
               <li>🇲🇾 Befrienders Kuala Lumpur:<strong>03-7956 8144</strong></li>
-              <li>🌏 其他地区:<a href="https://findahelpline.com" target="_blank" rel="noopener">findahelpline.com</a></li>
+              <li data-i18n-html="disclaimerCrisisIntl">🌏 其他地区:<a href="https://findahelpline.com" target="_blank" rel="noopener">findahelpline.com</a></li>
             </ul>
-            <p><strong>5. 你可以随时删除自己的数据。</strong>停掉 host,删除 <code>.aipehub-*</code> 目录即可彻底清掉。</p>
+            <p data-i18n-html="disclaimerP5"><strong>5. 你可以随时删除自己的数据。</strong>停掉 host,删除 <code>.aipehub-*</code> 目录即可彻底清掉。</p>
             <p style="margin-top: 1rem; text-align: center;">
-              <button type="button" id="disclaimer-accept" class="ma-btn" style="padding: 0.5rem 1.6rem;">我看完了,开始用</button>
+              <button type="button" id="disclaimer-accept" class="ma-btn" style="padding: 0.5rem 1.6rem;" data-i18n="disclaimerAccept">我看完了,开始用</button>
             </p>
           </div>
         </div>
@@ -548,8 +548,8 @@
         <div class="modal-card modal-card-wide" role="dialog" aria-modal="true">
           <header class="modal-head">
             <h3 id="growth-report-title">成长报告</h3>
-            <a id="growth-report-download" class="ma-btn ma-btn-secondary" href="#" download>下载</a>
-            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+            <a id="growth-report-download" class="ma-btn ma-btn-secondary" href="#" download data-i18n="download">下载</a>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div id="growth-report-body" class="growth-report-body"></div>
         </div>
@@ -562,19 +562,19 @@
            download one with a click. -->
       <section id="growth-reports" class="managed-agents" data-tab="workflows" hidden>
         <h2>
-          <span>成长报告</span>
+          <span data-i18n="growthReportsTitle">成长报告</span>
           <span id="growth-reports-summary" class="lb-summary"></span>
-          <button type="button" id="growth-reports-refresh" class="ma-btn ma-btn-secondary">刷新</button>
+          <button type="button" id="growth-reports-refresh" class="ma-btn ma-btn-secondary" data-i18n="refresh">刷新</button>
         </h2>
-        <p class="hint">个人成长工作流跑完一轮后,综合规划师把 7 段产出汇总成一篇 Markdown 报告,落在这里。点"下载"把它存成本地文件。</p>
-        <div id="growth-reports-empty" class="empty-state" hidden>还没有报告 — 跑一次"个人成长发展路径"工作流就会出现。</div>
+        <p class="hint" data-i18n="growthReportsHint">个人成长工作流跑完一轮后,综合规划师把 7 段产出汇总成一篇 Markdown 报告,落在这里。点"下载"把它存成本地文件。</p>
+        <div id="growth-reports-empty" class="empty-state" hidden data-i18n="growthReportsEmpty">还没有报告 — 跑一次"个人成长发展路径"工作流就会出现。</div>
         <table id="growth-reports-table" class="services-table" hidden>
           <thead>
             <tr>
-              <th>生成时间</th>
+              <th data-i18n="colGeneratedTime">生成时间</th>
               <th>caseId</th>
-              <th>大小</th>
-              <th>操作</th>
+              <th data-i18n="meColSize">大小</th>
+              <th data-i18n="colActions">操作</th>
             </tr>
           </thead>
           <tbody id="growth-reports-tbody"></tbody>
@@ -590,7 +590,7 @@
               <span data-i18n="workflowRunsTitle">运行历史</span>
               <span id="wf-runs-target" class="lb-summary"></span>
             </h3>
-            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div class="dispatch-form wf-runs-body">
             <div class="wf-runs-cols">
@@ -617,7 +617,7 @@
               <span data-i18n="workflowRevisionsTitle">修订历史</span>
               <span id="wf-rev-target" class="lb-summary"></span>
             </h3>
-            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div class="dispatch-form">
             <div id="wf-rev-list"></div>
@@ -685,21 +685,22 @@
         <div class="modal-backdrop" data-act="close-modal"></div>
         <div class="modal-card" role="dialog" aria-modal="true" style="max-width: 48rem;">
           <header class="modal-head">
-            <h3>AI 助手 — 生成工作流草稿</h3>
-            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+            <h3 data-i18n="wfAssistModalTitle">AI 助手 — 生成工作流草稿</h3>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div class="dispatch-form">
-            <p class="hint">
+            <p class="hint" data-i18n-html="wfAssistModalHint">
               用一句话描述你想要的工作流(中文 / 英文都行)。AI 会按
               <code>aipehub.workflow/v1</code> 生成 YAML 草稿,自动 validate
               通过后才能保存。
             </p>
             <label>
-              <span>描述</span>
+              <span data-i18n="wfAssistDescLabel">描述</span>
               <textarea id="wf-assist-description" rows="4"
+                        data-i18n-placeholder="wfAssistDescPh"
                         placeholder="例:每周一爬 5 个新闻源、用 DeepSeek 总结、发到 Telegram 群"></textarea>
             </label>
-            <button type="button" id="wf-assist-generate" class="ma-btn">生成草稿</button>
+            <button type="button" id="wf-assist-generate" class="ma-btn" data-i18n="wfAssistGenerate">生成草稿</button>
             <p id="wf-assist-msg" class="form-msg"></p>
 
             <!-- Phase 13 follow-up — live streaming preview. Shown only
@@ -708,7 +709,7 @@
             <div id="wf-assist-streaming" hidden style="margin-top: 0.8rem;">
               <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem;">
                 <span class="live-stream-dot" style="color: #2563eb;">●</span>
-                <strong style="color: #2563eb;">LLM 正在生成中…</strong>
+                <strong style="color: #2563eb;" data-i18n="wfAssistStreaming">LLM 正在生成中…</strong>
                 <span id="wf-assist-streaming-meta" class="hint"></span>
               </div>
               <pre id="wf-assist-streaming-text"
@@ -721,18 +722,18 @@
             <!-- Result panel — hidden until first generate -->
             <div id="wf-assist-result" hidden style="margin-top: 1rem;">
               <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem;">
-                <strong>状态:</strong>
+                <strong data-i18n="wfAssistStatusLabel">状态:</strong>
                 <span id="wf-assist-status-chip" class="lb-summary"></span>
               </div>
               <div id="wf-assist-explanation" class="hint" style="margin: 0.4rem 0 0.8rem;"></div>
               <details open>
-                <summary>YAML 草稿</summary>
+                <summary data-i18n="wfAssistYamlSummary">YAML 草稿</summary>
                 <pre style="background: #f5f5f5; padding: 0.6rem; overflow-x: auto;
                             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
                             font-size: 0.85em; max-height: 24rem;"><code id="wf-assist-yaml"></code></pre>
               </details>
               <details id="wf-assist-error-details" hidden style="margin-top: 0.5rem;">
-                <summary>校验错误</summary>
+                <summary data-i18n="wfAssistErrorSummary">校验错误</summary>
                 <pre style="background: #fef2f2; color: #b91c1c; padding: 0.6rem; overflow-x: auto;
                             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
                             font-size: 0.85em;"><code id="wf-assist-validation-error"></code></pre>
@@ -740,14 +741,14 @@
               <!-- Phase 13 M4 — deep-check warnings. Shown when draftStatus=valid
                    but the workflow references things the current hub doesn't have. -->
               <details id="wf-assist-deepcheck-details" hidden open style="margin-top: 0.5rem;">
-                <summary id="wf-assist-deepcheck-summary">深度检查警告</summary>
+                <summary id="wf-assist-deepcheck-summary" data-i18n="wfAssistDeepcheckSummary">深度检查警告</summary>
                 <ul id="wf-assist-deepcheck-list" style="margin: 0.4rem 0 0 1.2rem; padding: 0;
                                                          font-size: 0.85em; color: #92400e;"></ul>
               </details>
               <div style="display: flex; gap: 0.5rem; margin-top: 0.8rem;">
                 <!-- save button only enabled when draftStatus === 'valid' -->
-                <button type="button" id="wf-assist-save" class="ma-btn" disabled>保存为工作流</button>
-                <button type="button" id="wf-assist-regenerate" class="ma-btn ma-btn-secondary">重新生成</button>
+                <button type="button" id="wf-assist-save" class="ma-btn" disabled data-i18n="wfAssistSave">保存为工作流</button>
+                <button type="button" id="wf-assist-regenerate" class="ma-btn ma-btn-secondary" data-i18n="wfAssistRegenerate">重新生成</button>
               </div>
             </div>
           </div>
@@ -760,7 +761,7 @@
         <div class="modal-card" role="dialog" aria-modal="true">
           <header class="modal-head">
             <h3 data-i18n="importWorkflow">导入工作流</h3>
-            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div class="dispatch-form">
             <p class="hint" data-i18n="workflowImportHint">aipehub.workflow/v1 格式。导入后立刻注册到 Hub，并写入 .aipehub/workflows/definitions/ 目录。</p>
@@ -787,13 +788,13 @@
         <div class="modal-backdrop" data-act="close-modal"></div>
         <div class="modal-card" role="dialog" aria-modal="true">
           <header class="modal-head">
-            <h3>开始工作流 <span id="wf-start-title" class="lb-summary"></span></h3>
-            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+            <h3><span data-i18n="wfStartTitle">开始工作流</span> <span id="wf-start-title" class="lb-summary"></span></h3>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div id="wf-start-body" class="dispatch-form">
             <p id="wf-start-desc" class="hint"></p>
             <div id="wf-start-fields"></div>
-            <button type="button" id="wf-start-submit">派发任务</button>
+            <button type="button" id="wf-start-submit" data-i18n="wfStartSubmit">派发任务</button>
             <p id="wf-start-msg" class="form-msg"></p>
           </div>
         </div>
@@ -809,29 +810,29 @@
         <div class="modal-backdrop" data-act="close-modal"></div>
         <div class="modal-card" role="dialog" aria-modal="true">
           <header class="modal-head">
-            <h3>导入团队 (bundle)</h3>
-            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+            <h3 data-i18n="importBundle">导入团队 (bundle)</h3>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div class="dispatch-form">
-            <p class="hint">aipehub.bundle/v1 格式 — 一个文件包含一组 agent + 一条 workflow + API key 输入提示。导入后所有 agent 一次创建,workflow 自动注册,可直接派发。</p>
-            <p class="hint">模板：<a href="https://github.com/AipeHub/AipeHub/tree/main/templates/bundles" target="_blank" rel="noopener">templates/bundles/</a> · 或用内置模板:</p>
+            <p class="hint" data-i18n="bundleImportHint">aipehub.bundle/v1 格式 — 一个文件包含一组 agent + 一条 workflow + API key 输入提示。导入后所有 agent 一次创建,workflow 自动注册,可直接派发。</p>
+            <p class="hint" data-i18n-html="bundleImportTemplates">模板：<a href="https://github.com/AipeHub/AipeHub/tree/main/templates/bundles" target="_blank" rel="noopener">templates/bundles/</a> · 或用内置模板:</p>
             <p>
-              <button type="button" id="bundle-builtin-pg-btn" class="ma-btn ma-btn-secondary">🎁 用内置模板:个人成长 (7 教练 + 12 周墙上计划)</button>
+              <button type="button" id="bundle-builtin-pg-btn" class="ma-btn ma-btn-secondary" data-i18n="bundleBuiltinPg">🎁 用内置模板:个人成长 (7 教练 + 12 周墙上计划)</button>
             </p>
             <label>
-              <span>上传文件</span>
+              <span data-i18n="uploadFile">上传文件</span>
               <input id="bundle-import-file" type="file" accept=".yaml,.yml,.json" />
             </label>
             <label>
-              <span>或粘贴内容</span>
+              <span data-i18n="orPaste">或粘贴内容</span>
               <textarea id="bundle-import-text" rows="10" placeholder="schema: aipehub.bundle/v1&#10;bundle:&#10;  name: ...&#10;  team: ..."></textarea>
             </label>
             <label>
               <span id="bundle-key-label">API key (optional)</span>
-              <input id="bundle-import-key" type="password" autocomplete="off" placeholder="为 openai-compatible 类 agent 一次性填 key (留空跳过)" />
-              <small class="hint">如果 bundle 里有 <code>openai-compatible</code> 类 agent (e.g. DeepSeek),粘贴一次 API key,自动应用到所有该类 agent — 不再需要逐个手填。</small>
+              <input id="bundle-import-key" type="password" autocomplete="off" data-i18n-placeholder="bundleKeyPh" placeholder="为 openai-compatible 类 agent 一次性填 key (留空跳过)" />
+              <small class="hint" data-i18n-html="bundleKeyHint">如果 bundle 里有 <code>openai-compatible</code> 类 agent (e.g. DeepSeek),粘贴一次 API key,自动应用到所有该类 agent — 不再需要逐个手填。</small>
             </label>
-            <button type="button" id="bundle-import-submit">导入</button>
+            <button type="button" id="bundle-import-submit" data-i18n="doImport">导入</button>
             <p id="bundle-import-msg" class="form-msg"></p>
           </div>
         </div>
@@ -845,7 +846,7 @@
         <div class="modal-card" role="dialog" aria-modal="true">
           <header class="modal-head">
             <h3 data-i18n="ghImportTitle">从 GitHub 导入</h3>
-            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div class="dispatch-form">
             <p class="hint" data-i18n="ghImportHint">粘贴 GitHub 上 agent / team / workflow 的 yaml 链接（blob 或 raw 都行）。如果访问 GitHub 慢，可一键切换到国内镜像源。</p>
@@ -878,7 +879,7 @@
         <div class="modal-card" role="dialog" aria-modal="true">
           <header class="modal-head">
             <h3 data-i18n="importAgent">导入</h3>
-            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div class="dispatch-form">
             <p class="hint" data-i18n="importHint">支持 YAML 或 JSON。可上传 .yaml / .json 文件，或直接粘贴。</p>
@@ -905,7 +906,7 @@
         <div class="modal-card" role="dialog" aria-modal="true">
           <header class="modal-head">
             <h3><span data-i18n="agentAccessTitle">Agent 访问控制</span> · <code id="ma-access-target"></code></h3>
-            <button type="button" class="modal-close" data-act="close-modal" aria-label="关闭">×</button>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div class="dispatch-form">
             <div class="wf-grants-head">
@@ -936,7 +937,7 @@
       <section id="leaderboard-section" class="leaderboard-section" data-tab="overview">
         <h2>
           <span data-i18n="leaderboardTitle">贡献榜</span>
-          <select id="lb-window" class="lb-window-select" aria-label="时段">
+          <select id="lb-window" class="lb-window-select" data-i18n-aria="lbWindowAria" aria-label="时段">
             <option value="all" data-i18n="lbWindowAll">不限时段</option>
             <option value="today" data-i18n="lbWindowToday">今天</option>
             <option value="week" data-i18n="lbWindowWeek">近 7 天</option>
