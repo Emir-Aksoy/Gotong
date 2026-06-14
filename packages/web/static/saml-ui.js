@@ -23,6 +23,12 @@
 ;(function () {
   'use strict'
 
+  // i18n — read the live dict off window.AipeHub at call time (app-core.js runs
+  // synchronously before this panel is injected, so AipeHub is always defined).
+  // `t()` returns the current-language dict; re-render on language change.
+  const AH = window.AipeHub
+  function t() { return AH.t }
+
   const API = '/api/admin/saml/providers'
   // The IdP must POST assertions to this path (the absolute URL is
   // host-configured via AIPE_PUBLIC_URL; M5e saml-routes.ts /acs). Shown as a
@@ -102,40 +108,37 @@
   // ---- render -----------------------------------------------------------
 
   function buildUi(root) {
+    const d = t()
     root.innerHTML =
       '<div style="padding:1rem;max-width:64rem;">' +
-      '<h2 style="margin-top:0;">单点登录 / SSO (SAML 2.0)</h2>' +
-      '<p style="color:#555;font-size:0.9rem;margin:0 0 0.5rem;">注册本 hub 接受 SAML 断言的外部身份提供方 (IdP)。' +
-      '成员在登录页会看到「用 X 登录」按钮。<strong>SSO 只放已存在的本地用户进门</strong> —— ' +
-      '按 IdP 签名断言里的邮箱匹配现有账号,绝不自动开户。</p>' +
-      '<p style="color:#555;font-size:0.85rem;margin:0 0 1rem;">断言接收地址 (ACS, 在 IdP 处登记): ' +
-      '<code>' + escHtml(ACS_PATH) + '</code> —— 即 <code>https://&lt;你的域名&gt;' + escHtml(ACS_PATH) + '</code>。' +
-      '注册后每行有「SP 元数据」链接可交给 IdP 管理员。</p>' +
+      '<h2 style="margin-top:0;">' + escHtml(d.samlTitle) + '</h2>' +
+      '<p style="color:#555;font-size:0.9rem;margin:0 0 0.5rem;">' + d.samlIntro + '</p>' +
+      '<p style="color:#555;font-size:0.85rem;margin:0 0 1rem;">' + d.samlAcsHint(escHtml(ACS_PATH)) + '</p>' +
       '<div id="saml-status" class="saml-status" style="margin-bottom:1rem;min-height:1.2em;font-size:0.9rem;"></div>' +
       '<details open style="margin-bottom:1.5rem;">' +
-      '<summary style="cursor:pointer;font-weight:bold;">注册 IdP</summary>' +
+      '<summary style="cursor:pointer;font-weight:bold;">' + escHtml(d.samlRegisterIdp) + '</summary>' +
       '<form id="saml-add-form" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.5rem;margin-top:0.75rem;">' +
-      '<input name="idpEntityId" type="text" placeholder="IdP entityID (断言 Issuer)" required autocomplete="off" />' +
-      '<input name="label" type="text" placeholder="显示名 (按钮文字, 可选)" autocomplete="off" />' +
-      '<input name="ssoUrl" type="url" placeholder="SSO URL (HTTP-Redirect 端点)" required autocomplete="off" />' +
-      '<input name="spEntityId" type="text" placeholder="SP entityID (本 hub, 断言 Audience)" required autocomplete="off" />' +
-      '<textarea name="idpCert" placeholder="IdP 签名证书 (X.509 PEM, 公开验证钥)" required autocomplete="off" ' +
+      '<input name="idpEntityId" type="text" placeholder="' + escHtml(d.samlPhIdpEntityId) + '" required autocomplete="off" />' +
+      '<input name="label" type="text" placeholder="' + escHtml(d.samlPhLabel) + '" autocomplete="off" />' +
+      '<input name="ssoUrl" type="url" placeholder="' + escHtml(d.samlPhSsoUrl) + '" required autocomplete="off" />' +
+      '<input name="spEntityId" type="text" placeholder="' + escHtml(d.samlPhSpEntityId) + '" required autocomplete="off" />' +
+      '<textarea name="idpCert" placeholder="' + escHtml(d.samlPhIdpCert) + '" required autocomplete="off" ' +
       'style="grid-column:1 / -1;min-height:6rem;font-family:monospace;font-size:0.78rem;"></textarea>' +
       '<label style="grid-column:1 / -1;font-size:0.85rem;color:#555;display:flex;gap:0.4rem;align-items:center;">' +
-      '<input name="enabled" type="checkbox" checked /> 启用 (成员登录页立即可见)</label>' +
-      '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">注册</button>' +
+      '<input name="enabled" type="checkbox" checked /> ' + escHtml(d.samlEnabledLabel) + '</label>' +
+      '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">' + escHtml(d.samlRegisterBtn) + '</button>' +
       '</form>' +
       '</details>' +
-      '<h3 style="margin-bottom:0.5rem;">已注册 IdP</h3>' +
+      '<h3 style="margin-bottom:0.5rem;">' + escHtml(d.samlRegisteredIdp) + '</h3>' +
       '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">' +
       '<thead><tr style="text-align:left;border-bottom:1px solid #ccc;background:#fafafa;">' +
-      '<th style="padding:0.4rem;">标签 / EntityID</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(d.samlColLabelEntity) + '</th>' +
       '<th style="padding:0.4rem;">SSO URL</th>' +
-      '<th style="padding:0.4rem;">证书</th>' +
-      '<th style="padding:0.4rem;">状态</th>' +
-      '<th style="padding:0.4rem;">操作</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(d.samlColCert) + '</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(d.samlColState) + '</th>' +
+      '<th style="padding:0.4rem;">' + escHtml(d.samlColActions) + '</th>' +
       '</tr></thead>' +
-      '<tbody id="saml-tbody"><tr><td colspan="5" style="padding:0.6rem;color:#888;">载入中…</td></tr></tbody>' +
+      '<tbody id="saml-tbody"><tr><td colspan="5" style="padding:0.6rem;color:#888;">' + escHtml(d.samlLoadingCell) + '</td></tr></tbody>' +
       '</table>' +
       '</div>'
 
@@ -148,18 +151,18 @@
     if (!tbody) return
     if (!providers.length) {
       tbody.innerHTML =
-        '<tr><td colspan="5" style="padding:0.6rem;color:#888;">还没有注册 IdP。在上面表单注册一个后,' +
-        '成员登录页会出现对应的 SSO 按钮。</td></tr>'
+        '<tr><td colspan="5" style="padding:0.6rem;color:#888;">' + escHtml(t().samlEmpty) + '</td></tr>'
       return
     }
+    const d = t()
     tbody.innerHTML = ''
     for (const p of providers) {
       const idLabel = p.label
         ? escHtml(p.label) + ' <code style="color:#888;">' + escHtml(p.idpEntityId) + '</code>'
         : '<code>' + escHtml(p.idpEntityId) + '</code>'
       const stateBadge = p.enabled
-        ? '<span class="saml-badge saml-on">启用</span>'
-        : '<span class="saml-badge saml-off">停用</span>'
+        ? '<span class="saml-badge saml-on">' + escHtml(d.samlStateEnabled) + '</span>'
+        : '<span class="saml-badge saml-off">' + escHtml(d.samlStateDisabled) + '</span>'
       const metaUrl = METADATA_PATH + '?provider=' + encodeURIComponent(p.id)
       const tr = document.createElement('tr')
       tr.style.borderBottom = '1px solid #eee'
@@ -170,29 +173,29 @@
         '<td style="padding:0.4rem;">' + stateBadge + '</td>' +
         '<td style="padding:0.4rem;white-space:nowrap;">' +
         '<button type="button" class="saml-toggle" style="padding:0.25rem 0.5rem;">' +
-        (p.enabled ? '停用' : '启用') + '</button> ' +
-        '<button type="button" class="saml-cert" style="padding:0.25rem 0.5rem;">轮换证书</button> ' +
+        (p.enabled ? escHtml(d.samlBtnDisable) : escHtml(d.samlBtnEnable)) + '</button> ' +
+        '<button type="button" class="saml-cert" style="padding:0.25rem 0.5rem;">' + escHtml(d.samlBtnRotateCert) + '</button> ' +
         '<a class="saml-meta" href="' + escHtml(metaUrl) + '" target="_blank" rel="noopener" ' +
-        'style="padding:0.25rem 0.5rem;display:inline-block;">SP 元数据</a> ' +
-        '<button type="button" class="saml-del" style="padding:0.25rem 0.5rem;color:#c0392b;">删除</button>' +
+        'style="padding:0.25rem 0.5rem;display:inline-block;">' + escHtml(d.samlBtnMetadata) + '</a> ' +
+        '<button type="button" class="saml-del" style="padding:0.25rem 0.5rem;color:#c0392b;">' + escHtml(d.samlBtnRemove) + '</button>' +
         '</td>'
       tr.querySelector('.saml-toggle').addEventListener('click', function () {
-        doPatch(root, p.id, { enabled: !p.enabled }, p.enabled ? '已停用' : '已启用')
+        doPatch(root, p.id, { enabled: !p.enabled }, p.enabled ? t().samlDisabled : t().samlEnabled)
       })
       tr.querySelector('.saml-cert').addEventListener('click', function () {
         // The cert is public and round-trips fine; prompt is acceptable for the
         // occasional IdP key rotation (the owner pastes the new PEM).
-        const next = window.prompt('粘贴新的 IdP 签名证书 (X.509 PEM):', '')
+        const next = window.prompt(t().samlCertPrompt, '')
         if (next == null) return // cancelled
         const trimmed = next.trim()
         if (!trimmed) {
-          setStatus(root, '证书不能为空 (留空已忽略)', 'error')
+          setStatus(root, t().samlCertEmpty, 'error')
           return
         }
-        doPatch(root, p.id, { idpCert: trimmed }, '证书已轮换')
+        doPatch(root, p.id, { idpCert: trimmed }, t().samlCertRotated)
       })
       tr.querySelector('.saml-del').addEventListener('click', function () {
-        if (!window.confirm('删除 IdP「' + (p.label || p.idpEntityId) + '」? 已联结的用户将无法再用它登录。')) return
+        if (!window.confirm(t().samlRemoveConfirm(p.label || p.idpEntityId))) return
         doDelete(root, p.id)
       })
       tbody.appendChild(tr)
@@ -204,21 +207,21 @@
   function unwired(root, err) {
     if (err && err.status === 503) {
       renderRows(root, [])
-      setStatus(root, '此主机未启用身份存储 (SAML 不可用)', 'error')
+      setStatus(root, t().samlHostNoIdentity, 'error')
       return true
     }
     return false
   }
 
   async function load(root) {
-    setStatus(root, '载入…', 'loading')
+    setStatus(root, t().samlLoading, 'loading')
     try {
       const providers = await apiList()
       renderRows(root, providers)
-      setStatus(root, '已注册 ' + providers.length + ' 个 IdP', 'ok')
+      setStatus(root, t().samlLoadedN(providers.length), 'ok')
     } catch (err) {
       if (unwired(root, err)) return
-      setStatus(root, '载入失败:' + (err.message || err), 'error')
+      setStatus(root, t().samlLoadFailed(err.message || err), 'error')
     }
   }
 
@@ -237,39 +240,39 @@
     // Optional: only send when filled, so the store keeps its default (null).
     const label = str('label')
     if (label) body.label = label
-    setStatus(root, '注册…', 'loading')
+    setStatus(root, t().samlRegistering, 'loading')
     try {
       await apiAdd(body)
       form.reset()
       await load(root)
-      setStatus(root, '已注册', 'ok')
+      setStatus(root, t().samlRegistered, 'ok')
     } catch (err) {
       if (unwired(root, err)) return
-      setStatus(root, '注册失败:' + (err.message || err), 'error')
+      setStatus(root, t().samlRegisterFailed(err.message || err), 'error')
     }
   }
 
   async function doPatch(root, id, patch, okMsg) {
-    setStatus(root, '保存…', 'loading')
+    setStatus(root, t().samlSaving, 'loading')
     try {
       await apiPatch(id, patch)
       await load(root)
-      setStatus(root, okMsg || '已保存', 'ok')
+      setStatus(root, okMsg || t().samlSaved, 'ok')
     } catch (err) {
       if (unwired(root, err)) return
-      setStatus(root, '保存失败:' + (err.message || err), 'error')
+      setStatus(root, t().samlSaveFailed(err.message || err), 'error')
     }
   }
 
   async function doDelete(root, id) {
-    setStatus(root, '删除…', 'loading')
+    setStatus(root, t().samlRemoving, 'loading')
     try {
       await apiDelete(id)
       await load(root)
-      setStatus(root, '已删除', 'ok')
+      setStatus(root, t().samlRemoved, 'ok')
     } catch (err) {
       if (unwired(root, err)) return
-      setStatus(root, '删除失败:' + (err.message || err), 'error')
+      setStatus(root, t().samlRemoveFailed(err.message || err), 'error')
     }
   }
 
@@ -291,6 +294,12 @@
     }).observe(document.body, {
       attributes: true,
       attributeFilter: ['data-active-tab'],
+    })
+    // Re-render on language switch — relabel the static shell, and reload the
+    // rows when the tab is showing so the live data picks up the new dict too.
+    AH.onLangChange(function () {
+      buildUi(root)
+      if (isActive()) load(root).catch(function () { /* setStatus reported it */ })
     })
     if (isActive()) {
       maybeLoad(root).catch(function () { /* */ })
