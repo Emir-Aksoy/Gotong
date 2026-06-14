@@ -14,8 +14,8 @@
 | 🧪 **真机测试指南**（本机 / 局域网 / 公网 VPS） | [`REAL-WORLD-TESTING.md`](REAL-WORLD-TESTING.md) |
 | 🤖 自己写 agent 接入 | [`AGENT.md`](AGENT.md) |
 | 🔧 在自己机器 / 服务器部署 | [`DEPLOY.md`](DEPLOY.md) |
-| 🪢 多团队 hub 联合 | [`../FEDERATION.md`](../FEDERATION.md)（英文，待翻译） |
-| ⚖️ MIT 协议 / 商用 / 模板 license | [`../LICENSE-FAQ.md`](../LICENSE-FAQ.md)（英文，待翻译） |
+| 🪢 多团队 hub 联合 | [`FEDERATION.md`](FEDERATION.md)（中文，英文版 [`../FEDERATION.md`](../FEDERATION.md)） |
+| ⚖️ MIT 协议 / 商用 / 模板 license | [`LICENSE-FAQ.md`](LICENSE-FAQ.md)（中文，英文版 [`../LICENSE-FAQ.md`](../LICENSE-FAQ.md)） |
 | 🧠 整体架构 + 设计取舍 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md)（英文） |
 | 📡 Wire 协议（写自己的语言 SDK） | [`../PROTOCOL.md`](../PROTOCOL.md)（英文） |
 
@@ -29,8 +29,8 @@
 | REAL-WORLD-TESTING | ✅ 中文原创（暂无英文版，欢迎 PR 翻译） |
 | AGENT | ✅ 完整翻译 |
 | DEPLOY | ✅ 完整翻译 |
-| FEDERATION | ⏳ 待翻译 |
-| LICENSE-FAQ | ⏳ 待翻译 |
+| FEDERATION | ✅ 完整翻译（REL-5） |
+| LICENSE-FAQ | ✅ 完整翻译（REL-5） |
 | ARCHITECTURE | ⏸️ 内部架构文档，优先级低 |
 | PROTOCOL | ⏸️ Wire 协议，原文够精确 |
 

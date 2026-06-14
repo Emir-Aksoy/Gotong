@@ -115,10 +115,18 @@ Decisions (updated 2026-06-08) — each is independent and any can stay
 
 - [ ] **Replace `hub.example.com` example URLs** in docs with whatever
       domain hosts the project's own public-preview / demo deployment.
-- [ ] **Translate** the remaining `docs/zh/` queue —
-      see [`docs/zh/README.md`](../docs/zh/README.md) "翻译状态" table.
-      AGENT + DEPLOY are now done; only **FEDERATION** + **LICENSE-FAQ**
-      remain (ARCHITECTURE / PROTOCOL are intentionally low-priority).
+- [x] **Translate** the `docs/zh/` queue — **Done (REL-5, 2026-06).**
+      AGENT + DEPLOY + **FEDERATION** + **LICENSE-FAQ** all shipped
+      bilingual (`docs/FEDERATION.md` 184 / `docs/zh/FEDERATION.md` 176;
+      `docs/LICENSE-FAQ.md` 182 / `docs/zh/LICENSE-FAQ.md` 161). The
+      `docs/zh/README.md` "翻译状态" table is updated to ✅. ARCHITECTURE /
+      PROTOCOL stay intentionally low-priority (English-source reference).
+- [x] **Bilingual UI (中英双语)** — **Done (REL-6→REL-9, 2026-06).** Full
+      `/me` + admin SPA i18n retrofit (1290-key `I18N.zh`/`I18N.en` at
+      parity), client-authoritative language detection (`lang` cookie >
+      `navigator.language` > server `defaultLang` > `zh`), cross-surface
+      cookie persistence (invite / offline / worker pages read the same
+      cookie). See [`docs/zh/I18N-PLAN.md`](../docs/zh/I18N-PLAN.md).
 - [ ] **Refresh `Adapted:` dates** in `templates/community/agents/*.yaml`
       headers if the prompts get a re-pass before launch.
 
@@ -156,10 +164,55 @@ Decisions (updated 2026-06-08) — each is independent and any can stay
       creates a stable line worth backporting to.
 - [ ] Run one tabletop exercise of "high-severity report comes in at
       Friday 19:00" to validate the 72-hour ack target.
+- [ ] **(Optional) Add live-LLM CI gate secrets** — if you want the
+      nightly real-LLM smoke ([`workflows/live.yml`](workflows/live.yml),
+      Route B P1-M13c) to actually run rather than skip-clean, add
+      `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `OPENAI_BASE_URL` to repo
+      secrets (Settings → Secrets and variables → Actions). Without them
+      the gate skips cleanly and never reports a false red — so this is
+      strictly optional and never blocks a release.
+
+## Going public + cutting 1.0 — the final gate
+
+> **This is the one decision the maintainer must make in person.** Nothing
+> below is automatable: an agent does not flip a repo to public, does not
+> create a `v1.0.0` tag, and does not push to a public remote. Those are
+> the maintainer's explicit, in-session go/no-go.
+
+**State as of the last review (2026-06-14):**
+
+- Push freeze: **lifted for the PRIVATE remote only** (`origin =
+  github.com/Emir-Aksoy/AipeHub`, private). Going public is still frozen.
+- REL-1 → REL-9 are **done** (freeze lift + ops debt + doc translation +
+  full bilingual UI). REL-10 (this file) is the closeout.
+- All remaining unchecked boxes above are **maintainer-only external
+  actions** (register `aipehub.dev`, enable GitHub Private Vulnerability
+  Reporting, enable GitHub Discussions, optional binaries/registry/CI
+  secrets, optional demo-domain URL swap, CVE authority, tabletop). None
+  block correctness; they gate the *public* posture.
+
+**Pre-flight before flipping public (each is yours to do):**
+
+1. Decide which "Operational / Repo hygiene / Domain" boxes are
+   *go-live blockers* vs *post-1.0 follow-ups* (most are non-blocking).
+2. Enable **Private Vulnerability Reporting** so the advertised
+   `/security/advisories/new` channel resolves (currently the sole
+   disclosure path).
+3. (Optional) register `aipehub.dev` + swap demo URLs if you want the
+   docs' `hub.example.com` placeholders to point at a real preview.
+4. Flip the repo to **public** (GitHub Settings → General → Danger zone).
+5. Cut the **`v1.0.0`** tag — this triggers
+   [`workflows/release.yml`](workflows/release.yml) (binaries + SBOM +
+   provenance). Then (optionally) JSR / PyPI per the Distribution section.
+
+**Confirmation required:** the agent will not perform steps 4–5 (or push
+to any public remote) without an explicit "go public + tag 1.0" from the
+maintainer in-session.
 
 ---
 
 Once every box is checked, delete this file. Its absence == "we shipped
 the placeholder cleanup".
 
-Last reviewed: 2026-06-08.
+Last reviewed: 2026-06-14 (REL-10 closeout — consolidated REL-5→REL-9
+completions; remaining items are maintainer-only external actions).
