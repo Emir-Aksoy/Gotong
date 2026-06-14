@@ -39,7 +39,9 @@ import {
 
 const USER = 'u1'
 
-/** One owned agent + a provider list whose `openai-compatible` must be filtered. */
+/** One owned agent + a provider list whose `openai-compatible` must be filtered.
+ * The write verbs (create/update/remove) are part of the widened directory but
+ * unused by `plan`, so they throw if a plan test ever reaches them. */
 function fakeAgentDir(): StewardAgentDirectory {
   return {
     async listOwned(userId) {
@@ -56,6 +58,15 @@ function fakeAgentDir(): StewardAgentDirectory {
       // `openai-compatible` is operator infra (needs a baseURL), not a
       // steward-pickable provider — the service must drop it from the snapshot.
       return ['anthropic', 'mock', 'openai-compatible']
+    },
+    async create() {
+      throw new Error('create not exercised by plan tests')
+    },
+    async update() {
+      throw new Error('update not exercised by plan tests')
+    },
+    async remove() {
+      throw new Error('remove not exercised by plan tests')
     },
   }
 }
@@ -126,6 +137,12 @@ async function boot(): Promise<Bench> {
     config: { provider: 'mock' },
     agents: fakeAgentDir(),
     workflows: fakeWorkflowDir(),
+    // The editor is unused by plan; a throwing stub satisfies the required dep.
+    workflowEditor: {
+      async edit() {
+        throw new Error('workflowEditor.edit not exercised by plan tests')
+      },
+    },
     logger: createLogger('test-steward'),
     provider, // test seam — bypass env/key, use the scripted mock
   })

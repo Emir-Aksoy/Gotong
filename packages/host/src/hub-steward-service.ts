@@ -43,6 +43,8 @@ import {
   type HubStewardOutput,
   type HubStewardPayload,
   type StewardAction,
+  type StewardActionTier,
+  type StewardAgentFields,
   type StewardAgentProvider,
   type StewardSnapshot,
   type StewardSnapshotAgent,
@@ -51,6 +53,8 @@ import {
 } from '@aipehub/hub-steward'
 
 import type { OrgApiPool } from './org-api-pool.js'
+import type { HostMeAgentService } from './me-agent-service.js'
+import type { MeWorkflowEditResult, MeWorkflowEditService } from './me-workflow-edit-service.js'
 
 /** Concrete provider choice for the host-built-in steward. */
 export type StewardProviderKind = 'anthropic' | 'openai' | 'mock'
@@ -70,26 +74,54 @@ export interface HubStewardAgentConfig {
 // (wired in main.ts, SW-M8). Narrow interfaces keep this service unit-testable
 // with light fakes (no Hub key, no sqlite) and keep web out of host's runtime.
 
+// Input types for the executor's write verbs, DERIVED from the real
+// `HostMeAgentService` so the live service is GUARANTEED to satisfy
+// `StewardAgentDirectory` (the same `Parameters<…>` discipline
+// `me-workflow-edit-service.ts` uses to track the web opts). A light test fake
+// only ever RECEIVES these — it never has to construct them.
+type MeAgentCreateInput = Parameters<HostMeAgentService['create']>[1]
+type MeAgentUpdateInput = Parameters<HostMeAgentService['update']>[2]
+
 /**
- * The member-agent slice the steward reads for its snapshot. (SW-M4 widens this
- * with create / update / remove for the executor.) `HostMeAgentService`
- * satisfies it — so the steward structurally cannot exceed what the member could
- * do by hand: the same `resource_grants` RBAC + member limits apply.
+ * The member-agent slice the steward uses — READ (snapshot) + WRITE (executor).
+ * `HostMeAgentService` satisfies it, so the steward structurally CANNOT exceed
+ * what the member could do by hand: the same `resource_grants` RBAC ladder +
+ * member limits (no inline key, provider-must-have-key, per-member cap) gate
+ * every create / edit / delete the steward performs.
  */
 export interface StewardAgentDirectory {
   /** The member's owned managed agents (the snapshot's `agents`). */
   listOwned(userId: string): Promise<StewardOwnedAgent[]>
   /** Providers the member may pick (org/workspace/env + their own BYO keys). */
   availableProviders(userId: string): Promise<string[]>
+  /** Build a new owned agent — the `create_agent` action (SW-M4 executor). */
+  create(userId: string, input: MeAgentCreateInput): Promise<StewardOwnedAgent>
+  /** Change an owned agent's config — the `edit_agent` action. */
+  update(userId: string, agentId: string, input: MeAgentUpdateInput): Promise<StewardOwnedAgent>
+  /** Remove an owned agent — the `delete_agent` action (DANGEROUS, gated by M5). */
+  remove(userId: string, agentId: string): Promise<boolean>
 }
 
-/** The fields the steward reads off an owned agent for its snapshot. */
+/** The fields the steward reads off an owned agent for its snapshot / write result. */
 export interface StewardOwnedAgent {
   id: string
   label: string
   capabilities: string[]
   provider: string
   model?: string
+}
+
+/**
+ * The workflow-edit executor — the SAME `MeWorkflowEditService.edit` the
+ * OpenClaw-style `/me` editor uses, so a steward `edit_workflow` inherits the
+ * cross-hub 出入口 lock + structure hard-gate + run-drift-safe versioning + the
+ * line diff for free, and a member can NEVER repoint a cross-hub edge through the
+ * steward that they couldn't through the editor. Input / result are the service's
+ * own types, so the live service satisfies this with no adapter; a test passes a
+ * light fake.
+ */
+export interface StewardWorkflowEditor {
+  edit(req: Parameters<MeWorkflowEditService['edit']>[0]): Promise<MeWorkflowEditResult>
 }
 
 /**
@@ -120,6 +152,43 @@ export interface HubStewardPlanInput {
   onChunk?: (chunk: string) => void
 }
 
+/** One `apply` request — the member + the single action they accepted. */
+export interface HubStewardApplyInput {
+  /** The authenticated member (server-resolved; NEVER client-supplied). */
+  userId: string
+  /**
+   * The action to apply. The Web layer SHAPE-validates it, but its TIER is
+   * re-derived server-side here — the client's classification is never trusted,
+   * and the member services re-check RBAC, so a forged action can't escalate.
+   */
+  action: StewardAction
+}
+
+/** What `performStewardAction` produces for a successfully executed action. */
+export type StewardActionResult =
+  | { kind: 'inspect'; answer: string }
+  | { kind: 'create_agent'; agent: StewardOwnedAgent }
+  | { kind: 'edit_agent'; agent: StewardOwnedAgent }
+  | { kind: 'delete_agent'; removed: boolean }
+  | { kind: 'edit_workflow'; edit: MeWorkflowEditResult }
+
+/**
+ * The outcome of `apply`.
+ *
+ *   - `done`           — a SAFE action executed inline; `result` carries the
+ *                        per-kind outcome (incl. the WFEDIT diff / denial for an
+ *                        `edit_workflow` — a locally-safe edit can still come
+ *                        back `edit.ok === false`, e.g. the assistant failed).
+ *   - `refused`        — a FORBIDDEN action; nothing executed, `reason` explains.
+ *   - `needs_approval` — a DANGEROUS / CROSS_HUB action: NOT executed here. M4
+ *                        returns this verbatim; M5 turns it into a real inbox
+ *                        approval (the user's two hard constraints).
+ */
+export type StewardApplyResult =
+  | { status: 'done'; tier: StewardActionTier; result: StewardActionResult }
+  | { status: 'refused'; reason: string }
+  | { status: 'needs_approval'; tier: 'dangerous' | 'cross_hub' }
+
 /** Duck-typed surface the Web layer consumes via `serveWeb({ hubSteward })`. */
 export interface HubStewardSurface {
   /**
@@ -132,6 +201,20 @@ export interface HubStewardSurface {
    * it returns `{ reply, actions: [] }`.
    */
   plan(input: HubStewardPlanInput): Promise<ClassifiedProposal>
+
+  /**
+   * Apply ONE action the member accepted from a prior `plan`. Re-classifies the
+   * action server-side (never the client's tier) and:
+   *   - SAFE → executes inline via `performStewardAction` (reusing the member
+   *     services, so their RBAC + member limits apply);
+   *   - FORBIDDEN → refuses without executing;
+   *   - DANGEROUS / CROSS_HUB → returns `needs_approval` (M5 routes these to the
+   *     approval inbox — the user's "跨 hub + 危险动作都再次确认").
+   *
+   * The member services throw `{ status: 4xx }` on RBAC / not-found / validation;
+   * those propagate for the Web layer to map.
+   */
+  apply(input: HubStewardApplyInput): Promise<StewardApplyResult>
 }
 
 /**
@@ -237,6 +320,8 @@ export function createHubStewardService(deps: {
   config: HubStewardAgentConfig
   agents: StewardAgentDirectory
   workflows: StewardWorkflowDirectory
+  /** Executes an `edit_workflow` action — the member's OpenClaw-style editor. */
+  workflowEditor: StewardWorkflowEditor
   orgApiPool?: OrgApiPool
   logger: Logger
   /**
@@ -247,7 +332,7 @@ export function createHubStewardService(deps: {
    */
   provider?: LlmProvider
 }): HubStewardSurface | null {
-  const { hub, config, agents, workflows, orgApiPool, logger } = deps
+  const { hub, config, agents, workflows, workflowEditor, orgApiPool, logger } = deps
 
   let provider: LlmProvider
   if (deps.provider) {
@@ -380,8 +465,51 @@ export function createHubStewardService(deps: {
       }))
       return { reply: output.reply, actions: classified }
     },
+
+    async apply(input) {
+      const { userId, action } = input
+
+      // Re-derive the tier server-side. An `edit_workflow`'s cross-hub-ness comes
+      // from the SAME `listForUser` the plan snapshot + the editor lock use, so
+      // "what the steward gates as cross_hub" can't drift from "what the editor
+      // locks". Only fetched for `edit_workflow` — other actions don't need it.
+      const crossHubWorkflowIds =
+        action.kind === 'edit_workflow'
+          ? new Set(
+              (await workflows.listForUser(userId)).filter((w) => w.crossHub).map((w) => w.id),
+            )
+          : EMPTY_CROSS_HUB
+      const tier = classifyStewardAction(action, {
+        crossHubWorkflowIds,
+        stewardId: HUB_STEWARD_DEFAULT_ID,
+      })
+
+      switch (tier) {
+        case 'forbidden':
+          // Never executed — the steward only explains + points to settings.
+          return {
+            status: 'refused',
+            reason:
+              action.kind === 'refuse'
+                ? action.reason
+                : '这个动作超出管家的范围(凭证 / peer / 安全 / 权限),请到对应的设置面板手动操作。',
+          }
+        case 'dangerous':
+        case 'cross_hub':
+          // M4 surfaces the need for a SECOND confirmation but does NOT execute;
+          // M5 wires the real approval inbox (the user's two hard constraints).
+          return { status: 'needs_approval', tier }
+        case 'safe': {
+          const result = await performStewardAction(userId, action, { agents, workflowEditor })
+          return { status: 'done', tier, result }
+        }
+      }
+    },
   }
 }
+
+/** A shared empty cross-hub set for `apply` on non-`edit_workflow` actions. */
+const EMPTY_CROSS_HUB: ReadonlySet<string> = new Set()
 
 // --- helpers ----------------------------------------------------------------
 
@@ -428,4 +556,75 @@ export function summarizeStewardAction(action: StewardAction): string {
     case 'refuse':
       return `这个超出管家范围:${action.reason}`
   }
+}
+
+/**
+ * The single execution chokepoint — the SAFE inline path (`apply`, SW-M4) AND the
+ * post-approval path (`StewardApprovalBroker`, SW-M5) both run a write through
+ * here, so a dangerous / cross-hub action takes the EXACT same code path after a
+ * human approves it as a safe action does immediately. Every write delegates to a
+ * member service, which enforces that member's RBAC ladder + limits — the steward
+ * cannot exceed what the member could do by hand. `refuse` is never executed
+ * (forbidden); reaching here with one is a programming error.
+ */
+export async function performStewardAction(
+  userId: string,
+  action: StewardAction,
+  deps: { agents: StewardAgentDirectory; workflowEditor: StewardWorkflowEditor },
+): Promise<StewardActionResult> {
+  switch (action.kind) {
+    case 'inspect':
+      // Read-only — the answer was produced at plan time; nothing to execute.
+      return { kind: 'inspect', answer: action.answer }
+    case 'create_agent': {
+      const input: MeAgentCreateInput = {
+        id: action.handle, // the member service composes the namespaced id
+        label: action.label,
+        provider: action.provider,
+        system: action.system,
+        capabilities: [...action.capabilities],
+        ...(action.model ? { model: action.model } : {}),
+      }
+      const agent = await deps.agents.create(userId, input)
+      return { kind: 'create_agent', agent }
+    }
+    case 'edit_agent': {
+      const agent = await deps.agents.update(userId, action.agentId, mapAgentChanges(action.changes))
+      return { kind: 'edit_agent', agent }
+    }
+    case 'delete_agent': {
+      const removed = await deps.agents.remove(userId, action.agentId)
+      return { kind: 'delete_agent', removed }
+    }
+    case 'edit_workflow': {
+      // Delegates to the OpenClaw-style editor: same cross-hub 出入口 lock +
+      // structure gate + run-drift-safe versioning. A locally-safe edit can still
+      // come back `edit.ok === false` (e.g. the assistant failed) — that's an
+      // honest outcome, surfaced to the member, not an error.
+      const edit = await deps.workflowEditor.edit({
+        workflowId: action.workflowId,
+        instruction: action.instruction,
+        userId,
+      })
+      return { kind: 'edit_workflow', edit }
+    }
+    case 'refuse':
+      throw new Error('performStewardAction: a refuse action is never executed (it is forbidden)')
+  }
+}
+
+/**
+ * Map a steward's proposed agent changes onto the member-update input. `handle`
+ * is intentionally dropped — the participant id is fixed at create time (renaming
+ * = a new agent), so an `edit_agent` only touches label / provider / model /
+ * system / capabilities.
+ */
+function mapAgentChanges(changes: Partial<StewardAgentFields>): MeAgentUpdateInput {
+  const out: MeAgentUpdateInput = {}
+  if (changes.label !== undefined) out.label = changes.label
+  if (changes.provider !== undefined) out.provider = changes.provider
+  if (changes.model !== undefined) out.model = changes.model
+  if (changes.system !== undefined) out.system = changes.system
+  if (changes.capabilities !== undefined) out.capabilities = [...changes.capabilities]
+  return out
 }
