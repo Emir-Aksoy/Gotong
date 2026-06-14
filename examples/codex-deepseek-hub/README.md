@@ -31,7 +31,7 @@ Codex is the fast hands that turn a plan into code. The router combines two inpu
    good at, which coders are off right now (`unavailable`), a budget cap
    (`singleCoder`), an optional preferred lead.
 
-`planRoute(goal, policy)` combines them — so the **same** goal routes
+`planRoute(goal, policy, override?)` combines them — so the **same** goal routes
 **differently** under different arrangements, and always to a coder that can
 actually do it:
 
@@ -42,7 +42,14 @@ feature  · budget = 1 coder → deepseek-tui alone
 trivial  · default roster   → codex (direct fix)
 trivial  · codex off        → deepseek-tui covers the small fix
 review-only (don't change)  → deepseek-tui (reports findings, no implementation)
+点名 codex (显式分派)         → codex alone (overrides role-fill for THIS goal)
+大白话「codex 不在岗」(改分工) → deepseek-tui alone (persisted to routing-policy.json)
 ```
+
+The last two lines are the **two ways the user stays in control**: naming a coder
+in the goal itself (显式分派 — the `override` arg, temporary, this goal only), and
+editing the standing arrangement in plain language (大白话改总分工层 — written back
+to `routing-policy.json`, persistent). See **让用户说了算** below.
 
 ## Run (deterministic, no API key)
 
@@ -62,6 +69,69 @@ when the human denies it.
 The router brain and the coders are deterministic stand-ins, but the **file
 sharing is real**: a real temp repo with a real `AGENTS.md` + `PROGRESS.md` that
 both coders read and append to.
+
+## 让用户说了算:点名(显式分派)+ 大白话改总分工层
+
+The router does NOT just analyze the goal — it lets the user **override** the
+routing two ways (the same mechanism as the sister hub):
+
+**① 显式分派 — name a coder in the goal** (temporary, this goal only). Naming a
+coder in the goal sentence overrides the role-fill for that one dispatch:
+
+```
+交给 codex 直接实现这个登录按钮              → codex alone
+让 deepseek-tui 设计、codex 实现 OAuth     → deepseek-tui → codex
+```
+
+A naming counts as 显式分派 only when a dispatch verb is also present (交给 / 派给 /
+让 / 用 …), so "tidy codex's comments" won't match. It's still honored against
+on-call: a named-but-off coder degrades to the standing arrangement.
+`parseExplicitAssignment(goal)` feeds it to `planRoute` as the `override` arg.
+
+**② 大白话改总分工层 — OpenClaw-style natural-language edit** (persistent, written
+to a file). The 总分工层 is a `RoutingPolicy` (roster / on-call / lead / budget)
+that lives in `routing-policy.json` next to the workspace — the **single source
+of truth** both run modes derive from. Edit it in plain language in the CLI:
+
+```
+coding-hub> :roster                                  # print the standing arrangement
+coding-hub> :policy codex 今天限流, 先不在岗           # → codex marked off-call (written back)
+coding-hub> :policy 让 deepseek-tui 主理, 这周预算限单  # → one sentence, two changes
+coding-hub> :roster                                  # the edit persists, survives restart
+```
+
+`:policy <大白话>` runs `applyPolicyEdit(policy, 大白话)` (`src/policy.ts`): it
+splits the sentence into clauses and applies one intent each (off-call / on-call /
+lead / budget), 中英 keywords. The parser is a deterministic stand-in — a real LLM
+plays the same role, the file contract is unchanged.
+
+> **临时 vs 持久**: 点名 (①) only affects that one dispatch; 大白话改总分工层 (②)
+> lands in the file and every later dispatch follows it.
+
+## Interactive CLI — 交互式命令行(推荐真跑入口)
+
+Instead of the one-shot `index.real.ts`, open a readline loop you keep typing
+goals into; the DeepSeek router dispatches each one live:
+
+```bash
+# interactive (recommended): a readline loop, keep typing goals
+DEEPSEEK_API_KEY=sk-... pnpm demo:codex-deepseek-hub:cli
+
+# point it at YOUR repo (seeds AGENTS.md + PROGRESS.md only if absent)
+DEEPSEEK_API_KEY=sk-... pnpm demo:codex-deepseek-hub:cli -- --cwd /path/to/your/repo
+
+# dry run — no real coder CLI spent (router key still needed)
+STUB_CODERS=1 DEEPSEEK_API_KEY=sk-... pnpm demo:codex-deepseek-hub:cli
+```
+
+Type a goal at `coding-hub>` to dispatch it; meta commands (prefix `:`): `:help`
+`:files` `:progress` (the shared handoff log) `:roster` (print the 总分工层)
+`:policy <大白话>` (edit it in plain language) `:quit`. You can also name a coder
+in the goal itself (显式分派).
+
+When the 总分工层 changes (`:policy`), the CLI re-registers the router so its system
+prompt reflects the new arrangement — the real DeepSeek brain re-reads it via
+`buildRouterSystem(policy)`.
 
 ## Real mode — driving the actual Codex + a DeepSeek TUI
 
