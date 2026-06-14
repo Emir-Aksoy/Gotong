@@ -36,42 +36,51 @@
     </style>
   </head>
   <body>
-    <h1>AipeHub · 接受邀请</h1>
-    <p class="meta">设置密码后立即激活账号并跳转到你的工作流页面。</p>
+    <!--
+      i18n: this is a standalone surface (only loads /invite.js, NOT the
+      shared app-core.js engine). Bilingual text lives in a small local
+      dict inside invite.js, applied to [data-i18n] elements on boot.
+      Language is detected from the same `lang` cookie the main SPA sets,
+      falling back to navigator.language, then zh. Detection-only (no
+      toggle) to keep this minimal accept page lightweight. The Chinese
+      below is the on-disk default; invite.js rewrites it per language.
+    -->
+    <h1 data-i18n="h1">AipeHub · 接受邀请</h1>
+    <p class="meta" data-i18n="intro">设置密码后立即激活账号并跳转到你的工作流页面。</p>
 
     <div id="status" class="status"></div>
 
     <!-- Shown while we GET /api/invites/:token to learn what's in this link. -->
     <section id="loading-section">
-      <p class="meta">正在验证邀请链接…</p>
+      <p class="meta" data-i18n="verifying">正在验证邀请链接…</p>
     </section>
 
     <!-- Shown when invite is valid + pending. The actual accept form. -->
     <section id="accept-section" class="hidden">
       <div class="invite-info">
-        <div>邀请邮箱: <strong id="invite-email"></strong></div>
-        <div>分配角色: <strong id="invite-role"></strong></div>
-        <div>到期: <span id="invite-expires" class="meta"></span></div>
+        <div><span data-i18n="emailLabel">邀请邮箱:</span> <strong id="invite-email"></strong></div>
+        <div><span data-i18n="roleLabel">分配角色:</span> <strong id="invite-role"></strong></div>
+        <div><span data-i18n="expiresLabel">到期:</span> <span id="invite-expires" class="meta"></span></div>
       </div>
       <form id="accept-form">
-        <label>显示名 (可选,会显示在你创建的工作流上)
+        <label><span data-i18n="displayNameLabel">显示名 (可选,会显示在你创建的工作流上)</span>
           <input name="displayName" type="text" autocomplete="name" />
         </label>
-        <label>设置密码 (至少 8 个字符)
+        <label><span data-i18n="passwordLabel">设置密码 (至少 8 个字符)</span>
           <input name="password" type="password" required autocomplete="new-password" minlength="8" />
         </label>
-        <label>再次输入密码
+        <label><span data-i18n="password2Label">再次输入密码</span>
           <input name="password2" type="password" required autocomplete="new-password" minlength="8" />
         </label>
-        <button type="submit" id="accept-btn" style="margin-top:0.75rem;">激活账号</button>
+        <button type="submit" id="accept-btn" data-i18n="activateBtn" style="margin-top:0.75rem;">激活账号</button>
       </form>
     </section>
 
     <!-- Shown when invite is unusable (expired / revoked / already used / not found). -->
     <section id="fail-section" class="hidden">
-      <h2 id="fail-title">链接不可用</h2>
+      <h2 id="fail-title" data-i18n="failTitleDefault">链接不可用</h2>
       <p id="fail-detail" class="meta"></p>
-      <p class="meta" style="margin-top:1rem;">请联系给你发邀请的人重新生成一条链接。</p>
+      <p class="meta" style="margin-top:1rem;" data-i18n="contactInviter">请联系给你发邀请的人重新生成一条链接。</p>
     </section>
 
     <script src="/invite.js"></script>

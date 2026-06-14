@@ -43,9 +43,60 @@
   <body>
     <div class="wrap">
       <img class="dot" src="/icon.svg" alt="" width="56" height="56" />
-      <h1>当前离线</h1>
-      <p>AipeHub 的实时数据需要联网。请检查网络连接后重试 —— 你的本地 hub 仍在磁盘上，重连即恢复。</p>
-      <button type="button" onclick="location.reload()">重试</button>
+      <h1 data-i18n="heading">当前离线</h1>
+      <p data-i18n="body">AipeHub 的实时数据需要联网。请检查网络连接后重试 —— 你的本地 hub 仍在磁盘上，重连即恢复。</p>
+      <button type="button" data-i18n="retry" onclick="location.reload()">重试</button>
     </div>
+    <!--
+      i18n: this is the PWA offline fallback served by the service worker
+      when there is NO network — it must be fully self-contained (no
+      app-core.js, no fetch). So the bilingual swap is a tiny inline dict
+      applied synchronously. Language comes from the same `lang` cookie the
+      main SPA sets → navigator.language → zh. The Chinese above is the
+      on-disk default; this script rewrites it per language at load.
+    -->
+    <script>
+      ;(function () {
+        function detectLang() {
+          try {
+            var m = /(?:^|;\s*)lang=([^;]+)/.exec(document.cookie || '')
+            if (m) {
+              var v = decodeURIComponent(m[1]).toLowerCase()
+              if (v === 'en' || v === 'zh') return v
+            }
+          } catch (e) {}
+          try {
+            var nav = (navigator.language || '').toLowerCase()
+            if (nav && nav.indexOf('zh') !== 0) return 'en'
+          } catch (e) {}
+          return 'zh'
+        }
+        var T = {
+          zh: {
+            docTitle: 'AipeHub — 离线',
+            heading: '当前离线',
+            body: 'AipeHub 的实时数据需要联网。请检查网络连接后重试 —— 你的本地 hub 仍在磁盘上，重连即恢复。',
+            retry: '重试',
+          },
+          en: {
+            docTitle: 'AipeHub — Offline',
+            heading: "You're offline",
+            body: 'AipeHub needs a network connection for live data. Check your connection and retry — your local hub is still on disk and recovers the moment you reconnect.',
+            retry: 'Retry',
+          },
+        }
+        var lang = detectLang()
+        var t = T[lang] || T.zh
+        try {
+          document.documentElement.lang = lang
+          document.title = t.docTitle
+        } catch (e) {}
+        var nodes = document.querySelectorAll('[data-i18n]')
+        for (var i = 0; i < nodes.length; i++) {
+          var k = nodes[i].getAttribute('data-i18n')
+          if (t[k] != null) nodes[i].textContent = t[k]
+        }
+      })()
+    </script>
   </body>
 </html>

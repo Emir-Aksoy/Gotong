@@ -15,6 +15,112 @@
 ;(function () {
   'use strict'
 
+  // --- i18n (self-contained) ---------------------------------------------
+  // This page does NOT load the shared app-core.js engine — it's a minimal
+  // standalone accept surface. So bilingual text lives in a small local
+  // dict here. Language is detected from the same `lang` cookie the main
+  // SPA sets (so a returning member keeps their choice), falling back to
+  // navigator.language, then zh. Detection-only — no toggle — to keep the
+  // page lightweight; the main app's toggle is what writes the cookie.
+  function detectLang() {
+    try {
+      const m = /(?:^|;\s*)lang=([^;]+)/.exec(document.cookie || '')
+      if (m) {
+        const v = decodeURIComponent(m[1]).toLowerCase()
+        if (v === 'en' || v === 'zh') return v
+      }
+    } catch (_) { /* no cookie access */ }
+    try {
+      const nav = (navigator.language || '').toLowerCase()
+      if (nav && nav.indexOf('zh') !== 0) return 'en'
+    } catch (_) { /* no navigator */ }
+    return 'zh'
+  }
+
+  const T = {
+    zh: {
+      docTitle: 'AipeHub · 接受邀请',
+      h1: 'AipeHub · 接受邀请',
+      intro: '设置密码后立即激活账号并跳转到你的工作流页面。',
+      verifying: '正在验证邀请链接…',
+      emailLabel: '邀请邮箱:',
+      roleLabel: '分配角色:',
+      expiresLabel: '到期:',
+      displayNameLabel: '显示名 (可选,会显示在你创建的工作流上)',
+      passwordLabel: '设置密码 (至少 8 个字符)',
+      password2Label: '再次输入密码',
+      activateBtn: '激活账号',
+      failTitleDefault: '链接不可用',
+      contactInviter: '请联系给你发邀请的人重新生成一条链接。',
+      notFoundTitle: '链接无效',
+      notFoundDetail: '没有找到这个邀请。链接可能输错了,或已被撤销。',
+      notFoundShort: '没有找到这个邀请。',
+      expiredTitle: '链接已过期',
+      expiredDetail: '这条邀请的有效期已过。',
+      revokedTitle: '链接已撤销',
+      revokedDetail: '邀请人在你激活前撤销了这条邀请。',
+      usedTitle: '链接已被使用',
+      usedDetail: '这条邀请已经被激活过了 — 如果不是你激活的,请联系邀请人。',
+      loadFailTitle: '无法加载邀请',
+      unknownError: '未知错误',
+      badFormatTitle: '链接格式错误',
+      badFormatDetail: 'URL 里没有有效的 token,请检查邀请链接是否完整。',
+      pwMismatch: '两次输入的密码不一致',
+      pwTooShort: '密码至少 8 个字符',
+      activating: '正在激活账号…',
+      activatedRedirect: '账号已激活,正在跳转…',
+      activateFailPrefix: '激活失败: ',
+    },
+    en: {
+      docTitle: 'AipeHub · Accept invitation',
+      h1: 'AipeHub · Accept invitation',
+      intro: 'Set a password to activate your account and jump straight to your workflows.',
+      verifying: 'Verifying the invite link…',
+      emailLabel: 'Invited email:',
+      roleLabel: 'Assigned role:',
+      expiresLabel: 'Expires:',
+      displayNameLabel: 'Display name (optional — shown on the workflows you create)',
+      passwordLabel: 'Set a password (at least 8 characters)',
+      password2Label: 'Re-enter password',
+      activateBtn: 'Activate account',
+      failTitleDefault: 'Link unavailable',
+      contactInviter: 'Ask whoever invited you to generate a fresh link.',
+      notFoundTitle: 'Invalid link',
+      notFoundDetail: "This invite wasn't found. The link may be mistyped, or it was revoked.",
+      notFoundShort: "This invite wasn't found.",
+      expiredTitle: 'Link expired',
+      expiredDetail: 'This invitation is past its expiry.',
+      revokedTitle: 'Link revoked',
+      revokedDetail: 'The inviter revoked this invitation before you activated it.',
+      usedTitle: 'Link already used',
+      usedDetail: "This invitation has already been activated — if that wasn't you, contact the inviter.",
+      loadFailTitle: "Couldn't load the invite",
+      unknownError: 'Unknown error',
+      badFormatTitle: 'Malformed link',
+      badFormatDetail: "The URL has no valid token — check that the invite link is complete.",
+      pwMismatch: 'The two passwords do not match',
+      pwTooShort: 'Password must be at least 8 characters',
+      activating: 'Activating your account…',
+      activatedRedirect: 'Account activated, redirecting…',
+      activateFailPrefix: 'Activation failed: ',
+    },
+  }
+
+  const LANG = detectLang()
+  const t = T[LANG] || T.zh
+
+  // Apply the dict to [data-i18n] elements + <title> + <html lang> on boot.
+  function applyStatic() {
+    try {
+      document.documentElement.lang = LANG
+      document.title = t.docTitle
+    } catch (_) { /* */ }
+    document.querySelectorAll('[data-i18n]').forEach(function (el) {
+      const k = el.getAttribute('data-i18n')
+      if (t[k] != null) el.textContent = t[k]
+    })
+  }
+
   // --- DOM helpers --------------------------------------------------------
   function $(sel) {
     return document.querySelector(sel)
@@ -136,15 +242,15 @@
   function failFromError(err) {
     switch (err && err.code) {
       case 'invitation_not_found':
-        return { title: '链接无效', detail: '没有找到这个邀请。链接可能输错了,或已被撤销。' }
+        return { title: t.notFoundTitle, detail: t.notFoundDetail }
       case 'invitation_expired':
-        return { title: '链接已过期', detail: '这条邀请的有效期已过。' }
+        return { title: t.expiredTitle, detail: t.expiredDetail }
       case 'invitation_revoked':
-        return { title: '链接已撤销', detail: '邀请人在你激活前撤销了这条邀请。' }
+        return { title: t.revokedTitle, detail: t.revokedDetail }
       case 'invitation_already_used':
-        return { title: '链接已被使用', detail: '这条邀请已经被激活过了 — 如果不是你激活的,请联系邀请人。' }
+        return { title: t.usedTitle, detail: t.usedDetail }
       default:
-        return { title: '无法加载邀请', detail: (err && err.message) || '未知错误' }
+        return { title: t.loadFailTitle, detail: (err && err.message) || t.unknownError }
     }
   }
 
@@ -163,18 +269,19 @@
 
   // --- Boot ---------------------------------------------------------------
   async function init() {
+    applyStatic()
     const token = readTokenFromPath()
     // Scrub immediately — even before lookup, in case the lookup fails
     // and the user copy-pastes the URL "for help."
     if (token) scrubTokenFromUrl()
     if (!token) {
-      renderFail('链接格式错误', 'URL 里没有有效的 token,请检查邀请链接是否完整。')
+      renderFail(t.badFormatTitle, t.badFormatDetail)
       return
     }
     try {
       const invitation = await lookupInvite(token)
       if (!invitation) {
-        renderFail('链接无效', '没有找到这个邀请。')
+        renderFail(t.notFoundTitle, t.notFoundShort)
         return
       }
       if (invitation.status !== 'pending') {
@@ -199,19 +306,19 @@
       const pw2 = form.password2.value
       const dn = (form.displayName.value || '').trim()
       if (pw !== pw2) {
-        setStatus('两次输入的密码不一致', 'error')
+        setStatus(t.pwMismatch, 'error')
         return
       }
       if (pw.length < 8) {
-        setStatus('密码至少 8 个字符', 'error')
+        setStatus(t.pwTooShort, 'error')
         return
       }
       const btn = $('#accept-btn')
       if (btn) btn.disabled = true
-      setStatus('正在激活账号…')
+      setStatus(t.activating)
       try {
         await acceptInvite(token, pw, dn || undefined)
-        setStatus('账号已激活,正在跳转…', 'ok')
+        setStatus(t.activatedRedirect, 'ok')
         // Replace history entry so the browser back button doesn't land
         // back on the now-consumed invite page. C1c — /me was folded
         // into the unified SPA at /; the new user lands on the `home`
@@ -232,7 +339,7 @@
           renderFail(f.title, f.detail)
           return
         }
-        setStatus('激活失败: ' + err.message, 'error')
+        setStatus(t.activateFailPrefix + err.message, 'error')
       }
     })
   }
