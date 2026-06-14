@@ -707,6 +707,15 @@ export function summarizeStewardAction(action: StewardAction): string {
       return `删掉助手 ${action.agentId}`
     case 'edit_workflow':
       return `按你的说法改工作流 ${action.workflowId}`
+    case 'set_credential_ref':
+      // Never names the secret — only the env var the operator set out of band.
+      return `注册 ${action.provider} 凭证(密钥读环境变量 ${action.envVarName},不在这里填明文)`
+    case 'revoke_credential':
+      return `吊销凭证 ${action.credentialId}`
+    case 'set_peer_policy':
+      return `改对端 ${action.peerId} 的信任契约(数据类/配额/摘要)`
+    case 'set_security_quota':
+      return `给 ${action.scope} 设 ${action.metric} 配额(每${action.period} ${action.limit})`
     case 'refuse':
       return `这个超出管家范围:${action.reason}`
   }
@@ -762,6 +771,18 @@ export async function performStewardAction(
       })
       return { kind: 'edit_workflow', edit }
     }
+    case 'set_credential_ref':
+    case 'revoke_credential':
+    case 'set_peer_policy':
+    case 'set_security_quota':
+      // Phase B sensitive writes. B-M1 ships the vocabulary + validator only; the
+      // executors (the ONLY plaintext-secret holder, env-var resolved) are injected
+      // OPERATOR-ONLY in B-M3. Reaching here in B-M1 means classification let a
+      // sensitive action through — fail-closed (a member steward is never given the
+      // deps to run these, and the classifier tiers them `forbidden`).
+      throw new Error(
+        `performStewardAction: sensitive write '${action.kind}' requires the operator executor (B-M3); not wired`,
+      )
     case 'refuse':
       throw new Error('performStewardAction: a refuse action is never executed (it is forbidden)')
   }

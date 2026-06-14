@@ -45,8 +45,29 @@ export interface StewardAgentFields {
  *   - `edit_workflow` — change a workflow in plain language (delegated to
  *                       `MeWorkflowEditService.edit`; cross-hub workflows →
  *                       cross_hub tier).
+ *
+ * The SENSITIVE writes (Phase B) — OPERATOR-ONLY, and every one ALWAYS routes
+ * through the approval inbox (stricter than `delete_agent`). A member steward
+ * never receives the dependencies to execute these, and the classifier tiers
+ * them `forbidden` for a non-operator caller — so they are doubly gated:
+ *
+ *   - `set_credential_ref`  — register a provider credential whose secret the
+ *                             host reads from a named ENV VAR (see below).
+ *   - `revoke_credential`   — remove a stored credential by id.
+ *   - `set_peer_policy`     — change a peer (cross-org) link's trust contract.
+ *   - `set_security_quota`  — set a security-relevant usage quota.
+ *
  *   - `refuse`        — an out-of-scope / sensitive ask the steward will not do
- *                       (credentials / peers / security / RBAC) — never executed.
+ *                       (RBAC grants / billing, or any sensitive write a NON-
+ *                       operator asked for) — never executed.
+ *
+ * ── The one security invariant for the sensitive writes ──────────────────────
+ * A steward action NEVER carries a plaintext secret. `set_credential_ref` names
+ * `envVarName` — the name of a host environment variable the operator set OUT OF
+ * BAND — and the executor (the only plaintext holder) resolves `process.env[name]`
+ * at apply time. So no proposal / apply body / inbox item / transcript / history
+ * ever contains a key. The validator REJECTS the whole action if it carries any
+ * key-shaped field (`secret` / `apiKey` / `token` / …) — see `validateStewardAction`.
  */
 export type StewardAction =
   | { kind: 'inspect'; answer: string }
@@ -54,7 +75,60 @@ export type StewardAction =
   | { kind: 'edit_agent'; agentId: string; changes: Partial<StewardAgentFields> }
   | { kind: 'delete_agent'; agentId: string }
   | { kind: 'edit_workflow'; workflowId: string; instruction: string }
+  | ({ kind: 'set_credential_ref' } & StewardCredentialRef)
+  | { kind: 'revoke_credential'; credentialId: string }
+  | ({ kind: 'set_peer_policy' } & StewardPeerPolicy)
+  | ({ kind: 'set_security_quota' } & StewardSecurityQuota)
   | { kind: 'refuse'; reason: string }
+
+/**
+ * The fields for registering a provider credential WITHOUT ever naming the
+ * secret. `envVarName` is the host environment variable the operator set out of
+ * band; the host executor resolves `process.env[envVarName]` and stores it in
+ * the vault. The plaintext NEVER appears in this object (the validator drops the
+ * whole action if a key-shaped field is present).
+ */
+export interface StewardCredentialRef {
+  /** Which provider this key is for (e.g. `anthropic` / `openai`). Host re-validates. */
+  provider: string
+  /** The NAME of the host env var holding the secret — never the secret itself. */
+  envVarName: string
+  /** Optional human label for the stored credential. */
+  label?: string
+}
+
+/**
+ * A subset of a peer (cross-org) link's trust-contract fields the steward may
+ * set. These mirror the real per-link policy columns (P4-M4 data classes +
+ * quota, E5 share-summary) — all non-secret. The host maps them onto
+ * `PeerStore.updatePeer`; an omitted field is left unchanged.
+ */
+export interface StewardPeerPolicy {
+  /** The peer link id whose policy to change. */
+  peerId: string
+  /** Allowed outbound data classes (null/omitted = leave unchanged). */
+  allowedDataClasses?: string[]
+  /** Per-link quota budget (omitted = leave unchanged). */
+  perLinkQuotaBudget?: number
+  /** Whether this peer may pull privacy-safe summary counts (omitted = unchanged). */
+  shareSummary?: boolean
+}
+
+/**
+ * A security-relevant usage quota the steward may set. Plain scalars — no
+ * secret. The host re-validates `metric` / `period` against the real quota
+ * enums; an out-of-range value is rejected there, not here.
+ */
+export interface StewardSecurityQuota {
+  /** What the quota scopes to (e.g. a user id, agent id, or `hub`). */
+  scope: string
+  /** The metered dimension (e.g. `llm_tokens` / `llm_cost_micros` / `dispatch`). */
+  metric: string
+  /** The reset window (e.g. `day` / `month`). */
+  period: string
+  /** The ceiling. */
+  limit: number
+}
 
 export type StewardActionKind = StewardAction['kind']
 

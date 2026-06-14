@@ -82,6 +82,15 @@ export function classifyStewardAction(
     case 'edit_workflow':
       // ★ a workflow that leaves this hub re-confirms; a purely-local one is safe.
       return ctx.crossHubWorkflowIds.has(action.workflowId) ? 'cross_hub' : 'safe'
+    case 'set_credential_ref':
+    case 'revoke_credential':
+    case 'set_peer_policy':
+    case 'set_security_quota':
+      // Phase B sensitive writes. B-M1 ships them FAIL-CLOSED as `forbidden` (no
+      // operator context exists here yet — a member must never reach them). B-M2
+      // adds the `operator` flag to `ctx` that tiers them to the highest second-
+      // confirmation tier for an operator while keeping `forbidden` for a member.
+      return 'forbidden'
     case 'refuse':
       return 'forbidden' // out-of-scope / sensitive — never executed
   }

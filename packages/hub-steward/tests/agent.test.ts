@@ -293,6 +293,123 @@ describe('validateStewardAction', () => {
 })
 
 // ---------------------------------------------------------------------------
+// validateStewardAction — Phase B sensitive writes (B-M1)
+//   The security invariant: a sensitive action NEVER carries a plaintext secret.
+//   It only ever names an env var. Any key-shaped field drops the WHOLE action.
+// ---------------------------------------------------------------------------
+
+describe('validateStewardAction — sensitive writes (B-M1)', () => {
+  it('accepts a well-formed set_credential_ref (env-var name only, optional label)', () => {
+    expect(
+      validateStewardAction({ kind: 'set_credential_ref', provider: 'openai', envVarName: 'OPENAI_KEY' }),
+    ).toEqual({ kind: 'set_credential_ref', provider: 'openai', envVarName: 'OPENAI_KEY' })
+    expect(
+      validateStewardAction({
+        kind: 'set_credential_ref',
+        provider: 'anthropic',
+        envVarName: 'ANTHROPIC_KEY',
+        label: 'main key',
+      }),
+    ).toEqual({
+      kind: 'set_credential_ref',
+      provider: 'anthropic',
+      envVarName: 'ANTHROPIC_KEY',
+      label: 'main key',
+    })
+  })
+
+  it('accepts revoke_credential / set_security_quota', () => {
+    expect(validateStewardAction({ kind: 'revoke_credential', credentialId: 'cred_1' })).toEqual({
+      kind: 'revoke_credential',
+      credentialId: 'cred_1',
+    })
+    expect(
+      validateStewardAction({
+        kind: 'set_security_quota',
+        scope: 'u1',
+        metric: 'llm_tokens',
+        period: 'day',
+        limit: 100000,
+      }),
+    ).toEqual({ kind: 'set_security_quota', scope: 'u1', metric: 'llm_tokens', period: 'day', limit: 100000 })
+  })
+
+  it('accepts set_peer_policy with any subset of policy fields', () => {
+    expect(
+      validateStewardAction({ kind: 'set_peer_policy', peerId: 'orgX', allowedDataClasses: ['public'] }),
+    ).toEqual({ kind: 'set_peer_policy', peerId: 'orgX', allowedDataClasses: ['public'] })
+    expect(
+      validateStewardAction({
+        kind: 'set_peer_policy',
+        peerId: 'orgX',
+        perLinkQuotaBudget: 500,
+        shareSummary: true,
+      }),
+    ).toEqual({ kind: 'set_peer_policy', peerId: 'orgX', perLinkQuotaBudget: 500, shareSummary: true })
+  })
+
+  it('★ DROPS any sensitive action carrying a key-shaped field (no plaintext secret survives)', () => {
+    // The whole action is rejected — we never strip-and-execute a half-trusted one.
+    for (const leak of [
+      { secret: 'sk-xxx' },
+      { apiKey: 'sk-xxx' },
+      { api_key: 'sk-xxx' },
+      { API_KEY: 'sk-xxx' },
+      { token: 'sk-xxx' },
+      { key: 'sk-xxx' },
+      { bearer: 'sk-xxx' },
+      { password: 'hunter2' },
+      { clientSecret: 'sk-xxx' },
+    ]) {
+      expect(
+        validateStewardAction({ kind: 'set_credential_ref', provider: 'openai', envVarName: 'X', ...leak }),
+      ).toBeNull()
+    }
+    // …and on the other sensitive kinds too.
+    expect(
+      validateStewardAction({ kind: 'revoke_credential', credentialId: 'c1', token: 'sk-xxx' }),
+    ).toBeNull()
+    expect(
+      validateStewardAction({ kind: 'set_peer_policy', peerId: 'orgX', shareSummary: true, secret: 's' }),
+    ).toBeNull()
+    expect(
+      validateStewardAction({ kind: 'set_security_quota', scope: 'u1', metric: 'm', period: 'day', limit: 1, apiKey: 'k' }),
+    ).toBeNull()
+  })
+
+  it('does NOT false-positive legit fields (credentialId / envVarName / perLinkQuotaBudget)', () => {
+    // `credentialId` must not be flagged for containing "credential"; the guard
+    // matches EXACT normalized names, not substrings.
+    expect(validateStewardAction({ kind: 'revoke_credential', credentialId: 'cred_1' })).not.toBeNull()
+    expect(
+      validateStewardAction({ kind: 'set_credential_ref', provider: 'openai', envVarName: 'OPENAI_KEY' }),
+    ).not.toBeNull()
+    expect(
+      validateStewardAction({ kind: 'set_peer_policy', peerId: 'orgX', perLinkQuotaBudget: 10 }),
+    ).not.toBeNull()
+  })
+
+  it('rejects malformed sensitive actions', () => {
+    expect(validateStewardAction({ kind: 'set_credential_ref', provider: 'openai' })).toBeNull() // no envVarName
+    expect(validateStewardAction({ kind: 'set_credential_ref', envVarName: 'X' })).toBeNull() // no provider
+    expect(validateStewardAction({ kind: 'revoke_credential' })).toBeNull() // no id
+    expect(validateStewardAction({ kind: 'set_peer_policy', peerId: 'orgX' })).toBeNull() // no policy field = no-op
+    expect(
+      validateStewardAction({ kind: 'set_peer_policy', peerId: 'orgX', perLinkQuotaBudget: -1 }),
+    ).toBeNull() // negative budget
+    expect(
+      validateStewardAction({ kind: 'set_peer_policy', peerId: 'orgX', allowedDataClasses: 'public' }),
+    ).toBeNull() // not an array
+    expect(
+      validateStewardAction({ kind: 'set_security_quota', scope: 'u1', metric: 'm', period: 'day' }),
+    ).toBeNull() // no limit
+    expect(
+      validateStewardAction({ kind: 'set_security_quota', scope: 'u1', metric: 'm', period: 'day', limit: 'lots' }),
+    ).toBeNull() // limit not a number
+  })
+})
+
+// ---------------------------------------------------------------------------
 // round-trip: a proposal → JSON → parse must come back equal
 // ---------------------------------------------------------------------------
 

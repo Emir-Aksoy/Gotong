@@ -307,6 +307,69 @@ export function validateStewardAction(x: unknown): StewardAction | null {
       return isNonEmptyStr(o.workflowId) && isNonEmptyStr(o.instruction)
         ? { kind: 'edit_workflow', workflowId: o.workflowId.trim(), instruction: o.instruction.trim() }
         : null
+    // ── Phase B sensitive writes ──────────────────────────────────────────────
+    // Every sensitive-kind validation FIRST rejects the whole action if it
+    // carries a key-shaped field. A steward action must never transport a
+    // plaintext secret (it only ever NAMES an env var); a model that put one
+    // here misunderstood the contract, so we don't trust the rest of it either.
+    case 'set_credential_ref': {
+      if (hasSecretShapedField(o)) return null
+      if (!isNonEmptyStr(o.provider) || !isNonEmptyStr(o.envVarName)) return null
+      const a: Extract<StewardAction, { kind: 'set_credential_ref' }> = {
+        kind: 'set_credential_ref',
+        provider: o.provider.trim(),
+        envVarName: o.envVarName.trim(),
+      }
+      if (isNonEmptyStr(o.label)) a.label = o.label.trim()
+      return a
+    }
+    case 'revoke_credential':
+      if (hasSecretShapedField(o)) return null
+      return isNonEmptyStr(o.credentialId)
+        ? { kind: 'revoke_credential', credentialId: o.credentialId.trim() }
+        : null
+    case 'set_peer_policy': {
+      if (hasSecretShapedField(o)) return null
+      if (!isNonEmptyStr(o.peerId)) return null
+      const a: Extract<StewardAction, { kind: 'set_peer_policy' }> = {
+        kind: 'set_peer_policy',
+        peerId: o.peerId.trim(),
+      }
+      if ('allowedDataClasses' in o) {
+        if (!isStrArray(o.allowedDataClasses)) return null
+        a.allowedDataClasses = o.allowedDataClasses
+      }
+      if ('perLinkQuotaBudget' in o) {
+        if (!isNonNegNumber(o.perLinkQuotaBudget)) return null
+        a.perLinkQuotaBudget = o.perLinkQuotaBudget
+      }
+      if ('shareSummary' in o) {
+        if (typeof o.shareSummary !== 'boolean') return null
+        a.shareSummary = o.shareSummary
+      }
+      // A policy change with no actual field is a pointless approval — reject it.
+      if (
+        a.allowedDataClasses === undefined &&
+        a.perLinkQuotaBudget === undefined &&
+        a.shareSummary === undefined
+      )
+        return null
+      return a
+    }
+    case 'set_security_quota':
+      if (hasSecretShapedField(o)) return null
+      return isNonEmptyStr(o.scope) &&
+        isNonEmptyStr(o.metric) &&
+        isNonEmptyStr(o.period) &&
+        isNonNegNumber(o.limit)
+        ? {
+            kind: 'set_security_quota',
+            scope: o.scope.trim(),
+            metric: o.metric.trim(),
+            period: o.period.trim(),
+            limit: o.limit,
+          }
+        : null
     case 'refuse':
       return isNonEmptyStr(o.reason) ? { kind: 'refuse', reason: o.reason.trim() } : null
     default:
@@ -363,6 +426,54 @@ function validatePartialAgentFields(x: unknown): Partial<StewardAgentFields> | n
   return Object.keys(out).length > 0 ? out : null
 }
 
+// --- sensitive-write secret guard -------------------------------------------
+
+/**
+ * Field NAMES a sensitive steward action must never carry — a steward only ever
+ * names an env var, never a secret. Matched by EXACT normalized name (lowercase,
+ * `_`/`-` stripped) so legitimate fields like `credentialId` / `envVarName` /
+ * `perLinkQuotaBudget` are not false-positives (substring matching would flag
+ * `credentialId` for "credential" and break every revoke). This is the R3
+ * mitigation: nothing key-shaped survives into a proposal / inbox / transcript.
+ */
+const SECRET_FIELD_NAMES: ReadonlySet<string> = new Set([
+  'secret',
+  'secrets',
+  'apikey',
+  'apikeys',
+  'key',
+  'keys',
+  'token',
+  'tokens',
+  'accesstoken',
+  'refreshtoken',
+  'idtoken',
+  'sessiontoken',
+  'bearer',
+  'auth',
+  'authorization',
+  'password',
+  'passwd',
+  'pwd',
+  'passphrase',
+  'privatekey',
+  'clientsecret',
+  'credential',
+  'credentials',
+])
+
+function normFieldName(name: string): string {
+  return name.toLowerCase().replace(/[_-]/g, '')
+}
+
+/** True if `o` has any own field whose normalized name is a known secret name. */
+function hasSecretShapedField(o: Record<string, unknown>): boolean {
+  for (const name of Object.keys(o)) {
+    if (SECRET_FIELD_NAMES.has(normFieldName(name))) return true
+  }
+  return false
+}
+
 // --- tiny type guards -------------------------------------------------------
 
 function isStr(x: unknown): x is string {
@@ -373,4 +484,7 @@ function isNonEmptyStr(x: unknown): x is string {
 }
 function isStrArray(x: unknown): x is string[] {
   return Array.isArray(x) && x.every((e) => typeof e === 'string')
+}
+function isNonNegNumber(x: unknown): x is number {
+  return typeof x === 'number' && Number.isFinite(x) && x >= 0
 }
