@@ -17,7 +17,7 @@
 
 | hub | 类型 | 一句话 | 编排方式 | 模板装了什么 |
 |---|---|---|---|---|
-| [`personal-coding-hub`](../../examples/personal-coding-hub) | 个人 | 一个路由 LLM 调度 Claude Code + Codex 两个 CLI,共享同一仓库(`cwd`),靠 `AGENTS.md`/`PROGRESS.md` 交接 | 运行时 DispatchToolset(代码) | 1 导师 agent + `coding_methodology` KB |
+| [`personal-coding-hub`](../../examples/personal-coding-hub) | 个人 | 一个路由 LLM 调度 Claude Code + Codex 两个 CLI,共享同一仓库(`cwd`),靠 `AGENTS.md`/`PROGRESS.md` 交接;出问题时还能**会诊**(多 agent 一起找真实根因) | 运行时 DispatchToolset(代码) | 1 导师 agent + `coding_methodology` KB |
 | [`personal-research-hub`](../../examples/personal-research-hub) | 个人 | librarian 把 raw 源材料**编译**成互链 Obsidian wiki(LLM-as-compiler),再 ask-your-wiki | 运行时 DispatchToolset(代码) | 3 agent(librarian/compiler/researcher)+ `research_wiki` KB |
 | [`battle-monk-training`](../../examples/battle-monk-training) | 个人 | 督修把今日操练派给「身/心/学」三柱,各自把成长**状态**写进持久 Codex | 运行时 DispatchToolset(代码) | 4 agent(督修 + 三柱)+ `acolyte_codex` KB |
 | [`cafe-ops`](../../examples/cafe-ops) | **组织** | 奶茶/咖啡店:新员工上手 / 排班 / 加班,走「成员自助 → 店长审批」正式流程 | **声明式工作流**(模板里) | 2 agent + **3 工作流** + `store_ops_manual` KB |
@@ -45,6 +45,7 @@
 ```bash
 # 个人 hub
 pnpm demo:personal-coding-hub            # 路由 → Claude Code/Codex 共享 cwd + PROGRESS.md 交接
+pnpm demo:personal-coding-hub:consult    # 会诊:盲诊 → 质证 → 收敛到真实根因 / 升级给人(mock 自断言)
 pnpm demo:personal-research-hub          # raw → 编译成 wiki 笔记 → ask-your-wiki 引来源
 pnpm demo:battle-monk-training           # 督修派三柱 → 各写持久 Codex(承前 N 阶)
 
@@ -202,6 +203,13 @@ demo 里把 mock provider 换成一个**情境感知的 `LlmProvider`**:它从 p
 > **一句话**:个人 hub 把「看情况派谁」抽成纯函数 `planXxx()`(可单测);组织 hub 让 dispatch 图保持
 > 结构性,把情境感知放进 worker 的确定性算账 + `when:` / `human:` / 出站审批闸。两条路都做到「结合
 > 使用者的情况」,且都不靠真 LLM 就能断言。
+
+**另一种协作形态:对抗式会诊(不是分派,是收敛)。** 上面讲的都是**分工式派活** —— 看情况把活**拆给**
+合适的 agent。`personal-coding-hub` 还带了**对抗式会诊**:出了问题时不拆活,而是让多个 agent **都去读
+同一段代码**,先各自**盲诊**(互不看,避免抱团),再**质证**(相互反驳,把症状和根因分开),最后只让
+`level: root-cause` 级的诊断投票收敛到**真实根因**(或不收敛→升级给人)。同一个 hub 里两种形态并存:
+**分工**是「谁干这块」,**会诊**是「这块到底坏在哪」。会诊也全程确定性可断言(`runConsult` 是普通编排
+函数不是 LLM),命令见 §二的 `pnpm demo:personal-coding-hub:consult`。
 
 ---
 

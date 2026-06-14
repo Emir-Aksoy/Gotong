@@ -36,6 +36,7 @@
     "demo:personal-coding-hub:consult-core": "pnpm --filter @aipehub/example-personal-coding-hub consult-core",
     "demo:personal-coding-hub:consult": "pnpm --filter @aipehub/example-personal-coding-hub consult",
     "demo:personal-coding-hub:consult-flow": "pnpm --filter @aipehub/example-personal-coding-hub consult-flow",
+    "demo:personal-coding-hub:consult-real": "pnpm --filter @aipehub/example-personal-coding-hub consult-real",
     "demo:codex-deepseek-hub": "pnpm --filter @aipehub/example-codex-deepseek-hub start",
     "demo:codex-deepseek-hub:real": "pnpm --filter @aipehub/example-codex-deepseek-hub start:real",
     "demo:codex-deepseek-hub:cli": "pnpm --filter @aipehub/example-codex-deepseek-hub start:cli",

@@ -12,6 +12,7 @@
     "consult-core": "tsx src/consult.selfcheck.ts",
     "consult": "tsx src/consult-demo.ts",
     "consult-flow": "tsx src/consult-flow-demo.ts",
+    "consult-real": "tsx src/consult.real.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

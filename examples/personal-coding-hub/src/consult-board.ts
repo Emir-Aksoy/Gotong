@@ -28,13 +28,21 @@ export function setupConsultBoard(workspaceDir: string): ConsultBoard {
 }
 
 /**
- * The on-disk filename for an agent's card. Agent ids here are coder handles
- * (claude-code / codex) — safe as filenames — but we hyphenate anything odd so a
- * stray id can never escape the board dir. (Handles keep their hyphens, so the
+ * The board filename base for an agent — hyphenate anything odd so a stray id can
+ * never escape the board dir. Agent ids here are coder handles (claude-code /
+ * codex), already filename-safe, so they round-trip to the same id. Exported so the
+ * prompt convention (boardCardInstruction) names the SAME path the moderator reads.
+ */
+export function boardFileBase(agent: string): string {
+  return agent.replace(/[^a-zA-Z0-9_-]+/g, '_')
+}
+
+/**
+ * The on-disk filename for an agent's card. (Handles keep their hyphens, so the
  * filename round-trips to the same id in readAllDiagnoses.)
  */
 function fileFor(board: ConsultBoard, agent: string): string {
-  return join(board.dir, `${agent.replace(/[^a-zA-Z0-9_-]+/g, '_')}.md`)
+  return join(board.dir, `${boardFileBase(agent)}.md`)
 }
 
 /**
@@ -56,6 +64,39 @@ export function renderDiagnosis(d: Diagnosis): string {
 
 export function writeDiagnosis(board: ConsultBoard, d: Diagnosis): void {
   writeFileSync(fileFor(board, d.agent), renderDiagnosis(d))
+}
+
+/**
+ * The prompt fragment that tells a REAL diagnostic agent (claude-code / codex
+ * reading the repo) how to record its finding — the same card shape renderDiagnosis
+ * emits and parseDiagnosis reads back, so a real agent and the mock land on one
+ * format. The moderator appends this to each diagnosis prompt in real mode; the mock
+ * already knows the shape so the offline demo omits it. Naming the file via
+ * boardFileBase keeps the path identical to where readAllDiagnoses looks.
+ *
+ * `level: root-cause` is the gate that makes a panel worth more than one agent:
+ * only a confident underlying-cause call counts toward consensus, so the prompt is
+ * explicit that a surface effect stays `level: symptom`.
+ */
+export function boardCardInstruction(agent: string): string {
+  return [
+    'When you have finished diagnosing, WRITE your diagnosis to the file',
+    `\`DIAGNOSIS/${boardFileBase(agent)}.md\` (relative to the repo root) in EXACTLY this format:`,
+    '',
+    '```',
+    `# Diagnosis by ${agent}`,
+    '',
+    '- root-cause: <a short kebab-case tag, e.g. missing-await>',
+    '- level: <root-cause or symptom>',
+    '',
+    '<one or two sentences of evidence for your call>',
+    '```',
+    '',
+    'Use `level: root-cause` ONLY when you are confident you found the underlying',
+    'cause; if you only see a surface effect (a test fails, it is slow), use',
+    '`level: symptom`. Keep the root-cause tag short and canonical so peers who reach',
+    'the same conclusion use the same words.',
+  ].join('\n')
 }
 
 /**

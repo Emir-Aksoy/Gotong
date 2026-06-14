@@ -135,6 +135,68 @@ coding-hub> :roster                              # 改动持久, 重启仍在
 > **临时 vs 持久**:点名(①)只管这一次派发;大白话改总分工层(②)落到文件、之后每次都按新
 > 安排走。复制工作区目录 = 把这套分工一起带走(策略是文件,不是代码)。
 
+## 会诊:多个 agent 一起找真实根因(不停在症状)
+
+派活之外,这个 hub 还能**会诊**:发现一个问题时,让**几个 agent 一起读同一份代码**,各自
+**独立**给出诊断,再**相互质证**,收敛到**真实根因**——而不是表面症状。这是「多 agent 协作」
+里**对抗式**的一面(派活是分工式的一面):一个 agent 看走眼会从众,一组 agent 互相挑刺反而
+能把「测试挂了」这种**症状**逼成「handler 没 await 那个 promise」这种**根因**。
+
+```
+   发现问题 (显式「会诊」 / 测试失败)
+        │
+        ▼
+   ┌─ 盲诊 (round 1) ──────────────┐   各看各的, 不给同伴上下文
+   │  claude-code → missing-await  │   → 避免被一个自信的错误声音带跑(从众)
+   │  codex       → flaky-timeout  │   只有 level=root-cause 的诊断算票
+   │  reviewer    → race-condition │
+   └───────────────┬───────────────┘   分歧 → 进质证
+        ▼
+   ┌─ 质证 (round 2) ──────────────┐   主持人把"上一轮同伴的诊断"快照发给每人
+   │  codex    症状→根因 missing-await │ → 看到更强的证据, 把症状升级成根因
+   │  reviewer 改判     missing-await │   (这一步升级 = 一组人比一个人强的地方)
+   └───────────────┬───────────────┘
+        ▼
+   多数收敛 (panel 的严格多数, 票×2 > 人数)
+        ├─ 收敛 → 把真实根因交回 coder 修 → 测试转绿
+        └─ 不收敛(各执己见) → 升级给人裁决(真实部署写入 /me 收件箱)
+```
+
+**两个触发器**(在 `src/routing.ts` / `consult-flow-demo.ts`):
+
+| 触发 | 怎么进会诊 | 谁会诊 |
+|---|---|---|
+| **显式「会诊」** | `parseConsultRequest(goal)` 检出「会诊 / 一起诊断 / 找根因 / consult / root-cause」等措辞 → 直接召集面板,而不是当普通编码任务路由 | 两个 coder + 一个 reviewer 视角 |
+| **测试失败** | 一次正常实现没过(建模的)测试 → 自动召集面板找真实根因,再把根因交回 coder | 同上 |
+| *(一次过)* | 测试一次就过 → **不打扰**(触发是有选择的) | — |
+
+**症状 vs 根因**(为什么会诊有价值):每个诊断带一个 `level`——`symptom`(表面效应:测试挂了、
+慢)或 `root-cause`(底层原因)。**只有 root-cause 级的诊断算票**,所以会诊永远收敛在根因上;
+一个在盲诊里只看到症状的 agent,可以在质证后**升级**成根因——这正是一组人比一个人多出来的
+那点价值。根因用一个**规范化的 tag**(如 `missing-await`)记账,所以无需真 LLM 也能断言收敛。
+
+```bash
+pnpm demo:personal-coding-hub:consult-core   # 纯函数核心(panel/计票/状态机 + 白板往返)16 断言
+pnpm demo:personal-coding-hub:consult        # 完整会诊: 盲诊→质证→收敛 / 升级 两剧情(mock, 自断言)
+pnpm demo:personal-coding-hub:consult-flow    # 会诊接进分派流程: 显式 / 测试失败 / 一次过不触发 三剧情
+pnpm demo:personal-coding-hub:consult-real    # 真链条自检(默认 mock 面板, ✅/❌ 判定)
+
+# 真会诊: 真 claude-code + codex 读真仓库(auth.js 一个真 missing-await bug + 真失败的 node --test):
+CONSULT_REAL=1 pnpm demo:personal-coding-hub:consult-real
+```
+
+> **会诊的链条自检 vs 收敛结果**:`:consult-real` 的判定故意**只看链条**——每个 agent 都把一份
+> 可解析的诊断卡写上白板(`DIAGNOSIS/<agent>.md`)、且主持人收敛或升级,就算 ✅;它**不**断言
+> 收敛到哪个根因(真模型会抖)。要断言确定的收敛(`missing-await` 2/2 / 升级给人),看 mock 的
+> `:consult` —— 它用脚本化的诊断 agent,可以钉死面板动态。真模式比 mock 多的那根线只有一条:
+> 每个面板成员被额外递了 `boardCardInstruction`(白板卡片的约定格式),让真 CLI 写出主持人能
+> 解析回来的那个形状;mock 本来就知道这个形状,所以离线 demo 不递。
+>
+> **主持人不是 LLM**:`runConsult`(`src/consult-orchestrate.ts`)是一个普通编排函数——盲诊一轮、
+> 计票、决定报告/再质证一轮/升级,全是 `hub.dispatch` + 白板 + 纯函数(没有 LLM 决定何时停),
+> 所以会诊的走向可断言。盲诊的「盲」是构造性的:每个 agent 只写自己的 `DIAGNOSIS/<agent>.md`、
+> 从不读别人的;质证轮的同伴上下文只经主持人递的**快照**到达,所以一轮内的并行写不会互相影响。
+
 ## 方法论知识库(Karpathy 工作流)+ 可载入模板
 
 这个案例的「方法论大脑」是一个**可载入文件**,不是写死在 `index.ts` 里的 TS 字面量

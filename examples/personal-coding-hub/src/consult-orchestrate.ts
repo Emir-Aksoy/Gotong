@@ -43,6 +43,13 @@ export interface RunConsultOpts {
   problemId: string
   /** Optional progress line sink (the demo passes console.log). */
   log?: (msg: string) => void
+  /**
+   * Optional per-agent board-write convention appended to each diagnosis prompt.
+   * Real CLIs need to be told the exact card path + format (boardCardInstruction);
+   * the mock already knows the shape, so the offline demos leave this unset and the
+   * prompt is byte-for-byte unchanged.
+   */
+  cardInstruction?: (agent: string) => string
 }
 
 /**
@@ -69,7 +76,9 @@ export async function runConsult(
     log(`  round ${round} — ${blind ? 'blind diagnosis (no peer context)' : 'cross-examination'}`)
 
     await Promise.all(
-      plan.panel.map((agent) => dispatchDiagnosis(hub, agent, problem, round, blind, prev, opts.problemId)),
+      plan.panel.map((agent) =>
+        dispatchDiagnosis(hub, agent, problem, round, blind, prev, opts.problemId, opts.cardInstruction),
+      ),
     )
 
     const diagnoses = readAllDiagnoses(board)
@@ -92,6 +101,7 @@ async function dispatchDiagnosis(
   blind: boolean,
   prev: Diagnosis[],
   problemId: string,
+  cardInstruction?: (agent: string) => string,
 ): Promise<void> {
   const prompt = [
     `PROBLEM-ID: ${problemId}`,
@@ -101,6 +111,7 @@ async function dispatchDiagnosis(
     blind
       ? '(blind round — diagnose independently; do NOT consult peers)'
       : `PEER DIAGNOSES:\n${peerDigest(prev, agent)}`,
+    cardInstruction ? cardInstruction(agent) : '',
   ]
     .filter(Boolean)
     .join('\n')
