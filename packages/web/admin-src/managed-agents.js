@@ -61,12 +61,12 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       // wizard for non-technical users who just installed AipeHub.
       dom.maList.innerHTML = `<div class="empty-state" style="padding: 1.2rem; line-height: 1.7;">
         <p style="margin: 0 0 0.6rem; font-weight: 600;">${escapeHtml(t.maEmpty)}</p>
-        <p style="margin: 0 0 0.8rem; color: #555;">第一次用?试试 5 分钟出一份"12 周个人成长计划":</p>
+        <p style="margin: 0 0 0.8rem; color: #555;">${escapeHtml(t.admOnboardPgPrompt)}</p>
         <p style="margin: 0;">
-          <button type="button" id="onboarding-pg-btn" class="ma-btn">🎁 装个人成长团队 (7 教练 · DeepSeek)</button>
+          <button type="button" id="onboarding-pg-btn" class="ma-btn">${escapeHtml(t.admOnboardPgBtn)}</button>
         </p>
         <small class="hint" style="display: block; margin-top: 0.6rem; color: #777;">
-          先去 <a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a> 申请 API key (新用户送 10 元额度 ≈ 几十次跑工作流)。
+          ${t.admOnboardDeepseekHint('<a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a>')}
         </small>
       </div>`
       // Wire the button right after innerHTML — it's destroyed and

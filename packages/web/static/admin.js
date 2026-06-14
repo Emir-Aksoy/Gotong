@@ -466,12 +466,12 @@
       if (list.length === 0) {
         dom.maList.innerHTML = `<div class="empty-state" style="padding: 1.2rem; line-height: 1.7;">
         <p style="margin: 0 0 0.6rem; font-weight: 600;">${escapeHtml3(t3.maEmpty)}</p>
-        <p style="margin: 0 0 0.8rem; color: #555;">第一次用?试试 5 分钟出一份"12 周个人成长计划":</p>
+        <p style="margin: 0 0 0.8rem; color: #555;">${escapeHtml3(t3.admOnboardPgPrompt)}</p>
         <p style="margin: 0;">
-          <button type="button" id="onboarding-pg-btn" class="ma-btn">🎁 装个人成长团队 (7 教练 · DeepSeek)</button>
+          <button type="button" id="onboarding-pg-btn" class="ma-btn">${escapeHtml3(t3.admOnboardPgBtn)}</button>
         </p>
         <small class="hint" style="display: block; margin-top: 0.6rem; color: #777;">
-          先去 <a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a> 申请 API key (新用户送 10 元额度 ≈ 几十次跑工作流)。
+          ${t3.admOnboardDeepseekHint('<a href="https://platform.deepseek.com" target="_blank" rel="noopener">platform.deepseek.com</a>')}
         </small>
       </div>`;
         const btn = document.getElementById("onboarding-pg-btn");
@@ -1158,7 +1158,7 @@
         const isLive = state === "published" || state === "deprecated";
         const stateBadge = `<span class="wf-state wf-state-${escapeHtml4(state)}">${escapeHtml4(t4.workflowStateLabel(state))}</span>`;
         const revTag = w.currentRevision ? `<span class="wf-rev-tag">${escapeHtml4(t4.workflowRevTag(w.currentRevision))}</span>` : "";
-        const startBtn = isLive ? `<button type="button" class="ma-btn" data-act="start-workflow" data-id="${escapeHtml4(w.id)}">开始</button>` : "";
+        const startBtn = isLive ? `<button type="button" class="ma-btn" data-act="start-workflow" data-id="${escapeHtml4(w.id)}">${escapeHtml4(t4.admStart)}</button>` : "";
         return `<article class="ma-card">
         <header>
           <strong>${name}</strong>
@@ -2251,7 +2251,7 @@
         btn.appendChild(badge);
       }
       badge.textContent = String(n);
-      badge.title = `${n} 个 agent 正在等你回答`;
+      badge.title = t5.admAgentsWaiting(n);
     }
     async function refreshHealth() {
       if (!dom?.hToday) return;
@@ -2562,7 +2562,7 @@
     function renderGrowthReports(reports) {
       if (!dom.grTbody) return;
       if (dom.grSummary) {
-        dom.grSummary.textContent = reports.length === 0 ? "" : `共 ${reports.length} 份`;
+        dom.grSummary.textContent = reports.length === 0 ? "" : t5.admReportsCount(reports.length);
       }
       if (reports.length === 0) {
         dom.grTable.hidden = true;
@@ -2584,8 +2584,8 @@
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="view-growth-report"
                   data-path="${escapeHtml5(rep.path)}"
-                  data-when="${escapeHtml5(when)}">查看</button>
-          <a class="ma-btn ma-btn-secondary" href="${escapeHtml5(dlHref)}" download>下载</a>
+                  data-when="${escapeHtml5(when)}">${t5.admView}</button>
+          <a class="ma-btn ma-btn-secondary" href="${escapeHtml5(dlHref)}" download>${t5.admDownload}</a>
         </td>
       </tr>`;
       }).join("");
@@ -2626,20 +2626,20 @@
     }
     async function openGrowthReport(path, when) {
       if (!dom.grReportModal) return;
-      dom.grReportTitle.textContent = `成长报告 · ${when}`;
+      dom.grReportTitle.textContent = t5.admGrowthReportTitle(when);
       dom.grReportDownload.href = "/api/admin/growth-reports/download?path=" + encodeURIComponent(path);
-      dom.grReportBody.innerHTML = '<p class="hint">加载中...</p>';
+      dom.grReportBody.innerHTML = `<p class="hint">${escapeHtml5(t5.admLoading)}</p>`;
       dom.grReportModal.hidden = false;
       try {
         const r = await fetch("/api/admin/growth-reports/download?path=" + encodeURIComponent(path));
         if (!r.ok) {
-          dom.grReportBody.innerHTML = `<p class="hint">加载失败:HTTP ${r.status}</p>`;
+          dom.grReportBody.innerHTML = `<p class="hint">${escapeHtml5(t5.admLoadFailedHttp(r.status))}</p>`;
           return;
         }
         const text = await r.text();
         dom.grReportBody.innerHTML = renderMarkdown(text);
       } catch (err) {
-        dom.grReportBody.innerHTML = `<p class="hint">加载失败:${escapeHtml5(err.message || String(err))}</p>`;
+        dom.grReportBody.innerHTML = `<p class="hint">${escapeHtml5(t5.admLoadFailedErr(err.message || String(err)))}</p>`;
       }
     }
     function closeGrowthReport() {
@@ -2666,7 +2666,7 @@
           new Set(xhubSteps.filter((s) => s.kind === "a2a").map((s) => s.peerLabel || s.peer))
         );
         const xhub = peerDests.length || a2aDests.length ? `<br/><small class="wf-xhub-note">${escapeHtml5(t5.workflowCrossHubNote(peerDests, a2aDests))}</small>` : "";
-        dom.wfStartDesc.innerHTML = (w.description ? `${escapeHtml5(w.description)}<br/><small>派发能力:${cap}</small>` : `派发能力:${cap}`) + xhub;
+        dom.wfStartDesc.innerHTML = (w.description ? `${escapeHtml5(w.description)}<br/><small>${t5.admDispatchCap(cap)}</small>` : t5.admDispatchCap(cap)) + xhub;
       }
       renderWorkflowStartFields(w.payloadSchema);
       if (dom.wfStartMsg) {
@@ -2686,7 +2686,7 @@
         dom.wfStartFields.innerHTML = `<label>
         <span>Payload (JSON)</span>
         <textarea id="wf-start-json" rows="8" placeholder='{ "key": "value" }'>{}</textarea>
-        <small class="hint">这条工作流没声明 payload_schema,要手填 JSON。看 workflow.yaml 的 trigger 段了解需要哪些字段。</small>
+        <small class="hint">${escapeHtml5(t5.admNoPayloadSchema)}</small>
       </label>`;
         return;
       }
@@ -2701,7 +2701,7 @@
       const ctx = typeof payload.context === "string" ? payload.context : "";
       const fromAgent = typeof payload.fromAgent === "string" ? payload.fromAgent : "(agent)";
       const fields = qs.map((q, i) => renderAgentQuestionField(v.id, q, i)).join("");
-      return `<div class="task-detail-section agent-question-form" data-aq-id="${escapeHtml5(v.id)}"><div class="aq-header"><strong>🤖 ${escapeHtml5(fromAgent)} 想再问你 ${qs.length} 件事</strong>` + (ctx ? `<p class="aq-context">${escapeHtml5(ctx)}</p>` : "") + `</div><div class="aq-fields">${fields}</div><div class="aq-actions"><button class="primary" data-act="submit-agent-question" data-id="${escapeHtml5(v.id)}">提交回答 (agent 会接着跑)</button><button class="secondary" data-act="skip-agent-question" data-id="${escapeHtml5(v.id)}" title="跳过 — agent 会按它第一轮的判断继续">跳过</button><span class="aq-msg" data-aq-msg="${escapeHtml5(v.id)}"></span></div></div>`;
+      return `<div class="task-detail-section agent-question-form" data-aq-id="${escapeHtml5(v.id)}"><div class="aq-header"><strong>${escapeHtml5(t5.admAgentAsksMore(fromAgent, qs.length))}</strong>` + (ctx ? `<p class="aq-context">${escapeHtml5(ctx)}</p>` : "") + `</div><div class="aq-fields">${fields}</div><div class="aq-actions"><button class="primary" data-act="submit-agent-question" data-id="${escapeHtml5(v.id)}">${escapeHtml5(t5.admSubmitAnswer)}</button><button class="secondary" data-act="skip-agent-question" data-id="${escapeHtml5(v.id)}" title="${escapeHtml5(t5.admSkipTitle)}">${escapeHtml5(t5.admSkip)}</button><span class="aq-msg" data-aq-msg="${escapeHtml5(v.id)}"></span></div></div>`;
     }
     function renderAgentQuestionField(taskId, q, idx) {
       const fid = q && typeof q.id === "string" ? q.id : `q${idx}`;
@@ -2729,7 +2729,7 @@
         msg.textContent = text;
         msg.className = "aq-msg" + (kind ? " " + kind : "");
       };
-      setMsg("提交中…");
+      setMsg(t5.admSubmitting);
       const view = state.tasks.find((x) => x.id === taskId);
       const qs = view?.task?.payload?.questions || [];
       const answers = {};
@@ -2738,7 +2738,7 @@
         if (!el) continue;
         const v = el.value;
         if (q.required && (v == null || String(v).trim() === "")) {
-          setMsg(`${q.label} 必填`, "err");
+          setMsg(t5.admFieldRequired(q.label), "err");
           return;
         }
         if (v != null && String(v).length > 0) answers[q.id] = String(v);
@@ -2749,16 +2749,16 @@
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ output: { answers } })
         });
-        setMsg("已提交 — agent 收到了,正在继续", "ok");
+        setMsg(t5.admSubmittedAgent, "ok");
       } catch (err) {
-        setMsg("提交失败: " + (err.message || String(err)), "err");
+        setMsg(t5.admSubmitFailedErr(err.message || String(err)), "err");
       }
     }
     async function skipAgentQuestion(taskId) {
       const card = document.querySelector(`.agent-question-form[data-aq-id="${cssEscape(taskId)}"]`);
       const msg = card?.querySelector(`[data-aq-msg="${cssEscape(taskId)}"]`);
       if (msg) {
-        msg.textContent = "跳过中…";
+        msg.textContent = t5.admSkipping;
         msg.className = "aq-msg";
       }
       try {
@@ -2768,12 +2768,12 @@
           body: JSON.stringify({ error: "admin skipped" })
         });
         if (msg) {
-          msg.textContent = "已跳过 — agent 用了第一轮的判断";
+          msg.textContent = t5.admSkipped;
           msg.className = "aq-msg ok";
         }
       } catch (err) {
         if (msg) {
-          msg.textContent = "跳过失败: " + (err.message || String(err));
+          msg.textContent = t5.admSkipFailedErr(err.message || String(err));
           msg.className = "aq-msg err";
         }
       }
@@ -2898,7 +2898,7 @@
     }
     function renderUnknownBlock(b) {
       return `<div class="mm-block mm-unknown">
-      <small>未识别的 ${escapeHtml5(String(b && b.type) || "unknown")} 块</small>
+      <small>${escapeHtml5(t5.admUnknownBlock(String(b && b.type) || "unknown"))}</small>
     </div>`;
     }
     function renderOneField(f) {
@@ -2918,7 +2918,7 @@
         control = `<input type="number" id="${id}"${ph} value="${defaultV}" />`;
       } else if (f.type === "file") {
         const accept = Array.isArray(f.accept) && f.accept.length > 0 ? ` accept="${escapeHtml5(f.accept.join(","))}"` : "";
-        const sizeHint = typeof f.maxSizeMb === "number" ? `<small class="hint">最大 ${f.maxSizeMb} MB</small>` : "";
+        const sizeHint = typeof f.maxSizeMb === "number" ? `<small class="hint">${escapeHtml5(t5.admMaxSize(f.maxSizeMb))}</small>` : "";
         control = `<input type="file" id="${id}" data-aipe-file="1"${accept} />
         <span class="aipe-file-status" data-aipe-file-status="${id}" style="font-size:0.85em;color:#666;margin-left:0.5em;"></span>
         ${sizeHint}`;
@@ -2949,7 +2949,7 @@
             const files = el.files;
             if (!files || files.length === 0) {
               if (f.required) {
-                dom.wfStartMsg.textContent = `${f.label} 必填`;
+                dom.wfStartMsg.textContent = t5.admFieldRequired(f.label);
                 dom.wfStartMsg.classList.add("err");
                 return;
               }
@@ -2958,36 +2958,36 @@
             const file = files[0];
             const capMb = typeof f.maxSizeMb === "number" ? f.maxSizeMb : 10;
             if (file.size > capMb * 1024 * 1024) {
-              dom.wfStartMsg.textContent = `${f.label} 文件超过 ${capMb} MB 上限`;
+              dom.wfStartMsg.textContent = t5.admFileTooLarge(f.label, capMb);
               dom.wfStartMsg.classList.add("err");
               return;
             }
             const statusEl = document.querySelector(
               `[data-aipe-file-status="wf-start-field-${cssEscape(f.id)}"]`
             );
-            if (statusEl) statusEl.textContent = "上传中…";
+            if (statusEl) statusEl.textContent = t5.admUploading;
             try {
               const ref = await uploadOneFile(file);
               if (statusEl) {
                 statusEl.style.color = "#080";
                 if (ref.mime && ref.mime.startsWith("image/")) {
                   const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`;
-                  statusEl.innerHTML = `<span>已上传 (${escapeHtml5(formatBytes2(ref.size))})</span> <img src="${escapeHtml5(url)}" alt="preview" style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`;
+                  statusEl.innerHTML = `<span>${escapeHtml5(t5.admUploaded(formatBytes2(ref.size)))}</span> <img src="${escapeHtml5(url)}" alt="preview" style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`;
                 } else if (ref.mime && ref.mime.startsWith("audio/")) {
                   const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`;
-                  statusEl.innerHTML = `<span>已上传 (${escapeHtml5(formatBytes2(ref.size))})</span> <audio controls src="${escapeHtml5(url)}" style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`;
+                  statusEl.innerHTML = `<span>${escapeHtml5(t5.admUploaded(formatBytes2(ref.size)))}</span> <audio controls src="${escapeHtml5(url)}" style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`;
                 } else {
-                  statusEl.textContent = `已上传 (${formatBytes2(ref.size)})`;
+                  statusEl.textContent = t5.admUploaded(formatBytes2(ref.size));
                 }
               }
               payload[f.id] = { type: "file_ref", artifactId: ref.artifactId, mime: ref.mime };
             } catch (err) {
               const msg = err && err.message ? err.message : String(err);
               if (statusEl) {
-                statusEl.textContent = `上传失败: ${msg}`;
+                statusEl.textContent = t5.admUploadFailedMsg(msg);
                 statusEl.style.color = "#c33";
               }
-              dom.wfStartMsg.textContent = `${f.label} 上传失败: ${msg}`;
+              dom.wfStartMsg.textContent = t5.admFieldUploadFailed(f.label, msg);
               dom.wfStartMsg.classList.add("err");
               return;
             }
@@ -2995,7 +2995,7 @@
           }
           let v = el.value;
           if (f.required && (v == null || v.trim() === "")) {
-            dom.wfStartMsg.textContent = `${f.label} 必填`;
+            dom.wfStartMsg.textContent = t5.admFieldRequired(f.label);
             dom.wfStartMsg.classList.add("err");
             return;
           }
@@ -3003,7 +3003,7 @@
           if (f.type === "number") {
             const n = Number(v);
             if (!Number.isFinite(n)) {
-              dom.wfStartMsg.textContent = `${f.label} 必须是数字`;
+              dom.wfStartMsg.textContent = t5.admFieldMustBeNumber(f.label);
               dom.wfStartMsg.classList.add("err");
               return;
             }
@@ -3017,7 +3017,7 @@
         try {
           payload = JSON.parse(jsonEl?.value || "{}");
         } catch (err) {
-          dom.wfStartMsg.textContent = "Payload JSON 不合法:" + (err.message || String(err));
+          dom.wfStartMsg.textContent = t5.admPayloadJsonInvalid(err.message || String(err));
           dom.wfStartMsg.classList.add("err");
           return;
         }
@@ -3034,15 +3034,15 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          dom.wfStartMsg.textContent = "失败:" + (body.error || `HTTP ${r.status}`);
+          dom.wfStartMsg.textContent = t5.admFailedReason(body.error || t5.admHttp(r.status));
           dom.wfStartMsg.classList.add("err");
           return;
         }
-        dom.wfStartMsg.textContent = "已派发 — 在「运行历史」面板看进度。";
+        dom.wfStartMsg.textContent = t5.admDispatched;
         dom.wfStartMsg.classList.add("ok");
         setTimeout(closeWorkflowStart, 1500);
       } catch (err) {
-        dom.wfStartMsg.textContent = "失败:" + (err.message || String(err));
+        dom.wfStartMsg.textContent = t5.admFailedReason(err.message || String(err));
         dom.wfStartMsg.classList.add("err");
       }
     }
@@ -3073,7 +3073,7 @@
         text = await file.text();
       }
       if (!text || !text.trim()) {
-        dom.bundleImportMsg.textContent = "请上传或粘贴 bundle yaml";
+        dom.bundleImportMsg.textContent = t5.admBundleNeeded;
         dom.bundleImportMsg.classList.add("err");
         return;
       }
@@ -3087,7 +3087,7 @@
         });
         const body = await r.json().catch(() => ({}));
         if (!r.ok) {
-          dom.bundleImportMsg.textContent = "失败:" + (body.error || `HTTP ${r.status}`);
+          dom.bundleImportMsg.textContent = t5.admFailedReason(body.error || t5.admHttp(r.status));
           dom.bundleImportMsg.classList.add("err");
           return;
         }
@@ -3095,14 +3095,14 @@
         const skippedN = body.team?.skipped?.length ?? 0;
         const wfId = body.workflow?.id;
         const parts = [];
-        if (createdN > 0) parts.push(`新增 ${createdN} 个 agent`);
-        if (skippedN > 0) parts.push(`跳过 ${skippedN} 个(已存在)`);
-        if (wfId) parts.push(`workflow ${wfId} 已注册`);
-        if (body.workflowError) parts.push(`(workflow 警告:${body.workflowError})`);
+        if (createdN > 0) parts.push(t5.admCreatedAgents(createdN));
+        if (skippedN > 0) parts.push(t5.admSkippedAgents(skippedN));
+        if (wfId) parts.push(t5.admWorkflowRegistered(wfId));
+        if (body.workflowError) parts.push(t5.admWorkflowWarning(body.workflowError));
         if (body.team?.spawnErrors?.length) {
-          parts.push(`(${body.team.spawnErrors.length} 个 spawn 失败:看 agent tab)`);
+          parts.push(t5.admSpawnFailed(body.team.spawnErrors.length));
         }
-        dom.bundleImportMsg.textContent = "导入完成 — " + parts.join("、");
+        dom.bundleImportMsg.textContent = t5.admImportDone + parts.join(t5.admListSep);
         dom.bundleImportMsg.classList.add("ok");
         await managedAgents.refreshManagedAgents().catch(() => {
         });
@@ -3110,7 +3110,7 @@
         });
         setTimeout(closeBundleImportModal, 1200);
       } catch (err) {
-        dom.bundleImportMsg.textContent = "失败:" + (err.message || String(err));
+        dom.bundleImportMsg.textContent = t5.admFailedReason(err.message || String(err));
         dom.bundleImportMsg.classList.add("err");
       }
     }
@@ -3316,7 +3316,7 @@
         try {
           const r = await fetch("/builtin-bundles/personal-growth.yaml");
           if (!r.ok) {
-            dom.bundleImportMsg.textContent = `加载内置模板失败:HTTP ${r.status}`;
+            dom.bundleImportMsg.textContent = t5.admTemplateLoadFailedHttp(r.status);
             dom.bundleImportMsg.classList.add("err");
             return;
           }
@@ -3327,11 +3327,11 @@
           if (label && dom.bundleKeyLabel) {
             dom.bundleKeyLabel.textContent = `${label} API key (optional)`;
           }
-          dom.bundleImportMsg.textContent = '已加载个人成长 bundle。粘贴 DeepSeek key 后点"导入"。';
+          dom.bundleImportMsg.textContent = t5.admGrowthBundleLoaded;
           dom.bundleImportMsg.classList.remove("err");
           dom.bundleImportMsg.classList.add("ok");
         } catch (err) {
-          dom.bundleImportMsg.textContent = "加载内置模板失败:" + (err.message || String(err));
+          dom.bundleImportMsg.textContent = t5.admTemplateLoadFailedErr(err.message || String(err));
           dom.bundleImportMsg.classList.add("err");
         }
       });
@@ -3353,8 +3353,8 @@
       dom.maApiKeyClear?.addEventListener("click", () => {
         ma._clearKeyOnSubmit = true;
         dom.maApiKey.value = "";
-        dom.maApiKey.placeholder = "(将清空)";
-        dom.maApiKeyHint.textContent = `${t5.clearKey}: 保存后该 agent 的私有 key 会被移除`;
+        dom.maApiKey.placeholder = t5.admWillClear;
+        dom.maApiKeyHint.textContent = t5.clearKey + t5.admApiKeyClearHintSuffix;
       });
       document.addEventListener("click", (e) => {
         const target = e.target;

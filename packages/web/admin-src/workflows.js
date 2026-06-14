@@ -80,7 +80,7 @@ export function createWorkflows({ wf }) {
       // workflow. A draft / review / archived one has no runner on the Hub,
       // so the run button is hidden; publishing it first is the path to a run.
       const startBtn = isLive
-        ? `<button type="button" class="ma-btn" data-act="start-workflow" data-id="${escapeHtml(w.id)}">开始</button>`
+        ? `<button type="button" class="ma-btn" data-act="start-workflow" data-id="${escapeHtml(w.id)}">${escapeHtml(t.admStart)}</button>`
         : ''
       return `<article class="ma-card">
         <header>

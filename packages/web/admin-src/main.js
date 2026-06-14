@@ -531,7 +531,7 @@ import { createWorkflows } from './workflows.js'
       btn.appendChild(badge)
     }
     badge.textContent = String(n)
-    badge.title = `${n} 个 agent 正在等你回答`
+    badge.title = t.admAgentsWaiting(n)
   }
 
   // Room health banner — counts derived from /api/leaderboard?from=<7d> +
@@ -1049,7 +1049,7 @@ import { createWorkflows } from './workflows.js'
     if (dom.grSummary) {
       dom.grSummary.textContent = reports.length === 0
         ? ''
-        : `共 ${reports.length} 份`
+        : t.admReportsCount(reports.length)
     }
     if (reports.length === 0) {
       dom.grTable.hidden = true
@@ -1071,8 +1071,8 @@ import { createWorkflows } from './workflows.js'
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="view-growth-report"
                   data-path="${escapeHtml(rep.path)}"
-                  data-when="${escapeHtml(when)}">查看</button>
-          <a class="ma-btn ma-btn-secondary" href="${escapeHtml(dlHref)}" download>下载</a>
+                  data-when="${escapeHtml(when)}">${t.admView}</button>
+          <a class="ma-btn ma-btn-secondary" href="${escapeHtml(dlHref)}" download>${t.admDownload}</a>
         </td>
       </tr>`
     }).join('')
@@ -1139,20 +1139,20 @@ import { createWorkflows } from './workflows.js'
 
   async function openGrowthReport(path, when) {
     if (!dom.grReportModal) return
-    dom.grReportTitle.textContent = `成长报告 · ${when}`
+    dom.grReportTitle.textContent = t.admGrowthReportTitle(when)
     dom.grReportDownload.href = '/api/admin/growth-reports/download?path=' + encodeURIComponent(path)
-    dom.grReportBody.innerHTML = '<p class="hint">加载中...</p>'
+    dom.grReportBody.innerHTML = `<p class="hint">${escapeHtml(t.admLoading)}</p>`
     dom.grReportModal.hidden = false
     try {
       const r = await fetch('/api/admin/growth-reports/download?path=' + encodeURIComponent(path))
       if (!r.ok) {
-        dom.grReportBody.innerHTML = `<p class="hint">加载失败:HTTP ${r.status}</p>`
+        dom.grReportBody.innerHTML = `<p class="hint">${escapeHtml(t.admLoadFailedHttp(r.status))}</p>`
         return
       }
       const text = await r.text()
       dom.grReportBody.innerHTML = renderMarkdown(text)
     } catch (err) {
-      dom.grReportBody.innerHTML = `<p class="hint">加载失败:${escapeHtml(err.message || String(err))}</p>`
+      dom.grReportBody.innerHTML = `<p class="hint">${escapeHtml(t.admLoadFailedErr(err.message || String(err)))}</p>`
     }
   }
 
@@ -1193,8 +1193,8 @@ import { createWorkflows } from './workflows.js'
         : ''
       dom.wfStartDesc.innerHTML =
         (w.description
-          ? `${escapeHtml(w.description)}<br/><small>派发能力:${cap}</small>`
-          : `派发能力:${cap}`) + xhub
+          ? `${escapeHtml(w.description)}<br/><small>${t.admDispatchCap(cap)}</small>`
+          : t.admDispatchCap(cap)) + xhub
     }
     renderWorkflowStartFields(w.payloadSchema)
     if (dom.wfStartMsg) {
@@ -1219,7 +1219,7 @@ import { createWorkflows } from './workflows.js'
       dom.wfStartFields.innerHTML = `<label>
         <span>Payload (JSON)</span>
         <textarea id="wf-start-json" rows="8" placeholder='{ "key": "value" }'>{}</textarea>
-        <small class="hint">这条工作流没声明 payload_schema,要手填 JSON。看 workflow.yaml 的 trigger 段了解需要哪些字段。</small>
+        <small class="hint">${escapeHtml(t.admNoPayloadSchema)}</small>
       </label>`
       return
     }
@@ -1262,13 +1262,13 @@ import { createWorkflows } from './workflows.js'
     return (
       `<div class="task-detail-section agent-question-form" data-aq-id="${escapeHtml(v.id)}">` +
         `<div class="aq-header">` +
-          `<strong>🤖 ${escapeHtml(fromAgent)} 想再问你 ${qs.length} 件事</strong>` +
+          `<strong>${escapeHtml(t.admAgentAsksMore(fromAgent, qs.length))}</strong>` +
           (ctx ? `<p class="aq-context">${escapeHtml(ctx)}</p>` : '') +
         `</div>` +
         `<div class="aq-fields">${fields}</div>` +
         `<div class="aq-actions">` +
-          `<button class="primary" data-act="submit-agent-question" data-id="${escapeHtml(v.id)}">提交回答 (agent 会接着跑)</button>` +
-          `<button class="secondary" data-act="skip-agent-question" data-id="${escapeHtml(v.id)}" title="跳过 — agent 会按它第一轮的判断继续">跳过</button>` +
+          `<button class="primary" data-act="submit-agent-question" data-id="${escapeHtml(v.id)}">${escapeHtml(t.admSubmitAnswer)}</button>` +
+          `<button class="secondary" data-act="skip-agent-question" data-id="${escapeHtml(v.id)}" title="${escapeHtml(t.admSkipTitle)}">${escapeHtml(t.admSkip)}</button>` +
           `<span class="aq-msg" data-aq-msg="${escapeHtml(v.id)}"></span>` +
         `</div>` +
       `</div>`
@@ -1312,7 +1312,7 @@ import { createWorkflows } from './workflows.js'
       msg.textContent = text
       msg.className = 'aq-msg' + (kind ? ' ' + kind : '')
     }
-    setMsg('提交中…')
+    setMsg(t.admSubmitting)
 
     const view = state.tasks.find((x) => x.id === taskId)
     const qs = view?.task?.payload?.questions || []
@@ -1322,7 +1322,7 @@ import { createWorkflows } from './workflows.js'
       if (!el) continue
       const v = el.value
       if (q.required && (v == null || String(v).trim() === '')) {
-        setMsg(`${q.label} 必填`, 'err')
+        setMsg(t.admFieldRequired(q.label), 'err')
         return
       }
       if (v != null && String(v).length > 0) answers[q.id] = String(v)
@@ -1334,9 +1334,9 @@ import { createWorkflows } from './workflows.js'
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ output: { answers } }),
       })
-      setMsg('已提交 — agent 收到了,正在继续', 'ok')
+      setMsg(t.admSubmittedAgent, 'ok')
     } catch (err) {
-      setMsg('提交失败: ' + (err.message || String(err)), 'err')
+      setMsg(t.admSubmitFailedErr(err.message || String(err)), 'err')
     }
   }
 
@@ -1346,16 +1346,16 @@ import { createWorkflows } from './workflows.js'
     // and falls back to its first-round output.
     const card = document.querySelector(`.agent-question-form[data-aq-id="${cssEscape(taskId)}"]`)
     const msg = card?.querySelector(`[data-aq-msg="${cssEscape(taskId)}"]`)
-    if (msg) { msg.textContent = '跳过中…'; msg.className = 'aq-msg' }
+    if (msg) { msg.textContent = t.admSkipping; msg.className = 'aq-msg' }
     try {
       await fetchJson(`/api/tasks/${encodeURIComponent(taskId)}/reject`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ error: 'admin skipped' }),
       })
-      if (msg) { msg.textContent = '已跳过 — agent 用了第一轮的判断'; msg.className = 'aq-msg ok' }
+      if (msg) { msg.textContent = t.admSkipped; msg.className = 'aq-msg ok' }
     } catch (err) {
-      if (msg) { msg.textContent = '跳过失败: ' + (err.message || String(err)); msg.className = 'aq-msg err' }
+      if (msg) { msg.textContent = t.admSkipFailedErr(err.message || String(err)); msg.className = 'aq-msg err' }
     }
   }
 
@@ -1532,7 +1532,7 @@ import { createWorkflows } from './workflows.js'
 
   function renderUnknownBlock(b) {
     return `<div class="mm-block mm-unknown">
-      <small>未识别的 ${escapeHtml(String(b && b.type) || 'unknown')} 块</small>
+      <small>${escapeHtml(t.admUnknownBlock(String(b && b.type) || 'unknown'))}</small>
     </div>`
   }
 
@@ -1564,7 +1564,7 @@ import { createWorkflows } from './workflows.js'
         ? ` accept="${escapeHtml(f.accept.join(','))}"`
         : ''
       const sizeHint = typeof f.maxSizeMb === 'number'
-        ? `<small class="hint">最大 ${f.maxSizeMb} MB</small>`
+        ? `<small class="hint">${escapeHtml(t.admMaxSize(f.maxSizeMb))}</small>`
         : ''
       control = `<input type="file" id="${id}" data-aipe-file="1"${accept} />
         <span class="aipe-file-status" data-aipe-file-status="${id}" style="font-size:0.85em;color:#666;margin-left:0.5em;"></span>
@@ -1598,7 +1598,7 @@ import { createWorkflows } from './workflows.js'
           const files = el.files
           if (!files || files.length === 0) {
             if (f.required) {
-              dom.wfStartMsg.textContent = `${f.label} 必填`
+              dom.wfStartMsg.textContent = t.admFieldRequired(f.label)
               dom.wfStartMsg.classList.add('err')
               return
             }
@@ -1609,14 +1609,14 @@ import { createWorkflows } from './workflows.js'
           // but a clean inline error beats waiting for a 413.
           const capMb = typeof f.maxSizeMb === 'number' ? f.maxSizeMb : 10
           if (file.size > capMb * 1024 * 1024) {
-            dom.wfStartMsg.textContent = `${f.label} 文件超过 ${capMb} MB 上限`
+            dom.wfStartMsg.textContent = t.admFileTooLarge(f.label, capMb)
             dom.wfStartMsg.classList.add('err')
             return
           }
           const statusEl = document.querySelector(
             `[data-aipe-file-status="wf-start-field-${cssEscape(f.id)}"]`,
           )
-          if (statusEl) statusEl.textContent = '上传中…'
+          if (statusEl) statusEl.textContent = t.admUploading
           try {
             const ref = await uploadOneFile(file)
             if (statusEl) {
@@ -1629,27 +1629,27 @@ import { createWorkflows } from './workflows.js'
               if (ref.mime && ref.mime.startsWith('image/')) {
                 const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`
                 statusEl.innerHTML =
-                  `<span>已上传 (${escapeHtml(formatBytes(ref.size))})</span> ` +
+                  `<span>${escapeHtml(t.admUploaded(formatBytes(ref.size)))}</span> ` +
                   `<img src="${escapeHtml(url)}" alt="preview" ` +
                   `style="max-height:32px;max-width:80px;vertical-align:middle;border-radius:2px;margin-left:0.4em;" />`
               } else if (ref.mime && ref.mime.startsWith('audio/')) {
                 const url = `/api/admin/uploads?id=${encodeURIComponent(ref.artifactId)}`
                 statusEl.innerHTML =
-                  `<span>已上传 (${escapeHtml(formatBytes(ref.size))})</span> ` +
+                  `<span>${escapeHtml(t.admUploaded(formatBytes(ref.size)))}</span> ` +
                   `<audio controls src="${escapeHtml(url)}" ` +
                   `style="height:24px;max-width:140px;vertical-align:middle;margin-left:0.4em;"></audio>`
               } else {
-                statusEl.textContent = `已上传 (${formatBytes(ref.size)})`
+                statusEl.textContent = t.admUploaded(formatBytes(ref.size))
               }
             }
             payload[f.id] = { type: 'file_ref', artifactId: ref.artifactId, mime: ref.mime }
           } catch (err) {
             const msg = err && err.message ? err.message : String(err)
             if (statusEl) {
-              statusEl.textContent = `上传失败: ${msg}`
+              statusEl.textContent = t.admUploadFailedMsg(msg)
               statusEl.style.color = '#c33'
             }
-            dom.wfStartMsg.textContent = `${f.label} 上传失败: ${msg}`
+            dom.wfStartMsg.textContent = t.admFieldUploadFailed(f.label, msg)
             dom.wfStartMsg.classList.add('err')
             return
           }
@@ -1657,7 +1657,7 @@ import { createWorkflows } from './workflows.js'
         }
         let v = el.value
         if (f.required && (v == null || v.trim() === '')) {
-          dom.wfStartMsg.textContent = `${f.label} 必填`
+          dom.wfStartMsg.textContent = t.admFieldRequired(f.label)
           dom.wfStartMsg.classList.add('err')
           return
         }
@@ -1665,7 +1665,7 @@ import { createWorkflows } from './workflows.js'
         if (f.type === 'number') {
           const n = Number(v)
           if (!Number.isFinite(n)) {
-            dom.wfStartMsg.textContent = `${f.label} 必须是数字`
+            dom.wfStartMsg.textContent = t.admFieldMustBeNumber(f.label)
             dom.wfStartMsg.classList.add('err')
             return
           }
@@ -1679,7 +1679,7 @@ import { createWorkflows } from './workflows.js'
       try {
         payload = JSON.parse(jsonEl?.value || '{}')
       } catch (err) {
-        dom.wfStartMsg.textContent = 'Payload JSON 不合法:' + (err.message || String(err))
+        dom.wfStartMsg.textContent = t.admPayloadJsonInvalid(err.message || String(err))
         dom.wfStartMsg.classList.add('err')
         return
       }
@@ -1696,15 +1696,15 @@ import { createWorkflows } from './workflows.js'
       })
       const body = await r.json().catch(() => ({}))
       if (!r.ok) {
-        dom.wfStartMsg.textContent = '失败:' + (body.error || `HTTP ${r.status}`)
+        dom.wfStartMsg.textContent = t.admFailedReason(body.error || t.admHttp(r.status))
         dom.wfStartMsg.classList.add('err')
         return
       }
-      dom.wfStartMsg.textContent = '已派发 — 在「运行历史」面板看进度。'
+      dom.wfStartMsg.textContent = t.admDispatched
       dom.wfStartMsg.classList.add('ok')
       setTimeout(closeWorkflowStart, 1500)
     } catch (err) {
-      dom.wfStartMsg.textContent = '失败:' + (err.message || String(err))
+      dom.wfStartMsg.textContent = t.admFailedReason(err.message || String(err))
       dom.wfStartMsg.classList.add('err')
     }
   }
@@ -1755,7 +1755,7 @@ import { createWorkflows } from './workflows.js'
       text = await file.text()
     }
     if (!text || !text.trim()) {
-      dom.bundleImportMsg.textContent = '请上传或粘贴 bundle yaml'
+      dom.bundleImportMsg.textContent = t.admBundleNeeded
       dom.bundleImportMsg.classList.add('err')
       return
     }
@@ -1769,7 +1769,7 @@ import { createWorkflows } from './workflows.js'
       })
       const body = await r.json().catch(() => ({}))
       if (!r.ok) {
-        dom.bundleImportMsg.textContent = '失败:' + (body.error || `HTTP ${r.status}`)
+        dom.bundleImportMsg.textContent = t.admFailedReason(body.error || t.admHttp(r.status))
         dom.bundleImportMsg.classList.add('err')
         return
       }
@@ -1778,20 +1778,20 @@ import { createWorkflows } from './workflows.js'
       const skippedN = body.team?.skipped?.length ?? 0
       const wfId = body.workflow?.id
       const parts = []
-      if (createdN > 0) parts.push(`新增 ${createdN} 个 agent`)
-      if (skippedN > 0) parts.push(`跳过 ${skippedN} 个(已存在)`)
-      if (wfId) parts.push(`workflow ${wfId} 已注册`)
-      if (body.workflowError) parts.push(`(workflow 警告:${body.workflowError})`)
+      if (createdN > 0) parts.push(t.admCreatedAgents(createdN))
+      if (skippedN > 0) parts.push(t.admSkippedAgents(skippedN))
+      if (wfId) parts.push(t.admWorkflowRegistered(wfId))
+      if (body.workflowError) parts.push(t.admWorkflowWarning(body.workflowError))
       if (body.team?.spawnErrors?.length) {
-        parts.push(`(${body.team.spawnErrors.length} 个 spawn 失败:看 agent tab)`)
+        parts.push(t.admSpawnFailed(body.team.spawnErrors.length))
       }
-      dom.bundleImportMsg.textContent = '导入完成 — ' + parts.join('、')
+      dom.bundleImportMsg.textContent = t.admImportDone + parts.join(t.admListSep)
       dom.bundleImportMsg.classList.add('ok')
       await managedAgents.refreshManagedAgents().catch(() => {})
       await workflows.refreshWorkflows().catch(() => {})
       setTimeout(closeBundleImportModal, 1200)
     } catch (err) {
-      dom.bundleImportMsg.textContent = '失败:' + (err.message || String(err))
+      dom.bundleImportMsg.textContent = t.admFailedReason(err.message || String(err))
       dom.bundleImportMsg.classList.add('err')
     }
   }
@@ -2048,7 +2048,7 @@ import { createWorkflows } from './workflows.js'
       try {
         const r = await fetch('/builtin-bundles/personal-growth.yaml')
         if (!r.ok) {
-          dom.bundleImportMsg.textContent = `加载内置模板失败:HTTP ${r.status}`
+          dom.bundleImportMsg.textContent = t.admTemplateLoadFailedHttp(r.status)
           dom.bundleImportMsg.classList.add('err')
           return
         }
@@ -2061,11 +2061,11 @@ import { createWorkflows } from './workflows.js'
         if (label && dom.bundleKeyLabel) {
           dom.bundleKeyLabel.textContent = `${label} API key (optional)`
         }
-        dom.bundleImportMsg.textContent = '已加载个人成长 bundle。粘贴 DeepSeek key 后点"导入"。'
+        dom.bundleImportMsg.textContent = t.admGrowthBundleLoaded
         dom.bundleImportMsg.classList.remove('err')
         dom.bundleImportMsg.classList.add('ok')
       } catch (err) {
-        dom.bundleImportMsg.textContent = '加载内置模板失败:' + (err.message || String(err))
+        dom.bundleImportMsg.textContent = t.admTemplateLoadFailedErr(err.message || String(err))
         dom.bundleImportMsg.classList.add('err')
       }
     })
@@ -2094,8 +2094,8 @@ import { createWorkflows } from './workflows.js'
       // can still back out by cancelling.
       ma._clearKeyOnSubmit = true
       dom.maApiKey.value = ''
-      dom.maApiKey.placeholder = '(将清空)'
-      dom.maApiKeyHint.textContent = `${t.clearKey}: 保存后该 agent 的私有 key 会被移除`
+      dom.maApiKey.placeholder = t.admWillClear
+      dom.maApiKeyHint.textContent = t.clearKey + t.admApiKeyClearHintSuffix
     })
     document.addEventListener('click', (e) => {
       const target = e.target
