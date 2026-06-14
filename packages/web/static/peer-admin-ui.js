@@ -26,6 +26,12 @@
 ;(function () {
   'use strict'
 
+  // i18n — read the live dict off window.AipeHub at call time (app-core.js runs
+  // synchronously before this panel is injected, so AipeHub is always defined).
+  // `t()` returns the current-language dict; re-render on language change.
+  const AH = window.AipeHub
+  function t() { return AH.t }
+
   const API = '/api/admin/identity/peers'
   // PeerKind union (identity schema v12). Default 'service'.
   const KINDS = ['service', 'organization', 'project', 'personal']
@@ -109,12 +115,11 @@
   }
 
   function buildUi(root) {
+    const d = t()
     root.innerHTML =
       '<header class="pa-header">' +
-      '  <h2>对端 / Peers (联邦)</h2>' +
-      '  <p class="pa-meta">登记本 hub 信任的联邦对端。认证是<strong>对称</strong>的:' +
-      '同一 bearer token 两边各登记一次 —— 用 <code>aipehub mint-peer-token</code> 生成,' +
-      '走安全信道交换。token 是 secret, 加密存 vault, <strong>永不回显</strong>(只能写入 / 轮换)。</p>' +
+      '  <h2>' + escHtml(d.padmTitle) + '</h2>' +
+      '  <p class="pa-meta">' + d.padmDesc + '</p>' +
       '  <span id="pa-status" class="pa-status"></span>' +
       '</header>' +
       '<form id="pa-add-form" class="pa-add-form" autocomplete="off">' +
@@ -124,18 +129,19 @@
       '    <input id="pa-endpoint" type="text" required placeholder="wss://partner/federation" /></label></div>' +
       '  <div class="pa-field"><label>Peer Token (bearer)' +
       '    <input id="pa-token" type="password" required placeholder="aipehub mint-peer-token" /></label></div>' +
-      '  <div class="pa-field"><label>标签 (可选)' +
-      '    <input id="pa-label" type="text" placeholder="合作方 hub" /></label></div>' +
-      '  <div class="pa-field"><label>类型' +
+      '  <div class="pa-field"><label>' + escHtml(d.padmLabelOptional) +
+      '    <input id="pa-label" type="text" placeholder="' + escHtml(d.padmLabelPlaceholder) + '" /></label></div>' +
+      '  <div class="pa-field"><label>' + escHtml(d.padmKind) +
       '    <select id="pa-kind">' + kindOptions('service') + '</select></label></div>' +
-      '  <div class="pa-field pa-actions"><button id="pa-add-btn" type="submit">添加 peer</button></div>' +
+      '  <div class="pa-field pa-actions"><button id="pa-add-btn" type="submit">' + escHtml(d.padmAddBtn) + '</button></div>' +
       '</form>' +
       '<section class="pa-list-wrap">' +
       '  <table class="pa-table">' +
       '    <thead><tr>' +
-      '      <th>对端</th><th>Endpoint</th><th>类型</th><th>状态</th><th>操作</th>' +
+      '      <th>' + escHtml(d.padmColPeer) + '</th><th>Endpoint</th><th>' + escHtml(d.padmColKind) +
+      '</th><th>' + escHtml(d.padmColState) + '</th><th>' + escHtml(d.padmColActions) + '</th>' +
       '    </tr></thead>' +
-      '    <tbody id="pa-rows"><tr><td colspan="5" class="pa-empty">加载中...</td></tr></tbody>' +
+      '    <tbody id="pa-rows"><tr><td colspan="5" class="pa-empty">' + escHtml(d.padmLoadingCell) + '</td></tr></tbody>' +
       '  </table>' +
       '</section>'
 
@@ -150,9 +156,10 @@
     if (!tbody) return
     if (!peers.length) {
       tbody.innerHTML =
-        '<tr><td colspan="5" class="pa-empty">还没有已登记的 peer。用上面的表单添加一个。</td></tr>'
+        '<tr><td colspan="5" class="pa-empty">' + escHtml(t().padmEmpty) + '</td></tr>'
       return
     }
+    const d = t()
     tbody.innerHTML = ''
     for (const p of peers) {
       const idCell = p.label
@@ -161,11 +168,11 @@
       const enabled = p.enabled !== false
       const stateBits =
         '<span class="pa-badge ' + (enabled ? 'pa-on' : 'pa-off') + '">' +
-        (enabled ? '已启用' : '已停用') + '</span>' +
+        (enabled ? escHtml(d.padmStateEnabled) : escHtml(d.padmStateDisabled)) + '</span>' +
         '<span class="pa-badge ' + (p.connected ? 'pa-conn' : 'pa-disc') + '">' +
-        (p.connected ? '在线' : '离线') + '</span>' +
+        (p.connected ? escHtml(d.padmStateOnline) : escHtml(d.padmStateOffline)) + '</span>' +
         (p.revocationState === 'revoked'
-          ? '<span class="pa-badge pa-off">已撤销</span>' : '')
+          ? '<span class="pa-badge pa-off">' + escHtml(d.padmStateRevoked) + '</span>' : '')
       const tr = document.createElement('tr')
       tr.innerHTML =
         '<td class="pa-peer">' + idCell + '</td>' +
@@ -173,10 +180,10 @@
         '<td class="pa-kind">' + escHtml(p.kind || 'service') + '</td>' +
         '<td class="pa-state">' + stateBits + '</td>' +
         '<td class="pa-row-actions">' +
-        '  <button type="button" class="pa-policy-toggle">策略</button>' +
-        '  <button type="button" class="pa-toggle">' + (enabled ? '停用' : '启用') + '</button>' +
-        '  <button type="button" class="pa-rotate">轮换 token</button>' +
-        '  <button type="button" class="pa-remove">删除</button>' +
+        '  <button type="button" class="pa-policy-toggle">' + escHtml(d.padmBtnPolicy) + '</button>' +
+        '  <button type="button" class="pa-toggle">' + (enabled ? escHtml(d.padmBtnDisable) : escHtml(d.padmBtnEnable)) + '</button>' +
+        '  <button type="button" class="pa-rotate">' + escHtml(d.padmBtnRotate) + '</button>' +
+        '  <button type="button" class="pa-remove">' + escHtml(d.padmBtnRemove) + '</button>' +
         '</td>'
       // M7c — expandable trust-contract editor row, hidden until 策略 click.
       const detail = document.createElement('tr')
@@ -193,19 +200,17 @@
         onSavePolicy(root, p.id, cell).catch(function () { /* setStatus handled it */ })
       })
       tr.querySelector('.pa-toggle').addEventListener('click', function () {
-        doPatch(root, p.id, { enabled: !enabled }, enabled ? '已停用' : '已启用')
+        doPatch(root, p.id, { enabled: !enabled }, enabled ? t().padmStateDisabled : t().padmStateEnabled)
       })
       tr.querySelector('.pa-rotate').addEventListener('click', function () {
-        const tok = window.prompt(
-          '粘贴新的 peer token (用 `aipehub mint-peer-token` 生成)。\n两边都要换成同一新值。',
-        )
+        const tok = window.prompt(t().padmRotatePrompt)
         if (tok == null) return
         const trimmed = tok.trim()
-        if (!trimmed) { setStatus(root, 'token 不能为空', 'error'); return }
-        doPatch(root, p.id, { peerToken: trimmed }, 'token 已轮换')
+        if (!trimmed) { setStatus(root, t().padmTokenEmpty, 'error'); return }
+        doPatch(root, p.id, { peerToken: trimmed }, t().padmTokenRotated)
       })
       tr.querySelector('.pa-remove').addEventListener('click', function () {
-        if (!window.confirm('删除 peer ' + (p.label || p.peerId) + '? 链路会断开。')) return
+        if (!window.confirm(t().padmConfirmRemove(p.label || p.peerId))) return
         doRemove(root, p.id)
       })
       tbody.appendChild(tr)
@@ -217,40 +222,43 @@
   // every field is already in the GET response). escHtml doubles as attr
   // escaping (it encodes the double-quote).
   function policyEditorHtml(p) {
+    const d = t()
     const acl = p.acl || {}
     const quota = p.perLinkQuotaBudget == null ? '' : String(p.perLinkQuotaBudget)
     const revoked = p.revocationState === 'revoked'
     return (
       '<div class="pa-policy">' +
       '  <div class="pa-policy-grid">' +
-      '    <label>入站 ACL capabilities <small>(逗号分隔, 留空=接受全部)</small>' +
+      '    <label>' + escHtml(d.padmPolAclCaps) + ' <small>' + escHtml(d.padmPolAclCapsHint) + '</small>' +
       '      <input class="pa-pol-aclcaps" type="text" value="' + escHtml(arrToText(acl.capabilities)) + '" /></label>' +
       '    <label class="pa-pol-check"><input class="pa-pol-requireorigin" type="checkbox"' +
-      (acl.requireOrigin ? ' checked' : '') + ' /> 入站要求带 origin</label>' +
-      '    <label>出站 capability 白名单 <small>(留空=全放)</small>' +
+      (acl.requireOrigin ? ' checked' : '') + ' /> ' + escHtml(d.padmPolRequireOrigin) + '</label>' +
+      '    <label>' + escHtml(d.padmPolOutCaps) + ' <small>' + escHtml(d.padmPolOutCapsHint) + '</small>' +
       '      <input class="pa-pol-outcaps" type="text" value="' + escHtml(arrToText(p.outboundCaps)) + '" /></label>' +
       '    <label class="pa-pol-check"><input class="pa-pol-approve" type="checkbox"' +
-      (p.requireApprovalOutbound ? ' checked' : '') + ' /> 出站需人工审批</label>' +
-      '    <label>允许的数据类 <small>(留空=全放)</small>' +
+      (p.requireApprovalOutbound ? ' checked' : '') + ' /> ' + escHtml(d.padmPolApprove) + '</label>' +
+      '    <label>' + escHtml(d.padmPolDataClasses) + ' <small>' + escHtml(d.padmPolDataClassesHint) + '</small>' +
       '      <input class="pa-pol-dataclasses" type="text" value="' + escHtml(arrToText(p.allowedDataClasses)) + '" /></label>' +
-      '    <label>可调用知识库 <small>(留空=全部可调)</small>' +
+      '    <label>' + escHtml(d.padmPolKb) + ' <small>' + escHtml(d.padmPolKbHint) + '</small>' +
       '      <input class="pa-pol-kb" type="text" value="' + escHtml(arrToText(p.allowedKnowledgeBases)) + '" /></label>' +
-      '    <label>每链路入站配额 <small>(非负整数, 留空=无限)</small>' +
+      '    <label>' + escHtml(d.padmPolQuota) + ' <small>' + escHtml(d.padmPolQuotaHint) + '</small>' +
       '      <input class="pa-pol-quota" type="number" min="0" step="1" value="' + escHtml(quota) + '" /></label>' +
-      '    <label>撤销状态' +
+      '    <label>' + escHtml(d.padmPolRevState) +
       '      <select class="pa-pol-revstate">' +
       '        <option value="active"' + (revoked ? '' : ' selected') + '>active</option>' +
       '        <option value="revoked"' + (revoked ? ' selected' : '') + '>revoked</option>' +
       '      </select></label>' +
       '    <label class="pa-pol-check"><input class="pa-pol-sharesummary" type="checkbox"' +
-      (p.shareSummary ? ' checked' : '') + ' /> 向该对端共享本 hub 摘要 <small>(仅计数, 控制面用)</small></label>' +
+      (p.shareSummary ? ' checked' : '') + ' /> ' + escHtml(d.padmPolShareSummary) +
+      ' <small>' + escHtml(d.padmPolShareSummaryHint) + '</small></label>' +
       // Stream G day-5 — opt-in to answer this peer's peer.transcript rpc with
       // one cross-hub task's execution trace. Strictly more revealing than the
       // summary's counts, so it is its own fail-closed flag (default off).
       '    <label class="pa-pol-check"><input class="pa-pol-sharetranscript" type="checkbox"' +
-      (p.shareTranscript ? ' checked' : '') + ' /> 向该对端共享跨 hub 任务轨迹 <small>(逐步 transcript, 比摘要更敏感)</small></label>' +
+      (p.shareTranscript ? ' checked' : '') + ' /> ' + escHtml(d.padmPolShareTranscript) +
+      ' <small>' + escHtml(d.padmPolShareTranscriptHint) + '</small></label>' +
       '  </div>' +
-      '  <button type="button" class="pa-pol-save">保存策略</button>' +
+      '  <button type="button" class="pa-pol-save">' + escHtml(d.padmPolSave) + '</button>' +
       '</div>'
     )
   }
@@ -261,7 +269,7 @@
     if (quotaRaw !== '') {
       const n = Number(quotaRaw)
       if (!Number.isInteger(n) || n < 0) {
-        setStatus(root, '每链路配额必须是非负整数', 'error')
+        setStatus(root, t().padmQuotaMustBeInt, 'error')
         return
       }
       perLinkQuotaBudget = n
@@ -280,13 +288,13 @@
       shareSummary: $('.pa-pol-sharesummary', detail).checked,
       shareTranscript: $('.pa-pol-sharetranscript', detail).checked,
     }
-    setStatus(root, '保存策略...', 'loading')
+    setStatus(root, t().padmSavingPolicy, 'loading')
     try {
       await apiPatch(id, body)
-      setStatus(root, '策略已保存', 'ok')
+      setStatus(root, t().padmPolicySaved, 'ok')
       await load(root)
     } catch (err) {
-      setStatus(root, '保存策略失败: ' + (err.message || err), 'error')
+      setStatus(root, t().padmPolicySaveFailed(err.message || err), 'error')
     }
   }
 
@@ -299,60 +307,60 @@
     const label = $('#pa-label', root).value.trim()
     const kind = $('#pa-kind', root).value
     if (!peerId || !endpointUrl || !peerToken) {
-      setStatus(root, 'Peer ID / Endpoint / Token 都必填', 'error')
+      setStatus(root, t().padmFieldsRequired, 'error')
       return
     }
-    setStatus(root, '添加中...', 'loading')
+    setStatus(root, t().padmAdding, 'loading')
     try {
       const body = { peerId: peerId, endpointUrl: endpointUrl, peerToken: peerToken, kind: kind }
       if (label) body.label = label
       await apiAdd(body)
       // Clear the secret field immediately; keep the form otherwise blank.
       $('#pa-add-form', root).reset()
-      setStatus(root, '已添加 ' + peerId, 'ok')
+      setStatus(root, t().padmAdded(peerId), 'ok')
       await load(root)
     } catch (err) {
-      setStatus(root, '添加失败: ' + (err.message || err), 'error')
+      setStatus(root, t().padmAddFailed(err.message || err), 'error')
     }
   }
 
   async function doPatch(root, id, body, okMsg) {
-    setStatus(root, '保存中...', 'loading')
+    setStatus(root, t().padmSaving, 'loading')
     try {
       await apiPatch(id, body)
-      setStatus(root, okMsg || '已保存', 'ok')
+      setStatus(root, okMsg || t().padmSaved, 'ok')
       await load(root)
     } catch (err) {
-      setStatus(root, '保存失败: ' + (err.message || err), 'error')
+      setStatus(root, t().padmSaveFailed(err.message || err), 'error')
     }
   }
 
   async function doRemove(root, id) {
-    setStatus(root, '删除中...', 'loading')
+    setStatus(root, t().padmRemoving, 'loading')
     try {
       await apiRemove(id)
-      setStatus(root, '已删除', 'ok')
+      setStatus(root, t().padmRemoved, 'ok')
       await load(root)
     } catch (err) {
-      setStatus(root, '删除失败: ' + (err.message || err), 'error')
+      setStatus(root, t().padmRemoveFailed(err.message || err), 'error')
     }
   }
 
   // ---- load -------------------------------------------------------------
 
   async function load(root) {
-    setStatus(root, '加载...', 'loading')
+    setStatus(root, t().padmLoading, 'loading')
     try {
       const peers = await apiList()
       renderRows(root, peers)
-      setStatus(root, '已登记 ' + peers.length + ' 个 peer', 'ok')
+      setStatus(root, t().padmLoadedN(peers.length), 'ok')
     } catch (err) {
       if (err.status === 503) {
         renderRows(root, [])
-        setStatus(root, 'host 未启用 identity / peer (个人模式)', 'error')
+        setStatus(root, t().padmHostNoIdentity, 'error')
         return
       }
-      setStatus(root, '加载失败: ' + (err.message || err), 'error')
+      setStatus(root, t().padmLoadFailed(err.message || err), 'error')
     }
   }
 
@@ -374,6 +382,12 @@
     }).observe(document.body, {
       attributes: true,
       attributeFilter: ['data-active-tab'],
+    })
+    // Re-render on language switch — relabel the static shell, and reload the
+    // rows when the tab is showing so the live data picks up the new dict too.
+    AH.onLangChange(function () {
+      buildUi(root)
+      if (isActive()) load(root).catch(function () { /* setStatus reported it */ })
     })
     if (isActive()) {
       maybeLoad(root).catch(function () { /* */ })
