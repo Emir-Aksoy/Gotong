@@ -10,8 +10,10 @@
  *   · The provider is constructed with the user's `RoutingPolicy` (the roster +
  *     who's on-call + budget) — the same arrangement a real hub is configured with.
  *   · Every `stream(req)` call sees the goal (the first user message) + the
- *     dispatch history. It calls the pure `planRoute(goal, policy)` to combine the
- *     task analysis with the arrangement, then dispatches one coder per planned step.
+ *     dispatch history. It calls the pure `planRoute(goal, policy, override)` to
+ *     combine the task analysis with the arrangement — where `override` is any
+ *     explicit naming the user put in the goal itself (显式分派) — then dispatches
+ *     one coder per planned step.
  *   · It knows which turn it is on by COUNTING prior `tool_use` blocks in the
  *     history — so turn k dispatches `plan.agents[k]`, then it reports back.
  *
@@ -22,7 +24,7 @@
 
 import type { LlmProvider, LlmRequest, LlmStreamChunk } from '@aipehub/llm'
 
-import { dispatchPrompt, planRoute, DEFAULT_CODING_POLICY, type CodingAgent, type RoutingPolicy } from './routing.js'
+import { dispatchPrompt, parseExplicitAssignment, planRoute, DEFAULT_CODING_POLICY, type CodingAgent, type RoutingPolicy } from './routing.js'
 
 /** Agent → the transcript title for that dispatch. */
 const TITLE: Record<CodingAgent, string> = {
@@ -42,7 +44,8 @@ class SituationAwareRouterProvider implements LlmProvider {
 
   async *stream(req: LlmRequest): AsyncIterable<LlmStreamChunk> {
     const goal = readGoal(req)
-    const plan = planRoute(goal, this.policy)
+    // 显式分派 (the user named coders in the goal) overrides role-fill for this task.
+    const plan = planRoute(goal, this.policy, parseExplicitAssignment(goal))
     const turn = countDispatched(req)
 
     if (turn < plan.agents.length) {

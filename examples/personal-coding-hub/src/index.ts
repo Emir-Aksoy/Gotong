@@ -37,6 +37,7 @@ import { setupSharedWorkspace, readProgress, type SharedWorkspace } from './work
 import { SharedWorkspaceCli } from './shared-workspace-cli.js'
 import { createRouterProvider } from './router-provider.js'
 import { DEFAULT_CODING_POLICY, type CodingAgent, type RoutingPolicy } from './routing.js'
+import { applyPolicyEdit, loadPolicy, savePolicy } from './policy.js'
 
 const MOCK_CODER = fileURLToPath(new URL('./mock-coder.mjs', import.meta.url))
 
@@ -55,6 +56,12 @@ interface RoutingScenario {
   goal: string
   /** The user's standing arrangement for this run (defaults to the std roster). */
   policy?: RoutingPolicy
+  /**
+   * A plain-language edit to the standing arrangement, applied (and round-tripped
+   * through a policy file) BEFORE routing — proof that changing 总分工层 in words
+   * changes how the SAME goal routes.
+   */
+  policyEdit?: string
   /** A short human label of the arrangement, for the console. */
   arrangement?: string
   /** The agents we assert appended to the shared PROGRESS.md (the dispatched set). */
@@ -109,6 +116,34 @@ const SCENARIOS: RoutingScenario[] = [
     arrangement: '默认 roster',
     expect: ['claude-code'],
   },
+  // —— 显式分派: the user names coders in the goal itself (覆盖角色填充) ——
+  {
+    label: '[F] 显式分派 · 这次点名交给 codex',
+    goal: '交给 codex 直接实现这个登录按钮',
+    arrangement: '用户在目标里点名 → 覆盖默认 roster',
+    expect: ['codex'],
+  },
+  {
+    label: '[F2] 显式分派 · claude-code 设计、codex 实现',
+    goal: '让 claude-code 设计、codex 实现 OAuth 刷新令牌',
+    arrangement: '用户点名两人各司其职',
+    expect: ['claude-code', 'codex'],
+  },
+  // —— 用大白话改总分工层: same FEATURE_GOAL routes differently after the edit ——
+  {
+    label: '[G] 大白话改分工 · codex 今天不在岗',
+    goal: FEATURE_GOAL,
+    policyEdit: 'codex 今天限流, 先不在岗',
+    arrangement: '改 standing 分工 → 写回 routing-policy.json',
+    expect: ['claude-code'], // 同一 feature, 总分工层改了 → 只派在岗的 claude-code
+  },
+  {
+    label: '[G2] 大白话改分工 · 让 claude-code 主理 + 预算限单',
+    goal: FEATURE_GOAL,
+    policyEdit: '让 claude-code 主理, 这周预算限单 coder',
+    arrangement: '主理=claude-code + 限单 → 主理一人包办',
+    expect: ['claude-code'],
+  },
 ]
 
 async function main(): Promise<void> {
@@ -120,7 +155,8 @@ async function main(): Promise<void> {
 
   section('done')
   console.log('  同一个目标, 安排变了就派得不同:Codex 不在岗 → Claude Code 一人包办;')
-  console.log('  预算限单 coder → 主理独立完成;小修默认给 Codex、Codex 不在岗就给在岗的。安全闸照旧。\n')
+  console.log('  预算限单 coder → 主理独立完成;小修默认给 Codex、Codex 不在岗就给在岗的。')
+  console.log('  点名(显式分派)直接覆盖;用大白话改总分工层(写回 routing-policy.json)→ 同一目标重新路由。安全闸照旧。\n')
   process.exit(0)
 }
 
@@ -128,6 +164,24 @@ async function main(): Promise<void> {
 async function runRouting(s: RoutingScenario): Promise<void> {
   const dir = mkdtempSync(join(tmpdir(), 'aipe-coding-hub-'))
   const ws = setupSharedWorkspace(dir)
+
+  // 用大白话改总分工层: apply the natural-language edit, persist it to a policy
+  // file next to the repo, reload — proving the file is the source of truth both
+  // run modes derive from (copy the dir = take the arrangement).
+  let policy = s.policy ?? DEFAULT_CODING_POLICY
+  let editNote = ''
+  if (s.policyEdit) {
+    const edit = applyPolicyEdit(policy, s.policyEdit)
+    if (!edit.understood) throw new Error(`[${s.label}] policy edit not understood: "${s.policyEdit}"`)
+    const policyFile = join(dir, 'routing-policy.json')
+    savePolicy(policyFile, edit.policy)
+    policy = loadPolicy(policyFile)
+    if (JSON.stringify(policy) !== JSON.stringify(edit.policy)) {
+      throw new Error(`[${s.label}] policy file round-trip mismatch`)
+    }
+    editNote = edit.changes.join('; ')
+  }
+
   const hub = new Hub({ storage: new InMemoryStorage() })
   await hub.start()
   hub.register(makeCoder('claude-code', ws))
@@ -137,7 +191,7 @@ async function runRouting(s: RoutingScenario): Promise<void> {
     new LlmAgent({
       id: routerId,
       capabilities: ['route'],
-      provider: createRouterProvider(s.policy),
+      provider: createRouterProvider(policy),
       system: ROUTER_SYSTEM,
       tools: DispatchToolset.create({ hub, selfId: routerId, allowedAgents: ['claude-code', 'codex'] }),
     }),
@@ -147,6 +201,7 @@ async function runRouting(s: RoutingScenario): Promise<void> {
     section(s.label)
     console.log(`  goal: ${s.goal}`)
     if (s.arrangement) console.log(`  安排: ${s.arrangement}`)
+    if (editNote) console.log(`  ✎ 大白话改分工: "${s.policyEdit}" → ${editNote}`)
     const result = await hub.dispatch({
       from: 'human',
       strategy: { kind: 'capability', capabilities: ['route'] },

@@ -27,6 +27,25 @@
 
 export type CodingAgent = 'claude-code' | 'codex'
 
+/** Narrow an arbitrary value to a known coding-agent id. */
+export function isAgent(x: unknown): x is CodingAgent {
+  return x === 'claude-code' || x === 'codex'
+}
+
+// Coder aliases for reading names out of plain language (中英). The claude-code
+// pattern is tried first and never matches "codex", so order is safe.
+const AGENT_ALIASES: Array<[RegExp, CodingAgent]> = [
+  [/claude[-\s]?code|claude/i, 'claude-code'],
+  [/codex/i, 'codex'],
+]
+
+/** The coding agents named in a piece of text, in roster order (lead first). */
+export function agentsIn(text: string): CodingAgent[] {
+  const out: CodingAgent[] = []
+  for (const [re, agent] of AGENT_ALIASES) if (re.test(text) && !out.includes(agent)) out.push(agent)
+  return out
+}
+
 export type RouteKind = 'plan-then-implement' | 'direct-fix' | 'review-only'
 
 export interface RoutePlan {
@@ -97,6 +116,28 @@ export function analyzeTask(goal: string): TaskFacets {
   return { reviewOnly, trivial, needsDesign: !reviewOnly && !trivial }
 }
 
+/**
+ * 显式分派 — what the user named directly in the goal. When the goal itself names
+ * coders ("交给 codex 实现", "claude-code 设计、codex 实现"), that overrides the
+ * role-fill for THIS task; absent a naming, `agents` is undefined and planRoute
+ * uses the standing arrangement instead. A real router reads this from the goal too.
+ */
+export interface ExplicitAssignment {
+  /** Coders the user named in the goal, roster order — overrides role-fill. */
+  agents?: CodingAgent[]
+}
+
+// A naming counts as an explicit dispatch only when a dispatch verb is also present,
+// so "tidy claude-code's comments" (mentions a name, no dispatch intent) won't match.
+const ASSIGN_TRIGGER = /交给|派给|分派|指定|让|用|route to|assign|dispatch/i
+
+/** Read any explicit per-task assignment out of the goal (显式分派). */
+export function parseExplicitAssignment(goal: string): ExplicitAssignment {
+  const named = agentsIn(goal)
+  if (named.length && ASSIGN_TRIGGER.test(goal)) return { agents: named }
+  return {}
+}
+
 /** The strength tag each role looks for when filling from the roster. */
 const ROLE_STRENGTH = {
   reviewer: ['review', 'analysis'],
@@ -110,9 +151,37 @@ const ROLE_STRENGTH = {
  * to whoever is on-call when the ideal coder is off — so it never dispatches an
  * unavailable coder and never hard-fails when one is missing.
  */
-export function planRoute(goal: string, policy: RoutingPolicy = DEFAULT_CODING_POLICY): RoutePlan {
+export function planRoute(
+  goal: string,
+  policy: RoutingPolicy = DEFAULT_CODING_POLICY,
+  override?: ExplicitAssignment,
+): RoutePlan {
   const facets = analyzeTask(goal)
   const off = new Set(policy.unavailable ?? [])
+
+  // 显式分派 wins: the user named the coder(s) for THIS task in the goal itself.
+  // Honor on-call (never dispatch an off coder), keep lead→impl roles so the
+  // handoff prompts still fit; if every named coder is off, fall through to the
+  // standing arrangement (honest degrade).
+  if (override?.agents?.length) {
+    const named = override.agents.filter((a) => !off.has(a))
+    if (named.length) {
+      const kind: RouteKind = facets.reviewOnly
+        ? 'review-only'
+        : named.length === 1
+          ? 'direct-fix'
+          : 'plan-then-implement'
+      const skipped = override.agents.filter((a) => off.has(a))
+      const note = skipped.length ? ` (跳过不在岗的 ${skipped.join('/')})` : ''
+      return {
+        agents: named,
+        kind,
+        solo: named.length === 1 && kind !== 'review-only',
+        rationale: `用户在目标里点名 → 按指定派给 ${named.join(' → ')}${note}`,
+      }
+    }
+  }
+
   const available = policy.profiles.filter((p) => !off.has(p.agent))
 
   // Degenerate arrangement: the user took every coder off. Be honest, route none.
