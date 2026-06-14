@@ -2733,9 +2733,25 @@
       const key = el.getAttribute('data-i18n')
       if (key && typeof t[key] === 'string') el.textContent = t[key]
     }
+    // data-i18n-html: for elements whose translated content contains inline
+    // markup (<strong>/<code>/<a>/<br>); innerHTML instead of textContent so
+    // the markup survives. Dict values are author-controlled (never user
+    // input), so this is not an injection surface.
+    for (const el of document.querySelectorAll('[data-i18n-html]')) {
+      const key = el.getAttribute('data-i18n-html')
+      if (key && typeof t[key] === 'string') el.innerHTML = t[key]
+    }
     for (const el of document.querySelectorAll('[data-i18n-placeholder]')) {
       const key = el.getAttribute('data-i18n-placeholder')
       if (key && typeof t[key] === 'string') el.placeholder = t[key]
+    }
+    for (const el of document.querySelectorAll('[data-i18n-title]')) {
+      const key = el.getAttribute('data-i18n-title')
+      if (key && typeof t[key] === 'string') el.setAttribute('title', t[key])
+    }
+    for (const el of document.querySelectorAll('[data-i18n-aria]')) {
+      const key = el.getAttribute('data-i18n-aria')
+      if (key && typeof t[key] === 'string') el.setAttribute('aria-label', t[key])
     }
     const btn = document.getElementById('lang-toggle')
     if (btn) {
