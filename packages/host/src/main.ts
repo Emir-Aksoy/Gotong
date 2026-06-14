@@ -220,8 +220,13 @@ import {
 import {
   createHubStewardService,
   resolveStewardConfig,
+  OPERATOR_STEWARD_IDS,
   type StewardWorkflowDirectory,
 } from './hub-steward-service.js'
+import { HostOperatorAgentService } from './operator-agent-service.js'
+import { OperatorWorkflowEditService } from './operator-workflow-edit-service.js'
+import { operatorStewardWorkflowDirectory } from './operator-workflow-directory.js'
+import { buildOperatorStewardSystemPrompt } from '@aipehub/hub-steward'
 
 // CLI flags handled before any work — keep these cheap and side-effect free
 // so `npx @aipehub/host --help` exits in milliseconds without trying to
@@ -1916,6 +1921,46 @@ async function main(): Promise<void> {
         })()
       : null
 
+  // SW-M9 A-M7 — the OPERATOR-console steward (`/api/admin/steward/*`), the
+  // site-wide twin of `hubSteward`. Same `createHubStewardService`, parameterized
+  // with `OPERATOR_STEWARD_IDS` (disjoint agent / cap / broker ids, A-M1) + the
+  // operator system prompt + a SITE-WIDE agent executor (`HostOperatorAgentService`)
+  // + a grant-free workflow editor (`OperatorWorkflowEditService` — the cross-hub
+  // 出入口 lock STILL holds) + an all-workflows directory. Those operator executors
+  // are constructed ONLY here, so a member's chat input can never reach a site-wide
+  // write — the privilege IS the injected dependency (A-M2 / A-M3), not a runtime
+  // flag. DANGEROUS + CROSS_HUB tiers still park in the operator's OWN /me inbox
+  // under the disjoint operator broker for the user's mandated second confirmation
+  // (A-M6 gates the admin route on a server-resolved operator userId). Same wiring
+  // conditions as the member steward — identity (owner grants + approval
+  // persistence) + the assistant (YAML authoring).
+  const operatorSteward =
+    stewardConfig && identity && workflowAssist
+      ? createHubStewardService({
+          hub,
+          config: stewardConfig,
+          agents: new HostOperatorAgentService({
+            space,
+            lifecycle: localAgents,
+            grants: identity,
+            ...(reconcileHeartbeats ? { reconcileHeartbeats } : {}),
+          }),
+          workflows: operatorStewardWorkflowDirectory(workflowController),
+          workflowEditor: new OperatorWorkflowEditService({
+            workflows: workflowController,
+            assist: workflowAssist,
+            participants: () => hub.participants(),
+            peerCapabilities: peerCapabilitiesView,
+            crossHubMarkers,
+          }),
+          inbox: inboxStore,
+          orgApiPool,
+          logger: log,
+          ids: OPERATOR_STEWARD_IDS,
+          systemOverride: buildOperatorStewardSystemPrompt(),
+        })
+      : null
+
   // Route B P1-M4e — browser SSO via configured OIDC IdPs. Wired only when
   // identity is present (the provider registry + (issuer,sub)→user links + the
   // session it mints all live there). Absent → /api/auth/oidc/* degrades: the
@@ -2134,6 +2179,9 @@ async function main(): Promise<void> {
     // agent service / workflow editor / identity / steward key is missing, in
     // which case /api/me/steward/{plan,apply} return 503.
     ...(hubSteward ? { hubSteward } : {}),
+    // SW-M9 A-M7 — the OPERATOR-console steward (site-wide twin); null on the same
+    // conditions, in which case /api/admin/steward/{plan,apply} return 503.
+    ...(operatorSteward ? { operatorSteward } : {}),
     // Phase 13 M3 — null when no API key / disabled. Web responds 503
     // on /api/admin/workflows/assist in that case so the UI can hide
     // the "AI assistant" button cleanly.
