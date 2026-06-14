@@ -57,6 +57,7 @@ import {
   type WorkflowGrantSink,
 } from './workflow-routes.js'
 import { handleAgentsRoute, type AgentGrantSink } from './agents-routes.js'
+import { handleAdminStewardRoute } from './admin-steward-routes.js'
 import { handleServicesRoute } from './services-routes.js'
 import { handleUploadsRoute } from './uploads-routes.js'
 import { handleSetupRoute } from './setup-routes.js'
@@ -335,6 +336,15 @@ export interface WebServerOptions {
    * type, and the action it forwards is `unknown` (the host validates it).
    */
   hubSteward?: MeHubStewardSurface
+  /**
+   * SW-M9 A-M6 — optional OPERATOR-console hub steward surface. The host wires a
+   * SECOND `HostStewardService` here (the site-wide operator one). When absent,
+   * `POST /api/admin/steward/{plan,apply}` return 503 so the admin UI can hide
+   * the operator 管家 panel. Same `MeHubStewardSurface` duck type as `hubSteward`
+   * (the operator service satisfies the identical plan/apply shape); the action
+   * it forwards is `unknown` (the host validates + re-tiers it).
+   */
+  operatorSteward?: MeHubStewardSurface
   /**
    * Optional readiness gate. When set, `GET /readyz` returns 200
    * once `isReady()` first returns true, and 503 with a JSON
@@ -984,6 +994,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     inbox: opts.inbox,
     workflowEdit: opts.workflowEdit,
     hubSteward: opts.hubSteward,
+    operatorSteward: opts.operatorSteward,
     readinessGate: opts.readinessGate,
     identity: opts.identity,
     peerRegistry: opts.peerRegistry,
@@ -1135,6 +1146,8 @@ interface HandlerCtx {
   workflowEdit: MeWorkflowEditSurface | undefined
   /** SW-M6 — see WebServerOptions.hubSteward doc above. */
   hubSteward: MeHubStewardSurface | undefined
+  /** SW-M9 A-M6 — see WebServerOptions.operatorSteward doc above. */
+  operatorSteward: MeHubStewardSurface | undefined
   readinessGate: { isReady: () => boolean } | undefined
   identity: IdentitySurface | undefined
   /** D1 — see WebServerOptions.peerRegistry doc above. */
@@ -1918,6 +1931,26 @@ async function handle(
         resolveActor: resolveResourceActor,
       },
       req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // SW-M9 A-M6 — operator-console hub steward ("管家"). Site-wide twin of the
+  // member `/api/me/steward/*` routes, behind requireAdmin + a resolved operator
+  // userId (the shared `resolveResourceActor` closure). 503 when no operator
+  // steward was wired, or when the admin has no v4 user row (no inbox to park a
+  // second-confirmation into).
+  if (path.startsWith('/api/admin/steward')) {
+    const handled = await handleAdminStewardRoute(
+      {
+        steward: ctx.operatorSteward,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+        resolveActor: resolveResourceActor,
+      },
+      req,
+      res,
+      method,
+      path,
     )
     if (handled) return
   }
