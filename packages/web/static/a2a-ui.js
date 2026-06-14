@@ -24,6 +24,12 @@
 ;(function () {
   'use strict'
 
+  // i18n — read the live dict off window.AipeHub at call time (app-core.js runs
+  // synchronously before this panel is injected, so AipeHub is always defined).
+  // `t()` returns the current-language dict; re-render on language change.
+  const AH = window.AipeHub
+  function t() { return AH.t }
+
   const API = '/api/admin/a2a-agents'
 
   function $(sel, root) {
@@ -51,20 +57,21 @@
 
   // Honest liveness badge — green only when actually registered on the hub.
   function statusBadge(a) {
+    const d = t()
     const base =
       'display:inline-block;padding:0.1rem 0.45rem;border-radius:0.25rem;font-size:0.75rem;white-space:nowrap;'
     if (a.active) {
-      return '<span style="' + base + 'background:#e6f4ea;color:#1e7e34;">在跑</span>'
+      return '<span style="' + base + 'background:#e6f4ea;color:#1e7e34;">' + d.a2aStRunning + '</span>'
     }
     const reason = a.inactiveReason
     const txt =
       reason === 'disabled'
-        ? '已停用'
+        ? d.a2aStDisabled
         : reason === 'token_env_unset'
-          ? '未激活·环境变量未设'
+          ? d.a2aStTokenUnset
           : reason === 'id_conflict'
-            ? '未激活·id 冲突'
-            : '未激活'
+            ? d.a2aStIdConflict
+            : d.a2aStInactive
     return (
       '<span title="' + escHtml(reason || '') + '" style="' + base + 'background:#fdecea;color:#c0392b;">' +
       txt +
@@ -76,14 +83,15 @@
   // in one turn); a lifecycle object = long-running (poll tasks/get while the
   // remote stays parked). `{}` opts in with the participant's defaults.
   function lifecycleText(a) {
-    if (!a.lifecycle) return '<span style="color:#888;">阻塞</span>'
+    const d = t()
+    if (!a.lifecycle) return '<span style="color:#888;">' + d.a2aModeBlocking + '</span>'
     const lc = a.lifecycle
     const parts = []
     if (lc.pollIntervalMs != null) parts.push(lc.pollIntervalMs + 'ms')
     if (lc.maxAttempts != null) parts.push('×' + lc.maxAttempts)
-    const detail = parts.length ? ' (' + parts.join(' ') + ')' : ' (默认)'
+    const detail = parts.length ? ' (' + parts.join(' ') + ')' : d.a2aModeDefault
     return (
-      '<span title="远端返回挂起任务时轮询 tasks/get" style="color:#1e7e34;">长任务' + detail + '</span>'
+      '<span title="' + d.a2aModeLongTitle + '" style="color:#1e7e34;">' + d.a2aModeLong(detail) + '</span>'
     )
   }
 
@@ -131,47 +139,44 @@
   // ---- render -----------------------------------------------------------
 
   function buildUi(root) {
+    const d = t()
     root.innerHTML =
       '<div style="padding:1rem;max-width:64rem;">' +
-      '<h2 style="margin-top:0;">出站 A2A 智能体</h2>' +
-      '<p style="color:#555;font-size:0.9rem;margin:0 0 0.5rem;">注册本 hub 对外转发的 A2A 智能体。' +
-      '把某个本地能力 (capability) 派发出去时,会转成对外部智能体的 <code>message/send</code> 调用。' +
-      '替代旧的 <code>AIPE_A2A_AGENTS</code> 环境变量,改为持久化 + 即时生效。</p>' +
-      '<p style="color:#555;font-size:0.85rem;margin:0 0 1rem;"><strong>令牌不在这里填</strong> —— ' +
-      '「令牌环境变量」是 host 读取 bearer 的环境变量<strong>名</strong>,密钥本身永不进数据库或浏览器。' +
-      '某行环境变量未设置时显示「未激活」;在主机设好后把该行停用→启用即可让 host 重新读取并上线 (无需重启)。</p>' +
+      '<h2 style="margin-top:0;">' + d.a2aTitle + '</h2>' +
+      '<p style="color:#555;font-size:0.9rem;margin:0 0 0.5rem;">' + d.a2aDesc + '</p>' +
+      '<p style="color:#555;font-size:0.85rem;margin:0 0 1rem;">' + d.a2aTokenNote + '</p>' +
       '<div id="a2a-status" style="margin-bottom:1rem;min-height:1.2em;font-size:0.9rem;color:#555;"></div>' +
       '<details open style="margin-bottom:1.5rem;">' +
-      '<summary style="cursor:pointer;font-weight:bold;">注册出站智能体</summary>' +
+      '<summary style="cursor:pointer;font-weight:bold;">' + d.a2aAddSummary + '</summary>' +
       '<form id="a2a-add-form" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.5rem;margin-top:0.75rem;">' +
-      '<input name="id" type="text" placeholder="本地 participant id (派发目标, 唯一)" required autocomplete="off" />' +
-      '<input name="label" type="text" placeholder="显示名 (可选)" autocomplete="off" />' +
-      '<input name="capabilities" type="text" placeholder="能力 capabilities (逗号分隔, 至少一个)" required autocomplete="off" style="grid-column:1 / -1;" />' +
-      '<input name="url" type="url" placeholder="远端 A2A message/send URL" required autocomplete="off" style="grid-column:1 / -1;" />' +
-      '<input name="tokenEnv" type="text" placeholder="令牌环境变量名 (如 WRITER_A2A_TOKEN)" required autocomplete="off" />' +
-      '<input name="peerId" type="text" placeholder="X-Aipe-Peer-Id (AipeHub↔AipeHub 时, 可选)" autocomplete="off" />' +
-      '<input name="targetSkill" type="text" placeholder="远端 skill (metadata.skill, 可选)" autocomplete="off" style="grid-column:1 / -1;" />' +
+      '<input name="id" type="text" placeholder="' + escHtml(d.a2aPhId) + '" required autocomplete="off" />' +
+      '<input name="label" type="text" placeholder="' + escHtml(d.a2aPhLabel) + '" autocomplete="off" />' +
+      '<input name="capabilities" type="text" placeholder="' + escHtml(d.a2aPhCaps) + '" required autocomplete="off" style="grid-column:1 / -1;" />' +
+      '<input name="url" type="url" placeholder="' + escHtml(d.a2aPhUrl) + '" required autocomplete="off" style="grid-column:1 / -1;" />' +
+      '<input name="tokenEnv" type="text" placeholder="' + escHtml(d.a2aPhTokenEnv) + '" required autocomplete="off" />' +
+      '<input name="peerId" type="text" placeholder="' + escHtml(d.a2aPhPeerId) + '" autocomplete="off" />' +
+      '<input name="targetSkill" type="text" placeholder="' + escHtml(d.a2aPhTargetSkill) + '" autocomplete="off" style="grid-column:1 / -1;" />' +
       '<label style="grid-column:1 / -1;font-size:0.85rem;color:#555;display:flex;gap:0.4rem;align-items:center;">' +
-      '<input name="lifecycle" type="checkbox" /> 长任务模式 (远端返回挂起任务时轮询 <code>tasks/get</code>; 不勾=阻塞, 远端必须一轮回完)</label>' +
-      '<input name="pollIntervalMs" type="number" min="250" placeholder="轮询间隔 ms (可选, 默认 3000)" autocomplete="off" />' +
-      '<input name="maxAttempts" type="number" min="1" placeholder="最多轮询次数 (可选, 默认 20)" autocomplete="off" />' +
+      '<input name="lifecycle" type="checkbox" /> ' + d.a2aLifecycleLabel + '</label>' +
+      '<input name="pollIntervalMs" type="number" min="250" placeholder="' + escHtml(d.a2aPhPollInterval) + '" autocomplete="off" />' +
+      '<input name="maxAttempts" type="number" min="1" placeholder="' + escHtml(d.a2aPhMaxAttempts) + '" autocomplete="off" />' +
       '<label style="grid-column:1 / -1;font-size:0.85rem;color:#555;display:flex;gap:0.4rem;align-items:center;">' +
-      '<input name="enabled" type="checkbox" checked /> 启用 (令牌环境变量已设则立即上线)</label>' +
-      '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">注册</button>' +
+      '<input name="enabled" type="checkbox" checked /> ' + d.a2aEnabledLabel + '</label>' +
+      '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">' + d.a2aBtnRegister + '</button>' +
       '</form>' +
       '</details>' +
-      '<h3 style="margin-bottom:0.5rem;">已注册出站智能体</h3>' +
+      '<h3 style="margin-bottom:0.5rem;">' + d.a2aRegisteredHeading + '</h3>' +
       '<table style="width:100%;border-collapse:collapse;font-size:0.85rem;">' +
       '<thead><tr style="text-align:left;border-bottom:1px solid #ccc;background:#fafafa;">' +
-      '<th style="padding:0.4rem;">id / 显示名</th>' +
-      '<th style="padding:0.4rem;">能力</th>' +
-      '<th style="padding:0.4rem;">URL</th>' +
-      '<th style="padding:0.4rem;">令牌环境变量</th>' +
-      '<th style="padding:0.4rem;">模式</th>' +
-      '<th style="padding:0.4rem;">状态</th>' +
-      '<th style="padding:0.4rem;">操作</th>' +
+      '<th style="padding:0.4rem;">' + d.a2aColIdLabel + '</th>' +
+      '<th style="padding:0.4rem;">' + d.a2aColCaps + '</th>' +
+      '<th style="padding:0.4rem;">' + d.a2aColUrl + '</th>' +
+      '<th style="padding:0.4rem;">' + d.a2aColTokenEnv + '</th>' +
+      '<th style="padding:0.4rem;">' + d.a2aColMode + '</th>' +
+      '<th style="padding:0.4rem;">' + d.a2aColStatus + '</th>' +
+      '<th style="padding:0.4rem;">' + d.a2aColActions + '</th>' +
       '</tr></thead>' +
-      '<tbody id="a2a-tbody"><tr><td colspan="7" style="padding:0.6rem;color:#888;">载入中…</td></tr></tbody>' +
+      '<tbody id="a2a-tbody"><tr><td colspan="7" style="padding:0.6rem;color:#888;">' + d.a2aLoading + '</td></tr></tbody>' +
       '</table>' +
       '</div>'
 
@@ -180,12 +185,12 @@
   }
 
   function renderRows(root, agents) {
+    const d = t()
     const tbody = $('#a2a-tbody', root)
     if (!tbody) return
     if (!agents.length) {
       tbody.innerHTML =
-        '<tr><td colspan="7" style="padding:0.6rem;color:#888;">还没有注册出站 A2A 智能体。' +
-        '在上面表单注册一个 —— 之后派发它声明的能力就会转发到远端。</td></tr>'
+        '<tr><td colspan="7" style="padding:0.6rem;color:#888;">' + escHtml(d.a2aEmpty) + '</td></tr>'
       return
     }
     tbody.innerHTML = ''
@@ -205,13 +210,13 @@
         '<td style="padding:0.4rem;">' + statusBadge(a) + '</td>' +
         '<td style="padding:0.4rem;white-space:nowrap;">' +
         '<button type="button" class="a2a-toggle" style="padding:0.25rem 0.5rem;">' +
-        (a.enabled ? '停用' : '启用') + '</button> ' +
+        (a.enabled ? d.a2aBtnDisable : d.a2aBtnEnable) + '</button> ' +
         '<button type="button" class="a2a-life" style="padding:0.25rem 0.5rem;">' +
-        (a.lifecycle ? '改阻塞' : '改长任务') + '</button> ' +
-        '<button type="button" class="a2a-del" style="padding:0.25rem 0.5rem;color:#c0392b;">删除</button>' +
+        (a.lifecycle ? d.a2aBtnToBlocking : d.a2aBtnToLong) + '</button> ' +
+        '<button type="button" class="a2a-del" style="padding:0.25rem 0.5rem;color:#c0392b;">' + d.a2aBtnDelete + '</button>' +
         '</td>'
       tr.querySelector('.a2a-toggle').addEventListener('click', function () {
-        doPatch(root, a.id, { enabled: !a.enabled }, a.enabled ? '已停用' : '已启用')
+        doPatch(root, a.id, { enabled: !a.enabled }, a.enabled ? t().a2aOkDisabled : t().a2aOkEnabled)
       })
       tr.querySelector('.a2a-life').addEventListener('click', function () {
         // Flip blocking <-> long-running (defaults). Precise poll tuning is via
@@ -220,11 +225,11 @@
           root,
           a.id,
           { lifecycle: a.lifecycle ? null : {} },
-          a.lifecycle ? '已改为阻塞' : '已改为长任务',
+          a.lifecycle ? t().a2aOkToBlocking : t().a2aOkToLong,
         )
       })
       tr.querySelector('.a2a-del').addEventListener('click', function () {
-        if (!window.confirm('删除出站智能体「' + (a.label || a.id) + '」? 派发它能力的工作流将不再转发到远端。')) return
+        if (!window.confirm(t().a2aConfirmDelete(a.label || a.id))) return
         doDelete(root, a.id)
       })
       tbody.appendChild(tr)
@@ -236,22 +241,22 @@
   function unwired(root, err) {
     if (err && err.status === 503) {
       renderRows(root, [])
-      setStatus(root, '此主机未启用身份存储 (出站 A2A 不可用)', 'error')
+      setStatus(root, t().a2aUnwired, 'error')
       return true
     }
     return false
   }
 
   async function load(root) {
-    setStatus(root, '载入…', 'loading')
+    setStatus(root, t().a2aLoadingStatus, 'loading')
     try {
       const agents = await apiList()
       renderRows(root, agents)
       const live = agents.filter(function (a) { return a.active }).length
-      setStatus(root, '共 ' + agents.length + ' 个 (在跑 ' + live + ')', 'ok')
+      setStatus(root, t().a2aLoadedStatus(agents.length, live), 'ok')
     } catch (err) {
       if (unwired(root, err)) return
-      setStatus(root, '载入失败:' + (err.message || err), 'error')
+      setStatus(root, t().a2aLoadFailed(err.message || err), 'error')
     }
   }
 
@@ -285,39 +290,39 @@
       if (max > 0) lc.maxAttempts = max
       body.lifecycle = lc
     }
-    setStatus(root, '注册…', 'loading')
+    setStatus(root, t().a2aRegistering, 'loading')
     try {
       await apiAdd(body)
       form.reset()
       await load(root)
-      setStatus(root, '已注册', 'ok')
+      setStatus(root, t().a2aRegistered, 'ok')
     } catch (err) {
       if (unwired(root, err)) return
-      setStatus(root, '注册失败:' + (err.message || err), 'error')
+      setStatus(root, t().a2aRegisterFailed(err.message || err), 'error')
     }
   }
 
   async function doPatch(root, id, patch, okMsg) {
-    setStatus(root, '保存…', 'loading')
+    setStatus(root, t().a2aSaving, 'loading')
     try {
       await apiPatch(id, patch)
       await load(root)
-      setStatus(root, okMsg || '已保存', 'ok')
+      setStatus(root, okMsg || t().a2aSaved, 'ok')
     } catch (err) {
       if (unwired(root, err)) return
-      setStatus(root, '保存失败:' + (err.message || err), 'error')
+      setStatus(root, t().a2aSaveFailed(err.message || err), 'error')
     }
   }
 
   async function doDelete(root, id) {
-    setStatus(root, '删除…', 'loading')
+    setStatus(root, t().a2aDeleting, 'loading')
     try {
       await apiDelete(id)
       await load(root)
-      setStatus(root, '已删除', 'ok')
+      setStatus(root, t().a2aDeleted, 'ok')
     } catch (err) {
       if (unwired(root, err)) return
-      setStatus(root, '删除失败:' + (err.message || err), 'error')
+      setStatus(root, t().a2aDeleteFailed(err.message || err), 'error')
     }
   }
 
@@ -342,6 +347,12 @@
     }).observe(document.body, {
       attributes: true,
       attributeFilter: ['data-active-tab'],
+    })
+    // Re-render on language switch — relabel the static shell, and reload the
+    // rows when the tab is showing so the live data picks up the new dict too.
+    AH.onLangChange(function () {
+      buildUi(root)
+      if (isActive()) load(root).catch(function () { /* setStatus reported it */ })
     })
     if (isActive()) {
       maybeLoad(root).catch(function () { /* */ })
