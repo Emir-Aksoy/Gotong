@@ -15,18 +15,26 @@
 ;(function () {
   'use strict'
 
+  // i18n — read the live dict off window.AipeHub at call time (app-core.js runs
+  // synchronously before this panel is injected, so AipeHub is always defined).
+  // `t()` returns the current-language dict; re-render on language change.
+  const AH = window.AipeHub
+  function t() { return AH.t }
+
   const SUMMARY_API = '/api/admin/identity/usage/summary'
   const LEDGER_EXPORT = '/api/admin/identity/usage/ledger/export'
   const AUDIT_EXPORT = '/api/admin/identity/audit/export'
 
+  // Dimension options — `labelKey` resolves against the live dict at build time
+  // so the selector relabels on language switch.
   const GROUP_OPTIONS = [
-    { value: 'user', label: '用户' },
-    { value: 'agent', label: '智能体' },
-    { value: 'workflow', label: '工作流' },
-    { value: 'model', label: '模型' },
-    { value: 'day', label: '按天' },
+    { value: 'user', labelKey: 'usgGroupUser' },
+    { value: 'agent', labelKey: 'usgGroupAgent' },
+    { value: 'workflow', labelKey: 'usgGroupWorkflow' },
+    { value: 'model', labelKey: 'usgGroupModel' },
+    { value: 'day', labelKey: 'usgGroupDay' },
     // Phase 19 P4-M2 — federated-peer dimension. '(none)' bucket = local usage.
-    { value: 'peer', label: '联邦对端' },
+    { value: 'peer', labelKey: 'usgGroupPeer' },
   ]
 
   function $(sel, root) {
@@ -75,36 +83,37 @@
   }
 
   function buildUi(root) {
+    const d = t()
     const opts = GROUP_OPTIONS.map(function (o) {
-      return '<option value="' + o.value + '">' + escHtml(o.label) + '</option>'
+      return '<option value="' + o.value + '">' + escHtml(d[o.labelKey]) + '</option>'
     }).join('')
     root.innerHTML =
       '<header class="usage-header">' +
-      '  <h2>用量 / 成本</h2>' +
-      '  <p class="usage-meta">从用量账本(usage ledger)按维度汇总 token 与成本。成本由服务端按模型价目表算好(整数 micro-USD),这里换算成美元显示;未知模型记 token、成本计 0。价目可用 <code>&lt;AIPE_SPACE&gt;/pricing.json</code> 覆盖。</p>' +
+      '  <h2>' + escHtml(d.usgTitle) + '</h2>' +
+      '  <p class="usage-meta">' + d.usgIntro + '</p>' +
       '  <div class="usage-controls">' +
-      '    <label>分组 <select id="usage-groupby">' + opts + '</select></label>' +
-      '    <button id="usage-refresh" type="button">刷新</button>' +
+      '    <label>' + escHtml(d.usgGroupByLabel) + ' <select id="usage-groupby">' + opts + '</select></label>' +
+      '    <button id="usage-refresh" type="button">' + escHtml(d.usgRefreshBtn) + '</button>' +
       '    <span id="usage-status" class="usage-status"></span>' +
       '  </div>' +
       '</header>' +
       '<section class="usage-list-wrap">' +
       '  <table class="usage-table">' +
       '    <thead><tr>' +
-      '      <th>维度</th><th>调用数</th><th>输入 token</th><th>输出 token</th><th>成本(USD)</th>' +
+      '      <th>' + escHtml(d.usgColDimension) + '</th><th>' + escHtml(d.usgColCalls) + '</th><th>' + escHtml(d.usgColInputTokens) + '</th><th>' + escHtml(d.usgColOutputTokens) + '</th><th>' + escHtml(d.usgColCostUsd) + '</th>' +
       '    </tr></thead>' +
-      '    <tbody id="usage-rows"><tr><td colspan="5" class="usage-empty">加载中...</td></tr></tbody>' +
+      '    <tbody id="usage-rows"><tr><td colspan="5" class="usage-empty">' + escHtml(d.usgLoadingCell) + '</td></tr></tbody>' +
       '    <tfoot id="usage-foot"></tfoot>' +
       '  </table>' +
       '</section>' +
       '<section class="usage-export">' +
-      '  <h3>导出</h3>' +
-      '  <p class="usage-meta">下载完整账本或审计日志(最多 10000 行)。</p>' +
+      '  <h3>' + escHtml(d.usgExportTitle) + '</h3>' +
+      '  <p class="usage-meta">' + escHtml(d.usgExportHint) + '</p>' +
       '  <div class="usage-export-links">' +
-      '    <a class="usage-dl" href="' + LEDGER_EXPORT + '?format=csv" download>账本 CSV</a>' +
-      '    <a class="usage-dl" href="' + LEDGER_EXPORT + '?format=jsonl" download>账本 JSONL</a>' +
-      '    <a class="usage-dl" href="' + AUDIT_EXPORT + '?format=csv" download>审计 CSV</a>' +
-      '    <a class="usage-dl" href="' + AUDIT_EXPORT + '?format=jsonl" download>审计 JSONL</a>' +
+      '    <a class="usage-dl" href="' + LEDGER_EXPORT + '?format=csv" download>' + escHtml(d.usgDlLedgerCsv) + '</a>' +
+      '    <a class="usage-dl" href="' + LEDGER_EXPORT + '?format=jsonl" download>' + escHtml(d.usgDlLedgerJsonl) + '</a>' +
+      '    <a class="usage-dl" href="' + AUDIT_EXPORT + '?format=csv" download>' + escHtml(d.usgDlAuditCsv) + '</a>' +
+      '    <a class="usage-dl" href="' + AUDIT_EXPORT + '?format=jsonl" download>' + escHtml(d.usgDlAuditJsonl) + '</a>' +
       '  </div>' +
       '</section>'
 
@@ -118,18 +127,18 @@
 
   async function refresh(root) {
     const groupBy = currentGroupBy(root)
-    setStatus(root, '加载...', 'loading')
+    setStatus(root, t().usgLoading, 'loading')
     try {
       const out = await fetchSummary(groupBy)
       renderRows(root, out.rows || [])
-      setStatus(root, '已加载 ' + (out.rows || []).length + ' 行', 'ok')
+      setStatus(root, t().usgLoadedN((out.rows || []).length), 'ok')
     } catch (err) {
       if (err.status === 503) {
         renderRows(root, [])
-        setStatus(root, 'host 未启用用量账本', 'error')
+        setStatus(root, t().usgHostDisabled, 'error')
         return
       }
-      setStatus(root, '加载失败:' + (err.message || err), 'error')
+      setStatus(root, t().usgLoadFailed(err.message || err), 'error')
       throw err
     }
   }
@@ -140,7 +149,7 @@
     if (!tbody) return
     if (rows.length === 0) {
       tbody.innerHTML =
-        '<tr><td colspan="5" class="usage-empty">还没有用量数据。一旦有 LLM 调用产生 token,这里会自动出现。</td></tr>'
+        '<tr><td colspan="5" class="usage-empty">' + escHtml(t().usgEmpty) + '</td></tr>'
       if (tfoot) tfoot.innerHTML = ''
       return
     }
@@ -163,7 +172,7 @@
     if (tfoot) {
       tfoot.innerHTML =
         '<tr class="usage-total">' +
-        '<td>合计</td>' +
+        '<td>' + escHtml(t().usgTotal) + '</td>' +
         '<td>' + fmtInt(totCalls) + '</td>' +
         '<td>' + fmtInt(totIn) + '</td>' +
         '<td>' + fmtInt(totOut) + '</td>' +
@@ -192,6 +201,16 @@
     }).observe(document.body, {
       attributes: true,
       attributeFilter: ['data-active-tab'],
+    })
+    // Re-render on language switch — relabel the static shell (keeping the
+    // chosen dimension), then reload the rows when the tab is showing so the
+    // total/empty labels and dimension keys pick up the new dict too.
+    AH.onLangChange(function () {
+      const keep = currentGroupBy(root)
+      buildUi(root)
+      const sel = $('#usage-groupby', root)
+      if (sel) sel.value = keep
+      if (isActive()) refresh(root).catch(function () { /* setStatus reported it */ })
     })
     if (isActive()) {
       maybeRefresh(root).catch(function () { /* */ })
