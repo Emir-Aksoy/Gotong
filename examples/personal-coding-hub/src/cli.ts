@@ -29,17 +29,28 @@ import { join, resolve } from 'node:path'
 
 import { Hub, InMemoryStorage } from '@aipehub/core'
 
-import { makeRouter, makeCoder, stripThink, MINIMAX_MODEL, MINIMAX_BASE_URL } from './real-agents.js'
+import { makeRouter, makeCoder, stripThink, ROUTER_ID, MINIMAX_MODEL, MINIMAX_BASE_URL } from './real-agents.js'
 import { setupSharedWorkspace, readProgress, initGitRepo, type SharedWorkspace } from './workspace.js'
+import { loadPolicy, savePolicy, applyPolicyEdit, describePolicy } from './policy.js'
+import { type RoutingPolicy } from './routing.js'
 
 const META_HELP = [
   '  meta 命令 (以 : 开头):',
-  '    :help      显示这份帮助',
-  '    :files     列出工作区文件',
-  '    :progress  打印 PROGRESS.md (两个 agent 的交接日志)',
-  '    :quit      退出 (别名 :q / :exit)',
+  '    :help          显示这份帮助',
+  '    :files         列出工作区文件',
+  '    :progress      打印 PROGRESS.md (两个 agent 的交接日志)',
+  '    :roster        打印当前「总分工层」(谁在岗 / 谁主理 / 预算)',
+  '    :policy <大白话>  用大白话改总分工层, 例: :policy codex 今天不在岗',
+  '    :quit          退出 (别名 :q / :exit)',
   '  其它任何输入都会作为「编码目标」派给路由模型, 由它决定派给 claude-code / codex。',
+  '  你也可以在目标里直接点名 (显式分派), 例: 交给 codex 实现这个登录按钮。',
 ].join('\n')
+
+/** Print the standing arrangement (the 总分工层) — what `:roster` shows. */
+function printRoster(policy: RoutingPolicy): void {
+  console.log('── 总分工层 ' + '─'.repeat(32))
+  for (const line of describePolicy(policy)) console.log(line)
+}
 
 /** Parse argv: drop pnpm's literal `--`, pull out `--cwd <dir>`. */
 function parseArgs(argv: string[]): { cwd?: string } {
@@ -110,16 +121,24 @@ async function main(): Promise<void> {
   const { cwd } = parseArgs(process.argv.slice(2))
   const { ws, ephemeral } = prepareWorkspace(cwd)
 
+  // The standing arrangement (总分工层) lives as a FILE next to the workspace, so
+  // copying the repo carries it and `:policy` edits survive restarts. loadPolicy
+  // defaults the roster on first run (no file yet).
+  const policyFile = join(ws.dir, 'routing-policy.json')
+  let policy = loadPolicy(policyFile)
+
   const hub = new Hub({ storage: new InMemoryStorage() })
   await hub.start()
   hub.register(makeCoder('claude-code', ws, stub))
   hub.register(makeCoder('codex', ws, stub))
-  hub.register(makeRouter(hub, apiKey))
+  hub.register(makeRouter(hub, apiKey, policy))
 
   console.log('\n=== personal-coding-hub (交互式 CLI) ===')
   console.log(`  router : MiniMax ${MINIMAX_MODEL} @ ${MINIMAX_BASE_URL}`)
   console.log(`  coders : ${stub ? 'in-process stand-ins (STUB_CODERS=1)' : 'claude-code + codex (各自 CLI 登录, 不注入 key)'}`)
   console.log(`  repo   : ${ws.dir}${ephemeral ? ' (临时, 退出后保留供查看)' : ' (--cwd)'}`)
+  console.log(`  policy : ${policyFile}`)
+  printRoster(policy)
   console.log(`\n${META_HELP}\n`)
 
   const rl: Interface = createInterface({ input: process.stdin, output: process.stdout, prompt: 'coding-hub> ' })
@@ -152,6 +171,35 @@ async function main(): Promise<void> {
       const text = queue.shift()!.trim()
       if (!text) continue
       if (text.startsWith(':')) {
+        const name = text.slice(1).split(/\s+/)[0]
+        // :roster / :policy need the live policy + router, which live in this
+        // closure — so they're handled here, not in the stateless handleMeta.
+        if (name === 'roster') {
+          printRoster(policy)
+          continue
+        }
+        if (name === 'policy') {
+          const instruction = text.slice(1).replace(/^policy\b\s*/, '').trim()
+          if (!instruction) {
+            console.log('  用法: :policy <大白话>  例: :policy codex 今天不在岗 / 让 claude-code 主理')
+            continue
+          }
+          const edit = applyPolicyEdit(policy, instruction)
+          if (!edit.understood) {
+            console.log('  没听懂这条分工调整, 换个说法 (例: codex 不在岗 / claude-code 主理 / 预算限单)。')
+            continue
+          }
+          // The file is the source of truth; re-register the router so its system
+          // prompt reflects the new arrangement (the real LLM brain re-reads it).
+          policy = edit.policy
+          savePolicy(policyFile, policy)
+          hub.unregister(ROUTER_ID)
+          // apiKey is guarded non-null at startup; narrowing is lost in this closure.
+          hub.register(makeRouter(hub, apiKey!, policy))
+          for (const c of edit.changes) console.log(`  ✓ ${c}`)
+          printRoster(policy)
+          continue
+        }
         if (handleMeta(text, ws) === 'quit') quitting = true
         continue
       }
