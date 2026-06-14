@@ -23,6 +23,12 @@
 ;(function () {
   'use strict'
 
+  // i18n — read the live dict off window.AipeHub at call time (app-core.js runs
+  // synchronously before this panel is injected, so AipeHub is always defined).
+  // `t()` returns the current-language dict; re-render on language change.
+  const AH = window.AipeHub
+  function t() { return AH.t }
+
   const LIST_API = '/api/admin/peer-manifests'
   const REFRESH_API = '/api/admin/peer-manifests/refresh'
 
@@ -57,11 +63,11 @@
   function statusOf(row) {
     if (row.online) {
       return row.lastFetchedAt == null
-        ? { cls: 'pf-online', label: '在线·未刷新' }
-        : { cls: 'pf-online', label: '在线' }
+        ? { cls: 'pf-online', label: t().pmStOnlineUnrefreshed }
+        : { cls: 'pf-online', label: t().pmStOnline }
     }
-    if (row.stale) return { cls: 'pf-stale', label: '离线·缓存' }
-    return { cls: 'pf-unknown', label: '离线·未知' }
+    if (row.stale) return { cls: 'pf-stale', label: t().pmStStale }
+    return { cls: 'pf-unknown', label: t().pmStUnknown }
   }
 
   // ---- API --------------------------------------------------------------
@@ -105,9 +111,9 @@
     if (!c || typeof c.id !== 'string') return ''
     const bits = []
     if (c.version) bits.push('v' + c.version)
-    if (c.costHint) bits.push('成本:' + c.costHint)
+    if (c.costHint) bits.push(t().pmCostPrefix + c.costHint)
     if (Array.isArray(c.dataClasses) && c.dataClasses.length) {
-      bits.push('数据:' + c.dataClasses.join('/'))
+      bits.push(t().pmDataPrefix + c.dataClasses.join('/'))
     }
     const meta = bits.length
       ? ' <small class="pf-cap-meta">' + escHtml(bits.join(' · ')) + '</small>'
@@ -118,21 +124,21 @@
   // ---- render -----------------------------------------------------------
 
   function buildUi(root) {
+    const d = t()
     root.innerHTML =
       '<header class="pf-header">' +
-      '  <h2>Peer 能力清单(federation manifest)</h2>' +
-      '  <p class="pf-meta">每个已连接 peer 通过认证 mesh 链路广播的能力(<code>peer.manifest</code> RPC)。' +
-      '清单缓存在内存里 —— 刷新前显示<strong>未知</strong>而不是陈旧快照。本面板只读;' +
-      '决定「接受 peer 什么」的入站信任契约在别处(policy 编辑器)。</p>' +
-      '  <button id="pf-refresh-all" type="button">刷新全部</button>' +
+      '  <h2>' + escHtml(d.pmTitle) + '</h2>' +
+      '  <p class="pf-meta">' + d.pmDesc + '</p>' +
+      '  <button id="pf-refresh-all" type="button">' + escHtml(d.pmRefreshAll) + '</button>' +
       '  <span id="pf-status" class="pf-status"></span>' +
       '</header>' +
       '<section class="pf-list-wrap">' +
       '  <table class="pf-table">' +
       '    <thead><tr>' +
-      '      <th>Peer</th><th>状态</th><th>能力</th><th>最近刷新</th><th></th>' +
+      '      <th>Peer</th><th>' + escHtml(d.pmColStatus) + '</th><th>' + escHtml(d.pmColCaps) +
+      '</th><th>' + escHtml(d.pmColLastRefresh) + '</th><th></th>' +
       '    </tr></thead>' +
-      '    <tbody id="pf-rows"><tr><td colspan="5" class="pf-empty">加载中...</td></tr></tbody>' +
+      '    <tbody id="pf-rows"><tr><td colspan="5" class="pf-empty">' + escHtml(d.pmLoading) + '</td></tr></tbody>' +
       '  </table>' +
       '</section>'
 
@@ -146,8 +152,7 @@
     if (!tbody) return
     if (!peers.length) {
       tbody.innerHTML =
-        '<tr><td colspan="5" class="pf-empty">还没有已配置的 peer。' +
-        '在本页上方「对端」面板添加一个 peer 后,这里会列出它广播的能力。</td></tr>'
+        '<tr><td colspan="5" class="pf-empty">' + escHtml(t().pmEmpty) + '</td></tr>'
       return
     }
     tbody.innerHTML = ''
@@ -159,14 +164,14 @@
       const caps = row.capabilities || []
       const capCell = caps.length
         ? caps.map(renderCap).join('')
-        : '<span class="pf-cap-empty">未知(点刷新)</span>'
+        : '<span class="pf-cap-empty">' + escHtml(t().pmCapUnknown) + '</span>'
       const tr = document.createElement('tr')
       tr.innerHTML =
         '<td class="pf-peer">' + peerCell + '</td>' +
         '<td><span class="pf-badge ' + st.cls + '">' + escHtml(st.label) + '</span></td>' +
         '<td class="pf-caps">' + capCell + '</td>' +
         '<td class="pf-time">' + escHtml(fmtTime(row.lastFetchedAt)) + '</td>' +
-        '<td><button type="button" class="pf-row-refresh">刷新</button></td>'
+        '<td><button type="button" class="pf-row-refresh">' + escHtml(t().pmRefresh) + '</button></td>'
       tr.querySelector('.pf-row-refresh').addEventListener('click', function () {
         doRefresh(root, row.peer).catch(function () { /* setStatus handled it */ })
       })
@@ -177,35 +182,35 @@
   // ---- load / refresh ---------------------------------------------------
 
   async function load(root) {
-    setStatus(root, '加载...', 'loading')
+    setStatus(root, t().pmStatusLoading, 'loading')
     try {
       const peers = await apiList()
       renderRows(root, peers)
-      setStatus(root, '已加载 ' + peers.length + ' 个 peer', 'ok')
+      setStatus(root, t().pmLoaded(peers.length), 'ok')
     } catch (err) {
       if (err.status === 503) {
         renderRows(root, [])
-        setStatus(root, 'host 未启用 peer 联邦', 'error')
+        setStatus(root, t().pmHostNoFederation, 'error')
         return
       }
-      setStatus(root, '加载失败:' + (err.message || err), 'error')
+      setStatus(root, t().pmLoadFailed(err.message || err), 'error')
       throw err
     }
   }
 
   async function doRefresh(root, peerId) {
-    setStatus(root, peerId ? '刷新 ' + peerId + '...' : '刷新全部...', 'loading')
+    setStatus(root, peerId ? t().pmRefreshingOne(peerId) : t().pmRefreshingAll, 'loading')
     try {
       const peers = await apiRefresh(peerId)
       renderRows(root, peers)
-      setStatus(root, '已刷新', 'ok')
+      setStatus(root, t().pmRefreshed, 'ok')
     } catch (err) {
       if (err.status === 503) {
         renderRows(root, [])
-        setStatus(root, 'host 未启用 peer 联邦', 'error')
+        setStatus(root, t().pmHostNoFederation, 'error')
         return
       }
-      setStatus(root, '刷新失败:' + (err.message || err), 'error')
+      setStatus(root, t().pmRefreshFailed(err.message || err), 'error')
       throw err
     }
   }
@@ -232,6 +237,12 @@
     }).observe(document.body, {
       attributes: true,
       attributeFilter: ['data-active-tab'],
+    })
+    // Re-render on language switch — relabel the static shell, and reload the
+    // rows when the tab is showing so the live data picks up the new dict too.
+    AH.onLangChange(function () {
+      buildUi(root)
+      if (isActive()) load(root).catch(function () { /* setStatus reported it */ })
     })
     if (isActive()) {
       maybeLoad(root).catch(function () { /* */ })
