@@ -233,4 +233,117 @@ describe('A2aAgentStore (P1-M11a)', () => {
     expect(u.label).toBe('renamed')
     expect(u.lifecycle).toEqual({ pollIntervalMs: 3000, maxAttempts: 20 })
   })
+
+  // --- Item 2: outbound gate policy (v34 data-class / quota / approval columns) ---
+
+  it('the gate columns default off — no contract, no quota, no approval (legacy)', () => {
+    const a = store.addA2aAgent({ id: 'plain', capabilities: ['chat'], url: URL_A, tokenEnv: 'T' })
+    expect(a.allowedDataClasses).toBeNull() // null = no contract (send anything)
+    expect(a.outboundQuotaBudget).toBeNull()
+    expect(a.requireApprovalOutbound).toBe(false)
+    const re = store.getA2aAgent('plain')!
+    expect(re.allowedDataClasses).toBeNull()
+    expect(re.outboundQuotaBudget).toBeNull()
+    expect(re.requireApprovalOutbound).toBe(false)
+  })
+
+  it('a data-class allowlist round-trips through the JSON column', () => {
+    const a = store.addA2aAgent({
+      id: 'classed',
+      capabilities: ['draft'],
+      url: URL_A,
+      tokenEnv: 'T',
+      allowedDataClasses: ['public', 'pii'],
+    })
+    expect(a.allowedDataClasses).toEqual(['public', 'pii'])
+    expect(store.getA2aAgent('classed')?.allowedDataClasses).toEqual(['public', 'pii'])
+  })
+
+  it('an empty allowlist [] = lockdown — persisted and distinct from null = no contract', () => {
+    const a = store.addA2aAgent({
+      id: 'locked',
+      capabilities: ['draft'],
+      url: URL_A,
+      tokenEnv: 'T',
+      allowedDataClasses: [],
+    })
+    // [] round-trips to [] (the gate refuses every declared class); NOT null.
+    expect(a.allowedDataClasses).toEqual([])
+    expect(a.allowedDataClasses).not.toBeNull()
+    expect(store.getA2aAgent('locked')?.allowedDataClasses).toEqual([])
+  })
+
+  it('allowlist trims + drops empty strings; a non-array value is rejected', () => {
+    const a = store.addA2aAgent({
+      id: 'trim',
+      capabilities: ['draft'],
+      url: URL_A,
+      tokenEnv: 'T',
+      allowedDataClasses: ['  pii  ', '', 'public'],
+    })
+    expect(a.allowedDataClasses).toEqual(['pii', 'public'])
+    expect(() =>
+      store.addA2aAgent({
+        id: 'bad-class',
+        capabilities: ['draft'],
+        url: URL_A,
+        tokenEnv: 'T',
+        allowedDataClasses: 'pii' as never,
+      }),
+    ).toThrow(/allowedDataClasses/)
+  })
+
+  it('a quota budget round-trips; 0 persists (off) and negative is rejected', () => {
+    const a = store.addA2aAgent({
+      id: 'quota',
+      capabilities: ['draft'],
+      url: URL_A,
+      tokenEnv: 'T',
+      outboundQuotaBudget: 25,
+    })
+    expect(a.outboundQuotaBudget).toBe(25)
+    expect(store.getA2aAgent('quota')?.outboundQuotaBudget).toBe(25)
+    // 0 is a persisted "off" (distinct from null = absent), faithfully kept.
+    const z = store.addA2aAgent({ id: 'zero', capabilities: ['d'], url: URL_A, tokenEnv: 'T', outboundQuotaBudget: 0 })
+    expect(z.outboundQuotaBudget).toBe(0)
+    // negative / non-finite → fail-visible
+    expect(() =>
+      store.addA2aAgent({ id: 'neg', capabilities: ['d'], url: URL_A, tokenEnv: 'T', outboundQuotaBudget: -1 }),
+    ).toThrow(/outboundQuotaBudget/)
+  })
+
+  it('requireApprovalOutbound round-trips true and toggles back off', () => {
+    const a = store.addA2aAgent({
+      id: 'gated',
+      capabilities: ['draft'],
+      url: URL_A,
+      tokenEnv: 'T',
+      requireApprovalOutbound: true,
+    })
+    expect(a.requireApprovalOutbound).toBe(true)
+    expect(store.getA2aAgent('gated')?.requireApprovalOutbound).toBe(true)
+    const u = store.updateA2aAgent('gated', { requireApprovalOutbound: false })
+    expect(u.requireApprovalOutbound).toBe(false)
+  })
+
+  it('update sets the gate fields; omitting them keeps the stored values', () => {
+    store.addA2aAgent({
+      id: 'evolve',
+      capabilities: ['draft'],
+      url: URL_A,
+      tokenEnv: 'T',
+      allowedDataClasses: ['public'],
+      outboundQuotaBudget: 10,
+      requireApprovalOutbound: true,
+    })
+    // Touch only the label; every gate field must be preserved (undefined = keep).
+    const kept = store.updateA2aAgent('evolve', { label: 'renamed' })
+    expect(kept.allowedDataClasses).toEqual(['public'])
+    expect(kept.outboundQuotaBudget).toBe(10)
+    expect(kept.requireApprovalOutbound).toBe(true)
+    // null clears the allowlist (back to no contract); 0 clears the quota.
+    const cleared = store.updateA2aAgent('evolve', { allowedDataClasses: null, outboundQuotaBudget: null })
+    expect(cleared.allowedDataClasses).toBeNull()
+    expect(cleared.outboundQuotaBudget).toBeNull()
+  })
 })

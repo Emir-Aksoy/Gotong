@@ -276,6 +276,16 @@ export interface A2aOutboundAgent {
   targetSkill: string | null
   /** Stream H2-OUT — long-running poll lifecycle; null = blocking (legacy). */
   lifecycle: A2aOutboundLifecycle | null
+  /**
+   * Item 2 — per-step data-class allowlist gated at this outbound edge via the
+   * SHARED core `checkOutboundDataClasses`. null = no contract (send anything,
+   * legacy); [] = lockdown (refuse any declared class); list = allowlist.
+   */
+  allowedDataClasses: readonly string[] | null
+  /** Item 2 — max outbound sends per window; null/0 = no quota (host owns the limiter). */
+  outboundQuotaBudget: number | null
+  /** Item 2 — wrap this outbound A2A edge in approval (park for owner) before sending. */
+  requireApprovalOutbound: boolean
   enabled: boolean
   label: string | null
   createdAt: number
@@ -291,6 +301,12 @@ export interface AddA2aOutboundAgentInput {
   targetSkill?: string | null
   /** Opt into long-running poll lifecycle; null/undefined = blocking (legacy). */
   lifecycle?: A2aOutboundLifecycle | null
+  /** undefined/null = no contract; [] = lockdown; list = allowlist (Item 2). */
+  allowedDataClasses?: readonly string[] | null
+  /** undefined/null/0 = no quota; >0 = max sends per window (Item 2). */
+  outboundQuotaBudget?: number | null
+  /** undefined/false = no approval; true = park for owner before sending (Item 2). */
+  requireApprovalOutbound?: boolean
   label?: string | null
   enabled?: boolean
 }
@@ -304,6 +320,12 @@ export interface UpdateA2aOutboundAgentInput {
   targetSkill?: string | null
   /** undefined = keep; null = turn lifecycle OFF; object = set/replace it. */
   lifecycle?: A2aOutboundLifecycle | null
+  /** undefined = keep; null = clear contract; [] = lockdown; list = allowlist (Item 2). */
+  allowedDataClasses?: readonly string[] | null
+  /** undefined = keep; null/0 = clear quota; >0 = set budget (Item 2). */
+  outboundQuotaBudget?: number | null
+  /** undefined = keep; boolean = toggle outbound approval (Item 2). */
+  requireApprovalOutbound?: boolean
   label?: string | null
   enabled?: boolean
 }
@@ -327,6 +349,17 @@ export interface AcpOutboundAgent {
   args: string[]
   /** Working directory the agent operates in; null = the host's cwd. */
   cwd: string | null
+  /**
+   * Item 2 — per-step data-class allowlist gated at this outbound edge via the
+   * SHARED core `checkOutboundDataClasses`. For ACP this is a GOVERNANCE control
+   * (which classes of context may feed a 3rd-party coding agent), not a network
+   * egress gate (the subprocess runs under the operator's own login). null = no
+   * contract; [] = lockdown; list = allowlist. There is deliberately NO approval
+   * field: ACP already escalates per-tool to the inbox (D5/D6).
+   */
+  allowedDataClasses: readonly string[] | null
+  /** Item 2 — max outbound dispatches per window; null/0 = no quota (runaway guard). */
+  outboundQuotaBudget: number | null
   enabled: boolean
   label: string | null
   createdAt: number
@@ -339,6 +372,10 @@ export interface AddAcpOutboundAgentInput {
   command: string
   args?: string[]
   cwd?: string | null
+  /** undefined/null = no contract; [] = lockdown; list = allowlist (Item 2). */
+  allowedDataClasses?: readonly string[] | null
+  /** undefined/null/0 = no quota; >0 = max dispatches per window (Item 2). */
+  outboundQuotaBudget?: number | null
   label?: string | null
   enabled?: boolean
 }
@@ -349,6 +386,10 @@ export interface UpdateAcpOutboundAgentInput {
   command?: string
   args?: string[]
   cwd?: string | null
+  /** undefined = keep; null = clear contract; [] = lockdown; list = allowlist (Item 2). */
+  allowedDataClasses?: readonly string[] | null
+  /** undefined = keep; null/0 = clear quota; >0 = set budget (Item 2). */
+  outboundQuotaBudget?: number | null
   label?: string | null
   enabled?: boolean
 }

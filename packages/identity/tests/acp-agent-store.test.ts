@@ -136,4 +136,71 @@ describe('AcpAgentStore (ACP-OUT-M1)', () => {
     expect(store.getAcpAgent('gone')).toBeNull()
     expect(store.removeAcpAgent('gone')).toBe(false)
   })
+
+  // --- Item 2: outbound gate policy (v34 data-class / quota columns; ACP has no approval) ---
+
+  it('the gate columns default off — no contract, no quota (legacy)', () => {
+    const a = store.addAcpAgent({ id: 'plain', capabilities: ['code'], command: 'npx' })
+    expect(a.allowedDataClasses).toBeNull() // null = no contract (governance off)
+    expect(a.outboundQuotaBudget).toBeNull()
+    const re = store.getAcpAgent('plain')!
+    expect(re.allowedDataClasses).toBeNull()
+    expect(re.outboundQuotaBudget).toBeNull()
+    // ACP carries no approval field at all (D5/D6 — it escalates per-tool).
+    expect('requireApprovalOutbound' in re).toBe(false)
+  })
+
+  it('a data-class allowlist round-trips; [] = lockdown (distinct from null)', () => {
+    const a = store.addAcpAgent({
+      id: 'classed',
+      capabilities: ['code'],
+      command: 'npx',
+      allowedDataClasses: ['public', 'pii'],
+    })
+    expect(a.allowedDataClasses).toEqual(['public', 'pii'])
+    expect(store.getAcpAgent('classed')?.allowedDataClasses).toEqual(['public', 'pii'])
+    const locked = store.addAcpAgent({ id: 'locked', capabilities: ['code'], command: 'npx', allowedDataClasses: [] })
+    expect(locked.allowedDataClasses).toEqual([])
+    expect(locked.allowedDataClasses).not.toBeNull()
+  })
+
+  it('allowlist trims + drops empties; a non-array value is rejected', () => {
+    const a = store.addAcpAgent({
+      id: 'trim',
+      capabilities: ['code'],
+      command: 'npx',
+      allowedDataClasses: ['  pii  ', '', 'public'],
+    })
+    expect(a.allowedDataClasses).toEqual(['pii', 'public'])
+    expect(() =>
+      store.addAcpAgent({ id: 'bad', capabilities: ['code'], command: 'npx', allowedDataClasses: 'pii' as never }),
+    ).toThrow(/allowedDataClasses/)
+  })
+
+  it('a quota budget round-trips; 0 persists (off) and negative is rejected', () => {
+    const a = store.addAcpAgent({ id: 'quota', capabilities: ['code'], command: 'npx', outboundQuotaBudget: 30 })
+    expect(a.outboundQuotaBudget).toBe(30)
+    expect(store.getAcpAgent('quota')?.outboundQuotaBudget).toBe(30)
+    const z = store.addAcpAgent({ id: 'zero', capabilities: ['code'], command: 'npx', outboundQuotaBudget: 0 })
+    expect(z.outboundQuotaBudget).toBe(0)
+    expect(() =>
+      store.addAcpAgent({ id: 'neg', capabilities: ['code'], command: 'npx', outboundQuotaBudget: -3 }),
+    ).toThrow(/outboundQuotaBudget/)
+  })
+
+  it('update sets the gate fields; omitting keeps them; null/null clears', () => {
+    store.addAcpAgent({
+      id: 'evolve',
+      capabilities: ['code'],
+      command: 'npx',
+      allowedDataClasses: ['public'],
+      outboundQuotaBudget: 12,
+    })
+    const kept = store.updateAcpAgent('evolve', { label: 'renamed' })
+    expect(kept.allowedDataClasses).toEqual(['public'])
+    expect(kept.outboundQuotaBudget).toBe(12)
+    const cleared = store.updateAcpAgent('evolve', { allowedDataClasses: null, outboundQuotaBudget: null })
+    expect(cleared.allowedDataClasses).toBeNull()
+    expect(cleared.outboundQuotaBudget).toBeNull()
+  })
 })

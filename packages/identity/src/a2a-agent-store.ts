@@ -33,6 +33,9 @@ interface A2aAgentRow {
   peer_id: string | null
   target_skill: string | null
   lifecycle: string | null
+  allowed_data_classes_json: string | null
+  outbound_quota_budget: number | null
+  require_approval_outbound: number
   enabled: number
   label: string | null
   created_at: number
@@ -120,6 +123,67 @@ function normLifecycle(value: A2aOutboundLifecycle | null | undefined): string |
   return JSON.stringify(out)
 }
 
+/**
+ * Item 2 — read the stored data-class allowlist JSON back to the gate's shape.
+ * Mirrors peer-store `parsePolicyArray` (the P4-M4 precedent): NULL → null = no
+ * contract (send anything, legacy); a JSON array → trimmed string[]; corrupt
+ * JSON / a non-array (only reachable by hand-editing the DB) → null = inert
+ * (no contract), consistent with how the mesh edge degrades a corrupt column.
+ * An empty stored array `'[]'` round-trips to `[]` = LOCKDOWN (distinct from
+ * NULL = off), so the host gate (`checkOutboundDataClasses`) refuses every
+ * declared class.
+ */
+function parseDataClasses(json: string | null): string[] | null {
+  if (json == null) return null
+  let v: unknown
+  try {
+    v = JSON.parse(json)
+  } catch {
+    return null
+  }
+  if (!Array.isArray(v)) return null
+  return v.filter((c): c is string => typeof c === 'string')
+}
+
+/**
+ * Item 2 — validate + serialize a data-class allowlist on the write path.
+ * null/undefined → NULL (no contract / clear). An array serializes its
+ * non-empty trimmed string elements — including `[]` → `'[]'` (lockdown). A
+ * non-array non-null value throws `invalid_input` (fail-visible, mirroring
+ * `normLifecycle`).
+ */
+function normDataClasses(value: readonly string[] | null | undefined): string | null {
+  if (value == null) return null
+  if (!Array.isArray(value)) {
+    throw new IdentityError({
+      code: 'invalid_input',
+      message: 'a2a agent allowedDataClasses must be a string[] or null',
+    })
+  }
+  const classes = value
+    .filter((c): c is string => typeof c === 'string')
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0)
+  return JSON.stringify(classes)
+}
+
+/**
+ * Item 2 — validate an outbound quota budget on the write path. null/undefined
+ * → null (no quota). A finite non-negative number floors to an integer (0 = a
+ * persisted "off"). Negative / non-finite / non-number throws `invalid_input`.
+ * The host owns the window + limiter; identity only rejects nonsense.
+ */
+function normQuota(value: number | null | undefined): number | null {
+  if (value == null) return null
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new IdentityError({
+      code: 'invalid_input',
+      message: 'a2a agent outboundQuotaBudget must be a non-negative number or null',
+    })
+  }
+  return Math.floor(value)
+}
+
 function rowToAgent(r: A2aAgentRow): A2aOutboundAgent {
   return {
     id: r.id,
@@ -129,6 +193,9 @@ function rowToAgent(r: A2aAgentRow): A2aOutboundAgent {
     peerId: r.peer_id ?? null,
     targetSkill: r.target_skill ?? null,
     lifecycle: parseLifecycle(r.lifecycle ?? null),
+    allowedDataClasses: parseDataClasses(r.allowed_data_classes_json ?? null),
+    outboundQuotaBudget: typeof r.outbound_quota_budget === 'number' ? r.outbound_quota_budget : null,
+    requireApprovalOutbound: r.require_approval_outbound === 1,
     enabled: r.enabled === 1,
     label: r.label ?? null,
     createdAt: r.created_at,
@@ -178,14 +245,18 @@ export class A2aAgentStore {
   constructor(private readonly db: SqliteDb) {
     this.stmtInsert = db.prepare(
       `INSERT INTO a2a_outbound_agents
-         (id, capabilities, url, token_env, peer_id, target_skill, lifecycle, enabled, label, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (id, capabilities, url, token_env, peer_id, target_skill, lifecycle,
+          allowed_data_classes_json, outbound_quota_budget, require_approval_outbound,
+          enabled, label, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     this.stmtById = db.prepare('SELECT * FROM a2a_outbound_agents WHERE id = ?')
     this.stmtList = db.prepare('SELECT * FROM a2a_outbound_agents ORDER BY created_at ASC')
     this.stmtUpdate = db.prepare(
       `UPDATE a2a_outbound_agents
-         SET capabilities = ?, url = ?, token_env = ?, peer_id = ?, target_skill = ?, lifecycle = ?, enabled = ?, label = ?, updated_at = ?
+         SET capabilities = ?, url = ?, token_env = ?, peer_id = ?, target_skill = ?, lifecycle = ?,
+             allowed_data_classes_json = ?, outbound_quota_budget = ?, require_approval_outbound = ?,
+             enabled = ?, label = ?, updated_at = ?
          WHERE id = ?`,
     )
     this.stmtDelete = db.prepare('DELETE FROM a2a_outbound_agents WHERE id = ?')
@@ -207,6 +278,9 @@ export class A2aAgentStore {
     const peerId = normOptional(input.peerId)
     const targetSkill = normOptional(input.targetSkill)
     const lifecycle = normLifecycle(input.lifecycle)
+    const allowedDataClasses = normDataClasses(input.allowedDataClasses)
+    const outboundQuotaBudget = normQuota(input.outboundQuotaBudget)
+    const requireApprovalOutbound = input.requireApprovalOutbound ? 1 : 0
     const enabled = input.enabled === false ? 0 : 1
     const label = normOptional(input.label)
 
@@ -220,6 +294,9 @@ export class A2aAgentStore {
         peerId,
         targetSkill,
         lifecycle,
+        allowedDataClasses,
+        outboundQuotaBudget,
+        requireApprovalOutbound,
         enabled,
         label,
         now,
@@ -266,6 +343,18 @@ export class A2aAgentStore {
     const targetSkill = patch.targetSkill !== undefined ? normOptional(patch.targetSkill) : r.target_skill
     // undefined = keep the raw stored value; null = turn lifecycle off; object = set it.
     const lifecycle = patch.lifecycle !== undefined ? normLifecycle(patch.lifecycle) : r.lifecycle
+    // undefined = keep; null = clear contract; [] = lockdown; list = allowlist.
+    const allowedDataClasses =
+      patch.allowedDataClasses !== undefined ? normDataClasses(patch.allowedDataClasses) : r.allowed_data_classes_json
+    // undefined = keep; null = clear quota; >=0 = set budget.
+    const outboundQuotaBudget =
+      patch.outboundQuotaBudget !== undefined ? normQuota(patch.outboundQuotaBudget) : r.outbound_quota_budget
+    const requireApprovalOutbound =
+      patch.requireApprovalOutbound !== undefined
+        ? patch.requireApprovalOutbound
+          ? 1
+          : 0
+        : r.require_approval_outbound
     const enabled = patch.enabled !== undefined ? (patch.enabled ? 1 : 0) : r.enabled
     const label = patch.label !== undefined ? normOptional(patch.label) : r.label
 
@@ -276,6 +365,9 @@ export class A2aAgentStore {
       peerId,
       targetSkill,
       lifecycle,
+      allowedDataClasses,
+      outboundQuotaBudget,
+      requireApprovalOutbound,
       enabled,
       label,
       Date.now(),

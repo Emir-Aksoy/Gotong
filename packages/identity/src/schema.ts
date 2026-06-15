@@ -1106,6 +1106,40 @@ const MIGRATIONS: Migration[] = [
       ALTER TABLE user_totp ADD COLUMN last_step INTEGER;
     `,
   },
+  {
+    // Item 2 — route the RAW A2A/ACP outbound edges through the P4-M4
+    // chokepoint. `A2aRemoteParticipant` / `AcpParticipant` are LOCAL
+    // participants that never cross a `RemoteHubViaLink`, so the mesh
+    // data-class + quota gates (which live in that wrapper) are structurally
+    // unreachable for them. These per-agent policy columns drive the SAME gates
+    // applied at the participant's own outbound edge (X-M4), so a workflow step
+    // dispatched to an external A2A/ACP capability is bounded the same way a
+    // mesh peer step is. Additive, nullable, NO secret column (continues the
+    // store's "never store a credential" discipline). Mirrors the per-link
+    // contract columns on `peers` (v15): one column per policy dimension.
+    //
+    //   allowed_data_classes_json  NULL = no contract (send anything, legacy).
+    //                              '[]' = lockdown (refuse any declared class).
+    //                              '["pii"]' = allowlist. Gates `Task.dataClasses`
+    //                              via the SHARED core `checkOutboundDataClasses`.
+    //   outbound_quota_budget      NULL / 0 = no quota. >0 = max sends per window
+    //                              (host owns the FixedWindowLimiter; X-M4).
+    //   require_approval_outbound  (a2a only) 0 | 1 — 1 wraps the participant in
+    //                              `ApprovalGatedParticipant` so an outbound send
+    //                              parks for owner approval first (Y-M1). ACP has
+    //                              no such column: it already escalates per-tool
+    //                              to the inbox (`dangerousToolGate`), and it is a
+    //                              local subprocess, not a network egress (D5/D6).
+    version: 34,
+    name: 'a2a-acp-outbound-gate',
+    sql: `
+      ALTER TABLE a2a_outbound_agents ADD COLUMN allowed_data_classes_json TEXT;
+      ALTER TABLE a2a_outbound_agents ADD COLUMN outbound_quota_budget INTEGER;
+      ALTER TABLE a2a_outbound_agents ADD COLUMN require_approval_outbound INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE acp_outbound_agents ADD COLUMN allowed_data_classes_json TEXT;
+      ALTER TABLE acp_outbound_agents ADD COLUMN outbound_quota_budget INTEGER;
+    `,
+  },
 ]
 
 /**
