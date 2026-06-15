@@ -209,6 +209,15 @@ importers:
       '@aipehub/inbox':
         specifier: workspace:*
         version: link:../../packages/inbox
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@aipehub/llm-openai':
+        specifier: workspace:*
+        version: link:../../packages/llm-openai
+      '@aipehub/mcp-client':
+        specifier: workspace:*
+        version: link:../../packages/mcp-client
       '@aipehub/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow

@@ -7,6 +7,7 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "selfcheck": "tsx src/participants.selfcheck.ts",
+    "real-agents:selfcheck": "tsx src/real-agents.selfcheck.ts",
     "load-template": "tsx src/load-template.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -14,6 +15,9 @@
     "@aipehub/core": "workspace:*",
     "@aipehub/workflow": "workspace:*",
     "@aipehub/inbox": "workspace:*",
+    "@aipehub/llm": "workspace:*",
+    "@aipehub/llm-openai": "workspace:*",
+    "@aipehub/mcp-client": "workspace:*",
     "yaml": "^2.6.0"
   }
 }
