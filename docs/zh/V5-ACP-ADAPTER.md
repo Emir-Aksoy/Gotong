@@ -276,6 +276,40 @@ follow-up。
 
 ---
 
+## Item 2 — ACP 出站闸（per-step data-class + 配额，复用 P4-M4 纯函数）
+
+> 用户「做这两项，一项一项做」的第二项里 ACP 那半。A2A 那半（含**出站审批**）记在
+> [`V5-H-FINAL.md`](V5-H-FINAL.md) §十一;两半共用同一个 core 纯函数，**完整对照表见那节 §11.4**。
+
+**缺口（同 A2A）**: `AcpParticipant extends AgentParticipant` 是**本地参与者**，被派发时**就地** spawn
+本地子进程转发，**永不经过 `RemoteHubViaLink`** → P4-M4 的 data-class 闸 / 出站配额对它**结构上够不着**。
+工作流步派到外部 ACP 能力时，runner 盖好的 `task.dataClasses` 此前无人校验。
+
+**做法（复用，不重造）**: 在 `AcpParticipant` 自己的出站边复用**同一个** core 纯函数
+`checkOutboundDataClasses`（`packages/core/src/peer-acl.ts:94`）——和 mesh 边、A2A 边**零漂移**。
+
+- **X-M2**（`73b8680`，`@aipehub/acp-agent`）构造加 `allowedDataClasses?` + `outboundQuotaGate?`;
+  `handleTask` 把闸插在 `session.ensureStarted()` **之前**（`acp-participant.ts:183`）→ **被拒任务
+  绝不 spawn 子进程**（R2 缓解，单测断言「禁类时子进程从未 ensureStarted」）。`!ok` 抛
+  `outbound_data_class_denied:<class>`;配额超抛 `outbound_quota_exceeded`。
+- **X-M3**（`3d4ff18`，identity **v34**）`acp_outbound_agents` 加 `allowed_data_classes_json TEXT`
+  + `outbound_quota_budget INTEGER`（**无 `require_approval_outbound` 列** — D5）。
+- **X-M4**（`4c944f3`，host）`AcpOutboundManager` 同 A2A manager 持 per-agent `FixedWindowLimiter`
+  Map（survives `refresh`）+ 穿 `allowedDataClasses`/`outboundQuotaGate` 进构造。
+- **Z-M1/Z-M2**（`caa94ed`/`5812d85`，web）admin「联邦」tab ACP 面板单列「出站闸」摘要
+  （data-class + 配额，**无审批徽章**）+ 表单两输入 + i18n + 重建。
+
+**为什么 ACP 的 data-class 闸是「治理」不是「网络出口」（D6）**: ACP 是本地子进程（Claude Code/Codex
+走自己登录态，**非**组织网络出口）。所以这道 data-class 闸约束的是**喂给第三方编码 agent 的上下文
+属于哪一类**（治理控制），配额是**跑飞护栏**;出站审批 ACP **不加**——它已有 per-tool
+`dangerousToolGate`→escalate→收件箱（见上「ACP-HITL」节），不叠出站审批装饰器。注释里如实写明
+这层不对称，不当 scope 问题处理。
+
+**显式推迟（ACP 半）**: ACP per-tool 级配额（现配额是 per-task send 计数，非 per-tool-call）/ 出站边
+redaction hook（同 A2A，独立增量）。完整推迟清单见 [`V5-H-FINAL.md`](V5-H-FINAL.md) §11.5。
+
+---
+
 ## 运维须知
 
 - **动作闸是默认推荐**。`dangerousToolGate()` 用一组保守的危险模式（`rm -rf` / `git push` /
@@ -300,6 +334,8 @@ follow-up。
   CRUD + admin 面板，见上「折进生产 host」节）。
 - ~~把 ACP 权限 park 升级成 inbox 审批（`onMatch:'escalate'` → 两步恢复）~~ **✓ ACP-HITL 已做**
   （main.ts 接好 inbox + owner 时自动 escalate，`AIPE_ACP_DANGER=deny` 强制旧硬拒；见上「ACP-HITL」节）。
+- ~~ACP 出站边的 per-step data-class + 配额闸（不过 P4-M4 chokepoint）~~ **✓ Item 2 已做**
+  （identity v34 两列 + 复用 core `checkOutboundDataClasses` + 闸先于 `ensureStarted` + admin 面板;见上「Item 2 — ACP 出站闸」节）。
 - `tool_call` / `plan` `session/update` 富渲染（MVP 只 message-chunk 文本 OBSERVE）。
 
 ---
