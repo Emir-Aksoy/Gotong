@@ -34,6 +34,7 @@ import type {
   MeHubStewardSurface,
   MeHubStewardPlanResult,
   MeHubStewardApplyResult,
+  StewardHistoryTurn,
 } from '../src/me-routes.js'
 
 /** A plain Error carrying an HTTP status, mirroring what the host services throw. */
@@ -46,7 +47,7 @@ class FakeOperatorSteward implements MeHubStewardSurface {
   readonly planCalls: Array<{
     userId: string
     instruction: string
-    history?: Array<{ role: 'user' | 'assistant'; content: string }>
+    history?: StewardHistoryTurn[]
   }> = []
   readonly applyCalls: Array<{ userId: string; action: unknown }> = []
 
@@ -79,7 +80,7 @@ class FakeOperatorSteward implements MeHubStewardSurface {
   async plan(input: {
     userId: string
     instruction: string
-    history?: Array<{ role: 'user' | 'assistant'; content: string }>
+    history?: StewardHistoryTurn[]
   }): Promise<MeHubStewardPlanResult> {
     this.planCalls.push(input)
     if (this.planThrows) throw this.planThrows
@@ -204,6 +205,33 @@ describe('/api/admin/steward/plan', () => {
     expect(b.steward.planCalls[0]?.history).toEqual([
       { role: 'user', content: '建一个工单助手' },
       { role: 'assistant', content: '已经建好了。' },
+    ])
+  })
+
+  it('POST forwards a turn `result` shape-coerced (operator route shares the helper)', async () => {
+    await fetch(`${b.server.url}/api/admin/steward/plan`, {
+      method: 'POST',
+      headers: { cookie: b.operatorCookie, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        instruction: '接着改工作流',
+        history: [
+          { role: 'user', content: '把工单助手建起来' },
+          {
+            role: 'assistant',
+            content: '',
+            result: {
+              kind: 'create_agent',
+              status: 'done',
+              subject: 'support-bot',
+              secret: 'sk-should-never-appear', // forged → dropped by the shared coercer
+            },
+          },
+        ],
+      }),
+    })
+    expect(b.steward.planCalls[0]?.history).toEqual([
+      { role: 'user', content: '把工单助手建起来' },
+      { role: 'assistant', content: '', result: { kind: 'create_agent', status: 'done', subject: 'support-bot' } },
     ])
   })
 

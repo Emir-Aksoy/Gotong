@@ -206,6 +206,7 @@
         return {}
       })
       renderResult(resultEl, btn, r, j)
+      recordOutcome(ca.action, r, j)
     } catch (err) {
       if (resultEl) {
         resultEl.className = 'me-steward-result error'
@@ -214,6 +215,41 @@
       btn.disabled = false
       btn.textContent = prev
     }
+  }
+
+  // Record a TERMINAL apply outcome into `chat` so the next plan POST round-trips
+  // it: the host folds `{kind,status,subject}` into a `[执行结果] …` line and the
+  // operator steward builds its next step on what already ran. Only the
+  // whitelisted shape is sent — the host re-validates kind/status and renders the
+  // text itself, so this can't inject a "succeeded" narrative. An `invalid` /
+  // transport error left the button live to retry, so it's not recorded.
+  function recordOutcome(action, r, j) {
+    const kind = action && action.kind
+    if (!kind) return
+    const raw = j && j.status
+    let status = null
+    if (r.ok && raw === 'done') status = 'done'
+    else if (raw === 'pending_approval' || raw === 'needs_approval') status = 'pending_approval'
+    else if (raw === 'refused') status = 'refused'
+    if (!status) return
+    chat.push({ role: 'assistant', content: '', result: { kind: kind, status: status, subject: subjectOf(action, j) } })
+  }
+
+  // The thing an action acted on, for the result line. Reads only non-secret
+  // identifier fields (never an env-var value / secret); the host clips it anyway.
+  function subjectOf(action, j) {
+    const res = (j && j.result) || {}
+    const fromResult = res.agent && (res.agent.id || res.agent.label)
+    const fromAction =
+      action &&
+      (action.id ||
+        action.agentId ||
+        action.workflowId ||
+        action.handle ||
+        action.provider ||
+        action.credentialId ||
+        action.peerId)
+    return String(fromResult || fromAction || '')
   }
 
   // Render an apply outcome into the card; retire the button on a terminal

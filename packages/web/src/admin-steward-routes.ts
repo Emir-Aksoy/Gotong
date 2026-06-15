@@ -29,7 +29,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AdminRecord } from '@aipehub/core'
 import { readJsonBody, sendJson } from './http-helpers.js'
-import type { MeHubStewardSurface } from './me-routes.js'
+import { coerceStewardHistory, type MeHubStewardSurface } from './me-routes.js'
 
 /** The acting admin's RBAC identity (same shape the workflow / agent admin routes use). */
 export interface AdminStewardActor {
@@ -120,23 +120,15 @@ async function handleAdminStewardPlan(
     return
   }
   // Optional conversation history (multi-step follow-ups). Web only shape-coerces
-  // (duck discipline): keep `{role:'user'|'assistant', content:string}` turns,
-  // drop the rest, clip to the last 12; the host service is the trimming authority.
+  // via the SHARED helper (keeps `{role,content}` + a `{kind,status,subject?}`
+  // result, drops the rest, clips to 12) so member + operator routes never drift;
+  // the host service is the trimming/validation authority.
   const rawHistory = body && typeof body === 'object' ? (body as { history?: unknown }).history : undefined
   if (rawHistory !== undefined && !Array.isArray(rawHistory)) {
     sendJson(res, { error: 'history 必须是一个数组。', code: 'bad_request' }, 400)
     return
   }
-  const history = (rawHistory ?? [])
-    .filter(
-      (t): t is { role: 'user' | 'assistant'; content: string } =>
-        !!t &&
-        typeof t === 'object' &&
-        ((t as { role?: unknown }).role === 'user' || (t as { role?: unknown }).role === 'assistant') &&
-        typeof (t as { content?: unknown }).content === 'string',
-    )
-    .slice(-12)
-    .map((t) => ({ role: t.role, content: t.content }))
+  const history = coerceStewardHistory(rawHistory)
   try {
     const out = await ctx.steward!.plan({
       userId,

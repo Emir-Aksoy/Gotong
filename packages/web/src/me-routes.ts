@@ -659,13 +659,29 @@ export type MeHubStewardApplyResult =
   | { status: 'pending_approval'; tier: string; inboxItemId: string }
   | { status: 'needs_approval'; tier: string }
 
+/**
+ * One turn of a steward conversation the SPA echoes back for multi-step
+ * follow-ups. From Phase C a turn may carry the STRUCTURED outcome of the action
+ * it applied (`result`); the host folds that into a fixed-format `[执行结果] …`
+ * line so the next proposal builds on what already ran. The web only
+ * shape-coerces — the host service whitelists `result.kind`/`status` against the
+ * real action enum and clips, so a forged result can never inject free narrative
+ * (only host-rendered text from a whitelisted kind/status/subject reaches the
+ * prompt).
+ */
+export interface StewardHistoryTurn {
+  role: 'user' | 'assistant'
+  content: string
+  result?: { kind: string; status: string; subject?: string }
+}
+
 export interface MeHubStewardSurface {
   /** Propose: ZERO side effects. Throws iff the underlying dispatch failed. */
   plan(input: {
     userId: string
     instruction: string
     /** Prior turns of this steward conversation (multi-step follow-ups). */
-    history?: Array<{ role: 'user' | 'assistant'; content: string }>
+    history?: StewardHistoryTurn[]
   }): Promise<MeHubStewardPlanResult>
   /** Apply ONE accepted action (validated + re-classified server-side). */
   apply(input: { userId: string; action: unknown }): Promise<MeHubStewardApplyResult>
@@ -1516,6 +1532,49 @@ async function handleMeWorkflowEdit(
 // actions to the approval inbox. userId is server-forced (never client-supplied).
 // ---------------------------------------------------------------------------
 
+/**
+ * Shape-coerce a `{kind,status,subject?}`-shaped turn `result` from an untrusted
+ * body. The web only checks the field types are strings — the host service
+ * re-validates `kind`/`status` against the real action enum, drops unknowns, and
+ * renders the line itself, so this can't smuggle narrative into the prompt.
+ */
+function coerceStewardTurnResult(
+  raw: unknown,
+): { kind: string; status: string; subject?: string } | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const kind = (raw as { kind?: unknown }).kind
+  const status = (raw as { status?: unknown }).status
+  if (typeof kind !== 'string' || typeof status !== 'string') return undefined
+  const out: { kind: string; status: string; subject?: string } = { kind, status }
+  const subject = (raw as { subject?: unknown }).subject
+  if (typeof subject === 'string') out.subject = subject
+  return out
+}
+
+/**
+ * Shape-coerce an untrusted `history[]` from a steward request body: keep
+ * well-formed `{role,content}` turns, carry a `{kind,status,subject?}`-shaped
+ * `result` when present, drop the rest, clip to the last 12. Shared by the member
+ * (`/api/me/steward`) and operator (`/api/admin/steward`) plan routes so the two
+ * coercions never drift; the host service stays the trimming/validation authority.
+ */
+export function coerceStewardHistory(raw: unknown): StewardHistoryTurn[] {
+  if (!Array.isArray(raw)) return []
+  const out: StewardHistoryTurn[] = []
+  for (const t of raw) {
+    if (!t || typeof t !== 'object') continue
+    const role = (t as { role?: unknown }).role
+    if (role !== 'user' && role !== 'assistant') continue
+    const content = (t as { content?: unknown }).content
+    if (typeof content !== 'string') continue
+    const turn: StewardHistoryTurn = { role, content }
+    const result = coerceStewardTurnResult((t as { result?: unknown }).result)
+    if (result) turn.result = result
+    out.push(turn)
+  }
+  return out.slice(-12)
+}
+
 async function handleMeStewardPlan(
   ctx: HandleMeRouteCtx,
   req: IncomingMessage,
@@ -1547,23 +1606,14 @@ async function handleMeStewardPlan(
     return
   }
   // Optional conversation history. Web only shape-coerces (duck discipline): keep
-  // `{role:'user'|'assistant', content:string}` turns, drop the rest, clip to the
-  // last 12; the host service is the authority on any further trimming.
+  // `{role,content}` turns + a `{kind,status,subject?}`-shaped `result`, drop the
+  // rest, clip to the last 12; the host service is the trimming/validation authority.
   const rawHistory = body && typeof body === 'object' ? (body as { history?: unknown }).history : undefined
   if (rawHistory !== undefined && !Array.isArray(rawHistory)) {
     sendJson(res, { error: 'history 必须是一个数组。', code: 'bad_request' }, 400)
     return
   }
-  const history = (rawHistory ?? [])
-    .filter(
-      (t): t is { role: 'user' | 'assistant'; content: string } =>
-        !!t &&
-        typeof t === 'object' &&
-        ((t as { role?: unknown }).role === 'user' || (t as { role?: unknown }).role === 'assistant') &&
-        typeof (t as { content?: unknown }).content === 'string',
-    )
-    .slice(-12)
-    .map((t) => ({ role: t.role, content: t.content }))
+  const history = coerceStewardHistory(rawHistory)
   try {
     const out = await ctx.hubSteward.plan({
       userId,

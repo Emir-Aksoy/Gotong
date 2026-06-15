@@ -1135,6 +1135,7 @@
       })
       const j = await r.json().catch(() => ({}))
       renderStewardResult(resultEl, btn, r, j)
+      recordStewardOutcome(ca.action, r, j)
     } catch (err) {
       if (resultEl) {
         resultEl.className = 'me-steward-result error'
@@ -1143,6 +1144,41 @@
       btn.disabled = false
       btn.textContent = prev
     }
+  }
+
+  // Record a TERMINAL apply outcome into the conversation so the next plan POST
+  // round-trips it: the host folds `{kind,status,subject}` into a `[执行结果] …`
+  // line and the steward builds its next step on what already ran. Only the
+  // whitelisted shape is sent — the host re-validates kind/status and renders the
+  // text itself, so a client can't inject a "succeeded" narrative. An `invalid` /
+  // transport error left the button live to retry, so it's not recorded.
+  function recordStewardOutcome(action, r, j) {
+    const kind = action && action.kind
+    if (!kind) return
+    const raw = j && j.status
+    let status = null
+    if (r.ok && raw === 'done') status = 'done'
+    else if (raw === 'pending_approval' || raw === 'needs_approval') status = 'pending_approval'
+    else if (raw === 'refused') status = 'refused'
+    if (!status) return
+    stewardChat.push({ role: 'assistant', content: '', result: { kind, status, subject: stewardSubjectOf(action, j) } })
+  }
+
+  // The thing an action acted on, for the result line. Reads only non-secret
+  // identifier fields (never an env-var value / secret); the host clips it anyway.
+  function stewardSubjectOf(action, j) {
+    const res = (j && j.result) || {}
+    const fromResult = res.agent && (res.agent.id || res.agent.label)
+    const fromAction =
+      action &&
+      (action.id ||
+        action.agentId ||
+        action.workflowId ||
+        action.handle ||
+        action.provider ||
+        action.credentialId ||
+        action.peerId)
+    return String(fromResult || fromAction || '')
   }
 
   // Render the outcome of an apply into the card, and retire the button on a
