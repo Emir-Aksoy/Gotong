@@ -1780,12 +1780,19 @@ async function main(): Promise<void> {
   // push add/update/delete onto the running hub without a restart (M11c).
   let a2aOutbound: A2aOutboundManager | undefined
   if (identity) {
-    // Item 2 — per-agent outbound quota window (mirrors AIPE_PEER_LINK_QUOTA_WINDOW_MS).
+    // Item 2 (Y) — an outbound A2A agent flagged `requireApprovalOutbound` is
+    // wrapped in an ApprovalGatedParticipant: each send parks for a /me approval
+    // before it leaves the hub. The approver is the org owner, the same one the
+    // ACP escalation and the Phase 18 mesh outbound gate use. A row that requires
+    // approval but has no inbox/owner stays persisted-but-inactive (fail-closed).
+    const a2aApprover = inboxStore ? findOwnerUserId(identity) : null
     a2aOutbound = new A2aOutboundManager({
       hub,
       source: identity,
       logger: log,
+      // Item 2 — per-agent outbound quota window (mirrors AIPE_PEER_LINK_QUOTA_WINDOW_MS).
       quotaWindowMs: envInt('AIPE_A2A_OUTBOUND_QUOTA_WINDOW_MS', 60_000),
+      ...(inboxStore && a2aApprover ? { approvalInbox: inboxStore, approver: a2aApprover } : {}),
     })
     a2aOutbound.registerAllFromStore()
     // Stream H — let the workflow controller's off-hub capability view see live

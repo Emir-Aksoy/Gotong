@@ -14,10 +14,34 @@
 
 import { describe, it, expect, beforeEach } from 'vitest'
 
+import { A2aRemoteParticipant } from '@aipehub/a2a'
 import { Hub, AgentParticipant, type Logger, type Task } from '@aipehub/core'
 import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { type InboxItem, type InboxStore } from '@aipehub/inbox'
 
 import { A2aOutboundManager } from '../src/a2a-outbound.js'
+import { ApprovalGatedParticipant } from '../src/outbound-approval.js'
+
+/** Minimal in-memory InboxStore — only the methods the approval gate touches. */
+class MemInboxStore implements InboxStore {
+  readonly items = new Map<string, InboxItem>()
+  ensureDirs(): void {}
+  async write(item: InboxItem): Promise<void> {
+    this.items.set(item.itemId, { ...item })
+  }
+  async get(itemId: string): Promise<InboxItem | null> {
+    return this.items.get(itemId) ?? null
+  }
+  async listPending(userId: string): Promise<InboxItem[]> {
+    return [...this.items.values()].filter((i) => i.userId === userId && i.status === 'pending')
+  }
+  async markResolved(): Promise<InboxItem> {
+    throw new Error('not used in these tests')
+  }
+  async delegate(): Promise<InboxItem> {
+    throw new Error('not used in these tests')
+  }
+}
 
 const silentLogger: Logger = {
   trace() {},
@@ -369,6 +393,89 @@ describe('A2aOutboundManager (P1-M11b)', () => {
       mgr.refresh('recycle') // row still exists → re-registers with a brand-new limiter
       const g2 = gateOf('recycle').outboundQuotaGate!
       expect(g2(undefined)).toBe(true) // fresh counter proves remove() cleared it
+    })
+  })
+
+  // --- Item 2 (Y): outbound approval wrap -----------------------------------
+  // When a stored row carries `requireApprovalOutbound`, the manager must wrap
+  // its A2A edge in an `ApprovalGatedParticipant` (Phase 18 outbound gate) so a
+  // person approves each send from `/me` before it leaves the hub. The gate
+  // delegates id + capabilities to the inner edge, so the hub still routes the
+  // agent's caps to it. The crux is fail-closed: a row that REQUIRES approval but
+  // has no approver wired must NOT register the bare edge ungated — it stays
+  // persisted-but-inactive (`approval_unconfigured`). The gate's full park/
+  // approve/reject + lifecycle-resume delegation is unit-tested in
+  // outbound-approval.test.ts; here we pin the manager WIRING.
+  describe('Item 2 (Y) — outbound approval wrap', () => {
+    /** A manager with the approval machinery injected (inbox + org-owner approver). */
+    function approvingManager(vars: Record<string, string>, store: InboxStore): A2aOutboundManager {
+      return new A2aOutboundManager({
+        hub,
+        source: identity,
+        logger: silentLogger,
+        readEnv: envFrom(vars),
+        approvalInbox: store,
+        approver: 'owner-user',
+      })
+    }
+
+    it('wraps an approval-required agent in the gate; a dispatch parks for /me approval', async () => {
+      const store = new MemInboxStore()
+      const mgr = approvingManager({ TOK: 'secret' }, store)
+      identity.addA2aAgent({
+        id: 'gated',
+        capabilities: ['review'],
+        url: 'https://a/a2a',
+        tokenEnv: 'TOK',
+        requireApprovalOutbound: true,
+      })
+      expect(mgr.refresh('gated')).toEqual({ active: true })
+      // Structural: the live participant is the approval gate, not the bare edge —
+      // yet it still answers to the agent's id (the gate delegates `id`).
+      const live = hub.participant('gated')
+      expect(live).toBeInstanceOf(ApprovalGatedParticipant)
+      expect(live?.capabilities).toEqual(['review'])
+
+      // Behavioural: a dispatch PARKS (writes a pending approval item) rather than
+      // sending — nothing crossed the boundary, no `fetchImpl` was even needed.
+      const res = await hub.dispatch({
+        from: 'human',
+        strategy: { kind: 'explicit', to: 'gated' },
+        payload: { text: 'hi' },
+      })
+      expect(res.kind).toBe('suspended')
+      const pending = await store.listPending('owner-user')
+      expect(pending).toHaveLength(1)
+      expect(pending[0]!.kind).toBe('approval')
+      expect(pending[0]!.itemId).toBe(res.taskId)
+    })
+
+    it('an approval-required agent with NO approver is persisted-but-inactive (fail-closed)', () => {
+      // The DEFAULT manager() injects neither inbox nor approver.
+      const mgr = manager({ TOK: 'secret' })
+      identity.addA2aAgent({
+        id: 'orphan',
+        capabilities: ['x'],
+        url: 'https://a/a2a',
+        tokenEnv: 'TOK',
+        requireApprovalOutbound: true,
+      })
+      expect(mgr.refresh('orphan')).toEqual({ active: false, reason: 'approval_unconfigured' })
+      // Never registered ungated — the whole point of fail-closed.
+      expect(hub.participant('orphan')).toBeUndefined()
+      // And the read-only probe agrees without mutating the hub.
+      expect(mgr.statusOf('orphan')).toEqual({ active: false, reason: 'approval_unconfigured' })
+    })
+
+    it('an agent that does NOT require approval registers the bare A2A edge (no gate)', () => {
+      const store = new MemInboxStore()
+      // Approver IS present, but the row opts out → no wrap.
+      const mgr = approvingManager({ TOK: 'secret' }, store)
+      identity.addA2aAgent({ id: 'plain', capabilities: ['x'], url: 'https://a/a2a', tokenEnv: 'TOK' })
+      expect(mgr.refresh('plain')).toEqual({ active: true })
+      const live = hub.participant('plain')
+      expect(live).toBeInstanceOf(A2aRemoteParticipant)
+      expect(live).not.toBeInstanceOf(ApprovalGatedParticipant)
     })
   })
 })

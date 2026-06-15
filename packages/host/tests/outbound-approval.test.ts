@@ -19,7 +19,13 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import { isSuspendTaskError, type Message, type Task, type TaskResult } from '@aipehub/core'
+import {
+  isSuspendTaskError,
+  SuspendTaskError,
+  type Message,
+  type Task,
+  type TaskResult,
+} from '@aipehub/core'
 import { NEVER_RESUME_AT, type InboxItem, type InboxStore } from '@aipehub/inbox'
 
 import {
@@ -62,6 +68,38 @@ class FakeInner implements GatedOutboundInner {
   }
   async onMessage(msg: Message): Promise<void> {
     this.messages.push(msg)
+  }
+}
+
+/**
+ * Item 2 D4 — an inner that ALSO has its own resume hook, like a lifecycle-aware
+ * A2A participant: after approval its `onTask` settles, but a real one can park
+ * to poll `tasks/get`, and the sweep then wakes the WRAPPER with the inner's own
+ * (non-approval) carried state. `mode` controls what `onResume` does:
+ *   - 'ok'   → settle (the poll found the remote done)
+ *   - 'park' → re-throw SuspendTaskError (the remote is still working → poll again)
+ */
+class FakeLifecycleInner implements GatedOutboundInner {
+  readonly sent: Task[] = []
+  readonly resumed: Array<{ task: Task; state: unknown }> = []
+  constructor(
+    readonly mode: 'ok' | 'park' = 'ok',
+    readonly id = 'hub_remote',
+    readonly capabilities: readonly string[] = ['probe'],
+  ) {}
+  async onTask(task: Task): Promise<TaskResult> {
+    this.sent.push(task)
+    return { kind: 'ok', taskId: task.id, by: this.id, output: { delivered: true }, ts: 1 }
+  }
+  async onResume(task: Task, state: unknown): Promise<TaskResult> {
+    this.resumed.push({ task, state })
+    if (this.mode === 'park') {
+      throw new SuspendTaskError({
+        resumeAt: 1000,
+        state: { __a2aLifecycle: 1, peerTaskId: 'pt', attempt: 2 },
+      })
+    }
+    return { kind: 'ok', taskId: task.id, by: this.id, output: { polled: true }, ts: 1 }
   }
 }
 
@@ -188,6 +226,50 @@ describe('ApprovalGatedParticipant — onResume forwards or denies', () => {
       isSuspendTaskError,
     )
     expect(inner.sent).toHaveLength(0)
+  })
+})
+
+describe('ApprovalGatedParticipant — D4 lifecycle resume delegation', () => {
+  // The inner's own carried state (an A2A `tasks/get` poll handle) — NOT an
+  // approval verdict. Before D4 this re-parked forever and lost the lifecycle.
+  const lifecycleState = { __a2aLifecycle: 1, peerTaskId: 'pt', attempt: 1 }
+
+  function lifecycleGate(mode: 'ok' | 'park') {
+    const inner = new FakeLifecycleInner(mode)
+    const store = new MemInboxStore()
+    const gated = new ApprovalGatedParticipant({
+      inner,
+      store,
+      approver: 'owner-user',
+      now: () => 42,
+    })
+    return { inner, gated }
+  }
+
+  it('non-approval resume delegates to inner.onResume (poll, not swallowed)', async () => {
+    const { inner, gated } = lifecycleGate('ok')
+    const result = await gated.onResume(makeTask(), lifecycleState)
+    // Reached the inner's resume with the SAME state — not re-parked, not re-sent.
+    expect(inner.resumed).toHaveLength(1)
+    expect(inner.resumed[0]!.state).toEqual(lifecycleState)
+    expect(inner.sent).toHaveLength(0)
+    expect(result.kind).toBe('ok')
+    if (result.kind === 'ok') expect(result.output).toEqual({ polled: true })
+  })
+
+  it('delegated inner re-park propagates (the lifecycle keeps polling)', async () => {
+    const { inner, gated } = lifecycleGate('park')
+    await expect(gated.onResume(makeTask(), lifecycleState)).rejects.toSatisfy(isSuspendTaskError)
+    // It went through the inner (not the gate's own re-park), and still no send.
+    expect(inner.resumed).toHaveLength(1)
+    expect(inner.sent).toHaveLength(0)
+  })
+
+  it('an approval verdict still wins over delegation (approved → onTask, not onResume)', async () => {
+    const { inner, gated } = lifecycleGate('ok')
+    await gated.onResume(makeTask(), { answer: { kind: 'approval', approved: true } })
+    expect(inner.sent).toHaveLength(1) // the real cross-org send
+    expect(inner.resumed).toHaveLength(0) // NOT misread as a lifecycle poll
   })
 })
 

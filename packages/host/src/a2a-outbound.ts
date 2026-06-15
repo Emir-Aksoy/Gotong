@@ -15,9 +15,11 @@
  */
 
 import { A2aRemoteParticipant } from '@aipehub/a2a'
-import type { Hub, Logger } from '@aipehub/core'
+import type { Hub, Logger, ParticipantId } from '@aipehub/core'
 import type { A2aOutboundAgent } from '@aipehub/identity'
+import type { InboxStore } from '@aipehub/inbox'
 
+import { ApprovalGatedParticipant } from './outbound-approval.js'
 import { FixedWindowLimiter } from './peer-registry.js'
 
 /** The narrow identity slice this manager needs (the real IdentityStore satisfies it). */
@@ -26,8 +28,18 @@ export interface A2aAgentSource {
   getA2aAgent(id: string): A2aOutboundAgent | null
 }
 
-/** Why a given agent is NOT live on the hub right now (for admin feedback / logs). */
-export type A2aInactiveReason = 'disabled' | 'token_env_unset' | 'id_conflict' | 'not_found'
+/**
+ * Why a given agent is NOT live on the hub right now (for admin feedback / logs).
+ * `approval_unconfigured` (Item 2 Y): the row requires outbound approval but the
+ * host has no approver wired (no inbox / no owner) — fail-closed to inactive
+ * rather than send ungated.
+ */
+export type A2aInactiveReason =
+  | 'disabled'
+  | 'token_env_unset'
+  | 'id_conflict'
+  | 'not_found'
+  | 'approval_unconfigured'
 
 export interface A2aRegisterResult {
   /** True iff the agent is registered on the hub after this call. */
@@ -47,6 +59,19 @@ export interface A2aOutboundManagerOptions {
    * `AIPE_A2A_OUTBOUND_QUOTA_WINDOW_MS`; tests inject a small value.
    */
   quotaWindowMs?: number
+  /**
+   * Item 2 (Y) — outbound approval wiring. When an agent row carries
+   * `requireApprovalOutbound`, its A2A edge is wrapped in an
+   * `ApprovalGatedParticipant` so a person must approve each outbound send from
+   * their `/me` inbox before it crosses the boundary (the same machinery the
+   * Phase 18 mesh outbound gate uses). BOTH must be present for the gate to
+   * engage; main.ts injects the shared inbox store + the org owner (the same
+   * approver the ACP escalation uses). If a row requires approval but these are
+   * absent, the row is persisted-but-inactive (`approval_unconfigured`) —
+   * fail-closed, never an ungated send.
+   */
+  approvalInbox?: InboxStore
+  approver?: ParticipantId
 }
 
 function defaultReadEnv(name: string): string | undefined {
@@ -65,6 +90,10 @@ export class A2aOutboundManager {
   private readonly log: Logger
   private readonly readEnv: (name: string) => string | undefined
   private readonly quotaWindowMs: number
+  /** Item 2 (Y) — where a required-approval send parks; undefined → no approver. */
+  private readonly approvalInbox: InboxStore | undefined
+  /** Item 2 (Y) — the user who approves outbound sends (the org owner). */
+  private readonly approver: ParticipantId | undefined
   /** ids this manager has live on the hub (a subset of all participant ids). */
   private readonly live = new Set<string>()
   /**
@@ -82,6 +111,13 @@ export class A2aOutboundManager {
     this.log = opts.logger
     this.readEnv = opts.readEnv ?? defaultReadEnv
     this.quotaWindowMs = opts.quotaWindowMs ?? 60_000
+    this.approvalInbox = opts.approvalInbox
+    this.approver = opts.approver
+  }
+
+  /** True iff this host can engage an outbound approval gate (inbox + approver). */
+  private get canApprove(): boolean {
+    return this.approvalInbox !== undefined && this.approver !== undefined
   }
 
   /** Boot: materialise every stored agent. Returns the count actually registered. */
@@ -133,6 +169,9 @@ export class A2aOutboundManager {
     if (!agent) return { active: false, reason: 'not_found' }
     if (!agent.enabled) return { active: false, reason: 'disabled' }
     if (!this.readEnv(agent.tokenEnv)) return { active: false, reason: 'token_env_unset' }
+    if (agent.requireApprovalOutbound && !this.canApprove) {
+      return { active: false, reason: 'approval_unconfigured' }
+    }
     // Enabled with its token present, yet not live → its id is owned by another
     // participant (a managed agent / broker) that won the registration race.
     return { active: false, reason: 'id_conflict' }
@@ -195,29 +234,52 @@ export class A2aOutboundManager {
       })
       return { active: false, reason: 'token_env_unset' }
     }
+    // Item 2 (Y) — an agent that requires outbound approval but has no approver
+    // wired must NOT register ungated (that would silently bypass the gate the
+    // operator asked for). Persisted-but-inactive, surfaced in the admin UI.
+    if (agent.requireApprovalOutbound && !this.canApprove) {
+      this.log.warn('outbound A2A agent inactive: approval required but no approver configured', {
+        id: agent.id,
+      })
+      return { active: false, reason: 'approval_unconfigured' }
+    }
+    const inner = new A2aRemoteParticipant({
+      id: agent.id,
+      capabilities: agent.capabilities,
+      url: agent.url,
+      token,
+      ...(agent.peerId ? { peerId: agent.peerId } : {}),
+      ...(agent.targetSkill ? { targetSkill: agent.targetSkill } : {}),
+      // Stream H2-OUT — opt into the long-running poll lifecycle iff the row
+      // carries it (NULL = blocking, the legacy default). The column maps 1:1
+      // to the participant's `lifecycle?` option ({pollIntervalMs?,maxAttempts?}),
+      // so a stored `{}` reaches here and opts in with participant defaults.
+      ...(agent.lifecycle ? { lifecycle: agent.lifecycle } : {}),
+      // Item 2 — route this outbound edge through the SAME P4-M4 chokepoint
+      // mesh peers use: per-step data-class gate (reuses core
+      // `checkOutboundDataClasses`, no drift) + per-agent outbound quota.
+      // null/undefined allowedDataClasses = no contract (legacy accept-all);
+      // the quota gate is undefined unless a budget is set.
+      allowedDataClasses: agent.allowedDataClasses,
+      outboundQuotaGate: this.outboundQuotaGateFor(agent),
+    })
+    // Item 2 (Y) — wrap in the outbound approval gate when the row asks for it.
+    // The gate delegates id + capabilities to `inner`, so the hub still routes
+    // this edge for the agent's capabilities; it parks each send for a `/me`
+    // approval first (and — via the D4 onResume delegation — still relays a
+    // lifecycle inner's `tasks/get` polls after approval). `canApprove` is
+    // guaranteed true here by the precondition above.
+    const participant =
+      agent.requireApprovalOutbound && this.approvalInbox && this.approver
+        ? new ApprovalGatedParticipant({
+            inner,
+            store: this.approvalInbox,
+            approver: this.approver,
+            peerLabel: agent.label ?? agent.id,
+          })
+        : inner
     try {
-      this.hub.register(
-        new A2aRemoteParticipant({
-          id: agent.id,
-          capabilities: agent.capabilities,
-          url: agent.url,
-          token,
-          ...(agent.peerId ? { peerId: agent.peerId } : {}),
-          ...(agent.targetSkill ? { targetSkill: agent.targetSkill } : {}),
-          // Stream H2-OUT — opt into the long-running poll lifecycle iff the row
-          // carries it (NULL = blocking, the legacy default). The column maps 1:1
-          // to the participant's `lifecycle?` option ({pollIntervalMs?,maxAttempts?}),
-          // so a stored `{}` reaches here and opts in with participant defaults.
-          ...(agent.lifecycle ? { lifecycle: agent.lifecycle } : {}),
-          // Item 2 — route this outbound edge through the SAME P4-M4 chokepoint
-          // mesh peers use: per-step data-class gate (reuses core
-          // `checkOutboundDataClasses`, no drift) + per-agent outbound quota.
-          // null/undefined allowedDataClasses = no contract (legacy accept-all);
-          // the quota gate is undefined unless a budget is set.
-          allowedDataClasses: agent.allowedDataClasses,
-          outboundQuotaGate: this.outboundQuotaGateFor(agent),
-        }),
-      )
+      this.hub.register(participant)
     } catch (err) {
       // The id collides with an already-registered participant (managed agent,
       // broker, …). Don't crash boot / the admin call — report it.

@@ -22,6 +22,10 @@
  *   onResume(task, {answer}):
  *     - approved → `inner.onTask(task)` — the real cross-org send finally fires
  *     - rejected → `{ kind:'failed', error:'outbound_approval_denied' }`
+ *     - non-approval state (Item 2 D4) → delegate to `inner.onResume` if it has
+ *       one. After approval a lifecycle-aware A2A inner can park to poll
+ *       `tasks/get`; the sweep then wakes THIS wrapper with the inner's own
+ *       carried state, which must reach the inner's resume, not a blind re-park.
  *
  * Three invariants (Phase 16 lineage):
  *   1. `NEVER_RESUME_AT` — else the 30s resume sweep would auto-wake the park.
@@ -58,6 +62,16 @@ export interface GatedOutboundInner {
   readonly capabilities: readonly string[]
   onTask(task: Task): Promise<TaskResult>
   onMessage?(msg: Message): void | Promise<void>
+  /**
+   * Item 2 (D4) — the inner participant's OWN resume hook, if it has one.
+   * `RemoteHubViaLink` (mesh) has none; an `A2aRemoteParticipant` with the
+   * long-running lifecycle opted in DOES — after approval its `onTask` can park
+   * with a FINITE `resumeAt` to poll `tasks/get`, and the sweep then resumes the
+   * WRAPPER (registered under this id). Those non-approval wakes must reach the
+   * inner's poll logic instead of being swallowed by the gate's re-park, or the
+   * lifecycle is lost. Optional → blocking inners are unaffected.
+   */
+  onResume?(task: Task, state: unknown): Promise<TaskResult>
 }
 
 export interface ApprovalGatedParticipantOptions {
@@ -139,12 +153,23 @@ export class ApprovalGatedParticipant implements Participant {
   async onResume(task: Task, state: unknown): Promise<TaskResult> {
     const decision = extractApproval(state)
     if (decision === null) {
-      // No approval decision in the resume state — a stray wake (shouldn't
-      // happen given NEVER_RESUME_AT). Re-park rather than silently send.
+      // Not an approval verdict. Under NEVER_RESUME_AT the ONLY thing that wakes
+      // this gate with a non-approval state is the inner participant itself
+      // having parked with a FINITE resumeAt (an A2A lifecycle `tasks/get` poll)
+      // AFTER we already approved — the sweep is now waking the WRAPPER. Delegate
+      // to the inner's own resume so the poll runs; if it re-parks, that
+      // SuspendTaskError propagates and the sweep re-persists it under this id
+      // (Item 2 D4 — fixes the lifecycle×approval resume collision).
+      if (this.inner.onResume) return this.inner.onResume(task, state)
+      // No inner resume path → this is a genuine stray wake (shouldn't happen
+      // given NEVER_RESUME_AT). Re-park rather than silently send.
       throw new SuspendTaskError({ resumeAt: NEVER_RESUME_AT, state })
     }
     if (decision.approved) {
-      // Approved — the real cross-org send finally happens.
+      // Approved — the real cross-org send finally happens. (For a lifecycle
+      // inner this `onTask` may itself park with a finite resumeAt to poll; that
+      // SuspendTaskError propagates out and the next non-approval wake lands in
+      // the delegation branch above.)
       return this.inner.onTask(task)
     }
     return {
