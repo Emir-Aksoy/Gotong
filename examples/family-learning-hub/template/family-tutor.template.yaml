@@ -1,0 +1,199 @@
+# 家长给孩子开 AI 订阅的家庭学习 hub — 家长 hub 一侧的可载入模板 (aipehub.template/v1)
+#
+# 这是第二个**跨组织 (cross-org)** 模板 (第一个是 tea-supply-link)。它和 tea-supply-link
+# 的方向**刻意相反**:
+#   - tea-supply-link 的模板是**发起方** (奶茶店) 一侧 —— 它起草订单、跨组织派给供货商;
+#   - 这个模板是**服务方** (家长) 一侧 —— 因为这套设置的价值 (AI 订阅、导师、主题白名单、
+#     家长审批) **全在家长这边**。家长买了订阅、把它配成给孩子用的 AI 导师。
+#
+# ★ 模版和框架是分离关系 (本案例的教学点,同 tea-supply-link) ★
+#   这个文件**只**带「家长 hub 一侧的导师 + 工作流骨架」:
+#     - 1 个 /teach 风格的导师 agent (上课 + 主题白名单筛查 + 内容自评打标);
+#     - 1 条声明式工作流 tutor-teach (筛查 → 白名单外家长审批 → 上课);
+#     - 1 个指向「学习档案」的 KB 槽位;
+#     - 一次性 DeepSeek key 提示。
+#   它**不**带、也**不能**带「跨组织的链接」本身:
+#     - 哪个 peer 是孩子的 hub、出站放行哪些 capability、是否需要家长审批 —— 这些是
+#       **运行时的 peer 配置** (host 的 installPeerLink / admin「联邦」tab),不在模板里,
+#       也不在工作流 YAML 里。工作流的 trigger 只写一个 capability 名 (`tutor.teach`),
+#       由孩子 hub 跨组织调用时路由过来,**模板从不点名某个 peer**。
+#   换句话说:模板是「可搬走的骨架」,链接是「落地时各自配的运行时契约」。
+#
+# ★ 为什么白名单审批这个 human: 步住在家长 hub 一侧 (本设计最关键的正确性约束) ★
+#   审批人 = 家长,而本地 `human:` 步**只能指派给本 hub 的用户**。家长是家长 hub 的本地
+#   用户,孩子 hub 那边指派不到家长。所以「主题白名单 + 家长审批」必须是**家长 hub 的工作流
+#   步骤** (本模板的 tutor-teach),而不是孩子 hub 工作流里的步。孩子 hub 那条工作流
+#   (见 examples/family-learning-hub/workflows/child-guided-lesson.yaml,可跑 demo 用) 只管
+#   发起 + 记录 + fork,本地不放审批步。
+#   (可跑 demo examples/family-learning-hub/src/index.ts 把这个白名单闸内联成可见的
+#   ~40 行出站审批闸 + 两步恢复,跟这个模板里的 human: 步是同一意图的两种呈现。)
+#
+# 知识**内容**不在这个文件里 (Stream B 决策 #4):模板只带「MCP 接线 + presetData 指针」。
+# 学习档案由你自己的 Obsidian vault 提供 (demo 用确定性 stand-in 替代真 LLM)。
+# 学习档案的**主副本**住在孩子 hub (决策 6);家长这边的 learning_records KB 是导师的「教学
+# 日志 / fork 来的小结副本」—— 两份并存,家长看得到孩子学了什么 (oversight)。
+#
+# 导入:admin UI →「Agents / 工作流」→ 导入,或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/family-learning-hub/template/family-tutor.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+schema: aipehub.template/v1
+template:
+  name: 家长 AI 导师(家庭学习 hub · 家长侧)
+  description: |-
+    家长给孩子开 AI 订阅的家庭学习 hub —— 家长 hub 一侧。一个 /teach 风格的 AI 导师:
+    孩子从自己的 hub 跨组织来求学 → 导师先按家长发布的主题白名单筛查 → 白名单外的主题挂起
+    等家长在收件箱批准 → 批了 (或本就在白名单内) 就按孩子的学习档案续上这一课,并对敏感内容
+    自评打标。模板带 1 个导师 agent、1 条带家长审批的工作流、一个指向学习档案的 KB 槽位,
+    以及一次性 DeepSeek key 提示。跨组织的链接 (哪个 peer 是孩子 hub / 出站放行 / 数据类
+    契约) 是**运行时**配的,不在模板里 —— 导入后到 admin「联邦」tab 连上孩子的 hub 即可落地。
+
+  version: 1
+
+  # ── 1 个 agent:/teach 风格的 AI 导师 ──────────────────────────────────────────
+  # 服务家长 hub 一侧的两个 capability:
+  #   - teach.lesson  上课 (读学习档案续上 + 对敏感内容自评打标);
+  #   - topic.screen  主题白名单筛查 (按家长发布的白名单判这个主题准不准学)。
+  # 挂学习档案 (mcp-obsidian):host spawn 时拉起 mcp-obsidian 子进程,把工具
+  # (obsidian__search / get_file_contents) 暴露给该 agent 的 tool-use 循环。
+  agents:
+    - id: family-tutor
+      displayName: AI 导师
+      capabilities: [teach.lesson, topic.screen]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是一个面向孩子的 AI 学习导师,风格贴近「一次一小步、按学习者当前进度续上」的
+        辅导法 (file-first、多次会话、调用即触发,不靠定时心跳)。语气温和、具体、鼓励。
+
+        上课 (capability teach.lesson):
+        - 先用 obsidian__search / obsidian__get_file_contents 读这个 learner_id 的学习档案
+          (learning-records/<learner_id>/),看 ta 上到第几课、学过什么,**续上下一课**,
+          不要从头重来。学习档案就是你的「时钟」—— 每次孩子来调用,你读档案接着教。
+        - 这一课给一个简短入门讲解 + 一个小练习,难度贴合 ta 的进度。
+        - **内容自评打标 (安全)**:如果这一课内容涉及可能需要家长留意的话题 (如投资 / 理财 /
+          股票 / 赌 / 贷款 等),在输出里自标 `flagged: true` 并写一句 `flagReason`。这是**最弱
+          一档**安全 (AI 自己判自己),靠主题白名单 (硬边界) + 全量 transcript 原生落家长 hub
+          (家长看得到) 兜底。拿不准就标。
+
+        主题白名单筛查 (capability topic.screen):
+        - 按**家长发布的主题白名单**判这个 topic 准不准直接学。白名单是家长配的 (在你的学习档案
+          KB 里,或由家长在系统提示中给定),孩子改不了。
+        - 返回一个结构化判断 `{ "allowed": true | false, "reason": "..." }`:在白名单内 →
+          allowed=true;白名单外 (新主题 / 敏感主题) → allowed=false,由家长在收件箱里决定这次
+          要不要放行。**只判断,不替家长拍板** —— 放不放行是家长的事。
+
+        注意:你是在**家长的 hub** 上跑的 (模型在这里,计家长的订阅)。孩子的学习数据带着
+        `child-learning` 数据类标记跨组织进来,过 per-link 闸 —— 这是框架运行时的事,你只管
+        把课上好、把主题筛清楚。
+
+      mcpServers:
+        - name: obsidian
+          command: uvx
+          args: [mcp-obsidian]
+          env:
+            OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+            OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+            OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+
+  # ── 1 条带家长审批的声明式工作流 ───────────────────────────────────────────────
+  # 导入时 parseTemplate 把这个内层 block 重新序列化成完整 workflow yaml 交给 workflow
+  # runtime 校验 + 注册。trigger 的 `tutor.teach` 是孩子 hub 跨组织调过来的能力 (这条工作流
+  # 不点名孩子 peer,运行时由联邦链路解析)。`screen` / `teach` 步派的 capability 由本模板的
+  # 导师 agent 服务。
+  #
+  # 这条工作流**有** human: 步 (guardian-approval) —— 跟 tea-supply-link 刻意相反:那边的
+  # 跨组织审批是运行时出站审批闸 (对工作流透明,工作流里没有 human: 步);这边的白名单审批是
+  # **家长 hub 工作流自己的一步**,因为审批人 (家长) 是本 hub 用户,本地 human: 步指派得到。
+  workflows:
+    - id: tutor-teach
+      name: AI 导师上课(主题白名单 + 家长审批)
+      description: 孩子跨 hub 求学 → 主题白名单筛查 → 白名单外家长批 → 导师按学习档案续上这一课。
+      governance:
+        data_sensitivity: confidential
+        required_credentials: [deepseek]
+        required_human_roles: [家长 (guardian)]
+        external_systems: [孩子 hub (联邦 peer, 发起求学)]
+        notes: 白名单外主题需家长在收件箱批准;孩子的学习数据标 child-learning, 过 per-link 出站闸。
+      trigger:
+        capability: tutor.teach
+        payload_schema:
+          - id: topic
+            label: 学习主题
+            type: text
+            required: true
+          - id: learner_id
+            label: 学习者 id
+            type: text
+            required: true
+          # 审批家长 = 家长 hub 的本地用户 id。孩子 hub 跨组织调用时把它带进来 (落地时配一次,
+          # 模版/框架分离)。诚实边界:生产中家长 hub 宜从自己的配置解析审批人,不盲信跨 hub
+          # payload —— 模板用 $trigger.payload.guardian_id 是可移植占位 (同 cafe-ops 的 manager_id)。
+          - id: guardian_id
+            label: 审批家长(本 hub 用户 id)
+            type: text
+            required: true
+      steps:
+        - id: screen
+          description: 导师按家长发布的主题白名单筛查这个主题准不准直接学。
+          dispatch:
+            strategy: { kind: capability, capabilities: [topic.screen] }
+            title: 主题白名单筛查
+            payload:
+              topic: $trigger.payload.topic
+        - id: guardian-approval
+          description: 白名单外 → 家长在收件箱批准这次例外 (白名单内 when 旁路, 不挂起)。
+          when: "$screen.output.allowed == false"
+          human:
+            assignee: $trigger.payload.guardian_id
+            kind: approval
+            prompt: 孩子想学一个白名单外的主题,允许这次用 AI 导师上这一课吗?
+            title: 白名单外主题审批
+        - id: teach
+          description: 导师按孩子的 learning-records 续上这一课(/teach 风格 + 内容自评打标)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [teach.lesson] }
+            # 这一课的内容是孩子的学习数据 —— 标 child-learning, 跟跨组织出站闸用同一套数据类。
+            dataClasses: [child-learning]
+            title: 上课
+            payload:
+              topic: $trigger.payload.topic
+              learner_id: $trigger.payload.learner_id
+      output:
+        screened: $screen.output
+        lesson: $teach.output
+
+  # ── 1 个可寻址知识库槽位:MCP 接线 + 预置数据「指针」(不是内容!)──────────────
+  # 槽位 name (`learning_records`) 是 KB 的可寻址身份;背后的 mcpServer name (`obsidian`)
+  # 是传输。导入时只「上报」不「自动接线」(决策 #4)—— 由你把自己的学习档案接到这个槽位。
+  # 注意:学习档案的**主副本**在孩子 hub;这里的 learning_records 是家长侧导师的教学日志 /
+  # fork 来的小结副本 (oversight)。
+  knowledgeBases:
+    - name: learning_records
+      description: 学习档案(每个学习者上到第几课 / 学过什么 / 主题白名单,via mcp-obsidian)。主副本在孩子 hub, 此为家长侧教学日志 / fork 副本。
+      mcpServer:
+        name: obsidian
+        command: uvx
+        args: [mcp-obsidian]
+        env:
+          OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+          OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+          OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+      presetData:
+        kind: url
+        ref: https://example.com/family-learning-records-seed.tar.zst
+        description: |-
+          一份学习档案的种子快照 (空的 learning-records/ 骨架 + 一份示例主题白名单) —— 注意这是
+          「指针」,不是内容。两种用法:① 把种子目录直接拷进你的 Obsidian vault;或 ② 打包托管,
+          让这个 ref 指过去再显式拉取。框架永不经手学习档案内容。
+
+  # ── 一键:导入时提示填一次 API key,自动应用到导师 agent ──────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek
