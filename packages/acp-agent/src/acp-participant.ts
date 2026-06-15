@@ -19,7 +19,14 @@
  *   - TERMINATE  — `onTaskCancelled` sends ACP cancel + aborts; `onShutdown` kills.
  */
 
-import { AgentParticipant, SuspendTaskError, type ParticipantId, type Task, type TaskId } from '@aipehub/core'
+import {
+  AgentParticipant,
+  checkOutboundDataClasses,
+  SuspendTaskError,
+  type ParticipantId,
+  type Task,
+  type TaskId,
+} from '@aipehub/core'
 
 import {
   ACP_NEVER_RESUME_AT,
@@ -99,6 +106,26 @@ export interface AcpParticipantOptions {
    * a `-32603 Internal error` debuggable. Unset → stderr is drained silently.
    */
   onStderr?: (chunk: string) => void
+  /**
+   * Item 2 — OUTBOUND data-class gate, reusing the SAME `checkOutboundDataClasses`
+   * the mesh edge runs (anti-drift: one core function, every outbound edge).
+   *
+   * Honest asymmetry vs. A2A (D6): ACP is NOT a network egress — it drives a
+   * LOCAL coding-agent subprocess (Claude Code / Codex under the operator's own
+   * login). So this gate is a GOVERNANCE control: it bounds what data CLASS of
+   * context may feed a third-party coding agent, not what leaves the org. Same
+   * semantics as everywhere: `null`/`undefined` → no contract (anything) /
+   * `[]` → lockdown / list → every declared class must be in the set. A task
+   * carrying a disallowed class is refused BEFORE the subprocess is started.
+   */
+  allowedDataClasses?: readonly string[] | null
+  /**
+   * Item 2 — OUTBOUND per-agent quota hook (a runaway guard on how many tasks
+   * this agent may run per window). Returns `true` to admit, `false` to refuse.
+   * The host manager owns the limiter; this participant only asks. Omitted → no
+   * quota. Consulted once at dispatch, before the subprocess starts.
+   */
+  outboundQuotaGate?: (task: Task) => boolean
 }
 
 export class AcpParticipant extends AgentParticipant {
@@ -106,6 +133,8 @@ export class AcpParticipant extends AgentParticipant {
   protected readonly onChunkCb: ((taskId: TaskId, chunk: AcpChunk) => void) | undefined
   protected readonly gate: (ctx: AcpToolContext) => AcpGateVerdict
   protected readonly promptTimeoutMs: number | undefined
+  private readonly allowedDataClasses: readonly string[] | null | undefined
+  private readonly outboundQuotaGate: ((task: Task) => boolean) | undefined
 
   /** Live abort handles per running task → the TERMINATE seam. */
   private readonly running = new Map<TaskId, AbortController>()
@@ -129,6 +158,8 @@ export class AcpParticipant extends AgentParticipant {
     this.onChunkCb = opts.onChunk
     this.gate = opts.gate ?? dangerousToolGate()
     this.promptTimeoutMs = opts.promptTimeoutMs
+    this.allowedDataClasses = opts.allowedDataClasses
+    this.outboundQuotaGate = opts.outboundQuotaGate
     this.session = new AcpSession({
       command: opts.command,
       ...(opts.args ? { args: opts.args } : {}),
@@ -149,9 +180,33 @@ export class AcpParticipant extends AgentParticipant {
   }
 
   protected async handleTask(task: Task): Promise<unknown> {
+    // Item 2 — gate BEFORE `ensureStarted()` so a refused task NEVER spawns the
+    // subprocess (fail-closed at the cheapest possible point). A thrown error
+    // becomes a `failed` result via AgentParticipant.
+    this.gateOutbound(task)
     await this.session.ensureStarted()
     this.taskText.set(task.id, '')
     return await this.runTurn(task, payloadToText(task.payload))
+  }
+
+  /**
+   * Item 2 — the outbound trust gate for THIS (ACP) edge. Two fail-closed checks,
+   * both BEFORE the child subprocess is started:
+   *   1. data-class — the SAME core `checkOutboundDataClasses` the mesh / A2A
+   *      edges use (anti-drift); a disallowed class throws
+   *      `outbound_data_class_denied:<class>`. For ACP this is a governance
+   *      control on what context feeds the coding agent (D6), not a network gate.
+   *   2. quota — the host-owned per-agent limiter; over budget throws
+   *      `outbound_quota_exceeded`.
+   */
+  private gateOutbound(task: Task): void {
+    const verdict = checkOutboundDataClasses(task, this.allowedDataClasses)
+    if (!verdict.ok) {
+      throw new Error(`outbound_data_class_denied:${verdict.reason}`)
+    }
+    if (this.outboundQuotaGate && !this.outboundQuotaGate(task)) {
+      throw new Error('outbound_quota_exceeded')
+    }
   }
 
   /**

@@ -150,3 +150,94 @@ describe('AcpParticipant — TERMINATE', () => {
     expect(out(r).stopReason).toBe('cancelled')
   })
 })
+
+describe('AcpParticipant — outbound data-class + quota gate (Item 2 X-M2)', () => {
+  /** A dispatched task that declares data classes (what the per-step gate stamps). */
+  function classed(id: string, prompt: string, dataClasses: readonly string[]): Task {
+    return { ...makeTask(id, prompt), dataClasses } as unknown as Task
+  }
+
+  it('refuses a disallowed class — failed AND the subprocess is NEVER started (fail-closed before spawn)', async () => {
+    const { transport, stats } = createMockAcpAgent()
+    const p = new AcpParticipant({
+      id: 'acp',
+      capabilities: ['code'],
+      command: 'x',
+      transport,
+      allowedDataClasses: ['public'],
+    })
+
+    const r = await p.onTask(classed('t1', 'go', ['pii']))
+
+    expect(r.kind).toBe('failed')
+    expect((r as { error: string }).error).toContain('outbound_data_class_denied:pii')
+    // The whole point: the gate runs BEFORE ensureStarted → no handshake, no child.
+    expect(stats.initCount).toBe(0)
+    expect(stats.promptCount).toBe(0)
+  })
+
+  it('admits a task whose classes are all allowed (subprocess starts normally)', async () => {
+    const { transport, stats } = createMockAcpAgent()
+    const p = new AcpParticipant({
+      id: 'acp',
+      capabilities: ['code'],
+      command: 'x',
+      transport,
+      allowedDataClasses: ['public', 'pii'],
+    })
+
+    const r = await p.onTask(classed('t1', 'do thing', ['pii']))
+
+    expect(r.kind).toBe('ok')
+    expect(stats.initCount).toBe(1)
+  })
+
+  it('allowedDataClasses === [] locks down — any declared class is refused, never started', async () => {
+    const { transport, stats } = createMockAcpAgent()
+    const p = new AcpParticipant({
+      id: 'acp', capabilities: ['code'], command: 'x', transport, allowedDataClasses: [],
+    })
+    const r = await p.onTask(classed('t1', 'go', ['anything']))
+    expect(r.kind).toBe('failed')
+    expect(stats.initCount).toBe(0)
+  })
+
+  it('no contract (null) feeds anything — a declared class still runs', async () => {
+    const { transport, stats } = createMockAcpAgent()
+    const p = new AcpParticipant({
+      id: 'acp', capabilities: ['code'], command: 'x', transport, allowedDataClasses: null,
+    })
+    const r = await p.onTask(classed('t1', 'go', ['pii']))
+    expect(r.kind).toBe('ok')
+    expect(stats.initCount).toBe(1)
+  })
+
+  it('refuses when the quota gate returns false — failed, subprocess NEVER started', async () => {
+    const { transport, stats } = createMockAcpAgent()
+    const p = new AcpParticipant({
+      id: 'acp',
+      capabilities: ['code'],
+      command: 'x',
+      transport,
+      outboundQuotaGate: () => false,
+    })
+
+    const r = await p.onTask(makeTask('t1', 'go'))
+
+    expect(r.kind).toBe('failed')
+    expect((r as { error: string }).error).toContain('outbound_quota_exceeded')
+    expect(stats.initCount).toBe(0)
+  })
+
+  it('data-class gate runs before quota (disallowed + over-budget → names the class)', async () => {
+    const { transport, stats } = createMockAcpAgent()
+    const p = new AcpParticipant({
+      id: 'acp', capabilities: ['code'], command: 'x', transport,
+      allowedDataClasses: ['public'], outboundQuotaGate: () => false,
+    })
+    const r = await p.onTask(classed('t1', 'go', ['pii']))
+    expect(r.kind).toBe('failed')
+    expect((r as { error: string }).error).toContain('outbound_data_class_denied')
+    expect(stats.initCount).toBe(0)
+  })
+})
