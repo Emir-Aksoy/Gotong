@@ -1,0 +1,206 @@
+# 家长给孩子开 AI 订阅的家庭学习 hub — 孩子 (child) hub 一侧的可载入模板 (aipehub.template/v1)
+#
+# 这是 family-tutor.template.yaml 的**另一半**: family-tutor 是家长 (guardian) hub 一侧
+# (订阅 + 导师 + 主题白名单 + 审批都在那), 这个文件是孩子 hub 一侧 —— 孩子借家长的订阅学习。
+#
+# ★ 孩子 hub 没有自己的 AI 订阅 (管辖权 = 家长持经济咽喉) ★
+#   这个模板**一个 LLM agent 都没有**, 这是设计本意, 不是遗漏:
+#     - LLM key (订阅) 只在家长 hub。孩子每次「用 AI」都要**跨组织借道家长**
+#       (模型在家长 hub 跑 = 计家长的订阅)。所以孩子 hub 这边装不了、也不该装一个
+#       带 key 的托管导师。
+#   模板只带「孩子 hub 一侧的编排骨架 + 本地学习档案接线」:
+#     - 1~2 条声明式工作流 (跟导师学一课 / 自己探索一课);
+#     - 1 个指向**学习档案主副本**的 KB 槽位。
+#
+# ★ 三个 capability 都是运行时确定性参与者, 不在模板里 (同 family-tutor 的两道闸) ★
+#   工作流点名三个**本地** capability, 由**运行时的确定性参与者**服务 (host 侧/运行时接线,
+#   见 examples/family-learning-hub/src/participants.ts), 不是 LLM:
+#     - records.append     → 把一课写进本地学习档案 (主副本, 孩子 hub 磁盘, 这一步不出本 hub)
+#     - report.to-guardian → fork 一份小结给家长 (oversight 副本; 孩子留原件, 家长收副本)
+#     - explore.local      → 孩子自己在本地学习档案里探索一课 (不借订阅、不跨 hub)
+#   它们都不需要 LLM, 故不进模板的 managed-agents (模板只点名 capability, 运行时提供参与者)。
+#   而 `tutor.teach` 那个 capability 住在**家长** hub (借订阅那一跳), 由家长那条联邦链路解析。
+#
+# ★ 跨组织的链接是运行时配置, 不在模板也不在工作流 (模版/框架分离, 同 family-tutor) ★
+#   哪个 peer 是家长的 hub、出站放行哪些 capability、白名单/审批策略、child-learning 数据类
+#   契约 —— 全是**运行时的 peer 配置** (host installPeerLink / admin「联邦」tab)。工作流的
+#   `tutor`/`report` 步只写 capability 名 (`tutor.teach` / `report.to-guardian`), 从不点名某个
+#   peer。这一层闸 (主题白名单 + 出站审批) 由家长在那条 link 上设, 孩子改不了 (出入口锁)。
+#
+# ★ 谁审批? 住在家长 hub 一侧 (设计 §七的正确性约束) ★
+#   白名单外主题的审批人是家长, 而本地 `human:` 步只能指派给本 hub 用户。家长是家长 hub 的
+#   本地用户, 孩子 hub 这边指派不到家长。所以孩子 hub 这两条工作流**本地不放审批步** —— 它们
+#   只管发起 / 记录 / fork; 审批由**家长那条 link 上的运行时出站审批闸**拦 (家长在自己的收件箱批)。
+#   这跟 family-tutor 模板里那条工作流刚好相反: 那边审批是家长 hub 工作流自己的 `human:` 步。
+#
+# 知识**内容**不在这个文件里 (Stream B 决策 #4): 模板只带「MCP 接线 + presetData 指针」。
+# 学习档案的**主副本**住在孩子 hub (决策 6) —— 就是这个 learning_records 槽位; 家长那边
+# (family-tutor 模板的同名槽位) 是 fork 来的教学日志副本。
+#
+# 导入: admin UI →「工作流」→ 导入, 或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/family-learning-hub/template/child-desk.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+schema: aipehub.template/v1
+template:
+  name: 孩子学习桌(家庭学习 hub · 孩子侧)
+  description: |-
+    家长给孩子开 AI 订阅的家庭学习 hub —— 孩子 hub 一侧。孩子借家长的订阅学习: 发起一课 →
+    (白名单外则家长在出站审批闸批准) → 跨组织借家长订阅的 AI 导师上课 → 记进本地学习档案
+    (主副本) → fork 一份小结给家长监督; 或者孩子自己在本地档案里探索一课 (不借订阅、不跨 hub),
+    结果同样 fork 给家长。模板**零 LLM agent** (订阅在家长那, 孩子借道家长) + 2 条声明式工作流
+    + 一个指向学习档案主副本的 KB 槽位。三个本地 capability (records.append / report.to-guardian /
+    explore.local) 是**运行时确定性参与者**, 不在模板里; 跨组织的链接 (哪个 peer 是家长 hub /
+    出站放行 / 白名单 + 审批策略 / child-learning 数据类契约) 也是**运行时**配的 —— 导入后到 admin
+    「联邦」tab 连上家长的 hub 即可落地。
+
+  version: 1
+
+  # ── 没有 agents: 孩子 hub 没有自己的订阅 (见文件头) ──────────────────────────────
+  # 每次「用 AI」都跨组织借道家长。这个模板不装任何带 key 的托管 agent。
+
+  # ── 2 条声明式工作流: 跟导师学一课 / 自己探索一课 ───────────────────────────────
+  # 导入时 parseTemplate 把每个内层 block 重新序列化成完整 workflow yaml 交给 workflow
+  # runtime 校验 + 注册。两条都 `surface.me` enabled —— 孩子从 `/me` 自助发起, 强制
+  # payload.learner_id = 发起成员自己的 userId (孩子只能为自己发起)。
+  workflows:
+    # 工作流 A: 跟 AI 导师学一课 (跨组织, 借家长订阅) —— 「带孩子探索」那一半。
+    #   tutor (cross-org → 家长导师) → record (本地主副本) → report (fork 给家长)。
+    - id: child-guided-lesson
+      name: 跟 AI 导师学一课(跨组织)
+      description: 孩子发起一课 → 白名单外则家长在出站审批闸批准 → 跨 hub 借家长订阅的 AI 导师上课 → 记进本地学习档案 (主副本) → fork 一份小结给家长。
+      governance:
+        data_sensitivity: confidential
+        required_credentials: [deepseek]
+        required_human_roles: [家长 (guardian)]
+        external_systems: [家长 hub (联邦 peer, 持订阅)]
+        notes: 白名单外的主题需家长在出站审批闸批准才上课;课程内容由家长 hub 的导师产出 (模型在家长侧, 计家长订阅);学习数据标 child-learning, 只流向家长, data-class 闸锁死不外泄第三方。
+      trigger:
+        capability: learn.request
+        payload_schema:
+          - id: topic
+            label: 今天想学什么?
+            type: text
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 跟 AI 导师学一课
+          description: 输入想学的主题;白名单内直接开课, 白名单外家长批准后开课。
+          allowed_roles: [owner, admin, member]
+          # /me 强制 payload.learner_id = 发起成员自己的 userId (孩子只能为自己发起)。
+          user_scope_field: learner_id
+      steps:
+        - id: tutor
+          description: 跨 hub 借家长订阅的导师上一课 (白名单外→家长批; 模型在家长 hub, 计家长订阅)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [tutor.teach] }
+            # 节点级数据类: 盖到 Task.dataClasses, 过家长那条 link 的出站 data-class 契约。
+            dataClasses: [child-learning]
+            title: 请家长导师上一课
+            payload:
+              topic: $trigger.payload.topic
+              learner_id: $trigger.payload.learner_id
+        - id: record
+          description: 把这一课记进本地学习档案 (主副本, 孩子 hub 磁盘 —— 这一步不出本 hub)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [records.append] }
+            title: 记入本地学习档案
+            payload:
+              learner_id: $trigger.payload.learner_id
+              topic: $trigger.payload.topic
+              lesson: $tutor.output
+        - id: report
+          description: fork 一份学习小结给家长 (oversight 副本; 孩子留原件, 家长收副本)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [report.to-guardian] }
+            dataClasses: [child-learning]
+            title: 同步学习小结给家长
+            payload:
+              learner_id: $trigger.payload.learner_id
+              summary: $record.output
+      output:
+        lesson: $tutor.output
+        record: $record.output
+        report: $report.output
+
+    # 工作流 B: 自己探索一课 (纯本地, 不借订阅、不跨 hub) —— 「看着孩子自己探索」那一半。
+    #   explore (本地确定性浏览自己的学习档案) → record (本地主副本) → report (fork 给家长)。
+    #   对比工作流 A: 没有 tutor 步 = 不动家长订阅; 但 report 仍 fork 给家长 (oversight)。
+    - id: child-autonomous-explore
+      name: 自己探索一课(纯本地, 不借订阅)
+      description: 孩子在本地学习档案里自己探索一个主题 (不借家长订阅、不跨 hub) → 记进本地档案 (主副本) → fork 一份给家长监督。
+      governance:
+        data_sensitivity: confidential
+        required_human_roles: [家长 (guardian, 仅 oversight)]
+        external_systems: [家长 hub (联邦 peer, 仅收 oversight fork)]
+        notes: 纯本地探索, 不动家长订阅、不调家长导师;唯一离开本 hub 的是 report 那一跳的 oversight fork (标 child-learning, 只流向家长)。
+      trigger:
+        capability: explore.request
+        payload_schema:
+          - id: topic
+            label: 想自己探索什么?
+            type: text
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 自己探索一课
+          description: 在自己的学习档案里探索一个主题;不借家长订阅, 但结果会同步给家长。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: learner_id
+      steps:
+        - id: explore
+          description: 孩子在本地学习档案里自己探索这个主题 (确定性本地浏览, 不借订阅、不跨 hub)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [explore.local] }
+            title: 自己探索一课
+            payload:
+              topic: $trigger.payload.topic
+              learner_id: $trigger.payload.learner_id
+        - id: record
+          description: 把这次探索记进本地学习档案 (主副本, 孩子 hub 磁盘)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [records.append] }
+            title: 记入本地学习档案
+            payload:
+              learner_id: $trigger.payload.learner_id
+              topic: $trigger.payload.topic
+              lesson: $explore.output
+        - id: report
+          description: fork 一份探索小结给家长 (oversight; 孩子自己探索的也让家长看得到)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [report.to-guardian] }
+            dataClasses: [child-learning]
+            title: 同步探索小结给家长
+            payload:
+              learner_id: $trigger.payload.learner_id
+              summary: $record.output
+      output:
+        explored: $explore.output
+        record: $record.output
+        report: $report.output
+
+  # ── 1 个可寻址知识库槽位: 学习档案**主副本** (MCP 接线 + presetData 指针) ──────────
+  # 槽位 name (`learning_records`) 是 KB 的可寻址身份; 背后的 mcpServer name (`obsidian`)
+  # 是传输。导入时只「上报」不「自动接线」(决策 #4) —— 由你把孩子的学习档案接到这个槽位。
+  # 注意: 这是**主副本** (住孩子 hub); 家长那边 family-tutor 模板的同名槽位是 fork 来的副本。
+  knowledgeBases:
+    - name: learning_records
+      description: 学习档案主副本(每个学习者上到第几课 / 学过什么, via mcp-obsidian)。住在孩子 hub;家长侧是 fork 副本。
+      mcpServer:
+        name: obsidian
+        command: uvx
+        args: [mcp-obsidian]
+        env:
+          OBSIDIAN_API_KEY: ${OBSIDIAN_API_KEY}
+          OBSIDIAN_HOST: ${OBSIDIAN_HOST}
+          OBSIDIAN_PORT: ${OBSIDIAN_PORT}
+      presetData:
+        kind: url
+        ref: https://example.com/family-learning-records-seed.tar.zst
+        description: |-
+          一份学习档案的种子快照 (空的 learning-records/ 骨架) —— 注意这是「指针」, 不是内容。
+          两种用法: ① 把种子目录直接拷进你的 Obsidian vault; 或 ② 打包托管, 让这个 ref 指过去
+          再显式拉取。框架永不经手学习档案内容。
