@@ -265,14 +265,18 @@ WorkflowController + 真 WorkflowAssistantAgent with mock LLM）+ 真 `StewardAp
 
 ---
 
-## 十、显式推迟
+## 十、显式推迟（MVP / SW-M8 当时）
 
-1. **admin.js 控制台管家 + operator 全站执行器**（走 `LocalAgentPool` + admin 工作流路由）
-   = SW-M9 快速跟进。
-2. **IM 入口**（管家 transport-agnostic，IM 桥后补，复用 Phase 12 bridge）。
+> 下面 1 / 4 / 5 已由 **SW-M9 能力扩展**（Phase A / B / C，见[§十二](#十二能力扩展sw-m9--operator-全站执行器--敏感写--结果感知多步)）落地；保留原文以记录「MVP 推迟 → 后续交付」的弧线。
+
+1. ✓ **已交付（Phase A）** — admin 控制台管家 + operator 全站执行器（**走现有 admin 写路径**，非裸
+   `LocalAgentPool`）。
+2. **IM 入口**（管家 transport-agnostic，IM 桥后补，复用 Phase 12 bridge）= **Phase D（example-first，待做）**。
 3. 成员 agent「启停 / 暂停」（成员服务无此动作）。
-4. 凭证 / peer / 安全 / RBAC grant 的**写**（MVP 只读 + 建议 → refuse）。
-5. 多步 tool-loop 管家（MVP 单轮结构化提议 + 注入快照，足够 Tier-1）。
+4. ✓ **部分交付（Phase B）** — 凭证 / peer / 安全的**写**已做实（operator-only，每写必过收件箱，
+   永不携明文密钥）；**RBAC grant 的写**仍推迟。
+5. ✓ **已交付（Phase C，语义收窄）** — **结构化多步 + 结果感知**（非自治循环）已做实；**自治 tool-loop**
+   仍明确**不做**（北极星：框架不跑自治决策）。
 6. 工作流 lifecycle 转移（publish / deprecate / archive）经管家——MVP 只 create / edit agent +
    edit workflow，lifecycle 留 admin 面板。
 
@@ -287,3 +291,115 @@ WorkflowController + 真 WorkflowAssistantAgent with mock LLM）+ 真 `StewardAp
   每个写都人确认（safe 一次 / 危险二次）；prompt 显式「你只能提议危险动作」。
 - **R3 L11 防 re-suspend**：broker 永远 override `onResume` 消费 `{answer}`，缺决策 → fail 非 re-park。
 - **R4 两条硬约束回归**：SW-M8 e2e **就是**那两条的验收门 + 分类器单测双层钉死，改坏即红。
+
+---
+
+## 十二、能力扩展（SW-M9）— operator 全站执行器 + 敏感写 + 结果感知多步
+
+> MVP（SW-M1→M8）是 member-facing「成员用大白话管**自己**的资源」。能力扩展把它推到三件事：
+> operator **用大白话管全站** + 最高危**敏感写** + **结果感知多步**。三条决策（用户锁定）：① 范围
+> = 四项全做，按 **A → B → C → D** 杠杆+依赖顺序；② 多步语义 = **结构化多步 + 结果感知，绝不
+> 自治执行循环**；③ 敏感写 = 凭证 + peer + 安全三族**全开**，但**仅 operator**、当**最高 tier
+> 每个写必过收件箱**（比 `delete_agent` 更严）。Phase D（IM 入口）是 example-first transport，单独做。
+
+### Phase A — operator 控制台管家 + 全站执行器（A-M1 → A-M8）
+
+**operator 管家 = 复用 `createHubStewardService` + 参数化 id**，**不是** payload 标志。privilege 边界
+必须是「**注册的 participant 身份 + 建它的 host surface**」，绝非成员可伪造的聊天/payload 字段
+（聊天输入不可信）。两实例 id 隔离、逐字节不撞：
+
+| | agent id | capability | broker id |
+|---|---|---|---|
+| 成员 | `hub-steward` | `hub:steward` | `aipehub:steward-exec` |
+| operator | `hub-steward-operator` | `hub:steward:operator` | `aipehub:steward-exec:operator` |
+
+**执行器走现有 admin 写路径**（非裸 `LocalAgentPool`、非成员 `MeWorkflowEditService`），三个新 host 件：
+
+- `host/src/operator-agent-service.ts` `HostOperatorAgentService` — 满足 `StewardAgentDirectory`：全
+  operator provider 集（`lifecycle.availableProviders()`）、站点级 id（admin 给、按 `agents-routes.ts`
+  校验）、列 `space.agents()` **全部**托管 agent。结构上满足目录契约 → 直接掉进 `performStewardAction`
+  **零改**。建/删复用 `space.upsertAgent`/`removeAgent` + `lifecycle.start`/`stop`/`onAgentRemoved` +
+  `seedAgentOwner`/`removeAllAgentGrants`（即 `agents-routes.ts` 那几个调用）。
+- `host/src/operator-workflow-edit-service.ts` — 复用 `MeWorkflowEditService.edit` 管线**只去掉 RBAC
+  那一行**（`hasWorkflowGrant`），**保留 `enforceEditBoundary`**：跨 hub 出入口锁是**治理契约非成员
+  专属**，operator 也**不能静默重指向 egress**。
+- `host/src/operator-workflow-directory.ts` — 站点级 `WorkflowController.listAll()` 标
+  `crossHub:(crossHubSteps?.length??0)>0`，**去掉** per-member grant 过滤。
+
+**审批落 operator 自己的 `/me` 收件箱（跨 SPA 深链）**。admin 控制台**零** `/api/me/inbox` 渲染机制，
+自建内联审批 = 重造两步恢复 UI。北极星「人是 Participant」→ 二次确认属于**人的收件箱**，不论哪个
+SPA 发起。`StewardApprovalBroker.onTask` 按 `payload.userId` 写 item，operator surface 强制 userId =
+认证的 operator → 落他自己收件箱；admin 控制台渲染「已送你的 /me 收件箱二次确认 →」深链。
+
+web `admin-steward-routes.ts`：`POST /api/admin/steward/{plan,apply}`，`requireAdmin` +
+`resolveActor(req).userId` **服务端强制** operator userId（绝不取 body）。**v3-only Space admin 无 user
+row** → gate 在 `resolveActor(req).userId` 存在，否则 503 清晰提示（无收件箱可 park）。
+
+A-M7 e2e（`host/tests/operator-steward-e2e.test.ts`）+ main.ts 在成员管家旁构造 operator 管家、注入
+operator surface。剧情：站点级 `create_agent` 内联建 / ★站点级 `delete_agent` park 进 **operator 的
+/me 收件箱**（operator broker id 恢复它自己的 broker）批/拒 / ★跨 hub 工作流 edit park 批准落新修订、
+egress 字节不变。**= SW-M9 落地。**
+
+### Phase B — 敏感写 operator-only 必过审批（B-M1 → B-M4）
+
+**最关键安全决策：敏感写永不携带明文密钥——动作只带环境变量名**（照 `tokenEnv` / `headerEnv` 先例）。
+四族动作词汇（`hub-steward/src/types.ts`）：
+
+```
+{ kind: 'set_credential_ref',  provider, envVarName, label? }   // 注册 provider 凭证，密钥读 env
+{ kind: 'revoke_credential',   credentialId }                   // 删一条已存凭证
+{ kind: 'set_peer_policy',     peerId, allowedDataClasses?, perLinkQuotaBudget?, shareSummary?, ... }
+{ kind: 'set_security_quota',  scope, metric, period, limit }
+```
+
+链路：管家提议「注册 provider X，密钥读 env `FOO_KEY`」→ operator 在主机环境**带外**设 `FOO_KEY` →
+**执行器**（`host/src/steward-sensitive.ts`，唯一持明文者）apply 时解析 `process.env[envVarName]` →
+`identity.createVaultEntry({ secret })`。**提议 JSON / apply body / 收件箱 item / transcript /
+`history[]` 永不含明文——只有 env 名。** `validateStewardAction` 对这些 kind **拒任何形似密钥字段**
+（`secret`/`apiKey`/`token` 直接 drop）。peer / 安全动作**天然无密钥**（peer policy 列是非密 JSON；
+quota 是数值）。
+
+**分级（双闸：分类器 + 依赖注入纵深）**：敏感 kind 在 **member ctx 分 `forbidden`**、**operator ctx
+分最高 tier**（每个写**永远走 broker**，绝不内联）。接 `authorizeAgentAction` 兜底（`authorityVerbFor`
+把每个敏感 kind 映射 `modify_owner_grant`/`change_security` 让 `AGENT_HUMAN_CONFIRM_ACTIONS` 升级）。
+成员管家**从不注入**这三族敏感依赖 → 即便分级漏了也**碰不到**（纵深防御）。
+
+### Phase C — 结构化多步 + 结果感知（C-M1 → C-M3，非自治）
+
+语义 = 「**propose → 人 applies → echo OUTCOME 回 → propose next**」，**绝不自治执行循环**（守北极星）。
+**零新 transport**——复用 SPA 已持的 `history[]`（WFEDIT-D3 先例，stateless across HTTP）。
+
+- **C-M1** — `StewardTurn` 加可选净化 `result?`。host `plan` 时 `sanitizeStewardHistory` 把**白名单**
+  结果折成**确定性一行**：`[执行结果] <kind> <mark> <label> → <subject>`。**host 是渲染权威**——client
+  只供白名单 `{kind,status,subject}`，**绝不**渲染自由文本。label 表：`done` = `✓ 已执行` /
+  `pending_approval` = `⏳ 已送收件箱待确认` / `refused` = `✗ 已拒绝(超出范围)` / `invalid` =
+  `✗ 动作无效`。保留**最后 8 turns**，content 裁 2000 / subject 裁 200；折完是 `{role,content}` 普通
+  turn（result 已折进 content）→ **agent 零改**，它只读 role+content。
+- **C-M2** — SPA（成员 `app.js` + operator 面板）`apply` 后追加 `result` 进 `history[]`；web 共享
+  `coerceStewardHistory`（`me-routes.ts` + `admin-steward-routes.ts` 同一「丢未知」纪律）。
+- **C-M3** — e2e 两步链条（`hub-steward-e2e.test.ts` +2）：① **create ✓ → 下一 plan 携上一步 done
+  结果 → 提议 `edit_agent` 接它**（确定性断言链条 + 真改 `managed.system`）；★② **负向**：history
+  **无** outcome turn → 管家**拒绝链接、提议 NOTHING**（不假设自己提的步骤真跑了 = 北极星不自治）。
+  mock provider 的哨兵 = host 对 done 结果渲的**确切串** `create_agent ✓ 已执行`（**区别于** prompt
+  里教格式用的示例 `create_agent ✓ → mailer`，无 `已执行`）→ 证明**只在 host 真折了执行结果时才链**，
+  而非匹配到 prompt 自己的格式说明。
+
+### 测试矩阵（SW-M9 增量）
+
+| 文件 | 覆盖 |
+|---|---|
+| `host/tests/operator-steward-e2e.test.ts` | Phase A 验收门 — 站点级 create 内联 / delete park 进 operator 收件箱批拒 / 跨 hub edit park 批准落修订 egress 不变 |
+| `host/tests/hub-steward-e2e.test.ts`（+2） | Phase C 链条 — create ✓ → 携结果 → 提议 edit_agent；★无结果 → 拒绝链接（不自治） |
+| `hub-steward/tests/classify.test.ts`（扩） | Phase B 分级 — 敏感 kind member→forbidden / operator→最高 tier；`authorityVerbFor` 兜底 |
+| `web/tests/{steward-routes,admin-steward-routes}.test.ts` | A 路由 gate + C 共享 `coerceStewardHistory` shape-coerce |
+
+全量回归：**host 1014 passed | 1 skipped**（live 测无 key 跳过），零回归。
+
+### SW-M9 后仍显式推迟
+
+- **Phase D — IM 入口**（example-first，复制 `examples/im-bridge-host/`，host main.ts 不动）：`/steward
+  <text>`→plan、`/apply <n>`→apply，审批 park 异步通知回 IM。**待做。**
+- **RBAC grant 的写**经管家（Phase B 只做凭证 / peer / 安全三族）。
+- 工作流 lifecycle 转移（publish / deprecate / archive）经管家——仍留 admin 面板。
+- **自治 tool-loop 管家**——**明确不做**（北极星：框架不跑自治决策）。
+- admin 控制台**内联**收件箱 / 审批视图（Phase A 用深链到 `/me`）。

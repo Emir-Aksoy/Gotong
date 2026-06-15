@@ -61,7 +61,7 @@ import {
   WORKFLOW_ASSISTANT_CAPABILITY,
   type WorkflowAssistantOutput,
 } from '@aipehub/workflow-assistant'
-import type { StewardSnapshotWorkflow } from '@aipehub/hub-steward'
+import type { StewardSnapshotWorkflow, StewardTurn, StewardTurnResult } from '@aipehub/hub-steward'
 
 import { WorkflowController, type PeerCapabilityView } from '../src/workflow-controller.js'
 import { MeWorkflowEditService, type WorkflowAssistView } from '../src/me-workflow-edit-service.js'
@@ -81,7 +81,7 @@ const USER = 'u1'
 // (the host folds the instruction into the agent prompt). One provider, every
 // scenario, fully deterministic.
 
-const MK = { create: 'MK_CREATE', del: 'MK_DELETE', edit: 'MK_EDIT', refuse: 'MK_REFUSE' }
+const MK = { create: 'MK_CREATE', del: 'MK_DELETE', edit: 'MK_EDIT', refuse: 'MK_REFUSE', chain: 'MK_CHAIN' }
 // The inner marker the steward's `edit_workflow` instruction carries through to
 // the workflow assistant's OWN mock, so the assistant returns the local-edit YAML.
 const ASSIST_MARK = 'MARK_CROSSLOCAL'
@@ -92,6 +92,31 @@ function fenceJson(obj: unknown): string {
 
 function stewardReply(req: LlmRequest): string {
   const seen = JSON.stringify(req)
+  // C-M3 result-aware step 2. Checked FIRST: step 2's history echoes step 1's
+  // instruction (which still carries MK_CREATE), but only step 2's OWN instruction
+  // carries MK_CHAIN — so matching it first routes correctly. The chain only fires
+  // when the host actually folded step 1's DONE outcome into the prompt. The
+  // sentinel is `create_agent ✓ 已执行` — the exact render `renderStewardTurnResult`
+  // (C-M1) emits for a done result (`✓` mark + `已执行` zh label). The steward's own
+  // system prompt documents the FORMAT with a different example (`create_agent ✓ →
+  // mailer`, no `已执行`), so this matches a real folded outcome, NOT the prompt's
+  // illustration. Absent that proof, the steward proposes NOTHING — it never
+  // assumes a step it proposed actually ran (北极星: 不自治).
+  if (seen.includes(MK.chain)) {
+    if (!seen.includes('create_agent ✓ 已执行')) {
+      return fenceJson({ reply: '我还不知道上一步建好没有,先把助手建出来再说。', actions: [] })
+    }
+    return fenceJson({
+      reply: '助手已经建好了,这就把它的说明改清楚一点。',
+      actions: [
+        {
+          kind: 'edit_agent',
+          agentId: `me.${USER}.mailer`,
+          changes: { system: '你把邮件总结成 3 条要点,每条不超过 20 字。' },
+        },
+      ],
+    })
+  }
   if (seen.includes(MK.create)) {
     return fenceJson({
       reply: '好的,这就给你建一个邮件总结助手。',
@@ -325,6 +350,16 @@ async function hasAgent(r: Rig, id: string): Promise<boolean> {
   return (await r.space.agents()).some((a) => a.id === id)
 }
 
+/**
+ * The turn the SPA appends after an `apply` succeeds (C-M2 `recordStewardOutcome`):
+ * a structured, WHITELISTED outcome ({kind,status,subject}) the host re-renders
+ * into the next prompt (C-M1). Content is empty — the steward reads the outcome,
+ * never a client-supplied "succeeded" narrative.
+ */
+function outcomeTurn(result: StewardTurnResult): StewardTurn {
+  return { role: 'assistant', content: '', result }
+}
+
 describe('SW-M8 — hub steward end-to-end (the two hard constraints, real stack)', () => {
   let r: Rig
   beforeEach(async () => {
@@ -455,5 +490,61 @@ describe('SW-M8 — hub steward end-to-end (the two hard constraints, real stack
     expect(res.reason).toContain('联邦')
     // Nothing parked.
     expect(await r.inboxStore.listPending(USER)).toHaveLength(0)
+  })
+
+  // ⑤ the result-aware multi-step CHAIN (C-M3). The steward is a structured
+  //    PROPOSER, never an autonomous loop — multi-step works by "propose → human
+  //    applies → echo the OUTCOME back → propose the next step". This drives the
+  //    whole result-aware path end-to-end: step 1 creates an agent; the SPA records
+  //    that outcome into history (C-M2); on the NEXT plan the host folds it into the
+  //    prompt (C-M1); and ONLY then does the steward chain forward to an edit_agent
+  //    on the very agent step 1 made.
+  it('⑤ a result-aware chain: create ✓ → next plan (carrying the outcome) proposes edit_agent on it', async () => {
+    // Step 1 — propose + apply a safe create (the chain's first link).
+    const p1 = await r.surface.plan({ userId: USER, instruction: `建一个总结邮件的助手 ${MK.create}` })
+    expect(p1.actions[0]!.action.kind).toBe('create_agent')
+    const r1 = await r.surface.apply({ userId: USER, action: p1.actions[0]!.action })
+    expect(r1.status).toBe('done')
+    expect(await hasAgent(r, `me.${USER}.mailer`)).toBe(true)
+
+    // Step 2 — the member follows up. The SPA echoes the conversation INCLUDING the
+    // step-1 outcome turn it recorded after the apply (C-M2). The host re-renders
+    // that whitelisted outcome into the prompt (C-M1), so the steward SEES the
+    // create actually succeeded and chains to edit_agent on the agent it made.
+    const p2 = await r.surface.plan({
+      userId: USER,
+      instruction: `接着把它的说明写清楚点 ${MK.chain}`,
+      history: [
+        { role: 'user', content: `建一个总结邮件的助手 ${MK.create}` },
+        { role: 'assistant', content: '好的,这就给你建一个邮件总结助手。' },
+        outcomeTurn({ kind: 'create_agent', status: 'done', subject: `me.${USER}.mailer` }),
+      ],
+    })
+    expect(p2.actions).toHaveLength(1)
+    const a2 = p2.actions[0]!
+    expect(a2.tier).toBe('safe')
+    expect(a2.action.kind).toBe('edit_agent')
+    if (a2.action.kind !== 'edit_agent') throw new Error('unreachable')
+    expect(a2.action.agentId).toBe(`me.${USER}.mailer`) // the agent step 1 made, not a guess
+
+    // Apply step 2 — the chain's second link lands a REAL config change on disk.
+    const r2 = await r.surface.apply({ userId: USER, action: a2.action })
+    expect(r2.status).toBe('done')
+    if (r2.status !== 'done' || r2.result.kind !== 'edit_agent') throw new Error('expected done/edit_agent')
+    const updated = (await r.space.agents()).find((a) => a.id === `me.${USER}.mailer`)
+    expect(updated?.managed?.system).toContain('3 条要点')
+  })
+
+  // ⑤ the negative half: WITHOUT the prior outcome in history the steward does NOT
+  //    chain forward — same instruction marker, only the structured result is
+  //    missing, so it refuses to pretend step 1 happened (北极星: 不自治). This is
+  //    what makes it genuinely result-AWARE rather than marker-driven.
+  it('⑤ without the prior outcome in history, the steward refuses to chain (no autonomy)', async () => {
+    const p2 = await r.surface.plan({
+      userId: USER,
+      instruction: `接着把它的说明写清楚点 ${MK.chain}`,
+      history: [{ role: 'user', content: '先帮我看看' }], // no outcome turn → no `[执行结果]` line
+    })
+    expect(p2.actions).toHaveLength(0)
   })
 })
