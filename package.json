@@ -60,6 +60,7 @@
     "demo:obsidian-kb": "pnpm --filter @aipehub/example-obsidian-kb start",
     "demo:elasticsearch-kb": "pnpm --filter @aipehub/example-elasticsearch-kb start",
     "demo:im-bridge-host": "pnpm --filter @aipehub/example-im-bridge-host start",
+    "demo:im-steward-bridge": "pnpm --filter @aipehub/example-im-steward-bridge start",
     "demo:cli-human": "pnpm --filter @aipehub/example-cli-human start",
     "demo:open-space": "pnpm --filter @aipehub/example-open-space start",
     "demo:federated-team": "pnpm --filter @aipehub/example-federated-team start",

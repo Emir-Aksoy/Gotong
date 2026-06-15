@@ -267,11 +267,12 @@ WorkflowController + 真 WorkflowAssistantAgent with mock LLM）+ 真 `StewardAp
 
 ## 十、显式推迟（MVP / SW-M8 当时）
 
-> 下面 1 / 4 / 5 已由 **SW-M9 能力扩展**（Phase A / B / C，见[§十二](#十二能力扩展sw-m9--operator-全站执行器--敏感写--结果感知多步)）落地；保留原文以记录「MVP 推迟 → 后续交付」的弧线。
+> 下面 1 / 2 / 4 / 5 已由 **SW-M9 能力扩展**（Phase A / D / B / C，见[§十二](#十二能力扩展sw-m9--operator-全站执行器--敏感写--结果感知多步)）落地；保留原文以记录「MVP 推迟 → 后续交付」的弧线。
 
 1. ✓ **已交付（Phase A）** — admin 控制台管家 + operator 全站执行器（**走现有 admin 写路径**，非裸
    `LocalAgentPool`）。
-2. **IM 入口**（管家 transport-agnostic，IM 桥后补，复用 Phase 12 bridge）= **Phase D（example-first，待做）**。
+2. ✓ **已交付（Phase D，example-first）** — **IM 入口**（管家 transport-agnostic）= `examples/im-steward-bridge`，
+   plan/apply over IM + 审批异步回推 IM，host main.ts 不动。
 3. 成员 agent「启停 / 暂停」（成员服务无此动作）。
 4. ✓ **部分交付（Phase B）** — 凭证 / peer / 安全的**写**已做实（operator-only，每写必过收件箱，
    永不携明文密钥）；**RBAC grant 的写**仍推迟。
@@ -384,6 +385,36 @@ quota 是数值）。
   里教格式用的示例 `create_agent ✓ → mailer`，无 `已执行`）→ 证明**只在 host 真折了执行结果时才链**，
   而非匹配到 prompt 自己的格式说明。
 
+### Phase D — IM 入口（D-M1 → D-M3，example-first，host main.ts 不动）
+
+把管家从「成员 SPA / admin 控制台」推到 **IM 客户端**（Telegram 等 6 桥同源）。新
+`examples/im-steward-bridge/`（复制 `examples/im-bridge-host/`），commit `b40febf`。
+
+**关键事实 — 这个桥不需要 `@aipehub/core` Hub。** 管家**不走 `hub.dispatch`** 而走 `plan` / `apply`
+口（镜像 host 的 `MeHubStewardSurface`）→ 从 admin 控制台、`/me` SPA、IM 三个 transport **够到同一个
+管家**。这个 example 只依赖三个包：`@aipehub/identity`（绑定流）+ `@aipehub/im-adapter`（桥 / 路由契约）
++ `@aipehub/hub-steward`（**真** `classifyStewardAction` → tier 徽章诚实，不是手写的）。
+
+- **D-M1 — 管家感知 IM 路由。** `StewardImRouter` **分叉路由**：`/steward` `/apply` 是
+  `parseImCommand`（`@aipehub/im-adapter`）不认的 UNKNOWN verb（会 fall through 成 `{kind:'free'}`），
+  所以**先预解析这两个**；其余共享 verb（`/help` `/bind` `/unbind`）**仍复用 `parseImCommand`** 让绑定
+  UX 与每个桥一致；自由文本 → `plan`。tier 徽章 `safe` 内联 / `dangerous`·`cross_hub` 进 `/me` 收件箱 /
+  `forbidden` 拒。**`apply` 服务端 RE-classify**，**从不信 `plan` 带回的 tier**（伪造 tier 不能让危险动作
+  内联跑）。绑定走 identity `im_bindings`（`issueImBindingCode` → `/bind <code>` → `getUserIdByImBinding`），
+  origin userId **服务端从绑定取**，聊天文本只当**不可信数据**（绑定，而非聊天，决定你是谁）。
+- **D-M2 — 审批异步通知回 IM。** 动作 park（`pending_approval`）时桥回「**已送你 /me 收件箱，确认后告诉
+  你**」；`StewardPort.onInboxResolve` 回调 → 桥 `sendMessage` 把批准 / 拒绝结果**推回发起人**。router 持
+  内存 `reachable Map<userId,{user,chatId}>`（每条入站消息刷新）让异步 resolve 找回 IM 身份。生产里这是
+  既有**多通道 inbox / alert 投递**（F day-3 `im` 通道，MC-M1..M7）——把 IM 身份登记成投递目标即可。
+- **D-M3 — example README + 登记。** `examples/im-steward-bridge/README.md`（为什么自成一桥 / 真假对照表 /
+  demo→生产）+ 根 `package.json` `demo:im-steward-bridge` + 本节 + CLAUDE.md。
+
+**唯一被 fake 的是「LLM」** —— `proposeActions`（指令 → 动作的关键词路由），同每个 example 都拿确定性
+provider 顶真 provider。tier 来自**真**分类器，`apply` **RE-classify** 演示生产的「服务端重新分级」纪律。
+11 自断言 demo（`pnpm demo:im-steward-bridge`，EXIT=0）钉死：① 两条硬约束延伸到 IM（危险 delete park →
+批准执行 + 回推 / 跨 hub edit park → 拒绝不执行 + 回推）；② B 的密钥纪律延伸到 IM（**整段 transcript 处处
+无明文密钥**，敏感凭证 ask 被拒且**只提环境变量名**）。
+
 ### 测试矩阵（SW-M9 增量）
 
 | 文件 | 覆盖 |
@@ -392,13 +423,19 @@ quota 是数值）。
 | `host/tests/hub-steward-e2e.test.ts`（+2） | Phase C 链条 — create ✓ → 携结果 → 提议 edit_agent；★无结果 → 拒绝链接（不自治） |
 | `hub-steward/tests/classify.test.ts`（扩） | Phase B 分级 — 敏感 kind member→forbidden / operator→最高 tier；`authorityVerbFor` 兜底 |
 | `web/tests/{steward-routes,admin-steward-routes}.test.ts` | A 路由 gate + C 共享 `coerceStewardHistory` shape-coerce |
+| `examples/im-steward-bridge`（自断言 demo） | Phase D — IM plan/apply + 审批异步回推；两条硬约束 + 无明文密钥（11 assertions） |
 
-全量回归：**host 1014 passed | 1 skipped**（live 测无 key 跳过），零回归。
+全量回归：**host 1014 passed | 1 skipped**（live 测无 key 跳过），零回归；Phase D 是 example-first
+（host main.ts 不动），blast radius 锁在新 example。
 
 ### SW-M9 后仍显式推迟
 
-- **Phase D — IM 入口**（example-first，复制 `examples/im-bridge-host/`，host main.ts 不动）：`/steward
-  <text>`→plan、`/apply <n>`→apply，审批 park 异步通知回 IM。**待做。**
+> **Phase D（IM 入口）已交付**（见上 §Phase D，`examples/im-steward-bridge`，commit `b40febf`）——
+> 四项能力扩展 A → B → C → D 全清。下面是 SW-M9 全做完后**仍**显式推迟的项。
+
+- **operator 管家经 IM** —— 现 example 走**成员**口（`MeHubStewardSurface`）；要 operator 全站管家经 IM，
+  需把 `StewardPort` 指到 admin 口（`/api/admin/steward/*`，A-M6）并**谨慎 gate IM 访问到 operator**。
+- **IM 路由升格 `@aipehub/im-router` 包** —— example-first，到第二个 caller（社区 host / 联邦 hub）再提。
 - **RBAC grant 的写**经管家（Phase B 只做凭证 / peer / 安全三族）。
 - 工作流 lifecycle 转移（publish / deprecate / archive）经管家——仍留 admin 面板。
 - **自治 tool-loop 管家**——**明确不做**（北极星：框架不跑自治决策）。
