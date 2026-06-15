@@ -140,6 +140,35 @@ transcript 兜底 + 主题白名单硬边界 + 家长事后可见」三层补强
 三个真 `Hub`,真 `parseWorkflow` + `WorkflowRunner`,真 `checkOutboundDataClasses` 闸(由
 `installPeerLink({allowedDataClasses})` 装在出站边)。
 
+## 孩子从 `/me` 自助发起一课(自助验证 · C-M3)
+
+设计 §九:孩子的 first-class 入口是 `/me` PWA —— 孩子自己在浏览器里发起一课,不经家长操作。
+孩子侧可载入模板 [`template/child-desk.template.yaml`](template/child-desk.template.yaml) 的两条工作流
+(`child-guided-lesson` / `child-autonomous-explore`)都 `surface.me` enabled,且声明
+`user_scope_field: learner_id` —— **`/me` 强制 `payload.learner_id = 发起成员自己的 userId`**,
+孩子只能为**自己**发起,改不了 `learner_id` 替别人发起。
+
+**durable 验收(确定性,无需 host / 浏览器):**
+[`packages/host/tests/family-child-me-e2e.test.ts`](../../packages/host/tests/family-child-me-e2e.test.ts)
+把这条契约跑在真 `WorkflowController` 上:读**实文件**孩子模板 → 经**真** admin
+`/api/admin/templates/import` 路由导入(落 **0 个 LLM agent** —— 订阅在家长 hub,孩子借道)→ 一个非
+admin 的**孩子 member** 经 `/api/me/workflows` 看见课、经 `/api/me/dispatch` 发起 `learn.request`
+→ 断言 `learner_id` 被强制成自己的 userId、伪造的 `someone-else` **一个任务都到不了**
+(trigger / 跨组织 `tutor` 借道 / 本地 `records.append` / fork 给家长 四步都没有),内部的
+capability / userScopeField **不泄漏**到 `/me`。
+
+```bash
+pnpm --filter @aipehub/host test family-child-me-e2e
+```
+
+**真机预览(可选,go-live 时人工核对):** 起一个生产 host(`aipehub start`,见 D-M1 runbook)→
+admin 导入孩子模板 → 接好三个本地确定性参与者(`records.append` / `report.to-guardian` /
+`explore.local`,见 [`src/participants.ts`](src/participants.ts))→ 加一个孩子 member → 用孩子账号
+开 `/me`(PWA Home tab)发起一课。
+> ⚠️ 预览静态资源前先**清掉 PWA service worker**(scope `/`),否则可能看到旧的 `/me` 壳
+> (memory `preview-sw-stale-static-assets`)。本里程碑不改任何 SPA / 静态代码 —— `/me` 的动态
+> 表单渲染是 Phase 14 / P1 早已 ship 的能力,这里只是把孩子的课接上去验证。
+
 ## 文件
 
 | 文件 | 作用 |
