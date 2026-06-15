@@ -226,6 +226,7 @@ import {
 import { HostOperatorAgentService } from './operator-agent-service.js'
 import { OperatorWorkflowEditService } from './operator-workflow-edit-service.js'
 import { operatorStewardWorkflowDirectory } from './operator-workflow-directory.js'
+import { HostStewardSensitiveExecutors } from './steward-sensitive.js'
 import { buildOperatorStewardSystemPrompt } from '@aipehub/hub-steward'
 
 // CLI flags handled before any work — keep these cheap and side-effect free
@@ -1962,6 +1963,14 @@ async function main(): Promise<void> {
           // (credentials / peer / security) tier as `dangerous` (always inbox)
           // instead of `forbidden`. The member steward above omits this flag.
           operator: true,
+          // B-M3 — gate 2 of the double gate: the sensitive executors are
+          // constructed ONLY here. The member steward never receives them, so
+          // even a future mis-tier can't run a site-wide write there (the
+          // privilege IS the injected dependency). `set_credential_ref` resolves
+          // the secret from a host env var named by the action — the steward
+          // chain never carries plaintext. `identity` is narrowed non-null by the
+          // `&& identity &&` guard above (same as `grants: identity`).
+          sensitive: new HostStewardSensitiveExecutors({ identity }),
         })
       : null
 

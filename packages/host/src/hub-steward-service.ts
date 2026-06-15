@@ -58,6 +58,7 @@ import type { InboxStore } from '@aipehub/inbox'
 import type { OrgApiPool } from './org-api-pool.js'
 import type { HostMeAgentService } from './me-agent-service.js'
 import type { MeWorkflowEditResult, MeWorkflowEditService } from './me-workflow-edit-service.js'
+import type { StewardSensitiveExecutors } from './steward-sensitive.js'
 import {
   StewardApprovalBroker,
   STEWARD_EXEC_CAPABILITY,
@@ -217,13 +218,25 @@ export interface HubStewardApplyInput {
   action: unknown
 }
 
-/** What `performStewardAction` produces for a successfully executed action. */
+/**
+ * What `performStewardAction` produces for a successfully executed action.
+ *
+ * The four B-M3 sensitive results carry NO plaintext secret — only the env-var
+ * NAME (for a credential), ids, and plain scalars. The result flows back to the
+ * caller / inbox / transcript, so a secret here would defeat the whole
+ * "never carry plaintext" invariant. The executor (`steward-sensitive.ts`) is the
+ * ONLY plaintext holder; it returns just the vault id it minted.
+ */
 export type StewardActionResult =
   | { kind: 'inspect'; answer: string }
   | { kind: 'create_agent'; agent: StewardOwnedAgent }
   | { kind: 'edit_agent'; agent: StewardOwnedAgent }
   | { kind: 'delete_agent'; removed: boolean }
   | { kind: 'edit_workflow'; edit: MeWorkflowEditResult }
+  | { kind: 'set_credential_ref'; provider: string; envVarName: string; credentialId: string }
+  | { kind: 'revoke_credential'; credentialId: string; removed: boolean }
+  | { kind: 'set_peer_policy'; peerId: string }
+  | { kind: 'set_security_quota'; scope: string; metric: string; period: string; limit: number }
 
 /**
  * The outcome of `apply`.
@@ -427,6 +440,15 @@ export function createHubStewardService(deps: {
    * member-forgeable payload field. Default `false` (member steward).
    */
   operator?: boolean
+  /**
+   * The OPERATOR-ONLY sensitive executors (B-M3). Passed ONLY for the operator
+   * console; the member steward omits it. They back the four sensitive writes
+   * (credentials / peer / security) after the second confirmation. Absent ⇒ those
+   * writes fail closed in `performStewardAction` (gate 2 — the privilege is this
+   * injected dependency, not a flag). Threaded into the approval broker, which is
+   * where a sensitive action actually executes after approval.
+   */
+  sensitive?: StewardSensitiveExecutors
 }): HubStewardSurface | null {
   const { hub, config, agents, workflows, workflowEditor, orgApiPool, logger } = deps
   const ids = deps.ids ?? DEFAULT_STEWARD_IDS
@@ -514,6 +536,11 @@ export function createHubStewardService(deps: {
       workflowEditor,
       id: ids.brokerId,
       capability: ids.brokerCapability,
+      // B-M3 — operator-only sensitive executors. The broker is where a sensitive
+      // action runs AFTER the member approves it in their inbox, so the executors
+      // must reach it here; absent (member steward) ⇒ those kinds never get this far
+      // (forbidden) and would fail closed even if they did.
+      ...(deps.sensitive ? { sensitive: deps.sensitive } : {}),
     })
     hub.register(broker)
     logger.info('hub-steward: approval broker registered', {
@@ -743,7 +770,18 @@ export function summarizeStewardAction(action: StewardAction): string {
 export async function performStewardAction(
   userId: string,
   action: StewardAction,
-  deps: { agents: StewardAgentDirectory; workflowEditor: StewardWorkflowEditor },
+  deps: {
+    agents: StewardAgentDirectory
+    workflowEditor: StewardWorkflowEditor
+    /**
+     * The OPERATOR-ONLY sensitive executors (B-M3). Present iff this steward is
+     * the operator console; ABSENT for the member steward, so the four sensitive
+     * kinds fail closed here (gate 2 of the double gate — the privilege is the
+     * injected dependency). The safe inline path never passes this either, so a
+     * mis-tiered sensitive action can't run inline.
+     */
+    sensitive?: StewardSensitiveExecutors
+  },
 ): Promise<StewardActionResult> {
   switch (action.kind) {
     case 'inspect':
@@ -781,21 +819,64 @@ export async function performStewardAction(
       })
       return { kind: 'edit_workflow', edit }
     }
-    case 'set_credential_ref':
-    case 'revoke_credential':
-    case 'set_peer_policy':
-    case 'set_security_quota':
-      // Phase B sensitive writes. B-M1 ships the vocabulary + validator only; the
-      // executors (the ONLY plaintext-secret holder, env-var resolved) are injected
-      // OPERATOR-ONLY in B-M3. Reaching here in B-M1 means classification let a
-      // sensitive action through — fail-closed (a member steward is never given the
-      // deps to run these, and the classifier tiers them `forbidden`).
-      throw new Error(
-        `performStewardAction: sensitive write '${action.kind}' requires the operator executor (B-M3); not wired`,
+    case 'set_credential_ref': {
+      // The ONLY plaintext-secret holder. The action carries an env-var NAME; the
+      // executor reads `process.env[name]` and mints an org vault row, returning
+      // just the vault id — no secret crosses back out.
+      const { credentialId } = await requireSensitive(deps, action.kind).setCredentialRef(
+        userId,
+        action,
       )
+      return {
+        kind: 'set_credential_ref',
+        provider: action.provider,
+        envVarName: action.envVarName,
+        credentialId,
+      }
+    }
+    case 'revoke_credential': {
+      const { removed } = await requireSensitive(deps, action.kind).revokeCredential(
+        userId,
+        action.credentialId,
+      )
+      return { kind: 'revoke_credential', credentialId: action.credentialId, removed }
+    }
+    case 'set_peer_policy': {
+      await requireSensitive(deps, action.kind).setPeerPolicy(userId, action)
+      return { kind: 'set_peer_policy', peerId: action.peerId }
+    }
+    case 'set_security_quota': {
+      await requireSensitive(deps, action.kind).setSecurityQuota(userId, action)
+      return {
+        kind: 'set_security_quota',
+        scope: action.scope,
+        metric: action.metric,
+        period: action.period,
+        limit: action.limit,
+      }
+    }
     case 'refuse':
       throw new Error('performStewardAction: a refuse action is never executed (it is forbidden)')
   }
+}
+
+/**
+ * Gate 2 of the double gate (B-M3): the sensitive executors are injected ONLY for
+ * the operator steward. Absent ⇒ fail closed — a sensitive action that somehow
+ * reached here (a future mis-tier, or the safe inline path which never passes
+ * `sensitive`) cannot run. The member steward is structurally incapable of a
+ * sensitive write because it was never handed the executor.
+ */
+function requireSensitive(
+  deps: { sensitive?: StewardSensitiveExecutors },
+  kind: string,
+): StewardSensitiveExecutors {
+  if (!deps.sensitive) {
+    throw new Error(
+      `performStewardAction: sensitive write '${kind}' requires the operator executor (B-M3); not wired`,
+    )
+  }
+  return deps.sensitive
 }
 
 /**

@@ -51,6 +51,7 @@ import {
   type StewardAgentDirectory,
   type StewardWorkflowEditor,
 } from './hub-steward-service.js'
+import type { StewardSensitiveExecutors } from './steward-sensitive.js'
 
 /**
  * The capability the steward dispatches a gated action to. One capability for
@@ -83,6 +84,14 @@ export interface StewardApprovalBrokerOptions {
   agents: StewardAgentDirectory
   /** The workflow-edit executor — the OpenClaw-style editor (cross-hub lock). */
   workflowEditor: StewardWorkflowEditor
+  /**
+   * The OPERATOR-ONLY sensitive executors (B-M3). This broker is where a
+   * sensitive action actually RUNS — after the operator approves it in their
+   * inbox. So for the operator console it must be threaded here; the member
+   * broker omits it (those kinds are `forbidden` for a member and never reach a
+   * broker). Absent ⇒ `performStewardAction` fails closed on a sensitive kind.
+   */
+  sensitive?: StewardSensitiveExecutors
   /** Clock injection for deterministic tests. */
   now?: () => number
   /**
@@ -107,12 +116,24 @@ export class StewardApprovalBroker implements Participant {
   readonly capabilities: readonly string[]
 
   private readonly store: InboxStore
-  private readonly deps: { agents: StewardAgentDirectory; workflowEditor: StewardWorkflowEditor }
+  private readonly deps: {
+    agents: StewardAgentDirectory
+    workflowEditor: StewardWorkflowEditor
+    sensitive?: StewardSensitiveExecutors
+  }
   private readonly now: () => number
 
   constructor(opts: StewardApprovalBrokerOptions) {
     this.store = opts.store
-    this.deps = { agents: opts.agents, workflowEditor: opts.workflowEditor }
+    // Thread `sensitive` only when the operator console supplies it — the member
+    // broker constructs without it, so `performStewardAction` (called from
+    // `onResume`) fails closed on a sensitive kind there (defence in depth: even
+    // a mis-tiered sensitive action that somehow reached a member broker cannot run).
+    this.deps = {
+      agents: opts.agents,
+      workflowEditor: opts.workflowEditor,
+      ...(opts.sensitive ? { sensitive: opts.sensitive } : {}),
+    }
     this.now = opts.now ?? (() => Date.now())
     this.id = opts.id ?? STEWARD_EXEC_PARTICIPANT_ID
     this.capabilities = [opts.capability ?? STEWARD_EXEC_CAPABILITY]
