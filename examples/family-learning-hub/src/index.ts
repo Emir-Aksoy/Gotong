@@ -6,8 +6,9 @@
  *
  * This demo runs the 家长-hub `tutor-teach` WORKFLOW through the REAL WorkflowRunner +
  * REAL predicate + REAL FileInboxStore + the Phase-16 human-inbox broker, with a ~30-line
- * mirror of HostInboxService's two-step resume (cafe-ops / tea-supply-link precedent). It
- * exists to NAIL two fail-OPEN holes a "core selling point" must not ship with:
+ * mirror of HostInboxService's two-step resume (cafe-ops / tea-supply-link precedent — now
+ * factored into ./harness.ts, shared with real mode). It exists to NAIL two fail-OPEN holes
+ * a "core selling point" must not ship with:
  *
  *   ① gate-level fail-open (closed by A-M1): the topic whitelist is a DETERMINISTIC
  *      `topic.screen` participant returning a real boolean `{allowed}`. If an LLM served
@@ -50,222 +51,50 @@
  *       fix). The tutor is never contacted.
  *
  * Host-free on purpose (same precedent as cafe-ops / tea-supply-link): core + workflow +
- * inbox + a ~30-line mirror of HostInboxService's two-step resume, so the mechanism is
- * visible. The deterministic gate participants live in ./participants.ts (shared with real
- * mode); only the TUTOR is swapped for an LlmAgent in Phase B — the gates stay deterministic.
+ * inbox + a ~30-line mirror of HostInboxService's two-step resume (in ./harness.ts), so the
+ * mechanism is visible. The deterministic gate participants live in ./participants.ts; only
+ * the TUTOR is swapped for an LlmAgent in real mode (index.real.ts) — the gates stay
+ * deterministic in both.
  *
  * Run:  pnpm demo:family-learning-hub
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { existsSync, rmSync } from 'node:fs'
 
+import { DEFAULT_MODERATION_RULES, LessonTutorStandin } from './participants.js'
 import {
-  Hub,
-  InMemoryStorage,
-  createInprocHubLinkPair,
-  installPeerLink,
-  type ParticipantId,
-  type Task,
-  type TaskResult,
-} from '@aipehub/core'
-import { FileInboxStore, HumanInboxParticipant, type InboxDecision, type InboxItem } from '@aipehub/inbox'
-import { parseWorkflow, WorkflowRunner, type WorkflowDefinition } from '@aipehub/workflow'
-
-import {
-  DEFAULT_MODERATION_RULES,
-  LessonTutorStandin,
-  ModerationParticipant,
-  RecordsAppendParticipant,
-  ReportToGuardianParticipant,
-  ThirdPartyStandin,
-  TopicScreenParticipant,
-  type LearningRecord,
-  type Lesson,
-  type ModerationResult,
-  type ModerationRule,
-  type ScreenResult,
-} from './participants.js'
-
-const WORKFLOWS_DIR = fileURLToPath(new URL('../workflows', import.meta.url))
-const GUARDIAN = 'guardian-parent' as ParticipantId // the 家长 user who approves (local to the 家长 hub)
-const LEARNER = 'kid-lin' // the 孩子 member; /me would force payload.learner_id = this userId
-const CHILD_LEARNING = 'child-learning' // the data class tagged on every cross-hub step
-
-/** Two reusable decisions the 家长 makes in their inbox. */
-const APPROVE: InboxDecision = { kind: 'approval', approved: true }
-const REJECT: InboxDecision = { kind: 'approval', approved: false }
-
-/** The `tutor-teach` workflow's output shape (steps: screen → guardian-approval → teach → moderate → mod-approval). */
-interface LessonOut {
-  screened?: ScreenResult
-  lesson?: Lesson
-  moderated?: ModerationResult
-}
-
-/** In-memory stand-in for identity.suspended_tasks — what a parked task needs to resume. */
-interface ParkedRow {
-  agentId: ParticipantId
-  state: unknown
-  taskJson: string
-}
-
-/**
- * One self-contained world: a 家长 hub running the real `tutor-teach` workflow, a 孩子 hub
- * owning the learning-records master, a third-party hub (only to prove confinement), and
- * the two cross-org links. The moderation rule list is a per-env knob so the demo can run
- * the SAME content with rules ON ([A]-[D],[F]) and OFF ([E]) and prove the layer is opt-out.
- */
-interface Env {
-  name: string
-  parentHub: Hub
-  childHub: Hub
-  thirdPartyHub: Hub
-  tutor: LessonTutorStandin
-  guardianInbox: ReportToGuardianParticipant
-  thirdParty: ThirdPartyStandin
-  childDesk: RecordsAppendParticipant
-  inbox: FileInboxStore
-  parked: Map<string, ParkedRow>
-  def: WorkflowDefinition
-}
-
-async function buildEnv(name: string, tmpRoot: string, moderationRules: readonly ModerationRule[]): Promise<Env> {
-  const root = join(tmpRoot, name)
-  mkdirSync(root, { recursive: true })
-  const childRecordsRoot = join(root, 'child-hub')
-  const parked = new Map<string, ParkedRow>()
-  const inbox = new FileInboxStore(root)
-  inbox.ensureDirs()
-
-  // 家长 hub — runs the tutor-teach WORKFLOW + serves its gate capabilities + the human
-  // broker + the local fork sink. A real host parks suspended tasks in
-  // identity.suspended_tasks; the demo records them in `parked` and wakes them by hand.
-  const parentHub = new Hub({
-    storage: new InMemoryStorage(),
-    suspendNotifier: (task, by, s) => {
-      parked.set(task.id, { agentId: by, state: s.state, taskJson: JSON.stringify(task) })
-    },
-  })
-  await parentHub.start()
-  const tutor = new LessonTutorStandin()
-  const guardianInbox = new ReportToGuardianParticipant()
-  parentHub.register(new HumanInboxParticipant({ store: inbox })) // aipehub.human/v1 — both approval steps
-  parentHub.register(new TopicScreenParticipant()) // topic.screen — ★ the gate-level fail-open fix (real boolean)
-  parentHub.register(new ModerationParticipant(moderationRules)) // content.moderate — the OPTIONAL rule-engine layer
-  parentHub.register(tutor) // teach.lesson — deterministic here, an LlmAgent in Phase B
-  parentHub.register(guardianInbox) // report.to-guardian — the local oversight fork sink
-
-  // 孩子 hub — owns the learning-records MASTER copy (records.append writes to ITS disk).
-  const childHub = new Hub({ storage: new InMemoryStorage() })
-  await childHub.start()
-  const childDesk = new RecordsAppendParticipant(childRecordsRoot)
-  childHub.register(childDesk)
-
-  // third-party hub — only here to PROVE child data can't escape to it.
-  const thirdPartyHub = new Hub({ storage: new InMemoryStorage() })
-  await thirdPartyHub.start()
-  const thirdParty = new ThirdPartyStandin()
-  thirdPartyHub.register(thirdParty)
-
-  // 家长 → 孩子 link: the per-link contract CLEARS child-learning and advertises
-  // records.append (advertise = authorize, G-M1). This is how the lesson's master copy
-  // crosses to the 孩子 hub where it belongs.
-  const childLink = createInprocHubLinkPair({ aPeerId: 'child-hub', bPeerId: 'parent-hub' })
-  installPeerLink({
-    hub: parentHub,
-    link: childLink.a,
-    selfHubId: 'parent-hub',
-    remoteCapabilities: ['records.append'],
-    outboundCaps: ['records.append'],
-    allowedDataClasses: [CHILD_LEARNING],
-  })
-  installPeerLink({ hub: childHub, link: childLink.b, selfHubId: 'child-hub' })
-
-  // 家长 → 第三方 link: clears ONLY 'public' → anything tagged child-learning fails closed
-  // here. Same data-class lock as §六; lets [C] prove "child data flows only to the cleared 孩子".
-  const thirdLink = createInprocHubLinkPair({ aPeerId: 'third-party-hub', bPeerId: 'parent-hub' })
-  installPeerLink({
-    hub: parentHub,
-    link: thirdLink.a,
-    selfHubId: 'parent-hub',
-    remoteCapabilities: ['thirdparty.ingest'],
-    outboundCaps: ['thirdparty.ingest'],
-    allowedDataClasses: ['public'],
-  })
-  installPeerLink({ hub: thirdPartyHub, link: thirdLink.b, selfHubId: 'third-party-hub' })
-
-  // The 家长 tutor-teach WORKFLOW — parsed by the REAL parseWorkflow (the same one the
-  // template importer runs), so a broken workflow YAML fails the demo loudly. topic.screen
-  // and content.moderate are served by the deterministic participants above, NOT the agent.
-  const def = parseWorkflow(readFileSync(join(WORKFLOWS_DIR, 'tutor-teach.yaml'), 'utf8'))
-  parentHub.register(new WorkflowRunner({ definition: def, hub: parentHub }))
-
-  return { name, parentHub, childHub, thirdPartyHub, tutor, guardianInbox, thirdParty, childDesk, inbox, parked, def }
-}
-
-async function teardown(env: Env): Promise<void> {
-  await Promise.all([env.parentHub.stop(), env.childHub.stop(), env.thirdPartyHub.stop()])
-}
-
-/** Dispatch the 孩子's learning request onto the 家长 hub (it "arrived" cross-org — model 2). */
-async function dispatchLesson(env: Env, topic: string): Promise<TaskResult> {
-  return env.parentHub.dispatch({
-    from: 'child-portal' as ParticipantId,
-    strategy: { kind: 'capability', capabilities: [env.def.trigger.capability] },
-    // /me would force payload.learner_id = the member's own userId; we pass it directly.
-    payload: { topic, learner_id: LEARNER, guardian_id: GUARDIAN },
-    title: '孩子的学习申请',
-  })
-}
-
-/** The 孩子 workflow's downstream master write — records.append crosses parent→child (cleared for child-learning). */
-async function appendRecord(env: Env, lesson: Lesson): Promise<LearningRecord> {
-  const r = await env.parentHub.dispatch({
-    from: 'parent-orchestrator' as ParticipantId,
-    strategy: { kind: 'capability', capabilities: ['records.append'] },
-    dataClasses: [CHILD_LEARNING], // child data — crosses to the CLEARED 孩子 hub, fail-closed everywhere else
-    payload: { learner_id: lesson.learnerId, topic: lesson.topic, lesson },
-    title: '把这一课记入孩子学习档案 (主副本, 跨 hub 写到孩子)',
-  })
-  return okOutput(r, 'records.append') as LearningRecord
-}
-
-/** The 孩子 workflow's downstream oversight fork — report.to-guardian, LOCAL on the 家长 hub. */
-async function reportFork(env: Env, lesson: Lesson): Promise<{ forked?: boolean }> {
-  const r = await env.parentHub.dispatch({
-    from: 'parent-orchestrator' as ParticipantId,
-    strategy: { kind: 'capability', capabilities: ['report.to-guardian'] },
-    payload: { learner_id: lesson.learnerId, summary: { lessonNo: lesson.lessonNo, title: lesson.title } },
-    title: 'fork 一份监督副本给家长',
-  })
-  return okOutput(r, 'report.to-guardian') as { forked?: boolean }
-}
-
-/** Record the master copy on the 孩子 hub AND fork an oversight copy to the 家长. */
-async function recordAndFork(env: Env, lesson: Lesson): Promise<LearningRecord> {
-  const record = await appendRecord(env, lesson)
-  await reportFork(env, lesson)
-  return record
-}
+  APPROVE,
+  CHILD_LEARNING,
+  GUARDIAN,
+  REJECT,
+  assert,
+  buildEnv,
+  dispatchLesson,
+  driveToCompletion,
+  makeTmpRoot,
+  okOutput,
+  recordAndFork,
+  section,
+  teardown,
+  type LessonOut,
+} from './harness.js'
 
 async function main(): Promise<void> {
   console.log('\n=== AipeHub case: family-learning-hub — 家长给孩子开 AI 订阅 + 管辖权 + AI 安全 (生产硬化 A-M2) ===\n')
   console.log('  跑的是真·家长 `tutor-teach` 工作流 (真 WorkflowRunner + 真求值器 + 真收件箱), 钉死两处 fail-open。\n')
 
-  const tmpRoot = mkdtempSync(join(tmpdir(), 'aipehub-family-learning-'))
+  const tmpRoot = makeTmpRoot()
   try {
     // ── env1: the 家长's default moderation rules ON (外挂 / 充值 / 私聊) ──────────────
-    const env1 = await buildEnv('rules-on', tmpRoot, DEFAULT_MODERATION_RULES)
+    const tutor1 = new LessonTutorStandin()
+    const env1 = await buildEnv('rules-on', tmpRoot, DEFAULT_MODERATION_RULES, tutor1)
 
     // --- [A] off-whitelist — parks TWICE (topic gate, then content gate) -------------
     section('[A] 白名单外 (投资理财): 家长批主题 → 上课 → 自评触发内容审核 → 家长批内容 → 建档 + fork')
-    const taughtBeforeA = env1.tutor.taught.length
+    const taughtBeforeA = tutor1.taught.length
     const firedA = await dispatchLesson(env1, '投资理财')
     assert(firedA.kind === 'suspended', '[A] 白名单外 → 工作流挂起在主题审批闸 (这一课还没用到家长订阅)')
-    assert(env1.tutor.taught.length === taughtBeforeA, '[A] 挂起期间导师 0 次被联系')
+    assert(tutor1.taught.length === taughtBeforeA, '[A] 挂起期间导师 0 次被联系')
     const firstA = (await env1.inbox.listPending(GUARDIAN))[0]
     assert(!!firstA && firstA.parentKind === 'workflow', '[A] 首个待办是 workflow-parented 审批 (两步恢复)')
     console.log(`  家长 /me 收件箱: [${firstA!.kind}] "${firstA!.title ?? firstA!.prompt}"`)
@@ -280,7 +109,7 @@ async function main(): Promise<void> {
     )
     assert(outA.lesson?.lessonNo === 1, '[A] 导师按学习档案续上第 1 课')
     assert(outA.lesson?.flagged === true, '[A] 导师自评把「投资理财」内容打了标 (决策 1.a, 底层)')
-    assert(env1.tutor.taught.length === taughtBeforeA + 1, '[A] 导师恰好被联系一次 (批准后才跨, 第二次挂起不重跑 teach)')
+    assert(tutor1.taught.length === taughtBeforeA + 1, '[A] 导师恰好被联系一次 (批准后才跨, 第二次挂起不重跑 teach)')
     const recA = await recordAndFork(env1, outA.lesson!)
     assert(typeof recA.recordPath === 'string' && existsSync(recA.recordPath), '[A] 学习档案主副本真写到孩子 hub 磁盘')
     assert(recA.totalRecords === 1, '[A] 孩子 hub 主副本累计 1 条')
@@ -304,7 +133,7 @@ async function main(): Promise<void> {
     // --- [C] data-class confinement — child data can't escape to a third party -------
     section('[C] 数据外泄闸: child-learning 任务发孩子通 (上面 records.append) / 发第三方拒')
     const firedC = await env1.parentHub.dispatch({
-      from: 'parent-orchestrator' as ParticipantId,
+      from: 'parent-orchestrator',
       strategy: { kind: 'capability', capabilities: ['thirdparty.ingest'] },
       dataClasses: [CHILD_LEARNING],
       payload: { note: '把孩子的学习记录发给第三方' },
@@ -335,22 +164,23 @@ async function main(): Promise<void> {
 
     // --- [F] off-whitelist → REJECT → the lesson is NOT taught (workflow-level fix) ---
     section('[F] 白名单外 (加密货币) 家长「拒绝」: 这一课不上 (钉死工作流层 fail-open — 拒绝真能拦)')
-    const taughtBeforeF = env1.tutor.taught.length
+    const taughtBeforeF = tutor1.taught.length
     const firedF = await dispatchLesson(env1, '加密货币')
     assert(firedF.kind === 'suspended', '[F] 白名单外 → 挂起等家长')
     const driveF = await driveToCompletion(env1, firedF, () => REJECT)
     const outF = okOutput(driveF.result, '[F] run after rejection') as LessonOut
     assert(driveF.gates.length === 1 && driveF.gates[0]!.title === '白名单外主题审批', '[F] 只卡主题审批 (拒绝后不再走内容闸)')
     assert(outF.lesson === undefined, '[F] ★ 家长拒绝 → teach 步被 when 跳过 → 没有这一课 (lesson=undefined)')
-    assert(env1.tutor.taught.length === taughtBeforeF, '[F] ★ 导师从未被联系 (拒绝真的拦住了, 不是 fail-open 照常上课)')
-    console.log(`  家长拒绝 → lesson=${outF.lesson}; 导师被联系次数不变 (${env1.tutor.taught.length})`)
+    assert(tutor1.taught.length === taughtBeforeF, '[F] ★ 导师从未被联系 (拒绝真的拦住了, 不是 fail-open 照常上课)')
+    console.log(`  家长拒绝 → lesson=${outF.lesson}; 导师被联系次数不变 (${tutor1.taught.length})`)
 
     assert((await env1.inbox.listPending(GUARDIAN)).length === 0, 'env1 收件箱无遗留待办')
     await teardown(env1)
 
     // ── env2: the SAME content, rule engine OFF (empty list = opt-out) ───────────────
     section('[E] 关掉规则引擎 (空规则清单): 同样的「编程基础之游戏外挂」内容 → 不再卡内容审核, 只剩自评层')
-    const env2 = await buildEnv('rules-off', tmpRoot, [])
+    const tutor2 = new LessonTutorStandin()
+    const env2 = await buildEnv('rules-off', tmpRoot, [], tutor2)
     const firedE = await dispatchLesson(env2, '编程基础之游戏外挂')
     const driveE = await driveToCompletion(env2, firedE, () => APPROVE)
     const outE = okOutput(driveE.result, '[E] rules-off run') as LessonOut
@@ -373,90 +203,6 @@ async function main(): Promise<void> {
   section('done')
   console.log('  孩子借家长订阅学习, 主题白名单 + 分层内容审核 + 家长审批都在家长工作流里, 拒绝真能拦, 数据各归各家。\n')
   process.exit(0)
-}
-
-/**
- * Drive a workflow run to completion, resolving each `human:` step it parks on. A single
- * run can park MORE THAN ONCE (scenario [A]: topic gate, then content gate), so this loops
- * until the run is no longer suspended, collecting the gates it hit (for assertions).
- */
-async function driveToCompletion(
-  env: Env,
-  fired: TaskResult,
-  decide: (item: InboxItem) => InboxDecision,
-): Promise<{ result: TaskResult; gates: InboxItem[] }> {
-  let result = fired
-  const gates: InboxItem[] = []
-  let guard = 0
-  while (result.kind === 'suspended') {
-    if (++guard > 10) throw new Error('run suspended more than 10 times — possible loop')
-    const pending = await env.inbox.listPending(GUARDIAN)
-    if (pending.length === 0) throw new Error('run suspended but the 家长 inbox has no pending item')
-    const item = pending[0]!
-    gates.push(item)
-    result = await resolveHumanStep(env.parentHub, env.inbox, env.parked, item.itemId, decide(item))
-  }
-  return { result, gates }
-}
-
-/**
- * Resolve a parked `human:` step and resume — the two-step pattern from
- * `HostInboxService.resolve` (host/src/inbox-service.ts), hand-rolled so the mechanism is
- * visible. The three invariants that keep it correct:
- *   1. flip pending→resolved FIRST (race guard) — a repeat resolve can't double-wake.
- *   2. resume the CHILD broker before the PARENT workflow — until the child resumes, the
- *      parent's lookup of the child result is still `suspended`.
- *   3. only drop the parent row when it actually finished (it could re-suspend on another
- *      human step — [A] parks twice).
- */
-async function resolveHumanStep(
-  hub: Hub,
-  store: FileInboxStore,
-  parked: Map<string, ParkedRow>,
-  itemId: string,
-  decision: InboxDecision,
-): Promise<TaskResult> {
-  const item = await store.get(itemId)
-  if (!item) throw new Error(`inbox item '${itemId}' not found`)
-
-  // (1) race guard — pending → resolved before any resume.
-  await store.markResolved(itemId, decision)
-
-  // (2) resume the CHILD broker with the decision as its answer.
-  const childRow = parked.get(itemId)
-  if (!childRow) throw new Error('child broker task was not parked')
-  const childTask = JSON.parse(childRow.taskJson) as Task
-  await hub.resumeTask(childRow.agentId, childTask, { answer: decision })
-  parked.delete(itemId)
-
-  // (3) resume the PARENT workflow run (child strictly before parent).
-  if (item.parentKind !== 'workflow' || !item.parent) {
-    throw new Error('expected a workflow parent for this demo step')
-  }
-  const parentRow = parked.get(item.parent.taskId)
-  if (!parentRow) throw new Error('parent workflow task was not parked')
-  if (parentRow.agentId !== item.parent.by) {
-    throw new Error(`parent agent mismatch: ${parentRow.agentId} !== ${item.parent.by}`)
-  }
-  const parentTask = JSON.parse(parentRow.taskJson) as Task
-  const result = await hub.resumeTask(item.parent.by, parentTask, parentRow.state)
-  // only drop the parent row once the run is actually done (not re-suspended on another gate).
-  if (result.kind !== 'suspended') parked.delete(item.parent.taskId)
-  return result
-}
-
-function okOutput(r: TaskResult, label: string): unknown {
-  if (r.kind !== 'ok') throw new Error(`${label}: expected an 'ok' result, got '${r.kind}'`)
-  return (r as { output: unknown }).output
-}
-
-function assert(cond: boolean, label: string): void {
-  if (!cond) throw new Error(`ASSERT FAILED: ${label}`)
-  console.log(`  ✓ ${label}`)
-}
-
-function section(title: string): void {
-  console.log(`\n── ${title} ${'─'.repeat(Math.max(0, 60 - title.length))}`)
 }
 
 main().catch((err) => {
