@@ -245,8 +245,19 @@ export class HostInboxService {
     // handleResume needs its carried state — the ACP adapter re-finds its
     // in-memory `permissionToken` from `row.state` to answer a still-open
     // permission request — gets both the state AND the decision in one payload.
-    await this.hub.resumeTask(row.agentId, childTask, { ...asObject(row.state), answer: decision })
-    this.identity.removeSuspendedTask(item.itemId)
+    const result = await this.hub.resumeTask(row.agentId, childTask, {
+      ...asObject(row.state),
+      answer: decision,
+    })
+    // Remove the child row only when the broker actually settled. A lifecycle-
+    // aware outbound participant (e.g. an approval-gated A2A agent whose remote
+    // returns a `working` Task) RE-parks on this very resume — approving it kicks
+    // off the poll loop. The notifier already wrote a fresh row (INSERT OR
+    // REPLACE under the same id) with a FINITE resumeAt; removing it here would
+    // strand the poll. Mirror resumeParent's same guard. We still `return true`:
+    // for a workflow parent, resumeParent re-reads the (now re-suspended) child,
+    // re-parks the run at that finite resumeAt, and the sweep converges both.
+    if (result.kind !== 'suspended') this.identity.removeSuspendedTask(item.itemId)
     return true
   }
 
