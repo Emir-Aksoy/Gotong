@@ -1,0 +1,16 @@
+{
+  "name": "@aipehub/example-im-steward-bridge",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "v5 Stream SW Phase D — reach the hub steward (管家) from an IM client. An IM bridge forks the router with a steward vocabulary (`/steward <plain text>` → plan, `/apply <n>` → apply) routed to a plan/apply StewardPort (mirroring `MeHubStewardSurface`), NOT `hub.dispatch`. Tier badges come from the REAL `classifyStewardAction`, so dangerous / cross-hub asks honestly park to the approval inbox and an async notify-back tells the user once they resolve it in `/me`.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/identity": "workspace:*",
+    "@aipehub/im-adapter": "workspace:*",
+    "@aipehub/hub-steward": "workspace:*"
+  }
+}

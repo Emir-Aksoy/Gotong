@@ -240,6 +240,18 @@ importers:
         specifier: workspace:*
         version: link:../../packages/im-adapter
 
+  examples/im-steward-bridge:
+    dependencies:
+      '@aipehub/hub-steward':
+        specifier: workspace:*
+        version: link:../../packages/hub-steward
+      '@aipehub/identity':
+        specifier: workspace:*
+        version: link:../../packages/identity
+      '@aipehub/im-adapter':
+        specifier: workspace:*
+        version: link:../../packages/im-adapter
+
   examples/industry-consultation-deepseek:
     dependencies:
       '@aipehub/core':
