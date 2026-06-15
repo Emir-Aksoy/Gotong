@@ -201,6 +201,18 @@ importers:
         specifier: ^4.7.0
         version: 4.22.0
 
+  examples/family-learning-hub:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/inbox':
+        specifier: workspace:*
+        version: link:../../packages/inbox
+      '@aipehub/workflow':
+        specifier: workspace:*
+        version: link:../../packages/workflow
+
   examples/federated-team:
     dependencies:
       '@aipehub/core':

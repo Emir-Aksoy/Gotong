@@ -1,0 +1,79 @@
+schema: aipehub.workflow/v1
+workflow:
+  id: child-guided-lesson
+  name: 跟 AI 导师学一课 (跨组织)
+  description: >-
+    孩子发起一课 → 主题白名单外则家长批准 → 跨 hub 借家长订阅的 AI 导师上课 →
+    记进本地学习档案 (主副本, 孩子 hub) → fork 一份小结给家长监督。
+  # 这是一条 CROSS-ORG 工作流, 住在**孩子 (child)** 的 hub 上。
+  #
+  # `tutor` 步派的 capability `tutor.teach` 与 `report` 步派的 `report.to-guardian`
+  # 都住在**家长 (guardian)** 的 hub 上 —— 订阅 (LLM key) 只在家长那边, 「用 AI 导师」
+  # 这件事每次都得跨 hub 借道家长 (模型在家长 hub 跑 = 计家长订阅)。但这份 YAML 里
+  # 没有任何 peer 的名字: 它们只是普通 capability, 恰好解析到一条联邦链路上的 peer。
+  #
+  # 「这一课准不准上」由**运行时的主题白名单 + 出站审批闸**决定 (家长在那条 link 上设了
+  # 白名单 + requireApprovalOutbound)。白名单内的主题直接跨出; 白名单外的主题挂起在
+  # 家长的收件箱, 家长批准了才真正越过组织边界。这一层是**框架运行时**的事, 不是工作流
+  # 里的 `human:` 步 —— 孩子 hub 的本地 `human:` 只能指派给本 hub 用户, 指派不到家长。
+  #
+  # 这正是「模版和框架分离」的教学点 (同 tea-supply-link): 链接 (谁是家长 peer +
+  # outboundCaps + 数据类契约 + 审批策略) 是运行时的 peer 配置, 既不在工作流里, 也不在
+  # 模板里。孩子改不了 (出入口锁); 模板只带「编排骨架」。
+  governance:
+    data_sensitivity: confidential
+    required_credentials: [deepseek]
+    required_human_roles: [家长 (guardian)]
+    external_systems: [家长 hub (联邦 peer, 持订阅)]
+    notes: >-
+      白名单外的主题需家长在出站审批闸批准才上课; 课程内容由家长 hub 的导师产出 (模型在
+      家长侧, 计家长订阅), 导师自评打标可疑内容; 学习数据标 child-learning, 只流向家长,
+      data-class 闸锁死不外泄第三方。
+  trigger:
+    capability: learn.request
+    payload_schema:
+      - id: topic
+        label: 今天想学什么?
+        type: text
+        required: true
+  surface:
+    me:
+      enabled: true
+      label: 跟 AI 导师学一课
+      description: 输入想学的主题; 白名单内直接开课, 白名单外家长批准后开课。
+      allowed_roles: [owner, admin, member]
+      # /me 强制 payload.learner_id = 发起成员自己的 userId (孩子只能为自己发起)。
+      user_scope_field: learner_id
+  steps:
+    - id: tutor
+      description: 跨 hub 借家长订阅的导师上一课 (白名单外→家长批; 模型在家长 hub, 计家长订阅)。
+      dispatch:
+        strategy: { kind: capability, capabilities: [tutor.teach] }
+        # 节点级数据类: 盖到 Task.dataClasses, 过家长那条 link 的出站 data-class 契约。
+        dataClasses: [child-learning]
+        title: 请家长导师上一课
+        payload:
+          topic: $trigger.payload.topic
+          learner_id: $trigger.payload.learner_id
+    - id: record
+      description: 把这一课记进本地学习档案 (主副本, 孩子 hub 磁盘 —— 这一步不出本 hub)。
+      dispatch:
+        strategy: { kind: capability, capabilities: [records.append] }
+        title: 记入本地学习档案
+        payload:
+          learner_id: $trigger.payload.learner_id
+          topic: $trigger.payload.topic
+          lesson: $tutor.output
+    - id: report
+      description: fork 一份学习小结给家长 (oversight 副本; 孩子留原件, 家长收副本)。
+      dispatch:
+        strategy: { kind: capability, capabilities: [report.to-guardian] }
+        dataClasses: [child-learning]
+        title: 同步学习小结给家长
+        payload:
+          learner_id: $trigger.payload.learner_id
+          summary: $record.output
+  output:
+    lesson: $tutor.output
+    record: $record.output
+    report: $report.output
