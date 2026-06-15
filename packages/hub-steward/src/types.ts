@@ -299,6 +299,28 @@ export interface StewardTurn {
 }
 
 /**
+ * The LOOSE, client-supplied shape of a prior turn's result, as echoed back by
+ * the SPA. `kind`/`status` are plain `string` here — the browser only
+ * shape-coerces, it doesn't know the action enum. `sanitizeStewardHistory`
+ * re-validates them against `STEWARD_ACTION_KINDS` + the status set and renders
+ * the prompt line itself, so a forged value can never inject a "succeeded"
+ * narrative. Use this AT REQUEST BOUNDARIES; use {@link StewardTurnResult} for
+ * the validated/internal form.
+ */
+export interface StewardTurnResultInput {
+  kind: string
+  status: string
+  subject?: string
+}
+
+/** The loose, client-supplied shape of a prior turn (see {@link StewardTurnResultInput}). */
+export interface StewardTurnInput {
+  role: 'user' | 'assistant'
+  content: string
+  result?: StewardTurnResultInput
+}
+
+/**
  * What the host packs into `Task.payload` when dispatching to the steward.
  * The host fills `snapshot` from the member's owned resources; the member only
  * ever supplies `instruction` (+ the running `history` the SPA keeps).

@@ -52,6 +52,7 @@ import {
   type StewardSnapshotAgent,
   type StewardSnapshotWorkflow,
   type StewardTurn,
+  type StewardTurnInput,
   type StewardTurnResult,
 } from '@aipehub/hub-steward'
 
@@ -193,8 +194,16 @@ export interface HubStewardPlanInput {
   userId: string
   /** The member's plain-language instruction. */
   instruction: string
-  /** Prior turns of this steward conversation, for follow-up instructions. */
-  history?: ReadonlyArray<StewardTurn>
+  /**
+   * Prior turns of this steward conversation, for follow-up instructions. The
+   * LOOSE input shape (`kind`/`status` as plain strings) — the SPA only
+   * shape-coerces. `plan` runs this through `sanitizeStewardHistory`, which
+   * re-validates against `STEWARD_ACTION_KINDS` + the status set and renders the
+   * prompt line itself, so a forged value can never inject a fake outcome. The
+   * looser declared type lets the web's `MeHubStewardSurface` boundary satisfy
+   * this method's parameter (contravariance under `strictFunctionTypes`).
+   */
+  history?: ReadonlyArray<StewardTurnInput>
   /**
    * Live LLM chunks for THIS call only (WFEDIT-D4 pattern). Routed per-call via
    * a private key, never the global transcript — so a member can watch the
