@@ -146,7 +146,7 @@ export class TopicScreenParticipant extends AgentParticipant {
  * own self-flag (layer 1, decision 1.a): an empty rule list means it NEVER flags
  * (opt-out); a populated list opts the 家长 into deterministic pre-screening of lesson
  * content before it reaches the child. Both layers feed ONE approval gate (the
- * workflow's `when: $teach.output.flagged == true OR $moderate.output.flagged == true`),
+ * workflow's `when: $teach.output.flagged == true || $moderate.output.flagged == true`),
  * so turning the rule engine off leaves the self-flag floor intact.
  */
 export class ModerationParticipant extends AgentParticipant {

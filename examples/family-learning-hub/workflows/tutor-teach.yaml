@@ -1,0 +1,107 @@
+schema: aipehub.workflow/v1
+workflow:
+  id: tutor-teach
+  name: AI 导师上课 (主题白名单 + 分层内容审核 + 家长审批)
+  description: >-
+    家长 hub 一侧的导师工作流。孩子跨组织来求学 → ① 确定性主题白名单筛查 →
+    ② 白名单外的主题挂起等家长批 → ③ 导师按学习档案续上这一课 (自评打标) →
+    ④ 可选的确定性规则引擎复筛课程内容 → ⑤ 自评或规则任一命中则挂起等家长审内容。
+  # 这条工作流住在**家长 (guardian)** 的 hub 上。它就是孩子跨组织调 `tutor.teach`
+  # 时被触发的实现 —— 主题白名单 + 家长审批都在这里 (审批人=家长=家长 hub 本地用户,
+  # 本地 `human:` 步指派得到; 见 FAMILY-LEARNING-HUB-DESIGN.md §七 的正确性约束)。
+  #
+  # ★ 两道闸都由「确定性参与者的结构化输出」驱动, 不是 LLM ★
+  #   - `screen` (topic.screen) 是确定性查表, 返回真布尔 `{allowed}` —— 故
+  #     `guardian-approval.when: $screen.output.allowed == false` 读得到真值。
+  #     若把 topic.screen 交给 LLM 导师, 它返回自由文本没有 `allowed` 字段,
+  #     `$screen.output.allowed` 求值成 undefined, `undefined == false` 是 false,
+  #     审批步被**静默跳过** → 白名单外主题零审批直达导师 = fail-OPEN 安全洞。
+  #     所以 topic.screen / content.moderate 必须是确定性参与者 (运行时接线),
+  #     **不进**模板的 managed-agents (模板只点名 capability, 运行时提供参与者)。
+  #
+  # ★ 分层内容审核 (纵深防御, 两层都保留, 第二层可选) ★
+  #   - 底层 (始终在): 导师自评打标 `teach.output.flagged` (决策 1.a, 最弱一档)。
+  #   - 第二层 (可选): `content.moderate` 确定性规则引擎按家长配置的禁词/分类规则
+  #     预筛课程内容; **空规则清单 = 永不 flag = 关闭** (opt-out), 填规则 = 开启。
+  #   两层喂同一个 `mod-approval` 闸 (`when: 自评 OR 规则 任一 flagged`) —— 关掉规则
+  #   引擎只剩自评层, 自评层照常兜底。
+  governance:
+    data_sensitivity: confidential
+    required_credentials: [deepseek]
+    required_human_roles: [家长 (guardian)]
+    external_systems: [孩子 hub (联邦 peer, 发起求学)]
+    notes: >-
+      白名单外主题需家长在收件箱批准; 课程内容由家长 hub 的导师产出 (模型在家长侧,
+      计家长订阅); 自评或规则引擎命中的内容再过一道家长审核; 孩子学习数据标
+      child-learning, 过 per-link 出站闸。
+  trigger:
+    capability: tutor.teach
+    payload_schema:
+      - id: topic
+        label: 学习主题
+        type: text
+        required: true
+      - id: learner_id
+        label: 学习者 id
+        type: text
+        required: true
+      # 审批家长 = 家长 hub 的本地用户 id。孩子 hub 跨组织调用时把它带进来 (落地时配一次,
+      # 模版/框架分离)。诚实边界: 生产中家长 hub 宜从自己的配置解析审批人, 不盲信跨 hub
+      # payload —— 模板用 $trigger.payload.guardian_id 是可移植占位 (同 cafe-ops 的 manager_id)。
+      - id: guardian_id
+        label: 审批家长 (本 hub 用户 id)
+        type: text
+        required: true
+  steps:
+    - id: screen
+      description: 导师按家长发布的主题白名单做确定性筛查 (返回真布尔 allowed, 非 LLM)。
+      dispatch:
+        strategy: { kind: capability, capabilities: [topic.screen] }
+        title: 主题白名单筛查
+        payload:
+          topic: $trigger.payload.topic
+    - id: guardian-approval
+      description: 白名单外 → 家长在收件箱批准这次例外 (白名单内 when 旁路, 不挂起)。
+      when: "$screen.output.allowed == false"
+      human:
+        assignee: $trigger.payload.guardian_id
+        kind: approval
+        prompt: 孩子想学一个白名单外的主题, 允许这次用 AI 导师上这一课吗?
+        title: 白名单外主题审批
+    - id: teach
+      description: 导师按孩子的 learning-records 续上这一课 (/teach 风格 + 内容自评打标)。
+      # ★ 只在 (白名单内) 或 (家长批准了白名单外例外) 时才上课 ★
+      #   若家长**拒绝**了白名单外审批, `$guardian-approval.output.approved == true` 为 false
+      #   且 `$screen.output.allowed == true` 也为 false → 整个 || 为 false → teach 被**跳过**,
+      #   这一课不上。没有这道 when, 收件箱里点「拒绝」也只是把 `{approved:false}` 当普通输出
+      #   往下流, 导师照常上课 = 工作流层 fail-OPEN。审批要真能拦, 下一步必须读审批结果。
+      when: "$screen.output.allowed == true || $guardian-approval.output.approved == true"
+      dispatch:
+        strategy: { kind: capability, capabilities: [teach.lesson] }
+        # 这一课的内容是孩子的学习数据 —— 标 child-learning, 跟跨组织出站闸用同一套数据类。
+        dataClasses: [child-learning]
+        title: 上课
+        payload:
+          topic: $trigger.payload.topic
+          learner_id: $trigger.payload.learner_id
+    - id: moderate
+      description: 可选的确定性规则引擎复筛课程内容 (空规则清单 = 关闭, 只剩自评层)。
+      # 同 teach: 没上课就没内容可筛 (拒绝路径下 teach 被跳过, 这里也跳过)。
+      when: "$screen.output.allowed == true || $guardian-approval.output.approved == true"
+      dispatch:
+        strategy: { kind: capability, capabilities: [content.moderate] }
+        title: 内容规则筛查
+        payload:
+          lesson: $teach.output
+    - id: mod-approval
+      description: 自评 (决策 1.a) 或规则引擎任一命中 → 家长在收件箱审这一课的内容。
+      when: "$teach.output.flagged == true || $moderate.output.flagged == true"
+      human:
+        assignee: $trigger.payload.guardian_id
+        kind: approval
+        prompt: 这一课的内容被标记为需要留意, 允许把它给孩子吗?
+        title: 课程内容审核
+  output:
+    screened: $screen.output
+    lesson: $teach.output
+    moderated: $moderate.output
