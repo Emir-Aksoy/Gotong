@@ -40,6 +40,16 @@ export interface AcpAgentView {
   command: string
   args: string[]
   cwd: string | null
+  /**
+   * Item 2 (Z-M1) — per-step OUTBOUND data-class allowlist gate at this ACP
+   * edge (same `checkOutboundDataClasses` core fn the mesh peer edge uses). For
+   * ACP this is a GOVERNANCE control — what class of context may be fed to a
+   * third-party coding agent (a local subprocess, NOT an org egress). null =
+   * allow all (legacy) / [] = lock shut / list = only these classes.
+   */
+  allowedDataClasses: string[] | null
+  /** Item 2 — per-agent outbound send budget per window; null = unlimited. */
+  outboundQuotaBudget: number | null
   enabled: boolean
   label: string | null
   createdAt: number
@@ -57,6 +67,10 @@ export interface AcpAgentAddInput {
   command: string
   args?: string[]
   cwd?: string | null
+  /** Item 2 — outbound data-class allowlist; null/undefined = allow all. */
+  allowedDataClasses?: string[] | null
+  /** Item 2 — outbound send budget per window; null/undefined = unlimited. */
+  outboundQuotaBudget?: number | null
   label?: string | null
   enabled?: boolean
 }
@@ -66,6 +80,10 @@ export interface AcpAgentUpdateInput {
   command?: string
   args?: string[]
   cwd?: string | null
+  /** undefined = keep; null = clear (allow all); list = replace. */
+  allowedDataClasses?: string[] | null
+  /** undefined = keep; null = clear (unlimited); number = replace. */
+  outboundQuotaBudget?: number | null
   label?: string | null
   enabled?: boolean
 }
@@ -141,6 +159,54 @@ function checkOptionalFields(o: Record<string, unknown>): string | null {
   return null
 }
 
+/**
+ * Item 2 — outbound data-class allowlist shape check: null → clear (allow all);
+ * an array of strings → set ([] = lock shut); anything else → error. Only called
+ * when the key is present. The store re-validates authoritatively.
+ */
+function coerceDataClasses(v: unknown): { value: string[] | null } | { error: string } {
+  if (v === null) return { value: null }
+  if (!Array.isArray(v)) return { error: 'allowedDataClasses must be an array of strings or null' }
+  for (const c of v) {
+    if (typeof c !== 'string') return { error: 'allowedDataClasses must be strings' }
+  }
+  return { value: v as string[] }
+}
+
+/**
+ * Item 2 — outbound quota budget shape check: null → clear (unlimited); a
+ * non-negative finite number → set; anything else → error. Only called when the
+ * key is present.
+ */
+function coerceQuotaBudget(v: unknown): { value: number | null } | { error: string } {
+  if (v === null) return { value: null }
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+    return { error: 'outboundQuotaBudget must be a non-negative number or null' }
+  }
+  return { value: v }
+}
+
+/**
+ * Item 2 — coerce the present-key-gated outbound gate fields (data-class +
+ * quota) shared by add/update. Returns the fields to spread, or an error.
+ */
+function coerceGateFields(
+  o: Record<string, unknown>,
+): { value: { allowedDataClasses?: string[] | null; outboundQuotaBudget?: number | null } } | { error: string } {
+  const out: { allowedDataClasses?: string[] | null; outboundQuotaBudget?: number | null } = {}
+  if (o.allowedDataClasses !== undefined) {
+    const dc = coerceDataClasses(o.allowedDataClasses)
+    if ('error' in dc) return { error: dc.error }
+    out.allowedDataClasses = dc.value
+  }
+  if (o.outboundQuotaBudget !== undefined) {
+    const q = coerceQuotaBudget(o.outboundQuotaBudget)
+    if ('error' in q) return { error: q.error }
+    out.outboundQuotaBudget = q.value
+  }
+  return { value: out }
+}
+
 function pickOptional(o: Record<string, unknown>): Partial<AcpAgentAddInput> {
   return {
     ...(o.cwd !== undefined ? { cwd: o.cwd as string | null } : {}),
@@ -167,12 +233,15 @@ function coerceAdd(body: unknown): { value: AcpAgentAddInput } | { error: string
   }
   const bad = checkOptionalFields(o)
   if (bad) return { error: bad }
+  const gate = coerceGateFields(o)
+  if ('error' in gate) return { error: gate.error }
   return {
     value: {
       id: o.id as string,
       capabilities: caps.value,
       command: o.command as string,
       ...(args !== undefined ? { args } : {}),
+      ...gate.value,
       ...pickOptional(o),
     },
   }
@@ -198,11 +267,14 @@ function coerceUpdate(body: unknown): { value: AcpAgentUpdateInput } | { error: 
   }
   const bad = checkOptionalFields(o)
   if (bad) return { error: bad }
+  const gate = coerceGateFields(o)
+  if ('error' in gate) return { error: gate.error }
   return {
     value: {
       ...(caps !== undefined ? { capabilities: caps } : {}),
       ...(o.command !== undefined ? { command: o.command as string } : {}),
       ...(args !== undefined ? { args } : {}),
+      ...gate.value,
       ...pickOptional(o),
     },
   }

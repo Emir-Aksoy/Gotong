@@ -51,6 +51,8 @@ function view(over: Partial<AcpAgentView> = {}): AcpAgentView {
     command: 'npx',
     args: ['@zed-industries/claude-code-acp'],
     cwd: null,
+    allowedDataClasses: null,
+    outboundQuotaBudget: null,
     enabled: true,
     label: null,
     createdAt: 1,
@@ -291,5 +293,100 @@ describe('/api/admin/acp-agents (ACP-OUT-M3)', () => {
     b = await boot()
     const r = await fetch(`${b.baseUrl}${AGENTS}`, { method: 'PUT', headers: auth(b) })
     expect(r.status).toBe(405)
+  })
+
+  // --- Item 2 (Z-M1): outbound-edge gate fields (data-class / quota) ---
+  // ACP gets data-class (a GOVERNANCE control over the context fed to a local
+  // coding subprocess) + quota (runaway guard) but NO approval toggle — its
+  // per-tool dangerousToolGate already escalates to the inbox (D5). Participant
+  // gates are covered in acp-agent/host tests; here we pin the route round-trip.
+
+  it('GET carries the gate fields in the view (null = allow-all / unlimited)', async () => {
+    b = await boot()
+    b.rows = [
+      view({ id: 'open' }), // defaults: null / null
+      view({ id: 'clamped', allowedDataClasses: ['public'], outboundQuotaBudget: 25 }),
+    ]
+    const j = await (await fetch(`${b.baseUrl}${AGENTS}`, { headers: auth(b) })).json()
+    expect(j.agents[0].allowedDataClasses).toBeNull()
+    expect(j.agents[0].outboundQuotaBudget).toBeNull()
+    expect(j.agents[1].allowedDataClasses).toEqual(['public'])
+    expect(j.agents[1].outboundQuotaBudget).toBe(25)
+  })
+
+  it('POST forwards the gate fields verbatim to the store', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({
+        id: 'gated',
+        capabilities: ['code'],
+        command: 'npx',
+        allowedDataClasses: ['public', 'internal'],
+        outboundQuotaBudget: 10,
+      }),
+    })
+    expect(r.status).toBe(201)
+    const sent = b.addCalls[0] as { allowedDataClasses?: unknown; outboundQuotaBudget?: unknown }
+    expect(sent.allowedDataClasses).toEqual(['public', 'internal'])
+    expect(sent.outboundQuotaBudget).toBe(10)
+  })
+
+  it('POST forwards an empty allowedDataClasses [] (lock shut) — it is meaningful, not omitted', async () => {
+    b = await boot()
+    await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({ id: 'locked', capabilities: ['a'], command: 'npx', allowedDataClasses: [] }),
+    })
+    expect((b.addCalls[0] as { allowedDataClasses?: unknown }).allowedDataClasses).toEqual([])
+  })
+
+  it('POST omits the gate fields entirely when absent (store keeps its NULL defaults)', async () => {
+    b = await boot()
+    await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({ id: 'plain', capabilities: ['a'], command: 'npx' }),
+    })
+    const sent = b.addCalls[0] as object
+    expect('allowedDataClasses' in sent).toBe(false)
+    expect('outboundQuotaBudget' in sent).toBe(false)
+  })
+
+  it('POST 400 on a non-array allowedDataClasses (web shape gate, never reaches the store)', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({ id: 'bad', capabilities: ['a'], command: 'npx', allowedDataClasses: 'public' }),
+    })
+    expect(r.status).toBe(400)
+    expect(b.addCalls).toHaveLength(0)
+  })
+
+  it('POST 400 on a negative outboundQuotaBudget', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({ id: 'bad', capabilities: ['a'], command: 'npx', outboundQuotaBudget: -5 }),
+    })
+    expect(r.status).toBe(400)
+    expect(b.addCalls).toHaveLength(0)
+  })
+
+  it('PATCH forwards allowedDataClasses: null (clear) + outboundQuotaBudget: null (unlimited)', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${AGENTS}/claude-code`, {
+      method: 'PATCH',
+      headers: jsonAuth(b),
+      body: JSON.stringify({ allowedDataClasses: null, outboundQuotaBudget: null }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.updateCalls).toEqual([
+      { id: 'claude-code', patch: { allowedDataClasses: null, outboundQuotaBudget: null } },
+    ])
   })
 })

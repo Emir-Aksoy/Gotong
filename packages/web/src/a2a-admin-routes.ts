@@ -51,13 +51,28 @@ export interface A2aAgentView {
   targetSkill: string | null
   /** Stream H2-OUT — long-running poll lifecycle; null = blocking (legacy). */
   lifecycle: A2aLifecycleInput | null
+  /**
+   * Item 2 (Z-M1) — per-step OUTBOUND data-class allowlist gate at this agent's
+   * edge (same `checkOutboundDataClasses` core fn the mesh peer edge uses, so
+   * the two never drift). null = allow everything (legacy) / [] = lock shut /
+   * list = only these classes may leave on a task's `dataClasses`.
+   */
+  allowedDataClasses: string[] | null
+  /** Item 2 — per-agent outbound send budget per window; null = unlimited. */
+  outboundQuotaBudget: number | null
+  /** Item 2 — opt into the outbound approval gate (the send parks for a human). */
+  requireApprovalOutbound: boolean
   enabled: boolean
   label: string | null
   createdAt: number
   updatedAt: number
   /** True iff this agent is registered+live on the hub right now. */
   active: boolean
-  /** When inactive: 'disabled' | 'token_env_unset' | 'id_conflict' | 'not_found'. */
+  /**
+   * When inactive: 'disabled' | 'token_env_unset' | 'approval_unconfigured'
+   * (requires approval but the host has no inbox/approver) | 'id_conflict' |
+   * 'not_found'.
+   */
   inactiveReason?: string
 }
 
@@ -71,6 +86,12 @@ export interface A2aAgentAddInput {
   targetSkill?: string | null
   /** Opt into the long-running lifecycle; null/undefined = blocking (legacy). */
   lifecycle?: A2aLifecycleInput | null
+  /** Item 2 — outbound data-class allowlist; null/undefined = allow all. */
+  allowedDataClasses?: string[] | null
+  /** Item 2 — outbound send budget per window; null/undefined = unlimited. */
+  outboundQuotaBudget?: number | null
+  /** Item 2 — opt into the outbound approval gate. */
+  requireApprovalOutbound?: boolean
   label?: string | null
   enabled?: boolean
 }
@@ -83,6 +104,12 @@ export interface A2aAgentUpdateInput {
   targetSkill?: string | null
   /** undefined = keep; null = turn lifecycle OFF; object = set/replace it. */
   lifecycle?: A2aLifecycleInput | null
+  /** undefined = keep; null = clear (allow all); list = replace. */
+  allowedDataClasses?: string[] | null
+  /** undefined = keep; null = clear (unlimited); number = replace. */
+  outboundQuotaBudget?: number | null
+  /** undefined = keep; boolean = set. */
+  requireApprovalOutbound?: boolean
   label?: string | null
   enabled?: boolean
 }
@@ -162,14 +189,43 @@ function coerceLifecycle(v: unknown): { value: A2aLifecycleInput | null } | { er
   return { value: out }
 }
 
-/** peerId/targetSkill/label must be string|null; enabled must be boolean. */
+/**
+ * Item 2 — outbound data-class allowlist shape check: null → clear (allow all);
+ * an array of strings → set ([] = lock shut); anything else → error. Only called
+ * when the key is present. The store re-validates authoritatively.
+ */
+function coerceDataClasses(v: unknown): { value: string[] | null } | { error: string } {
+  if (v === null) return { value: null }
+  if (!Array.isArray(v)) return { error: 'allowedDataClasses must be an array of strings or null' }
+  for (const c of v) {
+    if (typeof c !== 'string') return { error: 'allowedDataClasses must be strings' }
+  }
+  return { value: v as string[] }
+}
+
+/**
+ * Item 2 — outbound quota budget shape check: null → clear (unlimited); a
+ * non-negative finite number → set; anything else → error. Only called when the
+ * key is present.
+ */
+function coerceQuotaBudget(v: unknown): { value: number | null } | { error: string } {
+  if (v === null) return { value: null }
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) {
+    return { error: 'outboundQuotaBudget must be a non-negative number or null' }
+  }
+  return { value: v }
+}
+
+/** peerId/targetSkill/label must be string|null; enabled/requireApprovalOutbound boolean. */
 function checkOptionalFields(o: Record<string, unknown>): string | null {
   for (const f of ['peerId', 'targetSkill', 'label'] as const) {
     if (o[f] !== undefined && o[f] !== null && typeof o[f] !== 'string') {
       return `${f} must be a string or null`
     }
   }
-  if (o.enabled !== undefined && typeof o.enabled !== 'boolean') return 'enabled must be a boolean'
+  for (const f of ['enabled', 'requireApprovalOutbound'] as const) {
+    if (o[f] !== undefined && typeof o[f] !== 'boolean') return `${f} must be a boolean`
+  }
   return null
 }
 
@@ -179,7 +235,31 @@ function pickOptional(o: Record<string, unknown>): Partial<A2aAgentAddInput> {
     ...(o.targetSkill !== undefined ? { targetSkill: o.targetSkill as string | null } : {}),
     ...(o.label !== undefined ? { label: o.label as string | null } : {}),
     ...(o.enabled !== undefined ? { enabled: o.enabled as boolean } : {}),
+    ...(o.requireApprovalOutbound !== undefined
+      ? { requireApprovalOutbound: o.requireApprovalOutbound as boolean }
+      : {}),
   }
+}
+
+/**
+ * Item 2 — coerce the present-key-gated outbound gate fields (data-class +
+ * quota) shared by add/update. Returns the fields to spread, or an error.
+ */
+function coerceGateFields(
+  o: Record<string, unknown>,
+): { value: { allowedDataClasses?: string[] | null; outboundQuotaBudget?: number | null } } | { error: string } {
+  const out: { allowedDataClasses?: string[] | null; outboundQuotaBudget?: number | null } = {}
+  if (o.allowedDataClasses !== undefined) {
+    const dc = coerceDataClasses(o.allowedDataClasses)
+    if ('error' in dc) return { error: dc.error }
+    out.allowedDataClasses = dc.value
+  }
+  if (o.outboundQuotaBudget !== undefined) {
+    const q = coerceQuotaBudget(o.outboundQuotaBudget)
+    if ('error' in q) return { error: q.error }
+    out.outboundQuotaBudget = q.value
+  }
+  return { value: out }
 }
 
 function coerceAdd(body: unknown): { value: A2aAgentAddInput } | { error: string } {
@@ -200,6 +280,8 @@ function coerceAdd(body: unknown): { value: A2aAgentAddInput } | { error: string
     if ('error' in lc) return { error: lc.error }
     lifecycle = lc.value
   }
+  const gate = coerceGateFields(o)
+  if ('error' in gate) return { error: gate.error }
   return {
     value: {
       id: o.id as string,
@@ -207,6 +289,7 @@ function coerceAdd(body: unknown): { value: A2aAgentAddInput } | { error: string
       url: o.url as string,
       tokenEnv: o.tokenEnv as string,
       ...(lifecycle !== undefined ? { lifecycle } : {}),
+      ...gate.value,
       ...pickOptional(o),
     },
   }
@@ -234,12 +317,15 @@ function coerceUpdate(body: unknown): { value: A2aAgentUpdateInput } | { error: 
     if ('error' in lc) return { error: lc.error }
     lifecycle = lc.value
   }
+  const gate = coerceGateFields(o)
+  if ('error' in gate) return { error: gate.error }
   return {
     value: {
       ...(caps !== undefined ? { capabilities: caps } : {}),
       ...(o.url !== undefined ? { url: o.url as string } : {}),
       ...(o.tokenEnv !== undefined ? { tokenEnv: o.tokenEnv as string } : {}),
       ...(lifecycle !== undefined ? { lifecycle } : {}),
+      ...gate.value,
       ...pickOptional(o),
     },
   }

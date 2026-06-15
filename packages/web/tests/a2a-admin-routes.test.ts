@@ -52,6 +52,9 @@ function view(over: Partial<A2aAgentView> = {}): A2aAgentView {
     peerId: null,
     targetSkill: null,
     lifecycle: null,
+    allowedDataClasses: null,
+    outboundQuotaBudget: null,
+    requireApprovalOutbound: false,
     enabled: true,
     label: null,
     createdAt: 1,
@@ -347,5 +350,149 @@ describe('/api/admin/a2a-agents (Route B P1-M11c)', () => {
     })
     expect(r.status).toBe(200)
     expect(b.updateCalls).toEqual([{ id: 'remote-writer', patch: { lifecycle: null } }])
+  })
+
+  // --- Item 2 (Z-M1): outbound-edge gate fields (data-class / quota / approval) ---
+  // These reach the v34 columns. The participant-level gates are covered in
+  // a2a/tests + host/tests/a2a-outbound*.test.ts; here we pin the verbatim
+  // round-trip through the duck-typed route and the web shape gate (400).
+
+  it('GET carries the gate fields in the view (null = allow-all / unlimited, false = no approval)', async () => {
+    b = await boot()
+    b.rows = [
+      view({ id: 'open' }), // defaults: null / null / false
+      view({
+        id: 'clamped',
+        allowedDataClasses: ['public', 'internal'],
+        outboundQuotaBudget: 50,
+        requireApprovalOutbound: true,
+      }),
+    ]
+    const j = await (await fetch(`${b.baseUrl}${AGENTS}`, { headers: auth(b) })).json()
+    expect(j.agents[0].allowedDataClasses).toBeNull()
+    expect(j.agents[0].outboundQuotaBudget).toBeNull()
+    expect(j.agents[0].requireApprovalOutbound).toBe(false)
+    expect(j.agents[1].allowedDataClasses).toEqual(['public', 'internal'])
+    expect(j.agents[1].outboundQuotaBudget).toBe(50)
+    expect(j.agents[1].requireApprovalOutbound).toBe(true)
+  })
+
+  it('POST forwards the gate fields verbatim to the store', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({
+        id: 'gated',
+        capabilities: ['review'],
+        url: 'https://g.test/a2a',
+        tokenEnv: 'T',
+        allowedDataClasses: ['public'],
+        outboundQuotaBudget: 10,
+        requireApprovalOutbound: true,
+      }),
+    })
+    expect(r.status).toBe(201)
+    const sent = b.addCalls[0] as {
+      allowedDataClasses?: unknown
+      outboundQuotaBudget?: unknown
+      requireApprovalOutbound?: unknown
+    }
+    expect(sent.allowedDataClasses).toEqual(['public'])
+    expect(sent.outboundQuotaBudget).toBe(10)
+    expect(sent.requireApprovalOutbound).toBe(true)
+  })
+
+  it('POST forwards an empty allowedDataClasses [] (lock shut) — it is meaningful, not omitted', async () => {
+    b = await boot()
+    await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({
+        id: 'locked',
+        capabilities: ['a'],
+        url: 'https://l.test/a2a',
+        tokenEnv: 'T',
+        allowedDataClasses: [],
+      }),
+    })
+    expect((b.addCalls[0] as { allowedDataClasses?: unknown }).allowedDataClasses).toEqual([])
+  })
+
+  it('POST omits the gate fields entirely when absent (store keeps its NULL/false defaults)', async () => {
+    b = await boot()
+    await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({ id: 'plain', capabilities: ['a'], url: 'https://p.test/a2a', tokenEnv: 'T' }),
+    })
+    const sent = b.addCalls[0] as object
+    expect('allowedDataClasses' in sent).toBe(false)
+    expect('outboundQuotaBudget' in sent).toBe(false)
+    expect('requireApprovalOutbound' in sent).toBe(false)
+  })
+
+  it('POST 400 on a non-array allowedDataClasses (web shape gate, never reaches the store)', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({
+        id: 'bad',
+        capabilities: ['a'],
+        url: 'https://x.test/a2a',
+        tokenEnv: 'T',
+        allowedDataClasses: 'public',
+      }),
+    })
+    expect(r.status).toBe(400)
+    expect(b.addCalls).toHaveLength(0)
+  })
+
+  it('POST 400 on a negative outboundQuotaBudget', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({
+        id: 'bad',
+        capabilities: ['a'],
+        url: 'https://x.test/a2a',
+        tokenEnv: 'T',
+        outboundQuotaBudget: -5,
+      }),
+    })
+    expect(r.status).toBe(400)
+    expect(b.addCalls).toHaveLength(0)
+  })
+
+  it('POST 400 on a non-boolean requireApprovalOutbound', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${AGENTS}`, {
+      method: 'POST',
+      headers: jsonAuth(b),
+      body: JSON.stringify({
+        id: 'bad',
+        capabilities: ['a'],
+        url: 'https://x.test/a2a',
+        tokenEnv: 'T',
+        requireApprovalOutbound: 'yes',
+      }),
+    })
+    expect(r.status).toBe(400)
+    expect(b.addCalls).toHaveLength(0)
+  })
+
+  it('PATCH forwards allowedDataClasses: null (clear) + outboundQuotaBudget: null (unlimited)', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}${AGENTS}/remote-writer`, {
+      method: 'PATCH',
+      headers: jsonAuth(b),
+      body: JSON.stringify({ allowedDataClasses: null, outboundQuotaBudget: null }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.updateCalls).toEqual([
+      { id: 'remote-writer', patch: { allowedDataClasses: null, outboundQuotaBudget: null } },
+    ])
   })
 })

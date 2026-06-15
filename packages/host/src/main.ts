@@ -2088,6 +2088,11 @@ async function main(): Promise<void> {
       peerId: a.peerId,
       targetSkill: a.targetSkill,
       lifecycle: a.lifecycle, // Stream H2-OUT — null = blocking (legacy)
+      // Item 2 (Z-M1) — outbound gate config; copy the readonly allowlist to a
+      // mutable array for the view (null = allow all).
+      allowedDataClasses: a.allowedDataClasses ? [...a.allowedDataClasses] : null,
+      outboundQuotaBudget: a.outboundQuotaBudget,
+      requireApprovalOutbound: a.requireApprovalOutbound,
       enabled: a.enabled,
       label: a.label,
       createdAt: a.createdAt,
@@ -2129,6 +2134,10 @@ async function main(): Promise<void> {
       command: a.command,
       args: a.args,
       cwd: a.cwd,
+      // Item 2 (Z-M1) — outbound gate config (governance for a local coding
+      // subprocess); copy the readonly allowlist to a mutable array (null = all).
+      allowedDataClasses: a.allowedDataClasses ? [...a.allowedDataClasses] : null,
+      outboundQuotaBudget: a.outboundQuotaBudget,
       enabled: a.enabled,
       label: a.label,
       createdAt: a.createdAt,
