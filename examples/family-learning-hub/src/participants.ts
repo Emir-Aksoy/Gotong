@@ -195,8 +195,14 @@ export class LessonTutorStandin extends AgentParticipant {
   /** Tasks that ACTUALLY reached the tutor — so the demo can assert "0 before approval". */
   readonly taught: Task[] = []
 
-  constructor() {
-    super({ id: 'family-tutor', capabilities: ['teach.lesson'] })
+  /**
+   * `capability` defaults to `teach.lesson` (the 家长-form `tutor-teach` workflow's `teach`
+   * step — used by the hermetic demo + real mode). The federation demo (C-M1) passes
+   * `tutor.teach` instead, because the CHILD-form `child-guided-lesson` workflow names that
+   * cross-org capability. Same lesson logic, one cap label — additive, default unchanged.
+   */
+  constructor(capability: string = 'teach.lesson') {
+    super({ id: 'family-tutor', capabilities: [capability] })
   }
 
   protected async handleTask(task: Task): Promise<Lesson> {

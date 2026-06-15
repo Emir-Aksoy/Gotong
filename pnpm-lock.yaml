@@ -218,12 +218,22 @@ importers:
       '@aipehub/mcp-client':
         specifier: workspace:*
         version: link:../../packages/mcp-client
+      '@aipehub/transport-ws':
+        specifier: workspace:*
+        version: link:../../packages/transport-ws
       '@aipehub/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
+      ws:
+        specifier: ^8.20.1
+        version: 8.20.1
       yaml:
         specifier: ^2.6.0
         version: 2.9.0
+    devDependencies:
+      '@types/ws':
+        specifier: ^8.5.13
+        version: 8.18.1
 
   examples/federated-team:
     dependencies:
