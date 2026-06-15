@@ -1071,6 +1071,21 @@
       a2aOkEnabled: '已启用',
       a2aOkToBlocking: '已改为阻塞',
       a2aOkToLong: '已改为长任务',
+      // Item 2 — outbound-edge gate (data-class / quota / approval).
+      a2aPhDataClasses: '数据类许可清单 (逗号分隔; 留空=不限制)',
+      a2aPhQuotaBudget: '出站配额/窗口 (可选; 留空或 0=不限)',
+      a2aApprovalLabel: '出站需人工审批 (每次外发前在 /me 收件箱确认)',
+      a2aColGate: '出站闸',
+      a2aGateNone: '—',
+      a2aGateDcLocked: '数据类·锁死',
+      a2aGateDcList: (s) => '数据类: ' + s,
+      a2aGateQuota: (n) => '配额: ' + n + '/窗口',
+      a2aGateApproval: '需审批',
+      a2aStApprovalUnconfigured: '未激活·审批未配置',
+      a2aBtnToApproval: '改审批',
+      a2aBtnToDirect: '改直发',
+      a2aOkToApproval: '已改为需审批',
+      a2aOkToDirect: '已改为直发',
       acpTitle: '出站 ACP 编码智能体',
       acpDesc:
         '注册本 hub 经 ACP 长连接驱动的编码智能体 (Claude Code / Codex)。派发某个本地能力 (capability) 时,会把它<strong>启动一次→保持 session→反复派任务</strong>(任务间上下文保留),由它在子进程里跑编码工作。替代旧的 example 胶水,改为持久化 + 即时生效。',
@@ -1120,6 +1135,14 @@
       acpDeleteFailed: (msg) => '删除失败:' + msg,
       acpOkDisabled: '已停用',
       acpOkEnabled: '已启用',
+      // Item 2 — outbound-edge gate (data-class allowlist / quota; no approval, D5).
+      acpPhDataClasses: '数据类许可清单 (逗号分隔; 留空=不限制; 治理控制)',
+      acpPhQuotaBudget: '出站配额/窗口 (可选; 留空或 0=不限; 跑飞护栏)',
+      acpColGate: '出站闸',
+      acpGateNone: '—',
+      acpGateDcLocked: '数据类·锁死',
+      acpGateDcList: (s) => '数据类: ' + s,
+      acpGateQuota: (n) => '配额: ' + n + '/窗口',
       // peer-admin-ui.js — 联邦 tab peer onboarding 面板 (Route B P1-M7b/c)
       padmTitle: '对端 / Peers (联邦)',
       padmDesc:
@@ -2562,6 +2585,21 @@
       a2aOkEnabled: 'Enabled',
       a2aOkToBlocking: 'Changed to blocking',
       a2aOkToLong: 'Changed to long-running',
+      // Item 2 — outbound-edge gate (data-class / quota / approval).
+      a2aPhDataClasses: 'Data-class allowlist (comma-separated; empty = unrestricted)',
+      a2aPhQuotaBudget: 'Outbound quota per window (optional; empty or 0 = unlimited)',
+      a2aApprovalLabel: 'Require outbound approval (confirm each send in the /me inbox)',
+      a2aColGate: 'Outbound gate',
+      a2aGateNone: '—',
+      a2aGateDcLocked: 'Data-class · locked',
+      a2aGateDcList: (s) => 'Data-class: ' + s,
+      a2aGateQuota: (n) => 'Quota: ' + n + '/window',
+      a2aGateApproval: 'Approval',
+      a2aStApprovalUnconfigured: 'Inactive · approval not configured',
+      a2aBtnToApproval: 'Require approval',
+      a2aBtnToDirect: 'Allow direct',
+      a2aOkToApproval: 'Now requires approval',
+      a2aOkToDirect: 'Now sends directly',
       acpTitle: 'Outbound ACP coding agents',
       acpDesc:
         'Register coding agents (Claude Code / Codex) this hub drives over a long-lived ACP session. When a matching local capability is dispatched, it is <strong>spawned once → the session is held → many tasks are dispatched to it</strong> (context preserved across tasks), running the coding work in a child process. Replaces the old example glue with persistent config that takes effect immediately.',
@@ -2611,6 +2649,14 @@
       acpDeleteFailed: (msg) => 'Delete failed: ' + msg,
       acpOkDisabled: 'Disabled',
       acpOkEnabled: 'Enabled',
+      // Item 2 — outbound-edge gate (data-class allowlist / quota; no approval, D5).
+      acpPhDataClasses: 'Data-class allowlist (comma-separated; empty = unrestricted; governance control)',
+      acpPhQuotaBudget: 'Outbound quota per window (optional; empty or 0 = unlimited; runaway guard)',
+      acpColGate: 'Outbound gate',
+      acpGateNone: '—',
+      acpGateDcLocked: 'Data-class · locked',
+      acpGateDcList: (s) => 'Data-class: ' + s,
+      acpGateQuota: (n) => 'Quota: ' + n + '/window',
       // peer-admin-ui.js — federation tab peer onboarding panel (Route B P1-M7b/c)
       padmTitle: 'Peers (federation)',
       padmDesc:

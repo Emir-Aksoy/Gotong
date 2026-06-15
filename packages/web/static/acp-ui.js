@@ -88,6 +88,29 @@
     )
   }
 
+  // Item 2 — the outbound-edge gate, rendered compact in one cell. ACP has just
+  // two knobs (NO approval toggle — its per-tool dangerousToolGate already
+  // escalates to the /me inbox, D5). For ACP the data-class gate is a GOVERNANCE
+  // control over what classes of context get fed to a third-party coding agent,
+  // not an org-egress gate (the agent runs as a local subprocess on its own
+  // login). Both default-off, so a row with neither reads "—":
+  //   data-class : null=unrestricted (omit) / []=locked / [names]=allowlist
+  //   quota      : per-window dispatch budget (0/absent = off, runaway guard)
+  function gateCell(a) {
+    const d = t()
+    const parts = []
+    const dc = a.allowedDataClasses
+    if (dc != null) {
+      parts.push(dc.length === 0 ? d.acpGateDcLocked : d.acpGateDcList(dc.join(', ')))
+    }
+    if (a.outboundQuotaBudget != null && a.outboundQuotaBudget > 0) {
+      parts.push(d.acpGateQuota(a.outboundQuotaBudget))
+    }
+    return parts.length
+      ? '<span style="font-size:0.8rem;color:#555;">' + escHtml(parts.join(' · ')) + '</span>'
+      : '<span style="font-size:0.8rem;color:#bbb;">' + d.acpGateNone + '</span>'
+  }
+
   // ---- API --------------------------------------------------------------
 
   async function readJson(r) {
@@ -148,6 +171,9 @@
       '<input name="command" type="text" placeholder="' + escHtml(d.acpPhCommand) + '" required autocomplete="off" />' +
       '<input name="args" type="text" placeholder="' + escHtml(d.acpPhArgs) + '" autocomplete="off" />' +
       '<input name="cwd" type="text" placeholder="' + escHtml(d.acpPhCwd) + '" autocomplete="off" style="grid-column:1 / -1;" />' +
+      // Item 2 — outbound-edge gate (data-class allowlist / quota; no approval, D5).
+      '<input name="allowedDataClasses" type="text" placeholder="' + escHtml(d.acpPhDataClasses) + '" autocomplete="off" style="grid-column:1 / -1;" />' +
+      '<input name="outboundQuotaBudget" type="number" min="0" placeholder="' + escHtml(d.acpPhQuotaBudget) + '" autocomplete="off" />' +
       '<label style="grid-column:1 / -1;font-size:0.85rem;color:#555;display:flex;gap:0.4rem;align-items:center;">' +
       '<input name="enabled" type="checkbox" checked /> ' + d.acpEnabledLabel + '</label>' +
       '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">' + d.acpBtnRegister + '</button>' +
@@ -160,10 +186,11 @@
       '<th style="padding:0.4rem;">' + d.acpColCaps + '</th>' +
       '<th style="padding:0.4rem;">' + d.acpColCmd + '</th>' +
       '<th style="padding:0.4rem;">' + d.acpColCwd + '</th>' +
+      '<th style="padding:0.4rem;">' + d.acpColGate + '</th>' +
       '<th style="padding:0.4rem;">' + d.acpColStatus + '</th>' +
       '<th style="padding:0.4rem;">' + d.acpColActions + '</th>' +
       '</tr></thead>' +
-      '<tbody id="acp-tbody"><tr><td colspan="6" style="padding:0.6rem;color:#888;">' + d.acpLoading + '</td></tr></tbody>' +
+      '<tbody id="acp-tbody"><tr><td colspan="7" style="padding:0.6rem;color:#888;">' + d.acpLoading + '</td></tr></tbody>' +
       '</table>' +
       '</div>'
 
@@ -177,7 +204,7 @@
     if (!tbody) return
     if (!agents.length) {
       tbody.innerHTML =
-        '<tr><td colspan="6" style="padding:0.6rem;color:#888;">' + escHtml(d.acpEmpty) + '</td></tr>'
+        '<tr><td colspan="7" style="padding:0.6rem;color:#888;">' + escHtml(d.acpEmpty) + '</td></tr>'
       return
     }
     tbody.innerHTML = ''
@@ -194,6 +221,7 @@
         '<td style="padding:0.4rem;"><code style="color:#555;">' + caps + '</code></td>' +
         '<td style="padding:0.4rem;"><code style="color:#888;">' + cmdLine + '</code></td>' +
         '<td style="padding:0.4rem;"><code style="color:#888;">' + escHtml(a.cwd || '—') + '</code></td>' +
+        '<td style="padding:0.4rem;">' + gateCell(a) + '</td>' +
         '<td style="padding:0.4rem;">' + statusBadge(a) + '</td>' +
         '<td style="padding:0.4rem;white-space:nowrap;">' +
         '<button type="button" class="acp-toggle" style="padding:0.25rem 0.5rem;">' +
@@ -252,6 +280,16 @@
     if (cwd) body.cwd = cwd
     const label = str('label')
     if (label) body.label = label
+    // Item 2 — outbound-edge gate. Empty data-class → omit (default null =
+    // unrestricted); a filled field → governance allowlist. (No [] via the form.)
+    const dcs = parseCaps(str('allowedDataClasses'))
+    if (dcs.length) body.allowedDataClasses = dcs
+    // Empty quota → omit (no limit). A number (incl. 0 = off) → send.
+    const qb = str('outboundQuotaBudget')
+    if (qb !== '') {
+      const n = parseInt(qb, 10)
+      if (n >= 0) body.outboundQuotaBudget = n
+    }
     setStatus(root, t().acpRegistering, 'loading')
     try {
       await apiAdd(body)

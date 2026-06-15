@@ -71,7 +71,9 @@
           ? d.a2aStTokenUnset
           : reason === 'id_conflict'
             ? d.a2aStIdConflict
-            : d.a2aStInactive
+            : reason === 'approval_unconfigured'
+              ? d.a2aStApprovalUnconfigured
+              : d.a2aStInactive
     return (
       '<span title="' + escHtml(reason || '') + '" style="' + base + 'background:#fdecea;color:#c0392b;">' +
       txt +
@@ -93,6 +95,37 @@
     return (
       '<span title="' + d.a2aModeLongTitle + '" style="color:#1e7e34;">' + d.a2aModeLong(detail) + '</span>'
     )
+  }
+
+  // Item 2 — the outbound-edge gate, rendered compact in one cell. Three knobs,
+  // all default-off (so a row with none reads "—"):
+  //   data-class : null=unrestricted (omit) / []=locked / [names]=allowlist
+  //   quota      : per-window send budget (0/absent = off)
+  //   approval   : require human approval in /me inbox before each outbound send
+  // Data-class / quota match the P4-M4 mesh contract verbatim (same core gate).
+  function gateCell(a) {
+    const d = t()
+    const parts = []
+    const dc = a.allowedDataClasses
+    if (dc != null) {
+      // null = legacy accept-all → omit (it's the default, not a configured gate)
+      parts.push(dc.length === 0 ? d.a2aGateDcLocked : d.a2aGateDcList(dc.join(', ')))
+    }
+    if (a.outboundQuotaBudget != null && a.outboundQuotaBudget > 0) {
+      parts.push(d.a2aGateQuota(a.outboundQuotaBudget))
+    }
+    const head = parts.length
+      ? '<span style="color:#555;">' + escHtml(parts.join(' · ')) + '</span>'
+      : a.requireApprovalOutbound
+        ? ''
+        : '<span style="color:#bbb;">' + d.a2aGateNone + '</span>'
+    // approval is the high-stakes knob → amber chip, like a governance flag
+    const appr = a.requireApprovalOutbound
+      ? ' <span style="display:inline-block;padding:0.05rem 0.35rem;border-radius:0.25rem;font-size:0.72rem;background:#fff3cd;color:#8a6d00;white-space:nowrap;">' +
+        d.a2aGateApproval +
+        '</span>'
+      : ''
+    return '<span style="font-size:0.8rem;">' + head + appr + '</span>'
   }
 
   // ---- API --------------------------------------------------------------
@@ -160,6 +193,11 @@
       '<input name="lifecycle" type="checkbox" /> ' + d.a2aLifecycleLabel + '</label>' +
       '<input name="pollIntervalMs" type="number" min="250" placeholder="' + escHtml(d.a2aPhPollInterval) + '" autocomplete="off" />' +
       '<input name="maxAttempts" type="number" min="1" placeholder="' + escHtml(d.a2aPhMaxAttempts) + '" autocomplete="off" />' +
+      // Item 2 — outbound-edge gate (data-class allowlist / quota / approval).
+      '<input name="allowedDataClasses" type="text" placeholder="' + escHtml(d.a2aPhDataClasses) + '" autocomplete="off" style="grid-column:1 / -1;" />' +
+      '<input name="outboundQuotaBudget" type="number" min="0" placeholder="' + escHtml(d.a2aPhQuotaBudget) + '" autocomplete="off" />' +
+      '<label style="font-size:0.85rem;color:#555;display:flex;gap:0.4rem;align-items:center;">' +
+      '<input name="requireApprovalOutbound" type="checkbox" /> ' + d.a2aApprovalLabel + '</label>' +
       '<label style="grid-column:1 / -1;font-size:0.85rem;color:#555;display:flex;gap:0.4rem;align-items:center;">' +
       '<input name="enabled" type="checkbox" checked /> ' + d.a2aEnabledLabel + '</label>' +
       '<button type="submit" style="grid-column:1 / -1;padding:0.5rem;">' + d.a2aBtnRegister + '</button>' +
@@ -173,10 +211,11 @@
       '<th style="padding:0.4rem;">' + d.a2aColUrl + '</th>' +
       '<th style="padding:0.4rem;">' + d.a2aColTokenEnv + '</th>' +
       '<th style="padding:0.4rem;">' + d.a2aColMode + '</th>' +
+      '<th style="padding:0.4rem;">' + d.a2aColGate + '</th>' +
       '<th style="padding:0.4rem;">' + d.a2aColStatus + '</th>' +
       '<th style="padding:0.4rem;">' + d.a2aColActions + '</th>' +
       '</tr></thead>' +
-      '<tbody id="a2a-tbody"><tr><td colspan="7" style="padding:0.6rem;color:#888;">' + d.a2aLoading + '</td></tr></tbody>' +
+      '<tbody id="a2a-tbody"><tr><td colspan="8" style="padding:0.6rem;color:#888;">' + d.a2aLoading + '</td></tr></tbody>' +
       '</table>' +
       '</div>'
 
@@ -190,7 +229,7 @@
     if (!tbody) return
     if (!agents.length) {
       tbody.innerHTML =
-        '<tr><td colspan="7" style="padding:0.6rem;color:#888;">' + escHtml(d.a2aEmpty) + '</td></tr>'
+        '<tr><td colspan="8" style="padding:0.6rem;color:#888;">' + escHtml(d.a2aEmpty) + '</td></tr>'
       return
     }
     tbody.innerHTML = ''
@@ -207,12 +246,15 @@
         '<td style="padding:0.4rem;"><code style="color:#888;">' + escHtml(a.url) + '</code></td>' +
         '<td style="padding:0.4rem;"><code style="color:#888;">' + escHtml(a.tokenEnv) + '</code></td>' +
         '<td style="padding:0.4rem;">' + lifecycleText(a) + '</td>' +
+        '<td style="padding:0.4rem;">' + gateCell(a) + '</td>' +
         '<td style="padding:0.4rem;">' + statusBadge(a) + '</td>' +
         '<td style="padding:0.4rem;white-space:nowrap;">' +
         '<button type="button" class="a2a-toggle" style="padding:0.25rem 0.5rem;">' +
         (a.enabled ? d.a2aBtnDisable : d.a2aBtnEnable) + '</button> ' +
         '<button type="button" class="a2a-life" style="padding:0.25rem 0.5rem;">' +
         (a.lifecycle ? d.a2aBtnToBlocking : d.a2aBtnToLong) + '</button> ' +
+        '<button type="button" class="a2a-appr" style="padding:0.25rem 0.5rem;">' +
+        (a.requireApprovalOutbound ? d.a2aBtnToDirect : d.a2aBtnToApproval) + '</button> ' +
         '<button type="button" class="a2a-del" style="padding:0.25rem 0.5rem;color:#c0392b;">' + d.a2aBtnDelete + '</button>' +
         '</td>'
       tr.querySelector('.a2a-toggle').addEventListener('click', function () {
@@ -226,6 +268,16 @@
           a.id,
           { lifecycle: a.lifecycle ? null : {} },
           a.lifecycle ? t().a2aOkToBlocking : t().a2aOkToLong,
+        )
+      })
+      tr.querySelector('.a2a-appr').addEventListener('click', function () {
+        // Flip outbound approval on/off (a per-policy toggle, like enabled).
+        // data-class / quota tuning goes via re-registration (same as caps/url).
+        doPatch(
+          root,
+          a.id,
+          { requireApprovalOutbound: !a.requireApprovalOutbound },
+          a.requireApprovalOutbound ? t().a2aOkToDirect : t().a2aOkToApproval,
         )
       })
       tr.querySelector('.a2a-del').addEventListener('click', function () {
@@ -290,6 +342,18 @@
       if (max > 0) lc.maxAttempts = max
       body.lifecycle = lc
     }
+    // Item 2 — outbound-edge gate. Empty data-class field → omit (keep the
+    // store default null = unrestricted); a filled field → allowlist. (The add
+    // form can't express [] / deny-all; that edge config goes via the API.)
+    const dcs = parseCaps(str('allowedDataClasses'))
+    if (dcs.length) body.allowedDataClasses = dcs
+    // Empty quota → omit (no limit). A number (incl. 0 = off) → send.
+    const qb = str('outboundQuotaBudget')
+    if (qb !== '') {
+      const n = parseInt(qb, 10)
+      if (n >= 0) body.outboundQuotaBudget = n
+    }
+    if (fd.get('requireApprovalOutbound') != null) body.requireApprovalOutbound = true
     setStatus(root, t().a2aRegistering, 'loading')
     try {
       await apiAdd(body)
