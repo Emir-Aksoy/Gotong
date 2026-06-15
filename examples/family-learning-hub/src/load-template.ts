@@ -16,7 +16,10 @@
  *   [1] LOAD      — the config comes from a file (read + parsed here, live).
  *   [2] agent     — 1 /teach tutor covering the 家长 hub's LOCAL caps.
  *   [3] workflow  — 1 DECLARATIVE workflow: screen → guardian-approval (human:,
- *                   conditional on off-whitelist) → teach (tagged child-learning).
+ *                   off-whitelist) → teach (child-learning) → moderate (rule engine)
+ *                   → mod-approval (human:, when self-flag OR rule flagged). TWO
+ *                   human approval steps; topic.screen + content.moderate are RUNTIME
+ *                   deterministic participants (return真布尔), not agent caps.
  *   [4] KB slot   — an addressable learning_records whose presetData is a POINTER,
  *                   never the records content (Stream B decision #4).
  *   [5] the LINK  — which 孩子 peer, outbound allowlist, data-class contract:
@@ -71,6 +74,8 @@ interface LoadedTemplate {
 
 /** The capability the child reaches cross-hub — it's the WORKFLOW trigger, not an agent cap. */
 const TUTOR_CAP = 'tutor.teach'
+/** The two GATE capabilities — served by RUNTIME deterministic participants, never the LLM tutor. */
+const RUNTIME_GATE_CAPS = ['topic.screen', 'content.moderate']
 /** The data class tagging the child's learning content as it flows. */
 const CHILD_LEARNING = 'child-learning'
 
@@ -95,9 +100,11 @@ function main(): void {
   }
   console.log(`  note:  '${TUTOR_CAP}' is NOT an agent cap — it's the workflow trigger the child`)
   console.log('         reaches cross-hub; the workflow dispatches the inner teach.lesson here.')
+  console.log(`         the two gates (${RUNTIME_GATE_CAPS.join(' / ')}) are RUNTIME deterministic`)
+  console.log('         participants (return真布尔), NOT this LLM tutor — see file header.')
 
-  // --- [3] the DECLARATIVE workflow with the whitelist approval ----------------
-  section('[3] workflow (screen → 家长 审批 human: → teach)')
+  // --- [3] the DECLARATIVE workflow with the whitelist + content approvals ------
+  section('[3] workflow (screen → 家长审批 → teach → moderate → 内容审批)')
   const workflows = t.workflows ?? []
   for (const w of workflows) {
     const steps = w.steps ?? []
@@ -149,19 +156,40 @@ function main(): void {
   const ids = new Set(agents.map((a) => a.id))
   if (doc.schema !== 'aipehub.template/v1') throw new Error('expected schema aipehub.template/v1')
   if (!ids.has('family-tutor')) throw new Error('expected a family-tutor agent')
-  // The cross-hub trigger capability must NOT be served by a template agent.
+  // The cross-hub trigger AND the two deterministic gate caps must NOT be served by a
+  // template agent — they're the workflow trigger + runtime participants respectively.
   for (const a of agents) {
-    if ((a.capabilities ?? []).includes(TUTOR_CAP)) {
+    const caps = a.capabilities ?? []
+    if (caps.includes(TUTOR_CAP)) {
       throw new Error(`${a.id} must NOT serve ${TUTOR_CAP} — it's the cross-hub workflow trigger`)
+    }
+    for (const gate of RUNTIME_GATE_CAPS) {
+      if (caps.includes(gate)) {
+        throw new Error(`${a.id} must NOT serve ${gate} — it's a runtime deterministic gate, not the LLM tutor`)
+      }
     }
   }
   const wf = workflows.find((w) => w.id === 'tutor-teach')
   if (!wf) throw new Error('expected the tutor-teach workflow in the loaded template')
-  // ★ Inversion vs tea-shop: this workflow MUST carry a human approval step.
-  const approval = (wf.steps ?? []).find((s) => s.human)
-  if (!approval) throw new Error('expected a `human:` whitelist-approval step (家长 hub side)')
-  if (approval.when !== '$screen.output.allowed == false') {
-    throw new Error('the approval must be conditional on the whitelist (when off-whitelist)')
+  // ★ Inversion vs tea-shop: this workflow MUST carry human approval steps — TWO now
+  // (the whitelist gate + the content-moderation gate).
+  const humanSteps = (wf.steps ?? []).filter((s) => s.human)
+  if (humanSteps.length < 2) {
+    throw new Error('expected TWO `human:` approval steps (白名单外主题 + 课程内容审核)')
+  }
+  const approval = (wf.steps ?? []).find((s) => s.id === 'guardian-approval')
+  if (approval?.when !== '$screen.output.allowed == false') {
+    throw new Error('the whitelist approval must be conditional on the whitelist (when off-whitelist)')
+  }
+  // ★ The optional rule-engine layer: a `moderate` step dispatching content.moderate.
+  const moderate = (wf.steps ?? []).find((s) => s.id === 'moderate')
+  if (!(moderate?.dispatch?.strategy?.capabilities ?? []).includes('content.moderate')) {
+    throw new Error('expected a `moderate` step dispatching content.moderate (the rule-engine layer)')
+  }
+  // ★ The content-review approval must be conditional on a flagged content (self-flag OR rule).
+  const modApproval = (wf.steps ?? []).find((s) => s.id === 'mod-approval')
+  if (!modApproval?.when?.includes('flagged')) {
+    throw new Error('the content-review approval must be conditional on flagged content')
   }
   // ★ The teach step must tag the lesson content with the child-learning data class.
   const teach = (wf.steps ?? []).find((s) => s.id === 'teach')
@@ -172,7 +200,7 @@ function main(): void {
   if (!kb?.presetData?.ref) throw new Error('expected the KB slot to carry a presetData POINTER')
 
   section('done')
-  console.log('  Loaded from a FILE — 1 tutor + 1 workflow (家长 审批 human: 步 + child-learning 标), KB pointer; the LINK is runtime.\n')
+  console.log('  Loaded from a FILE — 1 tutor + 1 workflow (2 家长审批 human: 步 + 分层审核 + child-learning 标), KB pointer; the LINK is runtime.\n')
   process.exit(0)
 }
 

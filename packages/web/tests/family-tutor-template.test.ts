@@ -8,14 +8,22 @@
  * value of the whole setup lives on the 家长 side, so that's what the template is.
  *
  * Two teaching invariants this test pins down — both OPPOSITE to tea-shop:
- *   1. This workflow HAS a `human:` step (the topic-whitelist approval), because
- *      the approver (the 家长) is a LOCAL user of the 家长 hub — a local human step
- *      can only assign to a same-hub user, which is exactly why this approval must
- *      live in the 家长 hub workflow (the design's key correctness constraint).
- *      So unlike tea-shop, the embedded block MUST contain `aipehub.human/v1`.
+ *   1. This workflow HAS `human:` steps (TWO of them: the topic-whitelist approval
+ *      AND the content-moderation approval), because the approver (the 家长) is a
+ *      LOCAL user of the 家长 hub — a local human step can only assign to a same-hub
+ *      user, which is exactly why these approvals must live in the 家长 hub workflow
+ *      (the design's key correctness constraint). So unlike tea-shop, the embedded
+ *      block MUST contain `aipehub.human/v1`.
  *   2. The `teach` step carries `dataClasses: [child-learning]` — the data-class
  *      tag survives the template→workflow opaque re-serialization (same vocabulary
  *      as the per-link OUTBOUND data-class contract).
+ *
+ * And the key A-M3 safety invariant: the two GATE capabilities (topic.screen +
+ * content.moderate) are served by RUNTIME deterministic participants, NOT the LLM
+ * tutor — so the agent's ONLY capability is `teach.lesson`. A deterministic
+ * topic.screen returning a real boolean is what makes `guardian-approval.when:
+ * $screen.output.allowed == false` actually fire (an LLM returning free text would
+ * make `allowed` undefined → the gate silently skips → fail-OPEN).
  *
  * It reads the SHIPPED
  * `examples/family-learning-hub/template/family-tutor.template.yaml` off disk →
@@ -55,18 +63,25 @@ describe('examples/family-learning-hub/template (FL-M2)', () => {
     const t = parseTemplate(templateText)
     expect(t.name).toBe('家长 AI 导师(家庭学习 hub · 家长侧)')
     expect(t.version).toBe(1)
-    // One 家长-side tutor agent serving the two 家长-LOCAL capabilities.
+    // One 家长-side tutor agent serving its one 家长-LOCAL capability (teach.lesson).
     expect(t.agents.map((a) => a.id)).toEqual(['family-tutor'])
     expect(t.workflows.map((w) => w.id)).toEqual(WORKFLOW_IDS)
     expect(t.knowledgeBases.map((k) => k.name)).toEqual(['learning_records'])
   })
 
-  it('the tutor serves the 家长-LOCAL capabilities + reaches learning_records via mcp-obsidian', () => {
+  it('the tutor serves ONLY teach.lesson (the two gates are runtime participants) + reaches learning_records via mcp-obsidian', () => {
     const agent = parseTemplate(templateText).agents[0]!
-    expect(agent.capabilities).toEqual(['teach.lesson', 'topic.screen'])
-    // NOTE: `tutor.teach` is the WORKFLOW trigger (wraps screen+approval+teach), not
-    // an agent capability; the child reaches `tutor.teach` cross-hub and the 家长
-    // workflow dispatches the inner `teach.lesson` to this agent.
+    // ★ A-M3: the tutor serves ONLY teach.lesson. The two gate capabilities
+    // (topic.screen / content.moderate) are RUNTIME deterministic participants —
+    // a deterministic boolean gate is what keeps the whitelist闸 from fail-OPEN
+    // (an LLM topic.screen returns free text with no `allowed` field → the
+    // `guardian-approval.when` evaluates undefined == false → false → silent skip).
+    expect(agent.capabilities).toEqual(['teach.lesson'])
+    expect(agent.capabilities).not.toContain('topic.screen')
+    expect(agent.capabilities).not.toContain('content.moderate')
+    // NOTE: `tutor.teach` is the WORKFLOW trigger (wraps screen+approval+teach+
+    // moderate), not an agent capability; the child reaches `tutor.teach` cross-hub
+    // and the 家长 workflow dispatches the inner `teach.lesson` to this agent.
     expect(agent.capabilities).not.toContain('tutor.teach')
     // Credentials ride as ${ENV} placeholders — never literal secrets.
     const obsidian = (agent.managed.mcpServers ?? []).find((s) => s.name === 'obsidian')
@@ -76,13 +91,28 @@ describe('examples/family-learning-hub/template (FL-M2)', () => {
     )
   })
 
-  it('the embedded workflow round-trips through parseWorkflow — cross-org, WITH a human approval step', () => {
+  it('the embedded workflow round-trips through parseWorkflow — cross-org, WITH two human approval steps + a rule-engine moderation layer', () => {
     const t = parseTemplate(templateText)
     const wf = parseWorkflow(t.workflows[0]!.yaml)
 
     expect(wf.id).toBe('tutor-teach')
     // Triggered cross-hub by the child's `tutor.teach` dispatch (names no peer).
     expect(wf.trigger.capability).toBe('tutor.teach')
+
+    // ★ A-M3: the full 5-step sequence — screen → 家长批白名单外 → 上课 → 规则筛 → 家长审内容.
+    expect(wf.steps.map((s) => s.id)).toEqual([
+      'screen',
+      'guardian-approval',
+      'teach',
+      'moderate',
+      'mod-approval',
+    ])
+    // The topic screen is dispatched to a runtime deterministic participant (topic.screen).
+    const screen = wf.steps.find((s) => s.id === 'screen')!
+    expect(screen.dispatch?.strategy).toMatchObject({
+      kind: 'capability',
+      capabilities: ['topic.screen'],
+    })
 
     // ★ Inversion vs tea-shop #1: the whitelist approval IS a workflow human step,
     // because the approver (家长) is a LOCAL user of this hub. The `human:` sugar
@@ -107,6 +137,36 @@ describe('examples/family-learning-hub/template (FL-M2)', () => {
       capabilities: ['teach.lesson'],
     })
     expect(teach.dispatch?.dataClasses).toEqual(['child-learning'])
+    // The lesson only runs on-whitelist OR after the 家长 approved the off-whitelist
+    // exception — so a 家长 REJECTING the whitelist approval actually STOPS the lesson
+    // (the workflow-level fail-open fix; verified through the real predicate in A-M2).
+    expect(teach.when).toContain('$guardian-approval.output.approved == true')
+
+    // ★ A-M3: the optional rule-engine layer — a `moderate` step dispatching
+    // content.moderate (a runtime deterministic participant, not an agent cap).
+    const moderate = wf.steps.find((s) => s.id === 'moderate')!
+    expect(moderate.dispatch?.strategy).toMatchObject({
+      kind: 'capability',
+      capabilities: ['content.moderate'],
+    })
+
+    // ★ A-M3: a SECOND human approval — content review — gated on EITHER the tutor's
+    // self-flag (decision 1.a) OR the rule engine. Layered defense, both retained.
+    const modApproval = wf.steps.find((s) => s.id === 'mod-approval')!
+    expect(modApproval.dispatch?.strategy).toMatchObject({
+      kind: 'capability',
+      capabilities: ['aipehub.human/v1'],
+    })
+    expect(modApproval.when).toContain('flagged')
+    // So there are exactly TWO human (aipehub.human/v1) steps in this workflow now.
+    const humanStepIds = wf.steps
+      .filter((s) =>
+        (s.dispatch?.strategy as { capabilities?: string[] } | undefined)?.capabilities?.includes(
+          'aipehub.human/v1',
+        ),
+      )
+      .map((s) => s.id)
+    expect(humanStepIds).toEqual(['guardian-approval', 'mod-approval'])
 
     // The EXECUTABLE steps name only capabilities — no step targets a peer. (The
     // governance note below may name the child peer in prose; that's an honest
