@@ -212,6 +212,9 @@ importers:
       '@aipehub/workflow':
         specifier: workspace:*
         version: link:../../packages/workflow
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.0
 
   examples/federated-team:
     dependencies:

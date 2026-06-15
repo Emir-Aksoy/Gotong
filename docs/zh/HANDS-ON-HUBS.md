@@ -186,7 +186,9 @@ demo 里把 mock provider 换成一个**情境感知的 `LlmProvider`**:它从 p
    - `tea-supply-link`:供货商按**自己的目录 + 实时库存**逐行定价、判有无货。
    - `tea-chain-hq`:门店拿总部下发的调价指令,对**自己的菜单**算 delta、判在不在售。
 2. **闸结合情况拦人**:`when:` 条件分支、`human:` 审批(店长 / 战团长拍板)、跨组织**出站审批闸**
-   (tea-supply-link / tea-chain-hq:跨边界发货 / 下发前必须有人批)。
+   (tea-supply-link / tea-chain-hq:跨边界发货 / 下发前必须有人批;family-learning-hub:孩子学
+   白名单外的主题前必须家长批)、**data-class 闸**(family-learning-hub:孩子学习数据标
+   `child-learning`,只放行 `allowedDataClasses` 含它的出站边,别的 fail-closed)。
 
 **一张表对齐「结合什么情况 → 怎么分派 / 适配」:**
 
@@ -199,6 +201,7 @@ demo 里把 mock provider 换成一个**情境感知的 `LlmProvider`**:它从 p
 | `warband-club` | 组织·工作流 | 问询 + 档案库已有贡献 | archivist bigram 检索命中别人的贡献;战团长 `human:` |
 | `tea-supply-link` | 跨组织·工作流 | 订单明细 + 供货商目录 / 库存 | 供货商按目录定价 + 查库存;出站审批闸 |
 | `tea-chain-hq` | 跨组织·工作流 | 下发指令 + 门店自有菜单 | 门店算 delta vs 自有菜单;出站审批闸 |
+| `family-learning-hub` | 跨组织·工作流 | 学习档案进度 + 主题是否在白名单 + 数据类契约 | 导师按档案续课号 + 自评打标;白名单外走出站审批闸(家长批);`child-learning` data-class 闸锁孩子数据不外泄 |
 
 > **一句话**:个人 hub 把「看情况派谁」抽成纯函数 `planXxx()`(可单测);组织 hub 让 dispatch 图保持
 > 结构性,把情境感知放进 worker 的确定性算账 + `when:` / `human:` / 出站审批闸。两条路都做到「结合

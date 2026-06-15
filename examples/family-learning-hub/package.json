@@ -6,11 +6,13 @@
   "description": "家长给孩子开 AI 订阅的家庭学习 hub — two SOVEREIGN hubs (child + guardian) federated: the child's lesson workflow orchestrates the 家长's subscription-backed AI tutor across the boundary through a topic whitelist + outbound approval gate. 管辖权 = 家长 holds the subscription + per-link contract + transcript fork; AI safety = the framework never runs an LLM, every step passes a gate. learning-records master copy lives on the child hub, forked to the 家长. Deterministic, no API key.",
   "scripts": {
     "start": "tsx src/index.ts",
+    "load-template": "tsx src/load-template.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "@aipehub/core": "workspace:*",
     "@aipehub/workflow": "workspace:*",
-    "@aipehub/inbox": "workspace:*"
+    "@aipehub/inbox": "workspace:*",
+    "yaml": "^2.6.0"
   }
 }

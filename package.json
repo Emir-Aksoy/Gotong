@@ -58,6 +58,7 @@
     "demo:tea-chain-hq": "pnpm --filter @aipehub/example-tea-chain-hq start",
     "demo:tea-chain-hq:template": "pnpm --filter @aipehub/example-tea-chain-hq load-template",
     "demo:family-learning-hub": "pnpm --filter @aipehub/example-family-learning-hub start",
+    "demo:family-learning-hub:template": "pnpm --filter @aipehub/example-family-learning-hub load-template",
     "demo:obsidian-kb": "pnpm --filter @aipehub/example-obsidian-kb start",
     "demo:elasticsearch-kb": "pnpm --filter @aipehub/example-elasticsearch-kb start",
     "demo:im-bridge-host": "pnpm --filter @aipehub/example-im-bridge-host start",
