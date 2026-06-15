@@ -1780,7 +1780,13 @@ async function main(): Promise<void> {
   // push add/update/delete onto the running hub without a restart (M11c).
   let a2aOutbound: A2aOutboundManager | undefined
   if (identity) {
-    a2aOutbound = new A2aOutboundManager({ hub, source: identity, logger: log })
+    // Item 2 — per-agent outbound quota window (mirrors AIPE_PEER_LINK_QUOTA_WINDOW_MS).
+    a2aOutbound = new A2aOutboundManager({
+      hub,
+      source: identity,
+      logger: log,
+      quotaWindowMs: envInt('AIPE_A2A_OUTBOUND_QUOTA_WINDOW_MS', 60_000),
+    })
     a2aOutbound.registerAllFromStore()
     // Stream H — let the workflow controller's off-hub capability view see live
     // external A2A agents (lazy closure forward-declared above).
@@ -1816,7 +1822,14 @@ async function main(): Promise<void> {
       escalateDanger = true
       log.info('outbound ACP destructive actions escalate to /me approval', { approver })
     }
-    acpOutbound = new AcpOutboundManager({ hub, source: identity, logger: log, escalateDanger })
+    acpOutbound = new AcpOutboundManager({
+      hub,
+      source: identity,
+      logger: log,
+      escalateDanger,
+      // Item 2 — per-agent outbound quota window (mirrors AIPE_PEER_LINK_QUOTA_WINDOW_MS).
+      quotaWindowMs: envInt('AIPE_ACP_OUTBOUND_QUOTA_WINDOW_MS', 60_000),
+    })
     acpOutbound.registerAllFromStore()
   }
 

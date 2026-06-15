@@ -31,6 +31,8 @@ import { AcpParticipant, dangerousToolGate } from '@aipehub/acp-agent'
 import type { Hub, Logger } from '@aipehub/core'
 import type { AcpOutboundAgent } from '@aipehub/identity'
 
+import { FixedWindowLimiter } from './peer-registry.js'
+
 /** The narrow identity slice this manager needs (the real IdentityStore satisfies it). */
 export interface AcpAgentSource {
   listAcpAgents(): AcpOutboundAgent[]
@@ -61,6 +63,12 @@ export interface AcpOutboundManagerOptions {
    * park can never wait forever for an approver who doesn't exist. Default false.
    */
   escalateDanger?: boolean
+  /**
+   * Item 2 — window for the per-agent OUTBOUND quota counter
+   * (`outboundQuotaBudget` sends per window). Default 60_000. Main.ts passes
+   * `AIPE_ACP_OUTBOUND_QUOTA_WINDOW_MS`; tests inject a small value.
+   */
+  quotaWindowMs?: number
 }
 
 /**
@@ -73,14 +81,23 @@ export class AcpOutboundManager {
   private readonly source: AcpAgentSource
   private readonly log: Logger
   private readonly escalateDanger: boolean
+  private readonly quotaWindowMs: number
   /** ids this manager has live on the hub (a subset of all participant ids). */
   private readonly live = new Set<string>()
+  /**
+   * Item 2 — per-agent OUTBOUND quota counters, keyed by agent id. Same
+   * discipline as A2aOutboundManager / peer-registry's `linkQuota`: kept across
+   * `refresh()` (an edit/toggle must NOT reset the window), rebuilt only when the
+   * operator changes the budget, dropped only when the row vanishes (`remove`).
+   */
+  private readonly outboundQuota = new Map<string, { limiter: FixedWindowLimiter; budget: number }>()
 
   constructor(opts: AcpOutboundManagerOptions) {
     this.hub = opts.hub
     this.source = opts.source
     this.log = opts.logger
     this.escalateDanger = opts.escalateDanger ?? false
+    this.quotaWindowMs = opts.quotaWindowMs ?? 60_000
   }
 
   /** Boot: materialise every stored agent. Returns the count actually registered. */
@@ -109,6 +126,10 @@ export class AcpOutboundManager {
   /** Drop the wrapper for this id if we own it (after an admin delete/disable). */
   remove(id: string): void {
     this.unregister(id)
+    // The row is gone for good → drop its outbound quota counter. (A `refresh`
+    // edit/toggle goes through `unregister` too but KEEPS the counter so the
+    // window survives; only a real delete reaches here.)
+    this.outboundQuota.delete(id)
   }
 
   /** True iff this id is currently a live outbound ACP participant we manage. */
@@ -153,6 +174,32 @@ export class AcpOutboundManager {
     })
   }
 
+  /**
+   * Item 2 — the outbound quota gate closure for one agent, or undefined when it
+   * has no budget. Twin of A2aOutboundManager.outboundQuotaGateFor: a per-agent
+   * `FixedWindowLimiter` reused across refreshes, rebuilt only when the budget
+   * changes. For ACP the quota is a run-away guardrail (a parked coding agent
+   * can't be dispatched-to faster than the budget). Over budget → false → the
+   * participant raises a fail-closed `outbound_quota_exceeded` before any spawn.
+   */
+  private outboundQuotaGateFor(agent: AcpOutboundAgent): (() => boolean) | undefined {
+    const budget = agent.outboundQuotaBudget
+    if (!budget || budget <= 0) {
+      this.outboundQuota.delete(agent.id)
+      return undefined
+    }
+    const existing = this.outboundQuota.get(agent.id)
+    let limiter: FixedWindowLimiter
+    if (existing && existing.budget === budget) {
+      limiter = existing.limiter
+    } else {
+      limiter = new FixedWindowLimiter(budget, this.quotaWindowMs)
+      this.outboundQuota.set(agent.id, { limiter, budget })
+    }
+    const id = agent.id
+    return () => limiter.attempt(id)
+  }
+
   private tryRegister(agent: AcpOutboundAgent): AcpRegisterResult {
     if (!agent.enabled) return { active: false, reason: 'disabled' }
     try {
@@ -166,6 +213,14 @@ export class AcpOutboundManager {
           // Destructive tool calls either park for a /me approval (escalateDanger)
           // or are denied inline. See the file header's "Gate posture".
           gate: dangerousToolGate(undefined, { onMatch: this.escalateDanger ? 'escalate' : 'deny' }),
+          // Item 2 — route this outbound edge through the SAME P4-M4 chokepoint
+          // mesh peers use: per-step data-class gate (reuses core
+          // `checkOutboundDataClasses`, no drift) + per-agent outbound quota. The
+          // data-class gate runs BEFORE the ACP session spawns, so a denied task
+          // never starts the subprocess. For ACP this is a GOVERNANCE control over
+          // what class of context may feed the third-party coding agent (D6).
+          allowedDataClasses: agent.allowedDataClasses,
+          outboundQuotaGate: this.outboundQuotaGateFor(agent),
           onChunk: (taskId, chunk) => this.emitChunk(agent.id, taskId, chunk.text),
         }),
       )

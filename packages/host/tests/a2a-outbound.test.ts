@@ -260,4 +260,115 @@ describe('A2aOutboundManager (P1-M11b)', () => {
       expect(mgr.statusOf('clash')).toEqual({ active: false, reason: 'id_conflict' })
     })
   })
+
+  // --- Item 2: outbound data-class + quota gate at the A2A edge -------------
+  // The manager must wire the stored v34 columns through to the participant:
+  // the data-class allowlist becomes `allowedDataClasses`, and a budget becomes
+  // an `outboundQuotaGate` closure backed by a per-agent FixedWindowLimiter that
+  // SURVIVES a refresh (an admin edit must not reset the window). We read the
+  // participant's private fields at runtime (TS privacy is compile-time only),
+  // mirroring the existing `lifecycleOf`-style probes — offline + deterministic.
+  describe('Item 2 — outbound data-class + quota gate', () => {
+    /** Read the gate fields the manager wired onto the live participant. */
+    function gateOf(id: string): {
+      allowedDataClasses?: readonly string[] | null
+      outboundQuotaGate?: (task: unknown) => boolean
+    } {
+      const p = hub.participant(id) as unknown as {
+        allowedDataClasses?: readonly string[] | null
+        outboundQuotaGate?: (task: unknown) => boolean
+      }
+      return { allowedDataClasses: p?.allowedDataClasses, outboundQuotaGate: p?.outboundQuotaGate }
+    }
+
+    it('wires the stored data-class allowlist into the participant; null vs [] distinct', () => {
+      const mgr = manager({ TOK: 'secret' })
+      identity.addA2aAgent({ id: 'classed', capabilities: ['x'], url: 'https://a/a2a', tokenEnv: 'TOK', allowedDataClasses: ['public'] })
+      identity.addA2aAgent({ id: 'open', capabilities: ['x'], url: 'https://a/a2a', tokenEnv: 'TOK' })
+      identity.addA2aAgent({ id: 'locked', capabilities: ['x'], url: 'https://a/a2a', tokenEnv: 'TOK', allowedDataClasses: [] })
+      mgr.refresh('classed')
+      mgr.refresh('open')
+      mgr.refresh('locked')
+      expect(gateOf('classed').allowedDataClasses).toEqual(['public'])
+      expect(gateOf('open').allowedDataClasses).toBeNull() // no contract (legacy accept-all)
+      expect(gateOf('locked').allowedDataClasses).toEqual([]) // lockdown — distinct from null
+    })
+
+    it('builds an outbound quota gate only when a budget is set', () => {
+      const mgr = manager({ TOK: 'secret' })
+      identity.addA2aAgent({ id: 'budgeted', capabilities: ['x'], url: 'https://a/a2a', tokenEnv: 'TOK', outboundQuotaBudget: 3 })
+      identity.addA2aAgent({ id: 'unbudgeted', capabilities: ['x'], url: 'https://a/a2a', tokenEnv: 'TOK' })
+      mgr.refresh('budgeted')
+      mgr.refresh('unbudgeted')
+      expect(typeof gateOf('budgeted').outboundQuotaGate).toBe('function')
+      expect(gateOf('unbudgeted').outboundQuotaGate).toBeUndefined()
+    })
+
+    it('a task declaring a disallowed class fails fast — the remote is never sent to', async () => {
+      const mgr = manager({ TOK: 'secret' })
+      // No fetchImpl is injected, but the gate throws BEFORE any send anyway, so
+      // a denied dispatch is fully offline regardless.
+      identity.addA2aAgent({ id: 'gov', capabilities: ['review'], url: 'https://a/a2a', tokenEnv: 'TOK', allowedDataClasses: ['public'] })
+      mgr.refresh('gov')
+      const res = await hub.dispatch({
+        from: 'human',
+        strategy: { kind: 'explicit', to: 'gov' },
+        payload: { text: 'hi' },
+        dataClasses: ['secret'], // not in the ['public'] allowlist
+      })
+      expect(res.kind).toBe('failed')
+      expect((res as { error?: string }).error).toContain('outbound_data_class_denied')
+    })
+
+    it('the quota gate enforces the budget (fail-closed past it)', () => {
+      const mgr = manager({ TOK: 'secret' })
+      identity.addA2aAgent({ id: 'q', capabilities: ['x'], url: 'https://a/a2a', tokenEnv: 'TOK', outboundQuotaBudget: 2 })
+      mgr.refresh('q')
+      const gate = gateOf('q').outboundQuotaGate!
+      expect(gate(undefined)).toBe(true) // 1
+      expect(gate(undefined)).toBe(true) // 2
+      expect(gate(undefined)).toBe(false) // 3 → over budget
+    })
+
+    it('the quota window survives a refresh — re-registering must NOT reset it', () => {
+      const mgr = manager({ TOK: 'secret' })
+      identity.addA2aAgent({ id: 'survive', capabilities: ['x'], url: 'https://a/a2a', tokenEnv: 'TOK', outboundQuotaBudget: 2 })
+      mgr.refresh('survive')
+      const g1 = gateOf('survive').outboundQuotaGate!
+      expect(g1(undefined)).toBe(true)
+      expect(g1(undefined)).toBe(true) // budget of 2 exhausted this window
+      // A refresh is what an admin edit/toggle triggers: a fresh participant is
+      // registered, but the manager reuses the SAME limiter (budget unchanged).
+      mgr.refresh('survive')
+      const g2 = gateOf('survive').outboundQuotaGate!
+      expect(g2(undefined)).toBe(false) // still exhausted — the window carried over
+    })
+
+    it('changing the budget rebuilds the limiter (a fresh window)', () => {
+      const mgr = manager({ TOK: 'secret' })
+      identity.addA2aAgent({ id: 'rebudget', capabilities: ['x'], url: 'https://a/a2a', tokenEnv: 'TOK', outboundQuotaBudget: 1 })
+      mgr.refresh('rebudget')
+      const g1 = gateOf('rebudget').outboundQuotaGate!
+      expect(g1(undefined)).toBe(true)
+      expect(g1(undefined)).toBe(false) // exhausted at budget 1
+      identity.updateA2aAgent('rebudget', { outboundQuotaBudget: 5 })
+      mgr.refresh('rebudget')
+      const g2 = gateOf('rebudget').outboundQuotaGate!
+      expect(g2(undefined)).toBe(true) // new limiter → fresh window
+    })
+
+    it('remove drops the quota counter — a later refresh starts fresh', () => {
+      const mgr = manager({ TOK: 'secret' })
+      identity.addA2aAgent({ id: 'recycle', capabilities: ['x'], url: 'https://a/a2a', tokenEnv: 'TOK', outboundQuotaBudget: 1 })
+      mgr.refresh('recycle')
+      const g1 = gateOf('recycle').outboundQuotaGate!
+      expect(g1(undefined)).toBe(true)
+      expect(g1(undefined)).toBe(false) // exhausted
+      // remove() is the true-delete path; it must drop the counter (unlike refresh).
+      mgr.remove('recycle')
+      mgr.refresh('recycle') // row still exists → re-registers with a brand-new limiter
+      const g2 = gateOf('recycle').outboundQuotaGate!
+      expect(g2(undefined)).toBe(true) // fresh counter proves remove() cleared it
+    })
+  })
 })

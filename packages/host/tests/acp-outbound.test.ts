@@ -226,4 +226,115 @@ describe('AcpOutboundManager (ACP-OUT-M2)', () => {
       expect(mgr.statusOf('clash')).toEqual({ active: false, reason: 'id_conflict' })
     })
   })
+
+  // --- Item 2: outbound data-class + quota gate at the ACP edge -------------
+  // Same wiring proof as A2A, with one ACP-specific twist: the data-class gate
+  // runs BEFORE the subprocess is spawned (`session.ensureStarted()`), so a
+  // denied task never starts the coding agent. We prove that behaviorally with a
+  // deliberately bogus command — a denial yields `outbound_data_class_denied`,
+  // NOT an ENOENT from a spawn that should never have happened.
+  describe('Item 2 — outbound data-class + quota gate', () => {
+    /** Read the gate fields the manager wired onto the live participant. */
+    function gateOf(id: string): {
+      allowedDataClasses?: readonly string[] | null
+      outboundQuotaGate?: (task: unknown) => boolean
+    } {
+      const p = hub.participant(id) as unknown as {
+        allowedDataClasses?: readonly string[] | null
+        outboundQuotaGate?: (task: unknown) => boolean
+      }
+      return { allowedDataClasses: p?.allowedDataClasses, outboundQuotaGate: p?.outboundQuotaGate }
+    }
+
+    it('wires the stored data-class allowlist into the participant; null vs [] distinct', () => {
+      const mgr = manager()
+      identity.addAcpAgent({ id: 'classed', capabilities: ['code'], command: 'npx', allowedDataClasses: ['public'] })
+      identity.addAcpAgent({ id: 'open', capabilities: ['code'], command: 'npx' })
+      identity.addAcpAgent({ id: 'locked', capabilities: ['code'], command: 'npx', allowedDataClasses: [] })
+      mgr.refresh('classed')
+      mgr.refresh('open')
+      mgr.refresh('locked')
+      expect(gateOf('classed').allowedDataClasses).toEqual(['public'])
+      expect(gateOf('open').allowedDataClasses).toBeNull() // no contract (legacy accept-all)
+      expect(gateOf('locked').allowedDataClasses).toEqual([]) // lockdown — distinct from null
+    })
+
+    it('builds an outbound quota gate only when a budget is set', () => {
+      const mgr = manager()
+      identity.addAcpAgent({ id: 'budgeted', capabilities: ['code'], command: 'npx', outboundQuotaBudget: 3 })
+      identity.addAcpAgent({ id: 'unbudgeted', capabilities: ['code'], command: 'npx' })
+      mgr.refresh('budgeted')
+      mgr.refresh('unbudgeted')
+      expect(typeof gateOf('budgeted').outboundQuotaGate).toBe('function')
+      expect(gateOf('unbudgeted').outboundQuotaGate).toBeUndefined()
+    })
+
+    it('a disallowed class fails fast — the subprocess is NEVER spawned (gate before ensureStarted)', async () => {
+      const mgr = manager()
+      // A deliberately bogus command: if the gate did not fire first,
+      // ensureStarted() would try to spawn it and fail with ENOENT. Because the
+      // data-class gate runs BEFORE ensureStarted(), we get a clean denial and the
+      // binary is never touched.
+      identity.addAcpAgent({ id: 'gov', capabilities: ['code'], command: '/nonexistent/acp-binary', allowedDataClasses: ['public'] })
+      mgr.refresh('gov')
+      const res = await hub.dispatch({
+        from: 'human',
+        strategy: { kind: 'explicit', to: 'gov' },
+        payload: { text: 'review this' },
+        dataClasses: ['secret'], // not in the ['public'] allowlist
+      })
+      expect(res.kind).toBe('failed')
+      expect((res as { error?: string }).error).toContain('outbound_data_class_denied')
+      // The bogus binary was never spawned — no ENOENT leaked through.
+      expect((res as { error?: string }).error ?? '').not.toContain('ENOENT')
+    })
+
+    it('the quota gate enforces the budget (fail-closed past it)', () => {
+      const mgr = manager()
+      identity.addAcpAgent({ id: 'q', capabilities: ['code'], command: 'npx', outboundQuotaBudget: 2 })
+      mgr.refresh('q')
+      const gate = gateOf('q').outboundQuotaGate!
+      expect(gate(undefined)).toBe(true) // 1
+      expect(gate(undefined)).toBe(true) // 2
+      expect(gate(undefined)).toBe(false) // 3 → over budget
+    })
+
+    it('the quota window survives a refresh — re-registering must NOT reset it', () => {
+      const mgr = manager()
+      identity.addAcpAgent({ id: 'survive', capabilities: ['code'], command: 'npx', outboundQuotaBudget: 2 })
+      mgr.refresh('survive')
+      const g1 = gateOf('survive').outboundQuotaGate!
+      expect(g1(undefined)).toBe(true)
+      expect(g1(undefined)).toBe(true) // budget of 2 exhausted this window
+      mgr.refresh('survive') // an admin edit/toggle re-registers a fresh participant…
+      const g2 = gateOf('survive').outboundQuotaGate!
+      expect(g2(undefined)).toBe(false) // …but the limiter was reused — window carried over
+    })
+
+    it('changing the budget rebuilds the limiter (a fresh window)', () => {
+      const mgr = manager()
+      identity.addAcpAgent({ id: 'rebudget', capabilities: ['code'], command: 'npx', outboundQuotaBudget: 1 })
+      mgr.refresh('rebudget')
+      const g1 = gateOf('rebudget').outboundQuotaGate!
+      expect(g1(undefined)).toBe(true)
+      expect(g1(undefined)).toBe(false) // exhausted at budget 1
+      identity.updateAcpAgent('rebudget', { outboundQuotaBudget: 5 })
+      mgr.refresh('rebudget')
+      const g2 = gateOf('rebudget').outboundQuotaGate!
+      expect(g2(undefined)).toBe(true) // new limiter → fresh window
+    })
+
+    it('remove drops the quota counter — a later refresh starts fresh', () => {
+      const mgr = manager()
+      identity.addAcpAgent({ id: 'recycle', capabilities: ['code'], command: 'npx', outboundQuotaBudget: 1 })
+      mgr.refresh('recycle')
+      const g1 = gateOf('recycle').outboundQuotaGate!
+      expect(g1(undefined)).toBe(true)
+      expect(g1(undefined)).toBe(false) // exhausted
+      mgr.remove('recycle') // the true-delete path drops the counter (unlike refresh)
+      mgr.refresh('recycle') // row still exists → re-registers with a brand-new limiter
+      const g2 = gateOf('recycle').outboundQuotaGate!
+      expect(g2(undefined)).toBe(true) // fresh counter proves remove() cleared it
+    })
+  })
 })

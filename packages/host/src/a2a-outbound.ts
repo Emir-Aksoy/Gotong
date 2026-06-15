@@ -18,6 +18,8 @@ import { A2aRemoteParticipant } from '@aipehub/a2a'
 import type { Hub, Logger } from '@aipehub/core'
 import type { A2aOutboundAgent } from '@aipehub/identity'
 
+import { FixedWindowLimiter } from './peer-registry.js'
+
 /** The narrow identity slice this manager needs (the real IdentityStore satisfies it). */
 export interface A2aAgentSource {
   listA2aAgents(): A2aOutboundAgent[]
@@ -39,6 +41,12 @@ export interface A2aOutboundManagerOptions {
   logger: Logger
   /** Injectable env reader (defaults to process.env); '' / missing → undefined. */
   readEnv?: (name: string) => string | undefined
+  /**
+   * Item 2 — window for the per-agent OUTBOUND quota counter
+   * (`outboundQuotaBudget` sends per window). Default 60_000. Main.ts passes
+   * `AIPE_A2A_OUTBOUND_QUOTA_WINDOW_MS`; tests inject a small value.
+   */
+  quotaWindowMs?: number
 }
 
 function defaultReadEnv(name: string): string | undefined {
@@ -56,14 +64,24 @@ export class A2aOutboundManager {
   private readonly source: A2aAgentSource
   private readonly log: Logger
   private readonly readEnv: (name: string) => string | undefined
+  private readonly quotaWindowMs: number
   /** ids this manager has live on the hub (a subset of all participant ids). */
   private readonly live = new Set<string>()
+  /**
+   * Item 2 — per-agent OUTBOUND quota counters, keyed by agent id. Mirrors
+   * peer-registry's `linkQuota`: one `FixedWindowLimiter` per agent, kept across
+   * `refresh()` (an edit/toggle must NOT reset the window) and rebuilt ONLY when
+   * the operator changes the budget value (tracked alongside). Dropped only when
+   * the row truly vanishes (`remove`). An agent with no/zero budget has no entry.
+   */
+  private readonly outboundQuota = new Map<string, { limiter: FixedWindowLimiter; budget: number }>()
 
   constructor(opts: A2aOutboundManagerOptions) {
     this.hub = opts.hub
     this.source = opts.source
     this.log = opts.logger
     this.readEnv = opts.readEnv ?? defaultReadEnv
+    this.quotaWindowMs = opts.quotaWindowMs ?? 60_000
   }
 
   /** Boot: materialise every stored agent. Returns the count actually registered. */
@@ -92,6 +110,10 @@ export class A2aOutboundManager {
   /** Drop the wrapper for this id if we own it (after an admin delete/disable). */
   remove(id: string): void {
     this.unregister(id)
+    // The row is gone for good → drop its outbound quota counter. (A `refresh`
+    // edit/toggle goes through `unregister` too but KEEPS the counter so the
+    // window survives; only a real delete reaches here.)
+    this.outboundQuota.delete(id)
   }
 
   /** True iff this id is currently a live outbound A2A participant we manage. */
@@ -136,6 +158,32 @@ export class A2aOutboundManager {
     this.live.delete(id)
   }
 
+  /**
+   * Item 2 — the outbound quota gate closure for one agent, or undefined when it
+   * has no budget. Mirrors peer-registry's `inboundQuotaGate`: a per-agent
+   * `FixedWindowLimiter` reused across refreshes, rebuilt only when the budget
+   * changes. The closure debits one send per call; over budget → false, which the
+   * participant turns into a fail-closed `outbound_quota_exceeded`. A 0/cleared
+   * budget drops any stale counter and leaves the gate off (legacy accept-all).
+   */
+  private outboundQuotaGateFor(agent: A2aOutboundAgent): (() => boolean) | undefined {
+    const budget = agent.outboundQuotaBudget
+    if (!budget || budget <= 0) {
+      this.outboundQuota.delete(agent.id)
+      return undefined
+    }
+    const existing = this.outboundQuota.get(agent.id)
+    let limiter: FixedWindowLimiter
+    if (existing && existing.budget === budget) {
+      limiter = existing.limiter
+    } else {
+      limiter = new FixedWindowLimiter(budget, this.quotaWindowMs)
+      this.outboundQuota.set(agent.id, { limiter, budget })
+    }
+    const id = agent.id
+    return () => limiter.attempt(id)
+  }
+
   private tryRegister(agent: A2aOutboundAgent): A2aRegisterResult {
     if (!agent.enabled) return { active: false, reason: 'disabled' }
     const token = this.readEnv(agent.tokenEnv)
@@ -161,6 +209,13 @@ export class A2aOutboundManager {
           // to the participant's `lifecycle?` option ({pollIntervalMs?,maxAttempts?}),
           // so a stored `{}` reaches here and opts in with participant defaults.
           ...(agent.lifecycle ? { lifecycle: agent.lifecycle } : {}),
+          // Item 2 — route this outbound edge through the SAME P4-M4 chokepoint
+          // mesh peers use: per-step data-class gate (reuses core
+          // `checkOutboundDataClasses`, no drift) + per-agent outbound quota.
+          // null/undefined allowedDataClasses = no contract (legacy accept-all);
+          // the quota gate is undefined unless a budget is set.
+          allowedDataClasses: agent.allowedDataClasses,
+          outboundQuotaGate: this.outboundQuotaGateFor(agent),
         }),
       )
     } catch (err) {
