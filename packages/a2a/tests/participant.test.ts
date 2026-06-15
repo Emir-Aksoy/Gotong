@@ -261,3 +261,119 @@ describe('A2aRemoteParticipant — long-running task lifecycle (Stream H2)', () 
     expect(calls).toHaveLength(0) // failed before any tasks/get
   })
 })
+
+describe('A2aRemoteParticipant — outbound data-class + quota gate (Item 2 X-M1)', () => {
+  /** A task that declares data classes (what the per-step gate stamps). */
+  function classedTask(dataClasses: readonly string[]): Task {
+    return { ...makeTask({ text: 'go' }), dataClasses }
+  }
+
+  it('refuses a task carrying a disallowed class — failed result, remote NEVER hit', async () => {
+    const { fn, calls } = fakeFetch(() =>
+      jsonResponse({ jsonrpc: '2.0', id: 1, result: agentMessage('should not happen', 'm') }),
+    )
+    const p = new A2aRemoteParticipant({
+      id: 'ext',
+      capabilities: ['ask'],
+      url: 'u',
+      token: 't',
+      allowedDataClasses: ['public'],
+      fetchImpl: fn,
+    })
+
+    const result = await p.onTask(classedTask(['pii']))
+
+    expect(result.kind).toBe('failed')
+    if (result.kind === 'failed') expect(result.error).toMatch(/outbound_data_class_denied:pii/)
+    // Fail-closed: the gate runs before any network I/O.
+    expect(calls).toHaveLength(0)
+  })
+
+  it('admits a task whose classes are all allowed', async () => {
+    const { fn, calls } = fakeFetch(() =>
+      jsonResponse({ jsonrpc: '2.0', id: 1, result: agentMessage('ok', 'm') }),
+    )
+    const p = new A2aRemoteParticipant({
+      id: 'ext',
+      capabilities: ['ask'],
+      url: 'u',
+      token: 't',
+      allowedDataClasses: ['public', 'pii'],
+      fetchImpl: fn,
+    })
+
+    const result = await p.onTask(classedTask(['pii']))
+
+    expect(result).toMatchObject({ kind: 'ok', output: { text: 'ok' } })
+    expect(calls).toHaveLength(1)
+  })
+
+  it('allowedDataClasses === [] locks down — any declared class is refused', async () => {
+    const { fn, calls } = fakeFetch(() => jsonResponse({ jsonrpc: '2.0', id: 1, result: agentMessage('x', 'm') }))
+    const p = new A2aRemoteParticipant({
+      id: 'ext', capabilities: ['ask'], url: 'u', token: 't', allowedDataClasses: [], fetchImpl: fn,
+    })
+    const result = await p.onTask(classedTask(['anything']))
+    expect(result.kind).toBe('failed')
+    expect(calls).toHaveLength(0)
+  })
+
+  it('no contract (null/undefined) sends anything — a declared class still passes', async () => {
+    const { fn, calls } = fakeFetch(() => jsonResponse({ jsonrpc: '2.0', id: 1, result: agentMessage('ok', 'm') }))
+    const p = new A2aRemoteParticipant({
+      id: 'ext', capabilities: ['ask'], url: 'u', token: 't', allowedDataClasses: null, fetchImpl: fn,
+    })
+    const result = await p.onTask(classedTask(['pii']))
+    expect(result).toMatchObject({ kind: 'ok' })
+    expect(calls).toHaveLength(1)
+  })
+
+  it('refuses when the quota gate returns false — failed, remote NEVER hit', async () => {
+    const { fn, calls } = fakeFetch(() => jsonResponse({ jsonrpc: '2.0', id: 1, result: agentMessage('x', 'm') }))
+    const p = new A2aRemoteParticipant({
+      id: 'ext',
+      capabilities: ['ask'],
+      url: 'u',
+      token: 't',
+      outboundQuotaGate: () => false,
+      fetchImpl: fn,
+    })
+
+    const result = await p.onTask(makeTask({ text: 'go' }))
+
+    expect(result.kind).toBe('failed')
+    if (result.kind === 'failed') expect(result.error).toMatch(/outbound_quota_exceeded/)
+    expect(calls).toHaveLength(0)
+  })
+
+  it('the data-class gate runs before quota (an over-budget but disallowed task names the class)', async () => {
+    const { fn } = fakeFetch(() => jsonResponse({ jsonrpc: '2.0', id: 1, result: agentMessage('x', 'm') }))
+    const p = new A2aRemoteParticipant({
+      id: 'ext', capabilities: ['ask'], url: 'u', token: 't',
+      allowedDataClasses: ['public'], outboundQuotaGate: () => false, fetchImpl: fn,
+    })
+    const result = await p.onTask(classedTask(['pii']))
+    expect(result.kind).toBe('failed')
+    // data-class is checked first → its reason wins.
+    if (result.kind === 'failed') expect(result.error).toMatch(/outbound_data_class_denied/)
+  })
+
+  it('gates the lifecycle path too — a disallowed class never reaches message/send or parks', async () => {
+    const { fn, calls } = fakeFetch(() => send(workingTask('rt-1')))
+    const p = new A2aRemoteParticipant({
+      id: 'ext',
+      capabilities: ['ask'],
+      url: 'u',
+      token: 't',
+      lifecycle: { pollIntervalMs: 500 },
+      allowedDataClasses: ['public'],
+      fetchImpl: fn,
+    })
+
+    // Even though lifecycle is on, the gate is at handleTask's top → failed, no park.
+    const result = await p.onTask(classedTask(['secret']))
+    expect(result.kind).toBe('failed')
+    if (result.kind === 'failed') expect(result.error).toMatch(/outbound_data_class_denied:secret/)
+    expect(calls).toHaveLength(0)
+  })
+})

@@ -27,7 +27,13 @@
  * target skill.
  */
 
-import { AgentParticipant, SuspendTaskError, type ParticipantId, type Task } from '@aipehub/core'
+import {
+  AgentParticipant,
+  checkOutboundDataClasses,
+  SuspendTaskError,
+  type ParticipantId,
+  type Task,
+} from '@aipehub/core'
 
 import { a2aGetTask, a2aSend, a2aSendRaw } from './client.js'
 import { isA2ATask, isTerminalTaskState, messageText, type A2ATask } from './types.js'
@@ -72,6 +78,28 @@ export interface A2aRemoteParticipantOptions {
   now?: () => number
   /** Injectable fetch for deterministic tests. */
   fetchImpl?: typeof fetch
+  /**
+   * Item 2 — OUTBOUND data-class gate, reusing the SAME `checkOutboundDataClasses`
+   * the mesh edge (`RemoteHubViaLink`) runs. This is a true network egress edge
+   * (HTTP to an external endpoint, possibly cross-org / metered), so the peer's
+   * cleared classes apply here exactly as on a mesh link:
+   *   - `null` / `undefined` → no contract → send anything (legacy / accept-all).
+   *   - `[]`                 → lockdown: a task declaring ANY class is refused.
+   *   - `['pii', …]`         → every declared class must be in the set.
+   * A task carrying a disallowed class is refused BEFORE the send (fail-closed,
+   * not redaction — the payload is never rewritten). Gated once at dispatch
+   * (`handleTask`); a lifecycle resume/poll does not re-gate (the task already
+   * cleared admission).
+   */
+  allowedDataClasses?: readonly string[] | null
+  /**
+   * Item 2 — OUTBOUND per-agent quota hook. Returns `true` to admit the task,
+   * `false` to refuse it (a runaway / cost guard on outbound sends). The host
+   * manager owns the limiter (a `FixedWindowLimiter` keyed by agent id that
+   * survives `refresh`); this participant only asks. Omitted → no quota.
+   * Consulted once at dispatch alongside the data-class gate.
+   */
+  outboundQuotaGate?: (task: Task) => boolean
 }
 
 export class A2aRemoteParticipant extends AgentParticipant {
@@ -82,6 +110,8 @@ export class A2aRemoteParticipant extends AgentParticipant {
   private readonly lifecycle: { pollIntervalMs: number; maxAttempts: number } | undefined
   private readonly now: () => number
   private readonly fetchImpl: typeof fetch | undefined
+  private readonly allowedDataClasses: readonly string[] | null | undefined
+  private readonly outboundQuotaGate: ((task: Task) => boolean) | undefined
 
   constructor(opts: A2aRemoteParticipantOptions) {
     super({ id: opts.id, capabilities: opts.capabilities })
@@ -97,9 +127,37 @@ export class A2aRemoteParticipant extends AgentParticipant {
       : undefined
     this.now = opts.now ?? (() => Date.now())
     this.fetchImpl = opts.fetchImpl
+    this.allowedDataClasses = opts.allowedDataClasses
+    this.outboundQuotaGate = opts.outboundQuotaGate
+  }
+
+  /**
+   * Item 2 — the outbound trust gate for THIS edge. Two checks, fail-closed,
+   * both before any network I/O:
+   *   1. data-class — the SAME `checkOutboundDataClasses` core function the mesh
+   *      edge uses (anti-drift: one place, both edges); a disallowed class
+   *      throws `outbound_data_class_denied:<class>`.
+   *   2. quota — the host-owned per-agent limiter; over budget throws
+   *      `outbound_quota_exceeded`.
+   * A thrown error becomes a `failed` task result via `AgentParticipant`, so a
+   * refused task never reaches the remote.
+   */
+  private gateOutbound(task: Task): void {
+    const verdict = checkOutboundDataClasses(task, this.allowedDataClasses)
+    if (!verdict.ok) {
+      throw new Error(`outbound_data_class_denied:${verdict.reason}`)
+    }
+    if (this.outboundQuotaGate && !this.outboundQuotaGate(task)) {
+      throw new Error('outbound_quota_exceeded')
+    }
   }
 
   protected async handleTask(task: Task): Promise<unknown> {
+    // Item 2 — gate the outbound edge BEFORE any network I/O. Runs once at
+    // dispatch (blocking + lifecycle share this entry); a lifecycle resume/poll
+    // re-enters via `handleResume`, which does NOT re-gate — the task already
+    // cleared admission here.
+    this.gateOutbound(task)
     const text = payloadToText(task.payload)
     const send = this.sendOptions()
     // Legacy blocking path (no lifecycle opt-in): a2aSend throws on a returned

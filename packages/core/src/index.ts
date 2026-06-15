@@ -136,7 +136,15 @@ export type {
 // consumers (host workflow-controller cross-hub detection) gate on the SAME
 // notion of "which caps does this dispatch ask for" as the inbound/outbound
 // peer ACLs — one place, no drift.
-export { extractRequiredCapabilities } from './peer-acl.js'
+//
+// `checkOutboundDataClasses` is the canonical data-class gate (P4-M4). It lives
+// inside `RemoteHubViaLink` for mesh edges; re-exported here so the OTHER
+// outbound edges — `A2aRemoteParticipant` / `AcpParticipant`, which are local
+// participants that never cross a `RemoteHubViaLink` (Item 2) — gate on the
+// SAME function rather than a divergent re-implementation. Anti-drift: one
+// place, both edges learn new data-class semantics at once.
+export { extractRequiredCapabilities, checkOutboundDataClasses } from './peer-acl.js'
+export type { OutboundVerdict } from './peer-acl.js'
 
 export {
   FeedbackLedger,
