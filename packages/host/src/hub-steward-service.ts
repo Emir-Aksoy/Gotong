@@ -39,6 +39,7 @@ import {
   HUB_STEWARD_DEFAULT_ID,
   classifyStewardAction,
   validateStewardAction,
+  isStewardActionKind,
   type ClassifiedAction,
   type ClassifiedProposal,
   type HubStewardOutput,
@@ -51,6 +52,7 @@ import {
   type StewardSnapshotAgent,
   type StewardSnapshotWorkflow,
   type StewardTurn,
+  type StewardTurnResult,
 } from '@aipehub/hub-steward'
 
 import type { InboxStore } from '@aipehub/inbox'
@@ -574,7 +576,12 @@ export function createHubStewardService(deps: {
       // 2. Dispatch to the steward agent. A member call carries an origin so the
       //    spend is quota-attributed (Phase 17), and `from` is the member.
       const payload: HubStewardPayload = { instruction, snapshot }
-      if (input.history) payload.history = input.history
+      // Re-inject the conversation, sanitised: each prior turn's structured
+      // outcome (Phase C) is host-validated + folded into a fixed-format
+      // `[执行结果] …` line so the steward builds on what ACTUALLY happened — a
+      // forged result can't make anything run (the next apply re-classifies).
+      const history = sanitizeStewardHistory(input.history)
+      if (history.length > 0) payload.history = history
       let sinkKey: string | undefined
       if (input.onChunk) {
         sinkKey = randomUUID()
@@ -726,6 +733,93 @@ function projectSnapshotAgent(a: StewardOwnedAgent, userId: string): StewardSnap
   }
   if (a.id.startsWith(prefix)) out.handle = a.id.slice(prefix.length)
   return out
+}
+
+// --- result-aware history (Phase C) -----------------------------------------
+//
+// The SPA holds the steward conversation (stateless across `plan` calls, like
+// WFEDIT-D3) and echoes it back as `history[]`. From Phase C each prior turn may
+// carry the STRUCTURED outcome of the action it applied (`result`), so the
+// steward's NEXT proposal builds on what ACTUALLY happened, not what it merely
+// proposed. The host is the authority on that outcome: `sanitizeStewardHistory`
+// validates the round-tripped shape and RE-RENDERS it into a fixed-format
+// `[执行结果] …` line folded into the turn's content — the client never supplies
+// the rendered text, only the whitelisted `{kind,status,subject}`, so it can't
+// inject a "succeeded" narrative the model would read as ground truth. Advisory
+// only: the next `apply` is re-classified + re-executed server-side regardless.
+
+/** Keep recent turns only — what "接着上一步 / 再…一点" point at. */
+const MAX_STEWARD_HISTORY_TURNS = 8
+/** Clip a turn's folded content (defence against a bloated echo). */
+const MAX_STEWARD_CONTENT_CHARS = 2000
+/** Clip the result subject (an id / provider — never long). */
+const MAX_STEWARD_SUBJECT_CHARS = 200
+
+/**
+ * The mark + zh label for each outcome status. Exhaustive by type — TS errors if
+ * a `StewardTurnResult['status']` is added without a label here, so the rendered
+ * vocabulary never drifts from the type.
+ */
+const STEWARD_RESULT_LABEL: Record<
+  StewardTurnResult['status'],
+  { mark: string; label: string }
+> = {
+  done: { mark: '✓', label: '已执行' },
+  pending_approval: { mark: '⏳', label: '已送收件箱待确认' },
+  refused: { mark: '✗', label: '已拒绝(超出范围)' },
+  invalid: { mark: '✗', label: '动作无效' },
+}
+
+function isStewardResultStatus(x: unknown): x is StewardTurnResult['status'] {
+  return typeof x === 'string' && Object.prototype.hasOwnProperty.call(STEWARD_RESULT_LABEL, x)
+}
+
+function clipStewardText(s: string, max: number): string {
+  return s.length > max ? `${s.slice(0, max)}…` : s
+}
+
+/**
+ * Render a round-tripped structured result into a deterministic outcome line, or
+ * `null` if it isn't well-formed (unknown kind / status, or no object). Reads ONLY
+ * the whitelisted `kind` / `status` / `subject` — any other field the client
+ * stuffed in is ignored, so it can never reach the prompt.
+ */
+function renderStewardTurnResult(raw: unknown): string | null {
+  if (!raw || typeof raw !== 'object') return null
+  const o = raw as Record<string, unknown>
+  if (!isStewardActionKind(o.kind)) return null
+  if (!isStewardResultStatus(o.status)) return null
+  const meta = STEWARD_RESULT_LABEL[o.status]
+  const subject =
+    typeof o.subject === 'string' && o.subject.trim()
+      ? ` → ${clipStewardText(o.subject.trim(), MAX_STEWARD_SUBJECT_CHARS)}`
+      : ''
+  return `[执行结果] ${o.kind} ${meta.mark} ${meta.label}${subject}`
+}
+
+/**
+ * Validate + normalise the SPA-echoed conversation history before it re-enters a
+ * prompt. Mirrors `sanitizeEditHistory` (WFEDIT-D3): drop malformed turns,
+ * validate role, fold a whitelisted structured result into the content, clip,
+ * keep the last N. Returns PLAIN `{ role, content }` turns (the `result` is
+ * folded away) — so the agent needs no change; it only ever reads role+content.
+ */
+export function sanitizeStewardHistory(history: unknown): StewardTurn[] {
+  if (!Array.isArray(history)) return []
+  const out: StewardTurn[] = []
+  for (const turn of history) {
+    if (!turn || typeof turn !== 'object') continue
+    const role = (turn as { role?: unknown }).role
+    if (role !== 'user' && role !== 'assistant') continue
+    const rawContent = (turn as { content?: unknown }).content
+    let content = typeof rawContent === 'string' ? rawContent.trim() : ''
+    const rendered = renderStewardTurnResult((turn as { result?: unknown }).result)
+    if (rendered) content = content ? `${content}\n${rendered}` : rendered
+    // A turn with neither usable content nor a renderable result carries nothing.
+    if (!content) continue
+    out.push({ role, content: clipStewardText(content, MAX_STEWARD_CONTENT_CHARS) })
+  }
+  return out.slice(-MAX_STEWARD_HISTORY_TURNS)
 }
 
 /**

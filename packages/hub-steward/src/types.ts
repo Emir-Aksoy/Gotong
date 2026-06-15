@@ -133,6 +133,39 @@ export interface StewardSecurityQuota {
 export type StewardActionKind = StewardAction['kind']
 
 /**
+ * Every action kind, as a runtime-checkable flag map. The Record literal is the
+ * exhaustiveness guard: if a kind is added to the `StewardAction` union without a
+ * key here, TS errors — so the runtime whitelist can NEVER silently drift from
+ * the type. Used (Phase C) to validate a structured turn-result echoed back by an
+ * untrusted SPA before it is rendered into the next prompt.
+ */
+const STEWARD_ACTION_KIND_FLAGS: Record<StewardActionKind, true> = {
+  inspect: true,
+  create_agent: true,
+  edit_agent: true,
+  delete_agent: true,
+  edit_workflow: true,
+  set_credential_ref: true,
+  revoke_credential: true,
+  set_peer_policy: true,
+  set_security_quota: true,
+  refuse: true,
+}
+
+/** All steward action kinds (runtime list; declaration order). */
+export const STEWARD_ACTION_KINDS = Object.keys(
+  STEWARD_ACTION_KIND_FLAGS,
+) as StewardActionKind[]
+
+/** True iff `x` is a known steward action kind — a runtime whitelist guard. */
+export function isStewardActionKind(x: unknown): x is StewardActionKind {
+  return (
+    typeof x === 'string' &&
+    Object.prototype.hasOwnProperty.call(STEWARD_ACTION_KIND_FLAGS, x)
+  )
+}
+
+/**
  * The risk tier the HOST assigns each action — server-authoritative, the
  * client's claim is never trusted.
  *
@@ -223,10 +256,46 @@ export interface StewardSnapshot {
   providers?: ReadonlyArray<StewardAgentProvider>
 }
 
+/**
+ * The outcome of applying one steward action, as a turn records it (Phase C —
+ * "结果感知"). The SPA appends this after each `apply` so the steward's NEXT
+ * proposal builds on what ACTUALLY happened, not what it merely proposed.
+ *
+ *   - `done`             — a SAFE action executed inline.
+ *   - `pending_approval` — a dangerous / cross-hub / sensitive action was sent to
+ *                          the approval inbox (NOT yet executed).
+ *   - `refused`          — the host refused it (out of scope for this caller).
+ *   - `invalid`          — the action was malformed / failed validation.
+ *
+ * Purely advisory context: the host re-classifies + re-executes the NEXT action
+ * independently, so a forged result cannot make anything run. The host also
+ * RE-RENDERS this into a fixed-format line from the whitelisted fields below
+ * (`sanitizeStewardHistory`) — the client never supplies the rendered text, so it
+ * can't inject a "succeeded" narrative the model would read as ground truth.
+ */
+export interface StewardTurnResult {
+  /** Which action this was the outcome of (validated against `STEWARD_ACTION_KINDS`). */
+  kind: StewardActionKind
+  /** What happened to it. */
+  status: 'done' | 'pending_approval' | 'refused' | 'invalid'
+  /**
+   * The subject the action touched (an agent id, workflow id, provider, …) — for
+   * a readable "create_agent ✓ → support-bot" line. Non-secret by construction
+   * (the sensitive actions only ever name env vars / ids). Clipped by the host.
+   */
+  subject?: string
+}
+
 /** One prior conversational turn, for multi-step ("再礼貌一点") steward edits. */
 export interface StewardTurn {
   role: 'user' | 'assistant'
   content: string
+  /**
+   * The structured outcome of the action this turn applied, if any (Phase C).
+   * The host validates + folds it into the rendered prompt; the agent itself
+   * never reads this field (it only sees `role` + `content`).
+   */
+  result?: StewardTurnResult
 }
 
 /**

@@ -80,6 +80,10 @@ A single JSON object: { "reply": string, "actions": Action[] }.
 3. Act only on the member's OWN agents / workflows shown in the snapshot. If asked
    about something not listed, say you don't see it (inspect / refuse) — never guess an id.
 4. Use the ids and capability names EXACTLY as shown in the snapshot. Don't invent ids.
+5. The conversation may contain "[执行结果] …" lines (e.g. "[执行结果] create_agent ✓ → mailer")
+   — those are actions ALREADY applied. Build your NEXT proposal on them; do NOT re-propose
+   something already done. Still propose ONE next step at a time and never assume it has run —
+   the member applies each action.
 
 # Output format
 
@@ -192,6 +196,10 @@ A single JSON object: { "reply": string, "actions": Action[] }.
    inspect. If asked about something not listed, say you don't see it (inspect / refuse)
    — never guess an id.
 5. Use the ids and capability names EXACTLY as shown in the snapshot. Don't invent ids.
+6. The conversation may contain "[执行结果] …" lines (e.g. "[执行结果] create_agent ✓ → support-bot")
+   — those are actions ALREADY applied. Build your NEXT proposal on them; do NOT re-propose
+   something already done. Still propose ONE next step at a time and never assume it has run —
+   the operator applies each action.
 
 # Output format
 
