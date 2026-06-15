@@ -148,6 +148,24 @@ describe('buildOperatorStewardSystemPrompt (A-M5)', () => {
     expect(STEWARD_SYSTEM_PROMPT).toContain('short slug')
     expect(STEWARD_SYSTEM_PROMPT).toContain('turns it into the real id')
   })
+
+  it('graduates the four sensitive writes to operator vocabulary that always needs the inbox (B-M4)', () => {
+    const p = buildOperatorStewardSystemPrompt()
+    // The operator console MAY now propose them — Phase A's `refuse` for these is gone.
+    expect(p).toContain('set_credential_ref')
+    expect(p).toContain('revoke_credential')
+    expect(p).toContain('set_peer_policy')
+    expect(p).toContain('set_security_quota')
+    // …but a credential only ever NAMES an env var, never a plaintext secret.
+    expect(p).toContain('envVarName')
+    expect(p).toMatch(/NEVER write the secret|NEVER put a plaintext secret/i)
+    // RBAC / billing remain out of scope (the assertion above still finds OUT OF SCOPE).
+    expect(p).toContain('OUT OF SCOPE')
+    // The MEMBER prompt must NOT learn the sensitive vocabulary — those kinds are
+    // `forbidden` for a member, so it stays a plain `refuse`.
+    expect(STEWARD_SYSTEM_PROMPT).not.toContain('set_credential_ref')
+    expect(STEWARD_SYSTEM_PROMPT).not.toContain('set_peer_policy')
+  })
 })
 
 describe('renderStewardUserMessage', () => {

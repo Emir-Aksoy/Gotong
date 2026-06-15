@@ -58,12 +58,13 @@ import {
   WORKFLOW_ASSISTANT_CAPABILITY,
   type WorkflowAssistantOutput,
 } from '@aipehub/workflow-assistant'
-import { buildOperatorStewardSystemPrompt } from '@aipehub/hub-steward'
+import { buildOperatorStewardSystemPrompt, type StewardAction } from '@aipehub/hub-steward'
 
 import { WorkflowController, type PeerCapabilityView } from '../src/workflow-controller.js'
 import { MeWorkflowEditService, type WorkflowAssistView } from '../src/me-workflow-edit-service.js'
 import { HostInboxService } from '../src/inbox-service.js'
 import { HostOperatorAgentService } from '../src/operator-agent-service.js'
+import { HostStewardSensitiveExecutors } from '../src/steward-sensitive.js'
 import { OperatorWorkflowEditService } from '../src/operator-workflow-edit-service.js'
 import { operatorStewardWorkflowDirectory } from '../src/operator-workflow-directory.js'
 import {
@@ -82,10 +83,16 @@ const OP = 'op1'
 // Unlike the member mock, the create handle is a SITE-WIDE id used VERBATIM and
 // the delete targets that verbatim id.
 
-const MK = { create: 'MK_CREATE', del: 'MK_DELETE', edit: 'MK_EDIT', refuse: 'MK_REFUSE' }
+const MK = { create: 'MK_CREATE', del: 'MK_DELETE', edit: 'MK_EDIT', refuse: 'MK_REFUSE', cred: 'MK_CRED' }
 // The inner marker the steward's `edit_workflow` instruction carries through to
 // the workflow assistant's OWN mock, so the assistant returns the local-edit YAML.
 const ASSIST_MARK = 'MARK_CROSSLOCAL'
+
+// B-M4 — a throwaway env var + secret for the sensitive credential scenarios. The
+// action only ever NAMES this var; the secret lives in the env channel and must
+// never appear in a proposal / inbox item / parked suspended-task row.
+const CRED_ENV = 'AIPE_TEST_OPERATOR_STEWARD_CRED'
+const CRED_SECRET = 'sk-operator-secret-never-in-any-artifact'
 
 // The verbatim site-wide id the operator names directly (no `me.<userId>.*`).
 const SITE_AGENT = 'support-bot'
@@ -122,6 +129,20 @@ function stewardReply(req: LlmRequest): string {
       reply: '这个工作流会跨出本 hub,我准备好后要你再确认一次。',
       actions: [
         { kind: 'edit_workflow', workflowId: 'cross-flow', instruction: `把起草那步改一下 ${ASSIST_MARK}` },
+      ],
+    })
+  }
+  if (seen.includes(MK.cred)) {
+    // A sensitive write — the proposal NAMES the host env var, never the secret.
+    return fenceJson({
+      reply: '好的,我准备注册一个站点级 Anthropic 凭证,密钥从主机环境变量读取,要你再确认一次。',
+      actions: [
+        {
+          kind: 'set_credential_ref',
+          provider: 'anthropic',
+          envVarName: CRED_ENV,
+          label: '站点 Anthropic 密钥',
+        },
       ],
     })
   }
@@ -304,6 +325,13 @@ async function boot(): Promise<Rig> {
     provider: new MockLlmProvider({ reply: stewardReply }),
     ids: OPERATOR_STEWARD_IDS, // disjoint agent / cap / broker ids — coexist with the member steward
     systemOverride: buildOperatorStewardSystemPrompt(),
+    // B-M2 — THIS flag is the privilege boundary: with operator:true the classifier
+    // graduates the four sensitive writes from `forbidden` (member) to `dangerous`
+    // (always-inbox). B-M3 — the operator-only executors that actually run a
+    // sensitive write AFTER approval (env→vault / peer / quota). The member steward
+    // (hub-steward-e2e) constructs WITHOUT either, so it stays structurally fenced.
+    operator: true,
+    sensitive: new HostStewardSensitiveExecutors({ identity }),
   })
   if (!surface) throw new Error('createHubStewardService returned null (expected a surface)')
 
@@ -508,6 +536,199 @@ describe('SW-M9 A-M7 — operator hub steward end-to-end (site-wide, the two har
     expect(res.status).toBe('refused')
     if (res.status !== 'refused') throw new Error('unreachable')
     expect(res.reason).toContain('联邦')
+    expect(await r.inboxStore.listPending(OP)).toHaveLength(0)
+  })
+
+  // ─── ★ B-M4 — the four SENSITIVE writes (credentials / peer / security) ──────
+  // Operator-only, and EVERY one is the highest discipline: it ALWAYS parks in the
+  // operator's inbox — STRICTER than a delete, NEVER an inline `done`. The four
+  // kinds graduated from `forbidden` (a member) to `dangerous` (an operator) in
+  // B-M2; here we prove the PRODUCTION-SHAPED surface path end-to-end:
+  //   apply → park under the OPERATOR broker (NEVER_RESUME_AT, sweep-blind)
+  //        → approve → executes via the REAL IdentityStore
+  //        → reject → fail-closed (nothing written).
+  // The key-safety invariant rides along on every credential path: the action
+  // carries only the env-var NAME — the secret never appears in a proposal, an
+  // inbox item, or a parked suspended-task row (the executor resolves
+  // `process.env[envVarName]` at apply time, the one plaintext holder).
+
+  it('★ B-M4 plan tiers set_credential_ref as dangerous (graduated from forbidden) and names only the env var', async () => {
+    const proposal = await r.surface.plan({ userId: OP, instruction: `注册站点 Anthropic 凭证 ${MK.cred}` })
+    expect(proposal.actions).toHaveLength(1)
+    const ca = proposal.actions[0]!
+    // A member would get `forbidden`; the operator gets the highest second-
+    // confirmation tier — NEVER `safe` (which would run inline).
+    expect(ca.tier).toBe('dangerous')
+    expect(ca.action.kind).toBe('set_credential_ref')
+    // The proposal carries the env-var NAME, never a secret.
+    expect(JSON.stringify(ca.action)).toContain(CRED_ENV)
+    expect(JSON.stringify(proposal)).not.toContain(CRED_SECRET)
+  })
+
+  it('★ B-M4 set_credential_ref parks under the OPERATOR broker carrying ONLY the env-var name; approve mints a readable ORG vault row', async () => {
+    process.env[CRED_ENV] = CRED_SECRET
+    try {
+      const res = await r.surface.apply({
+        userId: OP,
+        action: { kind: 'set_credential_ref', provider: 'anthropic', envVarName: CRED_ENV, label: '站点 Anthropic 密钥' },
+      })
+      expect(res.status).toBe('pending_approval')
+      if (res.status !== 'pending_approval') throw new Error('unreachable')
+      expect(res.tier).toBe('dangerous') // the highest tier — never inline
+
+      // Parked under the OPERATOR broker at the never-resume sentinel; the sweep
+      // is blind to it, only a resolve can wake it (same R1 discipline as delete).
+      const row = r.identity.getSuspendedTask(res.inboxItemId)
+      expect(row?.agentId).toBe(OPERATOR_STEWARD_IDS.brokerId)
+      expect(row?.resumeAt).toBe(NEVER_RESUME_AT)
+
+      // ★ no-plaintext: neither the parked row NOR the inbox item carries the
+      // secret; both carry only the env-var NAME (the executor reads it at apply).
+      expect(JSON.stringify(row)).not.toContain(CRED_SECRET)
+      expect(JSON.stringify(row)).toContain(CRED_ENV)
+      const item = (await r.inboxStore.listPending(OP)).find((i) => i.itemId === res.inboxItemId)
+      expect(item).toBeDefined()
+      expect(JSON.stringify(item)).not.toContain(CRED_SECRET)
+      expect(item?.prompt).toContain(CRED_ENV)
+
+      // Nothing minted yet — the write waits for the second confirmation.
+      expect(r.identity.listVaultEntries({ kind: 'llm_provider', ownerKind: 'org' })).toHaveLength(0)
+
+      await resolve(r, res.inboxItemId, true)
+
+      // Approved → the executor read process.env[CRED_ENV] and stored the secret.
+      const orgKeys = r.identity.listVaultEntries({ kind: 'llm_provider', ownerKind: 'org', activeOnly: true })
+      expect(orgKeys).toHaveLength(1)
+      expect(r.identity.readVaultSecret(orgKeys[0]!.id)).toBe(CRED_SECRET)
+      // The minted row's stored projection records the env-var NAME, never the secret.
+      expect(JSON.stringify(orgKeys[0])).not.toContain(CRED_SECRET)
+      expect(r.identity.getSuspendedTask(res.inboxItemId)).toBeNull()
+    } finally {
+      delete process.env[CRED_ENV]
+    }
+  })
+
+  it('★ B-M4 rejecting a parked set_credential_ref mints nothing (fail-closed) even with the env var set', async () => {
+    process.env[CRED_ENV] = CRED_SECRET
+    try {
+      const res = await r.surface.apply({
+        userId: OP,
+        action: { kind: 'set_credential_ref', provider: 'anthropic', envVarName: CRED_ENV },
+      })
+      if (res.status !== 'pending_approval') throw new Error('expected pending_approval')
+
+      await resolve(r, res.inboxItemId, false)
+
+      // Fail-closed — the executor never ran; no org credential exists.
+      expect(r.identity.listVaultEntries({ kind: 'llm_provider', ownerKind: 'org' })).toHaveLength(0)
+      expect(r.identity.getSuspendedTask(res.inboxItemId)).toBeNull()
+      expect(await r.inboxStore.listPending(OP)).toHaveLength(0)
+    } finally {
+      delete process.env[CRED_ENV]
+    }
+  })
+
+  it('★ B-M4 revoke_credential parks, then on approval revokes the ORG key', async () => {
+    const seeded = r.identity.createVaultEntry({
+      kind: 'llm_provider',
+      ownerKind: 'org',
+      ownerId: null,
+      secret: 'sk-org-seed-to-revoke',
+      metadata: { provider: 'anthropic' },
+    })
+    expect(r.identity.listVaultEntries({ kind: 'llm_provider', ownerKind: 'org', activeOnly: true })).toHaveLength(1)
+
+    const res = await r.surface.apply({ userId: OP, action: { kind: 'revoke_credential', credentialId: seeded.id } })
+    expect(res.status).toBe('pending_approval')
+    if (res.status !== 'pending_approval') throw new Error('unreachable')
+    expect(r.identity.getSuspendedTask(res.inboxItemId)?.agentId).toBe(OPERATOR_STEWARD_IDS.brokerId)
+    // Still active before approval.
+    expect(r.identity.listVaultEntries({ kind: 'llm_provider', ownerKind: 'org', activeOnly: true })).toHaveLength(1)
+
+    await resolve(r, res.inboxItemId, true)
+
+    // Revoked — no longer in the active set.
+    expect(r.identity.listVaultEntries({ kind: 'llm_provider', ownerKind: 'org', activeOnly: true })).toHaveLength(0)
+  })
+
+  it('★ B-M4 set_peer_policy parks, then on approval applies the trust-contract change', async () => {
+    const reg = r.identity.addPeer({ peerId: 'orgZ', endpointUrl: 'wss://z.example/hub', peerToken: 'tok-z' })
+    expect(r.identity.getPeer(reg.id)?.shareSummary).toBe(false) // baseline
+
+    const res = await r.surface.apply({
+      userId: OP,
+      action: { kind: 'set_peer_policy', peerId: reg.id, shareSummary: true, allowedDataClasses: ['public'] },
+    })
+    expect(res.status).toBe('pending_approval')
+    if (res.status !== 'pending_approval') throw new Error('unreachable')
+    expect(r.identity.getSuspendedTask(res.inboxItemId)?.agentId).toBe(OPERATOR_STEWARD_IDS.brokerId)
+    // Unchanged before approval.
+    expect(r.identity.getPeer(reg.id)?.shareSummary).toBe(false)
+
+    await resolve(r, res.inboxItemId, true)
+
+    const after = r.identity.getPeer(reg.id)
+    expect(after?.shareSummary).toBe(true)
+    expect(after?.allowedDataClasses).toEqual(['public'])
+  })
+
+  it('★ B-M4 set_security_quota (scope=hub) parks, then on approval writes a hub-wide quota', async () => {
+    expect(r.identity.getOrgQuota('llm_tokens', 'daily')).toBeNull() // baseline
+
+    const res = await r.surface.apply({
+      userId: OP,
+      action: { kind: 'set_security_quota', scope: 'hub', metric: 'llm_tokens', period: 'daily', limit: 2000 },
+    })
+    expect(res.status).toBe('pending_approval')
+    if (res.status !== 'pending_approval') throw new Error('unreachable')
+    expect(r.identity.getSuspendedTask(res.inboxItemId)?.agentId).toBe(OPERATOR_STEWARD_IDS.brokerId)
+    expect(r.identity.getOrgQuota('llm_tokens', 'daily')).toBeNull() // not written yet
+
+    await resolve(r, res.inboxItemId, true)
+
+    expect(r.identity.getOrgQuota('llm_tokens', 'daily')?.quota).toBe(2000)
+  })
+
+  // ★ B-M4 the MEMBER side: a member steward (operator:false, NO sensitive dep)
+  //   REFUSES every sensitive kind — they tier `forbidden`, so `apply` returns
+  //   `refused` and nothing is parked. This is the apply-level complement to the
+  //   classifier-level proof (classify.test.ts) and the chokepoint-level proof
+  //   (steward-sensitive-e2e "double gate"). The member steward is structurally
+  //   incapable of a sensitive write: it never receives the operator flag OR the
+  //   sensitive executors.
+  it('★ B-M4 a member steward refuses every sensitive kind — nothing parked', async () => {
+    const memberSurface = createHubStewardService({
+      hub: r.hub,
+      config: { provider: 'mock' },
+      agents: r.operatorAgents, // never reached — a forbidden action returns before any executor
+      workflows: { listForUser: async () => [] },
+      workflowEditor: {
+        edit: async () => {
+          throw new Error('member workflow editor reached on a sensitive kind — gate bug')
+        },
+      },
+      inbox: r.inboxStore,
+      logger: createLogger('test-member-steward-refuse'),
+      provider: new MockLlmProvider({ reply: stewardReply }),
+      // NO ids → DEFAULT member ids (disjoint from the operator's, no collision);
+      // NO operator (→ false); NO sensitive — fenced by construction.
+    })
+    if (!memberSurface) throw new Error('member surface was null')
+
+    const sensitive: StewardAction[] = [
+      { kind: 'set_credential_ref', provider: 'anthropic', envVarName: CRED_ENV },
+      { kind: 'revoke_credential', credentialId: 'cred_x' },
+      { kind: 'set_peer_policy', peerId: 'orgX', shareSummary: true },
+      { kind: 'set_security_quota', scope: 'hub', metric: 'llm_tokens', period: 'daily', limit: 1 },
+    ]
+    for (const action of sensitive) {
+      const res = await memberSurface.apply({ userId: OP, action })
+      expect(res.status).toBe('refused')
+      if (res.status !== 'refused') throw new Error('unreachable')
+      // The generic forbidden reason names the out-of-scope domains.
+      expect(res.reason).toContain('凭证')
+    }
+    // Not one of the four parked anything in the member's inbox.
     expect(await r.inboxStore.listPending(OP)).toHaveLength(0)
   })
 })

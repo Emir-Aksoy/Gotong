@@ -221,17 +221,34 @@ export function parseStewardExecPayload(raw: unknown): StewardExecPayload {
   return { userId: p.userId, action }
 }
 
-/** A member-readable (zh) approval prompt for a gated action. */
+/**
+ * A member/operator-readable (zh) approval prompt for a gated action.
+ *
+ * The four B-M4 sensitive prompts name ONLY non-secret context — the env var
+ * (never the key), a credential / peer id, a quota's scope/metric. A prompt is
+ * persisted to the inbox item + transcript, so a secret here would defeat the
+ * "never carry plaintext" invariant the validator and executor uphold.
+ */
 function buildStewardApprovalPrompt(action: StewardAction): string {
   switch (action.kind) {
     case 'delete_agent':
       return `确认删除助手「${action.agentId}」?删掉后无法恢复。`
     case 'edit_workflow':
       return `确认按你的说法修改工作流「${action.workflowId}」?它会跨出本 hub,涉及跨组织协作,所以需要你再确认一次。`
+    case 'set_credential_ref':
+      // Names the env var, NEVER the secret — the host reads it at apply time.
+      return `确认注册 ${action.provider} 凭证?密钥从主机环境变量 ${action.envVarName} 读取(不在这里填明文),这是站点级敏感操作。`
+    case 'revoke_credential':
+      return `确认吊销凭证「${action.credentialId}」?吊销后用它的助手会失去这个 provider 密钥。`
+    case 'set_peer_policy':
+      return `确认修改对端「${action.peerId}」的信任契约(数据类 / 配额 / 摘要共享)?这会改变跨组织能流出什么,属于联邦安全操作。`
+    case 'set_security_quota':
+      return `确认给 ${action.scope} 设 ${action.metric} 配额(每${action.period}上限 ${action.limit})?这是站点级安全配额。`
     default:
-      // Only dangerous (delete_agent) / cross_hub (edit_workflow) actions reach
-      // the broker; anything else is a routing bug. Give a generic prompt rather
-      // than throwing inside onTask (the item is still actionable by the member).
+      // Only dangerous (delete_agent) / cross_hub (edit_workflow) / the four
+      // sensitive kinds reach the broker; anything else is a routing bug. Give a
+      // generic prompt rather than throwing inside onTask (the item is still
+      // actionable by the member).
       return `确认执行这个需要二次确认的动作 (${action.kind})?`
   }
 }
