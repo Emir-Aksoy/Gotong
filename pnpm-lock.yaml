@@ -206,6 +206,12 @@ importers:
       '@aipehub/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@aipehub/identity':
+        specifier: workspace:*
+        version: link:../../packages/identity
+      '@aipehub/im-adapter':
+        specifier: workspace:*
+        version: link:../../packages/im-adapter
       '@aipehub/inbox':
         specifier: workspace:*
         version: link:../../packages/inbox

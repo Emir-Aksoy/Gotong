@@ -8,6 +8,7 @@
     "start": "tsx src/index.ts",
     "start:real": "tsx src/index.real.ts",
     "federation": "tsx src/federation.ts",
+    "im-oversight": "tsx src/im-oversight.ts",
     "selfcheck": "tsx src/participants.selfcheck.ts",
     "real-agents:selfcheck": "tsx src/real-agents.selfcheck.ts",
     "load-template": "tsx src/load-template.ts",
@@ -15,6 +16,8 @@
   },
   "dependencies": {
     "@aipehub/core": "workspace:*",
+    "@aipehub/identity": "workspace:*",
+    "@aipehub/im-adapter": "workspace:*",
     "@aipehub/workflow": "workspace:*",
     "@aipehub/inbox": "workspace:*",
     "@aipehub/llm": "workspace:*",
