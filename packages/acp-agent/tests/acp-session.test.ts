@@ -1,4 +1,5 @@
 import { PassThrough } from 'node:stream'
+import { fileURLToPath } from 'node:url'
 import { describe, it, expect } from 'vitest'
 
 import { AcpSession } from '../src/acp-session.js'
@@ -130,4 +131,60 @@ describe('AcpSession — cancel + terminate (TERMINATE)', () => {
     await session.terminate()
     expect(session.alive).toBe(false)
   })
+})
+
+// A real-spawn gate for the process-group kill (the transport-injected tests above
+// never spawn, so they don't exercise killChild). The canonical command is
+// `npx … claude-code-acp`, where the real ACP bridge is a GRANDCHILD of `npx` —
+// a direct-pid-only kill orphans it (audit L6-1). The fixture stands in for that
+// shape: it handshakes, then spawns an idle grandchild in our process group.
+const GROUP_MOCK = fileURLToPath(new URL('./fixtures/acp-group-mock.mjs', import.meta.url))
+
+const isAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0) // signal 0 = existence/permission probe, no actual signal
+    return true
+  } catch {
+    return false // ESRCH — the process is gone
+  }
+}
+
+describe('AcpSession — terminate reaps the whole process group (audit L6-1)', () => {
+  // POSIX-only: Windows has no process groups, so the fix falls back to a
+  // direct-child kill there and this grandchild-reaping assertion doesn't apply.
+  it.skipIf(process.platform === 'win32')(
+    'kills the grandchild bridge, not just the direct child',
+    async () => {
+      let gcPid: number | undefined
+      const session = new AcpSession({
+        command: process.execPath,
+        args: [GROUP_MOCK],
+        initTimeoutMs: 5000,
+        onStderr: (chunk) => {
+          const m = /GRANDCHILD_PID=(\d+)/.exec(chunk)
+          if (m) gcPid = Number(m[1])
+        },
+      })
+      try {
+        await session.ensureStarted() // real spawn + real NDJSON handshake
+        for (let i = 0; gcPid === undefined && i < 50; i++) await tick()
+        expect(gcPid).toBeDefined()
+        const pid = gcPid as number
+        expect(isAlive(pid)).toBe(true) // grandchild is up, in our process group
+
+        await session.terminate() // must SIGTERM the GROUP, reaching the grandchild
+
+        // The group signal is async; poll briefly. WITHOUT the fix the grandchild
+        // is orphaned (its own 30s timer keeps it alive) and this never flips.
+        let reaped = false
+        for (let i = 0; i < 100 && !reaped; i++) {
+          if (!isAlive(pid)) reaped = true
+          else await new Promise((r) => setTimeout(r, 20))
+        }
+        expect(reaped).toBe(true)
+      } finally {
+        await session.terminate() // idempotent safety net
+      }
+    },
+  )
 })

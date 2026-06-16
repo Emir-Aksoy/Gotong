@@ -413,6 +413,12 @@ export class AcpSession {
         cwd: this.opts.cwd,
         env: buildEnv(this.opts.env),
         stdio: ['pipe', 'pipe', 'pipe'],
+        // Own process group (POSIX) so `killChild`'s ladder can signal the whole
+        // tree. The canonical command is `npx -y @zed-industries/claude-code-acp`:
+        // the direct child is `npx`, the real ACP bridge is a `node` grandchild.
+        // SIGTERM/SIGKILL on the direct pid alone would orphan that bridge (and
+        // anything IT spawned); a process-group kill reaps them (mirrors cli-runner B3).
+        detached: process.platform !== 'win32',
       })
     } catch (err) {
       throw asSpawnError(this.opts.command, err)
@@ -438,18 +444,33 @@ export class AcpSession {
   private async killChild(): Promise<void> {
     const child = this.child
     if (!child || child.killed || child.exitCode !== null) return
-    child.kill('SIGTERM')
+    // Signal the whole process group when we own one (negative pid, POSIX); the
+    // canonical `npx … claude-code-acp` makes the real bridge a `node` grandchild,
+    // so a direct-pid kill would orphan it (and anything IT spawned). Fall back to
+    // the direct child if the group is already gone or on Windows (mirrors cli-runner B3).
+    const signalTree = (sig: NodeJS.Signals): void => {
+      if (child.pid && process.platform !== 'win32') {
+        try {
+          process.kill(-child.pid, sig)
+          return
+        } catch {
+          /* group gone — fall through to the direct child */
+        }
+      }
+      try {
+        child.kill(sig)
+      } catch {
+        /* already dead */
+      }
+    }
+    signalTree('SIGTERM')
     await new Promise<void>((resolve) => {
       const t = setTimeout(() => {
-        try {
-          // `child.killed` flips the moment the SIGTERM above is *sent*, not
-          // when the process exits — gating on it made this escalation dead
-          // code and let a SIGTERM-ignoring bridge linger as a zombie. The
-          // real "still alive" condition is "hasn't exited yet."
-          if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL')
-        } catch {
-          /* already gone */
-        }
+        // `child.killed` flips the moment the SIGTERM above is *sent*, not
+        // when the process exits — gating on it made this escalation dead
+        // code and let a SIGTERM-ignoring bridge linger as a zombie. The
+        // real "still alive" condition is "hasn't exited yet."
+        if (child.exitCode === null && child.signalCode === null) signalTree('SIGKILL')
         resolve()
       }, KILL_GRACE_MS)
       const done = (): void => {
