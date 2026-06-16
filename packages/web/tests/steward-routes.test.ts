@@ -282,6 +282,11 @@ describe('/api/me/steward/plan', () => {
     expect((await res.json()) as { code?: string }).toMatchObject({ code: 'steward_failed' })
   })
 
+  // Unlike its siblings, this test stands up a SECOND server (the beforeEach
+  // already booted one) to assert the no-surface path. Two real HTTP boots in
+  // one test overruns vitest's 5s default on a contended Windows CI runner
+  // (same class of cold-start latency as the mcp-client double-spawn test) —
+  // it's slow, not hung. Give it room.
   it('POST → 503 when no hubSteward surface is wired', async () => {
     const b2 = await boot({ withSteward: false })
     try {
@@ -294,7 +299,7 @@ describe('/api/me/steward/plan', () => {
     } finally {
       await teardown(b2)
     }
-  })
+  }, 20_000)
 
   it('GET on the plan path (wrong method) falls through to 404', async () => {
     const res = await fetch(`${b.server.url}/api/me/steward/plan`, {
@@ -414,6 +419,9 @@ describe('/api/me/steward/apply', () => {
     expect(res.status).toBe(500)
   })
 
+  // Second server boot in one test (the beforeEach already booted one) — see the
+  // matching note in the /plan block. 20s keeps a contended Windows CI runner
+  // from tripping the 5s default on this no-surface path.
   it('POST → 503 when no hubSteward surface is wired', async () => {
     const b2 = await boot({ withSteward: false })
     try {
@@ -427,5 +435,5 @@ describe('/api/me/steward/apply', () => {
     } finally {
       await teardown(b2)
     }
-  })
+  }, 20_000)
 })
