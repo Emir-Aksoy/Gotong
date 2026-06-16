@@ -1167,19 +1167,27 @@ export function applyMigrations(db: SqliteDb): { applied: number[] } {
     ),
   )
   const newlyApplied: number[] = []
+  const recheck = db.prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
   for (const m of MIGRATIONS) {
     if (appliedVersions.has(m.version)) continue
-    // BEGIN IMMEDIATE: two hosts sharing one store must not both apply the
-    // same migration — a deferred tx only takes the write lock at first
-    // write, after both already read `appliedVersions` (audit P2; same
-    // reasoning as the invitations cap).
-    transactionImmediate(db, () => {
+    // BEGIN IMMEDIATE serializes two hosts sharing one store, but serializing
+    // alone isn't enough: both can read the stale `appliedVersions` snapshot
+    // above, then queue on the lock. The winner applies + records the row; the
+    // loser would then re-run a NON-idempotent ALTER and crash boot with a
+    // duplicate-column error (audit L3-1). So re-check the registry once the
+    // lock is held — the winner's INSERT is now visible — and adopt it instead
+    // of re-applying. Mirrors vault-store's seed() re-check-under-lock. (BEGIN
+    // IMMEDIATE only orders the writers; it does not make the earlier read see
+    // later writes.)
+    const applied = transactionImmediate(db, () => {
+      if (recheck.get(m.version)) return false
       db.exec(m.sql)
       db.prepare(
         'INSERT INTO schema_migrations(version, name, applied_at) VALUES(?, ?, ?)',
       ).run(m.version, m.name, Date.now())
+      return true
     })
-    newlyApplied.push(m.version)
+    if (applied) newlyApplied.push(m.version)
   }
   return { applied: newlyApplied }
 }
