@@ -31,7 +31,6 @@
  * TRIGGER, served by the WorkflowController, not by any participant here.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { AgentParticipant, type Task } from '@aipehub/core'
@@ -43,6 +42,7 @@ import {
   type TeachInsight,
   type TeachQuiz,
 } from './teach.js'
+import { writeTeachWorkspace } from './teach-workspace.js'
 
 // --- shapes flowing between the steps --------------------------------------------
 
@@ -95,10 +95,28 @@ export interface LearningRecord {
   learnerId: string
   topic: string
   lessonNo: number
-  /** Absolute path of the master record file on the 孩子 hub's disk. */
+  /**
+   * Absolute path of the lesson file written this call (lessons/NNNN-slug.md) — EVERY lesson is
+   * written, so this always points at a real file (the back-compat "master record" path).
+   */
   recordPath: string
+  /** Total lessons recorded for this learner (every append). Back-compat. */
   totalRecords: number
   note: string
+
+  // --- /teach file-first workspace projection (see teach-workspace.ts) ---
+  /** The learner's workspace dir on the 孩子 hub (`learning-records/<learnerId>`). */
+  workspaceDir?: string
+  /** MISSION.md path when this lesson established / first-wrote it (else omitted). */
+  missionPath?: string
+  /** records/NNNN-slug.md — present ONLY when the lesson captured an ADR-grade insight. */
+  insightPath?: string
+  /** RESOURCES.md path. */
+  resourcesPath?: string
+  /** GLOSSARY.md path. */
+  glossaryPath?: string
+  /** Total ADR-grade learning-records (evidence only) — distinct from totalRecords (lessons). */
+  totalInsights?: number
 }
 
 /** The `topic.screen` output — a real boolean the workflow predicate can read. */
@@ -197,7 +215,9 @@ export class ModerationParticipant extends AgentParticipant {
     const payload = (task.payload ?? {}) as { lesson?: Partial<Lesson> } & Partial<Lesson>
     // The moderate step's input is the tutor output; accept it nested (`{lesson}`) or flat.
     const lesson: Partial<Lesson> = payload.lesson ?? payload
-    const haystack = [lesson.topic, lesson.title, lesson.body, lesson.flagReason]
+    // Screen the WHOLE lesson content, including the /teach methodology fields (concept/practice/
+    // zpd) the tutor now produces — a rule must catch a problem wherever it lands, not just the body.
+    const haystack = [lesson.topic, lesson.title, lesson.body, lesson.flagReason, lesson.concept, lesson.practice, lesson.zpd]
       .filter((s): s is string => typeof s === 'string')
       .join('\n')
       .toLowerCase()
@@ -304,13 +324,16 @@ export class LessonTutorStandin extends AgentParticipant {
 // --- 孩子 hub: the learning-records MASTER copy (local, never leaves this hub) ------
 
 /**
- * Serves the LOCAL capability `records.append`: write this lesson into the child's OWN
- * learning-records (the MASTER copy, 决策 6). The fork to the 家长 is a SEPARATE
- * cross-hub step; this one never leaves the 孩子 hub.
+ * Serves the LOCAL capability `records.append`: project this lesson into the child's OWN
+ * file-first `/teach` WORKSPACE (the MASTER copy, 决策 6) under `<root>/learning-records/`. The
+ * fork to the 家长 is a SEPARATE cross-hub step; this one never leaves the 孩子 hub.
+ *
+ * The actual artifact layout (MISSION.md / RESOURCES.md / GLOSSARY.md / lessons/ / records/) is
+ * `writeTeachWorkspace` (teach-workspace.ts); this participant is the thin `records.append` →
+ * workspace adapter. `recordPath`/`totalRecords` keep their back-compat meaning (the lesson file,
+ * and the count of lessons recorded), with the /teach workspace paths/counts added.
  */
 export class RecordsAppendParticipant extends AgentParticipant {
-  private count = 0
-
   constructor(private readonly recordsRoot: string) {
     super({ id: 'child-desk', capabilities: ['records.append'] })
   }
@@ -323,26 +346,34 @@ export class RecordsAppendParticipant extends AgentParticipant {
     }
     const learnerId = String(learner_id ?? 'learner')
     const lessonNo = lesson?.lessonNo ?? 0
-    const dir = join(this.recordsRoot, 'learning-records', learnerId)
-    mkdirSync(dir, { recursive: true })
-    const recordPath = join(dir, `${String(lessonNo).padStart(3, '0')}.md`)
-    const flagLine = lesson?.flagged ? `\n> ⚑ 自评标记: ${lesson.flagReason ?? '建议家长留意'}` : ''
-    writeFileSync(
-      recordPath,
-      `# ${lesson?.title ?? `第 ${lessonNo} 课`}\n\n` +
-        `- 学习者: ${learnerId}\n` +
-        `- 主题: ${topic ?? lesson?.topic ?? ''}\n\n` +
-        `${lesson?.body ?? ''}${flagLine}\n`,
-      'utf8',
-    )
-    this.count += 1
-    return {
+    // Normalize to a complete Lesson — carry the tutor's methodology fields, but override the few
+    // the writer needs with safe defaults (spread first so these win over any undefined).
+    const full: Lesson = {
+      ...(lesson ?? {}),
       learnerId,
       topic: String(topic ?? lesson?.topic ?? ''),
       lessonNo,
-      recordPath,
-      totalRecords: this.count,
-      note: `已记入本地学习档案 (主副本) 第 ${lessonNo} 课, 累计 ${this.count} 条。`,
+      title: lesson?.title ?? `第 ${lessonNo} 课`,
+      body: lesson?.body ?? '',
+      flagged: lesson?.flagged ?? false,
+    }
+
+    const write = writeTeachWorkspace(join(this.recordsRoot, 'learning-records'), full)
+    return {
+      learnerId,
+      topic: full.topic,
+      lessonNo: full.lessonNo,
+      recordPath: write.lessonPath,
+      totalRecords: write.totalLessons,
+      note:
+        `已记入本地 /teach 学习档案 (主副本): 第 ${full.lessonNo} 课, 累计 ${write.totalLessons} 课` +
+        `${write.insightPath ? ` + 1 条学习档案 (有理解证据)` : ''}。`,
+      workspaceDir: write.workspaceDir,
+      ...(write.missionPath ? { missionPath: write.missionPath } : {}),
+      ...(write.insightPath ? { insightPath: write.insightPath } : {}),
+      resourcesPath: write.resourcesPath,
+      glossaryPath: write.glossaryPath,
+      totalInsights: write.totalInsights,
     }
   }
 }

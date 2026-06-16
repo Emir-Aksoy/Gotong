@@ -107,14 +107,34 @@ async function main(): Promise<void> {
     const rec1 = okOut(
       await desk.onTask(mkTask('records.append', { learner_id: 'k', topic: '分数运算', lesson: cleanLesson })),
     ) as LearningRecord
-    assert(typeof rec1.recordPath === 'string' && existsSync(rec1.recordPath), '主副本真写到磁盘')
-    assert(rec1.totalRecords === 1, '累计 1 条')
+    assert(typeof rec1.recordPath === 'string' && existsSync(rec1.recordPath), '主副本真写到磁盘 (lessons/NNNN)')
+    assert(rec1.totalRecords === 1, '累计 1 课')
+    assert(!!rec1.missionPath && existsSync(rec1.missionPath), '★ 第一课写出 MISSION.md (/teach 工作区)')
+    assert(rec1.insightPath === undefined && rec1.totalInsights === 0, '无 insight → 不写 records/ 学习档案')
     const rec2 = okOut(
       await desk.onTask(
         mkTask('records.append', { learner_id: 'k', topic: '数学', lesson: { ...cleanLesson, lessonNo: 2 } }),
       ),
     ) as LearningRecord
-    assert(rec2.totalRecords === 2, '累计递增到 2')
+    assert(rec2.totalRecords === 2, '累计递增到 2 课')
+    assert(rec2.missionPath === undefined, '使命已立, 第二课不再重写 MISSION.md')
+    // A lesson WITH evidence (an insight) → an ADR-grade learning-record IS written to records/.
+    const rec3 = okOut(
+      await desk.onTask(
+        mkTask('records.append', {
+          learner_id: 'k',
+          topic: '分数运算',
+          lesson: {
+            ...cleanLesson,
+            lessonNo: 3,
+            insight: { slug: 'tongfen', title: '掌握了通分', insight: '能用自己的话解释通分并举例' },
+          },
+        }),
+      ),
+    ) as LearningRecord
+    assert(!!rec3.insightPath && existsSync(rec3.insightPath), '★ 有理解证据的课 → records/ 学习档案落盘 (ADR 式)')
+    assert(rec3.totalInsights === 1, '学习档案累计 1 条 (只有这一课有证据)')
+    assert(rec3.totalRecords === 3, '课数累计 3 (课 ≠ 学习档案)')
 
     // --- report.to-guardian — the oversight fork ------------------------------------
     section('[4] report.to-guardian — fork 给家长 (监督副本)')
