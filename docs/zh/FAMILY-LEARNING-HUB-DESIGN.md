@@ -351,25 +351,50 @@ peer。这正是 `tea-supply-link` 的教学点。
 | **FL-M1** 确定性 demo | core+workflow+inbox,两 in-proc hub(孩子/家长)。补货式跑通:`learn.request`→跨 hub `tutor.teach`→主题白名单外挂起→家长批→上课回流→`records.append`(本地主副本)→`report.to-guardian`(fork)。内联 ~40 行出站审批闸 + 两步恢复镜像(同 `tea-supply-link`)。白名单内不挂起。**钱/进度确定性算,不是 LLM 算**。自断言可跑(无 key) |
 | **FL-M2** 可载入模板 | `template/family-tutor.template.yaml`(家长 hub 侧):导师 agent(`/teach` 风格,挂 mcp-obsidian → `learning_records` KB 槽位)+ `tutor-teach` 工作流(含 `human:` 白名单审批)+ DeepSeek apiKeyPrompt。web 防腐门:读实文件过真 `parseTemplate` + 逐条 `workflows[]` 过真 `parseWorkflow`(证 `human:` 脱糖 + data-class 透传)+ 真 import |
 | **FL-M3** 载入演示 + 文档 | `pnpm demo:family-learning-hub:template` config-preview + README(拓扑图 + 模版/框架分离表 + 两模式对比 + 安全边界)+ 接 [HANDS-ON-HUBS](HANDS-ON-HUBS.md) 目录 + CLAUDE.md 登记 |
-| **FL-M4**(可选) 真实模式 | DeepSeek 导师 + 真 mcp-obsidian 存 `learning-records/` + 两机真 ws 联邦(接 FEDERATION-RUNBOOK)。非 hermetic,opt-in |
 
 **孩子 hub 侧 + 联邦 link 是运行时**:模板不带孩子 hub 的 explore agent 与两侧的 link 配置
 (同 `tea-supply-link` 不把供货商 link 写进模板)。README 用一段「§5 链接是运行时不在模板」
 讲清这个分离。
 
+### 生产硬化(FL-M1→M3 之后,从「确定性 demo」到「真两机可部署」)— ✅ 已完成
+
+用户:「把这个工作流强化到可以实际使用的水平,因为它可能是我们的一个核心卖点。」FL-M1→M3 是
+host-free 确定性 demo + 家长侧模板。这一轮把它带到真两机可部署 + 真 LLM + 真安全闸。**底层机制
+几乎全现成**(联邦 ws / 出站 data-class 闸 / 配额 / Phase 16 inbox 两步恢复 / LlmAgent /
+mcp-obsidian / `/me` PWA / IM bridge),所以是「把现成零件接成真能部署的两主权 host + 补真缺口 +
+产品形态收口」,不是新机制。
+
+| 阶段 | 交付 |
+|---|---|
+| **A — 安全正确的确定性核心** | ★ **修 fail-open 安全洞**:`topic.screen` / `content.moderate` 必须是**确定性参与者**返结构化 `{allowed}`/`{flagged}`,**绝不**派给 LLM(否则 `when:` 读不到字段 → 求值 false → 审批步**静默跳过** → 白名单外零审批直达导师)。`src/participants.ts` 六个确定性闸参与者;demo 改跑**真** `tutor-teach` 工作流(真 `WorkflowRunner` + 真 predicate + 真 `FileInboxStore` + 两步恢复镜像)证两处 fail-open 修复(gate-level + workflow-level「拒绝真能拦」)+ **分层审核**;家长模板 `topic.screen` 从 LLM 下放成运行时确定性参与者 + 加 `moderate`/`mod-approval` 步;新孩子侧模板 `child-desk.template.yaml`。各 web 防腐门。 |
+| **B — 真实模式(opt-in,非 hermetic)** | `src/real-agents.ts` 真 `LlmAgent` 导师(DeepSeek 默认 / 可换 Anthropic)+ 真 mcp-obsidian 读写 `learning-records/`;`src/index.real.ts` 两真 hub 跑真工作流,链条自检(`FL_REAL=1` + key 否则退确定性仍发真 dispatch)。 |
+| **C — 两 host 真 ws 联邦 + 家长 IM 监督 + 孩子 `/me`** | `src/federation.ts` 真 `ws`(`acceptHubLinks`/`connectHubLink` + `bearerAuth`)+ per-link 契约(`allowedDataClasses:[child-learning]` + 配额 + `outboundCaps`)+ 出站审批闸 + 错 token 拒;`src/im-oversight.ts` 家长端 IM 监督桥(越界 / flagged 审批推 IM、批 / 拒回推、跨家长隔离 no-leak,复用 `im-steward-bridge` async 回推);`packages/host/tests/family-child-me-e2e.test.ts` 证孩子经 `/me` 自助发起、`learner_id` 强制不可伪造。 |
+| **D — go-live runbook + 文档** | [`FAMILY-LEARNING-GO-LIVE.md`](FAMILY-LEARNING-GO-LIVE.md)(真家庭 / 操作员能照着跑:三验证层 Tier 0 hermetic → Tier 1 真引擎单机 → Tier 2 两台主权机;接 HANDS-ON-HUBS 真 DeepSeek/Obsidian + FEDERATION-RUNBOOK 两 host;分层审核怎么配 + 安全清单 + 故障排查)+ README 收口 + 本节 + CLAUDE.md 登记。 |
+
+**诚实边界(example-first)**:导师 + 工作流 + KB 槽位**经模板导入进真 `aipehub start`**(一等
+公民);但**确定性闸参与者**是运行时接线的 example 代码(`src/participants.ts`)——它们是确定性
+capability 参与者,不能当模板托管 agent(同 CLI / ACP 编码 agent)。把本垂直 fold 进生产 host
+`main.ts` 是**显式推迟**项(§十二 ④,北极星 example-first:模板即产品化载体)。`src/index.real.ts`
+已是这层薄接线的可跑参照。
+
 ---
 
 ## 十二、显式推迟 / 开放问题
 
-- **更强的内容审核**(决策选了最弱的自评打标):后续可加「专门审核参与者 / MCP」
-  (第二个模型或规则引擎)做事前拦截,或接 `human:` 对 flagged 内容强制复核。现 MVP
-  靠自评 + 白名单 + 全量 transcript 三层,够用但不是最强。
-- **孩子端 app 的真实现**(本设计只到 `/me` PWA 起步 + 形态论证):互动课渲染、音频、
-  测验、家长 dashboard 是前端工程,独立于后端工作流,不在本 example 范围。
-- **per-step 粒度审批**:现审批是「白名单外整课」级,不是「一课内某动作」级。
+- ~~**更强的内容审核**(决策选了最弱的自评打标)~~ — ✅ **已做(生产硬化 A)**:分层审核落地,
+  自评(底层,始终在)+ 确定性**规则引擎** `ModerationParticipant`(第二层,家长配禁词清单,
+  空清单 = 关闭 = opt-out)叠加,两层接进同一个家长 `mod-approval` 闸。仍可后续再加「第二个
+  模型审」当第三层。
+- **孩子端 app 的真实现**(本设计 + 生产硬化只到 `/me` PWA 起步 + 形态论证 + go-live runbook):
+  互动课渲染、音频、测验、家长 dashboard、onboarding/计费是独立前端 / 产品工程,不在本 example
+  范围。两机部署照 [`FAMILY-LEARNING-GO-LIVE.md`](FAMILY-LEARNING-GO-LIVE.md)。
+- **per-step 粒度审批**:现审批是「白名单外 / flagged 整课」级,不是「一课内某动作」级。
 - **多孩子**:每个孩子一个 member(同一孩子 hub)用 `userScopeField` 隔离,还是各自一个
   孩子 hub?推荐前者(轻量);多 hub 留给真有多设备/多主权需求时。
 - **跨重启在飞的跨 hub 审批**:沿用 Stream G / H2 的 sweep 幂等,不额外处理。
+- ④ **把本垂直 fold 进生产 host `main.ts`**:现确定性闸参与者是运行时接线的 example 代码
+  (`src/participants.ts`,北极星 example-first:模板即产品化载体)。等使用模式稳定再决定是否
+  做成 `aipehub start` 的 first-class 配置。
 
 ---
 

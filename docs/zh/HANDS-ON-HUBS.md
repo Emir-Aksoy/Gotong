@@ -227,3 +227,5 @@ demo 里把 mock provider 换成一个**情境感知的 `LlmProvider`**:它从 p
 | `/me` 成员工作台(我的 AI 桌面) | [`V4-PHASE19-P1-FINAL.md`](V4-PHASE19-P1-FINAL.md) |
 | 真 LLM 冒烟门进 CI(provider 往返 + 整栈工作流 live) | [`V6-ROUTE-B-P1-M13-LIVE-GATE.md`](V6-ROUTE-B-P1-M13-LIVE-GATE.md) |
 | 出站驱动 CLI agent(hub → Claude Code/Codex,personal-coding-hub 用) | [`V5-E2-CLI-ADAPTER.md`](V5-E2-CLI-ADAPTER.md) |
+| 跨组织联邦两机 onboarding(铸 token / 登记 peer / per-link 契约) | [`FEDERATION-RUNBOOK.md`](FEDERATION-RUNBOOK.md) |
+| 家庭学习 hub 上线 runbook(`family-learning-hub`:两台主权机 + 真 DeepSeek/Obsidian + 四道安全闸 + 分层审核 + 孩子 `/me` / 家长批准) | [`FAMILY-LEARNING-GO-LIVE.md`](FAMILY-LEARNING-GO-LIVE.md) |
