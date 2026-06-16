@@ -36,6 +36,13 @@ import { OpenAIProvider } from '@aipehub/llm-openai'
 import { McpToolset } from '@aipehub/mcp-client'
 
 import type { Lesson } from './participants.js'
+import {
+  planTeach,
+  type TeachCitation,
+  type TeachGlossaryTerm,
+  type TeachInsight,
+  type TeachQuiz,
+} from './teach.js'
 
 // DeepSeek is OpenAI-compatible — point OpenAIProvider at its base URL (mirrors the
 // codex-deepseek-hub sibling; both `…/chat/completions` and `…/v1/chat/completions` work).
@@ -46,29 +53,49 @@ export const TUTOR_ID = 'family-tutor'
 export const TUTOR_CAP = 'teach.lesson'
 
 /**
- * The /teach methodology system prompt: read where the learner IS first, advance one
- * small step, self-flag sensitive content, and emit a STRICT JSON contract the workflow
- * can read structurally. The obsidian tools are only present when a vault is wired.
+ * The /teach methodology system prompt. This is what makes the tutor a faithful `/teach`
+ * mentor (github.com/mattpocock/skills) rather than a "next lesson" stub: ground every
+ * lesson in a MISSION (establish it on the first lesson), advance ONE step along the
+ * learner's zone of proximal development, teach ONE concept (difficulty is the enemy) then
+ * a retrieval-practice exercise (difficulty is the tool), cite a primary source, quiz with
+ * equal-length options, and capture an ADR-grade insight when there's evidence. The model
+ * emits a STRICT structured JSON the workflow + the safety gate read directly. The obsidian
+ * tools are only present when a vault is wired (otherwise the tutor starts at lesson 1).
  */
 export const TUTOR_SYSTEM = [
-  '你是一个家庭学习 hub 里的 AI 导师, 面向儿童, 风格参考 /teach: 先看学习者当前在哪',
-  '(读 TA 的学习档案), 再续上下一小步, 讲解简短、适龄、循序渐进。',
+  '你是一个家庭学习 hub 里的 AI 导师, 面向儿童, 严格按 Matt Pocock 的 /teach 方法论上课:',
   '',
   '工具 (via MCP, 命名空间 `obsidian__`, 仅在接了档案库时可用):',
   '- obsidian__search: 全文搜索整个档案库',
-  '- obsidian__list_files_in_dir: 浏览某目录下的笔记 (学习档案在 learning-records/<learnerId>/)',
+  '- obsidian__list_files_in_dir: 浏览某目录下的笔记 (学习者工作区在 learning-records/<learnerId>/)',
   '- obsidian__get_file_contents: 按路径读一篇笔记',
   '',
   '每节课你必须:',
-  '1. (有工具时) 先 search / list learning-records/<learnerId>/ 看上到第几课, 决定下一课的课号;',
-  '   没有档案就从第 1 课开始。',
-  '2. 写一节简短、面向儿童的讲解 + 一个小练习。',
-  '3. 内容自评打标 (决策 1.a — 这是最弱一层, 背后还有主题白名单 + 家长审核 + 全程转录给家长):',
+  '1. (有工具时) 先读 learning-records/<learnerId>/: 看 MISSION.md (为什么学) 与已有的',
+  '   learning-records/ 笔记 (上到第几课、掌握了什么); 没有档案就从第 1 课开始。',
+  '2. 使命锚定: 若还没有 MISSION (第一课), 先和学习者一起定下「为什么学」并把 missionEstablished',
+  '   设为 true; 之后每节课都要服务这个使命。',
+  '3. 最近发展区 (ZPD): 只在 TA 已掌握的基础上推进一小步, 不贪多 (zpd 字段一句话说明定位)。',
+  '4. 先知识后技能: concept 只讲清「一个」要点 (难度在知识里是敌人); practice 给一个回忆练习',
+  '   (让 TA 复述/举例, 不是重读 — 难度在技能里是工具)。',
+  '5. 引用来源: citations 至少一条权威来源, primarySource 推荐一个高可信的深入读物',
+  '   (绝不只凭脑子里的印象)。',
+  '6. 小测: quiz 出一道选择题, options 各项「长度尽量一致」(长度不能泄露答案), answer 是正确项下标。',
+  '7. 术语表: glossary 收本课引入的关键术语 (可为空数组)。',
+  '8. 学习档案: 当这节课有证据表明 TA 真的懂了, 在 insight 里写一条 ADR 式要点 (供下一课接续);',
+  '   没有就省略 insight (它不是流水账)。',
+  '9. 内容自评打标 (决策 1.a — 最弱一层, 背后还有主题白名单 + 家长审核 + 全程转录给家长):',
   '   若涉及投资/理财/赌博/诱导充值消费/联系陌生人等对儿童敏感的主题, flagged=true 并在',
   '   flagReason 一句话说明; 否则 flagged=false。',
   '',
-  '输出契约 (硬性): 只输出一个 JSON 对象, 不要任何解释或代码块外的文字:',
-  '{"lessonNo": 数字, "title": "标题", "body": "讲解 + 小练习", "flagged": false, "flagReason": ""}',
+  '输出契约 (硬性): 只输出一个 JSON 对象, 不要任何解释或代码块外的文字。形如:',
+  '{"lessonNo": 数字, "missionEstablished": false, "missionWhy": "为什么学",',
+  ' "zpd": "这一课的定位", "title": "标题", "concept": "一个要点的讲解",',
+  ' "citations": [{"title": "来源名", "source": "出处"}], "practice": "回忆练习",',
+  ' "quiz": {"question": "题干", "options": ["A","B","C"], "answer": 0},',
+  ' "primarySource": "推荐深入读物", "glossary": [{"term": "术语", "definition": "定义"}],',
+  ' "insight": {"slug": "dash-case", "title": "掌握了什么", "insight": "ADR 式要点"},',
+  ' "body": "可读的整课汇总", "flagged": false, "flagReason": ""}',
 ].join('\n')
 
 /** Options for {@link makeTutor}. */
@@ -142,18 +169,19 @@ export class FamilyTutorAgent extends LlmAgent {
     const t = String(topic ?? '').trim() || '自由探索'
     const hasVault = this.toolset !== undefined
     const userText = [
-      `请给学习者「${learnerId}」上一节关于「${t}」的课。`,
+      `请按 /teach 方法论给学习者「${learnerId}」上一节关于「${t}」的课。`,
       '',
       '步骤:',
       hasVault
-        ? `1. 先用 obsidian 工具读 learning-records/${learnerId}/ 看 TA 上到第几课、学过什么 (没有记录就从第 1 课开始)。`
-        : '1. 这次没有接学习档案库, 就当作第 1 课从头开始。',
-      '2. 续上下一课 (lessonNo = 已有最大课号 + 1), 写一节简短、适龄 (面向儿童) 的讲解 + 一个小练习。',
+        ? `1. 先用 obsidian 工具读 learning-records/${learnerId}/ 的 MISSION.md 和已有 learning-records/ 笔记, 看 TA 上到第几课、学过什么 (没有就从第 1 课、先立使命开始)。`
+        : '1. 这次没有接学习档案库, 就当作第 1 课从头开始, 先和 TA 立下学习使命 (missionEstablished=true)。',
+      '2. 续上下一课 (lessonNo = 已有最大课号 + 1)。沿最近发展区只推进一小步: 讲清一个 concept,',
+      '   配一个回忆 practice, 引用一条来源, 出一道等长选项的 quiz, 推荐一个 primarySource;',
+      '   有证据 TA 懂了就在 insight 里记一条 (没有就省略)。',
       '3. 自评打标: 若内容涉及投资/理财/赌博/诱导充值消费/联系陌生人等对儿童敏感的主题,',
       '   把 flagged 设为 true 并在 flagReason 一句话说明; 否则 flagged 为 false。',
       '',
-      '只输出一个 JSON 对象 (不要任何解释或代码块外的文字):',
-      '{"lessonNo": 数字, "title": "标题", "body": "讲解 + 小练习", "flagged": false, "flagReason": ""}',
+      '只输出 system 里约定的那个 JSON 对象 (不要任何解释或代码块外的文字)。',
     ].join('\n')
 
     const req: LlmRequest = { messages: [{ role: 'user', content: userText }] }
@@ -189,11 +217,13 @@ export class FamilyTutorAgent extends LlmAgent {
 // --- parsing helpers (deterministic; always yield a VALID Lesson) -------------------
 
 /**
- * Build a valid `Lesson` from the model's text. The model is asked for strict JSON, but we
- * never let a malformed reply break the workflow: missing fields fall back to safe defaults
- * (lessonNo→1, body→the raw text), and `flagged` is `true` ONLY when the model explicitly
- * said so (conservative — a parse miss never silently clears a self-flag the model raised,
- * because the rule-engine layer + whitelist + transcript fork still stand behind it).
+ * Build a valid `Lesson` from the model's text. The model is asked for the strict `/teach`
+ * JSON, but we never let a malformed reply break the workflow: the SAFETY surface keeps its
+ * original conservative defaults (lessonNo→1, body→the raw text, `flagged` true ONLY when the
+ * model explicitly said so — a parse miss never silently clears a self-flag the model raised),
+ * and every `/teach` METHODOLOGY field falls back to a deterministic `planTeach` baseline so a
+ * sparse model reply still yields a complete, well-formed lesson. The rule-engine layer +
+ * whitelist + transcript fork remain the stronger floor behind the self-flag regardless.
  */
 export function coerceLesson(text: string, learnerId: string, topic: string): Lesson {
   const parsed = extractJson(text)
@@ -204,7 +234,90 @@ export function coerceLesson(text: string, learnerId: string, topic: string): Le
   const flagReason = flagged
     ? (nonEmptyString(parsed?.flagReason) ?? '导师自评: 内容可能需要家长留意')
     : undefined
-  return { learnerId, topic, lessonNo, title, body, flagged, ...(flagReason ? { flagReason } : {}) }
+
+  // A baseline /teach plan supplies safe defaults for any methodology field the model omitted
+  // (we infer mission-established from the lessonNo since a single call has no workspace state).
+  const base = planTeach(topic, {
+    learnerId,
+    missionPresent: lessonNo > 1,
+    priorLessons: Math.max(0, lessonNo - 1),
+    priorInsights: [],
+  })
+  const insight = coerceInsight(parsed?.insight) ?? base.insight
+
+  return {
+    learnerId,
+    topic,
+    lessonNo,
+    title,
+    body,
+    flagged,
+    ...(flagReason ? { flagReason } : {}),
+    missionEstablished:
+      typeof parsed?.missionEstablished === 'boolean'
+        ? (parsed.missionEstablished as boolean)
+        : base.missionEstablished,
+    missionWhy: nonEmptyString(parsed?.missionWhy) ?? base.missionWhy,
+    zpd: nonEmptyString(parsed?.zpd) ?? base.zpd,
+    concept: nonEmptyString(parsed?.concept) ?? base.concept,
+    citations: coerceCitations(parsed?.citations) ?? base.citations,
+    practice: nonEmptyString(parsed?.practice) ?? base.practice,
+    quiz: coerceQuiz(parsed?.quiz) ?? base.quiz,
+    primarySource: nonEmptyString(parsed?.primarySource) ?? base.primarySource,
+    glossary: coerceGlossary(parsed?.glossary) ?? base.glossary,
+    ...(insight ? { insight } : {}),
+    followUp: nonEmptyString(parsed?.followUp) ?? base.followUp,
+  }
+}
+
+/** Parse the model's `citations` array; drop malformed entries; `undefined` if none usable. */
+function coerceCitations(v: unknown): TeachCitation[] | undefined {
+  if (!Array.isArray(v)) return undefined
+  const out: TeachCitation[] = []
+  for (const e of v) {
+    const title = nonEmptyString((e as { title?: unknown } | undefined)?.title)
+    const source = nonEmptyString((e as { source?: unknown } | undefined)?.source)
+    if (title && source) out.push({ title, source })
+  }
+  return out.length ? out : undefined
+}
+
+/** Parse the model's `quiz`; needs a question, ≥2 options, and an in-range answer index. */
+function coerceQuiz(v: unknown): TeachQuiz | undefined {
+  if (!v || typeof v !== 'object') return undefined
+  const q = v as { question?: unknown; options?: unknown; answer?: unknown }
+  const question = nonEmptyString(q.question)
+  const options = Array.isArray(q.options)
+    ? q.options.filter((o): o is string => typeof o === 'string' && o.trim().length > 0)
+    : []
+  const answer = typeof q.answer === 'number' ? Math.floor(q.answer) : Number(q.answer)
+  if (!question || options.length < 2 || !Number.isInteger(answer) || answer < 0 || answer >= options.length) {
+    return undefined
+  }
+  return { question, options, answer }
+}
+
+/** Parse the model's `glossary` array; drop malformed entries; `[]` (kept) if the array is empty. */
+function coerceGlossary(v: unknown): TeachGlossaryTerm[] | undefined {
+  if (!Array.isArray(v)) return undefined
+  const out: TeachGlossaryTerm[] = []
+  for (const e of v) {
+    const term = nonEmptyString((e as { term?: unknown } | undefined)?.term)
+    const definition = nonEmptyString((e as { definition?: unknown } | undefined)?.definition)
+    if (term && definition) out.push({ term, definition })
+  }
+  return out // [] is a valid "no terms this lesson"; only a non-array falls through to the base
+}
+
+/** Parse the model's `insight`; needs a title + insight body; synthesizes a slug if absent. */
+function coerceInsight(v: unknown): TeachInsight | undefined {
+  if (!v || typeof v !== 'object') return undefined
+  const i = v as { slug?: unknown; title?: unknown; insight?: unknown }
+  const title = nonEmptyString(i.title)
+  const body = nonEmptyString(i.insight)
+  if (!title || !body) return undefined
+  const slug = nonEmptyString(i.slug) ?? title.toLowerCase().replace(/[\s/\\.,，。]+/g, '-').replace(/-+/g, '-')
+  return { slug, title, insight: body }
 }
 
 /** Extract the first JSON object from text — fenced ```json``` first, then a bare {…}. */

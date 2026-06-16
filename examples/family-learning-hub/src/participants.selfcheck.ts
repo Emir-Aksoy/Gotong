@@ -134,8 +134,17 @@ async function main(): Promise<void> {
     )
     const l1 = okOut(await tutor.onTask(mkTask('teach.lesson', { topic: '分数运算', learner_id: 'k' }))) as Lesson
     assert(l1.lessonNo === 1 && l1.flagged === false, '第 1 课, 普通主题不自评')
+    assert(l1.missionEstablished === true, '★ /teach: 第 1 课先立学习使命 (missionEstablished=true)')
+    assert((l1.concept?.trim().length ?? 0) > 0 && (l1.citations?.length ?? 0) >= 1, '第 1 课有 concept + 引用来源')
+    assert(
+      (l1.quiz?.options?.length ?? 0) === 3 && new Set(l1.quiz!.options.map((o) => [...o].length)).size === 1,
+      '第 1 课小测三选项等长 (长度不泄露答案)',
+    )
+    assert(l1.insight === undefined, '第 1 课无证据 → 不写 insight')
     const l2 = okOut(await tutor.onTask(mkTask('teach.lesson', { topic: '投资理财', learner_id: 'k' }))) as Lesson
     assert(l2.lessonNo === 2, '同学习者续第 2 课 (进度递增)')
+    assert(l2.missionEstablished === false, '第 2 课不再重立使命')
+    assert(!!l2.insight && (l2.insight.insight?.length ?? 0) > 0, '★ 第 2 课有证据 → 捕获一条 ADR 式 insight')
     assert(l2.flagged === true && typeof l2.flagReason === 'string', '财经内容自评 flagged=true (决策 1.a)')
     assert(tutor.taught.length === 2, '导师被调 2 次')
   } finally {

@@ -67,6 +67,14 @@ function assertStructuredLesson(lesson: Lesson | undefined, label: string): asse
   // ★ The whole reason the real tutor returns structured output: a REAL boolean the
   // content-review predicate can read (not undefined → fail-open).
   assert(typeof lesson!.flagged === 'boolean', `${label} flagged 是真布尔 (内容审核闸读得到, 不 fail-open)`)
+  // /teach methodology shape — coerceLesson backfills any field the model omitted, so a real
+  // (possibly sparse) reply is still a complete /teach lesson the chain can rely on.
+  assert(typeof lesson!.concept === 'string' && lesson!.concept.length > 0, `${label} 有 concept (一个要点)`)
+  assert(
+    !!lesson!.quiz && Array.isArray(lesson!.quiz.options) && lesson!.quiz.options.length >= 2,
+    `${label} 有 quiz (≥2 选项的小测)`,
+  )
+  assert(Array.isArray(lesson!.citations) && lesson!.citations.length >= 1, `${label} 有 citations (引用来源)`)
 }
 
 async function main(): Promise<void> {

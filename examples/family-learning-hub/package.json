@@ -10,6 +10,7 @@
     "federation": "tsx src/federation.ts",
     "im-oversight": "tsx src/im-oversight.ts",
     "selfcheck": "tsx src/participants.selfcheck.ts",
+    "teach:selfcheck": "tsx src/teach.selfcheck.ts",
     "real-agents:selfcheck": "tsx src/real-agents.selfcheck.ts",
     "load-template": "tsx src/load-template.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"

@@ -108,6 +108,18 @@ async function main(): Promise<void> {
       '[A] 先卡主题白名单审批, 上课后又卡内容审核 (parks twice)',
     )
     assert(outA.lesson?.lessonNo === 1, '[A] 导师按学习档案续上第 1 课')
+    assert(outA.lesson?.missionEstablished === true, '[A] /teach: 没有学习档案 → 第 1 课先和孩子立下学习使命')
+    assert((outA.lesson?.concept?.trim().length ?? 0) > 0, '[A] 这一课只讲清「一个」要点 (知识, 难度是敌人)')
+    assert(
+      (outA.lesson?.citations?.length ?? 0) >= 1 && (outA.lesson?.primarySource?.trim().length ?? 0) > 0,
+      '[A] 引用来源 + 推荐 primarySource (/teach: 绝不只凭脑子里的印象)',
+    )
+    assert(
+      (outA.lesson?.quiz?.options?.length ?? 0) === 3 &&
+        new Set(outA.lesson!.quiz!.options.map((o) => [...o].length)).size === 1,
+      '[A] 小测三个选项等长 (长度不泄露答案 — desirable difficulty)',
+    )
+    assert(outA.lesson?.insight === undefined, '[A] 第 1 课还没有证据 → 不写 learning-record (insight 省略, 它不是流水账)')
     assert(outA.lesson?.flagged === true, '[A] 导师自评把「投资理财」内容打了标 (决策 1.a, 底层)')
     assert(tutor1.taught.length === taughtBeforeA + 1, '[A] 导师恰好被联系一次 (批准后才跨, 第二次挂起不重跑 teach)')
     const recA = await recordAndFork(env1, outA.lesson!)
@@ -125,7 +137,13 @@ async function main(): Promise<void> {
     assert(firedB.kind === 'ok', '[B] 白名单内主题不挂起, 直接完成')
     assert(driveB.gates.length === 0, '[B] 没有任何审批闸触发 (主题白名单内 + 内容不 flagged)')
     assert(outB.lesson?.lessonNo === 2, '[B] 同一学习者续上第 2 课 (进度递增 = /teach 文件状态当时钟)')
+    assert(outB.lesson?.missionEstablished === false, '[B] 使命已立, 第 2 课不再重立 (只服务它)')
+    assert(
+      !!outB.lesson?.insight && (outB.lesson.insight.insight?.trim().length ?? 0) > 0,
+      '[B] 这一课有证据 → 捕获一条 ADR 式 insight (供下一课接续 — /teach learning-record)',
+    )
     assert(outB.lesson?.flagged === false, '[B]「分数运算」不触发自评标记')
+    console.log(`  这一课捕获 insight:「${outB.lesson?.insight?.title}」 (会驱动下一课的最近发展区)`)
     const recB = await recordAndFork(env1, outB.lesson!)
     assert(recB.totalRecords === 2, '[B] 孩子 hub 主副本累计 2 条')
     console.log(`  没挂起, 直接上课: ${outB.lesson?.title}; 主副本累计 ${recB.totalRecords} 条`)
@@ -159,6 +177,13 @@ async function main(): Promise<void> {
     assert(outD.lesson?.flagged === false, '[D] 导师自评没标 (外挂不是自评关键词) — 漏网的')
     assert(outD.moderated?.flagged === true, '[D] 规则引擎 (第二层) 标了「外挂」→ 这就是它的价值')
     assert((outD.moderated?.reasons.length ?? 0) >= 1, '[D] 规则命中带 reasons')
+    // ★ /teach 的核心升级: 续课不是空转计数, 而是 where-is-the-learner — 上一课捕获的 insight
+    // 真的驱动了这一课的最近发展区 (导师替身按学习者的档案接续)。
+    assert(outD.lesson?.lessonNo === 3, '[D] 同一学习者续到第 3 课')
+    assert(
+      !!outB.lesson?.insight && (outD.lesson?.zpd ?? '').includes(outB.lesson.insight.title),
+      '[D] ★ 第 3 课的最近发展区引用了第 2 课捕获的 insight (档案驱动续课, 非空转计数)',
+    )
     await recordAndFork(env1, outD.lesson!)
     console.log(`  自评 flagged=${outD.lesson?.flagged}, 规则引擎 flagged=${outD.moderated?.flagged} (${outD.moderated?.reasons.join(', ')})`)
 

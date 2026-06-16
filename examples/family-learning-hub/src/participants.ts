@@ -36,9 +36,24 @@ import { join } from 'node:path'
 
 import { AgentParticipant, type Task } from '@aipehub/core'
 
+import {
+  planTeach,
+  type TeachCitation,
+  type TeachGlossaryTerm,
+  type TeachInsight,
+  type TeachQuiz,
+} from './teach.js'
+
 // --- shapes flowing between the steps --------------------------------------------
 
-/** One lesson the tutor produced — the `teach.lesson` output. */
+/**
+ * One lesson the tutor produced — the `teach.lesson` output. The first six fields are the
+ * original contract (still what every consumer + the safety gate read). The rest are the
+ * `/teach` methodology fields (see teach.ts): they are OPTIONAL on the type so a consumer or
+ * test that only needs the safety surface (e.g. a moderation input) can construct a `Lesson`
+ * without them, but the real tutor (deterministic stand-in AND the LLM via `coerceLesson`)
+ * ALWAYS populates them — an actual lesson is always a complete `/teach` lesson.
+ */
 export interface Lesson {
   learnerId: string
   topic: string
@@ -49,6 +64,30 @@ export interface Lesson {
   /** 决策 1.a — the tutor SELF-FLAGS content a 家长 may want to review (layer 1). */
   flagged: boolean
   flagReason?: string
+
+  // --- /teach methodology (always set by a real lesson; optional for terse consumers) ---
+  /** True when this lesson established the mission (first lesson, no MISSION.md yet). */
+  missionEstablished?: boolean
+  /** The reason-to-learn this lesson serves — grounds everything (/teach MISSION). */
+  missionWhy?: string
+  /** Where the learner is → what this advances to (/teach Zone of Proximal Development). */
+  zpd?: string
+  /** The ONE tightly-scoped concept (knowledge) — difficulty is the enemy here. */
+  concept?: string
+  /** Citation(s) for the concept — cite a primary source every lesson. */
+  citations?: TeachCitation[]
+  /** The retrieval-practice exercise (skill) — difficulty is the TOOL here. */
+  practice?: string
+  /** Equal-length-option quiz with instant feedback. */
+  quiz?: TeachQuiz
+  /** The recommended high-trust source to go deeper (/teach RESOURCES). */
+  primarySource?: string
+  /** Canonical terms this lesson introduced. */
+  glossary?: TeachGlossaryTerm[]
+  /** ADR-grade insight captured when the learner showed evidence of understanding. */
+  insight?: TeachInsight
+  /** Reminder to come back / ask the tutor — spacing. */
+  followUp?: string
 }
 
 /** A learning-records entry — the `records.append` output (the MASTER copy on 孩子 hub). */
@@ -184,14 +223,21 @@ export class ModerationParticipant extends AgentParticipant {
 export const SELF_FLAG_KEYWORDS: readonly string[] = ['投资', '理财', '股票', '加密货币', '赌', '贷款']
 
 /**
- * Serves `teach.lesson`. Reads where the learner is (the per-learner counter stands in
- * for reading `learning-records/`), advances one lesson, and self-flags potentially
- * sensitive content. Synchronous + deterministic — in real mode this capability is
- * served by an LlmAgent /teach mentor instead, the gates above unchanged.
+ * Serves `teach.lesson` as a faithful `/teach` mentor stand-in. It reads where the learner
+ * is (the per-learner memory below stands in for reading `learning-records/`), drives the
+ * lesson through the PURE `planTeach` planner (mission grounding → ZPD → one concept with a
+ * citation → retrieval practice → equal-length quiz → primary source → captured insight; see
+ * teach.ts), and self-flags potentially sensitive content. Synchronous + deterministic — in
+ * real mode this capability is served by an LlmAgent /teach mentor instead (real-agents.ts),
+ * the gates above unchanged. Pedagogy (`planTeach`) and safety (`flagged`) stay separate.
  */
 export class LessonTutorStandin extends AgentParticipant {
-  /** Per-learner lesson counter — stands in for reading learning-records/ to continue. */
-  private readonly progress = new Map<string, number>()
+  /**
+   * Per-learner workspace memory — stands in for reading the learner's `/teach` workspace
+   * (MISSION.md + learning-records/) to decide the next lesson. Carries the lesson clock, the
+   * established mission, and prior insights (the newest drives the next lesson's ZPD).
+   */
+  private readonly memory = new Map<string, { lessons: number; missionWhy?: string; insights: TeachInsight[] }>()
   /** Tasks that ACTUALLY reached the tutor — so the demo can assert "0 before approval". */
   readonly taught: Task[] = []
 
@@ -210,19 +256,47 @@ export class LessonTutorStandin extends AgentParticipant {
     const { topic, learner_id } = (task.payload ?? {}) as { topic?: string; learner_id?: string }
     const learnerId = String(learner_id ?? 'learner')
     const t = String(topic ?? '').trim() || '自由探索'
-    const lessonNo = (this.progress.get(learnerId) ?? 0) + 1
-    this.progress.set(learnerId, lessonNo)
 
+    // Where is the learner? Drive the next /teach lesson off the per-learner workspace memory.
+    const prev = this.memory.get(learnerId) ?? { lessons: 0, insights: [] as TeachInsight[] }
+    const plan = planTeach(t, {
+      learnerId,
+      missionPresent: prev.lessons > 0,
+      ...(prev.missionWhy ? { missionWhy: prev.missionWhy } : {}),
+      priorLessons: prev.lessons,
+      priorInsights: prev.insights,
+    })
+
+    // Safety self-flag (决策 1.a, layer 1) — a separate self-assessment from pedagogy; the
+    // real model judges this itself. Deterministic keyword match here.
     const hit = SELF_FLAG_KEYWORDS.find((k) => t.includes(k))
     const lesson: Lesson = {
       learnerId,
       topic: t,
-      lessonNo,
-      title: `第 ${lessonNo} 课 · ${t}`,
-      body: `导师按你的学习档案续上第 ${lessonNo} 课:${t} 的入门讲解 + 一个小练习。`,
+      lessonNo: plan.lessonNo,
+      title: plan.title,
+      body: plan.body,
       flagged: hit !== undefined,
       ...(hit !== undefined ? { flagReason: `内容涉及「${hit}」, 建议家长留意` } : {}),
+      missionEstablished: plan.missionEstablished,
+      missionWhy: plan.missionWhy,
+      zpd: plan.zpd,
+      concept: plan.concept,
+      citations: plan.citations,
+      practice: plan.practice,
+      quiz: plan.quiz,
+      primarySource: plan.primarySource,
+      glossary: plan.glossary,
+      ...(plan.insight ? { insight: plan.insight } : {}),
+      followUp: plan.followUp,
     }
+
+    // Advance the workspace memory — the mission sticks, a captured insight feeds next ZPD.
+    this.memory.set(learnerId, {
+      lessons: plan.lessonNo,
+      missionWhy: plan.missionWhy,
+      insights: plan.insight ? [...prev.insights, plan.insight] : prev.insights,
+    })
     return lesson
   }
 }
