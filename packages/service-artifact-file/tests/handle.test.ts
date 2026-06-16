@@ -252,13 +252,17 @@ describe('remove', () => {
 })
 
 describe('concurrent writes are serialized (no half-files)', () => {
+  // 50 real parallel filesystem writes. On a contended windows-latest runner
+  // this fans out slow enough to overrun vitest's 5s default (~8.5s observed) —
+  // it's I/O latency, not a hang (same class as the mcp-client double-spawn and
+  // steward-routes double-boot flakes). Give it room so it doesn't red-X CI.
   it('50 parallel writes to distinct paths all land cleanly', async () => {
     const h = newHandle()
     const writes = Array.from({ length: 50 }, (_, i) => h.write(`p-${i}.md`, `line-${i}`))
     await Promise.all(writes)
     const refs = await h.list()
     expect(refs).toHaveLength(50)
-  })
+  }, 20_000)
 
   it('two concurrent writes to the SAME path resolve in some order', async () => {
     const h = newHandle()
