@@ -32,6 +32,13 @@ updates:
       # supports. Bot has been known to push beyond Node 20.
       - dependency-name: "typescript"
         update-types: ["version-update:semver-major"]
+      # Pin @types/node to the Node 20 line (matches the engines field /
+      # nvm-managed v20 dev box). The bot keeps proposing @types/node 25; a
+      # major jump there pulls in lib typings for Node APIs we don't run on,
+      # surfacing phantom type breaks. Keep 20.x minor/patch; a real Node
+      # upgrade is a deliberate human change, not a weekly bot PR.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
       # Pin @xmldom/xmldom to the 0.8.x line. xml-crypto (our SAML signature
       # verifier, latest 6.1.2) declares "@xmldom/xmldom": "^0.8.10" and has no
       # release supporting 0.9.x. Taking the 0.9 bump would install a second
