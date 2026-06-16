@@ -12,6 +12,6 @@
     "@aipehub/core": "workspace:*"
   },
   "devDependencies": {
-    "tsx": "^4.7.0"
+    "tsx": "^4.22.4"
   }
 }

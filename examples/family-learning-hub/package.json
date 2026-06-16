@@ -26,7 +26,7 @@
     "@aipehub/llm-openai": "workspace:*",
     "@aipehub/mcp-client": "workspace:*",
     "@aipehub/transport-ws": "workspace:*",
-    "ws": "^8.20.1",
+    "ws": "^8.21.0",
     "yaml": "^2.6.0"
   },
   "devDependencies": {
