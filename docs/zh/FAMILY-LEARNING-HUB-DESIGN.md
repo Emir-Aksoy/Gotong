@@ -136,6 +136,22 @@ AipeHub 的母语——**文件优先、跨会话、按调用续上**:
 | 互动课(HTML + 音频 + 测验) | 一课的交付 | 导师产出,推到孩子端 app(§九) |
 | `learning-records/` | 跨会话进度,**每课更新** | **主副本在孩子 hub**(§六),fork 给家长 |
 
+### ✅ TEACH-M1→M3:`/teach` 方法论 + 文件优先工作区已忠实复刻
+
+用户:「查看 `/teach` 这个 skill,这个工作流要做到复刻这样的有一个专门的导师的功能。如果什么
+达不到,就补上。」拍板的忠实度天花板 = **方法论 + 工作区产物**(不含 HTML/音频/浏览器渲染,
+那是消费端 app 层 §九)。三个里程碑做实:
+
+| 里程碑 | 复刻了什么 | 在哪 |
+|---|---|---|
+| **TEACH-M1** | `/teach` **方法论核心** —— 纯 planner `planTeach`:使命锚定(第一课先立「为什么学」)→ 最近发展区(一小步)→ 先知识(一个要点,难度是敌人)后技能(回忆练习,难度是工具)→ 每课引一手来源 → **选项等长**的小测(长度不泄露答案)→ 有理解证据才记一条 **ADR 式** learning-record(不是流水账)→ 术语表。结构化 `Lesson` 类型 + 导师两侧(确定性 `LessonTutorStandin` + 真 `FamilyTutorAgent`)都按这套出课 | `src/teach.ts` · `src/participants.ts` · `src/real-agents.ts` |
+| **TEACH-M2** | `/teach` **文件优先工作区产物** —— `writeTeachWorkspace` 把结构化 `Lesson` 落成 `learning-records/<learnerId>/` 下的 `MISSION.md`(第一课确立后持久,不重写)、`RESOURCES.md`(累积去重)、`GLOSSARY.md`(术语累积去重)、`lessons/NNNN-slug.md`(每课都写)、`records/NNNN-slug.md`(**仅有理解证据时写** = ADR 式学习档案,非流水账)。确定性写者与真 LLM 导师 prompt 声明的同一形状,与 mcp-obsidian 读者对齐 | `src/teach-workspace.ts` |
+| **TEACH-M3** | 模板 `system:` prompt 对齐到完整 `/teach` 方法论(9 步 + 结构化 JSON 输出契约 + 自评 `flagged`),`family-tutor.template.yaml` 导入 `aipehub start` 即得一个忠实的 `/teach` 导师;web 防腐门保持绿(只钉能力/工作流结构,不钉 prompt 文本) | `template/family-tutor.template.yaml` |
+
+**忠实度天花板(§九)**:复刻**方法论 + 文件产物**即止——HTML / 音频 / 浏览器渲染的互动课
+**仍留给消费端 app 层**(原生孩子 app 的前端产品工程,§九 + §十二①)。导师产出的是结构化课程
+(JSON → 工作区文件),把它渲染成孩子点得动的互动界面是独立的一层。
+
 **为什么完美契合两个锁定决策**:
 
 - **决策 4「无心跳,调用模型触发」**:`/teach` 本来就不靠定时器——每次调用时**读

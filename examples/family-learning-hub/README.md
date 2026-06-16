@@ -198,8 +198,10 @@ pnpm --filter @aipehub/host test family-child-me-e2e
 
 | 文件 | 作用 |
 |---|---|
-| `src/participants.ts` | 六个**确定性闸参与者**(被 hermetic demo + 真实模式共用):`TopicScreenParticipant`(`topic.screen`→真布尔 `{allowed}` ★fail-open 修复)、`ModerationParticipant`(`content.moderate`→`{flagged,reasons}`,空规则=关闭)、`LessonTutorStandin`(`/teach` 风格,续课号 + 自评打标)、`RecordsAppendParticipant`(`records.append`,写本地主副本)、`ReportToGuardianParticipant`(`report.to-guardian`,收 fork)、`ThirdPartyStandin`(必须收 0 条孩子数据)。 |
-| `src/index.ts` | 6 剧情 demo:经**真**家长 `tutor-teach` 工作流跑 [A]-[F],钉死两处 fail-open + 分层审核 + data-class 锁。 |
+| `src/teach.ts` | **TEACH-M1** —— `/teach` 方法论纯 planner `planTeach`:使命锚定 → 最近发展区 → 一个 concept(难度是敌人)→ 回忆 practice(难度是工具)→ 引一手来源 → **选项等长**小测 → 有证据才记 ADR 式 insight → 术语表。结构化 `Lesson` 类型的单一真相源(导师两侧 + 工作区写者 + 真模型 coerce 都用它)。 |
+| `src/teach-workspace.ts` | **TEACH-M2** —— `writeTeachWorkspace` 把结构化 `Lesson` 落成文件优先工作区:`learning-records/<learnerId>/` 下的 `MISSION.md`(第一课确立后持久)、`RESOURCES.md` / `GLOSSARY.md`(累积去重)、`lessons/NNNN-slug.md`(每课写)、`records/NNNN-slug.md`(**仅有理解证据时写** = ADR 式学习档案,非流水账)。与真 LLM 导师 prompt 声明的同一形状、与 mcp-obsidian 读者对齐。 |
+| `src/participants.ts` | 六个**确定性闸参与者**(被 hermetic demo + 真实模式共用):`TopicScreenParticipant`(`topic.screen`→真布尔 `{allowed}` ★fail-open 修复)、`ModerationParticipant`(`content.moderate`→`{flagged,reasons}`,空规则=关闭)、`LessonTutorStandin`(`/teach` 风格:经 `planTeach` 出**完整**结构化 `Lesson`,自评打标)、`RecordsAppendParticipant`(`records.append`,经 `writeTeachWorkspace` 写本地 `/teach` 工作区主副本)、`ReportToGuardianParticipant`(`report.to-guardian`,收 fork)、`ThirdPartyStandin`(必须收 0 条孩子数据)。 |
+| `src/index.ts` | 6 剧情 demo:经**真**家长 `tutor-teach` 工作流跑 [A]-[F],钉死两处 fail-open + 分层审核 + data-class 锁;[D] 还钉死第 3 课的最近发展区**引用了第 2 课捕获的 insight**(`/teach` 档案驱动续课)。 |
 | `src/harness.ts` | 共享底座:建两侧 hub + link + 真 WorkflowRunner + 真 inbox + ~30 行两步恢复镜像(被 6 剧情 demo 与真实模式共用)。 |
 | `src/federation.ts` | 真 ws 两 host 联邦:`bearerAuth` 握手 + per-link 契约 + `TopicWhitelistGate` 出站审批 + 错 token 拒。 |
 | `src/im-oversight.ts` + `src/im-oversight/` | 家长端 IM 监督桥:越界 / flagged 审批推 IM、批 / 拒回推、跨家长隔离 no-leak。 |
@@ -231,6 +233,31 @@ pnpm --filter @aipehub/host test family-child-me-e2e
 | **3 主题白名单** | 白名单内直接流;白名单外 → 家长审批;白名单本身**家长发布、孩子改不了**(WFEDIT 出入口锁) | 白名单是"策略闸",审批是"例外口":大多数主题自由学,新主题家长一键放行 |
 | **#4 模板带结构 + 引用,永不带内容** | KB 槽位 `learning_records` 只带「MCP 接线 + presetData 指针」;学习记录内容是孩子 hub 的磁盘文件,不在模板里 | 同 tea-supply-link / battle-monk-training 的「KB 存用户状态」先例 |
 | **#5 + 本案例:跨组织链接也不在模板里** | 链接是运行时 per-link 信任契约(peer + outboundCaps + data-class + 审批策略),导入模板后到 admin「联邦」tab 配 | `tutor.teach` 步只写 capability,从不点名 peer |
+
+## ✅ 复刻 Matt Pocock `/teach`:一个专门的导师(TEACH-M1→M3)
+
+用户:「查看 `/teach` 这个 skill,这个工作流要做到复刻这样的有一个专门的导师的功能。如果什么
+达不到,就补上。」拍板的忠实度天花板 = **方法论 + 文件优先工作区产物**(HTML / 音频 / 浏览器
+渲染的互动课**留给消费端 app 层**,见下「忠实度天花板」)。
+
+| 里程碑 | 复刻了 `/teach` 的什么 | 落点 |
+|---|---|---|
+| **TEACH-M1 方法论** | 使命锚定(第一课先立「为什么学」)→ 最近发展区(只推进一小步)→ 先知识(讲清**一个**要点,难度是敌人)后技能(回忆 practice,难度是工具)→ 每课**引一手来源** → **选项等长**的小测(长度不泄露答案)→ **有理解证据才**记一条 ADR 式 learning-record(不是流水账)→ 术语表。纯 planner `planTeach` + 结构化 `Lesson` 类型 | `src/teach.ts` |
+| **TEACH-M2 工作区产物** | `MISSION.md`(确立后持久,不重写)、`RESOURCES.md` / `GLOSSARY.md`(累积去重)、`lessons/NNNN-slug.md`(每课写)、`records/NNNN-slug.md`(仅有证据时写 = ADR 式档案)。复制 `learning-records/<learnerId>/` 目录 = 搬走孩子整段学习旅程 | `src/teach-workspace.ts` |
+| **TEACH-M3 模板导师** | 家长模板 `system:` prompt 对齐到完整 9 步 `/teach` 方法论 + 结构化 JSON 输出契约 + 自评 `flagged`。导入 `aipehub start` 即得一个忠实的 `/teach` 导师(`teach.lesson` 由 LlmAgent 服务) | `template/family-tutor.template.yaml` |
+
+**导师两侧同一套方法论**:hermetic demo 用 `LessonTutorStandin`(经 `planTeach` 出**完整**结构化
+`Lesson`),真实模式用 `FamilyTutorAgent`(真 DeepSeek + mcp-obsidian,模型返 JSON → `coerceLesson`
+解析成同一 `Lesson`,稀疏 / 畸形回复降级到 `planTeach` 基线)。安全契约不变:导师是**唯一** LLM,
+四道确定性闸 + 自评 `flagged` 都不动。
+
+**忠实度天花板**:复刻**方法论 + 文件产物**即止 —— HTML / 音频 / 浏览器渲染的互动课**仍是消费
+端 app 层**(原生孩子 app 的前端产品工程,见「显式推迟 / 开放问题」§九 + §十二①)。导师产出的是
+结构化课程(JSON → 工作区文件),把它渲染成孩子点得动的互动界面是独立的一层。
+
+验证:`teach:selfcheck`(26 断言)+ `teach-workspace:selfcheck`(15 断言)+ `selfcheck`
+(导师两侧 `/teach` 字段)+ `start`([D] 钉死 insight 驱动续课)全绿;web 防腐门只钉能力 /
+工作流结构,**不**钉 prompt 文本,故方法论 prompt 可独立演进。
 
 ## 安全边界(家长产品的诚实边界)
 
