@@ -1,9 +1,14 @@
 # CodeQL — static-analysis security scan for TypeScript and Python.
 #
 # Triggers:
-#   - push to `main`: catches what slipped past PR review
-#   - pull_request to `main`: surfaces findings before merge
-#   - weekly cron: catches new CodeQL queries against unchanged code
+#   - manual (`workflow_dispatch`): run a scan on demand
+#   - weekly cron: scheduled scan + catches new CodeQL queries
+#
+# Why not on every push/PR: solo, pre-release, PRIVATE repo — per-push
+# scans burn the account's Actions-minute allotment for little marginal
+# signal at this stage. The weekly cron still surfaces findings into the
+# Security tab; re-add push/pull_request before external contributors
+# arrive (and before relying on per-PR diff annotations).
 #
 # CodeQL queries are essentially a security-flavoured linter — they
 # look for patterns like:
@@ -24,10 +29,7 @@
 name: CodeQL
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
   schedule:
     # Tuesdays at 14:17 UTC — odd minute to spread runner load away
     # from the on-the-hour stampede that every other repo's cron uses.

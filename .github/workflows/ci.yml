@@ -1,13 +1,20 @@
 # CI — build, typecheck, and test the TypeScript workspace + Python SDK.
 #
 # Triggers:
-#   - every push to `main`
-#   - every pull request targeting `main`
+#   - manual (`workflow_dispatch`) — run the full matrix on demand
+#   - weekly cron (Tue 14:05 UTC) — a scheduled cross-platform sweep
 #
-# Concurrency: for PRs we cancel any in-flight run on the same branch
-# when a new commit is pushed. Pushes to `main` are NOT cancelled —
-# we want the post-merge build to complete even if another merge lands
-# right after.
+# Why not on every push/PR: this is a solo, pre-release, PRIVATE repo,
+# so per-push CI mostly re-runs what `pnpm -r test` already covers
+# locally — while the macOS (10x) / Windows (2x) matrix burns the
+# account's Actions-minute allotment fast. Day-to-day verification is
+# local; the weekly + on-demand full matrix keeps the cross-platform
+# safety net (Windows/macOS bugs the dev Mac can't reproduce) without
+# the per-push minute drain. Re-add push/pull_request triggers before
+# opening the repo to external contributors.
+#
+# Concurrency (below) still de-dupes overlapping runs; with the PR
+# trigger gone its cancel-in-progress conditional simply never fires.
 #
 # Supply-chain hardening (v3.3):
 #   - All third-party actions are pinned to a 40-char commit SHA, with
@@ -27,10 +34,12 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # Weekly full-matrix sweep — Tuesdays 14:05 UTC, offset from the
+    # CodeQL (14:17) and Secret-scan (14:33) crons so the three don't
+    # all queue on the shared runner pool at once.
+    - cron: "5 14 * * 2"
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
