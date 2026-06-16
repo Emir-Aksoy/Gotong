@@ -608,7 +608,13 @@ describe('McpToolset — runtime addServer / removeServer (R5)', () => {
     } finally {
       await ts.disconnect()
     }
-  })
+    // This is the only case that spawns TWO real child servers in one test
+    // (connect()'s child + addServer()'s child, each with its own stdio
+    // handshake). On a cold Windows runner each node spawn + handshake is
+    // ~3s (sibling single-spawn cases already clock ~2.9s), so two of them
+    // overrun vitest's 5s default. Give this one a generous budget — it's
+    // environmental spawn latency, not a hang.
+  }, 20_000)
 
   it('addServer rejects a duplicate name', async () => {
     const ts = new McpToolset({ servers: [makeFakeServerConfig('a')] })
