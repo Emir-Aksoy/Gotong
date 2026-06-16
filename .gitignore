@@ -44,3 +44,11 @@ __pycache__/
 *.pyc
 *.egg-info/
 .pytest_cache/
+
+# Agent scratchpads — local planning notes that must never enter the repo.
+# Working files for Claude/Codex sessions, not project documentation. Listed
+# here so an accidental `git add -A` can't sweep them into a commit.
+codex-next-work.md
+docs/zh/V4-PHASE19-PLAN.md
+docs/zh/V5-ROADMAP.md
+docs/zh/V6-ROUTE-B-PLAN.md
