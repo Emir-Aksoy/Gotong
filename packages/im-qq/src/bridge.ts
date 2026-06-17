@@ -1,44 +1,53 @@
 /**
- * `ImBridge` implementation for QQ via OneBot v11 (forward WebSocket).
+ * `ImBridge` implementation for QQ via the OFFICIAL Bot API (webhook).
  *
- * EXPERIMENTAL — see README for full risk write-up. Headline:
+ * This replaces the previous OneBot v11 forward-WS bridge wholesale. The
+ * official QQ open platform (https://bot.q.qq.com) discontinued its
+ * WebSocket gateway (end-2024) and now delivers events over an HTTP
+ * **webhook**: the bot registers a public callback URL and QQ POSTs
+ * events to it.
  *
- *   - OneBot v11 is a *third-party* protocol. There is no official
- *     public QQ bot API for personal accounts. Adapters (NapCat,
- *     go-cqhttp, Lagrange, Mirai-onebot, …) reverse-engineer the
- *     client wire format. Using them carries account-suspension risk;
- *     Tencent has on-and-off enforced bans on common adapters.
- *   - The bridge refuses to start unless `AIPE_QQ_BRIDGE_ACK_RISK=true`
- *     is set in the environment. This is a deliberate friction step
- *     so a host operator can't accidentally enable QQ without reading
- *     the docs.
+ * Structural template = the Slack / Lark webhook bridges (HTTP server +
+ * `handleRawRequest` + `handleEvent`), NOT the Discord WS gateway.
  *
- * Threading model:
+ * Two inbound flows over the one webhook:
  *
- *   start() ─► OneBotClient.start() (WebSocket connect)
+ *   start() ─► http.createServer().listen()
  *                 │
- *                 ├─ event push (message) → oneBotToImMessage → listeners
- *                 ├─ event push (meta_event lifecycle) → cache self_id
- *                 ├─ event push (notice/request) → ignore (200 ack equivalent)
+ *                 ├─ POST <webhookPath>, op:13 → sign(event_ts+plain_token)
+ *                 │      → 200 { plain_token, signature }   (callback validation)
  *                 │
- *                 └─ socket close → bridge reconnects with exponential backoff
+ *                 └─ POST <webhookPath>, op:0  → verify Ed25519(timestamp+rawBody)
+ *                        → handleEvent → qqToImMessage → listeners → 200 {}
+ *                        signature mismatch → 401
  *
- *   stop() flips `intentionalStop`, closes the client, cancels any
- *   pending reconnect timer. Idempotent.
+ * The HTTP server is OPTIONAL — set `webhookPort: 0` and the host drives
+ * `handleRawRequest(rawBody, headers)` from its own HTTP layer (e.g. a
+ * reverse-proxied `@aipehub/web` route). The raw body MUST be the
+ * unmodified bytes QQ sent — the op:0 signature is over `timestamp +
+ * rawBody`, so a re-stringify of parsed JSON breaks it.
  *
- * What's NOT in M7 (deliberate):
+ * ── Passive-reply only (an official platform limitation, not a gap) ──
  *
- *   - OAuth installation flow — N/A; adapter handles QQ login itself.
- *   - Outbound attachments / images / records. `sendMessage` with
- *     attachments triggers `onError` but text still goes out.
- *   - Reverse WebSocket transport. Forward WS is the simpler default.
- *   - HTTP POST + reverse webhook transport. Same reason.
- *   - CQ-code string-form mention strip beyond at-bot. Adapter
- *     should be configured to emit array form; bridge handles both
- *     but the array-form path is canonical.
- *   - Sharding / multi-account. One bridge instance = one QQ login.
- *   - Token refresh (none — adapter's access_token is long-lived).
+ *   Group / C2C messages can only be replied to PASSIVELY: within a
+ *   short window after a user message, carrying that message's `msg_id`
+ *   (+ an incrementing `msg_seq`). Proactive push to group/C2C was
+ *   discontinued (2025-04). So `sendMessage` works as a reply to an
+ *   inbound message, but throws an honest error when asked to push to a
+ *   chat the bridge has never received a message from — the bridge
+ *   cannot fabricate the `msg_id` a passive reply requires. Heartbeat /
+ *   alert agents therefore cannot push unsolicited messages to QQ.
+ *
+ * What's NOT in this milestone (deliberate):
+ *   - Rich media (image/audio/file). Text only; media via the official
+ *     rich-media upload API is a follow-up.
+ *   - Guild proactive sends. Guild channels historically allowed some
+ *     proactive sends, but MVP treats every surface as passive-reply for
+ *     a single honest model.
  */
+
+import * as http from 'node:http'
+import type { KeyObject } from 'node:crypto'
 
 import type {
   ImAttachment,
@@ -48,164 +57,145 @@ import type {
 } from '@aipehub/im-adapter'
 
 import {
-  createOneBotClient,
-  type OneBotClient,
-  type OneBotClientOptions,
-  type WebSocketCtor,
+  createQqClient,
+  type QqClient,
+  type QqClientOptions,
 } from './client.js'
+import { deriveQqKeyPair, signQqCallback, verifyQqEventSignature } from './qq-crypto.js'
+import { parseQqChatId, qqToImMessage } from './message.js'
 import {
-  buildQqTextMessage,
-  oneBotToImMessage,
-  parseQqChatId,
-} from './message.js'
-import type {
-  OneBotEvent,
-  OneBotMessageEvent,
-  OneBotMetaEvent,
-  OneBotSendMsgData,
-  OneBotSendMsgParams,
+  QQ_OP_DISPATCH,
+  QQ_OP_VALIDATION,
+  type QqValidationData,
+  type QqWebhookPayload,
 } from './types.js'
 
-/**
- * Env-variable name the operator must set to `'true'` to enable the
- * bridge. Exported so docs / setup scripts can reference one source
- * of truth.
- */
-export const QQ_RISK_ACK_ENV = 'AIPE_QQ_BRIDGE_ACK_RISK'
-
 export interface QqBridgeOptions {
+  /** Bot AppID from the QQ open platform. Required. */
+  appId: string
   /**
-   * OneBot v11 forward-WS endpoint, e.g. `ws://127.0.0.1:3001/`.
-   * Required.
+   * Bot ClientSecret (a.k.a. AppSecret). Required — it drives BOTH the
+   * Ed25519 keypair (callback signing + event verification) and the
+   * app-access-token mint. The legacy `Token` value is unused on the
+   * webhook + v2 REST path, so the bridge doesn't take it.
    */
-  url: string
+  secret: string
+  /** Override the underlying client. Mostly for tests. */
+  client?: QqClient
+  /** Forwarded to `createQqClient` when `client` isn't supplied. */
+  clientOptions?: Omit<QqClientOptions, 'appId' | 'clientSecret'>
   /**
-   * Optional access token configured in the adapter (NapCat:
-   * `network.websocketServers[].token`; go-cqhttp: `access_token`).
-   * Omit when the adapter is open (loopback-only deployments).
+   * Port for the built-in HTTP webhook server. Default 9092 (one off
+   * from Slack's 9091). Set to `0` to disable the listener — the host
+   * then drives `handleRawRequest` from its own HTTP layer.
    */
-  accessToken?: string
-  /**
-   * Override the underlying client. Mostly for tests.
-   */
-  client?: OneBotClient
-  /**
-   * WebSocket constructor. Defaults to `globalThis.WebSocket` (Node
-   * 22+); on Node 20 pass `import { WebSocket } from "ws"`.
-   */
-  webSocketImpl?: WebSocketCtor
-  /**
-   * Forwarded to `createOneBotClient` when `client` isn't supplied.
-   * Useful for tuning the per-action timeout in tests.
-   */
-  clientOptions?: Omit<OneBotClientOptions, 'url' | 'accessToken' | 'webSocketImpl'>
-  /**
-   * Strip `[CQ:at,qq=<self>]` (and array-form `at` segments
-   * targeting the bot) from inbound text. Default `true`.
-   */
+  webhookPort?: number
+  /** Bind host. Default '0.0.0.0'. */
+  webhookHost?: string
+  /** Webhook path. Default '/qq/webhook'. */
+  webhookPath?: string
+  /** Strip the bot's `<@!id>` mention from guild text. Default `true`. */
   stripBotMentions?: boolean
-  /**
-   * Override the bot's own QQ number. Usually unnecessary — bridge
-   * captures `self_id` from the first inbound event (lifecycle or
-   * message). Pre-setting skips the wait.
-   */
-  selfId?: number
-  /**
-   * Reconnect backoff (ms). Same shape as Discord's: starts at
-   * `initial`, doubles per failure, caps at `max`, resets on
-   * successful event delivery.
-   */
-  reconnectInitialMs?: number
-  reconnectMaxMs?: number
-  /**
-   * Bypass the AIPE_QQ_BRIDGE_ACK_RISK env check. **TESTS ONLY.**
-   * Not exposed in the README. Type as required-false so we trip
-   * up future refactors that try to flip it.
-   */
-  __acknowledgeRiskInTest?: true
-  /**
-   * Background diagnostic surface.
-   */
+  /** Background diagnostic surface. Defaults to a no-op. */
   onError?: (err: unknown) => void
 }
 
 type Listener = (msg: ImMessage) => void | Promise<void>
 
-const DEFAULT_RECONNECT_INITIAL_MS = 1000
-const DEFAULT_RECONNECT_MAX_MS = 30_000
+/** Bounded dedup cache for event ids. ~512 ≈ a few minutes of busy traffic. */
+const DELIVERED_CACHE_MAX = 512
+
+/**
+ * Result the bridge tells the HTTP layer to write back to QQ.
+ *   - op:13 → 200 with the signed `{ plain_token, signature }`.
+ *   - op:0  → 200 `{}` ack (QQ treats 2xx as delivered).
+ *   - bad signature → 401; malformed → 400.
+ */
+export type QqHandleResult =
+  | { status: 200; body: { plain_token: string; signature: string } | Record<string, never> }
+  | { status: 401 | 400; body: { error: string } }
 
 export class QqBridge implements ImBridge {
   readonly platform = 'qq'
 
-  private readonly clientFactory: () => OneBotClient
+  private readonly client: QqClient
+  private readonly privateKey: KeyObject
+  private readonly publicKey: KeyObject
+  private readonly webhookPort: number
+  private readonly webhookHost: string
+  private readonly webhookPath: string
   private readonly stripBotMentions: boolean
   private readonly onError: (err: unknown) => void
-  private readonly reconnectInitialMs: number
-  private readonly reconnectMaxMs: number
 
-  private client: OneBotClient | null = null
-  private listeners: Listener[] = []
-  private selfId: number | null
   private running = false
-  private intentionalStop = false
-  private reconnectBackoff: number
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private listeners: Listener[] = []
+  private server: http.Server | null = null
+  private deliveredIds: Set<string> = new Set()
+  private deliveredOrder: string[] = []
+  /**
+   * The most recent inbound message per chat — the handle a passive
+   * reply needs. `seq` pre-increments per outbound so multiple replies
+   * to the same `msg_id` don't collide (QQ rejects duplicate msg_seq).
+   */
+  private lastReply: Map<string, { msgId: string; seq: number }> = new Map()
 
   constructor(opts: QqBridgeOptions) {
-    if (typeof opts?.url !== 'string' || opts.url.length === 0) {
-      throw new TypeError('QqBridge: url is required')
+    if (typeof opts?.appId !== 'string' || opts.appId.length === 0) {
+      throw new TypeError('QqBridge: appId is required')
     }
-    // Risk gate. We check process.env eagerly at construction so a
-    // misconfigured host fails at boot, not on first message.
-    const ack =
-      opts.__acknowledgeRiskInTest === true ||
-      (typeof process !== 'undefined' && process.env?.[QQ_RISK_ACK_ENV] === 'true')
-    if (!ack) {
-      throw new Error(
-        `QqBridge: experimental — set ${QQ_RISK_ACK_ENV}=true in the environment to acknowledge ` +
-          'the QQ bot account-suspension risk (see @aipehub/im-qq README). ' +
-          'OneBot v11 is a third-party protocol; Tencent does not officially permit personal-account bots.',
-      )
+    if (typeof opts?.secret !== 'string' || opts.secret.length === 0) {
+      throw new TypeError('QqBridge: secret is required')
     }
+    const keyPair = deriveQqKeyPair(opts.secret)
+    this.privateKey = keyPair.privateKey
+    this.publicKey = keyPair.publicKey
+    this.client =
+      opts.client ??
+      createQqClient({
+        appId: opts.appId,
+        clientSecret: opts.secret,
+        ...opts.clientOptions,
+      })
+    this.webhookPort = opts.webhookPort ?? 9092
+    this.webhookHost = opts.webhookHost ?? '0.0.0.0'
+    this.webhookPath = opts.webhookPath ?? '/qq/webhook'
     this.stripBotMentions = opts.stripBotMentions ?? true
     this.onError = opts.onError ?? (() => {})
-    this.selfId = opts.selfId ?? null
-    this.reconnectInitialMs = opts.reconnectInitialMs ?? DEFAULT_RECONNECT_INITIAL_MS
-    this.reconnectMaxMs = opts.reconnectMaxMs ?? DEFAULT_RECONNECT_MAX_MS
-    this.reconnectBackoff = this.reconnectInitialMs
-
-    if (opts.client) {
-      const c = opts.client
-      this.clientFactory = () => c
-    } else {
-      this.clientFactory = () =>
-        createOneBotClient({
-          url: opts.url,
-          accessToken: opts.accessToken,
-          webSocketImpl: opts.webSocketImpl,
-          ...opts.clientOptions,
-        })
-    }
   }
 
   async start(): Promise<void> {
     if (this.running) return
     this.running = true
-    this.intentionalStop = false
-    await this.openClient()
+    if (this.webhookPort > 0) {
+      this.server = http.createServer((req, res) => {
+        void this.handleHttp(req, res)
+      })
+      await new Promise<void>((resolve, reject) => {
+        const onError = (err: Error): void => {
+          this.server?.off('listening', onListening)
+          reject(err)
+        }
+        const onListening = (): void => {
+          this.server?.off('error', onError)
+          resolve()
+        }
+        this.server!.once('error', onError)
+        this.server!.once('listening', onListening)
+        this.server!.listen(this.webhookPort, this.webhookHost)
+      })
+    }
   }
 
   async stop(): Promise<void> {
     if (!this.running) return
     this.running = false
-    this.intentionalStop = true
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
+    if (this.server) {
+      const srv = this.server
+      this.server = null
+      await new Promise<void>((resolve) => {
+        srv.close(() => resolve())
+      })
     }
-    const c = this.client
-    this.client = null
-    if (c) await c.stop()
   }
 
   async sendMessage(
@@ -213,11 +203,6 @@ export class QqBridge implements ImBridge {
     text: string,
     options?: { attachments?: ImAttachment[]; chatId?: string },
   ): Promise<void> {
-    if (!this.client || this.client.state !== 'open') {
-      throw new Error(
-        `QqBridge.sendMessage: client not connected (state=${this.client?.state ?? 'null'})`,
-      )
-    }
     if (options?.attachments && options.attachments.length > 0) {
       this.onError(
         new Error(
@@ -225,36 +210,61 @@ export class QqBridge implements ImBridge {
         ),
       )
     }
-    // Prefer the inbound chatId — it tells us private vs group.
-    // Fall back: assume DM to the platformUserId (a QQ number).
     const chatId = options?.chatId
-    let params: OneBotSendMsgParams
-    if (typeof chatId === 'string' && chatId.length > 0) {
-      const parsed = parseQqChatId(chatId)
-      if (!parsed) {
-        throw new Error(
-          `QqBridge.sendMessage: malformed chatId ${JSON.stringify(chatId)}; expected "private:<qq>" or "group:<qq>"`,
-        )
-      }
-      params = {
-        message_type: parsed.message_type,
-        ...(parsed.message_type === 'private'
-          ? { user_id: parsed.id }
-          : { group_id: parsed.id }),
-        message: buildQqTextMessage(text),
-      }
-    } else {
-      const userId = Number(to.platformUserId)
-      if (!Number.isFinite(userId) || userId <= 0) {
-        throw new Error('QqBridge.sendMessage: no chatId and platformUserId is not a QQ number')
-      }
-      params = {
-        message_type: 'private',
-        user_id: userId,
-        message: buildQqTextMessage(text),
-      }
+    if (typeof chatId !== 'string' || chatId.length === 0) {
+      throw new Error(
+        'QqBridge.sendMessage: chatId is required — QQ needs the originating group/C2C/channel id',
+      )
     }
-    await this.client.callAction<OneBotSendMsgData>('send_msg', params as unknown as Record<string, unknown>)
+    const parsed = parseQqChatId(chatId)
+    if (!parsed) {
+      throw new Error(
+        `QqBridge.sendMessage: malformed chatId ${JSON.stringify(chatId)}; expected "group:"/"c2c:"/"channel:"/"dm:"`,
+      )
+    }
+    // Passive-reply model: we can only answer a message we actually
+    // received (it carries the msg_id a reply requires). Proactive push
+    // to a group/C2C was discontinued by the platform — honest-fail
+    // rather than silently no-op, so an alert agent learns QQ can't be
+    // a push target.
+    const handle = this.lastReply.get(chatId)
+    if (!handle || handle.msgId.length === 0) {
+      throw new Error(
+        `QqBridge.sendMessage: no inbound message to reply to for ${chatId}. ` +
+          'QQ only permits PASSIVE replies (within the window after a user message); ' +
+          'proactive push to QQ groups/users was discontinued by the platform.',
+      )
+    }
+    handle.seq += 1
+    const seq = handle.seq
+    switch (parsed.kind) {
+      case 'group':
+        await this.client.sendGroupMessage(parsed.id, {
+          content: text,
+          msg_id: handle.msgId,
+          msg_seq: seq,
+        })
+        return
+      case 'c2c':
+        await this.client.sendC2CMessage(parsed.id, {
+          content: text,
+          msg_id: handle.msgId,
+          msg_seq: seq,
+        })
+        return
+      case 'channel':
+        await this.client.sendChannelMessage(parsed.id, {
+          content: text,
+          msg_id: handle.msgId,
+        })
+        return
+      case 'dm':
+        await this.client.sendGuildDirectMessage(parsed.id, {
+          content: text,
+          msg_id: handle.msgId,
+        })
+        return
+    }
   }
 
   onMessage(listener: Listener): () => void {
@@ -264,75 +274,173 @@ export class QqBridge implements ImBridge {
     }
   }
 
-  // --- internal ----------------------------------------------------
+  // --- public-but-low-level: host-driven webhook entry point ---------
 
-  private async openClient(): Promise<void> {
-    const c = this.clientFactory()
-    this.client = c
-    c.onEvent((ev) => this.handleEvent(ev))
-    c.onState((s) => {
-      if (s === 'closed' && this.running && !this.intentionalStop) {
-        this.scheduleReconnect()
-      }
-    })
+  /**
+   * Handle one raw webhook request. Public so hosts that own the HTTP
+   * layer hand the raw bytes + signature headers straight in.
+   *
+   * Discriminates on `op` BEFORE verifying, because op:13 (callback
+   * validation) is itself unsigned — it's the bootstrap that proves the
+   * bot holds the secret. op:0 events ARE signed and verified over the
+   * UNMODIFIED `rawBody`.
+   */
+  async handleRawRequest(
+    rawBody: string,
+    headers: { signature?: string | null; timestamp?: string | null },
+  ): Promise<QqHandleResult> {
+    let payload: QqWebhookPayload
     try {
-      await c.start()
-      // Connection successful — reset backoff for the next cycle.
-      this.reconnectBackoff = this.reconnectInitialMs
+      payload = JSON.parse(rawBody) as QqWebhookPayload
     } catch (err) {
       this.onError(err)
-      if (this.running && !this.intentionalStop) this.scheduleReconnect()
+      return { status: 400, body: { error: 'invalid_json' } }
     }
+    if (!payload || typeof payload !== 'object' || typeof payload.op !== 'number') {
+      return { status: 400, body: { error: 'invalid_payload' } }
+    }
+
+    // op:13 — callback validation. Unsigned; we PROVE we hold the secret
+    // by signing event_ts + plain_token and echoing it back.
+    if (payload.op === QQ_OP_VALIDATION) {
+      const d = payload.d as QqValidationData | undefined
+      if (
+        !d ||
+        typeof d.plain_token !== 'string' ||
+        typeof d.event_ts !== 'string'
+      ) {
+        return { status: 400, body: { error: 'invalid_validation_payload' } }
+      }
+      const signature = signQqCallback(this.privateKey, d.event_ts, d.plain_token)
+      return { status: 200, body: { plain_token: d.plain_token, signature } }
+    }
+
+    // op:0 — a dispatched event. Verify the Ed25519 signature before
+    // trusting anything in the body.
+    if (payload.op === QQ_OP_DISPATCH) {
+      const ok = verifyQqEventSignature(this.publicKey, {
+        signature: headers.signature ?? '',
+        timestamp: headers.timestamp ?? '',
+        rawBody,
+      })
+      if (!ok) {
+        this.onError(new Error('QqBridge: event signature verification failed'))
+        return { status: 401, body: { error: 'bad_signature' } }
+      }
+      try {
+        await this.handleEvent(payload)
+      } catch (err) {
+        this.onError(err)
+        return { status: 400, body: { error: 'event_handler_failed' } }
+      }
+      return { status: 200, body: {} }
+    }
+
+    // Any other op (heartbeat-ish / resume on the deprecated gateway) —
+    // ack so QQ doesn't keep retrying.
+    return { status: 200, body: {} }
   }
 
-  private scheduleReconnect(): void {
-    if (this.reconnectTimer || this.intentionalStop) return
-    const delay = this.reconnectBackoff
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null
-      if (!this.running || this.intentionalStop) return
-      // Bump the backoff for the *next* attempt; capped.
-      this.reconnectBackoff = Math.min(this.reconnectMaxMs, this.reconnectBackoff * 2)
-      void this.openClient()
-    }, delay)
+  /**
+   * Handle one already-parsed dispatch (op:0) payload. Public so tests
+   * can drive the inner state machine without composing Ed25519
+   * signatures. Dedups by event id, maps to `ImMessage`, remembers the
+   * reply handle, and delivers to listeners.
+   */
+  async handleEvent(payload: QqWebhookPayload): Promise<void> {
+    if (payload.op !== QQ_OP_DISPATCH) return
+    // Dedup — QQ retries on a slow ack.
+    if (typeof payload.id === 'string' && payload.id.length > 0) {
+      if (!this.recordDelivered(payload.id)) return
+    }
+    const imMsg = qqToImMessage(payload, { stripBotMentions: this.stripBotMentions })
+    if (!imMsg) return
+    // Remember the reply handle so a later sendMessage to this chat can
+    // be a passive reply. Reset seq to 0 for the new inbound message.
+    if (
+      typeof imMsg.chatId === 'string' &&
+      imMsg.chatId.length > 0 &&
+      typeof imMsg.messageId === 'string' &&
+      imMsg.messageId.length > 0
+    ) {
+      this.lastReply.set(imMsg.chatId, { msgId: imMsg.messageId, seq: 0 })
+    }
+    await this.deliver(imMsg)
   }
 
-  private handleEvent(ev: OneBotEvent): void {
-    if (ev.post_type === 'meta_event') {
-      this.handleMetaEvent(ev as OneBotMetaEvent)
-      return
+  // --- internal ------------------------------------------------------
+
+  private recordDelivered(id: string): boolean {
+    if (this.deliveredIds.has(id)) return false
+    this.deliveredIds.add(id)
+    this.deliveredOrder.push(id)
+    if (this.deliveredOrder.length > DELIVERED_CACHE_MAX) {
+      const drop = this.deliveredOrder.shift()!
+      this.deliveredIds.delete(drop)
     }
-    if (ev.post_type === 'message') {
-      this.handleMessageEvent(ev as OneBotMessageEvent)
-      return
-    }
-    // notice / request etc. — silently drop. OneBot adapters typically
-    // emit a lot of `group_increase` / `friend_add` notices; bridging
-    // every one would be noise.
+    return true
   }
 
-  private handleMetaEvent(ev: OneBotMetaEvent): void {
-    // Lifecycle/heartbeat both carry self_id; capture if unset.
-    if (this.selfId === null && typeof ev.self_id === 'number' && Number.isFinite(ev.self_id)) {
-      this.selfId = ev.self_id
-    }
-  }
-
-  private async handleMessageEvent(ev: OneBotMessageEvent): Promise<void> {
-    // Opportunistic self_id capture from message events too — adapters
-    // sometimes deliver messages before lifecycle.
-    if (this.selfId === null && typeof ev.self_id === 'number') this.selfId = ev.self_id
-    const im = oneBotToImMessage(ev, {
-      selfId: this.selfId,
-      stripBotMentions: this.stripBotMentions,
-    })
-    if (!im) return
+  private async deliver(msg: ImMessage): Promise<void> {
     for (const l of this.listeners) {
       try {
-        await l(im)
+        await l(msg)
       } catch (err) {
         this.onError(err)
       }
     }
   }
+
+  private async handleHttp(
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+  ): Promise<void> {
+    if (req.method === 'GET') {
+      res.statusCode = 200
+      res.setHeader('content-type', 'text/plain')
+      res.end('qq-bridge ok')
+      return
+    }
+    if (req.method !== 'POST' || req.url !== this.webhookPath) {
+      res.statusCode = 404
+      res.end()
+      return
+    }
+    let rawBody: string
+    try {
+      rawBody = await readBody(req)
+    } catch (err) {
+      this.onError(err)
+      res.statusCode = 400
+      res.end()
+      return
+    }
+    const signature = pickHeader(req.headers['x-signature-ed25519'])
+    const timestamp = pickHeader(req.headers['x-signature-timestamp'])
+    const result = await this.handleRawRequest(rawBody, { signature, timestamp })
+    res.statusCode = result.status
+    res.setHeader('content-type', 'application/json; charset=utf-8')
+    res.end(JSON.stringify(result.body))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Read the full request body as a UTF-8 string (raw — signature depends on it). */
+function readBody(req: http.IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = []
+    req.on('data', (c: Buffer) => chunks.push(c))
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
+    req.on('error', reject)
+  })
+}
+
+/** Header values may be string | string[]; flatten to the first. */
+function pickHeader(value: string | string[] | undefined): string | null {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value) && value.length > 0) return value[0] ?? null
+  return null
 }

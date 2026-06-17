@@ -1,389 +1,299 @@
 /**
- * OneBot v11 forward-WebSocket client.
+ * QQ official Bot API client — fetch-based, no SDK dep.
  *
- * Responsibilities:
+ * Two responsibilities:
  *
- *   1. Connect to `ws://<adapter>:<port>/` (or wss for TLS-fronted
- *      adapters). Optional access token in
- *      `Authorization: Bearer <token>` or as `?access_token=` query.
- *   2. Route incoming frames into two streams:
- *      - Frames with `echo` matching an outstanding action request →
- *        resolve the pending promise.
- *      - Frames without `echo` (server-push events) → emit to the
- *        `onEvent` callback.
- *   3. Surface non-zero `retcode` as `OneBotApiError`.
- *   4. Per-action timeout with AbortController-like semantics —
- *      stale actions don't sit in the pending map forever.
+ *   1. **App access token.** The v2 bot API authenticates every REST
+ *      call with `Authorization: QQBot <app_access_token>`. The token is
+ *      minted from the AppID + ClientSecret at
+ *      `https://bots.qq.com/app/getAppAccessToken` and is short-lived
+ *      (~7200s). The client caches it and refreshes transparently before
+ *      expiry, coalescing concurrent refreshes so a burst of sends near
+ *      the TTL boundary fires only one auth POST. (Mirrors the Lark
+ *      client's token cache — same TTL shape, same thundering-herd
+ *      guard.)
  *
- * What's NOT here (deliberate for M7):
+ *   2. **Passive-reply sends.** Four endpoints, one per surface:
+ *        group   → POST /v2/groups/{group_openid}/messages
+ *        C2C     → POST /v2/users/{user_openid}/messages
+ *        channel → POST /channels/{channel_id}/messages
+ *        guild DM→ POST /dms/{guild_id}/messages
+ *      Group / C2C sends MUST carry `msg_id` (+ incrementing `msg_seq`)
+ *      to be accepted — they are PASSIVE replies within the reply
+ *      window. Proactive push to group/C2C was discontinued by the
+ *      platform (2025-04); the bridge enforces that limitation, not the
+ *      client (the client just sends what it's handed).
  *
- *   - Reconnect logic. The bridge owns lifecycle and reconnects by
- *     constructing a new client. Keeping the client single-life
- *     simplifies the pending-actions map (no need to think about
- *     "what happens to in-flight actions on reconnect?" — bridge
- *     re-creates the client from scratch and any pending promises
- *     reject with `disposed`).
- *   - HTTP transport. v11 spec supports HTTP POST + reverse webhook
- *     but forward WebSocket is the simplest production setup.
- *   - Message rate limiting. The adapter is responsible for QQ-side
- *     pacing — bridge sends as fast as the caller asks.
- *
- * Why not just use a WebSocket-RPC library: OneBot v11's wire format
- * is JSON+echo and only ~50 lines of routing. A library would drag
- * in extra deps and an opinionated reconnect strategy.
+ * Reference:
+ *   - getAppAccessToken:
+ *     https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/api-use.html
+ *   - v2 group / C2C send:
+ *     https://bot.q.qq.com/wiki/develop/api-v2/server-inter/message/send-receive/send.html
  */
 
 import type {
-  OneBotActionRequest,
-  OneBotActionResponse,
-  OneBotEvent,
+  QqApiErrorBody,
+  QqAppAccessTokenResponse,
+  QqPassiveReplyBody,
+  QqSendResult,
 } from './types.js'
+import { QQ_MSG_TYPE_TEXT } from './types.js'
 
-/**
- * Minimal WebSocket interface. We type to the platform-neutral
- * surface (readyState + onopen/onmessage/onclose/onerror + send/close)
- * so we can swap in `ws`, `undici.WebSocket`, or `globalThis.WebSocket`
- * on Node 22+.
- */
-export interface WebSocketLike {
-  readyState: number
-  onopen: ((ev: unknown) => void) | null
-  onmessage: ((ev: { data: unknown }) => void) | null
-  onclose: ((ev: { code?: number; reason?: string }) => void) | null
-  onerror: ((ev: unknown) => void) | null
-  send(data: string): void
-  close(code?: number, reason?: string): void
-}
-
-export type WebSocketCtor = new (url: string, protocols?: string[]) => WebSocketLike
-
-export class OneBotApiError extends Error {
-  readonly action: string
-  /** Numeric retcode (non-zero, since 0 doesn't reach here). */
-  readonly retcode: number
-  /** Adapter-supplied human message ('wording' takes precedence over 'msg'). */
+export class QqApiError extends Error {
+  readonly method: string
+  readonly path: string
+  readonly status: number
+  /** Business-logic error code from the response body (`code`/`err_code`). */
+  readonly code: number | null
+  /** Human-readable message from the response body. */
   readonly detail: string | null
 
-  constructor(input: { action: string; retcode: number; msg?: string; wording?: string }) {
-    const detail = input.wording ?? input.msg ?? null
-    super(`onebot ${input.action}: retcode=${input.retcode}${detail ? ` — ${detail}` : ''}`)
-    this.name = 'OneBotApiError'
-    this.action = input.action
-    this.retcode = input.retcode
-    this.detail = detail
+  constructor(input: {
+    method: string
+    path: string
+    status: number
+    code?: number | null
+    detail?: string | null
+  }) {
+    const codeStr =
+      input.code !== null && input.code !== undefined ? input.code : `HTTP_${input.status}`
+    super(`qq ${input.method} ${input.path}: ${codeStr} — ${input.detail ?? `HTTP ${input.status}`}`)
+    this.name = 'QqApiError'
+    this.method = input.method
+    this.path = input.path
+    this.status = input.status
+    this.code = input.code ?? null
+    this.detail = input.detail ?? null
   }
 }
 
-export interface OneBotClientOptions {
+export interface QqClientOptions {
+  /** Bot AppID from the QQ open platform. Required. */
+  appId: string
+  /** Bot ClientSecret (a.k.a. AppSecret) paired with the AppID. Required. */
+  clientSecret: string
   /**
-   * WebSocket endpoint exposed by the OneBot adapter. Example:
-   *   ws://127.0.0.1:3001/
-   *   wss://obb.example.com/ws
-   * Required.
+   * Base URL of the REST API. Defaults to the production sandbox-free
+   * host `https://api.sgroup.qq.com`. (The sandbox host
+   * `https://sandbox.api.sgroup.qq.com` is for the test environment.)
    */
-  url: string
+  apiBase?: string
   /**
-   * Optional access token. When set, the client sends it on the
-   * initial WebSocket upgrade as `Authorization: Bearer <token>`
-   * and also appends `?access_token=<token>` for adapters that
-   * only check the query form. (NapCat / go-cqhttp accept either.)
+   * Base URL of the app-access-token endpoint. Defaults to
+   * `https://bots.qq.com`. Split from `apiBase` because the token is
+   * minted on a different host than the message endpoints.
    */
-  accessToken?: string
+  tokenBase?: string
+  /** Inject a fetch implementation for testing. Defaults to `globalThis.fetch`. */
+  fetchImpl?: typeof fetch
   /**
-   * WebSocket constructor. Defaults to `globalThis.WebSocket`.
-   * Node 22+ has it; on Node 20 pass `import { WebSocket } from "ws"`
-   * (note: `ws` ignores the `protocols` arg the same way browser does).
-   */
-  webSocketImpl?: WebSocketCtor
-  /**
-   * Per-action timeout. Defaults to 30s — `send_msg` on a healthy
-   * adapter is milliseconds, but image uploads can take longer. We
-   * pick a ceiling generous enough for the common case and let the
-   * caller adjust per-call.
+   * Per-call timeout. Defaults to 60s — a hung request can't block the
+   * bridge's webhook handler indefinitely.
    */
   timeoutMs?: number
   /**
-   * Random hex id factory — injected for tests. Defaults to a 12-byte
-   * crypto-random hex string. The id only needs to be unique on the
-   * one open socket, so 12 bytes (~96 bits) is overkill safety.
+   * Safety margin (ms) subtracted from a fresh token's TTL so the client
+   * refreshes BEFORE the token expires server-side. Defaults to 120_000.
    */
-  generateEcho?: () => string
+  tokenSafetyMarginMs?: number
+  /** Clock injection for tests. Defaults to `Date.now`. */
+  now?: () => number
 }
 
-export interface OneBotClient {
-  /**
-   * Open the underlying WebSocket and wait for it to enter
-   * OPEN state. Throws on connect failure (refused / bad token).
-   */
-  start(): Promise<void>
-  /**
-   * Close the socket. Any pending actions reject with `disposed`.
-   * Idempotent.
-   */
-  stop(): Promise<void>
-  /**
-   * Subscribe to server-push events (messages, lifecycle, …).
-   * Returns an unsubscribe function. Replacing is undefined.
-   */
-  onEvent(listener: (ev: OneBotEvent) => void): () => void
-  /** Subscribe to lifecycle changes (open / close / error). */
-  onState(listener: (state: 'connecting' | 'open' | 'closed') => void): () => void
-  /**
-   * Send an action and resolve with `data`. Rejects with
-   * `OneBotApiError` on non-zero retcode, `TimeoutError` on timeout,
-   * `Error('disposed')` when the client is stopped mid-flight.
-   */
-  callAction<T = unknown>(action: string, params?: Record<string, unknown>): Promise<T>
-  /** Current connection state — useful for diagnostics. */
-  readonly state: 'connecting' | 'open' | 'closed'
+export interface QqClient {
+  /** Mint or return the cached app access token. */
+  getAccessToken(): Promise<string>
+  /** Passive-reply to a group. `msgId` makes it a reply; `msgSeq` increments per reply. */
+  sendGroupMessage(
+    groupOpenid: string,
+    body: QqPassiveReplyBody,
+  ): Promise<QqSendResult>
+  /** Passive-reply to a C2C (friend) chat. */
+  sendC2CMessage(userOpenid: string, body: QqPassiveReplyBody): Promise<QqSendResult>
+  /** Reply in a guild channel. */
+  sendChannelMessage(
+    channelId: string,
+    body: { content: string; msg_id?: string },
+  ): Promise<QqSendResult>
+  /** Reply in a guild direct-message conversation. */
+  sendGuildDirectMessage(
+    guildId: string,
+    body: { content: string; msg_id?: string },
+  ): Promise<QqSendResult>
+  /** Drop the cached token so the next call re-mints. */
+  invalidateToken(): void
 }
 
-const DEFAULT_TIMEOUT_MS = 30_000
-
-/**
- * Default crypto-random hex echo factory. Lives outside the
- * `createOneBotClient` body so the closure stays small.
- */
-function defaultGenerateEcho(): string {
-  const arr = new Uint8Array(12)
-  // crypto.getRandomValues is global on Node 18+ and all browsers.
-  globalThis.crypto.getRandomValues(arr)
-  return Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('')
-}
-
-export function createOneBotClient(opts: OneBotClientOptions): OneBotClient {
-  if (typeof opts?.url !== 'string' || opts.url.length === 0) {
-    throw new TypeError('createOneBotClient: url is required')
+export function createQqClient(opts: QqClientOptions): QqClient {
+  if (typeof opts?.appId !== 'string' || opts.appId.length === 0) {
+    throw new TypeError('createQqClient: appId is required')
   }
-  const resolvedWs =
-    opts.webSocketImpl ?? (globalThis as { WebSocket?: WebSocketCtor }).WebSocket
-  if (!resolvedWs) {
-    throw new TypeError(
-      'createOneBotClient: no WebSocket implementation available. ' +
-        'Pass webSocketImpl explicitly (Node 20: `import { WebSocket } from "ws"`) ' +
-        'or run on Node 22+ which has built-in WebSocket.',
-    )
+  if (typeof opts?.clientSecret !== 'string' || opts.clientSecret.length === 0) {
+    throw new TypeError('createQqClient: clientSecret is required')
   }
-  const WebSocketImpl: WebSocketCtor = resolvedWs
-  const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS
-  const generateEcho = opts.generateEcho ?? defaultGenerateEcho
+  const apiBase = (opts.apiBase ?? 'https://api.sgroup.qq.com').replace(/\/+$/, '')
+  const tokenBase = (opts.tokenBase ?? 'https://bots.qq.com').replace(/\/+$/, '')
+  const fetchImpl = opts.fetchImpl ?? globalThis.fetch
+  const defaultTimeoutMs = opts.timeoutMs ?? 60_000
+  const safetyMarginMs = opts.tokenSafetyMarginMs ?? 120_000
+  const now = opts.now ?? Date.now
 
-  // Build the connect URL. NapCat / go-cqhttp accept the token via
-  // header OR query string; we put it on the query so the same call
-  // works on adapters that ignore subprotocol/header (some browser
-  // WebSocket impls strip the Authorization header on connect).
-  function buildUrl(): string {
-    if (!opts.accessToken) return opts.url
-    const sep = opts.url.includes('?') ? '&' : '?'
-    return `${opts.url}${sep}access_token=${encodeURIComponent(opts.accessToken)}`
-  }
+  let cachedToken: { value: string; expiresAt: number } | null = null
+  /** Coalesces concurrent token refreshes — one auth POST under load. */
+  let refreshPromise: Promise<string> | null = null
 
-  let ws: WebSocketLike | null = null
-  let state: 'connecting' | 'open' | 'closed' = 'closed'
-  let disposed = false
-  const eventListeners: Array<(ev: OneBotEvent) => void> = []
-  const stateListeners: Array<(s: 'connecting' | 'open' | 'closed') => void> = []
-  /**
-   * Pending actions, keyed by echo. Each entry holds the resolver +
-   * a timeout timer that we clear on response. We also use this map
-   * to fail-fast all in-flights on close / stop.
-   */
-  const pending = new Map<
-    string,
-    {
-      resolve: (value: unknown) => void
-      reject: (err: unknown) => void
-      action: string
-      timer: ReturnType<typeof setTimeout>
-    }
-  >()
-
-  function setState(s: 'connecting' | 'open' | 'closed'): void {
-    // Dedup repeated transitions to the same state. Without this,
-    // `stop()` racing with the socket's own onclose fires `closed`
-    // twice on subscribers.
-    if (state === s) return
-    state = s
-    for (const l of stateListeners) {
-      try {
-        l(s)
-      } catch {
-        // Ignore listener errors here; lifecycle path must stay clean.
-      }
-    }
-  }
-
-  function failAllPending(err: Error): void {
-    for (const [, p] of pending) {
-      clearTimeout(p.timer)
-      p.reject(err)
-    }
-    pending.clear()
-  }
-
-  function handleFrame(text: string): void {
-    let parsed: unknown
+  async function fetchWithTimeout(
+    url: string,
+    init: RequestInit,
+    timeoutMs: number,
+  ): Promise<Response> {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs)
     try {
-      parsed = JSON.parse(text)
+      return await fetchImpl(url, { ...init, signal: ctrl.signal })
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  async function refreshToken(): Promise<string> {
+    const path = '/app/getAppAccessToken'
+    const url = `${tokenBase}${path}`
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ appId: opts.appId, clientSecret: opts.clientSecret }),
+      },
+      defaultTimeoutMs,
+    )
+    let parsed: (QqAppAccessTokenResponse & QqApiErrorBody) | null = null
+    try {
+      parsed = (await res.json()) as QqAppAccessTokenResponse & QqApiErrorBody
     } catch {
-      // Drop malformed frames — adapters shouldn't send these but
-      // we don't want one bad frame to take down the socket.
-      return
+      // Body wasn't JSON.
     }
-    if (!parsed || typeof parsed !== 'object') return
-    const obj = parsed as Record<string, unknown>
-    // Response shape: has `echo` matching a pending action.
-    if (typeof obj.echo === 'string' && pending.has(obj.echo)) {
-      const entry = pending.get(obj.echo)!
-      pending.delete(obj.echo)
-      clearTimeout(entry.timer)
-      const resp = obj as unknown as OneBotActionResponse
-      if (resp.retcode === 0 || resp.retcode === 1) {
-        entry.resolve(resp.data)
-      } else {
-        entry.reject(
-          new OneBotApiError({
-            action: entry.action,
-            retcode: resp.retcode,
-            msg: resp.msg,
-            wording: resp.wording,
-          }),
-        )
+    if (!res.ok || !parsed || typeof parsed.access_token !== 'string') {
+      throw new QqApiError({
+        method: 'POST',
+        path,
+        status: res.status,
+        code: parsed?.code ?? parsed?.err_code ?? null,
+        detail: parsed?.message ?? null,
+      })
+    }
+    // `expires_in` comes as a number or numeric string — coerce.
+    const ttlSec =
+      typeof parsed.expires_in === 'number'
+        ? parsed.expires_in
+        : Number.parseInt(String(parsed.expires_in), 10)
+    const ttlMs = Number.isFinite(ttlSec) && ttlSec > 0 ? ttlSec * 1000 : 0
+    cachedToken = {
+      value: parsed.access_token,
+      expiresAt: now() + Math.max(0, ttlMs - safetyMarginMs),
+    }
+    return parsed.access_token
+  }
+
+  async function getToken(): Promise<string> {
+    if (cachedToken && cachedToken.expiresAt > now()) return cachedToken.value
+    if (refreshPromise) return refreshPromise
+    refreshPromise = (async () => {
+      try {
+        return await refreshToken()
+      } finally {
+        refreshPromise = null
       }
-      return
+    })()
+    return refreshPromise
+  }
+
+  async function send(
+    method: 'POST',
+    path: string,
+    body: unknown,
+  ): Promise<QqSendResult> {
+    const token = await getToken()
+    const url = `${apiBase}${path}`
+    const res = await fetchWithTimeout(
+      url,
+      {
+        method,
+        headers: {
+          authorization: `QQBot ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      },
+      defaultTimeoutMs,
+    )
+    let parsed: (QqSendResult & QqApiErrorBody) | null = null
+    try {
+      parsed = (await res.json()) as QqSendResult & QqApiErrorBody
+    } catch {
+      // Some success responses have an empty body; treat as ok below.
     }
-    // Otherwise it's an event push.
-    if (typeof obj.post_type === 'string') {
-      const ev = obj as unknown as OneBotEvent
-      for (const l of eventListeners) {
-        try {
-          l(ev)
-        } catch {
-          // Event-listener throws are swallowed at this layer — the
-          // bridge is responsible for surfacing via onError.
-        }
-      }
+    if (!res.ok) {
+      throw new QqApiError({
+        method,
+        path,
+        status: res.status,
+        code: parsed?.code ?? parsed?.err_code ?? null,
+        detail: parsed?.message ?? null,
+      })
     }
+    // A 2xx with a non-zero `code` is still a business-logic failure.
+    if (parsed && typeof parsed.code === 'number' && parsed.code !== 0) {
+      throw new QqApiError({
+        method,
+        path,
+        status: res.status,
+        code: parsed.code,
+        detail: parsed.message ?? null,
+      })
+    }
+    return parsed ?? {}
   }
 
   return {
-    get state() {
-      return state
-    },
-    async start(): Promise<void> {
-      if (disposed) throw new Error('OneBotClient: already disposed')
-      if (state !== 'closed') return
-      setState('connecting')
-      const sock = new WebSocketImpl(buildUrl())
-      ws = sock
-      await new Promise<void>((resolve, reject) => {
-        const onOpen = (): void => {
-          sock.onopen = null
-          sock.onerror = null
-          setState('open')
-          resolve()
-        }
-        const onErr = (ev: unknown): void => {
-          sock.onopen = null
-          sock.onerror = null
-          ws = null
-          setState('closed')
-          reject(
-            new Error(
-              `OneBotClient: WebSocket connect failed${
-                ev && typeof ev === 'object' && 'message' in ev
-                  ? `: ${String((ev as { message?: unknown }).message)}`
-                  : ''
-              }`,
-            ),
-          )
-        }
-        sock.onopen = onOpen
-        sock.onerror = onErr
-        sock.onmessage = (ev) => {
-          // Browser sends ArrayBuffer for binary, string for text;
-          // ws sends Buffer. Normalise to string.
-          if (typeof ev.data === 'string') handleFrame(ev.data)
-          else if (ev.data instanceof ArrayBuffer)
-            handleFrame(new TextDecoder('utf-8').decode(ev.data))
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          else if ((ev.data as any)?.toString) handleFrame((ev.data as any).toString('utf-8'))
-        }
-        sock.onclose = (ev) => {
-          ws = null
-          setState('closed')
-          failAllPending(
-            new Error(
-              `OneBotClient: socket closed (code=${ev.code ?? 'n/a'} reason=${ev.reason ?? ''})`,
-            ),
-          )
-        }
-      })
-    },
-    async stop(): Promise<void> {
-      if (disposed) return
-      disposed = true
-      const sock = ws
-      ws = null
-      failAllPending(new Error('disposed'))
-      if (sock) {
-        try {
-          sock.close(1000, 'normal')
-        } catch {
-          // Close throws on already-closed sockets in some impls.
-        }
+    getAccessToken: getToken,
+
+    sendGroupMessage(groupOpenid, body) {
+      const payload: QqPassiveReplyBody = {
+        content: body.content,
+        msg_type: body.msg_type ?? QQ_MSG_TYPE_TEXT,
+        ...(body.msg_id !== undefined ? { msg_id: body.msg_id } : {}),
+        ...(body.msg_seq !== undefined ? { msg_seq: body.msg_seq } : {}),
       }
-      setState('closed')
+      return send('POST', `/v2/groups/${encodeURIComponent(groupOpenid)}/messages`, payload)
     },
-    onEvent(listener) {
-      eventListeners.push(listener)
-      return () => {
-        const i = eventListeners.indexOf(listener)
-        if (i >= 0) eventListeners.splice(i, 1)
+
+    sendC2CMessage(userOpenid, body) {
+      const payload: QqPassiveReplyBody = {
+        content: body.content,
+        msg_type: body.msg_type ?? QQ_MSG_TYPE_TEXT,
+        ...(body.msg_id !== undefined ? { msg_id: body.msg_id } : {}),
+        ...(body.msg_seq !== undefined ? { msg_seq: body.msg_seq } : {}),
       }
+      return send('POST', `/v2/users/${encodeURIComponent(userOpenid)}/messages`, payload)
     },
-    onState(listener) {
-      stateListeners.push(listener)
-      return () => {
-        const i = stateListeners.indexOf(listener)
-        if (i >= 0) stateListeners.splice(i, 1)
-      }
+
+    sendChannelMessage(channelId, body) {
+      // Guild channel endpoint takes `content` + `msg_id` (no msg_type/seq).
+      const payload: Record<string, unknown> = { content: body.content }
+      if (body.msg_id !== undefined) payload.msg_id = body.msg_id
+      return send('POST', `/channels/${encodeURIComponent(channelId)}/messages`, payload)
     },
-    async callAction<T = unknown>(
-      action: string,
-      params: Record<string, unknown> = {},
-    ): Promise<T> {
-      if (disposed) throw new Error('OneBotClient: disposed')
-      if (state !== 'open' || !ws) {
-        throw new Error(`OneBotClient: cannot send while state=${state}`)
-      }
-      const echo = generateEcho()
-      const req: OneBotActionRequest = { action, params, echo }
-      return new Promise<T>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          if (pending.has(echo)) {
-            pending.delete(echo)
-            reject(
-              new Error(
-                `OneBotClient: action timeout after ${timeoutMs}ms — action=${action}`,
-              ),
-            )
-          }
-        }, timeoutMs)
-        pending.set(echo, {
-          action,
-          resolve: (v) => resolve(v as T),
-          reject,
-          timer,
-        })
-        try {
-          ws!.send(JSON.stringify(req))
-        } catch (err) {
-          pending.delete(echo)
-          clearTimeout(timer)
-          reject(err)
-        }
-      })
+
+    sendGuildDirectMessage(guildId, body) {
+      const payload: Record<string, unknown> = { content: body.content }
+      if (body.msg_id !== undefined) payload.msg_id = body.msg_id
+      return send('POST', `/dms/${encodeURIComponent(guildId)}/messages`, payload)
+    },
+
+    invalidateToken(): void {
+      cachedToken = null
     },
   }
 }

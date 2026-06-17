@@ -1,223 +1,177 @@
 /**
- * OneBot v11 wire shapes — a hand-rolled subset.
+ * QQ official Bot API (webhook) wire shapes — a hand-rolled subset.
  *
- * What OneBot v11 is:
+ * What this is:
  *
- *   A community-maintained protocol spec that wraps QQ bot
- *   implementations (NapCat / go-cqhttp / Lagrange / Mirai-onebot /
- *   …) behind a uniform JSON-over-WebSocket interface. It is NOT
- *   official Tencent API — there is no official public bot API for
- *   personal QQ accounts. Implementations reverse-engineer the QQ
- *   client protocol; using them carries account-suspension risk.
+ *   The OFFICIAL Tencent QQ bot platform (https://bot.q.qq.com). Unlike
+ *   the previous OneBot v11 implementation (a third-party protocol that
+ *   drove personal QQ accounts via reverse-engineered adapters), this
+ *   talks the sanctioned bot API: an AppID/AppSecret-authenticated bot
+ *   registered on the QQ open platform.
  *
- * The bridge talks the v11 dialect (rather than the newer v12) for
- * two reasons:
- *   1. v11 has the broadest implementation coverage today (every
- *      maintained adapter supports it; v12 is still uneven).
- *   2. The contract is stable — published 2022, no breaking changes.
+ * Transport — why webhook, not WebSocket:
  *
- * Reference: https://github.com/botuniverse/onebot-11
+ *   The official platform shipped a WebSocket gateway historically, but
+ *   Tencent stopped maintaining it (end-2024) and discontinued
+ *   active-push for group bots (2025-04-21). The sanctioned path is now
+ *   the HTTP **webhook**: the bot registers a public callback URL and
+ *   QQ POSTs events to it. That means QQ ingress needs a public domain +
+ *   TLS (typically a reverse proxy in front of this bridge) — it is NOT
+ *   outbound/NAT-friendly the way Telegram/Lark/Slack are. This is a
+ *   deliberate trade the operator accepts for a first-party bot.
  *
- * Transport modes the spec defines:
+ * Reply model — passive only:
  *
- *   - Forward WebSocket: bridge connects to `ws://onebot:port/`.
- *     Bidirectional — bridge sends action calls, OneBot pushes events.
- *     **We use this.** Simplest to operate, no extra HTTP listener.
- *   - Reverse WebSocket: OneBot connects to a URL the bridge exposes.
- *     Useful when bridge is behind NAT but OneBot has internet egress.
- *   - HTTP POST: bridge POSTs to OneBot for actions; OneBot POSTs to
- *     bridge webhook for events. Two listeners, more moving parts.
+ *   Group / C2C messages can only be PASSIVELY replied to: within a
+ *   short window after a user message, carrying that message's `id`
+ *   (msg_id) on the outbound call. Proactive push to a group/user was
+ *   discontinued. The bridge can answer commands and conversation but
+ *   cannot push unsolicited messages (heartbeats/alerts) to QQ groups.
  *
- * v11 quirks vs other IM protocols:
- *
- *   - No "bot user id" pre-shared. Instead `self_id` is on every
- *     inbound event — the QQ number of the running OneBot instance.
- *     Bridge caches it from the first lifecycle event AND verifies
- *     against any explicit `selfId` opt.
- *   - "CQ codes" — historical inline markup `[CQ:image,file=...]`.
- *     v11 also accepts/emits the "array message" form
- *     `[{type:'text',data:{text:'...'}}, {type:'image',data:{url:...}}]`.
- *     We treat array form as the canonical wire format and request
- *     it via the `message_format` field where the adapter supports
- *     it; if the adapter still emits CQ-string form, we fall back
- *     to passing the raw string as text (graceful degradation; the
- *     CQ markup is human-ish readable).
+ * Reference:
+ *   - Event subscription (webhook):
+ *     https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/event-emit.html
+ *   - Signature / callback validation (Ed25519):
+ *     https://bot.q.qq.com/wiki/develop/api-v2/dev-prepare/interface-framework/sign.html
  */
 
 // ---------------------------------------------------------------------------
-// Action call / response (bridge → OneBot)
+// Opcodes
+// ---------------------------------------------------------------------------
+
+/** op:0 — a dispatched event (carries `t` event type + `d` payload). */
+export const QQ_OP_DISPATCH = 0
+/**
+ * op:13 — webhook callback validation handshake. QQ sends this once when
+ * the callback URL is configured (and periodically); the bot must sign
+ * `event_ts + plain_token` with its Ed25519 key and echo back
+ * `{ plain_token, signature }`.
+ */
+export const QQ_OP_VALIDATION = 13
+
+/** msg_type for plain text on the v2 group / C2C message endpoints. */
+export const QQ_MSG_TYPE_TEXT = 0
+
+// ---------------------------------------------------------------------------
+// Webhook envelope (QQ → bridge)
 // ---------------------------------------------------------------------------
 
 /**
- * Outbound action request. `echo` is a bridge-generated correlation
- * id; OneBot echoes it back in the matching response so we can pair
- * concurrent calls on the same socket.
+ * Top-level webhook payload. `op` discriminates:
+ *   - 0  (QQ_OP_DISPATCH):   a real event; `t` + `d` are set.
+ *   - 13 (QQ_OP_VALIDATION): callback-URL validation; `d` is
+ *     `{ plain_token, event_ts }`.
+ *
+ * `id` is the event id — used for passive-reply correlation and dedup.
+ * `s` (seq) only matters on the deprecated gateway; webhook ignores it.
  */
-export interface OneBotActionRequest {
-  action: string
-  params?: Record<string, unknown>
-  echo: string
+export interface QqWebhookPayload {
+  op: number
+  /** Event id (op:0). Also surfaced as a header; we read it from the body. */
+  id?: string
+  /** Event type (op:0), e.g. 'GROUP_AT_MESSAGE_CREATE'. */
+  t?: string
+  /** Gateway sequence — unused on webhook transport. */
+  s?: number
+  /** Event payload (op:0 message data) or validation data (op:13). */
+  d?: unknown
+}
+
+/** `d` of an op:13 validation payload. */
+export interface QqValidationData {
+  plain_token: string
+  event_ts: string
+}
+
+/** Event types this bridge maps to `ImMessage`. */
+export type QqMessageEventType =
+  | 'GROUP_AT_MESSAGE_CREATE' // group @bot
+  | 'C2C_MESSAGE_CREATE' // single (friend) chat
+  | 'AT_MESSAGE_CREATE' // guild channel @bot
+  | 'DIRECT_MESSAGE_CREATE' // guild direct message
+
+/**
+ * Message sender. Field availability varies by surface:
+ *   - group:   `id` + `member_openid` (+ `union_openid`)
+ *   - C2C:     `id` + `user_openid`   (+ `union_openid`)
+ *   - guild:   `id` + `username`
+ *
+ * `union_openid` is the bot-scoped identity stable ACROSS group/C2C, so
+ * it's the preferred `platformUserId` for IM bindings (a user keeps the
+ * same id whether they DM the bot or @ it in a group).
+ */
+export interface QqAuthor {
+  id?: string
+  union_openid?: string
+  member_openid?: string
+  user_openid?: string
+  username?: string
 }
 
 /**
- * Outbound action response. `retcode` follows the OneBot spec:
- *
- *   0   — ok
- *   1   — async ok (action queued; result later)
- *   100 — bad params
- *   102 — bad request
- *   103 — handler missing
- *   104 — wrong session
- *   201 — server error
- *
- * Non-zero is converted to `OneBotApiError` by the client.
+ * `d` of a message event. One shape covers all four event types; the
+ * presence of `group_openid` / `channel_id` / `guild_id` tells the
+ * mapper which surface it is.
  */
-export interface OneBotActionResponse<T = unknown> {
-  status: 'ok' | 'async' | 'failed'
-  retcode: number
-  data: T | null
-  msg?: string
-  wording?: string
-  echo: string
+export interface QqMessageData {
+  /** Per-message id — the passive-reply correlation handle. */
+  id?: string
+  /** Message body. Group/C2C: plain (the @ is consumed). Guild: has `<@!id>`. */
+  content?: string
+  /** ISO 8601 string on the official API. */
+  timestamp?: string
+  author?: QqAuthor
+  /** GROUP_AT_MESSAGE_CREATE — the group's openid. */
+  group_openid?: string
+  /** AT_MESSAGE_CREATE — guild channel id. */
+  channel_id?: string
+  /** DIRECT_MESSAGE_CREATE — guild id (the send target for guild DMs). */
+  guild_id?: string
 }
 
 // ---------------------------------------------------------------------------
-// Event push (OneBot → bridge)
+// App access token (bridge → QQ auth endpoint)
 // ---------------------------------------------------------------------------
 
 /**
- * Top-level discriminator for inbound events. M7 only consumes
- * `message` events; everything else either contextualises (meta_event:
- * lifecycle / heartbeat → capture self_id, update liveness) or is
- * ignored (notice: friend_add / group_increase, request: friend_request).
+ * Response from `POST https://bots.qq.com/app/getAppAccessToken`.
+ * `expires_in` is seconds — QQ has historically returned it as either a
+ * number or a numeric string, so the client coerces.
  */
-export type OneBotEvent =
-  | OneBotMessageEvent
-  | OneBotMetaEvent
-  | OneBotNoticeEvent
-  | OneBotRequestEvent
-
-interface OneBotEventBase {
-  time: number
-  /** QQ number of the running OneBot instance. */
-  self_id: number
-  post_type: string
-}
-
-export interface OneBotMessageEvent extends OneBotEventBase {
-  post_type: 'message'
-  /** 'private' = DM, 'group' = group chat. */
-  message_type: 'private' | 'group'
-  /** Adapter-dependent: 'friend' | 'normal' | 'anonymous' | 'notice' | ... */
-  sub_type?: string
-  /** Per-message id — adapters use either a string or a number. */
-  message_id: number | string
-  /** Sender QQ number. */
-  user_id: number
-  /** Set on `message_type: 'group'`. */
-  group_id?: number
-  /**
-   * Raw CQ-code message — backward-compatible string form. Always
-   * populated by older adapters; modern adapters keep it alongside
-   * `message: OneBotMessageSegment[]`.
-   */
-  raw_message?: string
-  /**
-   * Canonical message segments. Present when the adapter is told to
-   * emit array form (some run `message_format: 'array'` by default,
-   * others need explicit config — bridge handles both).
-   */
-  message: string | OneBotMessageSegment[]
-  /** Per-user sender metadata. */
-  sender?: OneBotSender
-}
-
-export interface OneBotSender {
-  user_id?: number
-  /** Display nickname. May be stale. */
-  nickname?: string
-  /** Group-specific name override (group only). */
-  card?: string
-  /** 'male' | 'female' | 'unknown' */
-  sex?: string
-  age?: number
-  /** Group role (group only): 'owner' | 'admin' | 'member' */
-  role?: string
-}
-
-export interface OneBotMetaEvent extends OneBotEventBase {
-  post_type: 'meta_event'
-  meta_event_type: 'lifecycle' | 'heartbeat'
-  sub_type?: 'enable' | 'disable' | 'connect'
-  /** Carried on heartbeat — bridge surfaces but doesn't currently consume. */
-  status?: Record<string, unknown>
-}
-
-export interface OneBotNoticeEvent extends OneBotEventBase {
-  post_type: 'notice'
-  notice_type: string
-}
-
-export interface OneBotRequestEvent extends OneBotEventBase {
-  post_type: 'request'
-  request_type: string
+export interface QqAppAccessTokenResponse {
+  access_token: string
+  expires_in: number | string
 }
 
 // ---------------------------------------------------------------------------
-// Message segments (array form)
+// Outbound message (bridge → QQ REST)
 // ---------------------------------------------------------------------------
 
 /**
- * Discriminated union of message segment shapes. M7 understands
- * 'text' / 'image' / 'record' (voice) / 'file'. Anything else is
- * passed through opaquely so unknown types don't crash the mapper.
- *
- * For `image`: `data.url` is QQ's CDN URL — public, no auth header
- * needed (similar to Discord, unlike Slack/Lark). `data.file` is
- * the adapter-cached filename; useful for re-sending the same
- * image without re-uploading.
- *
- * For `record`: same as image but for voice notes. Some adapters
- * emit `file://…` paths instead of URLs when the file is on the
- * adapter's local disk; bridge skips those (no remote-resolution
- * story in M7).
+ * Body for the v2 group / C2C message endpoints and the channel / DM
+ * endpoints. `msg_id` makes the send a PASSIVE reply (required — see the
+ * reply-model note above). `msg_seq` disambiguates multiple replies to
+ * the same `msg_id` (must increment).
  */
-export type OneBotMessageSegment =
-  | { type: 'text'; data: { text: string } }
-  | {
-      type: 'image'
-      data: { file?: string; url?: string; subType?: number; type?: string }
-    }
-  | { type: 'record'; data: { file?: string; url?: string } }
-  | { type: 'file'; data: { file?: string; url?: string; name?: string } }
-  | { type: 'at'; data: { qq: string | number } }
-  | { type: 'reply'; data: { id: string | number } }
-  | { type: 'face'; data: { id: string | number } }
-  | { type: string; data: Record<string, unknown> }
-
-// ---------------------------------------------------------------------------
-// chat.send_msg request shape (outbound)
-// ---------------------------------------------------------------------------
-
-/**
- * Body for `action: 'send_msg'`. OneBot v11 accepts either the
- * legacy single `user_id` / `group_id` form or a discriminator
- * `message_type` — we use the discriminator form because some
- * adapters reject the legacy form when both fields would be
- * ambiguous.
- *
- * `message` accepts either the CQ-string OR array form. We send
- * the array form for outbound consistency.
- */
-export interface OneBotSendMsgParams {
-  message_type: 'private' | 'group'
-  user_id?: number
-  group_id?: number
-  message: OneBotMessageSegment[]
-  /** Strip text auto-escape of CQ characters. M7 always sends plain text segments — irrelevant for us but typed for forward compat. */
-  auto_escape?: boolean
+export interface QqPassiveReplyBody {
+  content: string
+  /** Defaults to QQ_MSG_TYPE_TEXT on the group/C2C path. */
+  msg_type?: number
+  /** Inbound message id — turns this into a passive reply. */
+  msg_id?: string
+  /** Reply sequence for the same msg_id (increment per reply). */
+  msg_seq?: number
 }
 
-export interface OneBotSendMsgData {
-  message_id: number | string
+/** Minimal success shape returned by the send endpoints. */
+export interface QqSendResult {
+  id?: string
+  timestamp?: string | number
+}
+
+/** Error body the REST endpoints return on failure. */
+export interface QqApiErrorBody {
+  code?: number
+  message?: string
+  err_code?: number
 }

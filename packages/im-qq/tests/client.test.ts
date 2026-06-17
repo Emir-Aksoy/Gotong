@@ -1,377 +1,240 @@
 /**
- * Phase 12 M7 — OneBot v11 forward-WS client coverage.
+ * QQ official Bot API client — token cache + REST send shapes.
  *
- * Uses a FakeWebSocket so the test can drive `onopen`, push frames
- * via `pushFrame`, simulate close, and inspect outbound `send` calls.
+ * Hermetic: a fake `fetch` records every call and returns scripted
+ * `Response`s. No real AppID / secret, no network.
  */
 
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 
-import {
-  createOneBotClient,
-  OneBotApiError,
-  type WebSocketCtor,
-  type WebSocketLike,
-} from '../src/client.js'
+import { createQqClient, QqApiError } from '../src/client.js'
 
-class FakeWebSocket implements WebSocketLike {
-  static instances: FakeWebSocket[] = []
-  readyState = 0
-  onopen: ((ev: unknown) => void) | null = null
-  onmessage: ((ev: { data: unknown }) => void) | null = null
-  onclose: ((ev: { code?: number; reason?: string }) => void) | null = null
-  onerror: ((ev: unknown) => void) | null = null
-  readonly sent: string[] = []
-
-  constructor(public readonly url: string) {
-    FakeWebSocket.instances.push(this)
-  }
-
-  send(data: string): void {
-    if (this.readyState !== 1) throw new Error('socket not open')
-    this.sent.push(data)
-  }
-
-  close(code?: number, reason?: string): void {
-    this.readyState = 3
-    queueMicrotask(() => this.onclose?.({ code, reason }))
-  }
-
-  // --- test driver helpers (not part of WebSocketLike) ---
-  open(): void {
-    this.readyState = 1
-    this.onopen?.({})
-  }
-
-  fail(err: { message?: string } = { message: 'connect refused' }): void {
-    this.readyState = 3
-    this.onerror?.(err)
-  }
-
-  pushFrame(obj: unknown): void {
-    this.onmessage?.({ data: JSON.stringify(obj) })
-  }
-
-  pushRaw(text: string): void {
-    this.onmessage?.({ data: text })
-  }
-
-  serverClose(code = 1006, reason = 'abnormal'): void {
-    this.readyState = 3
-    this.onclose?.({ code, reason })
-  }
+interface Call {
+  url: string
+  init: RequestInit
 }
 
-const FakeWsCtor = FakeWebSocket as unknown as WebSocketCtor
-
-function newEchoFactory(): () => string {
-  let i = 0
-  return () => `echo-${++i}`
+/** A recording fetch driven by a per-URL handler. */
+function makeFetch(handler: (url: string, init: RequestInit) => Response): {
+  fetchImpl: typeof fetch
+  calls: Call[]
+} {
+  const calls: Call[] = []
+  const fetchImpl = (async (url: unknown, init: unknown) => {
+    const i = (init ?? {}) as RequestInit
+    calls.push({ url: String(url), init: i })
+    return handler(String(url), i)
+  }) as unknown as typeof fetch
+  return { fetchImpl, calls }
 }
 
-describe('createOneBotClient: construction', () => {
-  it('throws on missing url', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(() => createOneBotClient({} as any)).toThrow(/url is required/)
-    expect(() => createOneBotClient({ url: '' })).toThrow(/url is required/)
+function tokenResponse(token = 'TOK1', expiresIn: number | string = 7200): Response {
+  return new Response(JSON.stringify({ access_token: token, expires_in: expiresIn }), {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
   })
+}
 
-  it('throws when no WebSocket impl is available', () => {
-    const originalGlobal = (globalThis as { WebSocket?: unknown }).WebSocket
-    ;(globalThis as { WebSocket?: unknown }).WebSocket = undefined
-    try {
-      expect(() => createOneBotClient({ url: 'ws://x' })).toThrow(/no WebSocket implementation/)
-    } finally {
-      ;(globalThis as { WebSocket?: unknown }).WebSocket = originalGlobal
-    }
-  })
-})
+function jsonBody(init: RequestInit): Record<string, unknown> {
+  return JSON.parse(String(init.body)) as Record<string, unknown>
+}
 
-describe('createOneBotClient: connect lifecycle', () => {
-  it('opens the socket and reaches state=open', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({
-      url: 'ws://x/',
-      webSocketImpl: FakeWsCtor,
-      generateEcho: newEchoFactory(),
-    })
-    const p = c.start()
-    // Allow the constructor to run + onopen wiring to happen.
-    await new Promise((r) => setImmediate(r))
-    expect(FakeWebSocket.instances).toHaveLength(1)
-    FakeWebSocket.instances[0]!.open()
-    await p
-    expect(c.state).toBe('open')
-    await c.stop()
-  })
+const BASE_OPTS = { appId: 'APPID', clientSecret: 'SECRET' }
 
-  it('rejects on connect failure', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({
-      url: 'ws://x/',
-      webSocketImpl: FakeWsCtor,
-      generateEcho: newEchoFactory(),
-    })
-    const p = c.start()
-    await new Promise((r) => setImmediate(r))
-    FakeWebSocket.instances[0]!.fail({ message: 'ECONNREFUSED' })
-    await expect(p).rejects.toThrow(/ECONNREFUSED/)
-    expect(c.state).toBe('closed')
-  })
-
-  it('appends access_token to the connect URL', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({
-      url: 'ws://x/',
-      accessToken: 'tok-abc',
-      webSocketImpl: FakeWsCtor,
-      generateEcho: newEchoFactory(),
-    })
-    const p = c.start()
-    await new Promise((r) => setImmediate(r))
-    expect(FakeWebSocket.instances[0]!.url).toBe('ws://x/?access_token=tok-abc')
-    FakeWebSocket.instances[0]!.open()
-    await p
-    await c.stop()
-  })
-
-  it('appends access_token with & when url already has query', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({
-      url: 'ws://x/?foo=1',
-      accessToken: 'tok',
-      webSocketImpl: FakeWsCtor,
-      generateEcho: newEchoFactory(),
-    })
-    const p = c.start()
-    await new Promise((r) => setImmediate(r))
-    expect(FakeWebSocket.instances[0]!.url).toBe('ws://x/?foo=1&access_token=tok')
-    FakeWebSocket.instances[0]!.open()
-    await p
-    await c.stop()
-  })
-
-  it('emits state changes to subscribers', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({ url: 'ws://x', webSocketImpl: FakeWsCtor, generateEcho: newEchoFactory() })
-    const states: string[] = []
-    c.onState((s) => states.push(s))
-    const p = c.start()
-    await new Promise((r) => setImmediate(r))
-    FakeWebSocket.instances[0]!.open()
-    await p
-    await c.stop()
-    expect(states).toEqual(['connecting', 'open', 'closed'])
+describe('createQqClient — construction', () => {
+  it('requires appId and clientSecret', () => {
+    // @ts-expect-error missing appId
+    expect(() => createQqClient({ clientSecret: 'x' })).toThrow(/appId/)
+    // @ts-expect-error missing clientSecret
+    expect(() => createQqClient({ appId: 'x' })).toThrow(/clientSecret/)
   })
 })
 
-describe('createOneBotClient: action calls', () => {
-  it('sends a JSON action with echo and resolves on matching response', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({
-      url: 'ws://x',
-      webSocketImpl: FakeWsCtor,
-      generateEcho: newEchoFactory(),
+describe('app access token cache', () => {
+  it('mints once and serves the cached token on the next call', async () => {
+    let tokenPosts = 0
+    const { fetchImpl, calls } = makeFetch((url) => {
+      if (url.endsWith('/app/getAppAccessToken')) {
+        tokenPosts += 1
+        return tokenResponse('TOK1')
+      }
+      return new Response('{}', { status: 200 })
     })
-    const startP = c.start()
-    await new Promise((r) => setImmediate(r))
-    const sock = FakeWebSocket.instances[0]!
-    sock.open()
-    await startP
-    const actionP = c.callAction<{ message_id: number }>('send_msg', {
-      message_type: 'private',
-      user_id: 1,
-      message: [{ type: 'text', data: { text: 'hi' } }],
+    let clock = 1000
+    const client = createQqClient({ ...BASE_OPTS, fetchImpl, now: () => clock })
+
+    expect(await client.getAccessToken()).toBe('TOK1')
+    clock += 5000 // still well within TTL (7200s − 120s margin)
+    expect(await client.getAccessToken()).toBe('TOK1')
+    expect(tokenPosts).toBe(1)
+
+    // The token POST goes to the token host with appId + clientSecret.
+    const tokenCall = calls.find((c) => c.url.endsWith('/app/getAppAccessToken'))!
+    expect(tokenCall.url).toBe('https://bots.qq.com/app/getAppAccessToken')
+    expect(jsonBody(tokenCall.init)).toEqual({ appId: 'APPID', clientSecret: 'SECRET' })
+  })
+
+  it('coalesces concurrent refreshes into a single auth POST', async () => {
+    let tokenPosts = 0
+    const { fetchImpl } = makeFetch((url) => {
+      if (url.endsWith('/app/getAppAccessToken')) {
+        tokenPosts += 1
+        return tokenResponse('TOK1')
+      }
+      return new Response('{}', { status: 200 })
     })
-    // After microtask the send should have happened.
-    await new Promise((r) => setImmediate(r))
-    expect(sock.sent).toHaveLength(1)
-    const sentReq = JSON.parse(sock.sent[0]!) as { action: string; echo: string; params: unknown }
-    expect(sentReq.action).toBe('send_msg')
-    expect(sentReq.echo).toBe('echo-1')
-    sock.pushFrame({ status: 'ok', retcode: 0, data: { message_id: 999 }, echo: 'echo-1' })
-    const out = await actionP
-    expect(out).toEqual({ message_id: 999 })
-    await c.stop()
+    const client = createQqClient({ ...BASE_OPTS, fetchImpl })
+
+    const [a, b, c] = await Promise.all([
+      client.getAccessToken(),
+      client.getAccessToken(),
+      client.getAccessToken(),
+    ])
+    expect([a, b, c]).toEqual(['TOK1', 'TOK1', 'TOK1'])
+    expect(tokenPosts).toBe(1)
   })
 
-  it('rejects with OneBotApiError on non-zero retcode', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({ url: 'ws://x', webSocketImpl: FakeWsCtor, generateEcho: newEchoFactory() })
-    const startP = c.start()
-    await new Promise((r) => setImmediate(r))
-    FakeWebSocket.instances[0]!.open()
-    await startP
-    const sock = FakeWebSocket.instances[0]!
-    const ap = c.callAction('send_msg', {})
-    await new Promise((r) => setImmediate(r))
-    sock.pushFrame({
-      status: 'failed',
-      retcode: 100,
-      data: null,
-      msg: 'BAD_PARAMS',
-      wording: 'group_id required',
-      echo: 'echo-1',
+  it('re-mints once the cached token has expired', async () => {
+    let n = 0
+    const { fetchImpl } = makeFetch((url) => {
+      if (url.endsWith('/app/getAppAccessToken')) {
+        n += 1
+        return tokenResponse(`TOK${n}`, 7200)
+      }
+      return new Response('{}', { status: 200 })
     })
-    await expect(ap).rejects.toBeInstanceOf(OneBotApiError)
-    await ap.catch((err) => {
-      expect((err as OneBotApiError).retcode).toBe(100)
-      expect((err as OneBotApiError).detail).toBe('group_id required')
+    let clock = 1000
+    const client = createQqClient({ ...BASE_OPTS, fetchImpl, now: () => clock })
+
+    expect(await client.getAccessToken()).toBe('TOK1')
+    // Advance past expiry: TTL 7200s − 120s margin = 7_080_000 ms.
+    clock += 7_080_001
+    expect(await client.getAccessToken()).toBe('TOK2')
+    expect(n).toBe(2)
+  })
+
+  it('re-mints after invalidateToken()', async () => {
+    let n = 0
+    const { fetchImpl } = makeFetch((url) => {
+      if (url.endsWith('/app/getAppAccessToken')) {
+        n += 1
+        return tokenResponse(`TOK${n}`)
+      }
+      return new Response('{}', { status: 200 })
     })
-    await c.stop()
+    const client = createQqClient({ ...BASE_OPTS, fetchImpl })
+    expect(await client.getAccessToken()).toBe('TOK1')
+    client.invalidateToken()
+    expect(await client.getAccessToken()).toBe('TOK2')
+    expect(n).toBe(2)
   })
 
-  it('treats retcode=1 (async) as success and resolves with data', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({ url: 'ws://x', webSocketImpl: FakeWsCtor, generateEcho: newEchoFactory() })
-    const startP = c.start()
-    await new Promise((r) => setImmediate(r))
-    FakeWebSocket.instances[0]!.open()
-    await startP
-    const sock = FakeWebSocket.instances[0]!
-    const ap = c.callAction('send_msg', {})
-    await new Promise((r) => setImmediate(r))
-    sock.pushFrame({ status: 'async', retcode: 1, data: { queued: true }, echo: 'echo-1' })
-    await expect(ap).resolves.toEqual({ queued: true })
-    await c.stop()
-  })
-
-  it('rejects with timeout when no response arrives', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({
-      url: 'ws://x',
-      webSocketImpl: FakeWsCtor,
-      generateEcho: newEchoFactory(),
-      timeoutMs: 50,
+  it('coerces a numeric-string expires_in', async () => {
+    const { fetchImpl } = makeFetch((url) => {
+      if (url.endsWith('/app/getAppAccessToken')) return tokenResponse('TOK1', '7200')
+      return new Response('{}', { status: 200 })
     })
-    const startP = c.start()
-    await new Promise((r) => setImmediate(r))
-    FakeWebSocket.instances[0]!.open()
-    await startP
-    await expect(c.callAction('send_msg', {})).rejects.toThrow(/timeout/)
-    await c.stop()
+    let clock = 1000
+    const client = createQqClient({ ...BASE_OPTS, fetchImpl, now: () => clock })
+    expect(await client.getAccessToken()).toBe('TOK1')
+    clock += 5000
+    // Cache still valid → no throw, same token (would re-mint if ttl parsed to 0).
+    expect(await client.getAccessToken()).toBe('TOK1')
   })
 
-  it('rejects with disposed when stop() is called mid-flight', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({ url: 'ws://x', webSocketImpl: FakeWsCtor, generateEcho: newEchoFactory() })
-    const startP = c.start()
-    await new Promise((r) => setImmediate(r))
-    FakeWebSocket.instances[0]!.open()
-    await startP
-    const ap = c.callAction('send_msg', {}).catch((e: Error) => e.message)
-    await new Promise((r) => setImmediate(r))
-    await c.stop()
-    const msg = await ap
-    expect(msg).toBe('disposed')
-  })
-
-  it('rejects when sending while not connected', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({ url: 'ws://x', webSocketImpl: FakeWsCtor, generateEcho: newEchoFactory() })
-    await expect(c.callAction('send_msg')).rejects.toThrow(/state=closed/)
-  })
-
-  it('multiplexes concurrent actions by echo', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({ url: 'ws://x', webSocketImpl: FakeWsCtor, generateEcho: newEchoFactory() })
-    const startP = c.start()
-    await new Promise((r) => setImmediate(r))
-    FakeWebSocket.instances[0]!.open()
-    await startP
-    const sock = FakeWebSocket.instances[0]!
-    const a = c.callAction('send_msg', { id: 1 })
-    const b = c.callAction('send_msg', { id: 2 })
-    await new Promise((r) => setImmediate(r))
-    // Respond out of order.
-    sock.pushFrame({ status: 'ok', retcode: 0, data: 'B', echo: 'echo-2' })
-    sock.pushFrame({ status: 'ok', retcode: 0, data: 'A', echo: 'echo-1' })
-    expect(await a).toBe('A')
-    expect(await b).toBe('B')
-    await c.stop()
+  it('throws QqApiError when the token mint fails', async () => {
+    const { fetchImpl } = makeFetch(() =>
+      new Response(JSON.stringify({ code: 100007, message: 'appid invalid' }), { status: 401 }),
+    )
+    const client = createQqClient({ ...BASE_OPTS, fetchImpl })
+    await expect(client.getAccessToken()).rejects.toBeInstanceOf(QqApiError)
   })
 })
 
-describe('createOneBotClient: event push', () => {
-  it('routes server-push frames into onEvent listeners', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({ url: 'ws://x', webSocketImpl: FakeWsCtor, generateEcho: newEchoFactory() })
-    const got: unknown[] = []
-    c.onEvent((ev) => got.push(ev))
-    const startP = c.start()
-    await new Promise((r) => setImmediate(r))
-    FakeWebSocket.instances[0]!.open()
-    await startP
-    const sock = FakeWebSocket.instances[0]!
-    sock.pushFrame({
-      post_type: 'message',
-      message_type: 'private',
-      self_id: 1,
-      user_id: 2,
-      message: [{ type: 'text', data: { text: 'hi' } }],
-      message_id: 1,
-      time: 1,
+describe('REST send shapes', () => {
+  /** Build a client whose token always succeeds; sends echo a captured response. */
+  function sendingClient(sendResponse: () => Response) {
+    return makeFetch((url) => {
+      if (url.endsWith('/app/getAppAccessToken')) return tokenResponse('TOK1')
+      return sendResponse()
     })
-    expect(got).toHaveLength(1)
-    await c.stop()
+  }
+
+  it('group send → /v2/groups/{id}/messages with msg_type + msg_id + msg_seq', async () => {
+    const { fetchImpl, calls } = sendingClient(() => new Response('{}', { status: 200 }))
+    const client = createQqClient({ ...BASE_OPTS, fetchImpl })
+    await client.sendGroupMessage('G_ABC', { content: 'hi', msg_id: 'M1', msg_seq: 2 })
+
+    const call = calls.find((c) => c.url.includes('/v2/groups/'))!
+    expect(call.url).toBe('https://api.sgroup.qq.com/v2/groups/G_ABC/messages')
+    expect(call.init.method).toBe('POST')
+    expect((call.init.headers as Record<string, string>).authorization).toBe('QQBot TOK1')
+    expect(jsonBody(call.init)).toEqual({
+      content: 'hi',
+      msg_type: 0,
+      msg_id: 'M1',
+      msg_seq: 2,
+    })
   })
 
-  it('drops malformed JSON without crashing', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({ url: 'ws://x', webSocketImpl: FakeWsCtor, generateEcho: newEchoFactory() })
-    const startP = c.start()
-    await new Promise((r) => setImmediate(r))
-    FakeWebSocket.instances[0]!.open()
-    await startP
-    const sock = FakeWebSocket.instances[0]!
-    sock.pushRaw('this is not JSON')
-    // Should still be alive — drive a real action through to confirm.
-    const ap = c.callAction('test', {})
-    await new Promise((r) => setImmediate(r))
-    sock.pushFrame({ status: 'ok', retcode: 0, data: { ok: 1 }, echo: 'echo-1' })
-    expect(await ap).toEqual({ ok: 1 })
-    await c.stop()
+  it('C2C send → /v2/users/{id}/messages', async () => {
+    const { fetchImpl, calls } = sendingClient(() => new Response('{}', { status: 200 }))
+    const client = createQqClient({ ...BASE_OPTS, fetchImpl })
+    await client.sendC2CMessage('U_1', { content: 'yo', msg_id: 'M2', msg_seq: 1 })
+
+    const call = calls.find((c) => c.url.includes('/v2/users/'))!
+    expect(call.url).toBe('https://api.sgroup.qq.com/v2/users/U_1/messages')
+    expect(jsonBody(call.init)).toEqual({
+      content: 'yo',
+      msg_type: 0,
+      msg_id: 'M2',
+      msg_seq: 1,
+    })
   })
 
-  it('returns unsubscribe from onEvent', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({ url: 'ws://x', webSocketImpl: FakeWsCtor, generateEcho: newEchoFactory() })
-    const got: unknown[] = []
-    const off = c.onEvent((ev) => got.push(ev))
-    const startP = c.start()
-    await new Promise((r) => setImmediate(r))
-    FakeWebSocket.instances[0]!.open()
-    await startP
-    off()
-    FakeWebSocket.instances[0]!.pushFrame({
-      post_type: 'message',
-      message_type: 'private',
-      self_id: 1,
-      user_id: 2,
-      message: 'hi',
-      message_id: 1,
-      time: 1,
-    })
-    expect(got).toHaveLength(0)
-    await c.stop()
+  it('channel send → /channels/{id}/messages with content + msg_id only', async () => {
+    const { fetchImpl, calls } = sendingClient(() => new Response('{}', { status: 200 }))
+    const client = createQqClient({ ...BASE_OPTS, fetchImpl })
+    await client.sendChannelMessage('CH_1', { content: 'c', msg_id: 'M3' })
+
+    const call = calls.find((c) => c.url.includes('/channels/'))!
+    expect(call.url).toBe('https://api.sgroup.qq.com/channels/CH_1/messages')
+    expect(jsonBody(call.init)).toEqual({ content: 'c', msg_id: 'M3' })
+  })
+
+  it('guild DM send → /dms/{id}/messages', async () => {
+    const { fetchImpl, calls } = sendingClient(() => new Response('{}', { status: 200 }))
+    const client = createQqClient({ ...BASE_OPTS, fetchImpl })
+    await client.sendGuildDirectMessage('GU_1', { content: 'd', msg_id: 'M4' })
+
+    const call = calls.find((c) => c.url.includes('/dms/'))!
+    expect(call.url).toBe('https://api.sgroup.qq.com/dms/GU_1/messages')
+    expect(jsonBody(call.init)).toEqual({ content: 'd', msg_id: 'M4' })
+  })
+
+  it('tolerates an empty 2xx body', async () => {
+    const { fetchImpl } = sendingClient(() => new Response('', { status: 200 }))
+    const client = createQqClient({ ...BASE_OPTS, fetchImpl })
+    await expect(
+      client.sendGroupMessage('G', { content: 'x', msg_id: 'M', msg_seq: 1 }),
+    ).resolves.toEqual({})
+  })
+
+  it('throws QqApiError on a non-2xx send', async () => {
+    const { fetchImpl } = sendingClient(() => new Response('', { status: 403 }))
+    const client = createQqClient({ ...BASE_OPTS, fetchImpl })
+    await expect(
+      client.sendGroupMessage('G', { content: 'x', msg_id: 'M', msg_seq: 1 }),
+    ).rejects.toMatchObject({ name: 'QqApiError', status: 403 })
+  })
+
+  it('throws QqApiError on a 2xx with a non-zero business code', async () => {
+    const { fetchImpl } = sendingClient(
+      () => new Response(JSON.stringify({ code: 40034, message: 'rejected' }), { status: 200 }),
+    )
+    const client = createQqClient({ ...BASE_OPTS, fetchImpl })
+    await expect(
+      client.sendC2CMessage('U', { content: 'x', msg_id: 'M', msg_seq: 1 }),
+    ).rejects.toMatchObject({ name: 'QqApiError', code: 40034 })
   })
 })
-
-describe('createOneBotClient: server-side close', () => {
-  it('fails all pending actions when server closes', async () => {
-    FakeWebSocket.instances = []
-    const c = createOneBotClient({ url: 'ws://x', webSocketImpl: FakeWsCtor, generateEcho: newEchoFactory() })
-    const startP = c.start()
-    await new Promise((r) => setImmediate(r))
-    FakeWebSocket.instances[0]!.open()
-    await startP
-    const ap = c.callAction('send_msg', {}).catch((e: Error) => e.message)
-    await new Promise((r) => setImmediate(r))
-    FakeWebSocket.instances[0]!.serverClose(1006, 'lost')
-    expect(await ap).toMatch(/closed/)
-    expect(c.state).toBe('closed')
-  })
-})
-
-// Silence unused-import warning.
-void vi
