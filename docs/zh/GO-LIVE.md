@@ -57,6 +57,25 @@
 
 成员要的只是：你的**机器人用户名**（如 `@my_hub_bot`）+ 一个**绑定码**。
 
+### 2.1 例外：QQ 官方 webhook 需要公网（其余五桥免穿透）
+
+上面这套「出站、免穿透」对 Telegram / Lark / Slack / Discord / Matrix 全成立——它们
+都主动拨向平台云端（Telegram / Matrix 长轮询，Discord / Lark / Slack 持久 WS）。
+**唯一的例外是 QQ**：官方 Bot API 在 2024 底把 WebSocket 判死、只推**入站 webhook**，
+所以 QQ 桥必须有公网域名 + TLS + 反代，跑 T2/T3 云主机，家用 NAT 后面收不到。理由与
+取舍见 [`IM-OFFICIAL-REARCH.md`](IM-OFFICIAL-REARCH.md)。
+
+| 桥 | 方向 | 免穿透 | 需公网入口 | 主动推送 |
+|---|---|---|---|---|
+| Telegram / Discord / Matrix | 出站 | ✅ | ❌ | ✅ |
+| Lark（官方长连接） | 出站 | ✅ | ❌ | ✅ |
+| Slack（Socket Mode） | 出站 | ✅ | ❌ | ✅ |
+| **QQ（官方 webhook）** | **入站** | **❌** | **✅（域名 + TLS + 反代）** | **❌（仅被动回复）** |
+
+> host 的 `startImBridges()` 按 env 起桥（Telegram / Lark / Slack / QQ 已 env-gate，
+> Discord / Matrix 走示例 router）。本文以 Telegram 作 T1/T2 的默认 IM——它最省事、零
+> 公网面；要接其他桥按上表的方向选合适拓扑（QQ → 必上云 + 反代）。
+
 ---
 
 ## 三、家用主机 vs 云服务器：差异有多大？

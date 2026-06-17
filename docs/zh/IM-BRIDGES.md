@@ -1,13 +1,18 @@
 # IM Bridges — 部署 + 调试 cookbook
 
-> Phase 12 M8 收尾文档。本文是把 6 个 `@aipehub/im-*` bridge 真接到生产
-> host 的现场手册。读这篇之前推荐先看：
+> 本文是把 6 个 `@aipehub/im-*` bridge 真接到生产 host 的现场手册。
+>
+> **2026-06：IM 桥官方化。** 有官方 API 的平台全切官方直连——QQ 走官方 Bot
+> webhook（替代第三方 OneBot v11）、Lark 走官方长连接、Slack 走 Socket Mode
+> （都替代旧 webhook 入站）。改的理由、OpenClaw / Hermes 对照、QQ「官方 vs 免穿透」
+> 取舍见 [`IM-OFFICIAL-REARCH.md`](IM-OFFICIAL-REARCH.md)。
+>
+> 读这篇之前推荐先看：
 >
 > - `examples/im-bridge-host/` —— 端到端 demo
-> - `examples/im-bridge-host/src/router.ts` —— 可复制的 router 胶水
 > - 各 bridge 自己的 `packages/im-*/README.md` —— 平台特定坑
 >
-> Last updated: 2026-05-27
+> Last updated: 2026-06-17
 
 ---
 
@@ -17,74 +22,57 @@
 |---------|-----------------|---------|---------|---------|---------|
 | `@aipehub/im-telegram` | Bot API (HTTPS) | `getUpdates` 长轮询 | `sendMessage` | bot token | 出站 HTTPS 到 `api.telegram.org`（可走 proxy） |
 | `@aipehub/im-matrix` | Client-Server API | `/sync` 长轮询 (timeout 30s) | `PUT .../send/m.room.message/<txn>` | access_token | 出站 HTTPS 到 homeserver |
-| `@aipehub/im-lark` | Open API + Webhook | HTTPS webhook（**入向需要公网**） | `POST .../im/v1/messages` | app_id + app_secret | **入向公网 + 出站 HTTPS** 到 `open.feishu.cn` |
+| `@aipehub/im-lark` | 官方长连接（SDK `WSClient`） | 出站持久 WS（`im.message.receive_v1`） | `POST .../im/v1/messages` | app_id + app_secret | **出站**·免穿透 到 `open.feishu.cn` |
 | `@aipehub/im-discord` | Gateway (WSS) | WebSocket gateway 持久连 + heartbeat | `POST /channels/.../messages` | bot token + intents | 出站 WSS + HTTPS 到 `discord.com` |
-| `@aipehub/im-slack` | Events API webhook | HTTPS webhook（**入向需要公网**） | `chat.postMessage` (HTTPS) | signing secret + bot token | **入向公网 + 出站 HTTPS** 到 `slack.com` |
-| `@aipehub/im-qq` | OneBot v11 forward WS | bridge 主动连 adapter 的 `ws://` | adapter 的 `send_msg` action | adapter access_token | bridge 跟 adapter 都需要本地能跑 |
+| `@aipehub/im-slack` | Socket Mode（WSS） | 出站持久 WS（`xapp-` token） | `chat.postMessage` (HTTPS) | `xapp-` + `xoxb-` 两 token | **出站**·免穿透 到 `slack.com` |
+| `@aipehub/im-qq` | 官方 Bot API + Webhook | **HTTPS webhook（入向需公网 + TLS）** | 被动回复 REST（带 `msg_id`） | AppID + AppSecret | **入向公网 + 出站 HTTPS** 到 `bots.qq.com` |
 
-**三种部署模式**（从最简单到最折腾）：
+**两种部署模式**（按是否需要公网入口分）：
 
-1. **长轮询 (Telegram, Matrix)** — 最省心。bridge 自己向云端拉，**不需要公网入口**，
-   家里 NAT 后面也能跑。代价是延迟 1-5 秒（看 long-poll 配置）。
-2. **持久 WebSocket (Discord, QQ)** — 一条长连，秒级延迟。Discord 跟云端连；
-   QQ 跟你本地 adapter 连。**也不要公网入口**。
-3. **Webhook (Slack, Lark)** — 平台主动 POST 到你给的 URL。**必须公网可达 + TLS**，
-   通常配 Caddy / Nginx 反代到 bridge 的 HTTP 端口。延迟最低。
+1. **出站长连 / 长轮询 (Telegram, Matrix, Discord, Lark, Slack)** — bridge 主动拨向
+   平台云端：Telegram / Matrix 长轮询，Discord / Lark / Slack 持久 WS。**都不需要公网
+   入口**，家里 NAT 后面也能跑。这是官方化后的常态——五桥全出站、全免穿透。
+2. **入站 Webhook (QQ)** — QQ 官方 Bot API 把 WS 判死、只推入站 webhook，所以**必须
+   公网可达 + TLS**，配 Caddy / Nginx 反代到 bridge 的 HTTP 端口。这是 QQ 官方化的代价
+   （见 [`IM-OFFICIAL-REARCH.md`](IM-OFFICIAL-REARCH.md) §3.1）。
 
-如果你要从一个 0 入向公网的家用机跑：选 Telegram + Matrix + Discord + QQ（4 个），
-跳过 Slack + Lark（这两个非要走 webhook 的）。
+如果你要从一个 0 入向公网的家用机跑：选 Telegram + Matrix + Discord + Lark + Slack
+（5 个，全出站免穿透），跳过 **QQ**（唯一非要走入站 webhook、得上云配反代的）。
 
 ---
 
 ## 二、通用集成 (host 侧)
 
-所有 bridge 共享同一套 router glue 代码。复用模式：
+生产 host 已经把 IM 接线折进 `startImBridges()`（`packages/host/src/im-bridge.ts`）。
+你**不用**自己写 router——按平台填 env，host 启动时逐平台 env-gate 起桥，全挂到同一套
+`handleImMessage` 路由上。最省事的接法就是填环境变量：
 
-```ts
-import { TelegramBridge } from '@aipehub/im-telegram'
-import { SlackBridge } from '@aipehub/im-slack'
-import { QqBridge } from '@aipehub/im-qq'
-// …
-
-import { makeIdentityImBindingResolver } from './im/identity-resolver.js'
-import { createImRouter } from './im/router.js'   // 复制自 examples/im-bridge-host/src/router.ts
-
-const resolver = makeIdentityImBindingResolver(identity)
-const router = createImRouter({
-  hub,
-  resolver,
-  freeTextDispatch: { strategy: { kind: 'capability', capabilities: ['chat'] } },
-  onUnbind: async (platform, platformUserId) => {
-    const n = identity.removeImBinding(platform, platformUserId)
-    return { removed: n > 0 }
-  },
-  // ……其他 hook
-})
-
-// 同一套 router 接所有 bridge：
-const bridges = [
-  new TelegramBridge({ token: process.env.TELEGRAM_BOT_TOKEN! }),
-  new SlackBridge({
-    signingSecret: process.env.SLACK_SIGNING_SECRET!,
-    botToken: process.env.SLACK_BOT_TOKEN!,
-  }),
-  new QqBridge({ url: process.env.QQ_ONEBOT_URL ?? 'ws://127.0.0.1:3001/' }),
-]
-
-for (const b of bridges) {
-  b.onMessage((msg) => router.handle(b, msg))
-  await b.start()
-}
-
-// 退出时：反向 stop
-process.on('SIGINT', async () => {
-  for (const b of bridges.slice().reverse()) await b.stop()
-  await hub.stop()
-  process.exit(0)
-})
+```bash
+# 填哪个平台的 env，就起哪个桥（独立 gate；全不填 = IM 关闭，零行为变化）
+export AIPE_TELEGRAM_BOT_TOKEN=123456:AAE...        # Telegram（出站免穿透）
+export AIPE_LARK_APP_ID=cli_a1b2c3d4                # Lark（出站长连接）
+export AIPE_LARK_APP_SECRET=...
+export AIPE_SLACK_APP_TOKEN=xapp-...                # Slack（Socket Mode）
+export AIPE_SLACK_BOT_TOKEN=xoxb-...
+export AIPE_QQ_BOT_APPID=102000000                  # QQ（官方 webhook，需反代 + 公网）
+export AIPE_QQ_BOT_SECRET=...
+aipehub start
 ```
 
-完整可跑示例：`examples/im-bridge-host/`。
+> `startImBridges` 当前 env-gate **Telegram / Lark / Slack / QQ** 4 个平台。
+> Discord / Matrix 桥仍走 `examples/im-bridge-host/` 的示例 router（折进 host 是独立
+> 小步，见 [`IM-OFFICIAL-REARCH.md`](IM-OFFICIAL-REARCH.md) §六）。
+
+行为约定（`startImBridges`）：
+
+- **逐平台独立**：某平台 env 齐才构造它的桥，全 push 进同一个 `bridges` 数组。
+- **best-effort 起桥**：一个平台凭证坏只 log + skip，不阻断其他平台、不阻断 host 启动
+  （镜像 A2A / ACP 出站 manager）。
+- **零行为变化**：全没设 → 返回 `undefined`，现有部署逐字节不受影响。
+
+要完全自定义 router（改 help 文案 / 加 `/agents` / `/workflow` hook），复制
+`examples/im-bridge-host/src/router.ts` 自己接——所有桥只依赖 `ImBridge` 契约，一套
+router 接全部。
 
 ---
 
@@ -147,44 +135,31 @@ services:
 
 详细配置参考 [Synapse 官方文档](https://element-hq.github.io/synapse/latest/setup/installation.html)。
 
-### 3.3 Lark / Feishu
+### 3.3 Lark / Feishu（官方长连接，免穿透）
 
 ```bash
-# 1. 在 https://open.feishu.cn 建一个 "企业自建应用"
+# 1. 在 https://open.feishu.cn 建一个 "企业自建应用" → 拿 App ID + App Secret
 # 2. 应用功能 → 机器人 → 启用
-# 3. 事件订阅 → 把 Request URL 填成 https://your.host/lark/webhook
-#    Verification Token 留着，bridge 用它做请求验签
+# 3. 事件订阅 → 传输方式选「长连接」（不是「发送至开发者服务器」）
+#    —— 长连接由 bot 主动外拨，无需公网回调、无需 HTTPS、无需 Verification Token / Encrypt Key
 # 4. 加事件：im.message.receive_v1
-# 5. 权限管理 → 添加：
-#    - im:message       (收发消息)
-#    - im:message:send_as_bot
-#    - im:resource      (附件下载, 可选)
-# 6. 在 "凭证与基础信息" 抄 App ID + App Secret
+# 5. 权限管理 → 添加：im:message（收）+ im:message:send_as_bot（回）+ im:resource（附件，可选）
+# 6. 版本管理与发布 → 发布
 
-export LARK_APP_ID=cli_a1b2c3d4
-export LARK_APP_SECRET=...
-export LARK_VERIFICATION_TOKEN=...
-node host.js
+export AIPE_LARK_APP_ID=cli_a1b2c3d4
+export AIPE_LARK_APP_SECRET=...
+aipehub start
 ```
 
-bridge 默认监听 `0.0.0.0:9090/lark/webhook`。需要反代到公网：
-
-```caddy
-# /etc/caddy/Caddyfile (snippet)
-your.host {
-  handle /lark/webhook {
-    reverse_proxy 127.0.0.1:9090
-  }
-  # …其他路由
-}
-```
+bridge 用官方 `@larksuiteoapi/node-sdk` 的 `WSClient` 拨出一条持久 WS 收事件，出站发
+消息仍走 REST（`tenant_access_token` 自动续，缓存 ~2h）。**不需要反代 / 公网 / TLS**
+——跟 Telegram / Discord 一类。国际版只换 `baseUrl`（`open.larksuite.com`）。
 
 **坑**：
-- Lark 走的是 **请求加密 v2**（AES + base64）；bridge 已经处理，但
-  Feishu 后台的 "加密策略" 必须设成 `不加密`（明文 + verification token），
-  否则要在 bridge 配 `encryptKey`。
-- token 是 `app_access_token` 自动续，bridge 内部缓存 2h；首次出消息会
-  有 ~50ms 多走一次拿 token 的开销。
+- 务必选「长连接」而不是「发送至开发者服务器」——后者才是旧的 webhook 入站模式，
+  本桥已不用。
+- **卡片按钮回调事件长连接不投递**（那只走 HTTPS 回调）。纯文本聊天不受影响；要卡片
+  按钮得另起 webhook 旁路（超出本桥范围）。
 
 ### 3.4 Discord
 
@@ -208,122 +183,87 @@ bridge 连 `wss://gateway.discord.gg` 持久 WebSocket。
   "connecting" 超过 30 秒，多半 token 错。日志里看 op 9 (invalid session)。
 - shard 0 / 0 单实例 = 一个 bot；超过 2500 guild 才需要 sharding，本 bridge 不支持。
 
-### 3.5 Slack
+### 3.5 Slack（Socket Mode，免穿透）
 
 ```bash
-# 1. 在 https://api.slack.com/apps 建 App
-# 2. Event Subscriptions → 启用，Request URL 填 https://your.host/slack/webhook
-#    Slack 会发 url_verification 测试，bridge 自动回 challenge。
-# 3. Subscribe to bot events: message.channels, message.im, message.groups
+# 1. 在 https://api.slack.com/apps 建 App（From scratch）
+# 2. Socket Mode → Enable Socket Mode → 引导创建 App-Level Token（connections:write 作用域）
+#    → 拿 xapp-... → 填 AIPE_SLACK_APP_TOKEN
+# 3. Event Subscriptions → 开启 → Subscribe to bot events:
+#    message.channels, message.groups, message.im, message.mpim
+#    （Socket Mode 下不需要 Request URL —— 事件从 socket 推下来）
 # 4. OAuth & Permissions → Bot Token Scopes:
-#    - chat:write
-#    - im:history, channels:history, groups:history
-#    - files:read (可选)
-# 5. Install to Workspace → 拿 Bot User OAuth Token (xoxb-...)
-# 6. Basic Information → Signing Secret 抄一份
+#    chat:write, app_mentions:read, channels:history, groups:history, im:history, mpim:history,
+#    files:read（可选）
+# 5. Install to Workspace → 拿 Bot User OAuth Token (xoxb-...) → 填 AIPE_SLACK_BOT_TOKEN
+# 6. 重新邀请 bot 进 channel：/invite @你的Bot
 
-export SLACK_SIGNING_SECRET=...
-export SLACK_BOT_TOKEN=xoxb-...
-node host.js
+export AIPE_SLACK_APP_TOKEN=xapp-...    # 开 Socket Mode 连接（入站）
+export AIPE_SLACK_BOT_TOKEN=xoxb-...    # chat.postMessage（出站）
+aipehub start
 ```
 
-bridge 默认监听 `0.0.0.0:9091/slack/webhook`。需要反代到公网：
+bridge 用 `xapp-` token 调 `apps.connections.open` 拿 WSS URL 再拨出，事件经 socket
+推下来——**没有 Request URL、没有 TLS、没有 HMAC signing secret**，免穿透。
 
-```caddy
-your.host {
-  handle /slack/webhook {
-    reverse_proxy 127.0.0.1:9091
-  }
+**坑**：
+- 两个 token 别混：`xapp-`（app-level，开连接）vs `xoxb-`（bot，发消息）。
+- `apps.connections.open` 返 `invalid_auth` / `not_allowed_token_type` 等 = app token
+  配错，`start()` loud fail 不重试；限流 / 5xx / 网络按退避重连。
+- `xoxb-` 是长期 token，泄露就完蛋；务必走环境变量别 commit。
+- bridge 内部 `event_id` dedup 走 512-entry FIFO；正常 retry 都能去重。
+
+### 3.6 QQ（官方 Bot API + Webhook，需公网 + 反代）
+
+> QQ 是唯一**不免穿透**的桥：官方 Bot API 把 WebSocket 判死、只推**入站 webhook**，
+> 所以要跑在云主机上、前面挂反代终止 TLS。它替代了旧的第三方 OneBot v11 实现（那个
+> 驱动个人号、有封号风险）。详见 `packages/im-qq/README.md` +
+> [`IM-OFFICIAL-REARCH.md`](IM-OFFICIAL-REARCH.md)。
+
+```bash
+# 1. 在 https://q.qq.com 注册 bot → 拿 AppID + AppSecret（ClientSecret）
+#    旧 Token 在 webhook + v2 路径不用，桥不收它。
+# 2. 配置 bot 的「回调地址」为你的公网 HTTPS 端点，如 https://bot.example.com/qq/webhook
+#    保存时 QQ 发一次性回调校验（op:13），桥用 AppSecret 派生的 Ed25519 密钥自动应答。
+# 3. 启 host（桥自起本地 HTTP 监听，反代转发到它）：
+export AIPE_QQ_BOT_APPID=102000000
+export AIPE_QQ_BOT_SECRET=...
+export AIPE_QQ_WEBHOOK_PORT=9092          # 可选，默认 9092；反代转发到这个端口
+export AIPE_QQ_WEBHOOK_PATH=/qq/webhook   # 可选，默认 /qq/webhook
+aipehub start
+```
+
+反代终止 TLS（nginx 示例），两个 `X-Signature-*` header 必须原样到达桥：
+
+```nginx
+location /qq/webhook {
+    proxy_pass http://127.0.0.1:9092/qq/webhook;
+    proxy_set_header X-Signature-Ed25519   $http_x_signature_ed25519;
+    proxy_set_header X-Signature-Timestamp $http_x_signature_timestamp;
 }
 ```
 
 **坑**：
-- raw body 必须保留 —— Slack 用 HMAC SHA256 对 `v0:${ts}:${rawBody}` 签名。
-  如果用 Express 把它当 `bodyParser.json()` 处理掉，签名会永远验不过。
-  bridge 自带 HTTP server 已正确处理。
-- xoxb-token 是长期 token，不像 Lark 要刷新 —— 但泄露了就完蛋。务必装环境变量，
-  别 commit。
-- bridge 内部 `event_id` dedup 走 512 entry FIFO；正常 retry 都能去重，
-  极端高 QPS 下小心。
-
-### 3.6 QQ (OneBot v11)
-
-> ⚠️ **风险提示**：OneBot v11 不是腾讯官方 API，是社区逆向出来的协议。
-> Tencent 反复封号。请用小号 / 测试号，不要主号。详见 `packages/im-qq/README.md`。
-
-```bash
-# 1. 装 OneBot adapter (推荐 NapCat)
-#    下载: https://github.com/NapNeko/NapCatQQ/releases
-#    跑 NapCat → 扫码登 QQ → WebUI 配 Network → 加 WebSocket Server
-#      监听: ws://127.0.0.1:3001/
-#      access_token: napcat-token-xxx (建议带)
-#      message_format: array (不是默认的 string)
-#
-# 2. 启 bridge:
-export AIPE_QQ_BRIDGE_ACK_RISK=true     # 必须，否则 bridge 拒绝启动
-export ONEBOT_TOKEN=napcat-token-xxx
-node host.js
-```
-
-NapCat 当然也能 docker 化：
-
-```yaml
-# docker-compose.napcat.yml (snippet — 跑 NapCat adapter)
-services:
-  napcat:
-    image: mlikiowa/napcat-docker:latest
-    container_name: napcat
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3001:3001"   # OneBot WS (bridge 连这里)
-      - "127.0.0.1:6099:6099"   # WebUI (首次扫码登录)
-    volumes:
-      - ./napcat-data:/app/.config/QQ
-      - ./napcat-config:/app/napcat/config
-    environment:
-      ACCOUNT: "你的QQ号"
-      WEBUI_PORT: "6099"
-```
-
-跑起来后 `http://127.0.0.1:6099` 扫码登录 QQ，在 WebUI 里加 WebSocket Server 配置。
-
-**坑**：
-- 没 export `AIPE_QQ_BRIDGE_ACK_RISK=true` → bridge 构造时直接 throw（这是
-  设计：让你 fail-fast 而不是上线后才发现）。
-- `message_format: array` 必须配 —— 默认 string 模式下，bridge 收到的是 CQ-string
-  (`[CQ:image,file=xxx]`)，attachment 提取受限。
-- adapter 选型：当前最活跃是 NapCat 和 Lagrange.Core。go-cqhttp 已停维护，
-  Mirai 半活跃但走 onebot 模式需要 mirai-api-http 桥接。
-- 单 bridge 实例 = 单 QQ 登录。多账号要起多个进程。
+- **不免穿透**：QQ 必须有公网域名 + TLS + 反代，跑云主机（GO-LIVE 的 T2/T3），家用
+  NAT 后面收不到官方 webhook。
+- **群 / C2C 仅被动回复**：只能在用户消息时间窗内带 `msg_id` 回复；**主动推送
+  2025-04 已停**——agent 主动 push（心跳 / 告警）到 QQ 群不可用，`sendMessage` 到一个
+  没收过消息的会话会诚实失败。
+- 富媒体（图片 / 文件 / 语音）MVP 未做，`sendMessage` 带 attachments 触发 `onError`
+  但 text 仍发。
 
 ---
 
-## 四、Docker compose 示例（IM 子栈）
+## 四、Docker compose 示例（QQ 反代子栈）
 
-主 `docker-compose.yml` 已经包含 host 进程。如果要把 QQ adapter 一起部署，
-新建 `docker-compose.im.yml`：
+官方化后只有 **QQ** 还需要公网入口（其余五桥全出站免穿透，不需要反代）。如果你部署
+QQ，给主 `docker-compose.yml` 旁边加一个 Caddy 终止 TLS、把 `/qq/webhook` 反代到 host：
 
 ```yaml
-# docker-compose.im.yml — 跑在主 host 旁边的 IM 相关服务
+# docker-compose.im.yml — QQ 官方 webhook 的反向代理
 # 用法: docker compose -f docker-compose.yml -f docker-compose.im.yml up -d
 
 services:
-  # NapCat adapter for QQ bridge —— 详见 §3.6
-  napcat:
-    image: mlikiowa/napcat-docker:latest
-    container_name: aipehub-napcat
-    restart: unless-stopped
-    ports:
-      - "127.0.0.1:3001:3001"
-      - "127.0.0.1:6099:6099"
-    volumes:
-      - ./napcat-data:/app/.config/QQ
-      - ./napcat-config:/app/napcat/config
-    environment:
-      ACCOUNT: "${QQ_ACCOUNT:?需要在 .env 设 QQ_ACCOUNT}"
-      WEBUI_PORT: "6099"
-
-  # Caddy 反代 —— 如果要跑 Slack / Lark webhook
   caddy:
     image: caddy:2
     container_name: aipehub-caddy
@@ -339,26 +279,24 @@ services:
       - aipehub
 ```
 
-主 host 在 `docker-compose.yml` 里跑 `aipehub-host` 容器；这里加 Caddy + NapCat。
-
-Caddy 配置：
+Caddy 配置（自动 ACME 签发证书 + 转发 QQ webhook；T3 直连 IP 顺带反代 web）：
 
 ```caddy
 # caddy/Caddyfile
 your.host {
   encode gzip
 
-  handle /slack/webhook* {
-    reverse_proxy aipehub:9091
-  }
-  handle /lark/webhook* {
-    reverse_proxy aipehub:9090
+  handle /qq/webhook* {
+    reverse_proxy aipehub:9092
   }
   handle {
-    reverse_proxy aipehub:3000
+    reverse_proxy aipehub:3000   # T3 直连 IP 的 web/PWA；纯 T2 + QQ 可省
   }
 }
 ```
+
+> Lark / Slack **不再需要** Caddy——官方化后它俩走出站长连接 / Socket Mode，免穿透。
+> 旧版这里的 NapCat adapter 子栈已随 OneBot 实现一并删除。
 
 ---
 
@@ -404,9 +342,13 @@ your.host {
 | Lark | `LarkApiError(code, msg)` | code 见 [Lark error code 列表](https://open.feishu.cn/document/server-docs/getting-started/server-error-codes) |
 | Discord | `DiscordApiError(code, message)` | code 50001 = missing access |
 | Slack | `SlackApiError(code, error)` | `not_in_channel` = bot 没在 channel |
-| QQ | `OneBotApiError(action, retcode, detail)` | retcode 100 = bad param；wording 中文 |
+| QQ | `QqApiError(status, code, detail)` | 官方 Bot API 错误；发到没收过消息的会话 → 被动回复无 `msg_id` 诚实失败 |
 
 bridge 的 `onError(err)` 回调是关键诊断点 —— 集成时务必接上。
+
+> QQ 专属：群 / C2C **只能被动回复**（官方主动推送 2025-04 已停）。所以「sendMessage
+> 失败」在 QQ 上常常不是 bug，而是你想主动 push 一个没有先发过消息的会话——这条路
+> 官方关了。
 
 ### 5.4 "bot 自己的消息又回来了"
 
@@ -423,11 +365,10 @@ bridge 的 anti-loop 都做了 3-4 层防线，但仍可能在以下情况漏：
 部署任何 bridge 前过一遍：
 
 - [ ] 所有 token / secret 走 env 变量或 vault，**不要** commit 到代码或 `.env`。
-- [ ] webhook bridge (Slack/Lark) 必须 HTTPS。Caddy 自动 ACME 推荐。
-- [ ] Slack signing secret 验签开着（bridge 默认）；不要把验签关掉。
-- [ ] Lark verification token 配着（bridge 默认要求）。
-- [ ] QQ bridge 的 `AIPE_QQ_BRIDGE_ACK_RISK=true` 是显式确认 —— 设这条意味着
-      你接受 QQ 账号被封的风险。
+- [ ] QQ webhook 必须 HTTPS + 反代（Caddy 自动 ACME 推荐）；两个 `X-Signature-*`
+      header 必须原样到达桥（op:0 事件签名靠它验）。其余五桥出站免穿透，无入站面。
+- [ ] Slack 两个 token 别混且别 commit：`xapp-`（开连接）/ `xoxb-`（发消息）。
+- [ ] Lark 选「长连接」而非「发送至开发者服务器」——后者是旧 webhook 入站，会暴露面。
 - [ ] Matrix access_token 用专用 bot 账号，不要用你的主账号 token。
 - [ ] 不要把 bot 加到不该听的 channel/group — bridge 看到所有它能看到的消息。
 - [ ] 路由器外发消息时不要 echo 回 IM 用户输入的敏感 token / code — router 里
@@ -452,6 +393,7 @@ bridge 的 anti-loop 都做了 3-4 层防线，但仍可能在以下情况漏：
 | M12 — `@aipehub/cli` REPL | next |
 | M13 — Phase 12 release notes | next |
 
-host main.ts 还**没有**默认装 IM bridge —— 现状是用户复制 example 当模板。
-等社区使用模式稳定（哪些 hook 真的有人 fork、哪些只是装饰），再决定要不要
-fold 进 host CLI 当 first-class config 选项。
+**更新（2026-06）**：host 现在通过 `startImBridges()` env-gate 了 Telegram / Lark /
+Slack / QQ 4 个桥（见 §二）——填 env 即用，不再需要复制 example。Discord / Matrix 仍走
+example router，折进 host env 闸是独立小步。官方化的理由与各桥 transport 决策见
+[`IM-OFFICIAL-REARCH.md`](IM-OFFICIAL-REARCH.md)。
