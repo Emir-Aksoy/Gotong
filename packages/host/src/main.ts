@@ -131,6 +131,7 @@ import { A2aServer } from './a2a-server.js'
 import { A2aOutboundManager } from './a2a-outbound.js'
 import { AcpOutboundManager } from './acp-outbound.js'
 import { acpApprovalItemFor } from './acp-escalation.js'
+import { startImBridges, type ImBridgesHandle } from './im-bridge.js'
 import { OidcClient } from './oidc-client.js'
 import { OidcLoginService } from './oidc-login-service.js'
 import { SamlLoginService } from './saml-login-service.js'
@@ -1840,6 +1841,19 @@ async function main(): Promise<void> {
     acpOutbound.registerAllFromStore()
   }
 
+  // GO-LIVE GL-1 — outbound IM bridges (Telegram). OFF unless
+  // AIPE_TELEGRAM_BOT_TOKEN is set, so an existing deployment is byte-for-
+  // byte unaffected. Telegram long-polls (no public endpoint), which is
+  // exactly what lets a home box behind NAT run a hub with zero tunnelling
+  // — the IM cloud is the public relay. Members link their IM identity by
+  // DMing the bot `/bind <code>` with a code issued in the admin UI / 我的;
+  // every dispatch then carries the bound `origin.userId`. Needs identity
+  // for the binding store — without it there's nothing to bind against.
+  let imBridges: ImBridgesHandle | undefined
+  if (identity) {
+    imBridges = await startImBridges({ hub, identity, log })
+  }
+
   // Phase 18 C-M3 — inbound A2A message/send endpoint. OFF by default (it
   // exposes the hub to external A2A callers); enable with
   // AIPE_A2A_INBOUND_ENABLED. Auth reuses the per-peer vault token via
@@ -2394,6 +2408,13 @@ async function main(): Promise<void> {
     // server out from under them.
     if (peerRegistry) {
       try { await peerRegistry.stop() } catch (err) { log.error('peer registry stop error', { err }) }
+    }
+    // Stop the IM poll loop early so no new IM-driven dispatch lands mid-
+    // teardown. Telegram's long-poll may take up to its server timeout to
+    // return; the bridge awaits the in-flight poll so an update is never
+    // half-handled.
+    if (imBridges) {
+      try { await imBridges.stop() } catch (err) { log.error('im bridges stop error', { err }) }
     }
     if (mcpProxy) {
       try { await mcpProxy.close() } catch (err) { log.error('mcp proxy close error', { err }) }

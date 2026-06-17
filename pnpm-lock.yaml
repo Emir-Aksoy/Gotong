@@ -718,6 +718,12 @@ importers:
       '@aipehub/identity':
         specifier: workspace:*
         version: link:../identity
+      '@aipehub/im-adapter':
+        specifier: workspace:*
+        version: link:../im-adapter
+      '@aipehub/im-telegram':
+        specifier: workspace:*
+        version: link:../im-telegram
       '@aipehub/inbox':
         specifier: workspace:*
         version: link:../inbox

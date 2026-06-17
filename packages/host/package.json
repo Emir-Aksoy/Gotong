@@ -54,6 +54,8 @@
     "@aipehub/evals": "workspace:*",
     "@aipehub/hub-steward": "workspace:*",
     "@aipehub/identity": "workspace:*",
+    "@aipehub/im-adapter": "workspace:*",
+    "@aipehub/im-telegram": "workspace:*",
     "@aipehub/inbox": "workspace:*",
     "@aipehub/llm": "workspace:*",
     "@aipehub/llm-anthropic": "workspace:*",
