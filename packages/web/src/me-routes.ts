@@ -466,6 +466,44 @@ export interface MeCredentialsSurface {
 }
 
 // ---------------------------------------------------------------------------
+// Member IM-binding surface (GO-LIVE GL-1c)
+//
+// Lets a member link THEIR OWN IM account (Telegram, …): mint a one-time
+// binding code here, DM the bot `/bind <code>`, and from then on their IM
+// messages dispatch as that member. The host (HostMeImService) owns every
+// privileged decision — issuance/list are scoped to the session userId, revoke
+// is gated on ownership (404 otherwise, anti-enumeration). There is no secret
+// to project: a binding is just (platform, platformUserId) → this member.
+// ---------------------------------------------------------------------------
+
+/** One of the caller's own IM bindings (no secret — a binding has none). */
+export interface MeImBindingView {
+  platform: string
+  platformUserId: string
+  displayName: string | null
+  /** Unix ms (matches the identity store's native timestamp shape). */
+  createdAt: number
+}
+
+/** A freshly minted one-time binding code (single-use, short-lived). */
+export interface MeImCodeView {
+  code: string
+  /** Unix ms; the code is rejected on claim once `expiresAt < now`. */
+  expiresAt: number
+}
+
+export interface MeImSurface {
+  /** Whether an IM bridge is actually running (pure UI hint for the panel). */
+  enabled(): boolean
+  /** The caller's own IM bindings. */
+  listBindings(userId: string): Promise<MeImBindingView[]>
+  /** Mint a one-time binding code owned by `userId`. Rotates the prior one. */
+  issueCode(userId: string): Promise<MeImCodeView>
+  /** Disconnect one of `userId`'s OWN bindings. Throws (status 404) otherwise. */
+  removeBinding(userId: string, platform: string, platformUserId: string): Promise<boolean>
+}
+
+// ---------------------------------------------------------------------------
 // Member upload surface (Phase 19 P1-M4)
 //
 // Same host UploadSurface the admin route uses (`WorkflowSurface`-style duck
@@ -742,6 +780,11 @@ export interface HandleMeRouteCtx {
    */
   meCredentials: MeCredentialsSurface | undefined
   /**
+   * GO-LIVE GL-1c — member IM-account linking. Undefined when the host wired no
+   * identity; the /api/me/im routes then return 503 (empty list on GET).
+   */
+  meIm: MeImSurface | undefined
+  /**
    * Phase 19 P1-M4 — member file uploads. Undefined when the host wired no
    * upload backing; `/api/me/uploads` then returns 503.
    */
@@ -916,6 +959,31 @@ export async function handleMeRoute(
     const m = /^\/api\/me\/credentials\/([^/]+)$/.exec(path)
     if (m && method === 'DELETE') {
       await handleMeDeleteCredential(ctx, res, userId, decodeURIComponent(m[1]!))
+      return
+    }
+  }
+  // GO-LIVE GL-1c — member IM-account linking. GET returns whether a bridge is
+  // running + the caller's own bindings; POST mints a one-time binding code the
+  // member DMs to the bot as `/bind <code>`; DELETE disconnects one of the
+  // caller's OWN bindings. All scoped to the session userId server-side.
+  if (method === 'GET' && path === '/api/me/im') {
+    await handleMeListIm(ctx, res, userId)
+    return
+  }
+  if (method === 'POST' && path === '/api/me/im/binding-code') {
+    await handleMeIssueImCode(ctx, res, userId)
+    return
+  }
+  {
+    const m = /^\/api\/me\/im\/bindings\/([^/]+)\/([^/]+)$/.exec(path)
+    if (m && method === 'DELETE') {
+      await handleMeRemoveImBinding(
+        ctx,
+        res,
+        userId,
+        decodeURIComponent(m[1]!),
+        decodeURIComponent(m[2]!),
+      )
       return
     }
   }
@@ -2142,6 +2210,67 @@ async function handleMeDeleteCredential(
   }
   try {
     const removed = await ctx.meCredentials.remove(userId, credentialId)
+    sendJson(res, { ok: true, removed })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// /api/me/im/* — member IM-account linking (GO-LIVE GL-1c)
+//
+// Same shape as the credential handlers: GET degrades to an empty list when no
+// surface is wired; POST/DELETE return 503; host status-coded errors map to
+// HTTP via meAgentErrStatus (notably 404 for a binding the caller doesn't own).
+// ---------------------------------------------------------------------------
+
+async function handleMeListIm(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.meIm) {
+    sendJson(res, { enabled: false, bindings: [] })
+    return
+  }
+  try {
+    const bindings = await ctx.meIm.listBindings(userId)
+    sendJson(res, { enabled: ctx.meIm.enabled(), bindings })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+async function handleMeIssueImCode(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.meIm) {
+    sendJson(res, { error: 'IM linking unavailable (identity not wired)' }, 503)
+    return
+  }
+  try {
+    const { code, expiresAt } = await ctx.meIm.issueCode(userId)
+    sendJson(res, { ok: true, code, expiresAt }, 201)
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+async function handleMeRemoveImBinding(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+  platform: string,
+  platformUserId: string,
+): Promise<void> {
+  if (!ctx.meIm) {
+    sendJson(res, { error: 'IM linking unavailable (identity not wired)' }, 503)
+    return
+  }
+  try {
+    const removed = await ctx.meIm.removeBinding(userId, platform, platformUserId)
     sendJson(res, { ok: true, removed })
   } catch (err) {
     sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))

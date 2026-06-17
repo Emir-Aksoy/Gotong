@@ -203,6 +203,7 @@ import { MeWorkflowEditService } from './me-workflow-edit-service.js'
 import { HostMeAgentService } from './me-agent-service.js'
 import { HostMeAgentGrantsService } from './me-agent-grants-service.js'
 import { HostMeCredentialsService } from './me-credentials-service.js'
+import { HostMeImService } from './me-im-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
 import {
   DEFAULT_HEARTBEAT_MIN_MS,
@@ -1895,6 +1896,16 @@ async function main(): Promise<void> {
     ? new HostMeCredentialsService({ identity })
     : undefined
 
+  // GO-LIVE GL-1c — member IM-account linking. The binding code a member mints
+  // here is what they DM to the bot as `/bind <code>`; bindings live in
+  // identity, so this is wired only when identity is present (/api/me/im 503s
+  // otherwise). `isEnabled` is a live read of the bridge handle declared above
+  // — the panel hides "connect" when no bridge is running so a member isn't
+  // handed a code nothing can consume.
+  const meIm = identity
+    ? new HostMeImService({ identity, isEnabled: () => Boolean(imBridges) })
+    : undefined
+
   // v5 A-M4 — member agent access-grant sharing (an owner shares their agent
   // with other principals). Grants live in identity's resource_grants table, so
   // this is wired only when identity is present; /api/me/agents/:id/grants 503s
@@ -2225,6 +2236,8 @@ async function main(): Promise<void> {
     ...(meAgentGrants ? { meAgentGrants } : {}),
     // v5 A-M3 — member API-credential management (undefined → 503).
     ...(meCredentials ? { meCredentials } : {}),
+    // GO-LIVE GL-1c — member IM-account linking (undefined → 503).
+    ...(meIm ? { meIm } : {}),
     // Phase 16 — member task inbox; undefined when identity is unwired, in
     // which case /me/inbox degrades (empty list / 503).
     ...(inboxService ? { inbox: inboxService } : {}),
