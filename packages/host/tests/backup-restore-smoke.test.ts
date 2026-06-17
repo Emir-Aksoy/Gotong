@@ -14,10 +14,16 @@
  * check that rejects a valid space, a forgotten exclude) this goes red.
  *
  * Two invariants worth proving on the restored copy:
- *   1. `secrets.enc.json` travels (encrypted), `runtime/secret.key` does NOT
- *      — backup.sh deliberately excludes the key; the host lazily mints a
- *      fresh one on boot. So a restored space boots, but its old encrypted
- *      secrets are intentionally unrecoverable without the original key.
+ *   1. The ciphertext travels but its keys do NOT. `secrets.enc.json` (v3)
+ *      and `identity.sqlite`'s vault (v4) both ride along in the archive,
+ *      while their master keys — `runtime/secret.key` and
+ *      `identity-master.key` — are deliberately excluded. A backup that
+ *      bundled either key next to the data it unlocks would defeat the
+ *      at-rest encryption for that copy (the L5 DR-drill finding). The host
+ *      lazily mints a fresh v3 key on boot; the operator restores the v4
+ *      KEK separately. This is why the seed below creates a real identity
+ *      layer — a v3-only seed never exercises the `identity-master.key`
+ *      exclusion, so the assertion would be a no-op false-green.
  *   2. The v3 admin token still verifies — `admins.json` stores only a hash,
  *      so the token the operator kept from `Space.init` keeps working.
  *
@@ -37,6 +43,7 @@ import { fileURLToPath } from 'node:url'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { Hub, Space } from '@aipehub/core'
+import { loadOrCreateMasterKey, openIdentityStore } from '@aipehub/identity'
 import { serveWeb, type WebServerHandle } from '@aipehub/web'
 
 const here = dirname(fileURLToPath(import.meta.url))
@@ -99,9 +106,30 @@ maybe('Phase 19 P3-M2 — backup → restore → verify → boot round-trip', ()
     await init.space.upsertAgent({ id: 'reviewer', allowedCapabilities: ['review'] })
     await init.space.createWorker('alice', ['draft', 'review'])
 
-    // Sanity: the live space has the key the backup must exclude.
+    // --- seed the v4 identity layer on top (the part the old seed lacked) --
+    // Space.init produces a pure v3 space (no identity.sqlite / no KEK), so
+    // the original `not.toContain('secret.key')` never touched the v4 vault
+    // key. Stand up a real identity DB + a vault entry so the archive has the
+    // two things the exclusion is supposed to keep apart: the encrypted vault
+    // (identity.sqlite) and the key that unlocks it (identity-master.key).
+    const masterKeyPath = join(spaceDir, 'identity-master.key')
+    const identityDbPath = join(spaceDir, 'identity.sqlite')
+    const masterKey = loadOrCreateMasterKey(masterKeyPath) // mints a 0600 KEK file
+    const idStore = openIdentityStore({ dbPath: identityDbPath, masterKey })
+    idStore.createVaultEntry({
+      kind: 'oidc_client_secret',
+      ownerKind: 'org',
+      secret: 'sk-fake-vault-secret-not-a-real-credential',
+      label: 'dr-smoke',
+    })
+    idStore.close()
+
+    // Sanity: the live space has BOTH master keys the backup must exclude,
+    // and both ciphertext stores that must travel.
     expect(existsSync(join(spaceDir, 'runtime', 'secret.key'))).toBe(true)
     expect(existsSync(join(spaceDir, 'secrets.enc.json'))).toBe(true)
+    expect(existsSync(identityDbPath)).toBe(true)
+    expect(existsSync(masterKeyPath)).toBe(true)
   }, 60_000)
 
   afterAll(async () => {
@@ -126,6 +154,11 @@ maybe('Phase 19 P3-M2 — backup → restore → verify → boot round-trip', ()
     expect(listing).toContain('space.json')
     expect(listing).toContain('secrets.enc.json')
     expect(listing).not.toContain('secret.key')
+    // v4: the encrypted vault DB travels, but its KEK must NOT. A leaked
+    // backup carrying identity-master.key next to identity.sqlite would
+    // defeat the vault encryption — the L5 DR-drill finding this guards.
+    expect(listing).toContain('identity.sqlite')
+    expect(listing).not.toContain('identity-master.key')
   })
 
   it('restore.sh extracts + runs verify.sh, landing a structurally sound space', () => {
@@ -149,6 +182,9 @@ maybe('Phase 19 P3-M2 — backup → restore → verify → boot round-trip', ()
     // Encrypted secrets travel; the key to decrypt them deliberately does not.
     expect(existsSync(join(restoreDir, 'secrets.enc.json'))).toBe(true)
     expect(existsSync(join(restoreDir, 'runtime', 'secret.key'))).toBe(false)
+    // v4 vault: the DB travels; its KEK does not (mirrors the secret.key rule).
+    expect(existsSync(join(restoreDir, 'identity.sqlite'))).toBe(true)
+    expect(existsSync(join(restoreDir, 'identity-master.key'))).toBe(false)
   })
 
   it('the restored space boots and serves — admin token + agents survived', async () => {

@@ -22,7 +22,9 @@ restarts lives here.
 ├── admins.json                # admin records + bcrypt-hashed tokens
 ├── agents.json                # managed-agent records (templated agents)
 ├── workers.json               # worker (HumanParticipant) registry
-├── secrets.enc.json           # encrypted provider/agent API keys
+├── secrets.enc.json           # v3 encrypted provider/agent API keys
+├── identity.sqlite            # v4 identity layer — users/sessions/vault/quota/audit
+├── identity-master.key        # 🔑 v4 vault KEK — protect separately
 ├── transcript.jsonl           # append-only event log
 ├── services/                  # service-plugin state (memory, datastore, artifact)
 │   ├── memory/                  one dir per plugin instance — JSON or SQLite
@@ -32,17 +34,30 @@ restarts lives here.
     ├── pending-apps.json      # in-flight admission applications
     ├── admin-sessions.json    # active admin cookie sids
     ├── worker-sessions.json   # active worker cookie sids
-    └── secret.key             # 🔑 32-byte master key — protect separately
+    └── secret.key             # 🔑 v3 SpaceSecrets master key — protect separately
 ```
 
-Two files deserve special care:
+(`identity.sqlite` runs in WAL mode, so at runtime you'll also see
+transient `identity.sqlite-wal` / `-shm` companions.)
 
-- **`runtime/secret.key`** is the master encryption key for
-  `secrets.enc.json`. Anyone with both files has every API key.
-  **Back it up separately**, with separate access controls (1Password
-  / GCP Secret Manager / AWS KMS-protected S3 bucket / paper envelope
-  in a safe — anything that doesn't share an access policy with the
-  rest of the workspace).
+These files deserve special care:
+
+- **`runtime/secret.key`** is the v3 master encryption key for
+  `secrets.enc.json`. Anyone with both files has every provider/agent
+  API key. **Back it up separately**, with separate access controls
+  (1Password / GCP Secret Manager / AWS KMS-protected S3 bucket / paper
+  envelope in a safe — anything that doesn't share an access policy with
+  the rest of the workspace).
+
+- **`identity-master.key`** is the v4 identity-vault KEK (default
+  `local-file` provider). It wraps the DEK that encrypts the vault
+  inside `identity.sqlite` — SSO/OIDC client secrets, TOTP seeds,
+  per-user credentials. Same rule, same blast radius: anyone holding
+  both this key and `identity.sqlite` can decrypt the whole vault.
+  **Back it up separately too.** Online KEK rotation stages the next
+  key as `identity-master.key.next`, so treat the entire
+  `identity-master.key*` family as the secret. `backup.sh` excludes it
+  for exactly the same reason it excludes `secret.key`.
 
 - **`runtime/*-sessions.json`** are short-lived; restoring them from
   an old backup revives cookie sids that a stale browser tab can
@@ -61,7 +76,7 @@ Three small bash scripts under `scripts/backup/`:
 
 | Script | Job |
 |---|---|
-| `backup.sh` | Tar + gzip the workspace; exclude secret.key + sessions. |
+| `backup.sh` | Tar + gzip the workspace; exclude both master keys (secret.key + identity-master.key) + sessions. |
 | `restore.sh` | Extract a backup to a fresh directory; stash any existing target. |
 | `verify.sh` | Sanity-check a workspace (or backup) using `jq` only — no Node needed. |
 
@@ -99,13 +114,16 @@ There's no built-in `prune.sh`; here's a 3-liner that does it:
 find "$1" -name "aipehub-*.tar.gz" -mtime "+$2" -print -delete
 ```
 
-### secret.key handling
+### Master key handling
 
-**Do not** put `secret.key` in the same destination as the workspace
-backups. The backup script enforces this by refusing to include it in
-the archive, but it can't enforce your cron.
+Two master keys can exist in a workspace; **neither** belongs in the
+same destination as the workspace backups. `backup.sh` refuses to
+include either in the archive, but it can't enforce your cron.
 
-Recommended places for `secret.key`:
+- **`secret.key`** (v3) encrypts `secrets.enc.json`.
+- **`identity-master.key`** (v4) wraps the `identity.sqlite` vault DEK.
+
+Recommended places for **both** keys (each as its own entry):
 
 - **1Password / Bitwarden vault item** with a controlled-access tag,
   one entry per environment (staging / prod).
@@ -114,9 +132,12 @@ Recommended places for `secret.key`:
 - **Sealed offsite paper copy** for the worst-case "everything else
   is gone" recovery.
 
-Rotate by setting `AIPE_SECRET_KEY=<32 hex bytes>` on the host and
-re-saving each provider key through the admin UI. After rotation,
-delete old `secret.key` copies and re-save secrets.
+Rotate the **v3** key by setting `AIPE_SECRET_KEY=<32 hex bytes>` on
+the host and re-saving each provider key through the admin UI; then
+delete old `secret.key` copies. Rotate the **v4** KEK online with the
+host `rotate-master-key` subcommand — it re-wraps the vault DEK under a
+new key staged at `identity-master.key.next`, then promotes it, with no
+plaintext re-entry. Back up the new key the same way and retire the old.
 
 ---
 
@@ -170,6 +191,14 @@ space/services/
 space/space.json
 space/workers.json
 ```
+
+> **v4 note.** The walkthrough above seeds a v3-only space. A workspace
+> that has booted the identity layer also carries `identity.sqlite` in
+> the tarball (the encrypted vault) and **excludes** `identity-master.key`
+> for the same reason it excludes `secret.key`. Stash the v4 KEK offsite
+> alongside `secret.key` in the next step, and restore it the same way.
+> The automated drill (`scripts/backup/drill.sh`) asserts **both** keys
+> are absent from the restore.
 
 ### Step 2 — separately stash secret.key
 
@@ -282,8 +311,10 @@ What `verify.sh` checks (all without Node):
 | `agents.json` / `workers.json` parse | Catches partial-write corruption |
 | `transcript.jsonl` lines all parse as JSON | Catches truncated tails — the most common silent failure |
 | `secrets.enc.json` parses (encrypted; can't decrypt) | Catches structure corruption |
+| `identity.sqlite` has SQLite magic + passes `integrity_check` | Catches a torn online (WAL) backup |
 | `services/*/*.db` start with SQLite magic bytes | Catches SQLite truncation |
-| `runtime/secret.key` is **absent** | Sanity check on backup hygiene |
+| `runtime/secret.key` is **absent** | Backup hygiene — v3 master key not bundled |
+| `identity-master.key*` is **absent** | Backup hygiene — v4 vault KEK not bundled |
 
 Run it on a fresh backup. If it ever fails, the problem is upstream
 (SAN snapshot? Disk filling up mid-tar? Concurrent writes?) and your

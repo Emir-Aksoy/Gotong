@@ -106,7 +106,10 @@ maybe('Route B P0-M7-M3 — recovery drill catches a bad backup', () => {
     // The structural-invariant stage actually executed — not just verify.
     expect(out).toContain('admins preserved')
     expect(out).toContain('encrypted secrets carried over')
-    expect(out).toContain('master key correctly absent')
+    // backup.sh excludes BOTH master keys; drill.sh asserts each independently
+    // (v3 runtime/secret.key + v4 identity-master.key), so a v4 host proves both.
+    expect(out).toContain('v3 master key (runtime/secret.key) correctly absent')
+    expect(out).toContain('v4 master key (identity-master.key) correctly absent')
   })
 
   it('a torn-transcript space drills RED (non-zero exit, never PASSED)', () => {

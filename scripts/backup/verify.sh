@@ -128,6 +128,20 @@ else
   echo "ℹ runtime/secret.key MISSING — expected. Drop one in before starting the host."
 fi
 
+# 7b. identity-master.key — v4 identity-vault KEK (default local-file provider).
+#     Same rule as secret.key: it must NOT ride along in a backup — it unwraps
+#     the DEK that decrypts identity.sqlite's vault. backup.sh excludes the whole
+#     identity-master.key* family (live key + rotation .next staging).
+if ls "$DIR"/identity-master.key* >/dev/null 2>&1; then
+  echo "⚠ identity-master.key is present"
+  echo "  Unusual for a restored backup — backup.sh deliberately excludes the v4"
+  echo "  vault KEK. If a backup bundled it next to identity.sqlite, the vault"
+  echo "  encryption is defeated for that copy — audit your access controls."
+  WARNS=$((WARNS + 1))
+else
+  echo "ℹ identity-master.key MISSING — expected. Supply it (or AIPE_MASTER_KEY) before boot."
+fi
+
 # 8. identity.sqlite — v4 identity layer (users/sessions/vault/quota/…).
 #    WAL-mode at runtime, so the classic failure here is a torn online
 #    backup: the magic header still reads fine while the b-tree is

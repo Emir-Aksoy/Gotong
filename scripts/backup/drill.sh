@@ -6,8 +6,9 @@
 # a schedule (cron / CI): it backs up a workspace, restores the tarball into a
 # throwaway dir, runs verify.sh, and then diffs the structural invariants that
 # decide whether the restored copy is actually usable — same admins (or you
-# can't log in), encrypted secrets carried over, and the master key correctly
-# ABSENT (backup.sh excludes it by design). It reports PASS/FAIL and a non-zero
+# can't log in), encrypted secrets carried over, and the master keys correctly
+# ABSENT (backup.sh excludes both the v3 secret.key and the v4
+# identity-master.key by design). It reports PASS/FAIL and a non-zero
 # exit so a cron failure mail / CI red tells you your DR is broken BEFORE the
 # day you need it.
 #
@@ -154,12 +155,19 @@ if [ -f "$SRC/secrets.enc.json" ]; then
   fi
 fi
 
-# the master key must NOT be in the backup — bundling it next to the encrypted
-# secrets would defeat the encryption. backup.sh excludes it on purpose.
+# the master keys must NOT be in the backup — bundling either next to the
+# ciphertext it unlocks defeats the encryption. backup.sh excludes both on
+# purpose: runtime/secret.key (v3) and the identity-master.key* family (v4 vault
+# KEK + rotation .next staging). Check each independently — a v4 host has both.
 if [ -f "$RESTORE_DIR/runtime/secret.key" ]; then
-  fail "runtime/secret.key leaked into the backup (must be excluded)"
+  fail "runtime/secret.key leaked into the backup (v3 master key must be excluded)"
 else
-  ok "master key correctly absent (restore needs it placed separately)"
+  ok "v3 master key (runtime/secret.key) correctly absent"
+fi
+if ls "$RESTORE_DIR"/identity-master.key* >/dev/null 2>&1; then
+  fail "identity-master.key leaked into the backup (v4 vault KEK must be excluded)"
+else
+  ok "v4 master key (identity-master.key) correctly absent"
 fi
 
 echo

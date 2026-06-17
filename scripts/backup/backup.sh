@@ -3,12 +3,22 @@
 #
 # Design choices:
 #
-#   - We DO NOT include `runtime/secret.key` in the archive. That file
-#     is the master encryption key for `secrets.enc.json` (API keys for
-#     LLM providers, per-agent overrides). Bundling both into one
-#     tarball means whoever can read the backup can read every secret.
-#     The recipe in `docs/OPERATIONS.md` keeps `secret.key` in a
-#     separate location with separate access controls (1Password, etc).
+#   - We DO NOT include the master encryption keys in the archive.
+#     Two key files can live in a workspace, depending on its vintage:
+#       * `runtime/secret.key`   — the v3 SpaceSecrets master key that
+#         encrypts `secrets.enc.json` (provider API keys, per-agent
+#         overrides).
+#       * `identity-master.key`  — the v4 identity-vault KEK (default
+#         `local-file` provider) that wraps the DEK encrypting the vault
+#         inside `identity.sqlite` (SSO client secrets, TOTP seeds,
+#         per-user credentials). Online rotation (P0-M4d) stages a new
+#         key to `identity-master.key.next`, so we exclude the whole
+#         `identity-master.key*` family.
+#     Bundling either key next to the ciphertext it unlocks means
+#     whoever can read the backup can read every secret — it defeats the
+#     at-rest encryption for the backup copy. The recipe in
+#     `docs/OPERATIONS.md` keeps each key in a separate location with
+#     separate access controls (1Password, env provider, etc).
 #
 #   - We DO NOT include `runtime/admin-sessions.json` or
 #     `runtime/worker-sessions.json`. Restoring those revives stale
@@ -57,7 +67,8 @@ Flags:
                 backup is the default.
 
 Always excluded from the archive (security / freshness):
-  runtime/secret.key
+  runtime/secret.key          (v3 SpaceSecrets master key)
+  identity-master.key*        (v4 identity-vault KEK + rotation staging)
   runtime/admin-sessions.json
   runtime/worker-sessions.json
 EOF
@@ -177,6 +188,7 @@ if [ -n "$SNAP_ROOT" ]; then
   tar -cf "$TMP_TAR" \
     -C "$PARENT_DIR" \
     --exclude="$LEAF_NAME/runtime/secret.key" \
+    --exclude="$LEAF_NAME/identity-master.key*" \
     --exclude="$LEAF_NAME/runtime/admin-sessions.json" \
     --exclude="$LEAF_NAME/runtime/worker-sessions.json" \
     --exclude="$LEAF_NAME/identity.sqlite" \
@@ -191,6 +203,7 @@ else
   tar -czf "$OUT" \
     -C "$PARENT_DIR" \
     --exclude="$LEAF_NAME/runtime/secret.key" \
+    --exclude="$LEAF_NAME/identity-master.key*" \
     --exclude="$LEAF_NAME/runtime/admin-sessions.json" \
     --exclude="$LEAF_NAME/runtime/worker-sessions.json" \
     "$LEAF_NAME" \
@@ -202,6 +215,8 @@ fi
 SIZE="$(du -h "$OUT" | awk '{print $1}')"
 echo "✓ backup written: $OUT ($SIZE)"
 echo
-echo "Reminder: secret.key was intentionally NOT included. Keep your"
-echo "current secret.key safe and separate — it is required to decrypt"
-echo "secrets.enc.json on restore. See docs/OPERATIONS.md."
+echo "Reminder: master keys were intentionally NOT included — neither"
+echo "runtime/secret.key (v3) nor identity-master.key (v4 vault KEK)."
+echo "Keep them safe and SEPARATE; each is required to decrypt its"
+echo "ciphertext (secrets.enc.json / identity.sqlite) on restore."
+echo "See docs/OPERATIONS.md."
