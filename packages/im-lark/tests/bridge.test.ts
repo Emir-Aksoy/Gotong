@@ -1,30 +1,29 @@
 /**
- * Phase 12 M4 — LarkBridge coverage.
+ * LarkBridge coverage — official long connection
+ * (`@larksuiteoapi/node-sdk` WSClient).
  *
- * Two strategies:
- *   - Most paths drive `handleEvent(body)` directly with synthesized
- *     envelopes. No HTTP listener spun up, no port allocation —
- *     fast, deterministic, no flake.
- *   - One pair of HTTP tests verifies the listener correctly routes
- *     into handleEvent (200 ack on a valid event, 401 on bad token,
- *     200 challenge echo on url_verification).
+ * Strategy: inject a fake `connectionFactory`. The factory captures the
+ * `onMessageReceive` callback the bridge wired in `start()`, so a test
+ * can `emit()` a synthetic `im.message.receive_v1` event exactly as the
+ * real SDK would deliver it over the socket — no real SDK, no network,
+ * no port. Dispatch, dedup, mention-strip, and the anti-loop skip are
+ * all exercised through that single seam.
  *
- * sendMessage tests use a `FakeLarkClient` that records each call;
- * no fetch involved.
+ * sendMessage tests use a `FakeLarkClient` that records each call; no
+ * fetch involved. The REST send path is unchanged from the webhook era.
  */
 
 import type { ImMessage } from '@aipehub/im-adapter'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { LarkBridge } from '../src/bridge.js'
+import {
+  LarkBridge,
+  type LarkConnectionFactory,
+  type LarkConnectionFactoryParams,
+} from '../src/bridge.js'
 import type { LarkCallOptions, LarkClient } from '../src/client.js'
-import type {
-  LarkEventEnvelope,
-  LarkMessageReceiveEvent,
-  LarkUrlVerification,
-} from '../src/types.js'
+import type { LarkMessageReceiveEvent } from '../src/types.js'
 
-const TOKEN = 'verif-token-123'
 const SENDER_OPEN_ID = 'ou_alice'
 const CHAT_ID = 'oc_room1'
 
@@ -34,14 +33,6 @@ class FakeLarkClient implements LarkClient {
     path: string
     options?: LarkCallOptions
   }> = []
-  /** Optional handler that builds the response for each call. */
-  handler?: (
-    method: string,
-    path: string,
-    options?: LarkCallOptions,
-  ) => unknown | Promise<unknown>
-  /** When set, throws on the matching call. */
-  errors: Array<{ method: string; pathPrefix: string; err: unknown }> = []
 
   async call<T>(
     method: 'GET' | 'POST' | 'PUT' | 'DELETE',
@@ -49,14 +40,6 @@ class FakeLarkClient implements LarkClient {
     options?: LarkCallOptions,
   ): Promise<T> {
     this.calls.push({ method, path, options })
-    if (
-      this.errors.length > 0 &&
-      this.errors[0]!.method === method &&
-      path.startsWith(this.errors[0]!.pathPrefix)
-    ) {
-      throw this.errors.shift()!.err
-    }
-    if (this.handler) return (await this.handler(method, path, options)) as T
     return { code: 0, msg: 'ok' } as unknown as T
   }
 
@@ -65,43 +48,90 @@ class FakeLarkClient implements LarkClient {
   }
 }
 
-function buildEvent(over: Partial<{
-  eventId: string
-  eventType: string
-  token: string
-  message: { content?: string; message_type?: string }
-  senderType: 'user' | 'app'
-  openId: string | null
-}> = {}): LarkEventEnvelope<LarkMessageReceiveEvent> {
+/**
+ * A fake long connection. The factory captures the params the bridge
+ * hands it (appId/appSecret/onMessageReceive/onError); `emit` feeds an
+ * event through the captured callback as the SDK would over the socket.
+ */
+function fakeConnection(): {
+  factory: LarkConnectionFactory
+  emit: (event: LarkMessageReceiveEvent) => Promise<void>
+  params: () => LarkConnectionFactoryParams | null
+  startCount: () => number
+  stopCount: () => number
+} {
+  let captured: LarkConnectionFactoryParams | null = null
+  let startCount = 0
+  let stopCount = 0
+  const factory: LarkConnectionFactory = (params) => {
+    captured = params
+    return {
+      start(): void {
+        startCount += 1
+      },
+      stop(): void {
+        stopCount += 1
+      },
+    }
+  }
   return {
-    schema: '2.0',
-    header: {
-      event_id: over.eventId ?? 'evt-1',
-      token: over.token ?? TOKEN,
-      create_time: '1700000000000',
-      event_type: over.eventType ?? 'im.message.receive_v1',
-      tenant_key: 'tk',
-      app_id: 'cli_x',
+    factory,
+    emit: async (event) => {
+      if (!captured) throw new Error('connection not started — call start() first')
+      await captured.onMessageReceive(event)
     },
-    event: {
-      sender: {
-        sender_type: over.senderType ?? 'user',
-        sender_id:
-          over.openId === null
-            ? {}
-            : { open_id: over.openId ?? SENDER_OPEN_ID, user_id: 'u_x', union_id: 'on_x' },
-        tenant_key: 'tk',
-      },
-      message: {
-        message_id: 'om_1',
-        create_time: '1700000000000',
-        chat_id: CHAT_ID,
-        chat_type: 'p2p',
-        message_type: over.message?.message_type ?? 'text',
-        content: over.message?.content ?? JSON.stringify({ text: 'hello bot' }),
-      },
+    params: () => captured,
+    startCount: () => startCount,
+    stopCount: () => stopCount,
+  }
+}
+
+/**
+ * Build the `im.message.receive_v1` event body the SDK's dispatcher
+ * hands the handler — `{ sender, message }`, no webhook envelope.
+ */
+function buildEvent(
+  over: Partial<{
+    messageId: string
+    message: { content?: string; message_type?: string }
+    senderType: 'user' | 'app'
+    openId: string | null
+  }> = {},
+): LarkMessageReceiveEvent {
+  return {
+    sender: {
+      sender_type: over.senderType ?? 'user',
+      sender_id:
+        over.openId === null
+          ? {}
+          : { open_id: over.openId ?? SENDER_OPEN_ID, user_id: 'u_x', union_id: 'on_x' },
+      tenant_key: 'tk',
+    },
+    message: {
+      message_id: over.messageId ?? 'om_1',
+      create_time: '1700000000000',
+      chat_id: CHAT_ID,
+      chat_type: 'p2p',
+      message_type: over.message?.message_type ?? 'text',
+      content: over.message?.content ?? JSON.stringify({ text: 'hello bot' }),
     },
   }
+}
+
+function makeBridge(opts: {
+  factory: LarkConnectionFactory
+  client?: LarkClient
+  onError?: (e: unknown) => void
+  stripBotMentions?: boolean
+}): LarkBridge {
+  return new LarkBridge({
+    appId: 'cli_x',
+    appSecret: 's',
+    client: opts.client ?? new FakeLarkClient(),
+    connectionFactory: opts.factory,
+    onError: opts.onError,
+    stripBotMentions: opts.stripBotMentions,
+  })
 }
 
 describe('LarkBridge', () => {
@@ -113,185 +143,136 @@ describe('LarkBridge', () => {
     }
   })
 
-  it('rejects construction without verificationToken', () => {
+  it('rejects construction without appId / appSecret', () => {
+    expect(
+      () =>
+        new LarkBridge({
+          // @ts-expect-error missing appId
+          appSecret: 's',
+          client: new FakeLarkClient(),
+        }),
+    ).toThrow(/appId is required/)
     expect(
       () =>
         new LarkBridge({
           appId: 'cli_x',
-          appSecret: 's',
-          verificationToken: '',
+          // @ts-expect-error missing appSecret
           client: new FakeLarkClient(),
-          webhookPort: 0,
         }),
-    ).toThrow(/verificationToken is required/)
+    ).toThrow(/appSecret is required/)
   })
 
-  it('echoes the challenge on url_verification', async () => {
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-    })
-    const verify: LarkUrlVerification = {
-      type: 'url_verification',
-      challenge: 'chal-xyz',
-      token: TOKEN,
-    }
-    const result = await bridge.handleEvent(verify)
-    expect(result).toEqual({ challenge: 'chal-xyz' })
-  })
-
-  it('rejects url_verification with mismatched token', async () => {
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-    })
-    await expect(
-      bridge.handleEvent({
-        type: 'url_verification',
-        challenge: 'x',
-        token: 'wrong',
-      }),
-    ).rejects.toThrow(/token mismatch/)
-  })
-
-  it('rejects event envelope with mismatched header.token', async () => {
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-    })
-    await expect(bridge.handleEvent(buildEvent({ token: 'wrong' }))).rejects.toThrow(
-      /token mismatch/,
-    )
-  })
-
-  it('rejects non-Schema-2.0 events', async () => {
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-    })
-    await expect(
-      bridge.handleEvent({ schema: '1.0', header: {}, event: {} }),
-    ).rejects.toThrow(/Schema 2.0/)
+  it('start() builds the connection with appId/appSecret and starts it; stop() stops it', async () => {
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory })
+    await bridge.start()
+    expect(conn.startCount()).toBe(1)
+    expect(conn.params()?.appId).toBe('cli_x')
+    expect(conn.params()?.appSecret).toBe('s')
+    // idempotent start
+    await bridge.start()
+    expect(conn.startCount()).toBe(1)
+    await bridge.stop()
+    expect(conn.stopCount()).toBe(1)
+    // idempotent stop
+    await bridge.stop()
+    expect(conn.stopCount()).toBe(1)
+    bridge = null
   })
 
   it('delivers im.message.receive_v1 events as ImMessage', async () => {
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-    })
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory })
     const received: ImMessage[] = []
     bridge.onMessage((m) => {
       received.push(m)
     })
-    await bridge.handleEvent(buildEvent({}))
+    await bridge.start()
+    await conn.emit(buildEvent({}))
     expect(received).toHaveLength(1)
     expect(received[0]!.text).toBe('hello bot')
     expect(received[0]!.from.platformUserId).toBe(SENDER_OPEN_ID)
     expect(received[0]!.chatId).toBe(CHAT_ID)
   })
 
-  it('dedups by event_id', async () => {
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-    })
+  it('dedups by message_id (long connection may redeliver on reconnect)', async () => {
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory })
     const received: ImMessage[] = []
     bridge.onMessage((m) => {
       received.push(m)
     })
-    const evt = buildEvent({ eventId: 'dup-1' })
-    await bridge.handleEvent(evt)
-    await bridge.handleEvent(evt)
-    await bridge.handleEvent(evt)
+    await bridge.start()
+    const evt = buildEvent({ messageId: 'om_dup' })
+    await conn.emit(evt)
+    await conn.emit(evt)
+    await conn.emit(evt)
     expect(received).toHaveLength(1)
   })
 
-  it('skips events from app senders (anti-loop)', async () => {
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-    })
+  it('delivers two distinct message_ids', async () => {
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory })
     const received: ImMessage[] = []
     bridge.onMessage((m) => {
       received.push(m)
     })
-    await bridge.handleEvent(buildEvent({ senderType: 'app' }))
-    expect(received).toEqual([])
+    await bridge.start()
+    await conn.emit(buildEvent({ messageId: 'om_a' }))
+    await conn.emit(buildEvent({ messageId: 'om_b' }))
+    expect(received).toHaveLength(2)
   })
 
-  it('silently acks unknown event types (no dispatch, no throw)', async () => {
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-    })
+  it('skips events from app senders (anti-loop)', async () => {
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory })
     const received: ImMessage[] = []
     bridge.onMessage((m) => {
       received.push(m)
     })
-    await bridge.handleEvent(
-      buildEvent({ eventType: 'im.chat.updated_v1' }),
-    )
+    await bridge.start()
+    await conn.emit(buildEvent({ senderType: 'app' }))
     expect(received).toEqual([])
   })
 
   it('strips @bot mentions by default', async () => {
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-    })
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory })
     const received: ImMessage[] = []
     bridge.onMessage((m) => {
       received.push(m)
     })
-    await bridge.handleEvent(
+    await bridge.start()
+    await conn.emit(
       buildEvent({
         message: {
-          content: JSON.stringify({
-            text: '<at user_id="ou_bot">@Bot</at> /help',
-          }),
+          content: JSON.stringify({ text: '<at user_id="ou_bot">@Bot</at> /help' }),
         },
       }),
     )
     expect(received[0]!.text).toBe('/help')
   })
 
+  it('preserves mentions when stripBotMentions is false', async () => {
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, stripBotMentions: false })
+    const received: ImMessage[] = []
+    bridge.onMessage((m) => {
+      received.push(m)
+    })
+    await bridge.start()
+    await conn.emit(
+      buildEvent({
+        message: { content: JSON.stringify({ text: '<at user_id="ou_bot">@Bot</at> /help' }) },
+      }),
+    )
+    expect(received[0]!.text).toBe('<at user_id="ou_bot">@Bot</at> /help')
+  })
+
   it('listener throw does not stop other listeners', async () => {
     const errors: unknown[] = []
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-      onError: (e) => errors.push(e),
-    })
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, onError: (e) => errors.push(e) })
     const goodReceived: ImMessage[] = []
     bridge.onMessage(() => {
       throw new Error('listener boom')
@@ -299,40 +280,32 @@ describe('LarkBridge', () => {
     bridge.onMessage((m) => {
       goodReceived.push(m)
     })
-    await bridge.handleEvent(buildEvent({}))
+    await bridge.start()
+    await conn.emit(buildEvent({}))
     expect(goodReceived).toHaveLength(1)
     expect(errors.some((e) => String(e).includes('listener boom'))).toBe(true)
   })
 
   it('unsubscribe removes the listener', async () => {
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-    })
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory })
     const received: ImMessage[] = []
     const unsub = bridge.onMessage((m) => {
       received.push(m)
       if (received.length === 1) unsub()
     })
-    await bridge.handleEvent(buildEvent({ eventId: 'a' }))
-    await bridge.handleEvent(buildEvent({ eventId: 'b' }))
+    await bridge.start()
+    await conn.emit(buildEvent({ messageId: 'om_a' }))
+    await conn.emit(buildEvent({ messageId: 'om_b' }))
     expect(received).toHaveLength(1)
   })
 
-  // -------- sendMessage --------
+  // -------- sendMessage (unchanged REST path) --------
 
   it('sendMessage POSTs to /open-apis/im/v1/messages with chat_id receive type', async () => {
     const client = new FakeLarkClient()
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client,
-      webhookPort: 0,
-    })
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, client })
     await bridge.sendMessage(
       { platform: 'lark', platformUserId: SENDER_OPEN_ID },
       'hello back',
@@ -351,17 +324,9 @@ describe('LarkBridge', () => {
 
   it('sendMessage falls back to platformUserId (open_id) when no chatId', async () => {
     const client = new FakeLarkClient()
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client,
-      webhookPort: 0,
-    })
-    await bridge.sendMessage(
-      { platform: 'lark', platformUserId: SENDER_OPEN_ID },
-      'dm',
-    )
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, client })
+    await bridge.sendMessage({ platform: 'lark', platformUserId: SENDER_OPEN_ID }, 'dm')
     const c = client.calls[0]!
     expect(c.options?.query?.receive_id_type).toBe('open_id')
     const body = c.options?.body as { receive_id: string }
@@ -371,14 +336,8 @@ describe('LarkBridge', () => {
   it('sendMessage signals via onError on outbound attachments, still sends text', async () => {
     const client = new FakeLarkClient()
     const errors: unknown[] = []
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client,
-      webhookPort: 0,
-      onError: (e) => errors.push(e),
-    })
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory, client, onError: (e) => errors.push(e) })
     await bridge.sendMessage(
       { platform: 'lark', platformUserId: SENDER_OPEN_ID },
       'caption',
@@ -393,13 +352,8 @@ describe('LarkBridge', () => {
   })
 
   it('sendMessage throws when neither chatId nor platformUserId is provided', async () => {
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-    })
+    const conn = fakeConnection()
+    bridge = makeBridge({ factory: conn.factory })
     await expect(
       bridge.sendMessage(
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -408,203 +362,4 @@ describe('LarkBridge', () => {
       ),
     ).rejects.toThrow(/receive_id/)
   })
-
-  // -------- start / stop --------
-
-  it('start and stop are idempotent (no HTTP server)', async () => {
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-    })
-    await bridge.start()
-    await bridge.start()
-    await bridge.stop()
-    await bridge.stop()
-  })
-
-  // -------- HTTP listener wire-up --------
-
-  it('HTTP listener routes valid event → 200 ack + dispatches', async () => {
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0, // ephemeral; we'll bind in a moment
-    })
-    // Use a more dynamic approach: 0 disables the listener, so flip
-    // it via direct construction with a fresh port.
-    await bridge.stop()
-    bridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: 0,
-    })
-    // Actually for the HTTP test, we want a real port. Construct
-    // one bridge for that explicit purpose.
-    await bridge.stop()
-    bridge = null
-
-    const httpBridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: await pickEphemeralPort(),
-      webhookHost: '127.0.0.1',
-    })
-    const received: ImMessage[] = []
-    httpBridge.onMessage((m) => {
-      received.push(m)
-    })
-    await httpBridge.start()
-    try {
-      const port = getBoundPort(httpBridge)
-      const resp = await fetch(`http://127.0.0.1:${port}/lark/webhook`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(buildEvent({})),
-      })
-      expect(resp.status).toBe(200)
-      expect(received).toHaveLength(1)
-    } finally {
-      await httpBridge.stop()
-    }
-  })
-
-  it('HTTP listener responds 200 with challenge on url_verification', async () => {
-    const httpBridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: await pickEphemeralPort(),
-      webhookHost: '127.0.0.1',
-    })
-    await httpBridge.start()
-    try {
-      const port = getBoundPort(httpBridge)
-      const resp = await fetch(`http://127.0.0.1:${port}/lark/webhook`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          type: 'url_verification',
-          challenge: 'echo-me',
-          token: TOKEN,
-        }),
-      })
-      expect(resp.status).toBe(200)
-      const body = (await resp.json()) as { challenge?: string }
-      expect(body.challenge).toBe('echo-me')
-    } finally {
-      await httpBridge.stop()
-    }
-  })
-
-  it('HTTP listener responds 401 when verification token is wrong', async () => {
-    const errors: unknown[] = []
-    const httpBridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: await pickEphemeralPort(),
-      webhookHost: '127.0.0.1',
-      onError: (e) => errors.push(e),
-    })
-    await httpBridge.start()
-    try {
-      const port = getBoundPort(httpBridge)
-      const resp = await fetch(`http://127.0.0.1:${port}/lark/webhook`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(buildEvent({ token: 'wrong' })),
-      })
-      expect(resp.status).toBe(401)
-      expect(errors.some((e) => String(e).includes('token mismatch'))).toBe(true)
-    } finally {
-      await httpBridge.stop()
-    }
-  })
-
-  it('HTTP listener health check (GET) returns 200', async () => {
-    const httpBridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: await pickEphemeralPort(),
-      webhookHost: '127.0.0.1',
-    })
-    await httpBridge.start()
-    try {
-      const port = getBoundPort(httpBridge)
-      const resp = await fetch(`http://127.0.0.1:${port}/anything`)
-      expect(resp.status).toBe(200)
-      const text = await resp.text()
-      expect(text).toContain('lark-bridge ok')
-    } finally {
-      await httpBridge.stop()
-    }
-  })
-
-  it('HTTP listener returns 404 for non-matching POST paths', async () => {
-    const httpBridge = new LarkBridge({
-      appId: 'cli_x',
-      appSecret: 's',
-      verificationToken: TOKEN,
-      client: new FakeLarkClient(),
-      webhookPort: await pickEphemeralPort(),
-      webhookHost: '127.0.0.1',
-    })
-    await httpBridge.start()
-    try {
-      const port = getBoundPort(httpBridge)
-      const resp = await fetch(`http://127.0.0.1:${port}/wrong/path`, {
-        method: 'POST',
-        body: '{}',
-      })
-      expect(resp.status).toBe(404)
-    } finally {
-      await httpBridge.stop()
-    }
-  })
 })
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Allocate an ephemeral port by briefly binding a server. Returns
- * the OS-assigned port number. Avoids hardcoding port numbers that
- * could collide with other test workers.
- */
-async function pickEphemeralPort(): Promise<number> {
-  const { createServer } = await import('node:net')
-  return new Promise((resolve, reject) => {
-    const srv = createServer()
-    srv.unref()
-    srv.on('error', reject)
-    srv.listen(0, () => {
-      const addr = srv.address()
-      srv.close(() => {
-        if (typeof addr === 'object' && addr !== null) resolve(addr.port)
-        else reject(new Error('could not allocate ephemeral port'))
-      })
-    })
-  })
-}
-
-/** Pull the actual listening port out of a LarkBridge — we set port
- *  via constructor option, so just return that. (If we'd asked the OS
- *  for port 0, we'd need to dig into the internal server.) */
-function getBoundPort(bridge: LarkBridge): number {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (bridge as any).webhookPort as number
-}

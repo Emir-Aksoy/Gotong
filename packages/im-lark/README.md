@@ -1,11 +1,18 @@
 # @aipehub/im-lark
 
-Phase 12 M4 — third concrete `ImBridge` for AipeHub.
-
 A Lark / Feishu Open Platform Bot bridge implemented against
 [`@aipehub/im-adapter`](../im-adapter)'s `ImBridge` interface.
-Webhook (Event Subscription) mode; no `@larksuiteoapi/node-sdk`
-dependency (just `fetch`); ~600 lines of implementation.
+
+Inbound runs over the **official long connection**
+(`@larksuiteoapi/node-sdk` `WSClient` + `EventDispatcher`) — the bridge
+dials OUT to Lark and receives `im.message.receive_v1` events over a
+persistent socket. **No public callback URL, no TLS, no reverse proxy,
+no verification token: it works behind NAT** like Telegram / Discord /
+Matrix. This matches how OpenClaw / Hermes connect Feishu.
+
+Outbound (`sendMessage`) still goes through the REST client
+(`POST /open-apis/im/v1/messages`). Only the inbound transport is the
+long connection.
 
 国内（Feishu）和国际（Lark）切换只需要换 `baseUrl`。
 
@@ -18,11 +25,8 @@ import { parseImCommand } from '@aipehub/im-adapter'
 const bridge = new LarkBridge({
   appId: process.env.LARK_APP_ID!,
   appSecret: process.env.LARK_APP_SECRET!,
-  verificationToken: process.env.LARK_VERIFICATION_TOKEN!,
-  // baseUrl: 'https://open.larksuite.com',  // 国际版
+  // baseUrl: 'https://open.larksuite.com',  // 国际版 (via clientOptions)
   // baseUrl is 'https://open.feishu.cn' by default (国内)
-  webhookPort: 9090,
-  webhookPath: '/lark/webhook',
   onError: (err) => console.error('[lark]', err),
 })
 
@@ -44,7 +48,7 @@ bridge.onMessage(async (msg) => {
   }
 })
 
-await bridge.start()
+await bridge.start()   // dials the long connection
 // later
 await bridge.stop()
 ```
@@ -54,46 +58,48 @@ await bridge.stop()
 1. 创建应用（cli_xxx）— 拿到 **App ID** + **App Secret**。
 2. 在「凭证与基础信息」页找到 **App Secret**。
 3. 启用「机器人」能力，在「事件订阅」页：
-   - 复制 **Verification Token**（这是 bridge `verificationToken` 配置项）。
-   - **不要**配置 Encrypt Key（M4 只支持明文模式）。
-   - 「请求网址」填 `https://<你的域名>/lark/webhook`（生产必须 HTTPS — 用反代终止 TLS）。
+   - **传输方式选「长连接」**（不是「将事件发送至开发者服务器」）。
+     长连接由 bot 主动外拨，**无需**公网回调地址、无需 HTTPS、无需配
+     Verification Token / Encrypt Key。
    - 添加事件 `im.message.receive_v1`。
 4. 给机器人加权限：`im:message`（接收）+ `im:message:send_as_bot`（回消息）。
 5. 「版本管理与发布」发布到企业内部测试 / 全量。
 
 国际版 Lark 的配置在 [open.larksuite.com](https://open.larksuite.com)，流程一致。
 
-## 为什么 webhook，不是 long-poll？
+## 为什么长连接，不是 webhook？
 
-Lark 没有通用 long-poll API；事件订阅是官方推荐路径。Bridge 自带一个
-最小 `node:http` listener:
+webhook（事件订阅推到开发者服务器）要求一个公网 HTTPS 回调地址 —— 家
+用机得做内网穿透 / 反代。官方长连接（`@larksuiteoapi/node-sdk` 的
+`WSClient`）是**出站**的：bot 拨一条持久 WebSocket 给 Lark，事件经它推
+回来。这跟 Telegram long-poll / Discord gateway / Matrix `/sync` 同一
+类「官方 + 免穿透」模式，也是 OpenClaw / Hermes 接 Feishu 的路径。
 
-- 默认 `POST /lark/webhook` → `handleEvent(body)` → 派发监听者
-- `GET <任意路径>` → `200 lark-bridge ok` 健康检查
-- 验证 token 不匹配 → `401`，触发 onError
-- 收 `url_verification` → 自动 echo `challenge`
-- 收 Schema 2.0 envelope → 按 `event_type` 路由（M4 只处理 `im.message.receive_v1`）
+SDK 负责 socket、重连、事件分帧；bridge 只剩三件事：**去重、映射、派发**。
 
-如果 host 已经有 HTTP 层（`@aipehub/web`），把 `webhookPort: 0` 关闭
-内置 listener，再让 host 自己路由 `POST /lark/webhook` 进 `bridge.handleEvent(body)`
-即可，零额外端口。
+连接通过一个**可注入工厂**（`connectionFactory`）创建，默认工厂惰性
+`import('@larksuiteoapi/node-sdk')`。hermetic 测试注入 fake 工厂，喂合成
+`im.message.receive_v1` 事件，不碰真 SDK、不开 socket。
 
 ## Surface
 
-| Export                         | Purpose                                                       |
-|--------------------------------|---------------------------------------------------------------|
-| `LarkBridge`                   | `ImBridge` impl + 内置 webhook listener                       |
-| `createLarkClient`             | Fetch 封装，自动管理 `tenant_access_token`                    |
-| `LarkApiError`                 | 非 0 code 抛出 — 携带 `code`, `msg`, `status`                 |
-| `larkToImMessage`              | 纯映射: `LarkMessageReceiveEvent` → `ImMessage`               |
-| `larkExtractAttachments`       | 拉 image / audio / file 出来                                  |
-| `larkUri` / `parseLarkUri`     | `lark-image:` / `lark-audio:` / `lark-file:` URI 工具         |
-| `stripLarkMentions`            | 剥掉群消息里的 `<at>` 标签                                    |
-| `pickLarkReceiveIdType`        | 根据前缀（`oc_`/`ou_`/`on_`）推 `receive_id_type` 值           |
+| Export                              | Purpose                                                       |
+|-------------------------------------|---------------------------------------------------------------|
+| `LarkBridge`                        | `ImBridge` impl over the official long connection             |
+| `defaultLarkConnectionFactory`      | 默认连接工厂（惰性 import 官方 SDK 的 `WSClient`/`EventDispatcher`）|
+| `LarkConnectionFactory` (type)      | 注入点：测试 / 自定义传输实现可替换                          |
+| `createLarkClient`                  | Fetch 封装，自动管理 `tenant_access_token`（出站发消息用）     |
+| `LarkApiError`                      | 非 0 code 抛出 — 携带 `code`, `msg`, `status`                 |
+| `larkToImMessage`                   | 纯映射: `LarkMessageReceiveEvent` → `ImMessage`               |
+| `larkExtractAttachments`            | 拉 image / audio / file 出来                                  |
+| `larkUri` / `parseLarkUri`          | `lark-image:` / `lark-audio:` / `lark-file:` URI 工具         |
+| `stripLarkMentions`                 | 剥掉群消息里的 `<at>` 标签                                    |
+| `pickLarkReceiveIdType`             | 根据前缀（`oc_`/`ou_`/`on_`）推 `receive_id_type` 值           |
 
-## Token 管理
+## Token 管理（出站发消息）
 
-Lark 用短命的 `tenant_access_token`（约 2 小时 TTL）。`createLarkClient`：
+发消息走 REST，用短命的 `tenant_access_token`（约 2 小时 TTL）。
+`createLarkClient`：
 
 - 第一次业务调用前 `POST /open-apis/auth/v3/tenant_access_token/internal`
   拿 token，缓存
@@ -127,7 +133,8 @@ const bytes = await res.arrayBuffer()
 
 ## 国内 vs 国际
 
-只换 `baseUrl`，event schema 完全一致：
+只换 `baseUrl`（出站 REST 用），事件 schema 完全一致；长连接由 SDK 按
+`appId` 自动选对应域：
 
 ```ts
 // 国内 Feishu — 默认
@@ -139,29 +146,29 @@ new LarkBridge({ ...,
 })
 ```
 
-## M4 不做的
+## 不做的
 
-- **加密事件** (`encrypt_key` 模式). 业务事件 body 整体 AES 加密，
-  bridge 只走明文模式，verification token 比对足以认证。
+- **交互卡片回调按钮** (`card.action.trigger`). 长连接**不投递**卡片按钮
+  回调事件 —— 那只走 HTTPS 回调。纯文本聊天（bridge 的本职）完全覆盖；
+  需要卡片按钮的 hub 得另起一条 webhook 旁路（超出本桥范围）。
 - **出向附件 / 图片 / 卡片**. `sendMessage` 带 attachments 会触发
-  `onError` 但 text 仍发出，跟 Telegram M2 / Matrix M3 一致。
-- **交互卡片 / 回调按钮** (`message_action_v1`). 只处理
-  `im.message.receive_v1`。
-- **TLS 终止**. Bridge listen 明文 HTTP，生产环境必须用反代（nginx /
-  traefik / Caddy）终止 TLS — Lark webhook 要求 HTTPS。
+  `onError` 但 text 仍发出，跟 Telegram / Matrix 一致。
 - **OAuth/SSO/Marketplace 应用流程**. 假定内部企业应用 + 长期 app
   secret。
-- **Schema 1.0 events**. 已废弃；bridge 拒绝。
 
 ## 测试
 
-`tests/bridge.test.ts` 主要走 `handleEvent(body)` 直接喂事件，少数
-case 起 HTTP listener 验证 wire-up（404/401/200/challenge）。
-`FakeLarkClient` 不打网络，sendMessage 验证 `receive_id_type` 自动嗅探。
+`tests/bridge.test.ts` 注入 fake `connectionFactory`，捕获 bridge 在
+`start()` 里挂的 `onMessageReceive` 回调，再用 `emit()` 喂合成
+`im.message.receive_v1` 事件 —— 不碰真 SDK、不开 socket、不占端口。
+去重（按 `message_id`）、去 @ 标签、app-sender 反环、派发全在这条接缝上
+验证。`FakeLarkClient` 不打网络，sendMessage 验证 `receive_id_type` 自动
+嗅探。
 
 ## Status
 
-- Phase 12 M4 — released（transport only；host integration pending）。
-- Next milestones: M5 (Discord), M6 (Slack), M7 (QQ / OneBot v11)。
+- IM 桥官方化 — Lark/飞书改官方长连接（替代旧 webhook 模式）。
+- 同批：QQ 改官方 Bot webhook、Slack 改 Socket Mode。
 
-See `docs/zh/V4-PHASE7-13-PLAN.md` section 七 for the full roadmap.
+See `docs/zh/IM-OFFICIAL-REARCH.md` for the official-API re-architecture
+rationale (OpenClaw / Hermes 对照 + 各桥 transport 决策).

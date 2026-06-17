@@ -2,7 +2,14 @@
  * @aipehub/im-lark — public surface.
  */
 
-export { LarkBridge, type LarkBridgeOptions } from './bridge.js'
+export {
+  LarkBridge,
+  type LarkBridgeOptions,
+  type LarkConnectionFactory,
+  type LarkConnectionFactoryParams,
+  type LarkLongConnection,
+  defaultLarkConnectionFactory,
+} from './bridge.js'
 export {
   createLarkClient,
   LarkApiError,
@@ -26,8 +33,6 @@ export type {
   LarkAccessTokenResponse,
   LarkApiErrorBody,
   LarkAudioContent,
-  LarkEventEnvelope,
-  LarkEventHeader,
   LarkFileContent,
   LarkImageContent,
   LarkMention,
@@ -39,6 +44,5 @@ export type {
   LarkSendMessageResponse,
   LarkStickerContent,
   LarkTextContent,
-  LarkUrlVerification,
   LarkUserIds,
 } from './types.js'

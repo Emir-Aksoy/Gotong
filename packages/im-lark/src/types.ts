@@ -40,50 +40,14 @@ export interface LarkAccessTokenResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Webhook event envelope (Event Subscription, Schema 2.0)
+// `im.message.receive_v1` — the only event the bridge dispatches
 // ---------------------------------------------------------------------------
-
-/**
- * Lark wraps every event in a Schema 2.0 envelope. Both Feishu and
- * Lark use the same schema today; older Schema 1.0 events are not
- * supported (we'd reject in the bridge).
- *
- * Reference: https://open.feishu.cn/document/server-docs/event-subscription-guide/event-subscription-configure-
- */
-export interface LarkEventEnvelope<T = unknown> {
-  schema: '2.0'
-  header: LarkEventHeader
-  event: T
-}
-
-export interface LarkEventHeader {
-  /** Globally unique event id; bridge uses for dedup. */
-  event_id: string
-  /** Verification token configured in the Lark admin panel. */
-  token: string
-  /** Unix milliseconds, stringified. */
-  create_time: string
-  /** Event type — bridge only handles 'im.message.receive_v1' for M4. */
-  event_type: string
-  /** Tenant key — present in production, absent in dev sandbox. */
-  tenant_key?: string
-  app_id?: string
-}
-
-/**
- * Special envelope sent when Lark first registers the webhook URL —
- * NOT wrapped in Schema 2.0. Bot must echo `challenge` back in the
- * response body to confirm ownership.
- */
-export interface LarkUrlVerification {
-  type: 'url_verification'
-  challenge: string
-  token: string
-}
-
-// ---------------------------------------------------------------------------
-// `im.message.receive_v1` — the only event the bridge dispatches in M4
-// ---------------------------------------------------------------------------
+//
+// Over the official long connection (`@larksuiteoapi/node-sdk`
+// `EventDispatcher`), the registered `im.message.receive_v1` handler
+// receives the event body directly — `{ sender, message }`. The SDK
+// owns the envelope / dedup hints / reconnect, so the bridge no longer
+// models a webhook envelope or a url_verification handshake.
 
 export interface LarkMessageReceiveEvent {
   sender: LarkSender
