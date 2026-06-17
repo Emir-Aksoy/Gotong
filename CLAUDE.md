@@ -621,6 +621,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | RAG — 向量检索 via MCP (框架不存知识, `mcpServers` 完整 schema, 配额两层, 跨 hub server-侧 ACL) | `docs/zh/RAG-VIA-MCP.md` |
 | MCP 接入(client + server) | `docs/zh/MCP.md` |
 | Services 插件 RFC 系列 | `docs/services-rfc.md` 及 `*-rfc.md` |
+| 上线 runbook — 三拓扑准备上线 (**T1** 家用主机+IM / **T2** 云服务器+IM / **T3** 云服务器+直连 IP; IM 桥出站长轮询故 NAT 后家用机不需内网穿透; **家用 vs 云差异 = 二进制/数据目录/配置/IM 全一样, 差异 100% 在周界**; 成员 IM 绑定流程 + 云 IP 暴露风险表 + master key 挪出数据盘 + 远程首启 mint-admin-token; 配置模板 `deploy/.env.home`/`.env.cloud`/`deploy/README.md`; 加固脚本 `scripts/cloud-harden.sh`) | `docs/zh/GO-LIVE.md` |
 | 部署 / 运维 / 监控 | `docs/zh/DEPLOY.md`, `docs/OPERATIONS.md`, `docs/MONITORING.md` |
 | 历史 commit 流水账 | `CHANGELOG-v3-dev.md`, `CHANGELOG.md` |
 | 历史外部审计 | `audits/<date>-<auditor>/` (按时间归档, `audits/README.md` 是索引) |
