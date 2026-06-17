@@ -1,48 +1,83 @@
 /**
- * Slack Events API + Web API shapes — a hand-rolled subset.
+ * Slack Socket Mode + Web API shapes — a hand-rolled subset.
  *
- * Why hand-rolled rather than `@slack/bolt` / `@slack/web-api`:
+ * Inbound runs over Socket Mode (the official 免穿透 transport — the
+ * app dials OUT over a WebSocket). Outbound (`chat.postMessage`) is the
+ * Web API. Both are stable, well-documented HTTP / WS + JSON.
+ *
+ * Why hand-rolled rather than `@slack/bolt` / `@slack/socket-mode`:
  *
  *   - Bolt ships an HTTP framework, middleware stack, OAuth helpers,
  *     a request-routing DSL — most of which we don't need (the host
  *     already runs its own HTTP layer; OAuth installation is a
- *     separate concern outside the M6 transport surface).
- *   - `@slack/web-api` is a thinner wrapper but still drags in
- *     `axios`, retry plugins, and a code-generated method list of
- *     ~200 calls. Bridge only needs `chat.postMessage`.
- *   - The Events API and Web API are stable, well-documented HTTP +
- *     JSON; a typed fetch wrapper is ~300 lines.
+ *     separate concern outside the transport surface).
+ *   - `@slack/socket-mode` + `@slack/web-api` drag in `axios`, retry
+ *     plugins, and a code-generated method list of ~200 calls. The
+ *     bridge only needs `apps.connections.open` + `chat.postMessage`,
+ *     and the repo already hand-rolls a WS state machine for Discord.
+ *   - A typed fetch wrapper + a ~250-line WS state machine is enough.
  *
  * Reference (verified 2026-05):
- *   - https://api.slack.com/events-api
+ *   - https://docs.slack.dev/apis/events-api/using-socket-mode/
+ *   - https://api.slack.com/methods/apps.connections.open
  *   - https://api.slack.com/methods/chat.postMessage
- *   - https://api.slack.com/authentication/verifying-requests-from-slack
  */
 
 // ---------------------------------------------------------------------------
-// Events API webhook envelopes
+// Socket Mode envelopes
 // ---------------------------------------------------------------------------
 
 /**
- * Slack sends one of these two top-level envelopes to the configured
- * Events API request URL.
+ * `POST apps.connections.open` response — issues a single-use WSS URL
+ * for the Socket Mode connection. Authenticated with the app-level
+ * token (`xapp-…`), NOT the bot token.
  *
- * - `url_verification`: sent once when the URL is first configured in
- *   the app's "Event Subscriptions" page. Bridge echoes `challenge`
- *   back so Slack accepts the URL.
- * - `event_callback`: every subsequent event delivery. `event` carries
- *   the actual payload (message, reaction, file_shared, …). Bridge
- *   only handles `event.type === 'message'` in M6.
- *
- * Both envelopes are signed with HMAC SHA256 — bridge verifies the
- * `X-Slack-Signature` header against the raw body before parsing.
+ * `ok: false` carries Slack's machine error (`invalid_auth`,
+ * `not_allowed_token_type`, …); the socket-mode state machine treats a
+ * known-bad-credential error as fatal and everything else as transient.
  */
-export interface SlackUrlVerification {
-  type: 'url_verification'
-  challenge: string
-  /** Legacy verification token. Bridge ignores — HMAC signature is the source of truth. */
-  token?: string
+export interface SlackConnectionsOpenResponse {
+  ok: boolean
+  /** `wss://…` — single-use, expires in ~30s if not connected. */
+  url?: string
+  /** Slack machine error code when `ok: false`. */
+  error?: string
 }
+
+/**
+ * One Socket Mode envelope pushed by the server over the WebSocket.
+ *
+ *   - `hello`: sent once on connect; confirms the socket is live.
+ *   - `events_api`: wraps the standard `event_callback` body in
+ *     `payload`. The bridge surfaces ONLY these.
+ *   - `disconnect`: server is recycling the socket (`reason`:
+ *     refresh_requested / warning / too_many_connections) — the client
+ *     reconnects with a fresh URL.
+ *   - `slash_commands` / `interactive`: acked but not surfaced.
+ *
+ * Every envelope EXCEPT `hello` / `disconnect` carries an
+ * `envelope_id`; the client acks by echoing `{ envelope_id }` back over
+ * the socket within 3s. Unlike the old Events API webhook, there is NO
+ * HMAC signature and NO `url_verification` handshake — the `xapp-`
+ * token already authenticated the connection at `apps.connections.open`.
+ */
+export interface SlackSocketEnvelope<T = unknown> {
+  /** Ack target. Present on events_api / slash_commands / interactive. */
+  envelope_id?: string
+  /** 'hello' | 'events_api' | 'slash_commands' | 'interactive' | 'disconnect'. */
+  type: string
+  /** events_api: the standard `event_callback` body (see SlackEventCallback). */
+  payload?: T
+  /** disconnect reason. */
+  reason?: string
+  /** Whether the server wants a response payload in the ack. The bridge never sets one. */
+  accepts_response_payload?: boolean
+}
+
+// ---------------------------------------------------------------------------
+// The Events API `event_callback` body — Socket Mode delivers it as
+// the `payload` of an `events_api` envelope.
+// ---------------------------------------------------------------------------
 
 export interface SlackEventCallback<T = unknown> {
   type: 'event_callback'
@@ -197,26 +232,3 @@ export interface SlackPostMessageResponse extends SlackApiResponse {
   /** Echoed posted message. */
   message?: { text?: string; ts?: string; user?: string }
 }
-
-// ---------------------------------------------------------------------------
-// Signature verification result
-// ---------------------------------------------------------------------------
-
-/**
- * Discriminated union for `verifySlackSignature` outcomes. We avoid
- * throwing because signature failures are the COMMON path on a
- * public-facing webhook (port scanners, retry-after-timeout, etc.).
- * Throwing on the hot path costs stack-trace cycles.
- */
-export type SlackSignatureVerifyResult =
-  | { ok: true }
-  | {
-      ok: false
-      /**
-       * Why it failed:
-       *   - 'missing-headers' — request didn't carry both signature + ts headers
-       *   - 'bad-timestamp'   — ts is non-numeric or far outside tolerance window
-       *   - 'mismatch'        — computed HMAC doesn't equal sent signature
-       */
-      reason: 'missing-headers' | 'bad-timestamp' | 'mismatch'
-    }

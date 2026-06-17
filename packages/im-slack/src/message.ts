@@ -1,9 +1,10 @@
 /**
- * Slack event → `ImMessage` mapper + HMAC signature verifier.
+ * Slack `message` event → `ImMessage` mapper.
  *
- * Pure functions; no fetch, no node:crypto side effects beyond the
- * synchronous `createHmac` call (which doesn't touch the network).
- * Trivially unit-testable without a Slack workspace.
+ * Pure functions; no fetch, no node:crypto. Trivially unit-testable
+ * without a Slack workspace. (Socket Mode authenticates the connection
+ * with the `xapp-` token at `apps.connections.open`, so there is no
+ * per-request HMAC to verify here — unlike the old Events API webhook.)
  *
  * Skip rules — `slackToImMessage` returns `null` for any of:
  *
@@ -22,15 +23,9 @@
  * channels. Bridge uses `user` field verbatim as `platformUserId`.
  */
 
-import { createHmac, timingSafeEqual } from 'node:crypto'
-
 import type { ImAttachment, ImMessage, ImUser } from '@aipehub/im-adapter'
 
-import type {
-  SlackFile,
-  SlackMessageEvent,
-  SlackSignatureVerifyResult,
-} from './types.js'
+import type { SlackFile, SlackMessageEvent } from './types.js'
 
 // ---------------------------------------------------------------------------
 // `slack-file:` URI helpers — analogous to `lark-file:` / `telegram-file:`
@@ -200,74 +195,4 @@ export function slackToImMessage(
     chatId: event.channel,
     ts,
   }
-}
-
-// ---------------------------------------------------------------------------
-// HMAC signature verification (X-Slack-Signature + X-Slack-Request-Timestamp)
-// ---------------------------------------------------------------------------
-
-/**
- * Verify an incoming Slack webhook request.
- *
- * Spec: https://api.slack.com/authentication/verifying-requests-from-slack
- *
- *   base = "v0:" + timestamp + ":" + rawBody
- *   expected = "v0=" + hex(hmac-sha256(signingSecret, base))
- *   accept iff expected === signatureHeader  AND
- *           |now - timestamp| < toleranceSec  AND
- *           constant-time comparison
- *
- * Why a discriminated-result instead of throwing:
- *
- *   Slack webhooks face the open internet. Port scanners, retried
- *   stale requests after a long outage, misconfigured proxies, etc.
- *   all produce failed verifications routinely. Throwing on the hot
- *   path makes a perfectly normal failure mode expensive and hard
- *   to differentiate from real bugs.
- *
- * `now` is injectable for tests. Defaults to wallclock seconds.
- * Tolerance defaults to 300s (5 min) — Slack's official guidance.
- *
- * `rawBody` MUST be the exact bytes Slack sent. JSON-reserialising
- * after parse changes whitespace and breaks the signature. Bridge's
- * HTTP handler buffers the raw body before parsing.
- */
-export function verifySlackSignature(input: {
-  signingSecret: string
-  /** `X-Slack-Request-Timestamp` header value. */
-  timestamp: string | undefined | null
-  /** `X-Slack-Signature` header value (`v0=…`). */
-  signature: string | undefined | null
-  /** Raw, byte-for-byte request body as Slack sent it. */
-  rawBody: string
-  /** Override current time (unix seconds) for tests. */
-  nowSec?: number
-  /** Tolerance window in seconds. Defaults to 300 (5 min). */
-  toleranceSec?: number
-}): SlackSignatureVerifyResult {
-  const { signingSecret, timestamp, signature, rawBody } = input
-  if (
-    typeof timestamp !== 'string' ||
-    timestamp.length === 0 ||
-    typeof signature !== 'string' ||
-    signature.length === 0
-  ) {
-    return { ok: false, reason: 'missing-headers' }
-  }
-  const ts = Number(timestamp)
-  if (!Number.isFinite(ts)) return { ok: false, reason: 'bad-timestamp' }
-  const now = input.nowSec ?? Math.floor(Date.now() / 1000)
-  const tolerance = input.toleranceSec ?? 300
-  if (Math.abs(now - ts) > tolerance) return { ok: false, reason: 'bad-timestamp' }
-
-  const base = `v0:${timestamp}:${rawBody}`
-  const expected = `v0=${createHmac('sha256', signingSecret).update(base).digest('hex')}`
-
-  // Constant-time compare. timingSafeEqual demands equal-length buffers
-  // — length mismatch is a guaranteed mismatch, short-circuit to false.
-  const a = Buffer.from(expected, 'utf8')
-  const b = Buffer.from(signature, 'utf8')
-  if (a.length !== b.length) return { ok: false, reason: 'mismatch' }
-  if (!timingSafeEqual(a, b)) return { ok: false, reason: 'mismatch' }
-  return { ok: true }
 }

@@ -1,21 +1,33 @@
 /**
- * Phase 12 M6 — SlackBridge end-to-end coverage.
+ * SlackBridge coverage — official Socket Mode transport.
  *
- * Uses a FakeSlackClient to short-circuit fetch and drives
- * `handleRawRequest` / `handleEvent` directly (no live HTTP socket).
- * Signatures are computed via node:crypto exactly like the real
- * verifier so we test both halves on the same wire format.
+ * Two seams are exercised:
+ *
+ *   1. `handleEvent(payload)` directly — the `payload` of a Socket Mode
+ *      `events_api` envelope IS a standard `event_callback` body, so the
+ *      dispatch / dedup / anti-loop / mention-strip logic is tested by
+ *      handing event_callback bodies straight in. No socket needed.
+ *   2. A fake `socketFactory` — captures the params the bridge wires in
+ *      `start()` (appToken / onEvent / onError) so a test can `emit()` a
+ *      payload through `onEvent` exactly as the real socket would, and
+ *      assert start/stop drive the connection.
+ *
+ * sendMessage uses a `FakeSlackClient` that records each call; no fetch.
+ * The Web API send path is unchanged from the webhook era.
  */
 
-import { createHmac } from 'node:crypto'
+import { describe, expect, it } from 'vitest'
 
-import { describe, expect, it, vi } from 'vitest'
-
-import { SlackBridge } from '../src/bridge.js'
+import {
+  SlackBridge,
+  type SlackSocketFactory,
+  type SlackSocketFactoryParams,
+} from '../src/bridge.js'
 import { SlackApiError, type SlackClient } from '../src/client.js'
+import type { SlackSocketMode } from '../src/socket-mode.js'
 import type { SlackApiResponse, SlackMessageEvent } from '../src/types.js'
 
-const SIGNING_SECRET = 'shhhh'
+const APP_TOKEN = 'xapp-test'
 const BOT_USER_ID = 'UBOT01'
 const USER_ID = 'U_ALICE'
 const CHANNEL_ID = 'C_ROOM'
@@ -28,20 +40,17 @@ interface CallRecord {
 class FakeSlackClient implements SlackClient {
   readonly baseUrl = 'https://fake.slack.test/api'
   readonly calls: CallRecord[] = []
-  /** Optional per-path response stub. If unset, returns `{ ok: true }`. */
   private responseByPath = new Map<string, unknown>()
-  /** Optional per-path error stub. If set, throws this instead of returning. */
   private errorByPath = new Map<string, Error>()
-
-  setResponse(path: string, response: unknown): void {
-    this.responseByPath.set(path, response)
-  }
 
   setError(path: string, err: Error): void {
     this.errorByPath.set(path, err)
   }
 
-  async call<T extends SlackApiResponse>(path: string, options: { body?: unknown } = {}): Promise<T> {
+  async call<T extends SlackApiResponse>(
+    path: string,
+    options: { body?: unknown } = {},
+  ): Promise<T> {
     this.calls.push({ path, body: options.body })
     const e = this.errorByPath.get(path)
     if (e) throw e
@@ -50,15 +59,59 @@ class FakeSlackClient implements SlackClient {
   }
 }
 
-function sign(ts: string, body: string): string {
-  return `v0=${createHmac('sha256', SIGNING_SECRET).update(`v0:${ts}:${body}`).digest('hex')}`
+/**
+ * A fake Socket Mode connection. The factory captures the params the
+ * bridge hands it; `emitEvent` feeds a payload through the captured
+ * `onEvent` callback exactly as the real socket would over the wire.
+ */
+function fakeSocket(): {
+  factory: SlackSocketFactory
+  emitEvent: (payload: unknown) => Promise<void>
+  params: () => SlackSocketFactoryParams | null
+  startCount: () => number
+  stopCount: () => number
+} {
+  let captured: SlackSocketFactoryParams | null = null
+  let startCount = 0
+  let stopCount = 0
+  const factory: SlackSocketFactory = (params) => {
+    captured = params
+    const conn: SlackSocketMode = {
+      get state() {
+        return 'open'
+      },
+      async start(): Promise<void> {
+        startCount += 1
+      },
+      async stop(): Promise<void> {
+        stopCount += 1
+      },
+    }
+    return conn
+  }
+  return {
+    factory,
+    emitEvent: async (payload) => {
+      if (!captured) throw new Error('socket not started — call start() first')
+      await captured.onEvent(payload)
+    },
+    params: () => captured,
+    startCount: () => startCount,
+    stopCount: () => stopCount,
+  }
 }
 
-function makeMessageCallback(over: {
-  event?: Partial<SlackMessageEvent>
-  authorizations?: Array<{ user_id: string; is_bot?: boolean; team_id?: string }>
-  event_id?: string
-} = {}): {
+/**
+ * Build the `event_callback` body Socket Mode delivers as the `payload`
+ * of an `events_api` envelope.
+ */
+function makeMessageCallback(
+  over: {
+    event?: Partial<SlackMessageEvent>
+    authorizations?: Array<{ user_id: string; is_bot?: boolean; team_id?: string }>
+    event_id?: string
+  } = {},
+): {
   type: 'event_callback'
   event_id: string
   event_time: number
@@ -91,55 +144,52 @@ function makeMessageCallback(over: {
 
 describe('SlackBridge constructor', () => {
   it('exposes platform "slack"', () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET })
+    const b = new SlackBridge({ token: 'xoxb-x', appToken: APP_TOKEN })
     expect(b.platform).toBe('slack')
   })
 
   it('throws on missing token', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(() => new SlackBridge({ signingSecret: 's' } as any)).toThrow(/token is required/)
-    expect(() => new SlackBridge({ token: '', signingSecret: 's' })).toThrow(/token is required/)
+    expect(() => new SlackBridge({ appToken: APP_TOKEN } as any)).toThrow(/token is required/)
+    expect(() => new SlackBridge({ token: '', appToken: APP_TOKEN })).toThrow(/token is required/)
   })
 
-  it('throws on missing signingSecret', () => {
+  it('throws on missing appToken', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(() => new SlackBridge({ token: 'xoxb-x' } as any)).toThrow(/signingSecret is required/)
-    expect(() => new SlackBridge({ token: 'xoxb-x', signingSecret: '' })).toThrow(/signingSecret is required/)
+    expect(() => new SlackBridge({ token: 'xoxb-x' } as any)).toThrow(/appToken is required/)
+    expect(() => new SlackBridge({ token: 'xoxb-x', appToken: '' })).toThrow(/appToken is required/)
   })
 })
 
-describe('SlackBridge.handleEvent (parsed body, no signature)', () => {
-  it('echoes challenge for url_verification', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET })
-    const out = await b.handleEvent({
-      type: 'url_verification',
-      challenge: 'abc123',
-      token: 'ignored',
+describe('SlackBridge.handleEvent (events_api payload)', () => {
+  it('ignores non-event_callback payloads (no dispatch, no throw)', async () => {
+    const b = new SlackBridge({ token: 'xoxb-x', appToken: APP_TOKEN })
+    const got: unknown[] = []
+    b.onMessage((m) => got.push(m))
+    await b.handleEvent({ type: 'app_rate_limited', minute_rate_limited: 1 })
+    expect(got).toHaveLength(0)
+  })
+
+  it('reports via onError on a non-object payload (does not throw, no dispatch)', async () => {
+    const errors: unknown[] = []
+    const b = new SlackBridge({
+      token: 'xoxb-x',
+      appToken: APP_TOKEN,
+      onError: (e) => errors.push(e),
     })
-    expect(out).toEqual({ challenge: 'abc123' })
-  })
-
-  it('throws when url_verification has no challenge', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET })
-    await expect(b.handleEvent({ type: 'url_verification' })).rejects.toThrow(/missing challenge/)
-  })
-
-  it('ignores unknown top-level types (returns undefined, no throw)', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET })
-    const out = await b.handleEvent({ type: 'app_rate_limited', minute_rate_limited: 1 })
-    expect(out).toBeUndefined()
-  })
-
-  it('throws when body is not an object', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET })
-    await expect(b.handleEvent('not-an-object')).rejects.toThrow(/must be an object/)
+    const got: unknown[] = []
+    b.onMessage((m) => got.push(m))
+    await b.handleEvent('not-an-object')
+    expect(got).toHaveLength(0)
+    expect(errors).toHaveLength(1)
+    expect((errors[0] as Error).message).toMatch(/must be an object/)
   })
 
   it('dispatches a plain message event to listeners', async () => {
     const fake = new FakeSlackClient()
     const b = new SlackBridge({
       token: 'xoxb-x',
-      signingSecret: SIGNING_SECRET,
+      appToken: APP_TOKEN,
       client: fake,
       botUserId: BOT_USER_ID,
     })
@@ -157,12 +207,11 @@ describe('SlackBridge.handleEvent (parsed body, no signature)', () => {
   })
 
   it('captures botUserId from authorizations on first delivery', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET })
+    const b = new SlackBridge({ token: 'xoxb-x', appToken: APP_TOKEN })
     const got: Array<unknown> = []
     b.onMessage((m) => got.push(m))
-    // Send a message that includes a <@BOT_USER_ID> mention and an
-    // authorizations entry. After processing, the strip should have
-    // worked.
+    // A message that mentions <@BOT_USER_ID> plus an authorizations
+    // entry. After processing, the strip should have fired.
     await b.handleEvent(
       makeMessageCallback({
         event: { text: `<@${BOT_USER_ID}> /help` },
@@ -174,7 +223,7 @@ describe('SlackBridge.handleEvent (parsed body, no signature)', () => {
   })
 
   it('dedups by event_id across deliveries', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET, botUserId: BOT_USER_ID })
+    const b = new SlackBridge({ token: 'xoxb-x', appToken: APP_TOKEN, botUserId: BOT_USER_ID })
     const got: unknown[] = []
     b.onMessage((m) => got.push(m))
     const cb = makeMessageCallback({ event_id: 'Ev_dup' })
@@ -184,7 +233,7 @@ describe('SlackBridge.handleEvent (parsed body, no signature)', () => {
   })
 
   it('filters bot messages (anti-loop layer 1)', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET, botUserId: BOT_USER_ID })
+    const b = new SlackBridge({ token: 'xoxb-x', appToken: APP_TOKEN, botUserId: BOT_USER_ID })
     const got: unknown[] = []
     b.onMessage((m) => got.push(m))
     await b.handleEvent(
@@ -196,7 +245,7 @@ describe('SlackBridge.handleEvent (parsed body, no signature)', () => {
   })
 
   it('filters own-user posts (anti-loop layer 2)', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET, botUserId: BOT_USER_ID })
+    const b = new SlackBridge({ token: 'xoxb-x', appToken: APP_TOKEN, botUserId: BOT_USER_ID })
     const got: unknown[] = []
     b.onMessage((m) => got.push(m))
     await b.handleEvent(
@@ -208,7 +257,7 @@ describe('SlackBridge.handleEvent (parsed body, no signature)', () => {
   })
 
   it('skips system subtypes (channel_join, message_changed)', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET, botUserId: BOT_USER_ID })
+    const b = new SlackBridge({ token: 'xoxb-x', appToken: APP_TOKEN, botUserId: BOT_USER_ID })
     const got: unknown[] = []
     b.onMessage((m) => got.push(m))
     await b.handleEvent(makeMessageCallback({ event: { subtype: 'channel_join' } }))
@@ -217,7 +266,7 @@ describe('SlackBridge.handleEvent (parsed body, no signature)', () => {
   })
 
   it('passes through file_share subtype with attachment', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET, botUserId: BOT_USER_ID })
+    const b = new SlackBridge({ token: 'xoxb-x', appToken: APP_TOKEN, botUserId: BOT_USER_ID })
     const got: Array<{ text: string; attachments?: unknown[] }> = []
     b.onMessage((m) => got.push({ text: m.text, attachments: m.attachments }))
     await b.handleEvent(
@@ -238,7 +287,7 @@ describe('SlackBridge.handleEvent (parsed body, no signature)', () => {
     const errors: unknown[] = []
     const b = new SlackBridge({
       token: 'xoxb-x',
-      signingSecret: SIGNING_SECRET,
+      appToken: APP_TOKEN,
       botUserId: BOT_USER_ID,
       onError: (e) => errors.push(e),
     })
@@ -254,70 +303,40 @@ describe('SlackBridge.handleEvent (parsed body, no signature)', () => {
   })
 })
 
-describe('SlackBridge.handleRawRequest (signature path)', () => {
-  it('accepts a correctly-signed payload', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET, botUserId: BOT_USER_ID })
-    const got: unknown[] = []
-    b.onMessage((m) => got.push(m))
-    const body = JSON.stringify(makeMessageCallback())
-    const ts = String(Math.floor(Date.now() / 1000))
-    const sig = sign(ts, body)
-    const r = await b.handleRawRequest(body, { signature: sig, timestamp: ts })
-    expect(r.status).toBe(200)
-    expect(got).toHaveLength(1)
-  })
-
-  it('echoes challenge through the signed path', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET })
-    const body = JSON.stringify({ type: 'url_verification', challenge: 'xyz' })
-    const ts = String(Math.floor(Date.now() / 1000))
-    const sig = sign(ts, body)
-    const r = await b.handleRawRequest(body, { signature: sig, timestamp: ts })
-    expect(r.status).toBe(200)
-    expect(r.body).toEqual({ challenge: 'xyz' })
-  })
-
-  it('rejects bad signatures with 401', async () => {
-    const errors: unknown[] = []
+describe('SlackBridge socket wiring (start/stop + emit through onEvent)', () => {
+  it('start() builds the socket with the appToken and starts it; stop() stops it', async () => {
+    const sock = fakeSocket()
     const b = new SlackBridge({
       token: 'xoxb-x',
-      signingSecret: SIGNING_SECRET,
-      onError: (e) => errors.push(e),
+      appToken: APP_TOKEN,
+      socketFactory: sock.factory,
     })
-    const body = JSON.stringify(makeMessageCallback())
-    const ts = String(Math.floor(Date.now() / 1000))
-    const wrong = sign(ts, '{"different":"body"}')
-    const r = await b.handleRawRequest(body, { signature: wrong, timestamp: ts })
-    expect(r.status).toBe(401)
-    expect(r.body).toEqual({ error: 'mismatch' })
-    expect(errors).toHaveLength(1)
+    await b.start()
+    expect(sock.startCount()).toBe(1)
+    expect(sock.params()?.appToken).toBe(APP_TOKEN)
+    // idempotent start
+    await b.start()
+    expect(sock.startCount()).toBe(1)
+    await b.stop()
+    expect(sock.stopCount()).toBe(1)
+    // idempotent stop
+    await b.stop()
+    expect(sock.stopCount()).toBe(1)
   })
 
-  it('rejects requests with missing headers as 401', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET })
-    const r = await b.handleRawRequest('{}', { signature: null, timestamp: null })
-    expect(r.status).toBe(401)
-    expect(r.body).toEqual({ error: 'missing-headers' })
-  })
-
-  it('rejects stale timestamps as 401', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET, signatureToleranceSec: 60 })
-    const body = '{}'
-    const ts = String(Math.floor(Date.now() / 1000) - 3600)
-    const sig = sign(ts, body)
-    const r = await b.handleRawRequest(body, { signature: sig, timestamp: ts })
-    expect(r.status).toBe(401)
-    expect(r.body).toEqual({ error: 'bad-timestamp' })
-  })
-
-  it('returns 400 on invalid JSON body (signature valid)', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET })
-    const body = 'not-json'
-    const ts = String(Math.floor(Date.now() / 1000))
-    const sig = sign(ts, body)
-    const r = await b.handleRawRequest(body, { signature: sig, timestamp: ts })
-    expect(r.status).toBe(400)
-    expect(r.body).toEqual({ error: 'invalid_json' })
+  it('an events_api payload emitted through the socket dispatches as ImMessage', async () => {
+    const sock = fakeSocket()
+    const b = new SlackBridge({
+      token: 'xoxb-x',
+      appToken: APP_TOKEN,
+      botUserId: BOT_USER_ID,
+      socketFactory: sock.factory,
+    })
+    const got: Array<{ text: string; chatId?: string }> = []
+    b.onMessage((m) => got.push({ text: m.text, chatId: m.chatId }))
+    await b.start()
+    await sock.emitEvent(makeMessageCallback())
+    expect(got).toEqual([{ text: 'hello', chatId: CHANNEL_ID }])
   })
 })
 
@@ -326,7 +345,7 @@ describe('SlackBridge.sendMessage', () => {
     const fake = new FakeSlackClient()
     const b = new SlackBridge({
       token: 'xoxb-x',
-      signingSecret: SIGNING_SECRET,
+      appToken: APP_TOKEN,
       client: fake,
       botUserId: BOT_USER_ID,
     })
@@ -346,7 +365,7 @@ describe('SlackBridge.sendMessage', () => {
     const fake = new FakeSlackClient()
     const b = new SlackBridge({
       token: 'xoxb-x',
-      signingSecret: SIGNING_SECRET,
+      appToken: APP_TOKEN,
       client: fake,
       botUserId: BOT_USER_ID,
     })
@@ -358,7 +377,7 @@ describe('SlackBridge.sendMessage', () => {
     const fake = new FakeSlackClient()
     const b = new SlackBridge({
       token: 'xoxb-x',
-      signingSecret: SIGNING_SECRET,
+      appToken: APP_TOKEN,
       client: fake,
       botUserId: BOT_USER_ID,
     })
@@ -372,7 +391,7 @@ describe('SlackBridge.sendMessage', () => {
     const errors: unknown[] = []
     const b = new SlackBridge({
       token: 'xoxb-x',
-      signingSecret: SIGNING_SECRET,
+      appToken: APP_TOKEN,
       client: fake,
       botUserId: BOT_USER_ID,
       onError: (e) => errors.push(e),
@@ -404,7 +423,7 @@ describe('SlackBridge.sendMessage', () => {
     )
     const b = new SlackBridge({
       token: 'xoxb-x',
-      signingSecret: SIGNING_SECRET,
+      appToken: APP_TOKEN,
       client: fake,
       botUserId: BOT_USER_ID,
     })
@@ -416,82 +435,9 @@ describe('SlackBridge.sendMessage', () => {
   })
 })
 
-describe('SlackBridge lifecycle', () => {
-  it('start() then stop() with webhookPort=0 is a no-op (idempotent)', async () => {
-    const b = new SlackBridge({
-      token: 'xoxb-x',
-      signingSecret: SIGNING_SECRET,
-      webhookPort: 0,
-    })
-    await b.start()
-    await b.start() // second start is a no-op
-    await b.stop()
-    await b.stop() // second stop is also a no-op
-  })
-
-  it('start() actually opens an HTTP listener when port > 0', async () => {
-    const b = new SlackBridge({
-      token: 'xoxb-x',
-      signingSecret: SIGNING_SECRET,
-      webhookPort: 0, // 0 binds to an ephemeral port via http.Server.listen(0)
-      // Switch path to 0 above to keep test hermetic; verify with a
-      // separate ephemeral-port test:
-    })
-    await b.start()
-    await b.stop()
-  })
-
-  it('binds an ephemeral port and serves a 200 to the configured path', async () => {
-    // We need a real port for this test. Pick a high port; on a CI
-    // box, this is racy in theory but rarely in practice. The test
-    // doesn't actually fire a verified POST — that's covered by the
-    // signature/event tests above — only that the server accepts a
-    // POST and returns SOMETHING.
-    const ports = await import('node:net')
-    const portFinder = await new Promise<number>((resolve) => {
-      const srv = ports.createServer()
-      srv.listen(0, () => {
-        const addr = srv.address()
-        const port = typeof addr === 'object' && addr ? addr.port : 0
-        srv.close(() => resolve(port))
-      })
-    })
-    const errors: unknown[] = []
-    const b = new SlackBridge({
-      token: 'xoxb-x',
-      signingSecret: SIGNING_SECRET,
-      webhookPort: portFinder,
-      onError: (e) => errors.push(e),
-    })
-    await b.start()
-    try {
-      const res = await fetch(`http://127.0.0.1:${portFinder}/slack/webhook`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: '{}',
-      })
-      // No signature headers → 401 from handleRawRequest.
-      expect(res.status).toBe(401)
-      const body = await res.json()
-      expect(body).toEqual({ error: 'missing-headers' })
-      // And the GET liveness probe.
-      const ping = await fetch(`http://127.0.0.1:${portFinder}/slack/webhook`)
-      expect(ping.status).toBe(200)
-      expect(await ping.text()).toBe('slack-bridge ok')
-      // Unknown path → 404.
-      const notFound = await fetch(`http://127.0.0.1:${portFinder}/other`, { method: 'POST' })
-      expect(notFound.status).toBe(404)
-    } finally {
-      await b.stop()
-    }
-    // errors should include the "missing-headers" from the unsigned POST.
-    expect(errors.some((e) => (e as Error).message?.includes('missing-headers'))).toBe(true)
-  })
-})
-
 describe('SlackBridge.onMessage', () => {
   it('returns an unsubscribe that removes the listener', async () => {
-    const b = new SlackBridge({ token: 'xoxb-x', signingSecret: SIGNING_SECRET, botUserId: BOT_USER_ID })
+    const b = new SlackBridge({ token: 'xoxb-x', appToken: APP_TOKEN, botUserId: BOT_USER_ID })
     const got: unknown[] = []
     const unsub = b.onMessage((m) => got.push(m))
     await b.handleEvent(makeMessageCallback({ event_id: 'Ev1' }))
@@ -500,6 +446,3 @@ describe('SlackBridge.onMessage', () => {
     expect(got).toHaveLength(1)
   })
 })
-
-// Silence unused-import warning when nothing in the file uses vi yet.
-void vi

@@ -2,7 +2,7 @@
   "name": "@aipehub/im-slack",
   "version": "0.1.0",
   "type": "module",
-  "description": "AipeHub IM bridge for Slack — implements ImBridge against the Slack Events API + Web API. Webhook + HMAC signature; no @slack/bolt dep (uses fetch + node:crypto).",
+  "description": "AipeHub IM bridge for Slack — implements ImBridge over the official Socket Mode transport (outbound WebSocket, 免穿透). xapp- app token + xoxb- bot token; hand-rolled ws state machine, no @slack/bolt / @slack/socket-mode dep.",
   "license": "MIT",
   "private": true,
   "main": "./dist/index.js",

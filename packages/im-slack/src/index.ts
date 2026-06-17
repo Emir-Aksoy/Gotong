@@ -2,7 +2,20 @@
  * @aipehub/im-slack — public surface.
  */
 
-export { SlackBridge, type SlackBridgeOptions, type SlackHandleResult } from './bridge.js'
+export {
+  SlackBridge,
+  type SlackBridgeOptions,
+  type SlackSocketFactory,
+  type SlackSocketFactoryParams,
+  defaultSlackSocketFactory,
+} from './bridge.js'
+export {
+  createSlackSocketMode,
+  type SlackSocketMode,
+  type SlackSocketModeOptions,
+  type WebSocketCtor,
+  type WebSocketLike,
+} from './socket-mode.js'
 export {
   createSlackClient,
   SlackApiError,
@@ -16,18 +29,17 @@ export {
   slackFileUri,
   slackToImMessage,
   stripSlackBotMentions,
-  verifySlackSignature,
   SLACK_FILE_URI_PREFIX,
   type SlackToImMessageOptions,
 } from './message.js'
 export type {
   SlackApiResponse,
   SlackAuthorization,
+  SlackConnectionsOpenResponse,
   SlackEventCallback,
   SlackFile,
   SlackMessageEvent,
   SlackPostMessageRequest,
   SlackPostMessageResponse,
-  SlackSignatureVerifyResult,
-  SlackUrlVerification,
+  SlackSocketEnvelope,
 } from './types.js'

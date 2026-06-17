@@ -1,11 +1,10 @@
 /**
- * Phase 12 M6 — Slack message → ImMessage mapper + signature verifier.
+ * Slack message → ImMessage mapper (Socket Mode).
  *
- * Pure-function tests; no network. HMAC computed locally with
- * node:crypto so tests stay hermetic.
+ * Pure-function tests; no network. Socket Mode authenticates the
+ * connection at apps.connections.open, so there is no per-request HMAC
+ * to verify here (unlike the old Events API webhook).
  */
-
-import { createHmac } from 'node:crypto'
 
 import { describe, expect, it } from 'vitest'
 
@@ -15,7 +14,6 @@ import {
   slackFileUri,
   slackToImMessage,
   stripSlackBotMentions,
-  verifySlackSignature,
   SLACK_FILE_URI_PREFIX,
 } from '../src/message.js'
 import type { SlackMessageEvent } from '../src/types.js'
@@ -23,7 +21,6 @@ import type { SlackMessageEvent } from '../src/types.js'
 const BOT_USER_ID = 'UBOT0001'
 const USER_ID = 'U2222ALICE'
 const CHANNEL_ID = 'C9999ROOM'
-const SIGNING_SECRET = 'shhhh-secret-not-real'
 
 function makeEvent(over: Partial<SlackMessageEvent> = {}): SlackMessageEvent {
   return {
@@ -296,158 +293,5 @@ describe('slackToImMessage', () => {
     )
     expect(im!.text).toBe('')
     expect(im!.attachments).toHaveLength(1)
-  })
-})
-
-// ---------------------------------------------------------------------------
-// Signature verification
-// ---------------------------------------------------------------------------
-
-function sign(ts: string, body: string): string {
-  return `v0=${createHmac('sha256', SIGNING_SECRET).update(`v0:${ts}:${body}`).digest('hex')}`
-}
-
-describe('verifySlackSignature', () => {
-  it('accepts a freshly-signed request', () => {
-    const ts = '1748345600'
-    const body = '{"foo":"bar"}'
-    const sig = sign(ts, body)
-    const r = verifySlackSignature({
-      signingSecret: SIGNING_SECRET,
-      signature: sig,
-      timestamp: ts,
-      rawBody: body,
-      nowSec: 1748345610,
-    })
-    expect(r.ok).toBe(true)
-  })
-
-  it('rejects when signature header is missing', () => {
-    const r = verifySlackSignature({
-      signingSecret: SIGNING_SECRET,
-      signature: null,
-      timestamp: '1748345600',
-      rawBody: '{}',
-      nowSec: 1748345600,
-    })
-    expect(r).toEqual({ ok: false, reason: 'missing-headers' })
-  })
-
-  it('rejects when timestamp header is missing', () => {
-    const r = verifySlackSignature({
-      signingSecret: SIGNING_SECRET,
-      signature: sign('1748345600', '{}'),
-      timestamp: null,
-      rawBody: '{}',
-      nowSec: 1748345600,
-    })
-    expect(r).toEqual({ ok: false, reason: 'missing-headers' })
-  })
-
-  it('rejects empty-string headers', () => {
-    const r = verifySlackSignature({
-      signingSecret: SIGNING_SECRET,
-      signature: '',
-      timestamp: '',
-      rawBody: '{}',
-      nowSec: 1748345600,
-    })
-    expect(r).toEqual({ ok: false, reason: 'missing-headers' })
-  })
-
-  it('rejects a stale timestamp (> 5 min in the past)', () => {
-    const ts = '1748345600'
-    const body = '{}'
-    const sig = sign(ts, body)
-    const r = verifySlackSignature({
-      signingSecret: SIGNING_SECRET,
-      signature: sig,
-      timestamp: ts,
-      rawBody: body,
-      nowSec: 1748345600 + 301,
-    })
-    expect(r).toEqual({ ok: false, reason: 'bad-timestamp' })
-  })
-
-  it('rejects a future timestamp (> 5 min ahead)', () => {
-    const ts = '1748345600'
-    const body = '{}'
-    const sig = sign(ts, body)
-    const r = verifySlackSignature({
-      signingSecret: SIGNING_SECRET,
-      signature: sig,
-      timestamp: ts,
-      rawBody: body,
-      nowSec: 1748345600 - 301,
-    })
-    expect(r).toEqual({ ok: false, reason: 'bad-timestamp' })
-  })
-
-  it('rejects a non-numeric timestamp', () => {
-    const r = verifySlackSignature({
-      signingSecret: SIGNING_SECRET,
-      signature: sign('1748345600', '{}'),
-      timestamp: 'not-a-number',
-      rawBody: '{}',
-      nowSec: 1748345600,
-    })
-    expect(r).toEqual({ ok: false, reason: 'bad-timestamp' })
-  })
-
-  it('rejects a signature computed with the wrong secret', () => {
-    const ts = '1748345600'
-    const body = '{}'
-    const badSig = `v0=${createHmac('sha256', 'WRONG').update(`v0:${ts}:${body}`).digest('hex')}`
-    const r = verifySlackSignature({
-      signingSecret: SIGNING_SECRET,
-      signature: badSig,
-      timestamp: ts,
-      rawBody: body,
-      nowSec: 1748345600,
-    })
-    expect(r).toEqual({ ok: false, reason: 'mismatch' })
-  })
-
-  it('rejects when body has been tampered with', () => {
-    const ts = '1748345600'
-    const sig = sign(ts, '{"foo":"bar"}')
-    const r = verifySlackSignature({
-      signingSecret: SIGNING_SECRET,
-      signature: sig,
-      timestamp: ts,
-      rawBody: '{"foo":"bar","evil":true}',
-      nowSec: 1748345600,
-    })
-    expect(r).toEqual({ ok: false, reason: 'mismatch' })
-  })
-
-  it('rejects truncated/extended signatures (length mismatch)', () => {
-    const ts = '1748345600'
-    const body = '{}'
-    const sig = sign(ts, body) + 'extra'
-    const r = verifySlackSignature({
-      signingSecret: SIGNING_SECRET,
-      signature: sig,
-      timestamp: ts,
-      rawBody: body,
-      nowSec: 1748345600,
-    })
-    expect(r).toEqual({ ok: false, reason: 'mismatch' })
-  })
-
-  it('honours a custom toleranceSec', () => {
-    const ts = '1748345600'
-    const body = '{}'
-    const sig = sign(ts, body)
-    // 30s in the past, but tolerance is 10s → rejected
-    const r = verifySlackSignature({
-      signingSecret: SIGNING_SECRET,
-      signature: sig,
-      timestamp: ts,
-      rawBody: body,
-      nowSec: 1748345600 + 30,
-      toleranceSec: 10,
-    })
-    expect(r).toEqual({ ok: false, reason: 'bad-timestamp' })
   })
 })
