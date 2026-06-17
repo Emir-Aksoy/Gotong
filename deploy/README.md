@@ -28,6 +28,7 @@ set -a; . ./.env.local; set +a && pnpm host
 # T2/T3 云服务器（VPS）
 sudo cp deploy/.env.cloud /etc/aipehub.env
 sudo $EDITOR /etc/aipehub.env         # 域名 + master key（从 secret 注入）
+bash scripts/cloud-harden.sh /etc/aipehub.env   # 暴露前先跑周界自检，红项清零
 # 然后照 docs/zh/DEPLOY.md §C.4 起 systemd，§C.7 首启取 admin URL
 ```
 
