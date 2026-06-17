@@ -200,25 +200,67 @@ describe('GO-LIVE T1 — IM bridge fold (hermetic)', () => {
 })
 
 describe('GO-LIVE T1 — env gate (zero behaviour change when unset)', () => {
-  const KEY = 'AIPE_TELEGRAM_BOT_TOKEN'
-  let saved: string | undefined
+  // Every IM platform env the gate reads. The "all unset → undefined"
+  // contract only holds when the test process has NONE of them set, so the
+  // block saves + clears all four platforms (not just Telegram) and
+  // restores them after — the QQ-in test below also sets some of these.
+  const KEYS = [
+    'AIPE_TELEGRAM_BOT_TOKEN',
+    'AIPE_QQ_BOT_APPID',
+    'AIPE_QQ_BOT_SECRET',
+    'AIPE_QQ_WEBHOOK_PORT',
+    'AIPE_QQ_WEBHOOK_HOST',
+    'AIPE_QQ_WEBHOOK_PATH',
+    'AIPE_LARK_APP_ID',
+    'AIPE_LARK_APP_SECRET',
+    'AIPE_SLACK_APP_TOKEN',
+    'AIPE_SLACK_BOT_TOKEN',
+  ]
+  const saved: Record<string, string | undefined> = {}
 
   beforeEach(() => {
-    saved = process.env[KEY]
-    delete process.env[KEY]
+    for (const k of KEYS) {
+      saved[k] = process.env[k]
+      delete process.env[k]
+    }
   })
   afterEach(() => {
-    if (saved === undefined) delete process.env[KEY]
-    else process.env[KEY] = saved
+    for (const k of KEYS) {
+      if (saved[k] === undefined) delete process.env[k]
+      else process.env[k] = saved[k]
+    }
   })
 
-  it('startImBridges returns undefined with no token', async () => {
+  it('returns undefined when no platform is configured', async () => {
     const hub = Hub.inMemory()
     await hub.start()
     const identity = openIdentityStore({ dbPath: ':memory:' })
     try {
       const handle = await startImBridges({ hub, identity, log: silentLogger })
       expect(handle).toBeUndefined()
+    } finally {
+      identity.close()
+      await hub.stop()
+    }
+  })
+
+  it('env-gates QQ in independently of Telegram (official inbound webhook)', async () => {
+    // QQ's official Bot API is webhook-only; AIPE_QQ_WEBHOOK_PORT=0
+    // disables the bridge's built-in listener so the test stays hermetic
+    // (no socket bound, no network) while still proving the env gate wires
+    // the QQ bridge into the shared `bridges` array with Telegram unset.
+    process.env.AIPE_QQ_BOT_APPID = '102000000'
+    process.env.AIPE_QQ_BOT_SECRET = 'test-secret-deadbeef'
+    process.env.AIPE_QQ_WEBHOOK_PORT = '0'
+
+    const hub = Hub.inMemory()
+    await hub.start()
+    const identity = openIdentityStore({ dbPath: ':memory:' })
+    try {
+      const handle = await startImBridges({ hub, identity, log: silentLogger })
+      expect(handle).toBeDefined()
+      expect(handle!.bridges.map((b) => b.platform)).toEqual(['qq'])
+      await handle!.stop()
     } finally {
       identity.close()
       await hub.stop()

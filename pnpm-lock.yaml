@@ -721,6 +721,15 @@ importers:
       '@aipehub/im-adapter':
         specifier: workspace:*
         version: link:../im-adapter
+      '@aipehub/im-lark':
+        specifier: workspace:*
+        version: link:../im-lark
+      '@aipehub/im-qq':
+        specifier: workspace:*
+        version: link:../im-qq
+      '@aipehub/im-slack':
+        specifier: workspace:*
+        version: link:../im-slack
       '@aipehub/im-telegram':
         specifier: workspace:*
         version: link:../im-telegram
@@ -778,6 +787,9 @@ importers:
       openai:
         specifier: ^6.38.0
         version: 6.38.0(ws@8.20.1)(zod@4.4.3)
+      ws:
+        specifier: ^8.20.1
+        version: 8.20.1
     devDependencies:
       '@aipehub/cli-agent':
         specifier: workspace:*
@@ -791,9 +803,6 @@ importers:
       vitest:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@20.19.41)(tsx@4.22.0)(yaml@2.9.0)
-      ws:
-        specifier: ^8.20.1
-        version: 8.20.1
 
   packages/hub-steward:
     dependencies:

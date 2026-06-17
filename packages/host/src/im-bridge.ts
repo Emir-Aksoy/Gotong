@@ -39,6 +39,10 @@ import {
   type ImUser,
 } from '@aipehub/im-adapter'
 import { TelegramBridge } from '@aipehub/im-telegram'
+import { QqBridge } from '@aipehub/im-qq'
+import { LarkBridge } from '@aipehub/im-lark'
+import { SlackBridge, type WebSocketCtor as SlackWebSocketCtor } from '@aipehub/im-slack'
+import { WebSocket as NodeWebSocket } from 'ws'
 
 /**
  * Minimal structural logger — the host's `@aipehub/core` `Logger`
@@ -267,20 +271,106 @@ export interface ImBridgesHandle {
 }
 
 /**
- * Construct and start the configured IM bridges. Returns `undefined`
- * when no bridge is configured (no `AIPE_TELEGRAM_BOT_TOKEN`) — the
- * caller treats that as "IM disabled" and wires no shutdown hook.
+ * Construct and start every configured IM bridge. Each platform is
+ * INDEPENDENTLY env-gated: its bridge is built only when its env vars are
+ * present, so an operator turns on exactly the platforms they want. With
+ * none set, `startImBridges()` returns `undefined` and nothing changes —
+ * the zero-behaviour-change property an env gate exists for.
  *
- * Only Telegram is folded in for now (outbound long-poll → no public
- * endpoint needed, so a home box behind NAT works without a tunnel).
- * The other five `@aipehub/im-*` bridges drop into the same `bridges`
- * array unchanged the day a host wants them.
+ * The router (`handleImMessage`) is transport-agnostic — it depends only
+ * on the `ImBridge` contract — so all four platforms share one `config`
+ * and drop into one `bridges` array. They differ only in reachability:
+ *
+ *   - Telegram (long-poll), Lark (official long connection), and Slack
+ *     (Socket Mode) dial OUT → a home box behind NAT works with no public
+ *     endpoint.
+ *   - QQ's official Bot API discontinued its WebSocket and pushes an
+ *     INBOUND webhook (public domain + TLS), so the QQ bridge runs its own
+ *     HTTP listener that an operator fronts with a reverse proxy on a
+ *     cloud host. See docs/zh/IM-OFFICIAL-REARCH.md.
+ *
+ * Env per platform (a bridge needs ALL of its vars to activate):
+ *   Telegram  AIPE_TELEGRAM_BOT_TOKEN
+ *   QQ        AIPE_QQ_BOT_APPID + AIPE_QQ_BOT_SECRET
+ *             (+ AIPE_QQ_WEBHOOK_PORT / _HOST / _PATH to tune the listener)
+ *   Lark      AIPE_LARK_APP_ID + AIPE_LARK_APP_SECRET
+ *   Slack     AIPE_SLACK_APP_TOKEN (xapp-) + AIPE_SLACK_BOT_TOKEN (xoxb-)
  */
 export async function startImBridges(
   opts: StartImBridgesOptions,
 ): Promise<ImBridgesHandle | undefined> {
-  const token = process.env.AIPE_TELEGRAM_BOT_TOKEN?.trim()
-  if (!token) return undefined
+  // Defer construction behind each env gate. Building lazily (a factory
+  // per configured platform) keeps a bridge's start-time side effects —
+  // QQ's HTTP listener, Slack's apps.connections.open round trip — from
+  // firing for a platform the operator never configured.
+  const factories: Array<() => ImBridge> = []
+
+  const telegramToken = process.env.AIPE_TELEGRAM_BOT_TOKEN?.trim()
+  if (telegramToken) {
+    factories.push(
+      () =>
+        new TelegramBridge({
+          token: telegramToken,
+          onError: (err) => opts.log.warn('telegram bridge error', { err: String(err) }),
+        }),
+    )
+  }
+
+  const qqAppId = process.env.AIPE_QQ_BOT_APPID?.trim()
+  const qqSecret = process.env.AIPE_QQ_BOT_SECRET?.trim()
+  if (qqAppId && qqSecret) {
+    // The official QQ Bot API is inbound-webhook only (its WS was
+    // discontinued), so the bridge binds its own listener that a reverse
+    // proxy terminates TLS in front of. Port 0 disables the listener for a
+    // host that drives the webhook from its own HTTP layer.
+    const webhookPort = parseImPort(process.env.AIPE_QQ_WEBHOOK_PORT)
+    const webhookHost = process.env.AIPE_QQ_WEBHOOK_HOST?.trim()
+    const webhookPath = process.env.AIPE_QQ_WEBHOOK_PATH?.trim()
+    factories.push(
+      () =>
+        new QqBridge({
+          appId: qqAppId,
+          secret: qqSecret,
+          ...(webhookPort !== undefined ? { webhookPort } : {}),
+          ...(webhookHost ? { webhookHost } : {}),
+          ...(webhookPath ? { webhookPath } : {}),
+          onError: (err) => opts.log.warn('qq bridge error', { err: String(err) }),
+        }),
+    )
+  }
+
+  const larkAppId = process.env.AIPE_LARK_APP_ID?.trim()
+  const larkAppSecret = process.env.AIPE_LARK_APP_SECRET?.trim()
+  if (larkAppId && larkAppSecret) {
+    factories.push(
+      () =>
+        new LarkBridge({
+          appId: larkAppId,
+          appSecret: larkAppSecret,
+          onError: (err) => opts.log.warn('lark bridge error', { err: String(err) }),
+        }),
+    )
+  }
+
+  const slackBotToken = process.env.AIPE_SLACK_BOT_TOKEN?.trim()
+  const slackAppToken = process.env.AIPE_SLACK_APP_TOKEN?.trim()
+  if (slackBotToken && slackAppToken) {
+    factories.push(
+      () =>
+        new SlackBridge({
+          token: slackBotToken,
+          appToken: slackAppToken,
+          // Node 20 has no global WebSocket (flag-gated until 22), so hand
+          // the Socket Mode client `ws`'s impl — the same dependency
+          // transport-ws already uses. The cast bridges `ws`'s typings to
+          // the bridge's minimal structural `WebSocketCtor`.
+          webSocketImpl: NodeWebSocket as unknown as SlackWebSocketCtor,
+          onError: (err) => opts.log.warn('slack bridge error', { err: String(err) }),
+        }),
+    )
+  }
+
+  if (factories.length === 0) return undefined
 
   const resolver = makeIdentityImBindingResolver(opts.identity)
   const config: HostImConfig = {
@@ -297,22 +387,46 @@ export async function startImBridges(
     log: opts.log,
   }
 
-  const bridge: ImBridge = new TelegramBridge({
-    token,
-    onError: (err) => opts.log.warn('telegram bridge error', { err: String(err) }),
-  })
+  const bridges: ImBridge[] = []
+  for (const make of factories) {
+    const bridge = make()
+    // A single bad message must not take down a bridge's receive loop. The
+    // concrete bridge already catches listener throws; this top-level net
+    // also sends the user a friendly error instead of a silent drop.
+    bridge.onMessage((m) => {
+      void dispatchSafely(bridge, m, config)
+    })
+    try {
+      await bridge.start()
+    } catch (err) {
+      // One platform's bad credential must not abort the others or the host
+      // boot (these are independent transports, mirroring the best-effort
+      // A2A / ACP outbound managers). Log loudly and skip it; the platforms
+      // that DO start still run. Clean up the half-started bridge so it
+      // leaves no listener / socket behind.
+      opts.log.error('im bridge start failed', {
+        platform: bridge.platform,
+        err: String(err),
+      })
+      try {
+        await bridge.stop()
+      } catch {
+        /* best-effort cleanup; the start failure is the real signal */
+      }
+      continue
+    }
+    opts.log.info('IM bridge enabled', {
+      platform: bridge.platform,
+      freeTextCapability: config.freeTextCapability,
+    })
+    bridges.push(bridge)
+  }
 
-  // A single bad message must not take down the poll loop. The concrete
-  // bridge already catches listener throws, but the top-level net here
-  // also sends the user a friendly error instead of silent drop.
-  bridge.onMessage((m) => {
-    void dispatchSafely(bridge, m, config)
-  })
+  // Every configured bridge failed to start → IM is effectively disabled.
+  // Returning undefined keeps the "no shutdown hook" contract the caller
+  // relies on, same as the no-env path.
+  if (bridges.length === 0) return undefined
 
-  await bridge.start()
-  opts.log.info('IM bridge enabled', { platform: bridge.platform, freeTextCapability: config.freeTextCapability })
-
-  const bridges: ImBridge[] = [bridge]
   return {
     bridges,
     async stop() {
@@ -325,6 +439,19 @@ export async function startImBridges(
       }
     },
   }
+}
+
+/**
+ * Parse an IM webhook port from env. Returns `undefined` for an unset or
+ * malformed value (the bridge then keeps its own default); 0 is a valid,
+ * meaningful value — "no built-in listener, the host drives the webhook".
+ */
+function parseImPort(raw: string | undefined): number | undefined {
+  const trimmed = raw?.trim()
+  if (!trimmed) return undefined
+  const n = Number(trimmed)
+  if (!Number.isInteger(n) || n < 0 || n > 65535) return undefined
+  return n
 }
 
 // ---------------------------------------------------------------------------
