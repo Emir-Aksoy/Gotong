@@ -121,6 +121,50 @@ export function resolveRefs(value: unknown, ctx: ResolutionContext): unknown {
  */
 const REF_RE = /\$[a-zA-Z0-9_][a-zA-Z0-9_.:-]*/g
 
+/**
+ * Statically collect the *heads* of every `$ref` that appears anywhere in a
+ * value tree, WITHOUT resolving them against a live run. The head is the first
+ * dot-segment after `$` — `trigger` for `$trigger.payload.x`, or a step id for
+ * `$draft.output` / `$fan.branchA.output` (a parallel ref's head is the
+ * parallel STEP id, not the branch).
+ *
+ * Used by the read-only graph projection ({@link projectWorkflowGraph}) to draw
+ * data-dependency edges — "which earlier steps does this step's payload read".
+ * Mirrors {@link lookupRef}'s head parsing + the same {@link REF_RE} the
+ * resolver uses, so the static view never disagrees with runtime resolution
+ * about what a ref's source is. A match whose head isn't a real step id is
+ * harmless: the caller filters against the known step set before drawing.
+ */
+export function collectRefHeads(value: unknown): {
+  steps: Set<string>
+  usesTrigger: boolean
+} {
+  const steps = new Set<string>()
+  let usesTrigger = false
+  const visit = (v: unknown): void => {
+    if (typeof v === 'string') {
+      const matches = v.match(REF_RE)
+      if (!matches) return
+      for (const ref of matches) {
+        const head = ref.slice(1).split('.')[0]
+        if (!head) continue
+        if (head === 'trigger') usesTrigger = true
+        else steps.add(head)
+      }
+      return
+    }
+    if (Array.isArray(v)) {
+      for (const x of v) visit(x)
+      return
+    }
+    if (v && typeof v === 'object') {
+      for (const x of Object.values(v)) visit(x)
+    }
+  }
+  visit(value)
+  return { steps, usesTrigger }
+}
+
 function resolveStringValue(s: string, ctx: ResolutionContext): unknown {
   // Fast path: whole string is exactly a single ref → preserve type.
   const trimmed = s.trim()

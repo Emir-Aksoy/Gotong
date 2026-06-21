@@ -241,6 +241,11 @@ import { createWorkflows } from './workflows.js'
       bundleImportSubmit: $('bundle-import-submit'),
       bundleImportMsg: $('bundle-import-msg'),
       bundleBuiltinPgBtn: $('bundle-builtin-pg-btn'),
+      // Template gallery — one-click install of shipped templates (G-M3)
+      templateGalleryBtn: $('template-gallery-btn'),
+      templateGalleryModal: $('template-gallery-modal'),
+      templateGalleryList: $('template-gallery-list'),
+      templateGalleryMsg: $('template-gallery-msg'),
       wfImportModal: $('wf-import-modal'),
       wfImportFile: $('wf-import-file'),
       wfImportText: $('wf-import-text'),
@@ -281,6 +286,11 @@ import { createWorkflows } from './workflows.js'
       wfRevList: $('wf-rev-list'),
       wfRevEmpty: $('wf-rev-empty'),
       wfRevMsg: $('wf-rev-msg'),
+      // Read-only flow chart (graph) modal (DAG-M4)
+      wfGraphModal: $('wf-graph-modal'),
+      wfGraphTarget: $('wf-graph-target'),
+      wfGraphBody: $('wf-graph-body'),
+      wfGraphMsg: $('wf-graph-msg'),
       // Governance audit sub-section inside the revision modal (Phase 19 P2-M4)
       wfAuditAction: $('wf-audit-action'),
       wfAuditList: $('wf-audit-list'),
@@ -1796,6 +1806,142 @@ import { createWorkflows } from './workflows.js'
     }
   }
 
+  // --- template gallery (G-M3) -------------------------------------------
+  // One-click install of the templates the host embeds. The gallery fetches
+  // lean install previews from GET /api/admin/templates/catalog (projected
+  // server-side through the SAME parseTemplate the install runs, so the
+  // preview can't drift from what lands), and on "install" pulls the raw
+  // yaml from GET .../catalog/:id and POSTs it to /api/admin/templates/import
+  // — the exact route the bundle/manual import already uses. Knowledge
+  // CONTENT never rides along (decision #4): the importer wires their own KB
+  // to each reported slot afterwards.
+
+  // The embedded catalog is static, so we load it once and keep whatever was
+  // rendered (incl. per-card install results) across re-opens.
+  let galleryLoaded = false
+
+  async function openTemplateGalleryModal() {
+    if (!dom?.templateGalleryModal) return
+    if (dom.templateGalleryMsg) {
+      dom.templateGalleryMsg.textContent = ''
+      dom.templateGalleryMsg.classList.remove('ok', 'err')
+    }
+    dom.templateGalleryModal.hidden = false
+    if (galleryLoaded) return
+    if (dom.templateGalleryList) {
+      dom.templateGalleryList.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
+    }
+    try {
+      const r = await fetch('/api/admin/templates/catalog')
+      if (!r.ok) {
+        if (dom.templateGalleryList) dom.templateGalleryList.innerHTML = ''
+        if (dom.templateGalleryMsg) {
+          dom.templateGalleryMsg.textContent = t.admFailedReason(t.admHttp(r.status))
+          dom.templateGalleryMsg.classList.add('err')
+        }
+        return
+      }
+      const body = await r.json()
+      renderTemplateGallery(body.templates || [])
+      galleryLoaded = true
+    } catch (err) {
+      if (dom.templateGalleryList) dom.templateGalleryList.innerHTML = ''
+      if (dom.templateGalleryMsg) {
+        dom.templateGalleryMsg.textContent = t.admFailedReason(err.message || String(err))
+        dom.templateGalleryMsg.classList.add('err')
+      }
+    }
+  }
+
+  function closeTemplateGalleryModal() {
+    if (dom?.templateGalleryModal) dom.templateGalleryModal.hidden = true
+  }
+
+  function renderTemplateGallery(templates) {
+    if (!dom?.templateGalleryList) return
+    if (!templates.length) {
+      dom.templateGalleryList.innerHTML = `<p class="hint">${escapeHtml(t.templateGalleryEmpty)}</p>`
+      return
+    }
+    dom.templateGalleryList.innerHTML = templates
+      .map((tpl) => {
+        const counts = [
+          t.templateGalleryCountAgents(tpl.agents?.length || 0),
+          t.templateGalleryCountWorkflows(tpl.workflows?.length || 0),
+          t.templateGalleryCountKbs(tpl.knowledgeBases?.length || 0),
+        ]
+        const apiHint = tpl.apiKeyPrompt
+          ? `<span class="tg-chip tg-chip-api">${escapeHtml(t.templateGalleryNeedsKey(tpl.apiKeyPrompt.label || tpl.apiKeyPrompt.provider))}</span>`
+          : ''
+        return (
+          `<div class="tg-card">` +
+            `<div class="tg-card-head">` +
+              `<h4 class="tg-card-name">${escapeHtml(tpl.name)}</h4>` +
+              `<button class="ma-btn tg-install-btn" data-act="install-template" data-id="${escapeHtml(tpl.id)}">${escapeHtml(t.templateGalleryInstall)}</button>` +
+            `</div>` +
+            (tpl.description ? `<p class="tg-card-desc">${escapeHtml(tpl.description)}</p>` : '') +
+            `<div class="tg-card-counts">${counts.map((c) => `<span class="tg-chip">${escapeHtml(c)}</span>`).join('')}${apiHint}</div>` +
+            `<div class="tg-card-result" data-tg-result="${escapeHtml(tpl.id)}"></div>` +
+          `</div>`
+        )
+      })
+      .join('')
+  }
+
+  async function installTemplate(id) {
+    const card = dom.templateGalleryList?.querySelector(`[data-tg-result="${cssEscape(id)}"]`)
+    const btn = dom.templateGalleryList?.querySelector(
+      `[data-act="install-template"][data-id="${cssEscape(id)}"]`,
+    )
+    const setResult = (msg, kind) => {
+      if (!card) return
+      card.textContent = msg
+      card.classList.remove('ok', 'err')
+      if (kind) card.classList.add(kind)
+    }
+    if (btn instanceof HTMLButtonElement) btn.disabled = true
+    setResult(t.templateGalleryInstalling, null)
+    try {
+      // 1. pull the raw yaml for this catalog entry…
+      const cr = await fetch(`/api/admin/templates/catalog/${encodeURIComponent(id)}`)
+      if (!cr.ok) {
+        setResult(t.admFailedReason(t.admHttp(cr.status)), 'err')
+        return
+      }
+      const { yaml } = await cr.json()
+      // 2. …and POST it to the existing template-import route.
+      const ir = await fetch('/api/admin/templates/import', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ template: yaml }),
+      })
+      const ib = await ir.json().catch(() => ({}))
+      if (!ir.ok) {
+        setResult(t.admFailedReason(ib.error || t.admHttp(ir.status)), 'err')
+        return
+      }
+      // Human summary: N created / M skipped / W workflows / K KB slots.
+      const createdN = ib.team?.created?.length ?? 0
+      const skippedN = ib.team?.skipped?.length ?? 0
+      const wfOk = (ib.workflows || []).filter((w) => w.ok).length
+      const kbN = ib.knowledgeBases?.length ?? 0
+      const parts = []
+      if (createdN > 0) parts.push(t.admCreatedAgents(createdN))
+      if (skippedN > 0) parts.push(t.admSkippedAgents(skippedN))
+      if (wfOk > 0) parts.push(t.templateGalleryWorkflowsLanded(wfOk))
+      if (kbN > 0) parts.push(t.templateGalleryKbSlots(kbN))
+      if (ib.team?.spawnErrors?.length) parts.push(t.admSpawnFailed(ib.team.spawnErrors.length))
+      setResult(t.admImportDone + parts.join(t.admListSep), 'ok')
+      // Refresh the agents + workflows lists so the new arrivals show up.
+      await managedAgents.refreshManagedAgents().catch(() => {})
+      await workflows.refreshWorkflows().catch(() => {})
+    } catch (err) {
+      setResult(t.admFailedReason(err.message || String(err)), 'err')
+    } finally {
+      if (btn instanceof HTMLButtonElement) btn.disabled = false
+    }
+  }
+
   // --- workflow AI assistant (Phase 13 M3 + M4 + streaming follow-up) ----
   // Implementation lives in admin-wf-assist.js (extracted as part of the
   // P3 audit cleanup). The factory is wired into our closure scope here
@@ -2035,6 +2181,8 @@ import { createWorkflows } from './workflows.js'
     dom.wfStartSubmit?.addEventListener('click', submitWorkflowStart)
     dom.bundleImportBtn?.addEventListener('click', openBundleImportModal)
     dom.bundleImportSubmit?.addEventListener('click', submitBundleImport)
+    // Template gallery — one-click install of shipped templates (G-M3)
+    dom.templateGalleryBtn?.addEventListener('click', openTemplateGalleryModal)
     // Phase 13 M3 — AI assistant dialog
     dom.wfAssistBtn?.addEventListener('click', openWorkflowAssistModal)
     dom.wfAssistGenerate?.addEventListener('click', submitWorkflowAssist)
@@ -2110,7 +2258,9 @@ import { createWorkflows } from './workflows.js'
         if (dom.wfAssistModal && !dom.wfAssistModal.hidden) closeWorkflowAssistModal()
         if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal()
         if (dom.wfRevModal && !dom.wfRevModal.hidden) workflows.closeWorkflowRevisionsModal()
+        if (dom.wfGraphModal && !dom.wfGraphModal.hidden) workflows.closeWorkflowGraphModal()
         if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal()
+        if (dom.templateGalleryModal && !dom.templateGalleryModal.hidden) closeTemplateGalleryModal()
         if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart()
         if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport()
       }
@@ -2195,6 +2345,8 @@ import { createWorkflows } from './workflows.js'
         workflows.removeWorkflow(id)
       } else if (act === 'open-workflow-runs') {
         workflows.openWorkflowRunsModal(id)
+      } else if (act === 'open-workflow-graph') {
+        workflows.openWorkflowGraphModal(id)
       } else if (act === 'open-workflow-run') {
         const runId = target.dataset.runId
         if (runId) workflows.openWorkflowRunDetail(runId)
@@ -2217,6 +2369,8 @@ import { createWorkflows } from './workflows.js'
         if (Number.isInteger(rev)) workflows.rollbackTo(id, rev)
       } else if (act === 'start-workflow') {
         openWorkflowStart(id)
+      } else if (act === 'install-template') {
+        installTemplate(id)
       }
     })
     // ESC closes any open modal
@@ -2230,7 +2384,9 @@ import { createWorkflows } from './workflows.js'
       if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal()
       if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal()
       if (dom.wfRevModal && !dom.wfRevModal.hidden) workflows.closeWorkflowRevisionsModal()
+      if (dom.wfGraphModal && !dom.wfGraphModal.hidden) workflows.closeWorkflowGraphModal()
       if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal()
+      if (dom.templateGalleryModal && !dom.templateGalleryModal.hidden) closeTemplateGalleryModal()
       if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart()
       if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport()
     })

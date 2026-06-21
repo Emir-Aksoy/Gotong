@@ -1168,6 +1168,9 @@
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="open-workflow-runs"
                   data-id="${escapeHtml4(w.id)}">${escapeHtml4(t4.workflowRunsBtn)}</button>
+          <button type="button" class="ma-btn ma-btn-secondary"
+                  data-act="open-workflow-graph"
+                  data-id="${escapeHtml4(w.id)}">${escapeHtml4(t4.workflowGraphBtn)}</button>
           ${lifecycleButtons(w.id, state)}
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="remove-workflow"
@@ -1318,6 +1321,132 @@
     }
     function closeWorkflowRevisionsModal() {
       if (dom.wfRevModal) dom.wfRevModal.hidden = true;
+    }
+    async function openWorkflowGraphModal(id) {
+      if (dom.wfGraphTarget) dom.wfGraphTarget.textContent = id;
+      if (dom.wfGraphMsg) {
+        dom.wfGraphMsg.textContent = "";
+        dom.wfGraphMsg.classList.remove("ok", "err");
+      }
+      if (dom.wfGraphBody) dom.wfGraphBody.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      if (dom.wfGraphModal) dom.wfGraphModal.hidden = false;
+      try {
+        const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/graph`);
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          if (dom.wfGraphBody) dom.wfGraphBody.innerHTML = "";
+          if (dom.wfGraphMsg) {
+            dom.wfGraphMsg.textContent = t4.workflowGraphError(body.error || `${r.status}`);
+            dom.wfGraphMsg.classList.add("err");
+          }
+          return;
+        }
+        const graph = (await r.json()).graph;
+        if (!graph || !Array.isArray(graph.nodes) || graph.nodes.length === 0) {
+          if (dom.wfGraphBody) dom.wfGraphBody.innerHTML = `<p class="hint">${escapeHtml4(t4.workflowGraphEmpty)}</p>`;
+          return;
+        }
+        if (dom.wfGraphBody) {
+          dom.wfGraphBody.innerHTML = `<div class="wf-graph-scroll">${renderWorkflowGraphSvg(graph)}</div>` + graphLegend();
+        }
+      } catch (err) {
+        if (dom.wfGraphBody) dom.wfGraphBody.innerHTML = "";
+        if (dom.wfGraphMsg) {
+          dom.wfGraphMsg.textContent = t4.workflowGraphError(err.message || String(err));
+          dom.wfGraphMsg.classList.add("err");
+        }
+      }
+    }
+    function closeWorkflowGraphModal() {
+      if (dom.wfGraphModal) dom.wfGraphModal.hidden = true;
+    }
+    function graphLegend() {
+      return `<div class="wf-graph-legend"><span class="wf-graph-legend-seq">${escapeHtml4(t4.workflowGraphLegendSeq)}</span><span class="wf-graph-legend-data">${escapeHtml4(t4.workflowGraphLegendData)}</span></div>`;
+    }
+    function renderWorkflowGraphSvg(graph) {
+      const MARGIN_X = 92, MARGIN_Y = 30, ROW_H = 100, COL_W = 250;
+      const BOX_W = 224, BRANCH_W = 198, BOX_H = 62, RIGHT_PAD = 56;
+      const boxW = (node) => node.kind === "branch" ? BRANCH_W : BOX_W;
+      const pos = /* @__PURE__ */ new Map();
+      let row = 0, maxCol = 0;
+      for (const node of graph.nodes) {
+        const col = node.kind === "branch" ? 1 : 0;
+        if (col > maxCol) maxCol = col;
+        pos.set(node.id, { col, row, node });
+        row++;
+      }
+      const left = (p) => MARGIN_X + p.col * COL_W;
+      const cx = (p) => left(p) + boxW(p.node) / 2;
+      const top = (p) => MARGIN_Y + p.row * ROW_H;
+      const bottom = (p) => top(p) + BOX_H;
+      const midY = (p) => top(p) + BOX_H / 2;
+      const width = MARGIN_X + maxCol * COL_W + BOX_W + RIGHT_PAD;
+      const height = MARGIN_Y * 2 + row * ROW_H;
+      const clip = (s, n) => {
+        s = String(s == null ? "" : s);
+        return s.length > n ? s.slice(0, n - 1) + "…" : s;
+      };
+      const destText = (node) => {
+        const d = node.destination;
+        if (!d) return "";
+        if (d.kind === "explicit") return t4.workflowGraphDestExplicit(d.to || "");
+        if (d.kind === "broadcast") return t4.workflowGraphDestBroadcast((d.capabilities || []).join(", "));
+        return t4.workflowGraphDestCapability((d.capabilities || []).join(", "));
+      };
+      const dataEdges = [], seqEdges = [];
+      for (const e of graph.edges || []) {
+        const a = pos.get(e.from), b = pos.get(e.to);
+        if (!a || !b) continue;
+        if (e.kind === "data") {
+          const x1 = left(a), y1 = midY(a), x2 = left(b), y2 = midY(b);
+          const apex = Math.min(x1, x2) - 30;
+          const my = (y1 + y2) / 2;
+          dataEdges.push(
+            `<path d="M ${x1} ${y1} Q ${apex} ${my}, ${x2} ${y2}" class="wf-graph-edge-data" marker-end="url(#wf-graph-arrow-data)" />`
+          );
+        } else if (b.node.kind === "branch") {
+          const x1 = cx(a), y1 = bottom(a), x2 = left(b), y2 = midY(b);
+          seqEdges.push(
+            `<path d="M ${x1} ${y1} C ${x1} ${y1 + 26}, ${x2 - 40} ${y2}, ${x2} ${y2}" class="wf-graph-edge-seq" marker-end="url(#wf-graph-arrow)" />`
+          );
+        } else {
+          seqEdges.push(
+            `<path d="M ${cx(a)} ${bottom(a)} L ${cx(b)} ${top(b)}" class="wf-graph-edge-seq" marker-end="url(#wf-graph-arrow)" />`
+          );
+        }
+      }
+      const boxes = graph.nodes.map((node) => {
+        const p = pos.get(node.id);
+        const w = boxW(node), x = left(p), y = top(p);
+        const cls = "wf-graph-box wf-graph-box-" + node.kind + (node.crossHub ? " wf-graph-box-xhub" : "");
+        const title = node.kind === "output" ? t4.workflowGraphOutput : node.label;
+        const tag = node.kind === "parallel" ? t4.workflowGraphParallel : node.kind === "branch" ? t4.workflowGraphBranch : node.kind === "trigger" ? t4.workflowGraphTrigger : "";
+        const parts = [`<rect x="${x}" y="${y}" width="${w}" height="${BOX_H}" rx="8" class="${cls}" />`];
+        if (tag) {
+          parts.push(`<text x="${x + w - 8}" y="${y + 15}" text-anchor="end" class="wf-graph-tag">${escapeHtml4(tag)}</text>`);
+        }
+        parts.push(`<text x="${x + 12}" y="${y + 25}" class="wf-graph-title">${escapeHtml4(clip(title, 26))}</text>`);
+        if (node.kind === "step" || node.kind === "branch") {
+          let sub = destText(node);
+          const extras = [];
+          if (node.readsTrigger) extras.push(t4.workflowGraphReadsTrigger);
+          if (Array.isArray(node.dataClasses) && node.dataClasses.length) extras.push(node.dataClasses.join("/"));
+          if (extras.length) sub = sub ? sub + " · " + extras.join(" · ") : extras.join(" · ");
+          if (sub) parts.push(`<text x="${x + 12}" y="${y + 43}" class="wf-graph-sub">${escapeHtml4(clip(sub, 36))}</text>`);
+        }
+        let ay = bottom(p) + 14;
+        if (node.when) {
+          parts.push(`<text x="${x + 2}" y="${ay}" class="wf-graph-when">${escapeHtml4(clip(t4.workflowGraphWhen(node.when), 42))}</text>`);
+          ay += 14;
+        }
+        if (node.crossHub) {
+          const dest = node.crossHub.peerLabel || node.crossHub.peer;
+          parts.push(`<text x="${x + 2}" y="${ay}" class="wf-graph-xhub-tag">${escapeHtml4(clip(t4.workflowGraphCrossHub(dest), 42))}</text>`);
+        }
+        return parts.join("");
+      }).join("");
+      const defs = `<defs><marker id="wf-graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="wf-graph-arrowhead" /></marker><marker id="wf-graph-arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="wf-graph-arrowhead-data" /></marker></defs>`;
+      return `<svg class="wf-graph-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="workflow graph">` + defs + dataEdges.join("") + seqEdges.join("") + boxes + `</svg>`;
     }
     function renderRevisions(current) {
       if (!dom.wfRevList) return;
@@ -1804,6 +1933,8 @@
       lifecycleAction,
       openWorkflowRevisionsModal,
       closeWorkflowRevisionsModal,
+      openWorkflowGraphModal,
+      closeWorkflowGraphModal,
       rollbackTo,
       refreshWorkflowAudit,
       refreshWorkflowGrants,
@@ -2031,6 +2162,11 @@
         bundleImportSubmit: $("bundle-import-submit"),
         bundleImportMsg: $("bundle-import-msg"),
         bundleBuiltinPgBtn: $("bundle-builtin-pg-btn"),
+        // Template gallery — one-click install of shipped templates (G-M3)
+        templateGalleryBtn: $("template-gallery-btn"),
+        templateGalleryModal: $("template-gallery-modal"),
+        templateGalleryList: $("template-gallery-list"),
+        templateGalleryMsg: $("template-gallery-msg"),
         wfImportModal: $("wf-import-modal"),
         wfImportFile: $("wf-import-file"),
         wfImportText: $("wf-import-text"),
@@ -2071,6 +2207,11 @@
         wfRevList: $("wf-rev-list"),
         wfRevEmpty: $("wf-rev-empty"),
         wfRevMsg: $("wf-rev-msg"),
+        // Read-only flow chart (graph) modal (DAG-M4)
+        wfGraphModal: $("wf-graph-modal"),
+        wfGraphTarget: $("wf-graph-target"),
+        wfGraphBody: $("wf-graph-body"),
+        wfGraphMsg: $("wf-graph-msg"),
         // Governance audit sub-section inside the revision modal (Phase 19 P2-M4)
         wfAuditAction: $("wf-audit-action"),
         wfAuditList: $("wf-audit-list"),
@@ -3114,6 +3255,109 @@
         dom.bundleImportMsg.classList.add("err");
       }
     }
+    let galleryLoaded = false;
+    async function openTemplateGalleryModal() {
+      if (!dom?.templateGalleryModal) return;
+      if (dom.templateGalleryMsg) {
+        dom.templateGalleryMsg.textContent = "";
+        dom.templateGalleryMsg.classList.remove("ok", "err");
+      }
+      dom.templateGalleryModal.hidden = false;
+      if (galleryLoaded) return;
+      if (dom.templateGalleryList) {
+        dom.templateGalleryList.innerHTML = `<p class="hint">${escapeHtml5(t5.loading)}</p>`;
+      }
+      try {
+        const r = await fetch("/api/admin/templates/catalog");
+        if (!r.ok) {
+          if (dom.templateGalleryList) dom.templateGalleryList.innerHTML = "";
+          if (dom.templateGalleryMsg) {
+            dom.templateGalleryMsg.textContent = t5.admFailedReason(t5.admHttp(r.status));
+            dom.templateGalleryMsg.classList.add("err");
+          }
+          return;
+        }
+        const body = await r.json();
+        renderTemplateGallery(body.templates || []);
+        galleryLoaded = true;
+      } catch (err) {
+        if (dom.templateGalleryList) dom.templateGalleryList.innerHTML = "";
+        if (dom.templateGalleryMsg) {
+          dom.templateGalleryMsg.textContent = t5.admFailedReason(err.message || String(err));
+          dom.templateGalleryMsg.classList.add("err");
+        }
+      }
+    }
+    function closeTemplateGalleryModal() {
+      if (dom?.templateGalleryModal) dom.templateGalleryModal.hidden = true;
+    }
+    function renderTemplateGallery(templates) {
+      if (!dom?.templateGalleryList) return;
+      if (!templates.length) {
+        dom.templateGalleryList.innerHTML = `<p class="hint">${escapeHtml5(t5.templateGalleryEmpty)}</p>`;
+        return;
+      }
+      dom.templateGalleryList.innerHTML = templates.map((tpl) => {
+        const counts = [
+          t5.templateGalleryCountAgents(tpl.agents?.length || 0),
+          t5.templateGalleryCountWorkflows(tpl.workflows?.length || 0),
+          t5.templateGalleryCountKbs(tpl.knowledgeBases?.length || 0)
+        ];
+        const apiHint = tpl.apiKeyPrompt ? `<span class="tg-chip tg-chip-api">${escapeHtml5(t5.templateGalleryNeedsKey(tpl.apiKeyPrompt.label || tpl.apiKeyPrompt.provider))}</span>` : "";
+        return `<div class="tg-card"><div class="tg-card-head"><h4 class="tg-card-name">${escapeHtml5(tpl.name)}</h4><button class="ma-btn tg-install-btn" data-act="install-template" data-id="${escapeHtml5(tpl.id)}">${escapeHtml5(t5.templateGalleryInstall)}</button></div>` + (tpl.description ? `<p class="tg-card-desc">${escapeHtml5(tpl.description)}</p>` : "") + `<div class="tg-card-counts">${counts.map((c) => `<span class="tg-chip">${escapeHtml5(c)}</span>`).join("")}${apiHint}</div><div class="tg-card-result" data-tg-result="${escapeHtml5(tpl.id)}"></div></div>`;
+      }).join("");
+    }
+    async function installTemplate(id) {
+      const card = dom.templateGalleryList?.querySelector(`[data-tg-result="${cssEscape(id)}"]`);
+      const btn = dom.templateGalleryList?.querySelector(
+        `[data-act="install-template"][data-id="${cssEscape(id)}"]`
+      );
+      const setResult = (msg, kind) => {
+        if (!card) return;
+        card.textContent = msg;
+        card.classList.remove("ok", "err");
+        if (kind) card.classList.add(kind);
+      };
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
+      setResult(t5.templateGalleryInstalling, null);
+      try {
+        const cr = await fetch(`/api/admin/templates/catalog/${encodeURIComponent(id)}`);
+        if (!cr.ok) {
+          setResult(t5.admFailedReason(t5.admHttp(cr.status)), "err");
+          return;
+        }
+        const { yaml } = await cr.json();
+        const ir = await fetch("/api/admin/templates/import", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ template: yaml })
+        });
+        const ib = await ir.json().catch(() => ({}));
+        if (!ir.ok) {
+          setResult(t5.admFailedReason(ib.error || t5.admHttp(ir.status)), "err");
+          return;
+        }
+        const createdN = ib.team?.created?.length ?? 0;
+        const skippedN = ib.team?.skipped?.length ?? 0;
+        const wfOk = (ib.workflows || []).filter((w) => w.ok).length;
+        const kbN = ib.knowledgeBases?.length ?? 0;
+        const parts = [];
+        if (createdN > 0) parts.push(t5.admCreatedAgents(createdN));
+        if (skippedN > 0) parts.push(t5.admSkippedAgents(skippedN));
+        if (wfOk > 0) parts.push(t5.templateGalleryWorkflowsLanded(wfOk));
+        if (kbN > 0) parts.push(t5.templateGalleryKbSlots(kbN));
+        if (ib.team?.spawnErrors?.length) parts.push(t5.admSpawnFailed(ib.team.spawnErrors.length));
+        setResult(t5.admImportDone + parts.join(t5.admListSep), "ok");
+        await managedAgents.refreshManagedAgents().catch(() => {
+        });
+        await workflows.refreshWorkflows().catch(() => {
+        });
+      } catch (err) {
+        setResult(t5.admFailedReason(err.message || String(err)), "err");
+      } finally {
+        if (btn instanceof HTMLButtonElement) btn.disabled = false;
+      }
+    }
     const wfAssist = window.AipeHub && window.AipeHub.installWorkflowAssist ? window.AipeHub.installWorkflowAssist({
       dom,
       state,
@@ -3308,6 +3552,7 @@
       dom.wfStartSubmit?.addEventListener("click", submitWorkflowStart);
       dom.bundleImportBtn?.addEventListener("click", openBundleImportModal);
       dom.bundleImportSubmit?.addEventListener("click", submitBundleImport);
+      dom.templateGalleryBtn?.addEventListener("click", openTemplateGalleryModal);
       dom.wfAssistBtn?.addEventListener("click", openWorkflowAssistModal);
       dom.wfAssistGenerate?.addEventListener("click", submitWorkflowAssist);
       dom.wfAssistRegenerate?.addEventListener("click", submitWorkflowAssist);
@@ -3369,7 +3614,9 @@
           if (dom.wfAssistModal && !dom.wfAssistModal.hidden) closeWorkflowAssistModal();
           if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal();
           if (dom.wfRevModal && !dom.wfRevModal.hidden) workflows.closeWorkflowRevisionsModal();
+          if (dom.wfGraphModal && !dom.wfGraphModal.hidden) workflows.closeWorkflowGraphModal();
           if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal();
+          if (dom.templateGalleryModal && !dom.templateGalleryModal.hidden) closeTemplateGalleryModal();
           if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart();
           if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport();
         }
@@ -3453,6 +3700,8 @@
           workflows.removeWorkflow(id);
         } else if (act === "open-workflow-runs") {
           workflows.openWorkflowRunsModal(id);
+        } else if (act === "open-workflow-graph") {
+          workflows.openWorkflowGraphModal(id);
         } else if (act === "open-workflow-run") {
           const runId = target.dataset.runId;
           if (runId) workflows.openWorkflowRunDetail(runId);
@@ -3475,6 +3724,8 @@
           if (Number.isInteger(rev)) workflows.rollbackTo(id, rev);
         } else if (act === "start-workflow") {
           openWorkflowStart(id);
+        } else if (act === "install-template") {
+          installTemplate(id);
         }
       });
       document.addEventListener("keydown", (e) => {
@@ -3487,7 +3738,9 @@
         if (dom.wfImportModal && !dom.wfImportModal.hidden) workflows.closeWorkflowImportModal();
         if (dom.wfRunsModal && !dom.wfRunsModal.hidden) workflows.closeWorkflowRunsModal();
         if (dom.wfRevModal && !dom.wfRevModal.hidden) workflows.closeWorkflowRevisionsModal();
+        if (dom.wfGraphModal && !dom.wfGraphModal.hidden) workflows.closeWorkflowGraphModal();
         if (dom.bundleImportModal && !dom.bundleImportModal.hidden) closeBundleImportModal();
+        if (dom.templateGalleryModal && !dom.templateGalleryModal.hidden) closeTemplateGalleryModal();
         if (dom.wfStartModal && !dom.wfStartModal.hidden) closeWorkflowStart();
         if (dom.grReportModal && !dom.grReportModal.hidden) closeGrowthReport();
       });

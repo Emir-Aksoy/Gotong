@@ -521,7 +521,8 @@
         <h2>
           <span data-i18n="workflowsTitle">工作流</span>
           <span id="wf-summary" class="lb-summary"></span>
-          <button type="button" id="bundle-import-btn" class="ma-btn" data-i18n="importBundle">导入团队 (bundle)</button>
+          <button type="button" id="template-gallery-btn" class="ma-btn" data-i18n="templateGalleryBtn">模板画廊</button>
+          <button type="button" id="bundle-import-btn" class="ma-btn ma-btn-secondary" data-i18n="importBundle">导入团队 (bundle)</button>
           <button type="button" id="wf-import-btn" class="ma-btn ma-btn-secondary" data-i18n="importWorkflow">导入工作流</button>
           <!-- Phase 13 M3 — AI 助手按钮; 不可用时(host 没装 assistant)点击会
                提示 503, 暂不在前端 probe 隐藏(避免 boot 时多一个 round-trip) -->
@@ -628,6 +629,26 @@
               </div>
             </div>
             <p id="wf-runs-msg" class="form-msg"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- DAG-M4 — read-only workflow flow chart. Hand-drawn SVG of the
+           trigger→steps→branches→output DAG the runner already executes;
+           pure visibility, never edits the YAML (the governance root). -->
+      <div id="wf-graph-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card modal-card-wide" role="dialog" aria-modal="true">
+          <header class="modal-head">
+            <h3>
+              <span data-i18n="workflowGraphHeading">流程图</span>
+              <span id="wf-graph-target" class="lb-summary"></span>
+            </h3>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
+          </header>
+          <div class="dispatch-form wf-graph-modal-body">
+            <div id="wf-graph-body" class="wf-graph-body"></div>
+            <p id="wf-graph-msg" class="form-msg"></p>
           </div>
         </div>
       </div>
@@ -859,6 +880,30 @@
             </label>
             <button type="button" id="bundle-import-submit" data-i18n="doImport">导入</button>
             <p id="bundle-import-msg" class="form-msg"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Modal: template gallery (G-M3) — the one-click "install a whole
+           ready-made hub" path. Cards are install previews projected
+           server-side through the SAME parseTemplate the install runs
+           (GET /api/admin/templates/catalog), so what you see is what
+           lands. "Install" pulls the raw yaml (GET .../catalog/:id) and
+           POSTs it to /api/admin/templates/import — the existing route.
+           Knowledge CONTENT never travels with a template (decision #4):
+           each reported KB slot is wired to your own knowledge base
+           afterwards. -->
+      <div id="template-gallery-modal" class="modal" hidden>
+        <div class="modal-backdrop" data-act="close-modal"></div>
+        <div class="modal-card modal-card-wide" role="dialog" aria-modal="true">
+          <header class="modal-head">
+            <h3 data-i18n="templateGalleryTitle">模板画廊 · 一键安装</h3>
+            <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
+          </header>
+          <div class="dispatch-form">
+            <p class="hint" data-i18n="templateGalleryHint">每个模板是一套现成的智能体 + 工作流 + 知识库槽位。点「安装」一键导入到本 hub。知识内容不随模板走——导入后你接上自己的知识库即可。</p>
+            <div id="template-gallery-list" class="template-gallery-list"></div>
+            <p id="template-gallery-msg" class="form-msg"></p>
           </div>
         </div>
       </div>

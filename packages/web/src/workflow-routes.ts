@@ -483,6 +483,34 @@ export async function handleWorkflowRoute(
     return true
   }
 
+  // DAG-M3 — GET /api/admin/workflows/:id/graph — read-only `{ nodes, edges }`
+  // projection for the admin "view flow chart" affordance. Admin-gated like the
+  // other read views (revisions / state), NOT RBAC-gated: seeing the shape of a
+  // workflow is an operator read, not a mutation. A host that didn't wire
+  // `graphOf` (legacy) → 404 so the UI hides the button. A null result (unknown
+  // id) → 404.
+  const graphMatch = path.match(/^\/api\/admin\/workflows\/([^/]+)\/graph$/)
+  if (method === 'GET' && graphMatch) {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    if (!ctx.workflows || !ctx.workflows.graphOf) {
+      sendJson(res, { error: 'workflow graph not enabled on this host' }, 404)
+      return true
+    }
+    const id = decodeURIComponent(graphMatch[1]!)
+    try {
+      const graph = await ctx.workflows.graphOf(id)
+      if (graph == null) {
+        sendJson(res, { error: `unknown workflow '${id}'` }, 404)
+        return true
+      }
+      sendJson(res, { graph })
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
+    }
+    return true
+  }
+
   // P2-M5b — workflow grant management (resource RBAC). Owner-gated; operators
   // (org owner / v3 admin) bypass. Wired before the catch-all DELETE /:id; the
   // extra /grants segment(s) keep these unambiguous. When RBAC is off (no

@@ -720,6 +720,15 @@ export interface WorkflowSurface {
    * route reads it from the `?branch=` query string.
    */
   fetchPeerStepTranscript?(runId: string, stepId: string, branchId?: string): Promise<unknown>
+  /**
+   * DAG-M3 — read-only graph projection of one workflow, for the admin UI's
+   * "view flow chart" affordance. Returns the `{ nodes, edges }` view (the host
+   * stamps off-hub destinations onto matching nodes) or `null` for an unknown id
+   * (the route then 404s). Pure projection — never mutates the definition or
+   * touches how the runner executes it. OPTIONAL so a legacy host without it
+   * leaves the route answering 404 + the admin UI hiding the affordance.
+   */
+  graphOf?(id: string): Promise<WorkflowGraphView | null>
 }
 
 /**
@@ -867,6 +876,50 @@ export interface CrossHubStepView {
    * treat as `'peer'`.
    */
   kind?: 'peer' | 'a2a'
+}
+
+// --- DAG viz — read-only graph mirror types --------------------------------
+// Structural duplicates of `@aipehub/workflow`'s `WorkflowGraphView` family, so
+// the Web layer can type the surface + echo the JSON verbatim without a runtime
+// dep on the workflow package. The `graph` route returns these fields as-is.
+
+export interface WorkflowGraphView {
+  workflowId: string
+  nodes: WorkflowGraphNode[]
+  edges: WorkflowGraphEdge[]
+}
+
+export interface WorkflowGraphNode {
+  id: string
+  kind: 'trigger' | 'step' | 'parallel' | 'branch' | 'output'
+  label: string
+  description?: string
+  destination?: WorkflowGraphDestination
+  when?: string
+  dataClasses?: string[]
+  readsTrigger?: boolean
+  branchNodeIds?: string[]
+  parentId?: string
+  /** Stamped by the host when this node's dispatch leaves the hub. */
+  crossHub?: WorkflowGraphCrossHub
+}
+
+export interface WorkflowGraphDestination {
+  kind: 'capability' | 'explicit' | 'broadcast'
+  capabilities: string[]
+  to?: string
+}
+
+export interface WorkflowGraphCrossHub {
+  peer: string
+  peerLabel: string | null
+  kind: 'peer' | 'a2a'
+}
+
+export interface WorkflowGraphEdge {
+  from: string
+  to: string
+  kind: 'sequence' | 'data'
 }
 
 // --- Phase 15 — lifecycle mirror types -------------------------------------
@@ -2110,7 +2163,13 @@ async function handle(
   // returned separately) and write an audit row. `audit` reuses the identity
   // surface (writeAuditLog optional); `personnel` is the resource_grants reader
   // (undefined → includePersonnel 503s).
-  if (path === '/api/admin/templates/export') {
+  // Export (POST) + Track G gallery catalog (GET list / GET :id) all live in
+  // handleTemplateRoute, which does its own precise method+path matching.
+  if (
+    path === '/api/admin/templates/export' ||
+    path === '/api/admin/templates/catalog' ||
+    path.startsWith('/api/admin/templates/catalog/')
+  ) {
     const handled = await handleTemplateRoute(
       {
         agentSource: ctx.space,

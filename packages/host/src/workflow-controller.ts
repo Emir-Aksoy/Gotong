@@ -36,9 +36,11 @@ import {
   WorkflowRunner,
   WorkflowLifecycleError,
   parseWorkflow,
+  projectWorkflowGraph,
   workflowParticipantId,
   type ArchiveRunsOptions,
   type DispatchSpec,
+  type GraphNodeCrossHub,
   type LifecycleState,
   type RevisionMeta,
   type RunState,
@@ -47,6 +49,7 @@ import {
   type Step,
   type StepRecord,
   type WorkflowDefinition,
+  type WorkflowGraphView,
 } from '@aipehub/workflow'
 import {
   checkWorkflowStructure,
@@ -908,6 +911,49 @@ export class WorkflowController {
       for (const c of p.capabilities) localCaps.add(c)
     }
     return crossHubStepsOf(def, localCaps, peerEntries)
+  }
+
+  /**
+   * DAG-M2 — read-only graph projection of one workflow, for the admin UI's
+   * "view flow chart" affordance. Builds the pure `{ nodes, edges }` view from the
+   * SAME revision {@link summaryFromView} projects (current published rev, else
+   * head — so a draft still shows its latest edited shape), then STAMPS each node
+   * that dispatches off-hub with its destination. The stamp reuses
+   * {@link computeCrossHubSteps}, so the chart's cross-hub marks can never disagree
+   * with the summary's `crossHubSteps` (or the member edit boundary lock) — one
+   * detector, no drift. Returns null for an unknown id so the web route 404s
+   * cleanly. Single-hub hosts (no off-hub view) stamp nothing — zero added cost.
+   */
+  async graphOf(id: string): Promise<WorkflowGraphView | null> {
+    let view: WorkflowLifecycleView
+    try {
+      view = await this.versioning.getState(id)
+    } catch {
+      return null
+    }
+    const rev = view.currentRevision ?? view.headRevision
+    const resolver = this.versioning.getResolver(id)
+    if (!resolver) return null
+    const def = resolver.byRevision(rev)
+    const graph = projectWorkflowGraph(def)
+    // Stamp off-hub destinations onto the matching nodes. A `CrossHubStep.stepId`
+    // is `<stepId>` for a simple step and `<stepId>/<branchId>` for a parallel
+    // branch — exactly the two node-id shapes the projection emits (`step:` /
+    // `branch:` prefixed; step ids are url-safe with no `/`, so the slash only
+    // ever marks the synthesized branch address). Index once, annotate in one pass.
+    const crossHub = this.computeCrossHubSteps(def)
+    if (crossHub.length > 0) {
+      const byNodeId = new Map<string, GraphNodeCrossHub>()
+      for (const s of crossHub) {
+        const nodeId = s.stepId.includes('/') ? `branch:${s.stepId}` : `step:${s.stepId}`
+        byNodeId.set(nodeId, { peer: s.peer, peerLabel: s.peerLabel, kind: s.kind ?? 'peer' })
+      }
+      for (const node of graph.nodes) {
+        const hit = byNodeId.get(node.id)
+        if (hit) node.crossHub = hit
+      }
+    }
+    return graph
   }
 }
 

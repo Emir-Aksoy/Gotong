@@ -28,13 +28,14 @@
     "README.md"
   ],
   "scripts": {
-    "build": "node scripts/build-admin-ui.mjs && node scripts/build-static-assets.mjs && tsc -p tsconfig.json",
+    "build": "node scripts/build-admin-ui.mjs && node scripts/build-static-assets.mjs && node scripts/build-builtin-templates.mjs && tsc -p tsconfig.json",
     "build:admin": "node scripts/build-admin-ui.mjs",
     "build:assets": "node scripts/build-admin-ui.mjs && node scripts/build-static-assets.mjs",
+    "build:templates": "node scripts/build-builtin-templates.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepack": "node scripts/build-admin-ui.mjs && node scripts/build-static-assets.mjs && tsc -p tsconfig.json"
+    "prepack": "node scripts/build-admin-ui.mjs && node scripts/build-static-assets.mjs && node scripts/build-builtin-templates.mjs && tsc -p tsconfig.json"
   },
   "dependencies": {
     "@aipehub/core": "workspace:*",

@@ -32,6 +32,7 @@ import { parse as parseYaml } from 'yaml'
 import type { AdminRecord } from '@aipehub/core'
 import { createLogger } from '@aipehub/core'
 
+import { BUILTIN_TEMPLATES } from './builtin-templates.js'
 import { readJsonBody, sendJson } from './http-helpers.js'
 import { ManifestError, type BundleApiKeyPrompt } from './manifest.js'
 import { encryptJson } from './template-crypto.js'
@@ -100,6 +101,77 @@ export interface TemplateRoutesCtx {
 
 const EXPORT_PATH = '/api/admin/templates/export'
 
+// ── Track G: template gallery (one-click install of shipped templates) ───────
+// The gallery surfaces the curated `aipehub.template/v1` manifests embedded at
+// build time (src/builtin-templates.ts, single source of truth in examples/).
+// `catalog` lists each one's INSTALL PREVIEW (what agents/workflows/KBs it would
+// land); `catalog/:id` returns the raw yaml the frontend POSTs to the existing
+// import route. No host injection — these templates are static, so the routes
+// read the embedded constant directly.
+const CATALOG_PATH = '/api/admin/templates/catalog'
+const CATALOG_ITEM_PREFIX = '/api/admin/templates/catalog/'
+
+/** One gallery entry's install preview — derived, never the raw yaml. */
+export interface TemplateCatalogEntry {
+  /** Stable gallery id (also the `catalog/:id` selector). */
+  id: string
+  /** Provenance: the example directory this manifest was bundled from. */
+  sourceExample: string
+  name: string
+  description?: string
+  version: number
+  /** What lands on install — agents (id + capabilities, NO secrets). */
+  agents: { id: string; displayName?: string; capabilities: string[] }[]
+  /** Declarative workflows the template carries (ids only). */
+  workflows: { id: string }[]
+  /** Addressable KB slots (name + description; wiring/preset stay server-side). */
+  knowledgeBases: { name: string; description?: string }[]
+  /** One-click apiKeyPrompt hint, if the template declares one. */
+  apiKeyPrompt?: BundleApiKeyPrompt
+}
+
+// Built once: BUILTIN_TEMPLATES is a static, build-time constant, so the
+// projection through the real parseTemplate (zero drift vs install) is memoized.
+let catalogCache: TemplateCatalogEntry[] | null = null
+
+function buildTemplateCatalog(): TemplateCatalogEntry[] {
+  if (catalogCache) return catalogCache
+  const out: TemplateCatalogEntry[] = []
+  for (const t of BUILTIN_TEMPLATES) {
+    try {
+      // Same parser the install route runs → the preview can't drift from what
+      // actually lands. (The anti-rot test guarantees every entry parses; the
+      // per-entry guard just keeps one bad manifest from sinking the whole list.)
+      const p = parseTemplate(t.yaml)
+      out.push({
+        id: t.id,
+        sourceExample: t.sourceExample,
+        name: p.name,
+        ...(p.description !== undefined ? { description: p.description } : {}),
+        version: p.version,
+        agents: p.agents.map((a) => ({
+          id: a.id,
+          ...(a.displayName !== undefined ? { displayName: a.displayName } : {}),
+          capabilities: a.capabilities,
+        })),
+        workflows: p.workflows.map((w) => ({ id: w.id })),
+        knowledgeBases: p.knowledgeBases.map((k) => ({
+          name: k.name,
+          ...(k.description !== undefined ? { description: k.description } : {}),
+        })),
+        ...(p.apiKeyPrompt ? { apiKeyPrompt: p.apiKeyPrompt } : {}),
+      })
+    } catch (err) {
+      log.error('builtin template failed to parse for catalog', {
+        id: t.id,
+        err: err instanceof Error ? err.message : String(err),
+      })
+    }
+  }
+  catalogCache = out
+  return out
+}
+
 /**
  * Handle the template export route. Returns `true` if the request was handled.
  */
@@ -110,6 +182,36 @@ export async function handleTemplateRoute(
   method: string,
   path: string,
 ): Promise<boolean> {
+  // Track G — gallery catalog (list the install previews of shipped templates).
+  if (path === CATALOG_PATH) {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    if (method !== 'GET') {
+      sendJson(res, { error: `method ${method} not allowed on ${path}` }, 405)
+      return true
+    }
+    sendJson(res, { templates: buildTemplateCatalog() })
+    return true
+  }
+
+  // Track G — fetch one template's raw yaml (the frontend POSTs it to import).
+  if (path.startsWith(CATALOG_ITEM_PREFIX)) {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    if (method !== 'GET') {
+      sendJson(res, { error: `method ${method} not allowed on ${path}` }, 405)
+      return true
+    }
+    const id = decodeURIComponent(path.slice(CATALOG_ITEM_PREFIX.length))
+    const entry = BUILTIN_TEMPLATES.find((t) => t.id === id)
+    if (!entry) {
+      sendJson(res, { error: `unknown template '${id}'` }, 404)
+      return true
+    }
+    sendJson(res, { id: entry.id, yaml: entry.yaml })
+    return true
+  }
+
   if (path !== EXPORT_PATH) return false
 
   const admin = await ctx.requireAdmin(req, res)

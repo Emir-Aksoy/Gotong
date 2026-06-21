@@ -51,8 +51,22 @@ export type {
   TransitionInput,
 } from './lifecycle.js'
 
-export { resolveRefs, lookupRef } from './resolver.js'
+export { resolveRefs, lookupRef, collectRefHeads } from './resolver.js'
 export type { ResolutionContext } from './resolver.js'
+
+// Read-only DAG projection of a workflow definition — a pure lens over the
+// already-structured definition (no runtime, no LLM). Consumed by the host's
+// `graphOf` (which stamps cross-hub annotations) and rendered by the admin UI.
+export { projectWorkflowGraph, TRIGGER_NODE_ID, OUTPUT_NODE_ID } from './graph.js'
+export type {
+  WorkflowGraphView,
+  WorkflowGraphNode,
+  WorkflowGraphEdge,
+  GraphNodeKind,
+  GraphEdgeKind,
+  GraphNodeDestination,
+  GraphNodeCrossHub,
+} from './graph.js'
 
 export { RunStore } from './run-store.js'
 export type { ArchiveRunsOptions, RunStatusCounts } from './run-store.js'

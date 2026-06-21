@@ -1556,6 +1556,44 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .modal-card-wide {
   width: min(64rem, 100% - 2rem);
 }
+/* Template gallery — one-click install cards (G-M3) */
+.template-gallery-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+  gap: 0.7rem;
+  margin: 0.4rem 0 0.2rem;
+}
+.tg-card {
+  border: 1px solid #e6e6e0;
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  background: #fcfcfa;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.tg-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.tg-card-name { margin: 0; font-size: 0.92rem; line-height: 1.3; }
+.tg-card-desc { margin: 0; font-size: 0.76rem; color: #666; line-height: 1.4; }
+.tg-card-counts { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.tg-chip {
+  font-size: 0.7rem;
+  color: #555;
+  background: #efefe9;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  white-space: nowrap;
+}
+.tg-chip-api { color: #b5651d; background: #fbf0e4; }
+.tg-install-btn { flex: 0 0 auto; }
+.tg-card-result { font-size: 0.74rem; color: #666; min-height: 0; }
+.tg-card-result.ok { color: #3a7d4f; }
+.tg-card-result.err { color: #c0392b; }
 .wf-runs-body { padding: 0.6rem 1rem 1rem; }
 .wf-runs-cols {
   display: grid;
@@ -1763,6 +1801,67 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .wf-gov-sens-internal { background: #e3e8ef; color: #51637a; }
 .wf-gov-sens-confidential { background: #fde9cf; color: #9a5b13; }
 .wf-gov-sens-pii { background: #fbdcdc; color: #9a1f1f; }
+
+/* DAG-M4 — read-only flow chart (graph) modal. Hand-drawn SVG (no chart
+   library); colors live here, mirroring the palette used elsewhere: green for
+   the trigger/output termini, neutral for steps, blue for parallel/branch and
+   the cross-hub accent, amber for `when:` gates. */
+.wf-graph-modal-body { padding: 0.6rem 1rem 1rem; }
+.wf-graph-body { min-height: 6rem; }
+.wf-graph-scroll {
+  overflow: auto;
+  max-height: calc(100vh - 14rem);
+  border: 1px solid #eee;
+  border-radius: 8px;
+  background: #fcfcfa;
+}
+.wf-graph-svg { display: block; }
+.wf-graph-box { stroke-width: 1.5; }
+.wf-graph-box-trigger { fill: #d6ecdb; stroke: #9cc9ab; }
+.wf-graph-box-output { fill: #d6ecdb; stroke: #9cc9ab; }
+.wf-graph-box-step { fill: #f9f9f5; stroke: #d8d8cf; }
+.wf-graph-box-parallel { fill: #e0e8f4; stroke: #aac1e0; }
+.wf-graph-box-branch { fill: #f4f6fb; stroke: #cdd8ec; }
+.wf-graph-box-xhub { stroke: #1d5fa8; stroke-width: 2; }
+.wf-graph-title { font-size: 13px; font-weight: 600; fill: #1a1a1a; }
+.wf-graph-sub { font-size: 11px; fill: #555; }
+.wf-graph-tag {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  fill: #2a5a85;
+}
+.wf-graph-when { font-size: 10.5px; fill: #9a6700; }
+.wf-graph-xhub-tag { font-size: 10.5px; font-weight: 600; fill: #1d5fa8; }
+.wf-graph-edge-seq { fill: none; stroke: #8a8a82; stroke-width: 1.6; }
+.wf-graph-edge-data { fill: none; stroke: #b58acb; stroke-width: 1.3; stroke-dasharray: 4 3; }
+.wf-graph-arrowhead { fill: #8a8a82; }
+.wf-graph-arrowhead-data { fill: #b58acb; }
+.wf-graph-legend {
+  display: flex;
+  gap: 1.2rem;
+  margin-top: 0.5rem;
+  font-size: 0.72rem;
+  color: #666;
+}
+.wf-graph-legend-seq::before {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  border-top: 1.6px solid #8a8a82;
+  vertical-align: middle;
+  margin-right: 5px;
+}
+.wf-graph-legend-data::before {
+  content: "";
+  display: inline-block;
+  width: 18px;
+  height: 0;
+  border-top: 1.3px dashed #b58acb;
+  vertical-align: middle;
+  margin-right: 5px;
+}
 
 .wf-rev-row {
   display: grid;
