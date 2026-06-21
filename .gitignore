@@ -14,6 +14,12 @@ build/
 .claude/
 .env
 .env.local
+
+# Local provider credentials — raw API keys live here ONLY, never in a
+# tracked file. e.g. secrets/mimo.local.env (Xiaomi MiMo chat-agent key).
+# A non-secret pointer (file path + endpoints + model) may live in
+# CLAUDE.md; the key itself must never be committed or echoed.
+secrets/
 coverage/
 .turbo/
 

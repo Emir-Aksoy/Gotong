@@ -535,6 +535,7 @@ UX 入口都从 admin 视角进。**个人用户应该有 first-class 入口**:
   - 不 `git push`, 不开 PR, 不调 GitHub API 写操作, 不跑 remote workflow
   - 所有 commit 都堆本地 `main`, 等用户解禁
 - **不要动备份**: `~/Backups/AipeHub/` 是历史快照, 只读
+- **临时/测试产物清理阈值 (2026-06-19 用户指令)**: agent 自己产生的临时 / scratch / 测试文件 (如 `/tmp/aipe-e2e-*` 测试空间、`/tmp/aipe-*.log`、临时 host 数据目录) 占用 **≤ 10 GB 时不必清理**, 超过阈值才清。清理前先 `du -sh` 核实大小。注: harness 会拦截破坏性 `rm -rf` 大范围通配 + 前台 `sleep`, 真要清就 `rm` 具体目录、逐项删, 别用 `rm -rf` 通配。
 - **不需要向前兼容**: 还没上线, 大胆改 schema / API。删旧代码比加 deprecation shim 优先
 - **代码尽量简化, 节点尽量轻量**: 每个 PR 一个小目标, 别一次塞 5 个 feature
 - **一个任务一个任务**: 规划完一项 → 开发 → 测试 → commit → 下一项
