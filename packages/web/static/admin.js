@@ -740,7 +740,8 @@
         });
         renderQuickChatReply(r?.result);
       } catch (err) {
-        dom.maQcStatus.textContent = t3.quickChatFailed(err.message || String(err));
+        const d = window.AipeHub.describeError(err && err.message ? err.message : String(err));
+        dom.maQcStatus.textContent = t3.quickChatFailed(d.fix ? `${d.text} ${d.fix}` : d.text);
         dom.maQcStatus.classList.remove("ok");
         dom.maQcStatus.classList.add("err");
       } finally {
@@ -758,8 +759,9 @@
         dom.maQcStatus.classList.add("err");
         return;
       }
-      if (result.kind === "ok") {
-        const out = result.output;
+      const out = result.output;
+      const errored = result.kind !== "ok" || out && out.stopReason === "error";
+      if (!errored) {
         const text = out && typeof out.text === "string" ? out.text : JSON.stringify(out ?? {}, null, 2);
         if (dom.maQcReply) {
           dom.maQcReply.textContent = text;
@@ -768,12 +770,18 @@
         dom.maQcStatus.textContent = t3.quickChatOk;
         dom.maQcStatus.classList.remove("err");
         dom.maQcStatus.classList.add("ok");
-      } else {
-        const reason = result.error || result.reason || result.kind;
-        dom.maQcStatus.textContent = t3.quickChatAgentFailed(reason);
-        dom.maQcStatus.classList.remove("ok");
-        dom.maQcStatus.classList.add("err");
+        return;
       }
+      const raw = result.kind === "ok" ? out && typeof out.text === "string" ? out.text : "" : result.error || result.reason || result.kind || "";
+      const d = window.AipeHub.describeError(raw);
+      const friendly = d.fix ? `${d.text} ${d.fix}` : d.text;
+      if (dom.maQcReply) {
+        dom.maQcReply.hidden = true;
+        dom.maQcReply.textContent = "";
+      }
+      dom.maQcStatus.textContent = t3.quickChatAgentFailed(friendly);
+      dom.maQcStatus.classList.remove("ok");
+      dom.maQcStatus.classList.add("err");
     }
     async function submitAgentForm(e) {
       e.preventDefault();

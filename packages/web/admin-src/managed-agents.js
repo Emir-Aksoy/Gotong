@@ -404,8 +404,10 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       renderQuickChatReply(r?.result)
     } catch (err) {
       // 504 (timeout) / 400 / network — fetchJson throws the server's error
-      // string; surface it so the user knows it wasn't a silent success.
-      dom.maQcStatus.textContent = t.quickChatFailed(err.message || String(err))
+      // string. Run it through the friendly-error classifier too so a timeout
+      // or refused connection reads as plain words + a fix, not a raw stack.
+      const d = window.AipeHub.describeError(err && err.message ? err.message : String(err))
+      dom.maQcStatus.textContent = t.quickChatFailed(d.fix ? `${d.text} ${d.fix}` : d.text)
       dom.maQcStatus.classList.remove('ok')
       dom.maQcStatus.classList.add('err')
     } finally {
@@ -421,10 +423,17 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       dom.maQcStatus.classList.add('err')
       return
     }
-    if (result.kind === 'ok') {
-      // LlmAgent ok → output.text is the reply. Fall back to pretty JSON for
+    const out = result.output
+    // ease-of-use ③TC — an LlmAgent that hits a provider auth/transport error
+    // folds it into output.stopReason==='error' with the raw error text in
+    // output.text, and STILL returns kind:'ok'. Rendering that as a green reply
+    // would show the lowest-capability user "[auth_error] 401 …" as if the agent
+    // had answered. So treat stopReason:'error' (and any non-ok kind) as a
+    // failure and run it through the friendly-error classifier.
+    const errored = result.kind !== 'ok' || (out && out.stopReason === 'error')
+    if (!errored) {
+      // Genuine reply. LlmAgent ok → output.text. Fall back to pretty JSON for
       // non-LLM agents whose output isn't a chat string.
-      const out = result.output
       const text = out && typeof out.text === 'string'
         ? out.text
         : JSON.stringify(out ?? {}, null, 2)
@@ -435,15 +444,21 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       dom.maQcStatus.textContent = t.quickChatOk
       dom.maQcStatus.classList.remove('err')
       dom.maQcStatus.classList.add('ok')
-    } else {
-      // failed / cancelled / no-participant / suspended — surface the reason so
-      // the user knows it wasn't a silent no-op (failed often = missing/invalid
-      // key, which ties back to the 测试连接 button above).
-      const reason = result.error || result.reason || result.kind
-      dom.maQcStatus.textContent = t.quickChatAgentFailed(reason)
-      dom.maQcStatus.classList.remove('ok')
-      dom.maQcStatus.classList.add('err')
+      return
     }
+    // Failure. The raw provider error is either folded into output.text (the
+    // stopReason:'error' case) or carried on a non-ok result. Classify it into
+    // plain words + an actionable fix (often "go fix the key" — which ties back
+    // to the 测试连接 button + API Key 管理 right above this panel).
+    const raw = result.kind === 'ok'
+      ? (out && typeof out.text === 'string' ? out.text : '')
+      : (result.error || result.reason || result.kind || '')
+    const d = window.AipeHub.describeError(raw)
+    const friendly = d.fix ? `${d.text} ${d.fix}` : d.text
+    if (dom.maQcReply) { dom.maQcReply.hidden = true; dom.maQcReply.textContent = '' }
+    dom.maQcStatus.textContent = t.quickChatAgentFailed(friendly)
+    dom.maQcStatus.classList.remove('ok')
+    dom.maQcStatus.classList.add('err')
   }
 
   async function submitAgentForm(e) {

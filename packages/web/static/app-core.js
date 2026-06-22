@@ -1564,6 +1564,15 @@
       testConnNetwork: '连不上 — 检查网络或 Base URL。',
       testConnTimeout: '超时 — 网络慢或端点无响应。',
       testConnUnknown: '测试失败(未知错误)。',
+      // ease-of-use ③TC — short, actionable fix hints appended to a friendly
+      // error (describeError in app-core.js maps an error code → one of these).
+      errFixKey: '→ 去「API Key 管理」检查或补一个 key。',
+      errFixModel: '→ 检查模型名是否填对。',
+      errFixProvider: '→ 确认提供方 / Base URL 选对了。',
+      // Additive to testConnNetwork ("连不上 — 检查网络或 Base URL"): that line
+      // already says network/Base-URL, so the hint points at what it doesn't —
+      // is the provider actually reachable, is the port right.
+      errFixNetwork: '→ 确认服务商在线、端口没填错。',
       // ease-of-use ②TC — after a CREATE, the user is nudged to talk to the
       // brand-new agent right here and see it respond. The reply comes from the
       // agent itself (reuses the wait:true dispatch path).
@@ -3237,6 +3246,12 @@
       testConnNetwork: 'Could not connect — check your network or the Base URL.',
       testConnTimeout: 'Timed out — slow network or an unresponsive endpoint.',
       testConnUnknown: 'Test failed (unknown error).',
+      // ease-of-use ③TC — short, actionable fix hints appended to a friendly
+      // error (describeError in app-core.js maps an error code → one of these).
+      errFixKey: '→ Check or add a key under "API keys".',
+      errFixModel: '→ Check the model name is correct.',
+      errFixProvider: '→ Confirm the provider / Base URL is right.',
+      errFixNetwork: '→ Make sure the provider is reachable and the port is right.',
       // ease-of-use ②TC — after a CREATE, the user is nudged to talk to the
       // brand-new agent right here and see it respond. The reply comes from the
       // agent itself (reuses the wait:true dispatch path).
@@ -3866,6 +3881,51 @@
     return { level: 'error', text: t[key] || t.testConnUnknown }
   }
 
+  // ease-of-use ③TC — friendly errors. A dispatch / quick-chat failure reaches
+  // the browser as a RAW provider error STRING (no structured HTTP status the
+  // way the key-test probe verdict carries one), so classify the text into the
+  // SAME category vocabulary the backend probe uses (llm-key-test.ts
+  // classifyKeyError) and reuse the SAME friendly explanation (KEY_TEST_CODE_KEYS
+  // above → testConn* words, one source of truth) plus a short, actionable fix
+  // hint. This is the string-only mirror of the server-side classifier; the
+  // pattern order matches its priority (transport → auth → quota → rate → …).
+  const ERROR_FIX_KEYS = {
+    invalid_key: 'errFixKey',
+    insufficient_quota: 'errFixKey',
+    not_found: 'errFixModel',
+    bad_request: 'errFixProvider',
+    network: 'errFixNetwork',
+    // rate_limited / timeout / upstream / unknown — transient or unclear; no
+    // single fix action, so the caller shows just the explanation.
+  }
+  function classifyErrorText(raw) {
+    const s = String(raw || '').toLowerCase()
+    if (!s) return 'unknown'
+    // Transport — never reached the provider's HTTP layer (wrong Base URL / DNS).
+    // The OpenAI / DeepSeek / Anthropic SDKs all surface a dead endpoint as the
+    // bare string "Connection error." (no errno prefix), so the human-readable
+    // connection-* phrases must be here too, not just the low-level errno codes.
+    if (/econnrefused|enotfound|eai_again|econnreset|etimedout|epipe|fetch failed|socket hang up|getaddrinfo|other side closed|network error|und_err|connection error|connection refused|connection reset|connection closed|connection timed|connect timeout|unable to connect|could not connect|failed to connect/.test(s)) return 'network'
+    // Our own abort budget, or any deliberate cancel/timeout.
+    if (/abort(ed|error)?|timed?\s?out|timeout|deadline exceeded/.test(s)) return 'timeout'
+    // Explicit auth signals win over quota (mirror: backend keys 401/403 before 429 body).
+    if (/\b401\b|\b403\b|unauthorized|unauthenticated|forbidden|invalid[^.]{0,16}(api[ _-]?key|token)|incorrect api key|authentication|no api key|missing api key|api key.{0,16}(missing|not|invalid)|not configured/.test(s)) return 'invalid_key'
+    if (/\b402\b|quota|insufficient|balance|credit|billing|exceeded your current|out of/.test(s)) return 'insufficient_quota'
+    if (/\b429\b|rate[ _-]?limit|too many requests/.test(s)) return 'rate_limited'
+    if (/\b404\b|not found|no such model|unknown model|does not exist|model_not_found/.test(s)) return 'not_found'
+    if (/\b400\b|\b422\b|bad request|invalid request|unprocessable/.test(s)) return 'bad_request'
+    if (/\b5\d\d\b|internal server error|bad gateway|service unavailable|overloaded|upstream/.test(s)) return 'upstream'
+    return 'unknown'
+  }
+  // Returns { code, text, fix } — `text` is the friendly explanation, `fix` is
+  // the actionable next step ('' when none applies). Caller composes them.
+  function describeError(raw) {
+    const code = classifyErrorText(raw)
+    const text = t[KEY_TEST_CODE_KEYS[code]] || t.testConnUnknown
+    const fixKey = ERROR_FIX_KEYS[code]
+    return { code, text, fix: fixKey ? (t[fixKey] || '') : '' }
+  }
+
   // --- expose -------------------------------------------------------------
 
   window.AipeHub = {
@@ -3882,6 +3942,7 @@
     summarize,
     isBadResult,
     describeKeyTest,
+    describeError,
     fetchJson,
     connectStream,
     $,
