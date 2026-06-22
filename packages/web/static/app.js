@@ -63,6 +63,125 @@
     el.addEventListener(type, handler)
   }
 
+  // ---- ease-of-use ⑨-M2 (A2) — "how to get a key" illustrated guide -----
+  //
+  // The single biggest first-run wall for a non-technical user isn't picking a
+  // provider — it's "I have no idea how to obtain that key". This renders a
+  // collapsible, per-provider step list (sign up → top up → create → copy)
+  // right under each provider <select>, plus a prominent link to the official
+  // key page (the user opens it in their own browser — we never navigate for
+  // them). Steps are inline-bilingual so the flat i18n dict stays lean; the
+  // chrome (summary / link label) lives in the dict like everything else.
+  //
+  // Real official destinations (verified): DeepSeek / Anthropic / OpenAI key
+  // pages. Unknown provider → body cleared (no guide), never throws.
+  const KEY_PROVIDER_GUIDES = {
+    deepseek: {
+      url: 'https://platform.deepseek.com/api_keys',
+      zh: {
+        steps: [
+          '打开 platform.deepseek.com，用手机号或邮箱注册并登录',
+          '进入「充值 / Top up」，最低约 ¥1 起，按量计费很便宜',
+          '左侧打开「API keys」→ 点「创建 API key」',
+          '复制以 sk- 开头的密钥，粘到下面的输入框',
+        ],
+      },
+      en: {
+        steps: [
+          'Sign up and log in at platform.deepseek.com',
+          'Open "Top up" — pay-as-you-go starts around ¥1, very cheap',
+          'Open "API keys" in the sidebar → "Create API key"',
+          'Copy the key starting with sk- and paste it below',
+        ],
+      },
+    },
+    anthropic: {
+      url: 'https://console.anthropic.com/settings/keys',
+      zh: {
+        steps: [
+          '打开 console.anthropic.com，注册并登录',
+          '在「Billing」里充值或绑定信用卡（按量计费）',
+          '打开「Settings → API keys」→ 点「Create Key」',
+          '复制以 sk-ant- 开头的密钥，粘到下面',
+        ],
+      },
+      en: {
+        steps: [
+          'Sign up and log in at console.anthropic.com',
+          'Add credit or a card under "Billing" (pay-as-you-go)',
+          'Open "Settings → API keys" → "Create Key"',
+          'Copy the key starting with sk-ant- and paste it below',
+        ],
+      },
+    },
+    openai: {
+      url: 'https://platform.openai.com/api-keys',
+      zh: {
+        steps: [
+          '打开 platform.openai.com，注册并登录',
+          '在「Billing」里充值（预付额度，按量扣）',
+          '打开「API keys」→ 点「Create new secret key」',
+          '复制以 sk- 开头的密钥，粘到下面（只显示一次，记得保存）',
+        ],
+      },
+      en: {
+        steps: [
+          'Sign up and log in at platform.openai.com',
+          'Add prepaid credit under "Billing"',
+          'Open "API keys" → "Create new secret key"',
+          'Copy the key starting with sk- and paste it below (shown once)',
+        ],
+      },
+    },
+  }
+
+  // Render the guide body for a provider into bodyEl. Reads the live language
+  // (window.AipeHub.lang) so a toggle re-renders correctly via refreshKeyGuides.
+  function renderKeyGuide(bodyEl, provider) {
+    if (!bodyEl) return
+    const guide = KEY_PROVIDER_GUIDES[provider]
+    if (!guide) { bodyEl.innerHTML = ''; return }
+    const lang = (window.AipeHub && window.AipeHub.lang) || 'zh'
+    const g = guide[lang] || guide.zh
+    const steps = g.steps.map((s) => `<li>${escape(s)}</li>`).join('')
+    bodyEl.innerHTML =
+      `<ol class="key-guide-steps">${steps}</ol>` +
+      `<a class="key-guide-link" href="${escape(guide.url)}" target="_blank" rel="noopener noreferrer">${escape(t('keyGuideOpenLink'))}</a>` +
+      `<div class="key-guide-url">${escape(guide.url)}</div>`
+  }
+
+  // Wire a provider <select> to its guide body: bindOnce the change handler
+  // (re-render on provider switch) + render once for the current value.
+  function wireKeyGuide(selectId, bodyId) {
+    const sel = document.getElementById(selectId)
+    const body = document.getElementById(bodyId)
+    if (!sel || !body) return
+    bindOnce(sel, 'change', () => renderKeyGuide(body, sel.value))
+    renderKeyGuide(body, sel.value)
+  }
+
+  // Re-render any present guide bodies in the current language. Registered as
+  // an always-on (not SIGNED_IN-gated) lang subscriber so the setup wizard
+  // (pre-login shell) re-renders too. No-ops when neither guide is mounted.
+  function refreshKeyGuides() {
+    const pairs = [
+      ['setup-key-form', 'setup-key-guide-body'],
+      ['me-cred-provider', 'me-cred-guide-body'],
+    ]
+    for (const [selId, bodyId] of pairs) {
+      const body = document.getElementById(bodyId)
+      if (!body) continue
+      // setup uses <select name="provider"> inside the form; me-cred uses an id.
+      const sel = selId === 'setup-key-form'
+        ? document.querySelector('#setup-key-form select[name="provider"]')
+        : document.getElementById(selId)
+      if (sel) renderKeyGuide(body, sel.value)
+    }
+  }
+  if (window.AipeHub && typeof window.AipeHub.onLangChange === 'function') {
+    window.AipeHub.onLangChange(refreshKeyGuides)
+  }
+
   // ---- Apply role visibility filter ------------------------------------
   // Hide every [data-roles] element whose role list doesn't include the
   // viewer. Anonymous viewers get `data-roles="anonymous"` matches only.
@@ -195,6 +314,14 @@
   function attachKeyForm(keyForm) {
     if (keyForm.dataset.bound === '1') return
     keyForm.dataset.bound = '1'
+    // ⑨-M2 — wire the "how to get a key" guide to the provider select (the
+    // setup select has no id, so target it within the form by name).
+    const provSel = keyForm.querySelector('select[name="provider"]')
+    const guideBody = document.getElementById('setup-key-guide-body')
+    if (provSel && guideBody) {
+      bindOnce(provSel, 'change', () => renderKeyGuide(guideBody, provSel.value))
+      renderKeyGuide(guideBody, provSel.value)
+    }
     const status = document.getElementById('setup-key-status')
     const skipBtn = document.getElementById('setup-key-skip')
     // Skip → straight to the login screen (empty cookie state).
@@ -2193,6 +2320,9 @@
     }
     sel.innerHTML = providers.map((p) => `<option value="${escape(p)}">${escape(p)}</option>`).join('')
     sel.dataset.loaded = '1'
+    // ⑨-M2 — once real provider options exist, wire the "how to get a key"
+    // guide (change → re-render + initial render for the first option).
+    wireKeyGuide('me-cred-provider', 'me-cred-guide-body')
   }
 
   function renderCredCard(c) {

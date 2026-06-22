@@ -2474,6 +2474,27 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 }
 .me-steward-chip:hover { background: #f0e7d8; border-color: #b5651d; color: #7a3f0d; }
 
+/* ease-of-use ⑨-M2 (A2) — "how to get a key" illustrated guide. Lives under
+   the provider <select> in both the setup wizard and the member key form. */
+.key-guide { margin: 0.35rem 0 0.7rem; border: 1px solid #e3dccf; border-radius: 8px; background: #faf7f2; }
+.key-guide > summary {
+  cursor: pointer; padding: 0.5rem 0.7rem; font-size: 0.86rem; color: #7a3f0d;
+  list-style: none; user-select: none;
+}
+.key-guide > summary::-webkit-details-marker { display: none; }
+.key-guide > summary::before { content: '▸ '; color: #b5651d; }
+.key-guide[open] > summary::before { content: '▾ '; }
+.key-guide > summary:hover { color: #b5651d; }
+.key-guide-body { padding: 0.1rem 0.85rem 0.7rem; }
+.key-guide-steps { margin: 0.3rem 0 0.6rem; padding-left: 1.3rem; color: #4a4034; font-size: 0.85rem; line-height: 1.55; }
+.key-guide-steps li { margin: 0.18rem 0; }
+.key-guide-link {
+  display: inline-block; padding: 0.4rem 0.85rem; border-radius: 6px;
+  background: #b5651d; color: #fff; font-size: 0.85rem; text-decoration: none;
+}
+.key-guide-link:hover { background: #9a5418; }
+.key-guide-url { margin-top: 0.35rem; font-size: 0.74rem; color: #999; word-break: break-all; }
+
 .me-steward-output { margin-top: 0.6rem; display: flex; flex-direction: column; gap: 0.6rem; }
 .me-steward-reply { white-space: pre-wrap; color: #333; font-size: 0.92rem; line-height: 1.5; }
 .me-steward-card {

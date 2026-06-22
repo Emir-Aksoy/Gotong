@@ -587,6 +587,10 @@
       meStewardEg1: '帮我建一个每天把新闻总结成一段中文的助手',
       meStewardEg2: '帮我建一个帮我回客户消息的客服小助手',
       meStewardEg3: '帮我建一个把英文邮件翻译成中文的助手',
+      // ease-of-use ⑨-M2 (A2) — "how to get a key" guide chrome (per-provider
+      // step content lives inline in app.js's KEY_PROVIDER_GUIDES).
+      keyGuideSummary: '不知道怎么拿 Key？点开看图文步骤',
+      keyGuideOpenLink: '打开官网，按步骤拿 Key →',
       meStewardThinking: '管家在想…',
       meStewardEmptyInput: '请先用一句话告诉管家你想做什么。',
       meStewardNoActions: '(管家这次只是回话,没有要执行的动作。)',
@@ -2202,6 +2206,9 @@
       meStewardEg1: 'Build me an assistant that summarizes the day’s news into one Chinese paragraph',
       meStewardEg2: 'Build me a support assistant that replies to customer messages',
       meStewardEg3: 'Build me an assistant that translates English emails into Chinese',
+      // ease-of-use ⑨-M2 (A2) — "how to get a key" guide chrome.
+      keyGuideSummary: 'No key yet? See the step-by-step guide',
+      keyGuideOpenLink: 'Open the official site and get your key →',
       meStewardThinking: 'The steward is thinking…',
       meStewardEmptyInput: 'Tell the steward in one line what you want to do.',
       meStewardNoActions: '(The steward just replied — nothing to run this time.)',

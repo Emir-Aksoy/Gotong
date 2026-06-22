@@ -90,6 +90,13 @@
               <option value="openai" data-i18n="setupKeyProviderOpenai">OpenAI</option>
             </select>
           </label>
+          <!-- ease-of-use ⑨-M2 (A2) — illustrated "how to get a key" guide.
+               Body is filled by app.js (renderKeyGuide) per selected provider +
+               language; open by default since this is the first-run moment. -->
+          <details id="setup-key-guide" class="key-guide" open>
+            <summary data-i18n="keyGuideSummary">不知道怎么拿 Key？点开看图文步骤</summary>
+            <div id="setup-key-guide-body" class="key-guide-body"></div>
+          </details>
           <label><span data-i18n="setupKeyInput">API Key</span>
             <input name="apiKey" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="setupKeyPlaceholder" placeholder="粘贴你的 API Key" />
           </label>
@@ -327,6 +334,12 @@
             <label for="me-cred-provider" data-i18n="meProvider">模型供应商</label>
             <select id="me-cred-provider" name="provider" required></select>
           </div>
+          <!-- ease-of-use ⑨-M2 (A2) — illustrated "how to get a key" guide,
+               filled by app.js (renderKeyGuide) per selected provider + language. -->
+          <details id="me-cred-guide" class="key-guide">
+            <summary data-i18n="keyGuideSummary">不知道怎么拿 Key？点开看图文步骤</summary>
+            <div id="me-cred-guide-body" class="key-guide-body"></div>
+          </details>
           <div class="me-field">
             <label for="me-cred-key" data-i18n="meCredKey">API 密钥</label>
             <input type="password" id="me-cred-key" name="apiKey" placeholder="sk-..." autocomplete="off" required />
