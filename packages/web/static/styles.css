@@ -1316,6 +1316,183 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 @media (max-width: 820px) {
   .start-here .sh-steps { grid-template-columns: 1fr; }
 }
+/* --- ease-of-use ⑨-M3: value-before-key (Ollama + scripted demo) ------
+   Lives UNDER step ③ when no model key is set. Two zero-cloud-key paths:
+   a one-click local Ollama option (green = free/go) and an honestly-labelled
+   scripted steward demo. */
+.start-here .sh-tryfree {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #fdf6f0;
+  border: 1px dashed #e3c4b4;
+  border-radius: 7px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  align-items: flex-start;
+}
+.start-here .sh-tryfree-label {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: #b25a3a;
+}
+.start-here .sh-tryfree-help {
+  margin: 0;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  color: #9a8b80;
+}
+.start-here #sh-ollama-slot:empty { display: none; }
+.start-here #sh-ollama-slot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.start-here .sh-btn-ollama {
+  margin-top: 0;
+  background: #1a8a4a;
+  color: #fff;
+  border-color: #1a8a4a;
+}
+.start-here .sh-btn-ollama:hover { background: #157a40; }
+.start-here .sh-ollama-hint {
+  font-size: 0.7rem;
+  color: #1a8a4a;
+  font-weight: 600;
+}
+.start-here .sh-btn-ghost {
+  margin-top: 0;
+  background: none;
+  color: #b25a3a;
+  border-color: transparent;
+  padding: 4px 0;
+  text-decoration: underline;
+}
+.start-here .sh-btn-ghost:hover { color: #c66a48; }
+
+/* scripted steward demo overlay (appended to <body>, not under .start-here) */
+.sh-demo-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  background: rgba(40, 28, 22, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+.sh-demo-card {
+  background: #fff;
+  border-radius: 12px;
+  max-width: 480px;
+  width: 100%;
+  padding: 18px 20px 20px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.28);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+.sh-demo-banner {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #8a6a18;
+  background: #fdf3d6;
+  border: 1px solid #f0dca0;
+  border-radius: 5px;
+  padding: 3px 9px;
+  margin-bottom: 10px;
+}
+.sh-demo-title {
+  margin: 0 0 12px;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+.sh-demo-thread {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.sh-demo-msg {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  padding: 9px 12px;
+  border-radius: 9px;
+  max-width: 88%;
+}
+.sh-demo-user {
+  align-self: flex-end;
+  background: #d57c5b;
+  color: #fff;
+  border-bottom-right-radius: 3px;
+}
+.sh-demo-steward {
+  align-self: flex-start;
+  background: #f6f1ec;
+  color: #2a2a2a;
+  border-bottom-left-radius: 3px;
+}
+.sh-demo-tier {
+  display: inline-block;
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #1a8a4a;
+  background: #e3f5e9;
+  border-radius: 4px;
+  padding: 1px 7px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.sh-demo-done {
+  align-self: flex-start;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #1a8a4a;
+  padding: 4px 2px;
+}
+.sh-demo-cta {
+  margin: 12px 0 0;
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: #7a6c62;
+  background: #fffaf6;
+  border: 1px solid #f0ddd0;
+  border-radius: 7px;
+  padding: 9px 11px;
+}
+.sh-demo-actions {
+  margin-top: 14px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+/* demo buttons live in the body-level overlay, so the .start-here-scoped
+   .sh-btn rules don't reach them — restate the minimum here. */
+.sh-demo-card .sh-btn {
+  font-size: 0.82rem;
+  font-weight: 600;
+  padding: 7px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid transparent;
+}
+.sh-demo-card .sh-btn-primary {
+  background: #d57c5b;
+  color: #fff;
+  border-color: #d57c5b;
+}
+.sh-demo-card .sh-btn-primary:hover { background: #c66a48; }
+.sh-demo-card .sh-btn-ghost {
+  background: none;
+  color: #8a7a70;
+  border-color: transparent;
+  text-decoration: underline;
+}
+.sh-demo-card .sh-btn-ghost:hover { color: #555; }
 
 /* --- capability suggestion chips ------------------------------------- */
 .cap-chips {

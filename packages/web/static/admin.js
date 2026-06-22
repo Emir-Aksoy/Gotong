@@ -2746,7 +2746,13 @@
         hasModelKey = Object.keys(s?.providers || {}).length > 0 || Object.values(s?.env || {}).some(Boolean);
       } catch {
       }
-      const step3 = hasModelKey ? `<span class="sh-done">${escapeHtml5(t5.startHereKeyDone)}</span>` : `<button type="button" class="sh-btn sh-btn-secondary" data-sh="key">${escapeHtml5(t5.startHereStep3Btn)}</button>`;
+      const step3 = hasModelKey ? `<span class="sh-done">${escapeHtml5(t5.startHereKeyDone)}</span>` : `<button type="button" class="sh-btn sh-btn-secondary" data-sh="key">${escapeHtml5(t5.startHereStep3Btn)}</button>
+         <div class="sh-tryfree">
+           <span class="sh-tryfree-label">${escapeHtml5(t5.startHereTryFreeLabel)}</span>
+           <div id="sh-ollama-slot"></div>
+           <button type="button" class="sh-btn sh-btn-ghost" data-sh="demo">${escapeHtml5(t5.startHereDemoBtn)}</button>
+           <p class="sh-tryfree-help">${escapeHtml5(t5.startHereNoKeyHelp)}</p>
+         </div>`;
       host.innerHTML = `
       <div class="sh-head">
         <h2 class="sh-title">${escapeHtml5(t5.startHereTitle)}</h2>
@@ -2771,6 +2777,76 @@
         </div>
       </div>`;
       host.hidden = false;
+      if (!hasModelKey) injectOllamaOption(host).catch(() => {
+      });
+    }
+    let ollamaModel = "";
+    async function probeOllama() {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 1200);
+      try {
+        const r = await fetch("http://127.0.0.1:11434/api/tags", { signal: ctrl.signal });
+        if (!r.ok) return { available: false, models: [] };
+        const body = await r.json();
+        const models = (body?.models || []).map((m) => m?.name).filter(Boolean);
+        return { available: models.length > 0, models };
+      } catch {
+        return { available: false, models: [] };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    async function injectOllamaOption(host) {
+      const slot = host.querySelector("#sh-ollama-slot");
+      if (!slot) return;
+      const probe = await probeOllama();
+      if (!probe.available) {
+        ollamaModel = "";
+        return;
+      }
+      ollamaModel = probe.models[0];
+      slot.innerHTML = `<button type="button" class="sh-btn sh-btn-ollama" data-sh="ollama">${escapeHtml5(t5.startHereOllamaBtn)}</button><span class="sh-ollama-hint">${escapeHtml5(t5.startHereOllamaDetected(ollamaModel))}</span>`;
+    }
+    function openDemoModal() {
+      document.getElementById("sh-demo-overlay")?.remove();
+      const overlay = document.createElement("div");
+      overlay.id = "sh-demo-overlay";
+      overlay.className = "sh-demo-overlay";
+      overlay.innerHTML = `
+      <div class="sh-demo-card" role="dialog" aria-modal="true">
+        <div class="sh-demo-banner">${escapeHtml5(t5.startHereDemoBanner)}</div>
+        <h3 class="sh-demo-title">${escapeHtml5(t5.startHereDemoTitle)}</h3>
+        <div class="sh-demo-thread">
+          <div class="sh-demo-msg sh-demo-user">${escapeHtml5(t5.startHereDemoUser)}</div>
+          <div class="sh-demo-msg sh-demo-steward">
+            <span class="sh-demo-tier">${escapeHtml5(t5.startHereDemoTier)}</span>
+            <span>${escapeHtml5(t5.startHereDemoProposal)}</span>
+          </div>
+          <div class="sh-demo-done" hidden>${escapeHtml5(t5.startHereDemoDone)}</div>
+        </div>
+        <p class="sh-demo-cta" hidden>${escapeHtml5(t5.startHereDemoCta)}</p>
+        <div class="sh-demo-actions">
+          <button type="button" class="sh-btn sh-btn-primary" data-demo="approve">${escapeHtml5(t5.startHereDemoApprove)}</button>
+          <button type="button" class="sh-btn sh-btn-ghost" data-demo="close">${escapeHtml5(t5.startHereDemoClose)}</button>
+        </div>
+      </div>`;
+      overlay.addEventListener("click", (ev) => {
+        const tgt = ev.target instanceof HTMLElement ? ev.target : null;
+        if (!tgt) return;
+        if (tgt === overlay) {
+          overlay.remove();
+          return;
+        }
+        const act = tgt.closest("[data-demo]")?.getAttribute("data-demo");
+        if (act === "close") {
+          overlay.remove();
+        } else if (act === "approve") {
+          overlay.querySelector(".sh-demo-done")?.removeAttribute("hidden");
+          overlay.querySelector(".sh-demo-cta")?.removeAttribute("hidden");
+          overlay.querySelector('[data-demo="approve"]')?.remove();
+        }
+      });
+      document.body.appendChild(overlay);
     }
     function onStartHereClick(e) {
       const btn = e.target instanceof HTMLElement ? e.target.closest("[data-sh]") : null;
@@ -2787,6 +2863,21 @@
         dom.templateGalleryBtn?.click();
       } else if (action === "key") {
         dom.maKeysBtn?.click();
+      } else if (action === "ollama") {
+        managedAgents.openAgentForm("create");
+        if (dom.maProvider) dom.maProvider.value = "openai-compatible";
+        managedAgents.syncProviderDependentFields();
+        if (dom.maBaseUrl) dom.maBaseUrl.value = "http://127.0.0.1:11434/v1";
+        if (dom.maProviderLabel) dom.maProviderLabel.value = "Ollama";
+        if (dom.maModel) dom.maModel.value = ollamaModel || "llama3";
+        if (dom.maApiKey) dom.maApiKey.value = "ollama";
+        if (dom.maId) dom.maId.value = "local-assistant";
+        if (dom.maDisplayName) dom.maDisplayName.value = t5.startHereOllamaName;
+        if (dom.maCaps) dom.maCaps.value = "chat";
+        if (dom.maSystem) dom.maSystem.value = t5.startHereAssistantSystem;
+        dom.maDisplayName?.focus();
+      } else if (action === "demo") {
+        openDemoModal();
       } else if (action === "dismiss") {
         try {
           localStorage.setItem(START_HERE_DISMISS_KEY, "1");
