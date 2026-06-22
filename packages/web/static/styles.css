@@ -2623,6 +2623,17 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .peer-admin-panel .pa-pair-out-wrap { display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; margin-top: 0.6rem; }
 .peer-admin-panel .pa-pair button { cursor: pointer; }
 
+/* ⑤-M1 — simple mode (progressive disclosure). When body[data-simple-mode="1"]
+   is set, hide the advanced admin tab buttons + their sections (tagged `.adv-only`
+   by app.js markAdvancedTabs). The router also refuses to activate them, so this
+   is belt-and-suspenders — and it's what actually removes the buttons from the
+   tabbar (setActiveTab only toggles `.active`, never hides buttons). */
+body[data-simple-mode="1"] .tabbar-btn.adv-only,
+body[data-simple-mode="1"] section.adv-only { display: none !important; }
+/* The settings toggle itself (owner/admin only — see app.html [data-roles]). */
+.simple-mode-toggle { display: flex; align-items: center; gap: 0.5rem; cursor: pointer; font-size: 0.9rem; margin-top: 0.3rem; }
+.simple-mode-toggle input { width: 1.05rem; height: 1.05rem; cursor: pointer; }
+
 /* Route B P1-M4f-3 — OIDC IdP registry (tab "SSO"). */
 .oidc-panel .oidc-status { font-size: 0.85rem; min-height: 1em; }
 .oidc-panel .oidc-status-loading { color: #888; }

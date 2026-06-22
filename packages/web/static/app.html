@@ -359,6 +359,19 @@
       <h2 style="margin-top:1.5rem;" data-i18n="setMfa">两步验证 (2FA)</h2>
       <div id="settings-mfa" class="settings-form"></div>
 
+      <!-- ⑤-M1 — simple mode (progressive disclosure). Owner/admin only — it
+           only narrows the admin shell, so it's a no-op on the member home /
+           settings surface. User-controlled, per-device (localStorage), and
+           orthogonal to personal/team mode. app.js wires #settings-simple-mode. -->
+      <div class="settings-form" data-roles="owner,admin">
+        <h2 style="margin-top:1.5rem;" data-i18n="setSimpleMode">界面模式</h2>
+        <p class="hint" data-i18n="setSimpleModeHint">简单模式只保留常用标签页 (总览 / 智能体 / 工作流 / 任务 / 用量),把联邦、用户、SSO 等高级功能收起来。随时可切回完整界面 — 不影响任何权限。</p>
+        <label class="simple-mode-toggle">
+          <input id="settings-simple-mode" type="checkbox" />
+          <span data-i18n="setSimpleModeLabel">开启简单模式</span>
+        </label>
+      </div>
+
       <!-- Phase 7 M5 — owner-only "升级到团队模式" 注入点. app.js
            reads /api/me/mode + populates this slot conditionally. The
            wrapping section is hidden unless body.mode-personal is set

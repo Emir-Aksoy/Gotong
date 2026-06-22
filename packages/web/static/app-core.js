@@ -1564,6 +1564,9 @@
       setNewPw: '新密码 (至少 12 位)',
       setSubmit: '提交',
       setMfa: '两步验证 (2FA)',
+      setSimpleMode: '界面模式',
+      setSimpleModeHint: '简单模式只保留常用标签页 (总览 / 智能体 / 工作流 / 任务 / 用量),把联邦、用户、SSO 等高级功能收起来。随时可切回完整界面 — 不影响任何权限。',
+      setSimpleModeLabel: '开启简单模式',
       setPersonalMode: '个人模式',
       setPersonalModeHint: '当前是个人模式 (1 用户, 简化界面)。升级后开放完整 admin 控件 — 用户管理 / 邀请 / peer / 配额。',
       // REL-8d — admin modals + static HTML (disclaimer / growth reports / wf-assist / wf-start / bundle import)
@@ -3159,6 +3162,9 @@
       setNewPw: 'New password (at least 12 chars)',
       setSubmit: 'Submit',
       setMfa: 'Two-factor authentication (2FA)',
+      setSimpleMode: 'Interface mode',
+      setSimpleModeHint: 'Simple mode keeps only the everyday tabs (overview / agents / workflows / tasks / usage) and tucks away advanced areas like federation, users and SSO. Switch back to the full interface anytime — it changes no permissions.',
+      setSimpleModeLabel: 'Enable simple mode',
       setPersonalMode: 'Personal mode',
       setPersonalModeHint: 'Currently in personal mode (1 user, simplified UI). Upgrading unlocks the full admin controls — user management / invitations / peers / quotas.',
       // REL-8d — admin modals + static HTML (disclaimer / growth reports / wf-assist / wf-start / bundle import)

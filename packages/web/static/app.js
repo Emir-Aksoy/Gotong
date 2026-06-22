@@ -401,6 +401,25 @@
     'saml',
   ])
 
+  // ⑤-M1 — Simple mode (progressive disclosure). A per-device, user-controlled
+  // toggle (localStorage) that trims the admin shell to a curated tab subset so
+  // a first-time / casual operator isn't met with federation / SSO / quotas on
+  // day one. Orthogonal to role AND to personal/team mode: it only narrows which
+  // admin tabs the router activates + which sections render. It grants/removes
+  // NO capability — the server still enforces every route. core / identity /
+  // host routes are untouched; this lives entirely in the SPA.
+  const SIMPLE_MODE_KEY = 'aipe_simple_mode'
+  const SIMPLE_ADMIN_TABS = new Set(['overview', 'agents', 'workflows', 'tasks', 'usage'])
+  function isSimpleMode() {
+    try { return localStorage.getItem(SIMPLE_MODE_KEY) === '1' } catch (_) { return false }
+  }
+  // The admin tab set the router honors right now. In simple mode the advanced
+  // tabs are treated as invalid, so currentTabFromHash / setActiveTab fall back
+  // to overview — a stale #federation hash can't strand you on a hidden section.
+  function effectiveAdminTabs() {
+    return isSimpleMode() ? SIMPLE_ADMIN_TABS : ADMIN_TABS
+  }
+
   function defaultTabForRole() {
     if (ADMIN_OR_OWNER) return 'overview'
     return 'home'
@@ -410,7 +429,7 @@
   // `<section data-tab=…>` and `.active` on each tabbar button. Matches
   // admin.js's setActiveTab contract exactly (we coexist in the same DOM).
   function setActiveTab(name) {
-    const validAdminTab = ADMIN_OR_OWNER && ADMIN_TABS.has(name)
+    const validAdminTab = ADMIN_OR_OWNER && effectiveAdminTabs().has(name)
     const validC1Tab = C1_TABS.has(name)
     if (!validAdminTab && !validC1Tab) {
       name = defaultTabForRole()
@@ -431,7 +450,7 @@
 
   function currentTabFromHash() {
     const h = (window.location.hash || '').slice(1)
-    if (ADMIN_OR_OWNER && ADMIN_TABS.has(h)) return h
+    if (ADMIN_OR_OWNER && effectiveAdminTabs().has(h)) return h
     if (C1_TABS.has(h)) return h
     return defaultTabForRole()
   }
@@ -448,7 +467,56 @@
     }
   }
 
+  // ⑤-M1 — tag every advanced (non-simple) admin tab button + its section once
+  // so the `body[data-simple-mode]` CSS rule can hide them declaratively.
+  // Idempotent. The router guard in effectiveAdminTabs() is the primary defense
+  // (a hidden tab can't be *activated*); the class + CSS is belt-and-suspenders
+  // that also removes the buttons from the tabbar (setActiveTab never hides
+  // buttons, only toggles `.active`).
+  function markAdvancedTabs() {
+    const advanced = (name) => ADMIN_TABS.has(name) && !SIMPLE_ADMIN_TABS.has(name)
+    $$('.tabbar-btn').forEach((btn) => {
+      if (advanced(btn.dataset.tab || '')) btn.classList.add('adv-only')
+    })
+    $$('section[data-tab]').forEach((sec) => {
+      if (advanced(sec.dataset.tab || '')) sec.classList.add('adv-only')
+    })
+  }
+
+  // Reflect the stored preference onto <body> + the settings checkbox. If the
+  // currently-active tab just became hidden (live toggle while sitting on an
+  // advanced tab), retreat to overview.
+  function applySimpleMode() {
+    const on = isSimpleMode()
+    if (on) document.body.dataset.simpleMode = '1'
+    else delete document.body.dataset.simpleMode
+    const box = $('#settings-simple-mode')
+    if (box) box.checked = on
+    if (on && ADMIN_OR_OWNER && !effectiveAdminTabs().has(document.body.dataset.activeTab || '')) {
+      gotoTab('overview')
+    }
+  }
+
+  // Wire the settings toggle. Flipping it writes localStorage then re-applies —
+  // applySimpleMode handles the body class, checkbox sync, and active-tab
+  // retreat; markAdvancedTabs already tagged the elements at boot.
+  function wireSimpleMode() {
+    const box = $('#settings-simple-mode')
+    if (!box) return
+    box.checked = isSimpleMode()
+    box.addEventListener('change', () => {
+      try { localStorage.setItem(SIMPLE_MODE_KEY, box.checked ? '1' : '0') } catch (_) {}
+      applySimpleMode()
+    })
+  }
+
   function wireTabs() {
+    // ⑤-M1 — tag advanced tabs + reflect the stored simple-mode pref onto
+    // <body> BEFORE the first resolve, so currentTabFromHash already rejects a
+    // stale #federation hash and lands on overview.
+    markAdvancedTabs()
+    wireSimpleMode()
+    if (isSimpleMode()) document.body.dataset.simpleMode = '1'
     $$('.tabbar-btn:not([hidden])').forEach((btn) => {
       btn.addEventListener('click', () => {
         const name = btn.dataset.tab
