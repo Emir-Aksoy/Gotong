@@ -117,6 +117,12 @@ import { OrgApiPool } from './org-api-pool.js'
 import { BAKED_VERSION } from './version.js'
 import { buildAgentCard } from './agent-card.js'
 import { auditBootSecurity, formatBootSecurityReport, isLoopbackHost } from './boot-security.js'
+import {
+  firstRunSetupBanner,
+  openUrl,
+  parseOpenBrowserEnv,
+  shouldOpenBrowser,
+} from './first-run-banner.js'
 import { rotateMasterKey } from './rotate-master-key.js'
 import { applyRetentionPolicies, parseRetentionPolicies } from './retention.js'
 import { recoverMasterKeyRotation } from './master-key-recovery.js'
@@ -2381,12 +2387,36 @@ async function main(): Promise<void> {
           : 'DISABLED while network-exposed — AIPE_ALLOW_INSECURE set (see boot warnings)'
     }`,
   )
+  // Friendly first-run nicety (presentation only): point a fresh local user
+  // at the loopback setup wizard and optionally open their browser. Never
+  // auto-opens when network-exposed (see shouldOpenBrowser). AIPE_OPEN_BROWSER
+  // controls it: auto (default, first run only) / always / never.
+  const openMode = parseOpenBrowserEnv(process.env.AIPE_OPEN_BROWSER)
+  const loopbackHost = isLoopbackHost(config.host)
+  const maybeOpenBrowser = (targetUrl: string, firstRun: boolean): void => {
+    if (!shouldOpenBrowser(openMode, { loopback: loopbackHost, firstRun })) return
+    const opened = openUrl(targetUrl, {
+      onError: (err) => log.debug('browser auto-open failed', { err }),
+    })
+    console.log(
+      opened
+        ? `  (已自动打开浏览器 / browser opened — AIPE_OPEN_BROWSER=0 关闭)`
+        : `  (自动打开浏览器失败,请手动打开上面的地址)`,
+    )
+  }
+
   if (adminToken) {
     const linkPath = join(SPACE_DIR, 'runtime', 'admin-link.txt')
     const adminUrl = `${web.url}/admin?token=${adminToken}`
     try {
       await writeAdminLinkFile(linkPath, adminUrl)
-      console.log(`\nFirst-run admin URL saved to (read once and delete):`)
+      // The friendly path in: the setup wizard at the web root needs no
+      // token (loopback bootstrap). Show it prominently and open it.
+      console.log(firstRunSetupBanner(web.url))
+      maybeOpenBrowser(web.url, true)
+      // The admin-token URL is the backup / network-exposed path; keep it
+      // in the 0o600 file (never stdout), just tell the operator where.
+      console.log(`\n备用 admin token URL 已写入 (读后即焚) / backup admin link saved:`)
       console.log(`  ${linkPath}`)
       console.log(`  mode 0o600 — only the user running this host can read it.\n`)
     } catch (err) {
@@ -2409,6 +2439,9 @@ async function main(): Promise<void> {
     }
   } else {
     console.log(`Admin     : ${web.url}/admin    (existing cookie or token)\n`)
+    // Only opens when AIPE_OPEN_BROWSER=always (firstRun=false → 'auto' is a
+    // no-op), so restarts don't spam the browser.
+    maybeOpenBrowser(`${web.url}/admin`, false)
   }
 
   let shuttingDown = false

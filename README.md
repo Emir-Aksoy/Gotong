@@ -75,6 +75,30 @@ pnpm host
 
 Both boot the same binary. Open the printed admin URL → save the token → you're in.
 
+**First-run nicety (new).** After boot the host prints a prominent next-step
+banner pointing at the loopback setup wizard, and on a local (loopback) first
+run it opens your browser there for you:
+
+```text
+┌─ 下一步 / Next step ──────────────────────────
+
+  打开浏览器完成 5 分钟设置 (设置向导,无需 token):
+  Open your browser to finish the 5-minute setup:
+
+      →  http://127.0.0.1:3000
+
+  设置向导在本机回环 (loopback) 上运行。
+  The setup wizard runs on loopback only.
+└───────────────────────────────────────────────
+  (已自动打开浏览器 / browser opened — AIPE_OPEN_BROWSER=0 关闭)
+```
+
+`AIPE_OPEN_BROWSER` controls the auto-open: unset = `auto` (first local run
+only), `1`/`always` = every start, `0`/`never` = off. It is also forced off
+whenever the host is network-exposed — a headless server never pops a browser,
+and the wizard isn't reachable there anyway (that path uses the admin-token
+file). The banner itself always prints.
+
 > 💡 **Distribution.** No `npm publish` at this stage — Docker (A) and source (B)
 > are the two supported install paths. The earlier "queued for v2.1" npm plan has
 > been **descoped**; the registry choice (npm / JSR / source-only) is an open
