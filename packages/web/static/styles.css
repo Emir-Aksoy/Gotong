@@ -2762,6 +2762,10 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .me-danger-btn { background: #c0392b; }
 .me-danger-btn:hover { background: #a02d22; }
 
+/* ease-of-use ②TC-ME — inline quick-chat box on an owned-agent card. */
+.me-chat-wrap { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px dashed #d6dbe0; }
+.me-chat-wrap textarea { width: 100%; box-sizing: border-box; margin-bottom: 0.4rem; }
+.me-chat-reply { white-space: pre-wrap; word-break: break-word; background: #f4f6f8; border-radius: 6px; padding: 0.5rem 0.7rem; margin-top: 0.5rem; font-size: 0.85rem; }
 /* v5 A-M4 — inline "manage access" (share an owned agent) panel */
 .me-grants-wrap { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px dashed #d6dbe0; }
 .me-grants-list { display: flex; flex-direction: column; gap: 0.35rem; }

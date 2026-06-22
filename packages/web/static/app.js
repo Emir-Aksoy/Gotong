@@ -2082,12 +2082,123 @@
         </div>
         <div class="me-agent-caps">${capChips}</div>
         <div class="me-own-agent-row-actions">
+          <button type="button" class="me-secondary-btn" data-own-chat="${escape(a.id)}">${t('meTryChat')}</button>
           <button type="button" class="me-secondary-btn" data-own-edit="${escape(a.id)}">${t('meEdit')}</button>
           <button type="button" class="me-secondary-btn" data-own-grants="${escape(a.id)}">${t('meManageAccess')}</button>
           <button type="button" class="me-secondary-btn me-danger-btn" data-own-delete="${escape(a.id)}">${t('meDelete')}</button>
         </div>
+        <div class="me-chat-wrap" data-chat-wrap="${escape(a.id)}" hidden></div>
         <div class="me-grants-wrap" data-grants-wrap="${escape(a.id)}" hidden></div>
       </div>`
+  }
+
+  // ②TC-ME — the inline quick-chat box rendered into a card's me-chat-wrap on
+  // first open. Mirror of the admin post-create quick-chat: hint + message box +
+  // send + status + reply pane.
+  function chatBoxHtml(agentId) {
+    const id = escape(agentId)
+    return `
+      <p class="me-meta">${t('quickChatHint')}</p>
+      <textarea data-chat-input="${id}" rows="2" placeholder="${escape(t('quickChatInputLabel'))}"></textarea>
+      <button type="button" class="me-primary-btn" data-chat-send="${id}">${t('quickChatSend')}</button>
+      <p class="me-status" data-chat-status="${id}"></p>
+      <pre class="me-chat-reply" data-chat-reply="${id}" hidden></pre>`
+  }
+
+  // Open (rendering once) the quick-chat box for a specific card — used right
+  // after CREATE so the zero-friction "say something to your new assistant"
+  // moment needs no extra click.
+  function openChatForAgent(agentId) {
+    const list = document.getElementById('me-own-agents-list')
+    if (!list) return
+    const card = Array.from(list.querySelectorAll('.me-agent-card')).find(
+      (c) => c.getAttribute('data-own-id') === agentId,
+    )
+    if (!card) return
+    const wrap = card.querySelector('[data-chat-wrap]')
+    if (!wrap) return
+    if (!wrap.dataset.rendered) { wrap.innerHTML = chatBoxHtml(agentId); wrap.dataset.rendered = '1' }
+    wrap.hidden = false
+    const toggle = card.querySelector('[data-own-chat]')
+    if (toggle) toggle.textContent = t('meChatClose')
+    card.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' })
+    wrap.querySelector('[data-chat-input]')?.focus?.()
+  }
+
+  // Send one message to an owned agent and render its reply inline. Reuses the
+  // wait:true dispatch the admin quick-chat uses, via the member route
+  // POST /api/me/agents/:id/chat. On any failure the raw error is folded to
+  // plain words + a fix through the SAME classifier (③TC describeError).
+  async function sendOwnAgentChat(agentId, card, btn) {
+    if (!card) return
+    const input = card.querySelector('[data-chat-input]')
+    const statusEl = card.querySelector('[data-chat-status]')
+    const replyEl = card.querySelector('[data-chat-reply]')
+    if (!input || !statusEl) return
+    const prompt = String(input.value || '').trim()
+    if (!prompt) {
+      statusEl.className = 'me-status error'
+      statusEl.textContent = t('quickChatNeedMsg')
+      return
+    }
+    const prevLabel = btn ? btn.textContent : ''
+    if (btn) { btn.disabled = true; btn.textContent = t('quickChatSending') }
+    statusEl.className = 'me-status'
+    statusEl.textContent = t('quickChatSending')
+    if (replyEl) { replyEl.hidden = true; replyEl.textContent = '' }
+    try {
+      const r = await fetch(`/api/me/agents/${encodeURIComponent(agentId)}/chat`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        // 429 / 503 / 504 / 4xx — fold the server error to plain words + a fix.
+        const d = window.AipeHub.describeError(j?.error || `HTTP ${r.status}`)
+        statusEl.className = 'me-status error'
+        statusEl.textContent = t('quickChatFailed', d.fix ? `${d.text} ${d.fix}` : d.text)
+        return
+      }
+      renderMeChatReply(j?.result, statusEl, replyEl)
+    } catch (err) {
+      const d = window.AipeHub.describeError(err?.message || String(err))
+      statusEl.className = 'me-status error'
+      statusEl.textContent = t('quickChatFailed', d.fix ? `${d.text} ${d.fix}` : d.text)
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = prevLabel || t('quickChatSend') }
+    }
+  }
+
+  // Render the dispatch result into the card's status + reply pane. Verbatim
+  // logic of the admin renderQuickChatReply: an LlmAgent that hit a provider
+  // error returns kind:'ok' with output.stopReason==='error' and the raw text
+  // in output.text — rendering that green would read as if the agent answered,
+  // so it's treated as a failure and folded through describeError too (③TC).
+  function renderMeChatReply(result, statusEl, replyEl) {
+    if (!statusEl) return
+    if (!result) {
+      statusEl.className = 'me-status error'
+      statusEl.textContent = t('quickChatNoResult')
+      return
+    }
+    const out = result.output
+    const errored = result.kind !== 'ok' || (out && out.stopReason === 'error')
+    if (!errored) {
+      const text = out && typeof out.text === 'string' ? out.text : JSON.stringify(out ?? {}, null, 2)
+      if (replyEl) { replyEl.textContent = text; replyEl.hidden = false }
+      statusEl.className = 'me-status ok'
+      statusEl.textContent = t('quickChatOk')
+      return
+    }
+    const raw = result.kind === 'ok'
+      ? (out && typeof out.text === 'string' ? out.text : '')
+      : (result.error || result.reason || result.kind || '')
+    const d = window.AipeHub.describeError(raw)
+    const friendly = d.fix ? `${d.text} ${d.fix}` : d.text
+    if (replyEl) { replyEl.hidden = true; replyEl.textContent = '' }
+    statusEl.className = 'me-status error'
+    statusEl.textContent = t('quickChatAgentFailed', friendly)
   }
 
   function resetOwnForm() {
@@ -2161,8 +2272,12 @@
       }
       status.className = 'me-status ok'
       status.textContent = editingId ? t('meSaved') : t('meCreated')
+      // ②TC-ME — zero-friction payoff: right after CREATING an assistant, open
+      // its quick-chat box so the member can immediately confirm it responds.
+      const createdId = editingId ? '' : (j?.agent?.id || '')
       resetOwnForm()
       await loadMyOwnAgents()
+      if (createdId) openChatForAgent(createdId)
     } catch (err) {
       status.className = 'me-status error'
       status.textContent = t('meFailedColon', escape(err?.message || String(err)))
@@ -2190,6 +2305,29 @@
       } catch (err) {
         alert(t('meDeleteFailedErr', err?.message || String(err)))
       }
+      return
+    }
+    // ②TC-ME — try-chat: toggle the inline quick-chat box on this card. The box
+    // is rendered once on first open; the actual send is data-chat-send below.
+    const chatId = e.target?.getAttribute?.('data-own-chat')
+    if (chatId) {
+      const card = e.target.closest('.me-agent-card')
+      const wrap = card?.querySelector('[data-chat-wrap]')
+      if (!wrap) return
+      if (wrap.hidden) {
+        if (!wrap.dataset.rendered) { wrap.innerHTML = chatBoxHtml(chatId); wrap.dataset.rendered = '1' }
+        wrap.hidden = false
+        e.target.textContent = t('meChatClose')
+        wrap.querySelector('[data-chat-input]')?.focus?.()
+      } else {
+        wrap.hidden = true
+        e.target.textContent = t('meTryChat')
+      }
+      return
+    }
+    const sendChatId = e.target?.getAttribute?.('data-chat-send')
+    if (sendChatId) {
+      await sendOwnAgentChat(sendChatId, e.target.closest('.me-agent-card'), e.target)
       return
     }
     // v5 A-M4 — share this agent: toggle the inline access panel, add a grant,

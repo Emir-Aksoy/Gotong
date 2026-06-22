@@ -664,6 +664,8 @@
       meConfirmDeleteAgent: '确定删除这个助手？此操作不可撤销。',
       // Grants
       meCollapseAccess: '收起访问',
+      meTryChat: '试聊',
+      meChatClose: '收起',
       meConfirmRevokeGrant: '撤销这条访问授权？',
       meGrantKindUser: '用户',
       meGrantKindAgent: '助手',
@@ -2338,6 +2340,8 @@
       meConfirmDeleteAgent: 'Delete this assistant? This cannot be undone.',
       // Grants
       meCollapseAccess: 'Collapse access',
+      meTryChat: 'Try it',
+      meChatClose: 'Close',
       meConfirmRevokeGrant: 'Revoke this access grant?',
       meGrantKindUser: 'User',
       meGrantKindAgent: 'Assistant',

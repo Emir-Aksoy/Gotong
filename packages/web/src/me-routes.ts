@@ -940,6 +940,18 @@ export async function handleMeRoute(
       return
     }
   }
+  // ease-of-use ②TC-ME — quick-chat to an agent the member can access. The
+  // extra `/chat` segment means the single-segment CRUD regex above never
+  // catches it. Mirror of the admin post-create quick-chat, but member-scoped
+  // (ownership gate = meAgentAdmin.read) and synchronous (waits for the reply
+  // so the UI can render it).
+  {
+    const chat = method === 'POST' ? /^\/api\/me\/agents\/([^/]+)\/chat$/.exec(path) : null
+    if (chat) {
+      await handleMeChatAgent(ctx, req, res, userId, decodeURIComponent(chat[1]!))
+      return
+    }
+  }
   // v5 A-M4 — agent access grants: the owner shares their agent with other
   // principals (user / agent / peer-hub) at viewer / editor / owner. These have
   // an extra `/grants` segment, so the single-segment CRUD regex above never
@@ -2300,6 +2312,85 @@ async function handleMeTestLlmKey(
     })
   } catch (err) {
     sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
+  }
+}
+
+/**
+ * ease-of-use ②TC-ME — POST /api/me/agents/:id/chat. After a member builds
+ * their assistant (打造我的助手) and tests the key (①TC-ME), THIS is the payoff:
+ * actually talk to it in the UI, with no detour through a workflow. Mirror of
+ * the admin post-create quick-chat (server.ts /api/admin/dispatch wait:true),
+ * but member-scoped:
+ *
+ *  - Ownership gate = meAgentAdmin.read (the read FLOOR of the grant ladder):
+ *    the caller must hold at least 'viewer' on this agent, else 403/404 (anti-
+ *    enumeration). So you can only chat with an agent you can already see.
+ *  - Quota debits the CALLER (origin.userId), exactly like /me/dispatch, so one
+ *    member can't burn another's budget. (Which per-user KEY a member-owned
+ *    agent runs on is resolved host-side from the agent's OWNER grant — that's
+ *    unchanged A-M3 attribution; chat opens no new spend path beyond what the
+ *    grant already permits, since a viewer-granted member can already cause the
+ *    agent to run via other dispatch paths.)
+ *  - Synchronous (Promise.race + timeout, the same idiom as the admin wait:true
+ *    path) so the reply returns in this response. The body is { ok, result } so
+ *    the SPA renders it with the SAME logic the admin quick-chat uses, including
+ *    the ③TC friendly-error folding (describeError).
+ */
+async function handleMeChatAgent(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  agentId: string,
+): Promise<void> {
+  // Each chat is an outbound LLM call; rate-limit per-user (same machinery as
+  // /me/dispatch + ①TC-ME) so a member can't loop it to hammer a provider.
+  if (!checkMeRateLimit(ctx, userId, 'me-chat')) {
+    sendRateLimited(res, 'too many messages; try again in a minute')
+    return
+  }
+  if (!ctx.meAgentAdmin) {
+    sendJson(res, { error: 'agent chat unavailable (agent surface not wired)' }, 503)
+    return
+  }
+  // Ownership gate — the ONLY access decision. read() throws (status 403/404)
+  // if the caller doesn't hold at least 'viewer', so a non-grantee can neither
+  // chat with nor enumerate ids.
+  try {
+    await ctx.meAgentAdmin.read(userId, agentId)
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+    return
+  }
+  const body = (await readJsonBody(req).catch(() => ({}))) as Record<string, unknown>
+  const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
+  if (!prompt) {
+    sendJson(res, { error: 'prompt required' }, 400)
+    return
+  }
+  const rawTimeout = typeof body.timeoutMs === 'number' ? body.timeoutMs : 60_000
+  const timeoutMs = Math.max(1000, Math.min(600_000, rawTimeout))
+  try {
+    const result = await Promise.race([
+      ctx.hub.dispatch({
+        from: userId,
+        // Stamp the dispatcher so the org quota gate debits per-user — same
+        // attribution as /me/dispatch. orgId 'local' marks same-hub origin.
+        origin: { orgId: 'local', userId },
+        strategy: { kind: 'explicit', to: agentId },
+        payload: { prompt },
+        title: `chat — ${userId}`,
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('chat wait timeout')), timeoutMs),
+      ),
+    ])
+    sendJson(res, { ok: true, result })
+  } catch (err) {
+    // 504 = timed out, or dispatch rejected (eg. quota fail-closed). The SPA
+    // folds this through describeError, so a timeout / refused key reads as
+    // plain words + a fix rather than a raw stack.
+    sendJson(res, { ok: false, error: err instanceof Error ? err.message : String(err) }, 504)
   }
 }
 

@@ -29,6 +29,9 @@ import {
   Space,
   type GrowthReportSummary,
   type GrowthReportsAdminSurface,
+  type Participant,
+  type Task,
+  type TaskResult,
 } from '@aipehub/core'
 import { AUDIT_ACTIONS, openIdentityStore, type IdentityStore } from '@aipehub/identity'
 
@@ -41,6 +44,10 @@ import {
   type LlmKeyTestSurface,
   type LlmKeyTestResult,
 } from '../src/server.js'
+// ②TC-ME — the member quick-chat route's ownership gate is `MeAgentAdminSurface`;
+// `server.ts` only imports these (doesn't re-export), so pull them straight from
+// the route module where they're declared.
+import type { MeAgentAdminSurface, MeOwnedAgentView } from '../src/me-routes.js'
 
 /**
  * ease-of-use ①TC-ME — a recording fake for the member key probe. Captures
@@ -61,6 +68,71 @@ class RecordingKeyTest implements LlmKeyTestSurface {
     this.calls.push({ ...input })
     if (this.throwErr) throw this.throwErr
     return this.next
+  }
+}
+
+/**
+ * ease-of-use ②TC-ME — a fake ownership gate for `/api/me/agents/:id/chat`.
+ *
+ * Only `read` is exercised by the chat route (it's the SOLE access decision):
+ * ids in `owned` resolve to a stub view, anything else throws a `status: 404`
+ * error — exactly the anti-enumeration shape the real host surface uses, which
+ * `meAgentErrStatus` maps to HTTP 404. The other `MeAgentAdminSurface` methods
+ * throw `unused` so a stray call surfaces loudly instead of silently passing.
+ */
+class StubMeAgentAdmin implements MeAgentAdminSurface {
+  constructor(private readonly owned: Set<string>) {}
+  private view(agentId: string): MeOwnedAgentView {
+    return {
+      id: agentId,
+      label: agentId,
+      capabilities: [],
+      online: true,
+      provider: 'mock',
+      system: '',
+      createdAt: '2026-06-01T00:00:00.000Z',
+    }
+  }
+  async read(_userId: string, agentId: string): Promise<MeOwnedAgentView> {
+    if (!this.owned.has(agentId)) {
+      throw Object.assign(new Error('agent not found'), { status: 404 })
+    }
+    return this.view(agentId)
+  }
+  async availableProviders(): Promise<string[]> {
+    throw new Error('unused')
+  }
+  async listOwned(): Promise<MeOwnedAgentView[]> {
+    throw new Error('unused')
+  }
+  async create(): Promise<MeOwnedAgentView> {
+    throw new Error('unused')
+  }
+  async update(): Promise<MeOwnedAgentView> {
+    throw new Error('unused')
+  }
+  async remove(): Promise<boolean> {
+    throw new Error('unused')
+  }
+}
+
+/**
+ * ②TC-ME — a minimal dispatchable participant so the real Hub resolves an
+ * `explicit` dispatch and `hub.dispatch()` actually returns a result. It
+ * records each task it received so a test can assert the per-user `origin`
+ * attribution the route stamps (the quota-debit identity).
+ */
+class StubChatAgent implements Participant {
+  readonly kind = 'agent' as const
+  readonly capabilities: readonly string[] = []
+  readonly received: Task[] = []
+  constructor(
+    readonly id: string,
+    private readonly reply: (task: Task) => TaskResult,
+  ) {}
+  async onTask(task: Task): Promise<TaskResult> {
+    this.received.push(task)
+    return this.reply(task)
   }
 }
 
@@ -200,6 +272,8 @@ async function boot(
     withUploads?: boolean
     /** ease-of-use ①TC-ME — wire a recording fake LLM key probe for /api/me/test-llm-key. */
     llmKeyTest?: RecordingKeyTest
+    /** ease-of-use ②TC-ME — wire an ownership-gate fake for /api/me/agents/:id/chat. */
+    meAgentAdmin?: MeAgentAdminSurface
   } = {},
 ): Promise<BootResult> {
   const withGrowthReports = opts.withGrowthReports ?? true
@@ -256,6 +330,7 @@ async function boot(
     ...(opts.meAgents ? { meAgents: { listForMembers: async () => opts.meAgents! } } : {}),
     ...(uploads ? { uploads } : {}),
     ...(opts.llmKeyTest ? { llmKeyTest: opts.llmKeyTest } : {}),
+    ...(opts.meAgentAdmin ? { meAgentAdmin: opts.meAgentAdmin } : {}),
     ...(opts.adminLoginRateLimit
       ? { adminLoginRateLimit: opts.adminLoginRateLimit }
       : {}),
@@ -1222,6 +1297,155 @@ describe('POST /api/me/test-llm-key — rate limit (①TC-ME)', () => {
     // The rate-limit check fires BEFORE the probe, so the rejected hit never
     // reached the upstream provider (only 2 calls landed, not 3).
     expect(probe.calls.length).toBe(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ease-of-use ②TC-ME — member quick-chat to their OWN agent
+//
+// The payoff of "打造我的助手": after a member builds an agent + tests the key,
+// they can actually talk to it from /me. A thin wrapper over hub.dispatch
+// (explicit, by id) gated by the SAME ownership read() as the rest of the agent
+// surface, with the per-user quota origin stamped so a chat debits the member —
+// no new spend path. Mirrors the admin post-create quick-chat.
+// ---------------------------------------------------------------------------
+
+const OWNED_AGENT_ID = 'owned-agent'
+
+/** An 'ok' reply the StubChatAgent can hand back for a dispatched task. */
+function okChatReply(text: string): (task: Task) => TaskResult {
+  return (task) => ({
+    kind: 'ok',
+    taskId: task.id,
+    by: OWNED_AGENT_ID,
+    output: { text, stopReason: 'end_turn' },
+    ts: 0,
+  })
+}
+
+describe('POST /api/me/agents/:id/chat — member quick-chat (②TC-ME)', () => {
+  let b: BootResult
+  let stub: StubChatAgent
+
+  beforeEach(async () => {
+    b = await boot({ meAgentAdmin: new StubMeAgentAdmin(new Set([OWNED_AGENT_ID])) })
+    // A dispatchable participant under the owned id so the real Hub resolves
+    // the explicit dispatch and returns an 'ok' result the route can echo.
+    stub = new StubChatAgent(OWNED_AGENT_ID, okChatReply('hi from your assistant'))
+    b.hub.register(stub)
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  const post = (
+    agentId: string,
+    body: unknown,
+    cookie: string | undefined = b.memberCookie,
+  ) =>
+    fetch(`${b.baseUrl}/api/me/agents/${agentId}/chat`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(cookie ? { cookie } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+
+  it('rejects an unauthenticated caller with 401 (no member session)', async () => {
+    // Inline cookie-less fetch — the `post` helper's default param would
+    // substitute the member cookie for an explicit `undefined`.
+    const r = await fetch(`${b.baseUrl}/api/me/agents/${OWNED_AGENT_ID}/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'hello' }),
+    })
+    expect(r.status).toBe(401)
+    // The dispatch never ran for an anonymous caller.
+    expect(stub.received.length).toBe(0)
+  })
+
+  it('dispatches to the owned agent and echoes { ok, result } with the per-user origin', async () => {
+    const r = await post(OWNED_AGENT_ID, { prompt: 'summarise my day' })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.ok).toBe(true)
+    expect(j.result?.kind).toBe('ok')
+    expect(j.result?.output?.text).toBe('hi from your assistant')
+    // The agent saw exactly one task...
+    expect(stub.received.length).toBe(1)
+    // ...stamped with the member's per-user origin — the quota-debit identity,
+    // the SAME attribution as /me/dispatch. A chat opens no new spend path.
+    expect(stub.received[0]?.origin?.userId).toBe(b.memberUserId)
+    expect(stub.received[0]?.origin?.orgId).toBe('local')
+    // The prompt rode through as the task payload.
+    expect((stub.received[0]?.payload as { prompt?: string })?.prompt).toBe('summarise my day')
+  })
+
+  it('returns 404 for an agent the member does not own (no enumeration)', async () => {
+    const r = await post('someone-elses-agent', { prompt: 'hi' })
+    expect(r.status).toBe(404)
+    // The ownership gate fires BEFORE dispatch — even a real agent is never
+    // reached without at least a viewer grant.
+    expect(stub.received.length).toBe(0)
+  })
+
+  it('requires a non-empty prompt with 400', async () => {
+    const r = await post(OWNED_AGENT_ID, { prompt: '   ' })
+    expect(r.status).toBe(400)
+    expect(stub.received.length).toBe(0)
+  })
+
+  it('returns 503 when no agent surface is wired', async () => {
+    // Re-boot WITHOUT meAgentAdmin → ctx.meAgentAdmin is undefined.
+    const noSurface = await boot()
+    try {
+      const r = await fetch(`${noSurface.baseUrl}/api/me/agents/${OWNED_AGENT_ID}/chat`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: noSurface.memberCookie },
+        body: JSON.stringify({ prompt: 'hi' }),
+      })
+      expect(r.status).toBe(503)
+    } finally {
+      await teardown(noSurface)
+    }
+  })
+})
+
+describe('POST /api/me/agents/:id/chat — rate limit (②TC-ME)', () => {
+  let b: BootResult
+  let stub: StubChatAgent
+
+  beforeEach(async () => {
+    // Tight budget so we can prove the cap with a small loop. Chat shares the
+    // per-user limiter under its own 'me-chat' bucket.
+    b = await boot({
+      adminLoginRateLimit: { max: 2, windowSec: 60 },
+      meAgentAdmin: new StubMeAgentAdmin(new Set([OWNED_AGENT_ID])),
+    })
+    stub = new StubChatAgent(OWNED_AGENT_ID, okChatReply('ok'))
+    b.hub.register(stub)
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('returns 429 after the per-user budget is exhausted', async () => {
+    const chat = () =>
+      fetch(`${b.baseUrl}/api/me/agents/${OWNED_AGENT_ID}/chat`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+        body: JSON.stringify({ prompt: 'hi' }),
+      })
+    expect((await chat()).status).toBe(200)
+    expect((await chat()).status).toBe(200)
+    const r3 = await chat()
+    expect(r3.status).toBe(429)
+    expect(r3.headers.get('retry-after')).toBe('60')
+    expect((await r3.json()).code).toBe('rate_limited')
+    // The rate-limit check fires BEFORE dispatch, so the rejected hit never
+    // reached the agent (only 2 dispatches landed, not 3).
+    expect(stub.received.length).toBe(2)
   })
 })
 
