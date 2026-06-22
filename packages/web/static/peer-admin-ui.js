@@ -36,6 +36,14 @@
   // PeerKind union (identity schema v12). Default 'service'.
   const KINDS = ['service', 'organization', 'project', 'personal']
 
+  // ④-M1 pairing-code state. `selfInfo` = { hubId, wsPort } read once from
+  // /api/federation/self; `pairToken` = the shared secret shown in the generate
+  // box. Module-level so a language-switch rebuild (which re-runs buildUi and
+  // wipes the DOM) re-seeds the same token instead of minting a new secret
+  // mid-exchange.
+  let selfInfo = null
+  let pairToken = ''
+
   function $(sel, root) {
     return (root || document).querySelector(sel)
   }
@@ -106,6 +114,217 @@
     return readJson(await fetch(API + '/' + encodeURIComponent(id), { method: 'DELETE' }))
   }
 
+  // ④-M1 — best-effort read of this hub's own peerId + ws port to pre-fill the
+  // pairing generate box. Non-fatal: if it 503s (personal mode) or fails, the
+  // operator just types the fields by hand, so swallow everything to null.
+  async function apiSelf() {
+    try {
+      const r = await fetch('/api/federation/self')
+      if (!r.ok) return null
+      return await r.json()
+    } catch (_) {
+      return null
+    }
+  }
+
+  // ---- pairing code (ease-of-use ④-M1) ----------------------------------
+  // Byte-identical mirror of packages/web/src/pairing-codec.ts — static files
+  // can't import from src, so the transform is duplicated and the .ts unit test
+  // pins the contract. A pairing code is a CONVENIENCE ENCODING, not a new
+  // security mechanism: it just bundles { peerId, endpoint, token } into one
+  // base64url string. The token is still the symmetric shared secret, carried
+  // in the clear — treat the code exactly as you would the raw token.
+
+  function b64urlFromBytes(bytes) {
+    let bin = ''
+    for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i])
+    return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  }
+  function b64urlToString(code) {
+    const b64 = String(code).replace(/-/g, '+').replace(/_/g, '/')
+    const bin = atob(b64)
+    const bytes = new Uint8Array(bin.length)
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+    return new TextDecoder().decode(bytes)
+  }
+  // 256-bit random token, same strength as `aipehub mint-peer-token`.
+  function genPairToken() {
+    const bytes = new Uint8Array(32)
+    ;(window.crypto || window.msCrypto).getRandomValues(bytes)
+    return b64urlFromBytes(bytes)
+  }
+  // Keep the JSON key order { v, peerId, endpoint, token } identical to the .ts
+  // codec so a code minted on one hub round-trips byte-for-byte on the other.
+  function encodePairCode(input) {
+    const peerId = String((input && input.peerId) || '').trim()
+    const endpoint = String((input && input.endpoint) || '').trim()
+    const token = String((input && input.token) || '').trim()
+    if (!peerId || !endpoint || !token) throw new Error('peerId, endpoint and token are all required')
+    const json = JSON.stringify({ v: 1, peerId: peerId, endpoint: endpoint, token: token })
+    return b64urlFromBytes(new TextEncoder().encode(json))
+  }
+  function decodePairCode(code) {
+    const trimmed = String(code || '').trim()
+    if (!trimmed) throw new Error('empty pairing code')
+    let parsed
+    try {
+      parsed = JSON.parse(b64urlToString(trimmed))
+    } catch (_) {
+      throw new Error('not a valid pairing code')
+    }
+    if (typeof parsed !== 'object' || parsed === null) throw new Error('not a valid pairing code')
+    if (parsed.v !== 1) throw new Error('unsupported pairing-code version')
+    const peerId = parsed.peerId
+    const endpoint = parsed.endpoint
+    const token = parsed.token
+    if (
+      typeof peerId !== 'string' ||
+      typeof endpoint !== 'string' ||
+      typeof token !== 'string' ||
+      !peerId ||
+      !endpoint ||
+      !token
+    ) {
+      throw new Error('pairing code is missing peerId / endpoint / token')
+    }
+    return { peerId: peerId, endpoint: endpoint, token: token }
+  }
+
+  function pairingPanelHtml(d) {
+    return (
+      '<details class="pa-pair">' +
+      '  <summary>' + escHtml(d.padmPairTitle) + '</summary>' +
+      '  <p class="pa-pair-note">' + escHtml(d.padmPairNote) + '</p>' +
+      '  <div class="pa-pair-accept">' +
+      '    <label>' + escHtml(d.padmPairPasteLabel) +
+      '      <textarea id="pa-pair-in" rows="2" placeholder="' + escHtml(d.padmPairPastePlaceholder) + '"></textarea></label>' +
+      '    <button type="button" id="pa-pair-decode">' + escHtml(d.padmPairDecodeBtn) + '</button>' +
+      '  </div>' +
+      '  <div class="pa-pair-gen">' +
+      '    <h3>' + escHtml(d.padmPairGenTitle) + '</h3>' +
+      '    <div class="pa-pair-grid">' +
+      '      <label>' + escHtml(d.padmPairMyId) +
+      '        <input id="pa-pair-myid" type="text" readonly placeholder="' + escHtml(d.padmPairMyIdLoading) + '" /></label>' +
+      '      <label>' + escHtml(d.padmPairMyEndpoint) + ' <small>' + escHtml(d.padmPairMyEndpointHint) + '</small>' +
+      '        <input id="pa-pair-myendpoint" type="text" placeholder="wss://host:4000" /></label>' +
+      '      <label>' + escHtml(d.padmPairToken) + ' <small>' + escHtml(d.padmPairTokenHint) + '</small>' +
+      '        <input id="pa-pair-token" type="text" /></label>' +
+      '      <button type="button" id="pa-pair-newtoken" class="pa-pair-newtoken">' + escHtml(d.padmPairNewToken) + '</button>' +
+      '    </div>' +
+      '    <button type="button" id="pa-pair-gen-btn">' + escHtml(d.padmPairGenBtn) + '</button>' +
+      '    <div class="pa-pair-out-wrap" id="pa-pair-out-wrap" hidden>' +
+      '      <label>' + escHtml(d.padmPairOutLabel) +
+      '        <textarea id="pa-pair-out" rows="2" readonly></textarea></label>' +
+      '      <button type="button" id="pa-pair-copy">' + escHtml(d.padmPairCopyBtn) + '</button>' +
+      '    </div>' +
+      '  </div>' +
+      '</details>'
+    )
+  }
+
+  // Fill the generate box from cached self info + the live token. Called on
+  // first build, after the async self fetch lands, and on every lang rebuild.
+  // Only writes blank fields so it never clobbers what the operator is editing.
+  function fillSelf(root) {
+    const idInput = $('#pa-pair-myid', root)
+    if (idInput) idInput.value = (selfInfo && selfInfo.hubId) || ''
+    const epInput = $('#pa-pair-myendpoint', root)
+    if (epInput && !epInput.value) {
+      const wsPort = (selfInfo && selfInfo.wsPort) || 4000
+      epInput.value = 'wss://' + location.hostname + ':' + wsPort
+    }
+    const tokInput = $('#pa-pair-token', root)
+    if (tokInput && !tokInput.value) tokInput.value = pairToken
+  }
+
+  function wirePairing(root) {
+    if (!pairToken) pairToken = genPairToken()
+    fillSelf(root)
+    if (!selfInfo) {
+      apiSelf().then(function (info) {
+        if (info) {
+          selfInfo = info
+          fillSelf(root)
+        }
+      })
+    }
+    const decodeBtn = $('#pa-pair-decode', root)
+    if (decodeBtn) decodeBtn.addEventListener('click', function () { onDecodePair(root) })
+    const genBtn = $('#pa-pair-gen-btn', root)
+    if (genBtn) genBtn.addEventListener('click', function () { onGenPair(root) })
+    const newTokBtn = $('#pa-pair-newtoken', root)
+    if (newTokBtn) {
+      newTokBtn.addEventListener('click', function () {
+        pairToken = genPairToken()
+        const tokInput = $('#pa-pair-token', root)
+        if (tokInput) tokInput.value = pairToken
+      })
+    }
+    const copyBtn = $('#pa-pair-copy', root)
+    if (copyBtn) copyBtn.addEventListener('click', function () { onCopyPair(root) })
+  }
+
+  function onDecodePair(root) {
+    const raw = $('#pa-pair-in', root).value
+    let decoded
+    try {
+      decoded = decodePairCode(raw)
+    } catch (_) {
+      setStatus(root, t().padmPairDecodeFailed, 'error')
+      return
+    }
+    // Pre-fill the existing add-peer form — the operator confirms with 添加.
+    $('#pa-peerId', root).value = decoded.peerId
+    $('#pa-endpoint', root).value = decoded.endpoint
+    $('#pa-token', root).value = decoded.token
+    // Symmetric reuse: sync the inbound token into the generate box so the
+    // reply code we hand back carries the SAME shared secret both sides enrol.
+    pairToken = decoded.token
+    const tokInput = $('#pa-pair-token', root)
+    if (tokInput) tokInput.value = decoded.token
+    const form = $('#pa-add-form', root)
+    if (form && form.scrollIntoView) form.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
+    setStatus(root, t().padmPairDecoded, 'ok')
+  }
+
+  function onGenPair(root) {
+    const peerId = ($('#pa-pair-myid', root).value || '').trim()
+    const endpoint = ($('#pa-pair-myendpoint', root).value || '').trim()
+    const token = ($('#pa-pair-token', root).value || '').trim()
+    if (!peerId) { setStatus(root, t().padmPairNoSelfId, 'error'); return }
+    if (!endpoint) { setStatus(root, t().padmPairNoEndpoint, 'error'); return }
+    if (!token) { setStatus(root, t().padmPairNoToken, 'error'); return }
+    let code
+    try {
+      code = encodePairCode({ peerId: peerId, endpoint: endpoint, token: token })
+    } catch (_) {
+      setStatus(root, t().padmPairGenFailed, 'error')
+      return
+    }
+    pairToken = token
+    const out = $('#pa-pair-out', root)
+    if (out) out.value = code
+    const outWrap = $('#pa-pair-out-wrap', root)
+    if (outWrap) outWrap.hidden = false
+    setStatus(root, t().padmPairGenerated, 'ok')
+  }
+
+  function onCopyPair(root) {
+    const out = $('#pa-pair-out', root)
+    if (!out || !out.value) return
+    const done = function () { setStatus(root, t().padmPairCopied, 'ok') }
+    const fallback = function () {
+      out.select()
+      try { document.execCommand('copy') } catch (_) { /* */ }
+      done()
+    }
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(out.value).then(done, fallback)
+    } else {
+      fallback()
+    }
+  }
+
   // ---- render -----------------------------------------------------------
 
   function kindOptions(sel) {
@@ -135,6 +354,7 @@
       '    <select id="pa-kind">' + kindOptions('service') + '</select></label></div>' +
       '  <div class="pa-field pa-actions"><button id="pa-add-btn" type="submit">' + escHtml(d.padmAddBtn) + '</button></div>' +
       '</form>' +
+      pairingPanelHtml(d) +
       '<section class="pa-list-wrap">' +
       '  <table class="pa-table">' +
       '    <thead><tr>' +
@@ -149,6 +369,7 @@
       e.preventDefault()
       onAdd(root).catch(function () { /* setStatus handled it */ })
     })
+    wirePairing(root)
   }
 
   function renderRows(root, peers) {

@@ -1588,6 +1588,23 @@ async function handle(
     return
   }
 
+  // --- federation self-identity (ease-of-use ④-M1) ------------------------
+  // Lightweight read for the pairing-code wizard: the self peerId a partner
+  // hub must register us under (= our space hubId, the same value stamped on
+  // every outbound federation HELLO) plus our WS port so the UI can suggest a
+  // sensible endpoint default. Neither value is secret — the hubId is already
+  // broadcast to every peer — but gate behind admin/worker auth to avoid
+  // anonymous enumeration, mirroring /api/state. The externally-reachable
+  // endpoint URL is genuinely operator knowledge (proxy / TLS / port-forward),
+  // so the wizard only DEFAULTS it from these and lets the operator confirm.
+  if (method === 'GET' && path === '/api/federation/self') {
+    if (!(await requireAdminOrWorker(ctx, req, res))) return
+    const config = await ctx.space.config()
+    const meta = await ctx.space.meta()
+    sendJson(res, { hubId: meta.hubId ?? null, wsPort: config.wsPort })
+    return
+  }
+
   // --- who am I -----------------------------------------------------------
   if (method === 'GET' && path === '/api/whoami') {
     const adminSession = await ctx.space.findAdminSession(readCookie(req, ADMIN_COOKIE))

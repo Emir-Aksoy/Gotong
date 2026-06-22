@@ -2607,6 +2607,22 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .peer-admin-panel .pa-policy-grid .pa-pol-check { flex-direction: row; align-items: center; gap: 6px; }
 .peer-admin-panel .pa-pol-save { font-size: 0.82rem; padding: 4px 14px; }
 
+/* ④-M1 — pairing-code wizard (collapsible, above the peer list). */
+.peer-admin-panel .pa-pair { margin: 0 0 1rem; padding: 0.6rem 0.85rem; background: #f5f8fb; border: 1px solid #dbe6f0; border-radius: 6px; }
+.peer-admin-panel .pa-pair > summary { cursor: pointer; font-weight: 600; font-size: 0.9rem; color: #2c3e50; }
+.peer-admin-panel .pa-pair-note { font-size: 0.78rem; color: #7a6a3a; background: #fdf6e3; border: 1px solid #f0e3b8; border-radius: 4px; padding: 0.5rem 0.65rem; margin: 0.6rem 0; }
+.peer-admin-panel .pa-pair-accept { display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; margin-bottom: 0.9rem; }
+.peer-admin-panel .pa-pair-accept label, .peer-admin-panel .pa-pair-gen label { font-size: 0.78rem; color: #555; display: flex; flex-direction: column; gap: 3px; width: 100%; }
+.peer-admin-panel .pa-pair-accept textarea, .peer-admin-panel .pa-pair-out textarea, .peer-admin-panel .pa-pair textarea { width: 100%; box-sizing: border-box; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; padding: 5px 7px; border: 1px solid #ccc; border-radius: 4px; resize: vertical; }
+.peer-admin-panel .pa-pair-gen h3 { margin: 0 0 0.4rem; font-size: 0.82rem; color: #2c3e50; }
+.peer-admin-panel .pa-pair-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.5rem 1rem; align-items: end; margin-bottom: 0.6rem; }
+.peer-admin-panel .pa-pair-grid label small { color: #999; font-weight: 400; }
+.peer-admin-panel .pa-pair-grid input { font-size: 0.82rem; padding: 4px 6px; border: 1px solid #ccc; border-radius: 4px; }
+.peer-admin-panel .pa-pair-grid input[readonly] { background: #eef0f2; color: #555; }
+.peer-admin-panel .pa-pair-newtoken { font-size: 0.78rem; padding: 4px 10px; align-self: end; }
+.peer-admin-panel .pa-pair-out-wrap { display: flex; flex-direction: column; gap: 0.4rem; align-items: flex-start; margin-top: 0.6rem; }
+.peer-admin-panel .pa-pair button { cursor: pointer; }
+
 /* Route B P1-M4f-3 — OIDC IdP registry (tab "SSO"). */
 .oidc-panel .oidc-status { font-size: 0.85rem; min-height: 1em; }
 .oidc-panel .oidc-status-loading { color: #888; }
