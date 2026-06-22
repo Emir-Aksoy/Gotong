@@ -328,6 +328,54 @@
     if (skipBtn) {
       skipBtn.addEventListener('click', () => { window.location.reload() })
     }
+    // ease-of-use ①TC — "test connection" probes the typed key WITHOUT saving
+    // it, so a wrong key / wrong provider / empty balance is caught here. Maps
+    // the friendly provider choice through SETUP_KEY_PRESETS (so DeepSeek's
+    // openai-compatible baseURL is sent, not api.openai.com), POSTs the
+    // loopback-only setup probe, and renders the verdict via the shared
+    // describeKeyTest() words map (one source of truth with the admin form).
+    const testBtn = document.getElementById('setup-key-test')
+    if (testBtn) {
+      testBtn.addEventListener('click', async () => {
+        const fd = new FormData(keyForm)
+        const choice = String(fd.get('provider') || 'deepseek')
+        const apiKey = String(fd.get('apiKey') || '').trim()
+        const preset = SETUP_KEY_PRESETS[choice] || SETUP_KEY_PRESETS.deepseek
+        if (!apiKey) {
+          status.className = 'login-status error'
+          status.textContent = t('testConnNeedKey')
+          return
+        }
+        status.className = 'login-status'
+        status.textContent = t('testConnTesting')
+        testBtn.disabled = true
+        try {
+          const r = await fetch('/api/setup/test-llm-key', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              provider: preset.provider,
+              apiKey,
+              ...(preset.baseURL ? { baseURL: preset.baseURL } : {}),
+            }),
+          })
+          if (!r.ok) {
+            const j = await r.json().catch(() => ({}))
+            status.className = 'login-status error'
+            status.textContent = j?.error || t('meSetupFailedHttp', r.status)
+            return
+          }
+          const d = window.AipeHub.describeKeyTest(await r.json())
+          status.className = 'login-status ' + (d.level === 'ok' ? 'ok' : 'error')
+          status.textContent = d.text
+        } catch (err) {
+          status.className = 'login-status error'
+          status.textContent = t('meSetupFailedErr', err?.message || err)
+        } finally {
+          testBtn.disabled = false
+        }
+      })
+    }
     keyForm.addEventListener('submit', async (e) => {
       e.preventDefault()
       const fd = new FormData(keyForm)

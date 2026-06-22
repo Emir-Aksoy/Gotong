@@ -1547,6 +1547,23 @@
       setupKeyNeed: '请填入 API Key,或点「跳过」。',
       setupKeySaving: '保存中…',
       setupKeySaved: 'Key 已保存,去登录…',
+      // ease-of-use ①TC — "test connection" probe (shared by the setup wizard
+      // key step AND the admin agent-create form). The verdict `code` → 人话
+      // mapping lives in describeKeyTest() below; these are its strings.
+      testConnBtn: '测试连接',
+      testConnHint: '会用你填的 Key 向模型方发一次最小请求来验证。只用来测试,不保存、不外传。',
+      testConnTesting: '测试中…',
+      testConnNeedKey: '请先填入 API Key 再测试。',
+      testConnOk: (model, ms) => `连接成功 ✓（模型 ${model}，${ms}ms）`,
+      testConnInvalidKey: 'Key 无效或未授权 — 检查是否复制完整、提供方是否选对。',
+      testConnInsufficientQuota: '余额/额度不足 — 这个 Key 没钱了或超出了配额。',
+      testConnRateLimited: '触发限流 — 稍等片刻再试(Key 本身可能没问题)。',
+      testConnNotFound: '模型或端点不存在 — 检查 Base URL 和模型名。',
+      testConnBadRequest: '请求被拒 — 可能选错了提供方或 Base URL。',
+      testConnUpstream: '对方服务暂时出错 — 稍后再试。',
+      testConnNetwork: '连不上 — 检查网络或 Base URL。',
+      testConnTimeout: '超时 — 网络慢或端点无响应。',
+      testConnUnknown: '测试失败(未知错误)。',
       loginTitle: '登录 AipeHub',
       loginPassword: '密码',
       loginTotp: '两步验证码',
@@ -3189,6 +3206,23 @@
       setupKeyNeed: 'Enter an API key, or click "Skip".',
       setupKeySaving: 'Saving…',
       setupKeySaved: 'Key saved, heading to sign-in…',
+      // ease-of-use ①TC — "test connection" probe (shared by the setup wizard
+      // key step AND the admin agent-create form). The verdict `code` → words
+      // mapping lives in describeKeyTest() below; these are its strings.
+      testConnBtn: 'Test connection',
+      testConnHint: 'Sends one tiny request to the provider with the key you typed, just to verify it. Used only for the test — not saved, not shared.',
+      testConnTesting: 'Testing…',
+      testConnNeedKey: 'Enter an API key before testing.',
+      testConnOk: (model, ms) => `Connected ✓ (model ${model}, ${ms}ms)`,
+      testConnInvalidKey: 'Key invalid or unauthorized — check it was copied in full and the provider is right.',
+      testConnInsufficientQuota: 'Out of balance/quota — this key has no credit left or hit its limit.',
+      testConnRateLimited: 'Rate limited — wait a moment and retry (the key itself may be fine).',
+      testConnNotFound: 'Model or endpoint not found — check the Base URL and model name.',
+      testConnBadRequest: 'Request rejected — wrong provider or Base URL?',
+      testConnUpstream: 'The provider had a temporary error — try again later.',
+      testConnNetwork: 'Could not connect — check your network or the Base URL.',
+      testConnTimeout: 'Timed out — slow network or an unresponsive endpoint.',
+      testConnUnknown: 'Test failed (unknown error).',
       loginTitle: 'Sign in to AipeHub',
       loginPassword: 'Password',
       loginTotp: 'Two-factor code',
@@ -3774,6 +3808,36 @@
     } catch { return String(ts) }
   }
 
+  // ease-of-use ①TC — turn a /test-llm-key verdict into one localized line.
+  // The `code → words` map lives HERE, in one place, so the setup wizard and
+  // the admin agent-create form render identical, honest verdicts. Reads the
+  // live `t` (module-scoped, flips on setLang), so it follows the toggle.
+  // Returns { level: 'ok' | 'error', text } — callers pick the CSS class.
+  const KEY_TEST_CODE_KEYS = {
+    invalid_key: 'testConnInvalidKey',
+    insufficient_quota: 'testConnInsufficientQuota',
+    rate_limited: 'testConnRateLimited',
+    not_found: 'testConnNotFound',
+    bad_request: 'testConnBadRequest',
+    upstream: 'testConnUpstream',
+    network: 'testConnNetwork',
+    timeout: 'testConnTimeout',
+  }
+  function describeKeyTest(result) {
+    if (!result || typeof result !== 'object') {
+      return { level: 'error', text: t.testConnUnknown }
+    }
+    if (result.ok) {
+      const fn = t.testConnOk
+      const text = typeof fn === 'function'
+        ? fn(result.model || '?', Math.max(0, Math.round(Number(result.latencyMs) || 0)))
+        : 'ok'
+      return { level: 'ok', text }
+    }
+    const key = KEY_TEST_CODE_KEYS[result.code] || 'testConnUnknown'
+    return { level: 'error', text: t[key] || t.testConnUnknown }
+  }
+
   // --- expose -------------------------------------------------------------
 
   window.AipeHub = {
@@ -3789,6 +3853,7 @@
     formatTs,
     summarize,
     isBadResult,
+    describeKeyTest,
     fetchJson,
     connectStream,
     $,

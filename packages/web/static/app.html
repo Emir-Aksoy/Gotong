@@ -100,10 +100,16 @@
           <label><span data-i18n="setupKeyInput">API Key</span>
             <input name="apiKey" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="setupKeyPlaceholder" placeholder="粘贴你的 API Key" />
           </label>
+          <!-- ease-of-use ①TC — test the key BEFORE saving, so a wrong key /
+               wrong provider / empty balance is caught here instead of after the
+               first agent silently fails. Probes via the loopback-only setup
+               route; honest hint says it only tests, never stores. -->
           <div class="login-row">
+            <button type="button" id="setup-key-test" class="ghost" data-i18n="testConnBtn">测试连接</button>
             <button type="submit" data-i18n="setupKeySubmit">保存并完成</button>
             <button type="button" id="setup-key-skip" class="ghost" data-i18n="setupKeySkip">跳过,以后再配</button>
           </div>
+          <small class="login-meta" data-i18n="testConnHint">会用你填的 Key 向模型方发一次最小请求来验证。只用来测试,不保存、不外传。</small>
           <div id="setup-key-status" class="login-status"></div>
         </form>
       </div>
@@ -581,7 +587,15 @@
               <small id="ma-api-key-hint" class="hint" data-i18n="agentApiKeyHint">留空 → 使用工作区默认；点「清空」可移除本 agent 的私有 key</small>
               <button type="button" id="ma-api-key-clear" class="ma-btn ma-btn-secondary" hidden data-i18n="clearKey">清空</button>
             </label>
-            <button type="submit" data-i18n="save">保存</button>
+            <!-- ease-of-use ①TC — test the key/provider/baseURL/model the form
+                 currently holds, before saving, so a bad combo is caught here
+                 instead of when the agent first runs. Probes via the admin-gated
+                 route; result shows in its own line (not the save message). -->
+            <div class="ma-form-actions">
+              <button type="button" id="ma-test-conn" class="ma-btn ma-btn-secondary" data-i18n="testConnBtn">测试连接</button>
+              <button type="submit" data-i18n="save">保存</button>
+            </div>
+            <p id="ma-test-msg" class="form-msg"></p>
             <p id="ma-form-msg" class="form-msg"></p>
           </form>
         </div>

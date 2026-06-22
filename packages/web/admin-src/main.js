@@ -170,6 +170,8 @@ import { createWorkflows } from './workflows.js'
       maFormTitle: $('ma-form-title'),
       maFormEditWarning: $('ma-form-edit-warning'),
       maFormMsg: $('ma-form-msg'),
+      maTestConn: $('ma-test-conn'),
+      maTestMsg: $('ma-test-msg'),
       maId: $('ma-id'),
       maDisplayName: $('ma-display-name'),
       maCaps: $('ma-caps'),
@@ -2419,6 +2421,8 @@ import { createWorkflows } from './workflows.js'
       managedAgents.openGithubImportModal()
     })
     dom.maKeysBtn?.addEventListener('click', managedAgents.openKeysModal)
+    // "Test connection" — probe the typed key once, before saving (ease-of-use ①).
+    dom.maTestConn?.addEventListener('click', managedAgents.testConnection)
     dom.maForm?.addEventListener('submit', managedAgents.submitAgentForm)
     dom.maImportSubmit?.addEventListener('click', managedAgents.submitImport)
     dom.maGhImportSubmit?.addEventListener('click', managedAgents.submitGithubImport)

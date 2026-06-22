@@ -731,6 +731,45 @@
         dom.maFormMsg.classList.add("err");
       }
     }
+    async function testConnection() {
+      if (!dom?.maTestMsg) return;
+      dom.maTestMsg.textContent = "";
+      dom.maTestMsg.classList.remove("ok", "err");
+      const provider = dom.maProvider.value;
+      const model = dom.maModel.value.trim() || void 0;
+      const apiKey = dom.maApiKey.value;
+      const baseURL = provider === "openai-compatible" ? dom.maBaseUrl?.value.trim() || void 0 : void 0;
+      if (!apiKey.trim()) {
+        dom.maTestMsg.textContent = t3.testConnNeedKey;
+        dom.maTestMsg.classList.add("err");
+        return;
+      }
+      const btn = dom.maTestConn;
+      const prevLabel = btn ? btn.textContent : "";
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = t3.testConnTesting;
+      }
+      dom.maTestMsg.textContent = t3.testConnTesting;
+      try {
+        const verdict = await fetchJson3("/api/admin/test-llm-key", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ provider, apiKey, model, baseURL })
+        });
+        const d = window.AipeHub.describeKeyTest(verdict);
+        dom.maTestMsg.textContent = d.text;
+        dom.maTestMsg.classList.add(d.level === "ok" ? "ok" : "err");
+      } catch (err) {
+        dom.maTestMsg.textContent = t3.failedAlert(err.message || String(err));
+        dom.maTestMsg.classList.add("err");
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = prevLabel || t3.testConnBtn;
+        }
+      }
+    }
     function openImportModal() {
       dom.maImportText.value = "";
       dom.maImportFile.value = "";
@@ -1091,6 +1130,7 @@
       openAgentForm,
       closeAgentForm,
       submitAgentForm,
+      testConnection,
       openImportModal,
       openKeysModal,
       closeKeysModal,
@@ -2091,6 +2131,8 @@
         maFormTitle: $("ma-form-title"),
         maFormEditWarning: $("ma-form-edit-warning"),
         maFormMsg: $("ma-form-msg"),
+        maTestConn: $("ma-test-conn"),
+        maTestMsg: $("ma-test-msg"),
         maId: $("ma-id"),
         maDisplayName: $("ma-display-name"),
         maCaps: $("ma-caps"),
@@ -3745,6 +3787,7 @@
         managedAgents.openGithubImportModal();
       });
       dom.maKeysBtn?.addEventListener("click", managedAgents.openKeysModal);
+      dom.maTestConn?.addEventListener("click", managedAgents.testConnection);
       dom.maForm?.addEventListener("submit", managedAgents.submitAgentForm);
       dom.maImportSubmit?.addEventListener("click", managedAgents.submitImport);
       dom.maGhImportSubmit?.addEventListener("click", managedAgents.submitGithubImport);

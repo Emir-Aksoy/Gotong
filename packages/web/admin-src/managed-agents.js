@@ -416,6 +416,52 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     }
   }
 
+  // "Test connection" — probe the typed key ONCE before saving (ease-of-use ①).
+  // Reads the same form fields as submitAgentForm so the verdict reflects
+  // exactly what a save would persist. The key is sent to the host's probe
+  // route, never logged; the host returns a structured verdict whose `code`
+  // we map to localized words via the shared describeKeyTest helper (the same
+  // mapping the first-run setup wizard uses — one place, honest labels).
+  async function testConnection() {
+    if (!dom?.maTestMsg) return
+    dom.maTestMsg.textContent = ''
+    dom.maTestMsg.classList.remove('ok', 'err')
+    const provider = dom.maProvider.value
+    const model = dom.maModel.value.trim() || undefined
+    const apiKey = dom.maApiKey.value
+    // openai-compatible-only — mirror submitAgentForm so a DeepSeek/Qwen key
+    // hits its own baseURL instead of being mislabeled against api.openai.com.
+    const baseURL = provider === 'openai-compatible'
+      ? (dom.maBaseUrl?.value.trim() || undefined)
+      : undefined
+    if (!apiKey.trim()) {
+      dom.maTestMsg.textContent = t.testConnNeedKey
+      dom.maTestMsg.classList.add('err')
+      return
+    }
+    const btn = dom.maTestConn
+    const prevLabel = btn ? btn.textContent : ''
+    if (btn) { btn.disabled = true; btn.textContent = t.testConnTesting }
+    dom.maTestMsg.textContent = t.testConnTesting
+    try {
+      const verdict = await fetchJson('/api/admin/test-llm-key', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider, apiKey, model, baseURL }),
+      })
+      const d = window.AipeHub.describeKeyTest(verdict)
+      dom.maTestMsg.textContent = d.text
+      dom.maTestMsg.classList.add(d.level === 'ok' ? 'ok' : 'err')
+    } catch (err) {
+      // 503 (probe surface absent) / 400 (validation) / network — fetchJson
+      // throws the server's error string; surface it without leaking the key.
+      dom.maTestMsg.textContent = t.failedAlert(err.message || String(err))
+      dom.maTestMsg.classList.add('err')
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = prevLabel || t.testConnBtn }
+    }
+  }
+
   function openImportModal() {
     dom.maImportText.value = ''
     dom.maImportFile.value = ''
@@ -839,6 +885,7 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     openAgentForm,
     closeAgentForm,
     submitAgentForm,
+    testConnection,
     openImportModal,
     openKeysModal,
     closeKeysModal,
