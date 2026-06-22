@@ -2154,17 +2154,14 @@
       })
       const j = await r.json().catch(() => ({}))
       if (!r.ok) {
-        // 429 / 503 / 504 / 4xx — fold the server error to plain words + a fix.
-        const d = window.AipeHub.describeError(j?.error || `HTTP ${r.status}`)
-        statusEl.className = 'me-status error'
-        statusEl.textContent = t('quickChatFailed', d.fix ? `${d.text} ${d.fix}` : d.text)
+        // 429 / 503 / 504 / 4xx — fold the server error to plain words + a fix, and
+        // offer a one-click jump to the key panel when it's a key/quota issue (③TC-ME).
+        setChatFailure(statusEl, window.AipeHub.describeError(j?.error || `HTTP ${r.status}`), 'quickChatFailed')
         return
       }
       renderMeChatReply(j?.result, statusEl, replyEl)
     } catch (err) {
-      const d = window.AipeHub.describeError(err?.message || String(err))
-      statusEl.className = 'me-status error'
-      statusEl.textContent = t('quickChatFailed', d.fix ? `${d.text} ${d.fix}` : d.text)
+      setChatFailure(statusEl, window.AipeHub.describeError(err?.message || String(err)), 'quickChatFailed')
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = prevLabel || t('quickChatSend') }
     }
@@ -2195,10 +2192,46 @@
       ? (out && typeof out.text === 'string' ? out.text : '')
       : (result.error || result.reason || result.kind || '')
     const d = window.AipeHub.describeError(raw)
-    const friendly = d.fix ? `${d.text} ${d.fix}` : d.text
     if (replyEl) { replyEl.hidden = true; replyEl.textContent = '' }
+    setChatFailure(statusEl, d, 'quickChatAgentFailed')
+  }
+
+  // ease-of-use ③TC-ME — a member's first quick-chat most often fails because their
+  // BYO key is missing / invalid / out of quota. The ③TC fix text already says "go
+  // add a key", and the member's「我的 API 密钥」panel (with the 拿key向导) sits right
+  // here on the same /me page — just under a different name ("我的 API 密钥" vs the
+  // generic "API Key 管理" wording). So for those two key-related codes, make the fix
+  // a one-click jump instead of plain text the member has to hunt for. invalid_key /
+  // insufficient_quota are exactly the codes whose ERROR_FIX_KEYS === the key panel.
+  function chatFixIsKey(code) {
+    return code === 'invalid_key' || code === 'insufficient_quota'
+  }
+  // Scroll to + open the member BYO-key panel and its key-acquisition guide so the
+  // member can paste a key right away. preventScroll on focus so it doesn't fight
+  // the smooth scroll.
+  function revealMyKeyPanel() {
+    document.getElementById('me-credentials')?.scrollIntoView?.({ behavior: 'smooth', block: 'start' })
+    const guide = document.getElementById('me-cred-guide')
+    if (guide && 'open' in guide) guide.open = true
+    document.getElementById('me-cred-provider')?.focus?.({ preventScroll: true })
+  }
+  // Render a quick-chat failure into the status line as plain words + fix, and — when
+  // the cause is a key/quota problem — append a「去补 key」button that reveals the key
+  // panel. textContent first (the friendly strings are static i18n, but keep it
+  // text-safe), then a real button node appended; no innerHTML, nothing to escape.
+  // A subsequent send resets statusEl.textContent, which drops the stale button.
+  function setChatFailure(statusEl, d, msgKey) {
+    if (!statusEl) return
     statusEl.className = 'me-status error'
-    statusEl.textContent = t('quickChatAgentFailed', friendly)
+    statusEl.textContent = t(msgKey, d.fix ? `${d.text} ${d.fix}` : d.text)
+    if (chatFixIsKey(d.code)) {
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'me-chat-fix-btn'
+      btn.textContent = t('meChatGoAddKey')
+      btn.addEventListener('click', revealMyKeyPanel)
+      statusEl.append(' ', btn)
+    }
   }
 
   function resetOwnForm() {
