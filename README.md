@@ -115,6 +115,32 @@ pnpm exec aipehub-host --version    # current host version
 
 After it boots, follow [`docs/OVERVIEW.md`](docs/OVERVIEW.md) for the "what now" walkthrough.
 
+### Deploy to a cloud server (VPS)
+
+Got a fresh Ubuntu/Debian box? Put the checkout on it (`git clone` with your
+key, or `scp` it over — the repo is private, so there's no public pull), then
+provision a systemd service in one command:
+
+```bash
+# from inside the checkout, on the VPS
+sudo bash deploy/cloud-quickstart.sh        # install Node+pnpm → build → user+unit
+#   preview first, mutates nothing:  bash deploy/cloud-quickstart.sh --dry-run
+```
+
+It installs Node + pnpm, builds, creates the `aipehub` service user and data
+dir, drops in `/etc/aipehub.env` (from [`deploy/.env.cloud`](deploy/.env.cloud)),
+and installs a systemd unit that mirrors [`docs/zh/DEPLOY.md`](docs/zh/DEPLOY.md)
+§C.4. It **stops one step short of starting** — the env file ships with the
+domain / master key / host-allowlist blank, and exposing an unconfigured box is
+unsafe. It prints the safe last mile: fill the env, run
+[`scripts/cloud-harden.sh`](scripts/cloud-harden.sh) (perimeter check), put Caddy
++ a firewall in front, then `systemctl enable --now aipehub`.
+
+> There is **no browser "one-click deploy" button** while the repo is private
+> (those need a public repo or a provider account pre-linked to your git). This
+> copy-pasteable bootstrap is the real, testable equivalent. Full runbook —
+> topology, IP-exposure risks, IM member onboarding: [`docs/zh/GO-LIVE.md`](docs/zh/GO-LIVE.md).
+
 ### 个人模式 (新, v4 Phase 7) — 一个人用 AI 干活, 0 配置
 
 如果你就一个人, 想把 AipeHub 当成"我的 AI 桌面"用 (不是给团队开 hub),
