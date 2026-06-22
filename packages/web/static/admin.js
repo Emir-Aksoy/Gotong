@@ -670,10 +670,110 @@
       ma._editingMcpServers = mode === "edit" && Array.isArray(agent?.managed?.useMcpServers) ? [...agent.managed.useMcpServers] : [];
       loadMcpOptIn(ma._editingMcpServers).catch(() => {
       });
+      if (dom.maForm) dom.maForm.hidden = false;
+      if (dom.maQuickchat) dom.maQuickchat.hidden = true;
+      ma._quickChatAgentId = null;
       dom.maFormModal.hidden = false;
     }
     function closeAgentForm() {
       dom.maFormModal.hidden = true;
+      if (dom.maForm) dom.maForm.hidden = false;
+      if (dom.maQuickchat) dom.maQuickchat.hidden = true;
+      if (dom.maQcReply) {
+        dom.maQcReply.hidden = true;
+        dom.maQcReply.textContent = "";
+      }
+      if (dom.maQcStatus) {
+        dom.maQcStatus.textContent = "";
+        dom.maQcStatus.classList.remove("ok", "err");
+      }
+      ma._quickChatAgentId = null;
+    }
+    function openQuickChat(agentId) {
+      if (!dom.maQuickchat) return;
+      ma._quickChatAgentId = agentId;
+      if (dom.maForm) dom.maForm.hidden = true;
+      dom.maQuickchat.hidden = false;
+      if (dom.maQcInput) dom.maQcInput.value = "";
+      if (dom.maQcStatus) {
+        dom.maQcStatus.textContent = "";
+        dom.maQcStatus.classList.remove("ok", "err");
+      }
+      if (dom.maQcReply) {
+        dom.maQcReply.hidden = true;
+        dom.maQcReply.textContent = "";
+      }
+      if (dom.maQcInput) dom.maQcInput.focus();
+    }
+    async function quickChat() {
+      const agentId = ma._quickChatAgentId;
+      if (!agentId || !dom.maQcInput || !dom.maQcStatus) return;
+      const prompt = dom.maQcInput.value.trim();
+      if (!prompt) {
+        dom.maQcStatus.textContent = t3.quickChatNeedMsg;
+        dom.maQcStatus.classList.remove("ok");
+        dom.maQcStatus.classList.add("err");
+        return;
+      }
+      const btn = dom.maQcSend;
+      const prevLabel = btn ? btn.textContent : "";
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = t3.quickChatSending;
+      }
+      dom.maQcStatus.textContent = t3.quickChatSending;
+      dom.maQcStatus.classList.remove("ok", "err");
+      if (dom.maQcReply) {
+        dom.maQcReply.hidden = true;
+        dom.maQcReply.textContent = "";
+      }
+      try {
+        const r = await fetchJson3("/api/admin/dispatch", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            strategy: { kind: "explicit", to: agentId },
+            payload: { prompt },
+            wait: true,
+            timeoutMs: 6e4
+          })
+        });
+        renderQuickChatReply(r?.result);
+      } catch (err) {
+        dom.maQcStatus.textContent = t3.quickChatFailed(err.message || String(err));
+        dom.maQcStatus.classList.remove("ok");
+        dom.maQcStatus.classList.add("err");
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.textContent = prevLabel || t3.quickChatSend;
+        }
+      }
+    }
+    function renderQuickChatReply(result) {
+      if (!dom.maQcStatus) return;
+      if (!result) {
+        dom.maQcStatus.textContent = t3.quickChatNoResult;
+        dom.maQcStatus.classList.remove("ok");
+        dom.maQcStatus.classList.add("err");
+        return;
+      }
+      if (result.kind === "ok") {
+        const out = result.output;
+        const text = out && typeof out.text === "string" ? out.text : JSON.stringify(out ?? {}, null, 2);
+        if (dom.maQcReply) {
+          dom.maQcReply.textContent = text;
+          dom.maQcReply.hidden = false;
+        }
+        dom.maQcStatus.textContent = t3.quickChatOk;
+        dom.maQcStatus.classList.remove("err");
+        dom.maQcStatus.classList.add("ok");
+      } else {
+        const reason = result.error || result.reason || result.kind;
+        dom.maQcStatus.textContent = t3.quickChatAgentFailed(reason);
+        dom.maQcStatus.classList.remove("ok");
+        dom.maQcStatus.classList.add("err");
+      }
     }
     async function submitAgentForm(e) {
       e.preventDefault();
@@ -720,10 +820,12 @@
         if (r?.warning) {
           dom.maFormMsg.textContent = t3.savedWithWarning(r.error || r.warning);
           dom.maFormMsg.classList.add("err");
-        } else {
+        } else if (ma.formMode === "edit") {
           dom.maFormMsg.textContent = t3.saveOk;
           dom.maFormMsg.classList.add("ok");
           setTimeout(closeAgentForm, 400);
+        } else {
+          openQuickChat(id);
         }
         await refreshManagedAgents();
       } catch (err) {
@@ -1131,6 +1233,7 @@
       closeAgentForm,
       submitAgentForm,
       testConnection,
+      quickChat,
       openImportModal,
       openKeysModal,
       closeKeysModal,
@@ -2133,6 +2236,13 @@
         maFormMsg: $("ma-form-msg"),
         maTestConn: $("ma-test-conn"),
         maTestMsg: $("ma-test-msg"),
+        // ease-of-use ②TC — post-create quick-chat panel (lives in the agent modal)
+        maQuickchat: $("ma-quickchat"),
+        maQcInput: $("ma-qc-input"),
+        maQcSend: $("ma-qc-send"),
+        maQcDone: $("ma-qc-done"),
+        maQcStatus: $("ma-qc-status"),
+        maQcReply: $("ma-qc-reply"),
         maId: $("ma-id"),
         maDisplayName: $("ma-display-name"),
         maCaps: $("ma-caps"),
@@ -3788,6 +3898,8 @@
       });
       dom.maKeysBtn?.addEventListener("click", managedAgents.openKeysModal);
       dom.maTestConn?.addEventListener("click", managedAgents.testConnection);
+      dom.maQcSend?.addEventListener("click", managedAgents.quickChat);
+      dom.maQcDone?.addEventListener("click", managedAgents.closeAgentForm);
       dom.maForm?.addEventListener("submit", managedAgents.submitAgentForm);
       dom.maImportSubmit?.addEventListener("click", managedAgents.submitImport);
       dom.maGhImportSubmit?.addEventListener("click", managedAgents.submitGithubImport);

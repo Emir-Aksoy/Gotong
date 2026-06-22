@@ -334,11 +334,116 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       ? [...agent.managed.useMcpServers]
       : []
     loadMcpOptIn(ma._editingMcpServers).catch(() => {})
+    // ease-of-use ②TC — always open on the form, never a stale quick-chat
+    // panel left over from a prior create (closeAgentForm also resets, but be
+    // defensive so the entry point is self-sufficient).
+    if (dom.maForm) dom.maForm.hidden = false
+    if (dom.maQuickchat) dom.maQuickchat.hidden = true
+    ma._quickChatAgentId = null
     dom.maFormModal.hidden = false
   }
 
   function closeAgentForm() {
     dom.maFormModal.hidden = true
+    // ease-of-use ②TC — a create may have swapped the form out for the
+    // quick-chat panel. Restore the form + clear quick-chat state so the
+    // NEXT open shows a fresh form. Every dismissal path (×/backdrop/Escape/
+    // the panel's own Done button) routes through here, so this covers them all.
+    if (dom.maForm) dom.maForm.hidden = false
+    if (dom.maQuickchat) dom.maQuickchat.hidden = true
+    if (dom.maQcReply) { dom.maQcReply.hidden = true; dom.maQcReply.textContent = '' }
+    if (dom.maQcStatus) { dom.maQcStatus.textContent = ''; dom.maQcStatus.classList.remove('ok', 'err') }
+    ma._quickChatAgentId = null
+  }
+
+  // ease-of-use ②TC — a CREATE just succeeded. Instead of dead-ending on
+  // "已保存", swap the form out for a zero-friction quick-chat so the user can
+  // talk to their brand-new agent right now and SEE it respond. The agent
+  // registered live on create, so it's immediately dispatchable.
+  function openQuickChat(agentId) {
+    if (!dom.maQuickchat) return
+    ma._quickChatAgentId = agentId
+    if (dom.maForm) dom.maForm.hidden = true
+    dom.maQuickchat.hidden = false
+    if (dom.maQcInput) dom.maQcInput.value = ''
+    if (dom.maQcStatus) { dom.maQcStatus.textContent = ''; dom.maQcStatus.classList.remove('ok', 'err') }
+    if (dom.maQcReply) { dom.maQcReply.hidden = true; dom.maQcReply.textContent = '' }
+    if (dom.maQcInput) dom.maQcInput.focus()
+  }
+
+  // Send one message to the brand-new agent and render its reply inline.
+  // Reuses the existing wait:true dispatch path (the same one the MCP server
+  // uses) — explicit→to targets the agent by id, so no capability guessing.
+  async function quickChat() {
+    const agentId = ma._quickChatAgentId
+    if (!agentId || !dom.maQcInput || !dom.maQcStatus) return
+    const prompt = dom.maQcInput.value.trim()
+    if (!prompt) {
+      dom.maQcStatus.textContent = t.quickChatNeedMsg
+      dom.maQcStatus.classList.remove('ok')
+      dom.maQcStatus.classList.add('err')
+      return
+    }
+    const btn = dom.maQcSend
+    const prevLabel = btn ? btn.textContent : ''
+    if (btn) { btn.disabled = true; btn.textContent = t.quickChatSending }
+    dom.maQcStatus.textContent = t.quickChatSending
+    dom.maQcStatus.classList.remove('ok', 'err')
+    if (dom.maQcReply) { dom.maQcReply.hidden = true; dom.maQcReply.textContent = '' }
+    try {
+      const r = await fetchJson('/api/admin/dispatch', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          strategy: { kind: 'explicit', to: agentId },
+          payload: { prompt },
+          wait: true,
+          timeoutMs: 60000,
+        }),
+      })
+      renderQuickChatReply(r?.result)
+    } catch (err) {
+      // 504 (timeout) / 400 / network — fetchJson throws the server's error
+      // string; surface it so the user knows it wasn't a silent success.
+      dom.maQcStatus.textContent = t.quickChatFailed(err.message || String(err))
+      dom.maQcStatus.classList.remove('ok')
+      dom.maQcStatus.classList.add('err')
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = prevLabel || t.quickChatSend }
+    }
+  }
+
+  function renderQuickChatReply(result) {
+    if (!dom.maQcStatus) return
+    if (!result) {
+      dom.maQcStatus.textContent = t.quickChatNoResult
+      dom.maQcStatus.classList.remove('ok')
+      dom.maQcStatus.classList.add('err')
+      return
+    }
+    if (result.kind === 'ok') {
+      // LlmAgent ok → output.text is the reply. Fall back to pretty JSON for
+      // non-LLM agents whose output isn't a chat string.
+      const out = result.output
+      const text = out && typeof out.text === 'string'
+        ? out.text
+        : JSON.stringify(out ?? {}, null, 2)
+      if (dom.maQcReply) {
+        dom.maQcReply.textContent = text
+        dom.maQcReply.hidden = false
+      }
+      dom.maQcStatus.textContent = t.quickChatOk
+      dom.maQcStatus.classList.remove('err')
+      dom.maQcStatus.classList.add('ok')
+    } else {
+      // failed / cancelled / no-participant / suspended — surface the reason so
+      // the user knows it wasn't a silent no-op (failed often = missing/invalid
+      // key, which ties back to the 测试连接 button above).
+      const reason = result.error || result.reason || result.kind
+      dom.maQcStatus.textContent = t.quickChatAgentFailed(reason)
+      dom.maQcStatus.classList.remove('ok')
+      dom.maQcStatus.classList.add('err')
+    }
   }
 
   async function submitAgentForm(e) {
@@ -404,10 +509,15 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       if (r?.warning) {
         dom.maFormMsg.textContent = t.savedWithWarning(r.error || r.warning)
         dom.maFormMsg.classList.add('err')
-      } else {
+      } else if (ma.formMode === 'edit') {
         dom.maFormMsg.textContent = t.saveOk
         dom.maFormMsg.classList.add('ok')
         setTimeout(closeAgentForm, 400)
+      } else {
+        // ease-of-use ②TC — a CREATE just succeeded. Don't dead-end on
+        // "已保存": swap the form for a quick-chat box so the user can talk to
+        // their brand-new agent right now (it registered live on create).
+        openQuickChat(id)
       }
       await refreshManagedAgents()
     } catch (err) {
@@ -886,6 +996,7 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     closeAgentForm,
     submitAgentForm,
     testConnection,
+    quickChat,
     openImportModal,
     openKeysModal,
     closeKeysModal,

@@ -172,6 +172,13 @@ import { createWorkflows } from './workflows.js'
       maFormMsg: $('ma-form-msg'),
       maTestConn: $('ma-test-conn'),
       maTestMsg: $('ma-test-msg'),
+      // ease-of-use ②TC — post-create quick-chat panel (lives in the agent modal)
+      maQuickchat: $('ma-quickchat'),
+      maQcInput: $('ma-qc-input'),
+      maQcSend: $('ma-qc-send'),
+      maQcDone: $('ma-qc-done'),
+      maQcStatus: $('ma-qc-status'),
+      maQcReply: $('ma-qc-reply'),
       maId: $('ma-id'),
       maDisplayName: $('ma-display-name'),
       maCaps: $('ma-caps'),
@@ -2423,6 +2430,10 @@ import { createWorkflows } from './workflows.js'
     dom.maKeysBtn?.addEventListener('click', managedAgents.openKeysModal)
     // "Test connection" — probe the typed key once, before saving (ease-of-use ①).
     dom.maTestConn?.addEventListener('click', managedAgents.testConnection)
+    // ease-of-use ②TC — post-create quick-chat: Send dispatches to the new
+    // agent; Done routes through closeAgentForm (which resets the panel).
+    dom.maQcSend?.addEventListener('click', managedAgents.quickChat)
+    dom.maQcDone?.addEventListener('click', managedAgents.closeAgentForm)
     dom.maForm?.addEventListener('submit', managedAgents.submitAgentForm)
     dom.maImportSubmit?.addEventListener('click', managedAgents.submitImport)
     dom.maGhImportSubmit?.addEventListener('click', managedAgents.submitGithubImport)

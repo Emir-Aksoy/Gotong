@@ -1564,6 +1564,20 @@
       testConnNetwork: '连不上 — 检查网络或 Base URL。',
       testConnTimeout: '超时 — 网络慢或端点无响应。',
       testConnUnknown: '测试失败(未知错误)。',
+      // ease-of-use ②TC — after a CREATE, the user is nudged to talk to the
+      // brand-new agent right here and see it respond. The reply comes from the
+      // agent itself (reuses the wait:true dispatch path).
+      quickChatTitle: '✅ 助手已就位 — 现在跟它说句话试试',
+      quickChatHint: '随便发一句，确认它真的会回应你。回应来自它本人。',
+      quickChatInputLabel: '你的消息',
+      quickChatSend: '发送',
+      quickChatDone: '完成',
+      quickChatSending: '发送中…',
+      quickChatNeedMsg: '先输入一句话再发送。',
+      quickChatOk: '回应来了 ✓',
+      quickChatNoResult: '没有拿到回应（可能超时）。',
+      quickChatFailed: (msg) => `发送失败：${msg}`,
+      quickChatAgentFailed: (reason) => `它没能回应：${reason}`,
       loginTitle: '登录 AipeHub',
       loginPassword: '密码',
       loginTotp: '两步验证码',
@@ -3223,6 +3237,20 @@
       testConnNetwork: 'Could not connect — check your network or the Base URL.',
       testConnTimeout: 'Timed out — slow network or an unresponsive endpoint.',
       testConnUnknown: 'Test failed (unknown error).',
+      // ease-of-use ②TC — after a CREATE, the user is nudged to talk to the
+      // brand-new agent right here and see it respond. The reply comes from the
+      // agent itself (reuses the wait:true dispatch path).
+      quickChatTitle: '✅ Assistant is live — say something to it now',
+      quickChatHint: 'Send any message to confirm it actually responds. The reply comes from the agent itself.',
+      quickChatInputLabel: 'Your message',
+      quickChatSend: 'Send',
+      quickChatDone: 'Done',
+      quickChatSending: 'Sending…',
+      quickChatNeedMsg: 'Type a message before sending.',
+      quickChatOk: 'Got a reply ✓',
+      quickChatNoResult: 'No reply received (it may have timed out).',
+      quickChatFailed: (msg) => `Send failed: ${msg}`,
+      quickChatAgentFailed: (reason) => `It couldn't respond: ${reason}`,
       loginTitle: 'Sign in to AipeHub',
       loginPassword: 'Password',
       loginTotp: 'Two-factor code',

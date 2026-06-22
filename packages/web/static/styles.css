@@ -591,6 +591,23 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .form-msg.err { color: #c84242; }
 .hint { font-size: 0.72rem; color: #888; margin: 0 0 0.2rem; }
 
+/* ease-of-use ②TC — post-create quick-chat panel (lives inside the agent
+   modal; replaces the form once a create succeeds). */
+.ma-quickchat { display: flex; flex-direction: column; gap: 0.55rem; }
+.ma-qc-title { margin: 0; font-size: 0.95rem; color: #1a8a4a; }
+.ma-qc-reply {
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: #f5f5f0;
+  border: 1px solid #e2e2dd;
+  border-radius: 5px;
+  padding: 0.55rem 0.7rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
 /* clickable transcript rows in admin (for evaluate task-id picker) */
 .entry-clickable .body { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
 .entry-clickable:hover { background: #f5f5f0; }

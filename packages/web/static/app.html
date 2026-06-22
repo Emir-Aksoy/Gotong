@@ -598,6 +598,25 @@
             <p id="ma-test-msg" class="form-msg"></p>
             <p id="ma-form-msg" class="form-msg"></p>
           </form>
+          <!-- ease-of-use ②TC — after a CREATE succeeds, don't dead-end on
+               "已保存": swap the form out for a zero-friction quick-chat so the
+               user talks to their brand-new agent right here and SEES it
+               respond. Reuses the wait:true dispatch path; the agent registers
+               live on create so it's immediately dispatchable. -->
+          <div id="ma-quickchat" class="ma-quickchat" hidden>
+            <h3 class="ma-qc-title" data-i18n="quickChatTitle">✅ 助手已就位 — 现在跟它说句话试试</h3>
+            <p class="hint" data-i18n="quickChatHint">随便发一句，确认它真的会回应你。回应来自它本人。</p>
+            <label>
+              <span data-i18n="quickChatInputLabel">你的消息</span>
+              <textarea id="ma-qc-input" rows="2"></textarea>
+            </label>
+            <div class="ma-form-actions">
+              <button type="button" id="ma-qc-send" class="ma-btn" data-i18n="quickChatSend">发送</button>
+              <button type="button" id="ma-qc-done" class="ma-btn ma-btn-secondary" data-i18n="quickChatDone">完成</button>
+            </div>
+            <p id="ma-qc-status" class="form-msg"></p>
+            <div id="ma-qc-reply" class="ma-qc-reply" hidden></div>
+          </div>
         </div>
       </div>
 
