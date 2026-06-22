@@ -129,6 +129,7 @@ import { recoverMasterKeyRotation } from './master-key-recovery.js'
 import { applyRunRetention, parseRunRetention } from './run-retention.js'
 import { applyTranscriptRetention, parseTranscriptRetention } from './transcript-retention.js'
 import { writeAdminLinkFile } from './admin-link.js'
+import { friendlyBootError } from './boot-error.js'
 
 const log = createLogger('host')
 import { serveWebSocket } from '@aipehub/transport-ws'
@@ -2580,6 +2581,14 @@ function describe(e: TranscriptEntry): string {
 }
 
 main().catch((err) => {
-  log.fatal('boot failed', { err })
+  // ease-of-use ⑥-M2 — turn the common, recoverable EADDRINUSE into an
+  // actionable hint (which port var to change + `aipehub doctor`) instead of a
+  // structured-fatal dump. Everything else keeps the default observability path.
+  const hint = friendlyBootError(err)
+  if (hint) {
+    process.stderr.write(hint + '\n')
+  } else {
+    log.fatal('boot failed', { err })
+  }
   process.exit(1)
 })
