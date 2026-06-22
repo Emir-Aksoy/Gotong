@@ -3347,7 +3347,23 @@
         if (wfOk > 0) parts.push(t5.templateGalleryWorkflowsLanded(wfOk));
         if (kbN > 0) parts.push(t5.templateGalleryKbSlots(kbN));
         if (ib.team?.spawnErrors?.length) parts.push(t5.admSpawnFailed(ib.team.spawnErrors.length));
-        setResult(t5.admImportDone + parts.join(t5.admListSep), "ok");
+        const summary = t5.admImportDone + parts.join(t5.admListSep);
+        const checklist = ib.postInstallChecklist || {};
+        const kbTodos = Array.isArray(checklist.kbSlotsToWire) ? checklist.kbSlotsToWire : [];
+        const keyTodos = Array.isArray(checklist.agentsMissingKey) ? checklist.agentsMissingKey : [];
+        if (card && (kbTodos.length || keyTodos.length)) {
+          const items = [];
+          for (const kb of kbTodos) {
+            items.push(
+              kb.useMcpServer ? t5.templateGalleryKbSlotTodoRef(kb.name, kb.useMcpServer) : t5.templateGalleryKbSlotTodo(kb.name)
+            );
+          }
+          for (const a of keyTodos) items.push(t5.templateGalleryAgentNoKey(a.id, a.provider));
+          card.className = "tg-card-result ok";
+          card.innerHTML = `<div class="tg-result-summary">${escapeHtml5(summary)}</div><details class="tg-checklist" open><summary>${escapeHtml5(t5.templateGalleryChecklistTitle)}</summary><ul>${items.map((it) => `<li>${escapeHtml5(it)}</li>`).join("")}</ul></details>`;
+        } else {
+          setResult(summary, "ok");
+        }
         await managedAgents.refreshManagedAgents().catch(() => {
         });
         await workflows.refreshWorkflows().catch(() => {

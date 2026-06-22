@@ -219,3 +219,71 @@ describe('POST /api/admin/templates/import (v5 B-M4)', () => {
     expect((await b.space.agents()).map((a) => a.id)).toContain('support-agent')
   })
 })
+
+// ── ease-of-use ③-M1: post-install "last mile" checklist ───────────────────
+// The import response carries a checklist of what is still left to do after a
+// one-click template install: KB slots that need wiring (we never auto-wire —
+// decision #4) and freshly-created LLM agents whose provider key does not
+// resolve yet. The latter is derived from a host-supplied key probe (best
+// effort / advisory).
+describe('POST /api/admin/templates/import — postInstallChecklist (ease-of-use ③-M1)', () => {
+  it('reports KB slots to wire + agents whose provider key does not resolve', async () => {
+    // Re-boot the web server with a fake LLM-key probe: it resolves keys for
+    // 'has-key-agent' but not 'no-key-agent' — mirroring the host org-pool probe.
+    await b.server.close()
+    const probed: { id: string; provider: string }[] = []
+    const llmKeyProbe = {
+      resolvesKey: async (agentId: string, provider: string) => {
+        probed.push({ id: agentId, provider })
+        return agentId === 'has-key-agent'
+      },
+    }
+    const workflows = {
+      importFromText: async () => ({ id: 'x' }),
+    } as unknown as WorkflowSurface
+    b.server = await serveWeb(b.hub, { host: '127.0.0.1', port: 0, workflows, llmKeyProbe })
+
+    const r = await importReq({
+      template: templateText({
+        name: 'checklist-template',
+        version: 1,
+        agents: [
+          agentBlock({ id: 'has-key-agent', capabilities: ['cap-a'], provider: 'anthropic' }),
+          agentBlock({ id: 'no-key-agent', capabilities: ['cap-b'], provider: 'anthropic' }),
+          // A mock-provider agent is always "resolvable" → must NOT appear.
+          agentBlock({ id: 'mock-agent', capabilities: ['cap-c'], provider: 'mock' }),
+        ],
+        knowledgeBases: [{ name: 'kb-slot', useMcpServer: 'kb-mcp', description: '待接线' }],
+      }),
+    })
+    expect(r.status).toBe(200)
+    expect(r.json.postInstallChecklist).toBeDefined()
+    // KB ref slot needs wiring (no inline mcpServer).
+    expect(r.json.postInstallChecklist.kbSlotsToWire).toEqual([
+      { name: 'kb-slot', useMcpServer: 'kb-mcp' },
+    ])
+    // Only the no-key anthropic agent is flagged; mock is skipped, has-key resolves.
+    expect(r.json.postInstallChecklist.agentsMissingKey).toEqual([
+      { id: 'no-key-agent', provider: 'anthropic' },
+    ])
+    // The probe was consulted for both non-mock agents (mock short-circuits before).
+    expect(probed.map((p) => p.id).sort()).toEqual(['has-key-agent', 'no-key-agent'])
+  })
+
+  it('omits agentsMissingKey when no key probe is wired (zero regression)', async () => {
+    // The default beforeEach server has no llmKeyProbe.
+    const r = await importReq({
+      template: templateText({
+        name: 'no-probe',
+        agents: [agentBlock({ id: 'a1', capabilities: ['cap-a'], provider: 'anthropic' })],
+        knowledgeBases: [{ name: 'kb-slot', useMcpServer: 'kb-mcp' }],
+      }),
+    })
+    expect(r.status).toBe(200)
+    // KB half is always derivable; missing-key half is empty without a probe.
+    expect(r.json.postInstallChecklist.kbSlotsToWire).toEqual([
+      { name: 'kb-slot', useMcpServer: 'kb-mcp' },
+    ])
+    expect(r.json.postInstallChecklist.agentsMissingKey).toEqual([])
+  })
+})

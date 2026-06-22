@@ -768,6 +768,13 @@
       templateGalleryNeedsKey: (label) => `需要 ${label} key`,
       templateGalleryWorkflowsLanded: (n) => `注册 ${n} 条工作流`,
       templateGalleryKbSlots: (n) => `${n} 个知识库槽位待接线`,
+      // Post-install checklist (ease-of-use ③-M1): tell the operator what to do next.
+      templateGalleryChecklistTitle: '接下来要做',
+      templateGalleryKbSlotTodo: (name) => `知识库槽位「${name}」待接线 → 去「服务 / MCP」面板连一个 MCP server`,
+      templateGalleryKbSlotTodoRef: (name, server) =>
+        `知识库槽位「${name}」引用 MCP server「${server}」→ 去「服务 / MCP」面板确认它在线`,
+      templateGalleryAgentNoKey: (id, provider) =>
+        `agent「${id}」(${provider}) 还没有可用的 API key → 去「agent」面板或首启向导补`,
       admTemplateLoadFailedHttp: (s) => `加载内置模板失败:HTTP ${s}`,
       admGrowthBundleLoaded: '已加载个人成长 bundle。粘贴 DeepSeek key 后点"导入"。',
       admTemplateLoadFailedErr: (e) => `加载内置模板失败:${e}`,
@@ -2323,6 +2330,14 @@
       templateGalleryNeedsKey: (label) => `needs ${label} key`,
       templateGalleryWorkflowsLanded: (n) => `registered ${n} workflow(s)`,
       templateGalleryKbSlots: (n) => `${n} KB slot(s) to wire`,
+      // Post-install checklist (ease-of-use ③-M1): tell the operator what to do next.
+      templateGalleryChecklistTitle: 'Next steps',
+      templateGalleryKbSlotTodo: (name) =>
+        `KB slot "${name}" needs wiring → connect an MCP server in the Services / MCP panel`,
+      templateGalleryKbSlotTodoRef: (name, server) =>
+        `KB slot "${name}" references MCP server "${server}" → confirm it is online in the Services / MCP panel`,
+      templateGalleryAgentNoKey: (id, provider) =>
+        `agent "${id}" (${provider}) has no resolvable API key yet → add one in the agents panel or first-run wizard`,
       admTemplateLoadFailedHttp: (s) => `Failed to load builtin template: HTTP ${s}`,
       admGrowthBundleLoaded:
         'Loaded personal-growth bundle. Paste your DeepSeek key, then click "Import".',

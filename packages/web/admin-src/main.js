@@ -1931,7 +1931,33 @@ import { createWorkflows } from './workflows.js'
       if (wfOk > 0) parts.push(t.templateGalleryWorkflowsLanded(wfOk))
       if (kbN > 0) parts.push(t.templateGalleryKbSlots(kbN))
       if (ib.team?.spawnErrors?.length) parts.push(t.admSpawnFailed(ib.team.spawnErrors.length))
-      setResult(t.admImportDone + parts.join(t.admListSep), 'ok')
+      const summary = t.admImportDone + parts.join(t.admListSep)
+      // Last-mile checklist (ease-of-use ③-M1): KB slots still need wiring (we
+      // never auto-wire — decision #4) and any created agent whose provider key
+      // does not resolve yet. Render as a collapsible list below the summary.
+      const checklist = ib.postInstallChecklist || {}
+      const kbTodos = Array.isArray(checklist.kbSlotsToWire) ? checklist.kbSlotsToWire : []
+      const keyTodos = Array.isArray(checklist.agentsMissingKey) ? checklist.agentsMissingKey : []
+      if (card && (kbTodos.length || keyTodos.length)) {
+        const items = []
+        for (const kb of kbTodos) {
+          items.push(
+            kb.useMcpServer
+              ? t.templateGalleryKbSlotTodoRef(kb.name, kb.useMcpServer)
+              : t.templateGalleryKbSlotTodo(kb.name),
+          )
+        }
+        for (const a of keyTodos) items.push(t.templateGalleryAgentNoKey(a.id, a.provider))
+        card.className = 'tg-card-result ok'
+        card.innerHTML =
+          `<div class="tg-result-summary">${escapeHtml(summary)}</div>` +
+          `<details class="tg-checklist" open>` +
+          `<summary>${escapeHtml(t.templateGalleryChecklistTitle)}</summary>` +
+          `<ul>${items.map((it) => `<li>${escapeHtml(it)}</li>`).join('')}</ul>` +
+          `</details>`
+      } else {
+        setResult(summary, 'ok')
+      }
       // Refresh the agents + workflows lists so the new arrivals show up.
       await managedAgents.refreshManagedAgents().catch(() => {})
       await workflows.refreshWorkflows().catch(() => {})

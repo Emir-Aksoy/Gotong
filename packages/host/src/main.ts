@@ -2199,6 +2199,12 @@ async function main(): Promise<void> {
     port: config.webPort,
     cookieSecure: config.cookieSecure,
     lifecycle: localAgents,
+    // ease-of-use ③-M1 — LLM-key probe for the template-import post-install
+    // checklist ("agent X still needs a key"). Reuses the pool's spawn-time
+    // resolution chain so the checklist never disagrees with reality.
+    llmKeyProbe: {
+      resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
+    },
     reconcileHeartbeats,
     mcpRegistry,
     mcpFederation,

@@ -54,6 +54,20 @@ export interface AgentsWorkflowSurface {
   importFromText(yaml: string): Promise<unknown>
 }
 
+/**
+ * ease-of-use ③-M1 — duck-typed LLM-key probe. The host's LocalAgentPool
+ * satisfies it via `hasResolvableLlmKey(agentId, provider)`. The template-import
+ * handler uses it to derive the "agent X still needs a key" half of the
+ * post-install checklist (the KB-slot half is always derivable from the parsed
+ * template alone). Absent → the missing-key advisories are simply omitted (zero
+ * regression on hosts that don't wire it). Best-effort by contract: a probe that
+ * throws is treated as "resolvable" so the checklist never blocks or fails an
+ * import — it's advisory, not a gate.
+ */
+export interface LlmKeyProbe {
+  resolvesKey(agentId: string, provider: string): Promise<boolean>
+}
+
 /** v5 E4-M1 — grant levels on an agent resource (mirror of workflow perms). */
 export type AgentPermLiteral = 'viewer' | 'editor' | 'owner'
 
@@ -109,6 +123,13 @@ export interface AgentsRoutesCtx {
    */
   agentGrants?: AgentGrantSink
   resolveActor?(req: IncomingMessage): AgentActor
+  /**
+   * ease-of-use ③-M1 — optional probe for the template-import post-install
+   * checklist. The host wires it to LocalAgentPool.hasResolvableLlmKey. Absent
+   * → the "agent X still needs a key" advisories are omitted (KB-slot advisories
+   * are still derived from the parsed template).
+   */
+  llmKeyProbe?: LlmKeyProbe
 }
 
 // -- validation -----------------------------------------------------------
@@ -521,6 +542,11 @@ export async function handleAgentsRoute(
     const existing = new Set((await ctx.space.agents()).map((a) => a.id))
     const created: AgentRecord[] = []
     const skipped: string[] = []
+    // ease-of-use ③-M1 — remember each freshly-created agent's LLM provider so
+    // the post-install checklist can probe whether it has a resolvable key yet.
+    // Read from the parsed (pre-injection) managed spec; the provider tag is
+    // identical after secret injection.
+    const createdProviders: { id: string; provider: string }[] = []
     for (const a of template.agents) {
       if (existing.has(a.id)) { skipped.push(a.id); continue }
       const managed = secrets ? injectAgentSecrets(a.managed, secrets) : a.managed
@@ -531,6 +557,9 @@ export async function handleAgentsRoute(
         managed,
       })
       created.push(rec)
+      if (a.managed && typeof a.managed.provider === 'string') {
+        createdProviders.push({ id: a.id, provider: a.managed.provider })
+      }
       existing.add(a.id)
     }
     const spawnErrors: { id: string; error: string }[] = []
@@ -559,6 +588,35 @@ export async function handleAgentsRoute(
 
     for (const rec of created) seedAgentOwner(ctx, req, rec.id)
     await reconcileHeartbeats('template')
+
+    // ease-of-use ③-M1 — derive the post-install "last mile" checklist so the
+    // gallery can tell the importer what's left to do, rather than just showing
+    // counts. Two halves:
+    //   - kbSlotsToWire: KB slots the import did NOT auto-wire (decision #4 — we
+    //     report, never connect). A slot with an inline `mcpServer` is already
+    //     usable; only `useMcpServer` references (or bare slots) need the
+    //     importer to point them at their own MCP server.
+    //   - agentsMissingKey: freshly-created LLM agents with no resolvable key
+    //     yet (→ finish the first-run key wizard / add an org credential).
+    //     Derived from the host's key probe; absent (or mock provider) → omitted.
+    const kbSlotsToWire = template.knowledgeBases
+      .filter((kb) => !kb.mcpServer)
+      .map((kb) => ({ name: kb.name, ...(kb.useMcpServer ? { useMcpServer: kb.useMcpServer } : {}) }))
+    const agentsMissingKey: { id: string; provider: string }[] = []
+    if (ctx.llmKeyProbe) {
+      for (const { id, provider } of createdProviders) {
+        if (provider === 'mock') continue
+        try {
+          if (!(await ctx.llmKeyProbe.resolvesKey(id, provider))) {
+            agentsMissingKey.push({ id, provider })
+          }
+        } catch {
+          // Probe fault → advisory omit. The checklist must never block or
+          // fail an import; a missing probe result is "assume resolvable".
+        }
+      }
+    }
+
     sendJson(res, {
       ok: true,
       template: { name: template.name, version: template.version, description: template.description },
@@ -575,6 +633,8 @@ export async function handleAgentsRoute(
       secretsApplied: secrets ? Object.keys(secrets).length : 0,
       encryptedSkipped,
       personnelOmitted,
+      // ease-of-use ③-M1 — the "what's left to do" checklist (see above).
+      postInstallChecklist: { kbSlotsToWire, agentsMissingKey },
     })
     return true
   }

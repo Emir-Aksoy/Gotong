@@ -1126,6 +1126,27 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   }
 
   /**
+   * ease-of-use ③-M1 — advisory probe used by the template-import post-install
+   * checklist (web `LlmKeyProbe`). Answers "does this agent already have a
+   * resolvable LLM key?" so the gallery can tell the importer which freshly-
+   * landed agents still need one (→ finish the first-run key wizard / add an org
+   * credential). `mock` needs no key → true. Otherwise reuse the SAME resolution
+   * chain spawn uses ({@link resolveApiKey}), so the checklist can never disagree
+   * with whether the agent will actually start. Fail-open by contract: any probe
+   * fault is treated as "resolvable" — the checklist is advisory, never a gate.
+   */
+  async hasResolvableLlmKey(agentId: ParticipantId, provider: string): Promise<boolean> {
+    if (provider === 'mock') return true
+    try {
+      // `provider` arrives as a plain string from the web LlmKeyProbe; the
+      // resolution chain only understands the known union, so narrow here.
+      return !!(await this.resolveApiKey(agentId, provider as ManagedAgentSpec['provider']))
+    } catch {
+      return true
+    }
+  }
+
+  /**
    * v5 A-M3 — find the member who OWNS `agentId` (the `perm='owner'`
    * resource grant with a user principal), or null. Used to scope the
    * per-user "bring your own key" fallback. Read-only; defensively

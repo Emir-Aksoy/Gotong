@@ -57,7 +57,7 @@ import {
   handleWorkflowRoute,
   type WorkflowGrantSink,
 } from './workflow-routes.js'
-import { handleAgentsRoute, type AgentGrantSink } from './agents-routes.js'
+import { handleAgentsRoute, type AgentGrantSink, type LlmKeyProbe } from './agents-routes.js'
 import { handleAdminStewardRoute } from './admin-steward-routes.js'
 import { handleServicesRoute } from './services-routes.js'
 import { handleUploadsRoute } from './uploads-routes.js'
@@ -240,6 +240,12 @@ export interface WebServerOptions {
    * tests).
    */
   lifecycle?: ManagedAgentLifecycle
+  /**
+   * ease-of-use ③-M1 — optional LLM-key probe for the template-import
+   * post-install checklist. The host wires it to LocalAgentPool. Absent →
+   * the "agent X still needs a key" advisories are omitted.
+   */
+  llmKeyProbe?: LlmKeyProbe
   /**
    * v5 D-M4 — optional host callback to reconcile proactive-heartbeat rows
    * after a managed-agent create / edit / delete. The host wires this to its
@@ -1042,6 +1048,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     adminLoginLimiter,
     workerCreateLimiter,
     lifecycle: opts.lifecycle,
+    llmKeyProbe: opts.llmKeyProbe,
     reconcileHeartbeats: opts.reconcileHeartbeats,
     workflows: opts.workflows,
     templatePersonnel: opts.templatePersonnel,
@@ -1185,6 +1192,8 @@ interface HandlerCtx {
   adminLoginLimiter: RateLimiter
   workerCreateLimiter: RateLimiter
   lifecycle: ManagedAgentLifecycle | undefined
+  /** ease-of-use ③-M1 — see WebServerOptions.llmKeyProbe doc above. */
+  llmKeyProbe: LlmKeyProbe | undefined
   /** v5 D-M4 — see WebServerOptions.reconcileHeartbeats doc above. */
   reconcileHeartbeats: (() => Promise<void>) | undefined
   workflows: WorkflowSurface | undefined
@@ -1990,6 +1999,7 @@ async function handle(
         hub: ctx.hub,
         space: ctx.space,
         lifecycle: ctx.lifecycle,
+        llmKeyProbe: ctx.llmKeyProbe,
         reconcileHeartbeats: ctx.reconcileHeartbeats,
         workflows: ctx.workflows,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),

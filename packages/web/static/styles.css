@@ -1594,6 +1594,11 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .tg-card-result { font-size: 0.74rem; color: #666; min-height: 0; }
 .tg-card-result.ok { color: #3a7d4f; }
 .tg-card-result.err { color: #c0392b; }
+.tg-result-summary { margin-bottom: 0.3rem; }
+.tg-checklist { color: #555; }
+.tg-checklist > summary { cursor: pointer; font-weight: 600; color: #b5651d; }
+.tg-checklist ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
+.tg-checklist li { margin: 0.15rem 0; line-height: 1.35; }
 .wf-runs-body { padding: 0.6rem 1rem 1rem; }
 .wf-runs-cols {
   display: grid;
