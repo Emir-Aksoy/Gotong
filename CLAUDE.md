@@ -584,6 +584,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 想知道什么 | 读哪 |
 |---|---|
 | 5 分钟总览 | `docs/zh/OVERVIEW.md` |
+| 产品定位 — 赛道地图 + 产品级矩阵 (`COMPETITIVE-LANDSCAPE.md` 四支柱赛道地图「谁占哪根」 ↔ `PRODUCT-MATRIX.md` 产品级优势/劣势矩阵各一张 + 「最适合哪类有需求但今天没被满足的用户」+ DeepSeek 降价如何解锁那个格子; 前者赛道,后者目标用户判断,互为配套) | `docs/zh/COMPETITIVE-LANDSCAPE.md` · `docs/zh/PRODUCT-MATRIX.md` |
 | 上手案例 — 5 个开箱即用 hub (3 个人 + 2 组织) 对照表 + 确定性 demo + 真 DeepSeek/Obsidian go-live runbook + 验证锚点分层 | `docs/zh/HANDS-ON-HUBS.md` |
 | 模板画廊一键安装 (admin「工作流」面板模板画廊: 随框架附带 10 个开箱模板卡片 + 一键安装复用 `POST /templates/import`; 构建期生成器嵌入 + catalog 路由过真 parseTemplate 投影 + 一键安装往返验收门; 模版/框架分离不破 — KB 槽位只上报不接线/人员永不还原; 零 core 改) | `docs/zh/TEMPLATE-GALLERY.md` |
 | 只读 DAG 可视化 (admin 工作流「流程图」按钮: `projectWorkflowGraph` 纯函数从 `WorkflowDefinition` 投影 trigger/step/dispatch 成有向图 + host `graphOf` + web 路由 + 手写 SVG 分层渲染; 只读投影不碰「YAML 是治理/版本化的根」; 跟模板画廊同属一轮「呈现/打包」收口) | `docs/zh/WORKFLOW-DAG-VIZ.md` |
