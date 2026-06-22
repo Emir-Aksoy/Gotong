@@ -2053,21 +2053,33 @@ import { createWorkflows } from './workflows.js'
       const kbTodos = Array.isArray(checklist.kbSlotsToWire) ? checklist.kbSlotsToWire : []
       const keyTodos = Array.isArray(checklist.agentsMissingKey) ? checklist.agentsMissingKey : []
       if (card && (kbTodos.length || keyTodos.length)) {
-        const items = []
+        // ⑧ — make each checklist row actionable: render a deep-link button next
+        // to the text so the operator jumps straight to the panel that resolves
+        // it (KB slot → MCP tab; missing key → API-key modal) instead of hunting
+        // for it. The buttons carry data-act + no data-id, so the delegated click
+        // handler dispatches them before its `!id` guard (see goto-mcp/goto-key).
+        const rows = []
         for (const kb of kbTodos) {
-          items.push(
-            kb.useMcpServer
-              ? t.templateGalleryKbSlotTodoRef(kb.name, kb.useMcpServer)
-              : t.templateGalleryKbSlotTodo(kb.name),
+          const text = kb.useMcpServer
+            ? t.templateGalleryKbSlotTodoRef(kb.name, kb.useMcpServer)
+            : t.templateGalleryKbSlotTodo(kb.name)
+          rows.push(
+            `<li>${escapeHtml(text)} ` +
+              `<button type="button" class="tg-todo-fix" data-act="goto-mcp">${escapeHtml(t.templateGalleryTodoGotoMcp)}</button></li>`,
           )
         }
-        for (const a of keyTodos) items.push(t.templateGalleryAgentNoKey(a.id, a.provider))
+        for (const a of keyTodos) {
+          rows.push(
+            `<li>${escapeHtml(t.templateGalleryAgentNoKey(a.id, a.provider))} ` +
+              `<button type="button" class="tg-todo-fix" data-act="goto-key">${escapeHtml(t.templateGalleryTodoGotoKey)}</button></li>`,
+          )
+        }
         card.className = 'tg-card-result ok'
         card.innerHTML =
           `<div class="tg-result-summary">${escapeHtml(summary)}</div>` +
           `<details class="tg-checklist" open>` +
           `<summary>${escapeHtml(t.templateGalleryChecklistTitle)}</summary>` +
-          `<ul>${items.map((it) => `<li>${escapeHtml(it)}</li>`).join('')}</ul>` +
+          `<ul>${rows.join('')}</ul>` +
           `</details>`
       } else {
         setResult(summary, 'ok')
@@ -2472,6 +2484,20 @@ import { createWorkflows } from './workflows.js'
         const reportPath = target.dataset.path
         const when = target.dataset.when || ''
         if (reportPath) openGrowthReport(reportPath, when)
+        return
+      }
+      // ⑧ — post-install checklist deep-links carry no data-id, so dispatch them
+      // before the `!id` guard. Close the gallery modal first (otherwise the
+      // target tab/modal opens behind it), then jump to where the operator fixes
+      // the item: KB slot → MCP integrations tab; missing key → API-key modal.
+      if (act === 'goto-mcp') {
+        closeTemplateGalleryModal()
+        gotoTab('mcp')
+        return
+      }
+      if (act === 'goto-key') {
+        closeTemplateGalleryModal()
+        dom.maKeysBtn?.click()
         return
       }
       const id = target.dataset.id

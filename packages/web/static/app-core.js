@@ -775,6 +775,10 @@
         `知识库槽位「${name}」引用 MCP server「${server}」→ 去「服务 / MCP」面板确认它在线`,
       templateGalleryAgentNoKey: (id, provider) =>
         `agent「${id}」(${provider}) 还没有可用的 API key → 去「agent」面板或首启向导补`,
+      // ⑧ — each checklist row carries a deep-link button to the panel that
+      // resolves it (KB slot → MCP tab; missing key → API-key modal).
+      templateGalleryTodoGotoMcp: '去 MCP 面板 →',
+      templateGalleryTodoGotoKey: '去配密钥 →',
       admTemplateLoadFailedHttp: (s) => `加载内置模板失败:HTTP ${s}`,
       admGrowthBundleLoaded: '已加载个人成长 bundle。粘贴 DeepSeek key 后点"导入"。',
       admTemplateLoadFailedErr: (e) => `加载内置模板失败:${e}`,
@@ -2383,6 +2387,10 @@
         `KB slot "${name}" references MCP server "${server}" → confirm it is online in the Services / MCP panel`,
       templateGalleryAgentNoKey: (id, provider) =>
         `agent "${id}" (${provider}) has no resolvable API key yet → add one in the agents panel or first-run wizard`,
+      // ⑧ — each checklist row carries a deep-link button to the panel that
+      // resolves it (KB slot → MCP tab; missing key → API-key modal).
+      templateGalleryTodoGotoMcp: 'Go to MCP panel →',
+      templateGalleryTodoGotoKey: 'Configure key →',
       admTemplateLoadFailedHttp: (s) => `Failed to load builtin template: HTTP ${s}`,
       admGrowthBundleLoaded:
         'Loaded personal-growth bundle. Paste your DeepSeek key, then click "Import".',

@@ -1705,6 +1705,21 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .tg-checklist > summary { cursor: pointer; font-weight: 600; color: #b5651d; }
 .tg-checklist ul { margin: 0.3rem 0 0; padding-left: 1.1rem; }
 .tg-checklist li { margin: 0.15rem 0; line-height: 1.35; }
+/* ⑧ — inline deep-link button on each checklist row (jump to the fix panel) */
+.tg-todo-fix {
+  display: inline-block;
+  margin-left: 0.2rem;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  white-space: nowrap;
+  color: #fff;
+  background: #b5651d;
+  border: none;
+  border-radius: 0.6rem;
+  cursor: pointer;
+}
+.tg-todo-fix:hover { background: #9a531a; }
 .wf-runs-body { padding: 0.6rem 1rem 1rem; }
 .wf-runs-cols {
   display: grid;

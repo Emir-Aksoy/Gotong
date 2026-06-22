@@ -3448,15 +3448,20 @@
         const kbTodos = Array.isArray(checklist.kbSlotsToWire) ? checklist.kbSlotsToWire : [];
         const keyTodos = Array.isArray(checklist.agentsMissingKey) ? checklist.agentsMissingKey : [];
         if (card && (kbTodos.length || keyTodos.length)) {
-          const items = [];
+          const rows = [];
           for (const kb of kbTodos) {
-            items.push(
-              kb.useMcpServer ? t5.templateGalleryKbSlotTodoRef(kb.name, kb.useMcpServer) : t5.templateGalleryKbSlotTodo(kb.name)
+            const text = kb.useMcpServer ? t5.templateGalleryKbSlotTodoRef(kb.name, kb.useMcpServer) : t5.templateGalleryKbSlotTodo(kb.name);
+            rows.push(
+              `<li>${escapeHtml5(text)} <button type="button" class="tg-todo-fix" data-act="goto-mcp">${escapeHtml5(t5.templateGalleryTodoGotoMcp)}</button></li>`
             );
           }
-          for (const a of keyTodos) items.push(t5.templateGalleryAgentNoKey(a.id, a.provider));
+          for (const a of keyTodos) {
+            rows.push(
+              `<li>${escapeHtml5(t5.templateGalleryAgentNoKey(a.id, a.provider))} <button type="button" class="tg-todo-fix" data-act="goto-key">${escapeHtml5(t5.templateGalleryTodoGotoKey)}</button></li>`
+            );
+          }
           card.className = "tg-card-result ok";
-          card.innerHTML = `<div class="tg-result-summary">${escapeHtml5(summary)}</div><details class="tg-checklist" open><summary>${escapeHtml5(t5.templateGalleryChecklistTitle)}</summary><ul>${items.map((it) => `<li>${escapeHtml5(it)}</li>`).join("")}</ul></details>`;
+          card.innerHTML = `<div class="tg-result-summary">${escapeHtml5(summary)}</div><details class="tg-checklist" open><summary>${escapeHtml5(t5.templateGalleryChecklistTitle)}</summary><ul>${rows.join("")}</ul></details>`;
         } else {
           setResult(summary, "ok");
         }
@@ -3797,6 +3802,16 @@
           const reportPath = target.dataset.path;
           const when = target.dataset.when || "";
           if (reportPath) openGrowthReport(reportPath, when);
+          return;
+        }
+        if (act === "goto-mcp") {
+          closeTemplateGalleryModal();
+          gotoTab("mcp");
+          return;
+        }
+        if (act === "goto-key") {
+          closeTemplateGalleryModal();
+          dom.maKeysBtn?.click();
           return;
         }
         const id = target.dataset.id;
