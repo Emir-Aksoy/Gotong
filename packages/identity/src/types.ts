@@ -543,6 +543,13 @@ export const AUDIT_ACTIONS = {
   INVITE_CREATE_BLOCKED: 'invite_create_blocked',
   // Phase 5 — setup wizard.
   SETUP_OWNER_CREATED: 'setup_owner_created',
+  // Ease-of-use ②-M1 — the first-run wizard's OPTIONAL second step wrote an
+  // org-scope LLM key (vault row kind='llm_provider' ownerKind='org'). One row
+  // per save so operators can answer "was the default model key set during
+  // bootstrap, and for which provider". The secret never appears — metadata
+  // carries only { provider }. Like SETUP_OWNER_CREATED, actorSource is
+  // 'anonymous' (loopback proximity, no session yet).
+  SETUP_OWNER_LLM_KEY: 'setup_owner_llm_key',
   // Phase 5 — vault (A1).
   VAULT_CREATE: 'vault_create',
   VAULT_REVOKE: 'vault_revoke',

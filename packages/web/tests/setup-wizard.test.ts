@@ -23,11 +23,12 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
+import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { Hub, Space } from '@aipehub/core'
-import { openIdentityStore, type IdentityStore } from '@aipehub/identity'
+import { MASTER_KEY_LEN_BYTES, openIdentityStore, type IdentityStore } from '@aipehub/identity'
 
 import { serveWeb, type WebServerHandle } from '../src/server.js'
 
@@ -60,7 +61,10 @@ async function boot(opts: {
   let identity: IdentityStore | undefined
   let ownerUserId: string | null = null
   if (withIdentity) {
-    identity = openIdentityStore({ dbPath: join(tmp, 'identity.sqlite') })
+    // masterKey enables the vault APIs the owner-llm-key route writes through;
+    // owner-password/needs-bootstrap tests don't touch the vault so this is
+    // purely additive for them.
+    identity = openIdentityStore({ dbPath: join(tmp, 'identity.sqlite'), masterKey: randomBytes(MASTER_KEY_LEN_BYTES) })
     const ib = identity.bootstrap({
       adminToken,
       ownerEmail: 'owner@setup.local',
@@ -258,4 +262,192 @@ describe('POST /api/setup/owner-password', () => {
   // verify by inspection (server.ts directly compares socket address
   // against the three loopback literals), and forging x-forwarded-for
   // can't fool it because the gate ignores trustProxy entirely.
+})
+
+// Ease-of-use ②-M1 — the OPTIONAL second wizard step writes an org-scope LLM
+// key so the owner's first managed agent has a key to resolve. Same loopback +
+// single-user gates as owner-password; repeatable (overwrites the prior org
+// row for the same provider tag).
+describe('POST /api/setup/owner-llm-key', () => {
+  async function postKey(baseUrl: string, body: unknown): Promise<Response> {
+    return fetch(`${baseUrl}/api/setup/owner-llm-key`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+    })
+  }
+
+  it('DeepSeek preset — writes org vault row tagged openai-compatible + baseURL, audit row', async () => {
+    const b = await boot()
+    try {
+      const r = await postKey(b.baseUrl, {
+        provider: 'openai-compatible',
+        apiKey: 'sk-deepseek-secret-key',
+        baseURL: 'https://api.deepseek.com/v1',
+        label: 'DeepSeek',
+      })
+      expect(r.status).toBe(200)
+      expect(await r.json()).toEqual({ ok: true, provider: 'openai-compatible' })
+
+      // Exactly one active org LLM key row, tagged correctly.
+      const rows = b.identity!.listVaultEntries!({
+        kind: 'llm_provider',
+        ownerKind: 'org',
+        activeOnly: true,
+      })
+      expect(rows.length).toBe(1)
+      expect(rows[0]!.metadata?.provider).toBe('openai-compatible')
+      expect(rows[0]!.metadata?.baseURL).toBe('https://api.deepseek.com/v1')
+      expect(rows[0]!.metadata?.registeredBy).toBe('setup-wizard')
+
+      // The secret round-trips through the vault (never returned by list).
+      if (typeof b.identity!.readVaultSecret === 'function') {
+        expect(b.identity!.readVaultSecret(rows[0]!.id)).toBe('sk-deepseek-secret-key')
+      }
+
+      // Audit row written, pinned to the owner, secret-free.
+      const audit = b.identity!.listAuditLog!({ action: 'setup_owner_llm_key' })
+      expect(audit.length).toBe(1)
+      expect(audit[0]!.targetUserId).toBe(b.ownerUserId)
+      expect(audit[0]!.actorSource).toBe('anonymous')
+      expect(audit[0]!.metadata?.provider).toBe('openai-compatible')
+    } finally { await teardown(b) }
+  })
+
+  it('Anthropic preset — writes row tagged anthropic, no baseURL', async () => {
+    const b = await boot()
+    try {
+      const r = await postKey(b.baseUrl, { provider: 'anthropic', apiKey: 'sk-ant-secret' })
+      expect(r.status).toBe(200)
+      const rows = b.identity!.listVaultEntries!({ kind: 'llm_provider', ownerKind: 'org', activeOnly: true })
+      expect(rows.length).toBe(1)
+      expect(rows[0]!.metadata?.provider).toBe('anthropic')
+      expect(rows[0]!.metadata?.baseURL).toBeUndefined()
+    } finally { await teardown(b) }
+  })
+
+  it('re-submitting same provider revokes the prior row (overwrite hygiene)', async () => {
+    const b = await boot()
+    try {
+      await postKey(b.baseUrl, { provider: 'openai-compatible', apiKey: 'first-key', baseURL: 'https://api.deepseek.com/v1' })
+      await postKey(b.baseUrl, { provider: 'openai-compatible', apiKey: 'second-key', baseURL: 'https://api.deepseek.com/v1' })
+
+      // Only the newest active row remains for that provider tag…
+      const active = b.identity!.listVaultEntries!({ kind: 'llm_provider', ownerKind: 'org', activeOnly: true })
+      expect(active.length).toBe(1)
+      // …but the revoked one is still on the books (activeOnly: false).
+      const all = b.identity!.listVaultEntries!({ kind: 'llm_provider', ownerKind: 'org', activeOnly: false })
+      expect(all.length).toBe(2)
+    } finally { await teardown(b) }
+  })
+
+  it('identity unwired → 503', async () => {
+    const b = await boot({ withIdentity: false })
+    try {
+      const r = await postKey(b.baseUrl, { provider: 'anthropic', apiKey: 'sk-ant-x' })
+      expect(r.status).toBe(503)
+    } finally { await teardown(b) }
+  })
+
+  it('multi-user host → 409', async () => {
+    const b = await boot({ preCreateExtraUser: true })
+    try {
+      const r = await postKey(b.baseUrl, { provider: 'anthropic', apiKey: 'sk-ant-x' })
+      expect(r.status).toBe(409)
+      expect((await r.json()).error).toMatch(/multi-user/)
+      // No org LLM key was written.
+      const rows = b.identity!.listVaultEntries!({ kind: 'llm_provider', ownerKind: 'org', activeOnly: true })
+      expect(rows.length).toBe(0)
+    } finally { await teardown(b) }
+  })
+
+  it('unsupported provider (raw "deepseek") → 400', async () => {
+    // The frontend maps the "deepseek" choice to the openai-compatible tag;
+    // a raw "deepseek" reaching the route is not in the allowlist.
+    const b = await boot()
+    try {
+      const r = await postKey(b.baseUrl, { provider: 'deepseek', apiKey: 'sk-x' })
+      expect(r.status).toBe(400)
+      expect((await r.json()).error).toMatch(/unsupported provider/)
+    } finally { await teardown(b) }
+  })
+
+  it('empty apiKey → 400', async () => {
+    const b = await boot()
+    try {
+      const r = await postKey(b.baseUrl, { provider: 'anthropic', apiKey: '   ' })
+      expect(r.status).toBe(400)
+      expect((await r.json()).error).toMatch(/apiKey is required/)
+    } finally { await teardown(b) }
+  })
+
+  it('garbage body → 400', async () => {
+    const b = await boot()
+    try {
+      const r = await postKey(b.baseUrl, '{not json')
+      expect(r.status).toBe(400)
+    } finally { await teardown(b) }
+  })
+})
+
+// Ease-of-use ①-M1 followup — the friendly first-run banner the host prints
+// tells a fresh user to "open / to finish setup (no token needed)". For that
+// to be true the web ROOT must surface the setup wizard (which lives in
+// app.html) during the loopback bootstrap window — otherwise anonymous lands
+// on worker.html and the banner is a dead end. These assert the `/` handler
+// serves the SPA shell (id="setup-wizard") exactly when bootstrap is pending
+// and the request is loopback, and reverts to worker.html otherwise.
+//
+// The boot() server binds to 127.0.0.1, so the test's own fetch IS loopback —
+// the same property the owner-password / owner-llm-key happy paths rely on.
+describe('GET / (root) during first-run bootstrap', () => {
+  // app.html (the unified SPA, which renders the wizard) carries the static
+  // id="setup-wizard"; worker.html (the v3 join page) carries the
+  // switch-to-admin button and never the wizard id.
+  const isAppShell = (html: string) => html.includes('id="setup-wizard"')
+  const isWorkerShell = (html: string) => html.includes('switch-to-admin-btn')
+
+  it('bootstrap pending + loopback → serves the SPA so the wizard surfaces', async () => {
+    const b = await boot()
+    try {
+      const r = await fetch(`${b.baseUrl}/`)
+      expect(r.status).toBe(200)
+      const html = await r.text()
+      expect(isAppShell(html)).toBe(true)
+      expect(isWorkerShell(html)).toBe(false)
+    } finally { await teardown(b) }
+  })
+
+  it('owner already has a password → reverts to worker.html', async () => {
+    const b = await boot({ preSetPassword: true })
+    try {
+      const r = await fetch(`${b.baseUrl}/`)
+      expect(r.status).toBe(200)
+      const html = await r.text()
+      expect(isWorkerShell(html)).toBe(true)
+      expect(isAppShell(html)).toBe(false)
+    } finally { await teardown(b) }
+  })
+
+  it('identity unwired → worker.html (no bootstrap window at all)', async () => {
+    const b = await boot({ withIdentity: false })
+    try {
+      const r = await fetch(`${b.baseUrl}/`)
+      expect(r.status).toBe(200)
+      const html = await r.text()
+      expect(isWorkerShell(html)).toBe(true)
+      expect(isAppShell(html)).toBe(false)
+    } finally { await teardown(b) }
+  })
+
+  it('multi-user host → worker.html (setup already done)', async () => {
+    const b = await boot({ preCreateExtraUser: true })
+    try {
+      const r = await fetch(`${b.baseUrl}/`)
+      expect(r.status).toBe(200)
+      const html = await r.text()
+      expect(isWorkerShell(html)).toBe(true)
+      expect(isAppShell(html)).toBe(false)
+    } finally { await teardown(b) }
+  })
 })

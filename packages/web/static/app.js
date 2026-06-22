@@ -157,9 +157,82 @@
         }
         status.className = 'login-status ok'
         status.textContent = t('meSetupDone')
-        // Swap to the login form so the operator can sign in with the
-        // newly-set password. Reload picks up an empty cookie state (no
-        // session yet) and renders the login shell.
+        // ease-of-use ②-M1 — instead of reloading straight to login,
+        // advance to the optional LLM-key step. The owner can set a key
+        // (so their first agent has one) or skip to the login screen.
+        revealKeyStep(form)
+      } catch (err) {
+        status.className = 'login-status error'
+        status.textContent = t('meSetupFailedErr', err?.message || err)
+      }
+    })
+  }
+
+  // ease-of-use ②-M1 — first-run LLM key step (the second wizard panel).
+  //
+  // The select's value is a friendly provider name; we map it to the
+  // (provider tag, baseURL) the host's key resolver expects. DeepSeek uses
+  // the `openai-compatible` umbrella tag + its OpenAI-compatible /v1 base —
+  // a managed DeepSeek agent (provider: openai-compatible) then resolves
+  // this org key via the org-pool tier.
+  const SETUP_KEY_PRESETS = {
+    deepseek: { provider: 'openai-compatible', baseURL: 'https://api.deepseek.com/v1', label: 'DeepSeek' },
+    anthropic: { provider: 'anthropic', label: 'Anthropic' },
+    openai: { provider: 'openai', label: 'OpenAI' },
+  }
+
+  function revealKeyStep(pwForm) {
+    const keyForm = document.getElementById('setup-key-form')
+    if (!keyForm) { window.location.reload(); return }
+    // Hide the (now-done) password form, reveal the key step.
+    if (pwForm) pwForm.hidden = true
+    keyForm.hidden = false
+    attachKeyForm(keyForm)
+    const apiKey = keyForm.querySelector('input[name="apiKey"]')
+    if (apiKey) apiKey.focus()
+  }
+
+  function attachKeyForm(keyForm) {
+    if (keyForm.dataset.bound === '1') return
+    keyForm.dataset.bound = '1'
+    const status = document.getElementById('setup-key-status')
+    const skipBtn = document.getElementById('setup-key-skip')
+    // Skip → straight to the login screen (empty cookie state).
+    if (skipBtn) {
+      skipBtn.addEventListener('click', () => { window.location.reload() })
+    }
+    keyForm.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const fd = new FormData(keyForm)
+      const choice = String(fd.get('provider') || 'deepseek')
+      const apiKey = String(fd.get('apiKey') || '').trim()
+      const preset = SETUP_KEY_PRESETS[choice] || SETUP_KEY_PRESETS.deepseek
+      if (!apiKey) {
+        status.className = 'login-status error'
+        status.textContent = t('setupKeyNeed')
+        return
+      }
+      status.className = 'login-status'
+      status.textContent = t('setupKeySaving')
+      try {
+        const r = await fetch('/api/setup/owner-llm-key', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            provider: preset.provider,
+            apiKey,
+            ...(preset.baseURL ? { baseURL: preset.baseURL } : {}),
+            label: preset.label,
+          }),
+        })
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}))
+          status.className = 'login-status error'
+          status.textContent = j?.error || t('meSetupFailedHttp', r.status)
+          return
+        }
+        status.className = 'login-status ok'
+        status.textContent = t('setupKeySaved')
         setTimeout(() => { window.location.reload() }, 700)
       } catch (err) {
         status.className = 'login-status error'

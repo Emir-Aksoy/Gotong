@@ -3,8 +3,8 @@
  *
  * Extracted from server.ts in the P3 audit cleanup (batch 3).
  *
- * Two routes that exist solely to handle the "host has booted, the
- * owner row exists, but nobody has set a password yet" window:
+ * Routes that exist solely to handle the "host has booted, the owner
+ * row exists, but the owner hasn't finished setup yet" window:
  *
  *   GET /api/setup/needs-bootstrap
  *     Anonymous. Returns `{bootstrap: boolean}` so the unified SPA
@@ -18,11 +18,21 @@
  *     credential. On success: sets the password + writes
  *     `setup_owner_created` audit row + returns `{ok: true}`.
  *
+ *   POST /api/setup/owner-llm-key   (ease-of-use ②-M1)
+ *     LOOPBACK ONLY. Body: `{provider, apiKey, baseURL?, label?}`.
+ *     The OPTIONAL second wizard step — writes an org-scope LLM key
+ *     (vault row `kind='llm_provider' ownerKind='org'`) so the very
+ *     first managed agent the owner creates has a key to resolve.
+ *     Gated single-user (the personal-mode bootstrap window) so it
+ *     never becomes a key-write surface on a multi-user/team host;
+ *     those go through the admin credential UI. Repeatable (overwrites
+ *     the prior org row for the same provider tag).
+ *
  * Loopback-only matches the mint-admin-token CLI trust model —
  * anyone who can `ssh` to the host can already mint a token, so
- * letting them set the owner's first password from a browser on
- * localhost adds no new surface. Hosts behind a reverse proxy must
- * finish setup via `aipehub-host mint-admin-token` instead.
+ * letting them finish setup from a browser on localhost adds no new
+ * surface. Hosts behind a reverse proxy must finish setup via
+ * `aipehub-host mint-admin-token` instead.
  */
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
@@ -34,6 +44,65 @@ import type { IdentitySurface } from './identity-routes.js'
 export interface SetupRoutesCtx {
   identity?: IdentitySurface
 }
+
+// -- helpers --------------------------------------------------------------
+
+/**
+ * Loopback check from `socket.remoteAddress` directly — we do NOT honour
+ * x-forwarded-for, even when trustProxy is on. A reverse proxy in front
+ * means setup MUST go through the CLI; we'd rather refuse than let a
+ * misconfigured edge expose the setup writes to the public.
+ *
+ * Exported so the `/` root-path handler can reuse the SAME loopback trust
+ * model when deciding whether to surface the setup wizard at the web root
+ * during the first-run bootstrap window (ease-of-use ①-M1 followup).
+ */
+export function isLoopbackReq(req: IncomingMessage): boolean {
+  const a = req.socket?.remoteAddress ?? ''
+  return a === '127.0.0.1' || a === '::1' || a === '::ffff:127.0.0.1'
+}
+
+/**
+ * The "first-run bootstrap is still pending" predicate, shared between the
+ * `/api/setup/needs-bootstrap` flag route and the `/` root handler (the
+ * latter serves the unified SPA — so the wizard surfaces — instead of
+ * worker.html while this is true and the request is loopback).
+ *
+ * True iff: identity is wired AND there is exactly one user (the owner the
+ * host bootstrapped) AND that owner has no password credential yet. Any
+ * other shape (no identity, multi-user/team host, owner already has a
+ * password) means setup is done → false. Single source of truth so the
+ * flag the SPA reads and the routing decision can never drift apart.
+ */
+export function isBootstrapPending(identity: IdentitySurface | undefined): boolean {
+  if (!identity) return false
+  const users = identity.listUsers()
+  if (users.length !== 1) return false
+  const owner = users[0]!
+  const creds = identity.listCredentials(owner.id)
+  return !creds.some((c) => c.kind === 'password')
+}
+
+/** Provider tag of a vault row from `metadata.provider`, defensively. */
+function vaultProviderTag(meta: Record<string, unknown> | null | undefined): string | null {
+  if (!meta || typeof meta !== 'object') return null
+  const p = (meta as Record<string, unknown>).provider
+  return typeof p === 'string' ? p : null
+}
+
+/**
+ * Providers the first-run wizard may write. Kept small on purpose — these are
+ * the three the host's `selectLlmApiKey` resolves an ORG vault row for:
+ *   - `openai-compatible` — the umbrella tag a managed DeepSeek agent uses
+ *     (`provider: openai-compatible` + `baseURL: https://api.deepseek.com/v1`).
+ *     The org-pool tier IS consulted for this tag (only workspace/env are
+ *     skipped), so a row tagged here resolves for those agents.
+ *   - `anthropic` / `openai` — direct vendor tags.
+ * The umbrella tag is intentionally ambiguous (Qwen/Zhipu also use
+ * openai-compatible); for a single-owner first-run wizard that's acceptable —
+ * the owner is configuring their own hub's default key.
+ */
+const SETUP_LLM_PROVIDERS = new Set(['openai-compatible', 'anthropic', 'openai'])
 
 // -- route handler --------------------------------------------------------
 
@@ -49,13 +118,7 @@ export async function handleSetupRoute(
   path: string,
 ): Promise<boolean> {
   if (path === '/api/setup/needs-bootstrap' && method === 'GET') {
-    if (!ctx.identity) { sendJson(res, { bootstrap: false }); return true }
-    const users = ctx.identity.listUsers()
-    if (users.length !== 1) { sendJson(res, { bootstrap: false }); return true }
-    const owner = users[0]!
-    const creds = ctx.identity.listCredentials(owner.id)
-    const hasPwd = creds.some((c) => c.kind === 'password')
-    sendJson(res, { bootstrap: !hasPwd })
+    sendJson(res, { bootstrap: isBootstrapPending(ctx.identity) })
     return true
   }
 
@@ -64,17 +127,8 @@ export async function handleSetupRoute(
       sendJson(res, { error: 'v4 identity store not enabled on this host' }, 503)
       return true
     }
-    // Loopback check uses socket.remoteAddress directly — we do NOT
-    // honour x-forwarded-for here, even when trustProxy is on. A
-    // reverse proxy sitting in front means setup MUST go through the
-    // CLI; we'd rather refuse than let a misconfigured edge expose
-    // the password-set route to the public.
     const sockAddr = req.socket?.remoteAddress ?? ''
-    const isLoop =
-      sockAddr === '127.0.0.1' ||
-      sockAddr === '::1' ||
-      sockAddr === '::ffff:127.0.0.1'
-    if (!isLoop) {
+    if (!isLoopbackReq(req)) {
       sendJson(
         res,
         { error: 'setup-owner-password is loopback-only; use `aipehub-host mint-admin-token` from a remote shell' },
@@ -128,6 +182,108 @@ export async function handleSetupRoute(
       } catch { /* audit failure is non-fatal */ }
     }
     sendJson(res, { ok: true })
+    return true
+  }
+
+  // ease-of-use ②-M1 — optional first-run LLM key step. Mirrors the
+  // owner-password gates (loopback + single-user) and writes the org vault
+  // row the host's OrgApiPool reads. Repeatable: re-running the wizard (or
+  // re-submitting) overwrites the prior org row for the same provider tag.
+  if (path === '/api/setup/owner-llm-key' && method === 'POST') {
+    const id = ctx.identity
+    // Needs the vault write APIs. A pre-vault IdentityStore (or a test stub)
+    // lacks them → 503, same shape as the no-identity case.
+    if (
+      !id ||
+      typeof id.createVaultEntry !== 'function' ||
+      typeof id.listVaultEntries !== 'function'
+    ) {
+      sendJson(res, { error: 'v4 identity vault not enabled on this host' }, 503)
+      return true
+    }
+    const sockAddr = req.socket?.remoteAddress ?? ''
+    if (!isLoopbackReq(req)) {
+      sendJson(
+        res,
+        { error: 'setup-owner-llm-key is loopback-only; configure keys via the admin credential UI on a remote host' },
+        403,
+      )
+      return true
+    }
+    // Single-user gate: this is the personal-mode bootstrap window. On a
+    // multi-user/team host setup is already done — operators add org keys
+    // through the authenticated admin UI, not this anonymous loopback route.
+    const users = id.listUsers()
+    if (users.length !== 1) {
+      sendJson(res, { error: 'setup already complete (multi-user host)' }, 409)
+      return true
+    }
+    const owner = users[0]!
+    let body: unknown
+    try { body = await readJsonBody(req) }
+    catch { sendJson(res, { error: 'invalid JSON body' }, 400); return true }
+    const b = (body ?? {}) as {
+      provider?: unknown
+      apiKey?: unknown
+      baseURL?: unknown
+      label?: unknown
+    }
+    const provider = typeof b.provider === 'string' ? b.provider : ''
+    const apiKey = typeof b.apiKey === 'string' ? b.apiKey.trim() : ''
+    const baseURL = typeof b.baseURL === 'string' && b.baseURL.trim() ? b.baseURL.trim() : undefined
+    const label = typeof b.label === 'string' && b.label.trim() ? b.label.trim() : null
+    if (!SETUP_LLM_PROVIDERS.has(provider)) {
+      sendJson(res, { error: `unsupported provider (allowed: ${[...SETUP_LLM_PROVIDERS].join(', ')})` }, 400)
+      return true
+    }
+    if (apiKey.length === 0) {
+      sendJson(res, { error: 'apiKey is required' }, 400)
+      return true
+    }
+    // Overwrite hygiene: revoke prior active org rows carrying the same
+    // provider tag so the vault doesn't accumulate stale wizard keys.
+    // Not required for correctness (resolveLlmKey already picks the newest
+    // active row) — just keeps re-runs clean. Best-effort.
+    try {
+      const prior = id
+        .listVaultEntries({ kind: 'llm_provider', ownerKind: 'org', activeOnly: true })
+        .filter((e) => vaultProviderTag(e.metadata) === provider)
+      if (typeof id.revokeVaultEntry === 'function') {
+        for (const e of prior) id.revokeVaultEntry(e.id)
+      }
+    } catch { /* overwrite cleanup is best-effort */ }
+    try {
+      id.createVaultEntry({
+        kind: 'llm_provider',
+        ownerKind: 'org',
+        ownerId: null,
+        secret: apiKey,
+        label,
+        // Non-secret context only. `provider` is the resolution tag; `baseURL`
+        // is informational for the admin UI (the agent's own YAML carries the
+        // real baseURL used at call time).
+        metadata: { provider, ...(baseURL ? { baseURL } : {}), registeredBy: 'setup-wizard' },
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      sendJson(res, { error: `vault write failed: ${msg}` }, 400)
+      return true
+    }
+    // Audit row uses actor_source='anonymous' (loopback proximity, no session),
+    // pinned to the owner. The secret never appears — only the provider tag.
+    if (typeof id.writeAuditLog === 'function') {
+      try {
+        id.writeAuditLog({
+          action: 'setup_owner_llm_key',
+          actorSource: 'anonymous',
+          targetUserId: owner.id,
+          ip: sockAddr,
+          metadata: { provider },
+          success: true,
+        })
+      } catch { /* audit failure is non-fatal */ }
+    }
+    sendJson(res, { ok: true, provider })
     return true
   }
 

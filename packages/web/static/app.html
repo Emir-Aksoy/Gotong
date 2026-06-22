@@ -69,9 +69,35 @@
           </label>
           <div class="login-row">
             <button type="submit" data-i18n="setupSubmit">设置密码</button>
-            <span class="login-meta" data-i18n="setupSubmitMeta">完成后页面自动跳到登录。</span>
+            <span class="login-meta" data-i18n="setupSubmitMeta">完成后进入下一步,配置 AI 模型 Key。</span>
           </div>
           <div id="setup-status" class="login-status"></div>
+        </form>
+
+        <!-- ease-of-use ②-M1 — optional second step. Revealed by app.js after
+             the password is set. Writes an org-scope LLM key (loopback-only
+             POST /api/setup/owner-llm-key) so the owner's first agent has a key
+             to resolve. "Skip" reloads straight to the login screen. -->
+        <form id="setup-key-form" hidden>
+          <h2 data-i18n="setupKeyTitle">第二步 (可选) — 配置 AI 模型 Key</h2>
+          <p class="login-meta" data-i18n="setupKeyIntro">
+            填一个模型 Key,你创建的第一个智能体就能直接跑。Key 只存在本机的加密保险库,绝不外传。也可以跳过,以后在「凭证」里再配。
+          </p>
+          <label><span data-i18n="setupKeyProvider">模型提供方</span>
+            <select name="provider">
+              <option value="deepseek" data-i18n="setupKeyProviderDeepseek">DeepSeek (推荐 · 性价比高)</option>
+              <option value="anthropic" data-i18n="setupKeyProviderAnthropic">Anthropic (Claude)</option>
+              <option value="openai" data-i18n="setupKeyProviderOpenai">OpenAI</option>
+            </select>
+          </label>
+          <label><span data-i18n="setupKeyInput">API Key</span>
+            <input name="apiKey" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="setupKeyPlaceholder" placeholder="粘贴你的 API Key" />
+          </label>
+          <div class="login-row">
+            <button type="submit" data-i18n="setupKeySubmit">保存并完成</button>
+            <button type="button" id="setup-key-skip" class="ghost" data-i18n="setupKeySkip">跳过,以后再配</button>
+          </div>
+          <div id="setup-key-status" class="login-status"></div>
         </form>
       </div>
     </section>

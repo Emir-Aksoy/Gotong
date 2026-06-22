@@ -61,7 +61,7 @@ import { handleAgentsRoute, type AgentGrantSink } from './agents-routes.js'
 import { handleAdminStewardRoute } from './admin-steward-routes.js'
 import { handleServicesRoute } from './services-routes.js'
 import { handleUploadsRoute } from './uploads-routes.js'
-import { handleSetupRoute } from './setup-routes.js'
+import { handleSetupRoute, isBootstrapPending, isLoopbackReq } from './setup-routes.js'
 import { handleAdminRoute } from './admin-routes.js'
 import {
   handleMcpRoute,
@@ -2489,6 +2489,21 @@ async function handle(
       const hasV4 = ctx.identity && readCookie(req, IDENTITY_COOKIE)
       const hasV3 = readCookie(req, ADMIN_COOKIE)
       if (hasV4 || hasV3) {
+        await serveAppHtml(ctx, req, res)
+        return
+      }
+      // ease-of-use ①-M1 followup — during the loopback first-run bootstrap
+      // window (identity wired, single owner, no password yet) serve the
+      // unified SPA so the setup wizard surfaces at the web ROOT. Without
+      // this, a fresh anonymous browser lands on worker.html and never sees
+      // the wizard, making the host's friendly first-run banner ("open / to
+      // finish setup — no token needed") a dead end. The wizard's writes
+      // (owner-password / owner-llm-key) are themselves loopback-only, so we
+      // gate the same way: a remote visitor still gets worker.html. Reverts
+      // automatically once the owner sets a password (isBootstrapPending →
+      // false). Every API call stays server-gated — this only changes which
+      // static shell anonymous loopback gets during a single setup window.
+      if (isLoopbackReq(req) && isBootstrapPending(ctx.identity)) {
         await serveAppHtml(ctx, req, res)
         return
       }

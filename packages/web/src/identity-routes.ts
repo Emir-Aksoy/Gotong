@@ -436,6 +436,35 @@ export interface IdentitySurface {
   // missing so legacy behaviour is preserved.
   getOrgMode?(): 'personal' | 'team'
   setOrgMode?(mode: 'personal' | 'team'): void
+  // Ease-of-use ②-M1 — org-scope LLM key vault writes for the first-run
+  // wizard's optional key step (setup-routes `/api/setup/owner-llm-key`).
+  // Optional like the audit/peer methods above: a pre-vault IdentityStore
+  // lacks them and the route 503s. The real IdentityStore satisfies these
+  // structurally — same narrow shapes host's steward-sensitive executor
+  // duck-types. The return is the structural subset the wizard reads (the
+  // real store returns a wider VaultEntry, which is assignable).
+  createVaultEntry?(input: {
+    kind: 'llm_provider'
+    ownerKind: 'org'
+    ownerId: null
+    secret: string
+    label?: string | null
+    metadata?: Record<string, unknown> | null
+  }): VaultEntryLike
+  listVaultEntries?(query: {
+    kind?: 'llm_provider'
+    ownerKind?: 'org'
+    ownerId?: string | null
+    activeOnly?: boolean
+  }): VaultEntryLike[]
+  revokeVaultEntry?(id: string): boolean
+}
+
+/** The vault-row fields the setup wizard reads — a structural subset of the
+ *  identity store's `VaultEntry`, so web needn't import @aipehub/identity. */
+export interface VaultEntryLike {
+  id: string
+  metadata: Record<string, unknown> | null
 }
 
 // ---------------------------------------------------------------------------
