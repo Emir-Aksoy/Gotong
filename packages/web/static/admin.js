@@ -2700,6 +2700,102 @@
         console.warn("refreshGrowthReports:", err);
       }
     }
+    const START_HERE_DISMISS_KEY = "aipe_start_here_dismissed";
+    let startHereSettled = false;
+    function startHereDismissed() {
+      try {
+        return localStorage.getItem(START_HERE_DISMISS_KEY) === "1";
+      } catch {
+        return false;
+      }
+    }
+    async function renderStartHere() {
+      const host = document.getElementById("start-here");
+      if (!host) return;
+      if (startHereSettled) return;
+      if (startHereDismissed()) {
+        host.hidden = true;
+        startHereSettled = true;
+        return;
+      }
+      let managedCount = 0;
+      let workflowCount = 0;
+      try {
+        const agentsResp = await fetchJson4("/api/admin/agents");
+        managedCount = (agentsResp?.agents || []).filter((a) => !!a.managed).length;
+      } catch {
+        host.hidden = true;
+        return;
+      }
+      try {
+        const r = await fetch("/api/admin/workflows");
+        if (r.ok) {
+          const body = await r.json();
+          workflowCount = (body?.workflows || []).length;
+        }
+      } catch {
+      }
+      if (managedCount > 0 || workflowCount > 0) {
+        host.hidden = true;
+        startHereSettled = true;
+        return;
+      }
+      let hasModelKey = false;
+      try {
+        const s = await fetchJson4("/api/admin/secrets");
+        hasModelKey = Object.keys(s?.providers || {}).length > 0 || Object.values(s?.env || {}).some(Boolean);
+      } catch {
+      }
+      const step3 = hasModelKey ? `<span class="sh-done">${escapeHtml5(t5.startHereKeyDone)}</span>` : `<button type="button" class="sh-btn sh-btn-secondary" data-sh="key">${escapeHtml5(t5.startHereStep3Btn)}</button>`;
+      host.innerHTML = `
+      <div class="sh-head">
+        <h2 class="sh-title">${escapeHtml5(t5.startHereTitle)}</h2>
+        <button type="button" class="sh-dismiss" data-sh="dismiss">${escapeHtml5(t5.startHereDismiss)}</button>
+      </div>
+      <p class="sh-intro">${escapeHtml5(t5.startHereIntro)}</p>
+      <div class="sh-steps">
+        <div class="sh-step sh-step-primary">
+          <h3>${escapeHtml5(t5.startHereStep1Title)}</h3>
+          <p>${escapeHtml5(t5.startHereStep1Desc)}</p>
+          <button type="button" class="sh-btn sh-btn-primary" data-sh="assistant">${escapeHtml5(t5.startHereStep1Btn)}</button>
+        </div>
+        <div class="sh-step">
+          <h3>${escapeHtml5(t5.startHereStep2Title)}</h3>
+          <p>${escapeHtml5(t5.startHereStep2Desc)}</p>
+          <button type="button" class="sh-btn sh-btn-secondary" data-sh="template">${escapeHtml5(t5.startHereStep2Btn)}</button>
+        </div>
+        <div class="sh-step">
+          <h3>${escapeHtml5(t5.startHereStep3Title)}</h3>
+          <p>${escapeHtml5(t5.startHereStep3Desc)}</p>
+          ${step3}
+        </div>
+      </div>`;
+      host.hidden = false;
+    }
+    function onStartHereClick(e) {
+      const btn = e.target instanceof HTMLElement ? e.target.closest("[data-sh]") : null;
+      if (!btn) return;
+      const action = btn.dataset.sh;
+      if (action === "assistant") {
+        managedAgents.openAgentForm("create");
+        if (dom.maId) dom.maId.value = "assistant";
+        if (dom.maDisplayName) dom.maDisplayName.value = t5.startHereAssistantName;
+        if (dom.maCaps) dom.maCaps.value = "chat";
+        if (dom.maSystem) dom.maSystem.value = t5.startHereAssistantSystem;
+        dom.maDisplayName?.focus();
+      } else if (action === "template") {
+        dom.templateGalleryBtn?.click();
+      } else if (action === "key") {
+        dom.maKeysBtn?.click();
+      } else if (action === "dismiss") {
+        try {
+          localStorage.setItem(START_HERE_DISMISS_KEY, "1");
+        } catch {
+        }
+        renderStartHere().catch(() => {
+        });
+      }
+    }
     function renderGrowthReports(reports) {
       if (!dom.grTbody) return;
       if (dom.grSummary) {
@@ -3510,6 +3606,8 @@
         if (e.detail?.name === "workflows") refreshGrowthReports().catch(() => {
         });
         if (e.detail?.name === "mcp") mcp.refreshMcp().catch((err) => console.warn("mcp refresh failed:", err));
+        if (e.detail?.name === "overview") renderStartHere().catch(() => {
+        });
       });
       dom.dStrategy.addEventListener("change", updateDispatchVisibility);
       dom.dispatchForm.addEventListener("submit", submitDispatch);
@@ -3777,6 +3875,9 @@
       managedAgents.refreshManagedAgents().catch((err) => console.warn("initial agents refresh:", err));
       workflows.refreshWorkflows().catch((err) => console.warn("initial workflows refresh:", err));
       refreshGrowthReports().catch((err) => console.warn("initial growth-reports refresh:", err));
+      renderStartHere().catch(() => {
+      });
+      document.getElementById("start-here")?.addEventListener("click", onStartHereClick);
       if (dom.grRefreshBtn) {
         dom.grRefreshBtn.addEventListener("click", () => {
           refreshGrowthReports().catch((err) => console.warn("manual growth-reports refresh:", err));
@@ -3837,6 +3938,8 @@
       onLangChange(() => {
         applyStaticI18n();
         renderAll();
+        renderStartHere().catch(() => {
+        });
       });
       const switchToWorkerBtn = document.getElementById("switch-to-worker-btn");
       if (switchToWorkerBtn) {

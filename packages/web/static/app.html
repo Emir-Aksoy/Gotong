@@ -387,6 +387,13 @@
          settings sections live OUTSIDE <main> above so member/viewer
          get a coherent surface even when the admin shell is hidden. -->
     <main id="main-grid" class="admin-grid" data-roles="owner,admin" hidden>
+      <!-- ease-of-use ⑦-M1 — first-run "start here" coaching card. Shown ONLY on a
+           fresh hub (no managed agents AND no workflows) and until dismissed; filled
+           by admin.js (renderStartHere). Its CTAs OPEN THE SAME modals the Agents /
+           Workflows tabs use (create-agent form, template gallery, keys modal) — adds
+           NO new capability/route. Pure launcher-layer nudge; zero host change. -->
+      <section id="start-here" class="start-here" data-tab="overview" hidden></section>
+
       <!-- SW-M9 A-M8 — the OPERATOR-console hub steward ("站点管家"). The
            site-wide twin of the member steward (which sits atop the "我的" home
            tab). Owner/admin only (gated by main[data-roles] above) + the

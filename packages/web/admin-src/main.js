@@ -1054,6 +1054,120 @@ import { createWorkflows } from './workflows.js'
     }
   }
 
+  // ease-of-use ⑦-M1 — first-run "start here" coaching card (overview tab).
+  //
+  // Shown ONLY on a FRESH hub — no managed agents AND no workflows — and until
+  // the operator dismisses it (localStorage). Its three CTAs OPEN THE SAME
+  // modals the Agents / Workflows tabs already expose (the prefilled create-
+  // agent form, the template gallery, the keys modal), so the card adds NO new
+  // capability or route — pure launcher-layer nudge. The primary CTA opens the
+  // REAL create-agent form (prefilled) rather than blind-POSTing a guessed
+  // provider: openAgentForm('create') runs syncProviderSelect() which already
+  // defaults the provider to a key-backed one, so the operator reviews + clicks
+  // Save (= POST /api/admin/agents). Faithful to "框架只提议、人点一下执行" —
+  // no auto-generated disk state, no "deleted but respawns on restart" trap.
+  const START_HERE_DISMISS_KEY = 'aipe_start_here_dismissed'
+  // Latches once the card is hidden for good (dismissed OR hub no longer fresh)
+  // so we stop re-probing the three endpoints on every overview focus / lang
+  // switch. A fresh, undismissed hub keeps re-rendering (cheap, rare) until it
+  // gains its first agent/workflow or the operator dismisses.
+  let startHereSettled = false
+
+  function startHereDismissed() {
+    try { return localStorage.getItem(START_HERE_DISMISS_KEY) === '1' } catch { return false }
+  }
+
+  async function renderStartHere() {
+    const host = document.getElementById('start-here')
+    if (!host) return
+    if (startHereSettled) return
+    if (startHereDismissed()) { host.hidden = true; startHereSettled = true; return }
+
+    // Fresh = no managed agents AND no workflows. Probe both; if the agents
+    // probe fails (e.g. a member who somehow ran this) we can't prove fresh →
+    // leave hidden (better to under-show a nudge than nag an established hub).
+    let managedCount = 0
+    let workflowCount = 0
+    try {
+      const agentsResp = await fetchJson('/api/admin/agents')
+      managedCount = (agentsResp?.agents || []).filter((a) => !!a.managed).length
+    } catch { host.hidden = true; return }
+    try {
+      const r = await fetch('/api/admin/workflows')
+      if (r.ok) {
+        const body = await r.json()
+        workflowCount = (body?.workflows || []).length
+      }
+      // 404/503 (host has no WorkflowSurface) → treat as 0 workflows.
+    } catch { /* network error — treat as 0 */ }
+
+    if (managedCount > 0 || workflowCount > 0) { host.hidden = true; startHereSettled = true; return }
+
+    // Fresh hub. Is a model key configured? (Decorates step ③.) Best-effort —
+    // any error just leaves the "configure key" button showing.
+    let hasModelKey = false
+    try {
+      const s = await fetchJson('/api/admin/secrets')
+      hasModelKey = Object.keys(s?.providers || {}).length > 0 ||
+        Object.values(s?.env || {}).some(Boolean)
+    } catch { /* leave hasModelKey false */ }
+
+    const step3 = hasModelKey
+      ? `<span class="sh-done">${escapeHtml(t.startHereKeyDone)}</span>`
+      : `<button type="button" class="sh-btn sh-btn-secondary" data-sh="key">${escapeHtml(t.startHereStep3Btn)}</button>`
+
+    host.innerHTML = `
+      <div class="sh-head">
+        <h2 class="sh-title">${escapeHtml(t.startHereTitle)}</h2>
+        <button type="button" class="sh-dismiss" data-sh="dismiss">${escapeHtml(t.startHereDismiss)}</button>
+      </div>
+      <p class="sh-intro">${escapeHtml(t.startHereIntro)}</p>
+      <div class="sh-steps">
+        <div class="sh-step sh-step-primary">
+          <h3>${escapeHtml(t.startHereStep1Title)}</h3>
+          <p>${escapeHtml(t.startHereStep1Desc)}</p>
+          <button type="button" class="sh-btn sh-btn-primary" data-sh="assistant">${escapeHtml(t.startHereStep1Btn)}</button>
+        </div>
+        <div class="sh-step">
+          <h3>${escapeHtml(t.startHereStep2Title)}</h3>
+          <p>${escapeHtml(t.startHereStep2Desc)}</p>
+          <button type="button" class="sh-btn sh-btn-secondary" data-sh="template">${escapeHtml(t.startHereStep2Btn)}</button>
+        </div>
+        <div class="sh-step">
+          <h3>${escapeHtml(t.startHereStep3Title)}</h3>
+          <p>${escapeHtml(t.startHereStep3Desc)}</p>
+          ${step3}
+        </div>
+      </div>`
+    host.hidden = false
+  }
+
+  function onStartHereClick(e) {
+    const btn = e.target instanceof HTMLElement ? e.target.closest('[data-sh]') : null
+    if (!btn) return
+    const action = btn.dataset.sh
+    if (action === 'assistant') {
+      // Open the REAL create-agent form, prefilled. openAgentForm('create')
+      // runs dom.maForm.reset() + syncProviderSelect() synchronously, so we
+      // can set field values right after — the provider dropdown is already
+      // defaulted to a key-backed provider (zero provider/key drift). The user
+      // reviews + clicks Save; nothing is written until then.
+      managedAgents.openAgentForm('create')
+      if (dom.maId) dom.maId.value = 'assistant'
+      if (dom.maDisplayName) dom.maDisplayName.value = t.startHereAssistantName
+      if (dom.maCaps) dom.maCaps.value = 'chat'
+      if (dom.maSystem) dom.maSystem.value = t.startHereAssistantSystem
+      dom.maDisplayName?.focus()
+    } else if (action === 'template') {
+      dom.templateGalleryBtn?.click()
+    } else if (action === 'key') {
+      dom.maKeysBtn?.click()
+    } else if (action === 'dismiss') {
+      try { localStorage.setItem(START_HERE_DISMISS_KEY, '1') } catch {}
+      renderStartHere().catch(() => {})
+    }
+  }
+
   function renderGrowthReports(reports) {
     if (!dom.grTbody) return
     if (dom.grSummary) {
@@ -2129,6 +2243,10 @@ import { createWorkflows } from './workflows.js'
       // MCP tab (#2-M4): lazy-refresh the registry list on every focus so
       // installs/uninstalls from another window get picked up.
       if (e.detail?.name === 'mcp') mcp.refreshMcp().catch((err) => console.warn('mcp refresh failed:', err))
+      // ⑦-M1 — re-probe the "start here" card whenever the user lands on
+      // overview (it self-hides once the hub gains an agent/workflow or the
+      // card is dismissed; the guard inside makes this a no-op after that).
+      if (e.detail?.name === 'overview') renderStartHere().catch(() => {})
     })
 
     dom.dStrategy.addEventListener('change', updateDispatchVisibility)
@@ -2435,6 +2553,10 @@ import { createWorkflows } from './workflows.js'
     managedAgents.refreshManagedAgents().catch((err) => console.warn('initial agents refresh:', err))
     workflows.refreshWorkflows().catch((err) => console.warn('initial workflows refresh:', err))
     refreshGrowthReports().catch((err) => console.warn('initial growth-reports refresh:', err))
+    // ⑦-M1 — first-run "start here" coaching card (self-hides on a non-fresh
+    // or dismissed hub). Its CTAs are delegated through onStartHereClick.
+    renderStartHere().catch(() => {})
+    document.getElementById('start-here')?.addEventListener('click', onStartHereClick)
     if (dom.grRefreshBtn) {
       dom.grRefreshBtn.addEventListener('click', () => {
         refreshGrowthReports().catch((err) => console.warn('manual growth-reports refresh:', err))
@@ -2508,6 +2630,9 @@ import { createWorkflows } from './workflows.js'
     onLangChange(() => {
       applyStaticI18n()
       renderAll()
+      // ⑦-M1 — re-render the start-here card in the new language while it's
+      // still showing (no-op once settled, i.e. dismissed / non-fresh).
+      renderStartHere().catch(() => {})
     })
 
     // View switcher — jump to the worker (`/`) view. Both views share
