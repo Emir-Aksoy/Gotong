@@ -5,6 +5,8 @@
  *
  * Subcommands supported in v1.2:
  *
+ *   - `aipehub init`                    bootstrap a workspace on disk
+ *   - `aipehub start`                   launch `@aipehub/host` (delegated)
  *   - `aipehub new agent <name>`        scaffold a TypeScript sidecar
  *   - `aipehub new python-agent <name>` scaffold a Python sidecar
  *   - `aipehub ping <ws-url>`           handshake-only probe of a Hub
@@ -16,9 +18,12 @@
  * `@aipehub/protocol` for the wire-protocol version string. `ping`
  * uses a hand-rolled WebSocket client (the `ws` package, declared as
  * a devDep so the published CLI bundles it via `bundleDependencies`).
+ * `start` keeps that discipline: it resolves `@aipehub/host` lazily at
+ * runtime (never a build-time dep) and only launches it if present.
  */
 
 import { init } from './commands/init.js'
+import { start } from './commands/start.js'
 import { newAgent } from './commands/new-agent.js'
 import { ping } from './commands/ping.js'
 import { repl } from './commands/repl.js'
@@ -52,6 +57,8 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
     switch (cmd) {
       case 'init':
         return await init(rest)
+      case 'start':
+        return await start(rest)
       case 'new': {
         const [kind, ...args] = rest
         if (kind === 'agent') return await newAgent({ language: 'ts', args })

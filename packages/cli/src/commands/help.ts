@@ -8,6 +8,7 @@ const SHELL = `aipehub <command> [args]
 
 Commands:
   init                        Initialize a workspace (personal mode by default)
+  start                       Launch the host (delegates to @aipehub/host)
   new agent <name>            Scaffold a TypeScript sidecar agent project
   new python-agent <name>     Scaffold a Python sidecar agent project
   ping <ws-url>               Verify a Hub is reachable (HELLO/WELCOME handshake)
@@ -19,6 +20,7 @@ Commands:
 
 Examples:
   aipehub init
+  aipehub start
   aipehub new agent greeter
   aipehub new python-agent classifier --capabilities=triage,classify
   aipehub ping ws://127.0.0.1:4000
@@ -45,6 +47,26 @@ Examples:
   aipehub init
   aipehub init --space-dir=/opt/aipehub --admin-name="Alice"
   aipehub init --pin-team
+`,
+  start: `aipehub start
+
+Starts the production AipeHub host in this process — a thin convenience
+wrapper around \`@aipehub/host\`, identical to \`npx @aipehub/host\` but
+reachable through the same \`aipehub\` CLI you use for connect / repl / init.
+
+The host is a SEPARATE package (LLM SDKs, SQLite, the web bundle), so the
+CLI does not depend on it: if @aipehub/host is installed \`start\` launches
+it, otherwise it prints how to get it and exits non-zero.
+
+Configuration is via environment variables (12-factor):
+  AIPE_SPACE=.aipehub        workspace directory (auto-created on first run)
+  AIPE_WEB_PORT=3000         admin UI / API port
+  AIPE_WS_PORT=4000          agent WebSocket port
+  AIPE_OPEN_BROWSER=0        suppress the first-run browser auto-open
+
+Examples:
+  aipehub start
+  AIPE_SPACE=/opt/aipehub aipehub start
 `,
   new: `aipehub new <agent|python-agent> <name> [options]
 
