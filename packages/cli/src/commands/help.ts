@@ -9,6 +9,7 @@ const SHELL = `aipehub <command> [args]
 Commands:
   init                        Initialize a workspace (personal mode by default)
   start                       Launch the host (delegates to @aipehub/host)
+  doctor                      Pre-flight environment check (ports, space, keys)
   new agent <name>            Scaffold a TypeScript sidecar agent project
   new python-agent <name>     Scaffold a Python sidecar agent project
   ping <ws-url>               Verify a Hub is reachable (HELLO/WELCOME handshake)
@@ -21,6 +22,7 @@ Commands:
 Examples:
   aipehub init
   aipehub start
+  aipehub doctor
   aipehub new agent greeter
   aipehub new python-agent classifier --capabilities=triage,classify
   aipehub ping ws://127.0.0.1:4000
@@ -67,6 +69,27 @@ Configuration is via environment variables (12-factor):
 Examples:
   aipehub start
   AIPE_SPACE=/opt/aipehub aipehub start
+`,
+  doctor: `aipehub doctor
+
+Pre-flight check for a fresh box: inspects the same environment the host
+reads — WITHOUT booting it — and prints, per check, ✓ / ⚠ / ✖ with a fix.
+Run it first when \`start\` won't come up and you don't know why.
+
+Checks:
+  - Node.js >= 20
+  - @aipehub/host resolvable (or how to install it)
+  - AIPE_WEB_PORT / AIPE_WS_PORT actually free to bind
+  - AIPE_SPACE writable (or creatable on first run)
+  - master key present when AIPE_MASTER_KEY_PROVIDER=env
+  - an LLM provider key in the env (optional — the setup wizard can set one)
+
+It reports the NAMES of key env vars, never their values. Exit code is 0 when
+there are no ✖ blockers (⚠ are advisory), 1 otherwise, 2 on a usage error.
+
+Examples:
+  aipehub doctor
+  AIPE_WEB_PORT=8080 aipehub doctor
 `,
   new: `aipehub new <agent|python-agent> <name> [options]
 

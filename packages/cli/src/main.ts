@@ -7,6 +7,7 @@
  *
  *   - `aipehub init`                    bootstrap a workspace on disk
  *   - `aipehub start`                   launch `@aipehub/host` (delegated)
+ *   - `aipehub doctor`                  pre-flight environment check
  *   - `aipehub new agent <name>`        scaffold a TypeScript sidecar
  *   - `aipehub new python-agent <name>` scaffold a Python sidecar
  *   - `aipehub ping <ws-url>`           handshake-only probe of a Hub
@@ -24,6 +25,7 @@
 
 import { init } from './commands/init.js'
 import { start } from './commands/start.js'
+import { doctor } from './commands/doctor.js'
 import { newAgent } from './commands/new-agent.js'
 import { ping } from './commands/ping.js'
 import { repl } from './commands/repl.js'
@@ -59,6 +61,8 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
         return await init(rest)
       case 'start':
         return await start(rest)
+      case 'doctor':
+        return await doctor(rest)
       case 'new': {
         const [kind, ...args] = rest
         if (kind === 'agent') return await newAgent({ language: 'ts', args })
