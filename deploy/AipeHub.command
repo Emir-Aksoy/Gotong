@@ -1,0 +1,94 @@
+#!/usr/bin/env bash
+#
+# AipeHub.command — double-click launcher for macOS (Finder → Terminal).
+#
+# A thin convenience wrapper: it finds a way to start the AipeHub host and
+# hands the Terminal window over to it. The HOST itself opens your browser
+# once it is actually listening (AIPE_OPEN_BROWSER), so there is no race and
+# no double-open — this script never opens a URL of its own.
+#
+# Twin of deploy/AipeHub.sh (Linux / generic). Keep the two bodies in sync.
+#
+# Gatekeeper: the first time you double-click an unsigned .command, macOS may
+# refuse ("unidentified developer"). Right-click the file → Open → Open. This
+# is a one-time trust prompt; we ship no signed .app on purpose (signing is
+# heavy and the data path is identical).
+#
+# It reads NO credentials and writes NO secrets — it only launches the host.
+set -euo pipefail
+
+# Resolve this script's own directory, robust under Finder double-click (where
+# the working directory is $HOME, not the file's folder) and through symlinks.
+SOURCE="${BASH_SOURCE[0]}"
+while [ -h "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+  SOURCE="$(readlink "$SOURCE")"
+  case "$SOURCE" in /*) ;; *) SOURCE="$DIR/$SOURCE" ;; esac
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" >/dev/null 2>&1 && pwd)"
+
+# Always surface the UI on a double-click. The host opens the browser only
+# after it is listening, so this is race-free. An explicit override wins.
+export AIPE_OPEN_BROWSER="${AIPE_OPEN_BROWSER:-always}"
+
+# Hand over (or, with AIPE_LAUNCH_DRY_RUN set, just report what we would run —
+# used by the smoke check so the launcher is testable without booting a server).
+launch() {
+  echo "→ $*"
+  if [ -n "${AIPE_LAUNCH_DRY_RUN:-}" ]; then
+    echo "[dry-run] not executing"
+    exit 0
+  fi
+  exec "$@"
+}
+
+# Walk up from the script for a monorepo checkout (pnpm-workspace.yaml +
+# packages/host). If you double-clicked this file inside your own checkout,
+# that is almost certainly the host you mean to run.
+find_repo_root() {
+  local d="$1"
+  while [ "$d" != "/" ]; do
+    if [ -f "$d/pnpm-workspace.yaml" ] && [ -d "$d/packages/host" ]; then
+      printf '%s\n' "$d"
+      return 0
+    fi
+    d="$(dirname "$d")"
+  done
+  return 1
+}
+
+if REPO_ROOT="$(find_repo_root "$SCRIPT_DIR")"; then
+  if command -v pnpm >/dev/null 2>&1; then
+    if [ ! -d "$REPO_ROOT/node_modules" ]; then
+      echo "Dependencies not installed at $REPO_ROOT — run 'pnpm install' there first." >&2
+    fi
+    cd "$REPO_ROOT"
+    launch pnpm --filter @aipehub/host start
+  fi
+  echo "Found a checkout at $REPO_ROOT, but 'pnpm' is not on PATH." >&2
+  echo "Install pnpm (https://pnpm.io) or open a terminal that has it." >&2
+fi
+
+# Installed CLI: `aipehub start` delegates to @aipehub/host if present.
+if command -v aipehub >/dev/null 2>&1; then
+  launch aipehub start
+fi
+
+# Installed host package, fetched on demand (works once it is published).
+if command -v npx >/dev/null 2>&1; then
+  launch npx -y @aipehub/host
+fi
+
+cat >&2 <<'HINT'
+
+Could not find a way to start AipeHub. Install one of:
+
+  • Node.js (https://nodejs.org), then double-click again to use `npx @aipehub/host`
+  • the CLI:   npm i -g @aipehub/cli @aipehub/host    then `aipehub start`
+  • a source checkout:   pnpm install   then double-click this file
+
+HINT
+# Keep the Terminal window readable for a double-click user before it closes.
+printf 'Press Return to close… '
+read -r _ || true
+exit 1
