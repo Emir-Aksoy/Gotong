@@ -38,7 +38,31 @@ import {
   type WorkflowSummary,
   type WorkflowSurface,
   type WorkflowRunSummary,
+  type LlmKeyTestSurface,
+  type LlmKeyTestResult,
 } from '../src/server.js'
+
+/**
+ * ease-of-use ①TC-ME — a recording fake for the member key probe. Captures
+ * exactly what the route forwarded to `testLlmKey()` (so the test can prove the
+ * member path sends only `{provider, apiKey}` — never a baseURL/model — i.e.
+ * zero arbitrary-endpoint surface) and returns a configurable verdict.
+ */
+class RecordingKeyTest implements LlmKeyTestSurface {
+  readonly calls: Array<{ provider: string; apiKey: string; baseURL?: string; model?: string }> = []
+  next: LlmKeyTestResult = { ok: true, model: 'claude-haiku-4-5-20251001', latencyMs: 42 }
+  throwErr: Error | undefined
+  async testLlmKey(input: {
+    provider: string
+    apiKey: string
+    baseURL?: string
+    model?: string
+  }): Promise<LlmKeyTestResult> {
+    this.calls.push({ ...input })
+    if (this.throwErr) throw this.throwErr
+    return this.next
+  }
+}
 
 interface BootResult {
   tmp: string
@@ -56,6 +80,8 @@ interface BootResult {
   workflowSurface: StubWorkflowSurface | undefined
   /** Phase 19 P1-M4 — present when boot() was given `withUploads`. */
   uploads: StubUploads | undefined
+  /** ease-of-use ①TC-ME — present when boot() was given `llmKeyTest`. */
+  llmKeyTest: RecordingKeyTest | undefined
 }
 
 class StubGrowthReports implements GrowthReportsAdminSurface {
@@ -172,6 +198,8 @@ async function boot(
     meAgents?: Array<{ id: string; label: string; capabilities: string[]; online: boolean; description?: string }>
     /** Phase 19 P1-M4 — wire an in-memory upload backing for /api/me/uploads. */
     withUploads?: boolean
+    /** ease-of-use ①TC-ME — wire a recording fake LLM key probe for /api/me/test-llm-key. */
+    llmKeyTest?: RecordingKeyTest
   } = {},
 ): Promise<BootResult> {
   const withGrowthReports = opts.withGrowthReports ?? true
@@ -227,6 +255,7 @@ async function boot(
     ...(workflowSurface ? { workflows: workflowSurface } : {}),
     ...(opts.meAgents ? { meAgents: { listForMembers: async () => opts.meAgents! } } : {}),
     ...(uploads ? { uploads } : {}),
+    ...(opts.llmKeyTest ? { llmKeyTest: opts.llmKeyTest } : {}),
     ...(opts.adminLoginRateLimit
       ? { adminLoginRateLimit: opts.adminLoginRateLimit }
       : {}),
@@ -267,6 +296,7 @@ async function boot(
     growthReports,
     workflowSurface,
     uploads,
+    llmKeyTest: opts.llmKeyTest,
   }
 }
 
@@ -1061,6 +1091,137 @@ describe('/api/me/growth-reports — rate limit (AUDIT-P3-02)', () => {
       headers: { cookie: b.memberCookie },
     })
     expect(r.status).toBe(200)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// ease-of-use ①TC-ME — member BYO-key "test connection"
+// ---------------------------------------------------------------------------
+
+describe('POST /api/me/test-llm-key — member key probe (①TC-ME)', () => {
+  let b: BootResult
+  let probe: RecordingKeyTest
+
+  beforeEach(async () => {
+    probe = new RecordingKeyTest()
+    b = await boot({ llmKeyTest: probe })
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  const post = (body: unknown, cookie: string | undefined = b.memberCookie) =>
+    fetch(`${b.baseUrl}/api/me/test-llm-key`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(cookie ? { cookie } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+
+  it('rejects an unauthenticated caller with 401 (no member session)', async () => {
+    // Inline fetch with NO cookie header — the `post` helper's default param
+    // would substitute the member cookie for an explicit `undefined`, which
+    // would defeat the point of this test (mirrors the 503 test below).
+    const r = await fetch(`${b.baseUrl}/api/me/test-llm-key`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider: 'anthropic', apiKey: 'sk-x' }),
+    })
+    expect(r.status).toBe(401)
+    // The probe must never run for an anonymous caller.
+    expect(probe.calls.length).toBe(0)
+  })
+
+  it('probes the typed key and echoes only the structured verdict (no key)', async () => {
+    probe.next = { ok: true, model: 'claude-haiku-4-5-20251001', latencyMs: 88 }
+    const r = await post({ provider: 'anthropic', apiKey: 'sk-secret-123' })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j).toEqual({ ok: true, model: 'claude-haiku-4-5-20251001', latencyMs: 88 })
+    // The response NEVER carries the key back.
+    expect(JSON.stringify(j)).not.toContain('sk-secret-123')
+    // The route forwarded exactly { provider, apiKey } — never a baseURL or
+    // model. That's the SSRF-safety contract: members can't aim the probe at
+    // an arbitrary endpoint (the host service picks a fixed provider endpoint).
+    expect(probe.calls).toEqual([{ provider: 'anthropic', apiKey: 'sk-secret-123' }])
+  })
+
+  it('forwards the stable failure code so the UI can render friendly words', async () => {
+    probe.next = { ok: false, model: 'gpt-4o-mini', latencyMs: 120, code: 'invalid_key', message: 'unauthorized' }
+    const r = await post({ provider: 'openai', apiKey: 'sk-bad' })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j).toMatchObject({ ok: false, code: 'invalid_key' })
+    // The scrubbed diagnostic `message` is an internal field — not echoed.
+    expect(j).not.toHaveProperty('message')
+  })
+
+  it('rejects a provider outside the member allow-list (anthropic|openai) with 400', async () => {
+    const r = await post({ provider: 'deepseek', apiKey: 'sk-x' })
+    expect(r.status).toBe(400)
+    expect(probe.calls.length).toBe(0)
+  })
+
+  it('lowercases/trims the provider before the allow-list check', async () => {
+    const r = await post({ provider: '  Anthropic  ', apiKey: 'sk-x' })
+    expect(r.status).toBe(200)
+    expect(probe.calls[0]?.provider).toBe('anthropic')
+  })
+
+  it('requires a non-empty apiKey with 400', async () => {
+    const r = await post({ provider: 'anthropic', apiKey: '   ' })
+    expect(r.status).toBe(400)
+    expect(probe.calls.length).toBe(0)
+  })
+
+  it('returns 503 when no key-test surface is wired', async () => {
+    // Re-boot WITHOUT the probe → ctx.llmKeyTest is undefined.
+    const noProbe = await boot()
+    try {
+      const r = await fetch(`${noProbe.baseUrl}/api/me/test-llm-key`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: noProbe.memberCookie },
+        body: JSON.stringify({ provider: 'anthropic', apiKey: 'sk-x' }),
+      })
+      expect(r.status).toBe(503)
+    } finally {
+      await teardown(noProbe)
+    }
+  })
+})
+
+describe('POST /api/me/test-llm-key — rate limit (①TC-ME)', () => {
+  let b: BootResult
+  let probe: RecordingKeyTest
+
+  beforeEach(async () => {
+    probe = new RecordingKeyTest()
+    // Tight budget so we can prove the cap with a small loop. The member
+    // key probe shares the per-user limiter under its own action bucket.
+    b = await boot({ adminLoginRateLimit: { max: 2, windowSec: 60 }, llmKeyTest: probe })
+  })
+  afterEach(async () => {
+    await teardown(b)
+  })
+
+  it('returns 429 after the per-user budget is exhausted', async () => {
+    const test = () =>
+      fetch(`${b.baseUrl}/api/me/test-llm-key`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', cookie: b.memberCookie },
+        body: JSON.stringify({ provider: 'anthropic', apiKey: 'sk-x' }),
+      })
+    expect((await test()).status).toBe(200)
+    expect((await test()).status).toBe(200)
+    const r3 = await test()
+    expect(r3.status).toBe(429)
+    expect(r3.headers.get('retry-after')).toBe('60')
+    expect((await r3.json()).code).toBe('rate_limited')
+    // The rate-limit check fires BEFORE the probe, so the rejected hit never
+    // reached the upstream provider (only 2 calls landed, not 3).
+    expect(probe.calls.length).toBe(2)
   })
 })
 

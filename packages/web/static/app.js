@@ -748,6 +748,8 @@
     bindOnce(document.getElementById('me-own-agents-list'), 'click', onOwnAgentsClick)
     // v5 A-M3 — my API keys (BYO): create form + delegated delete.
     bindOnce(document.getElementById('me-cred-form'), 'submit', submitCredential)
+    // ease-of-use ①TC-ME — test the typed BYO key before saving it.
+    bindOnce(document.getElementById('me-cred-test'), 'click', submitTestCredential)
     bindOnce(document.getElementById('me-cred-list'), 'click', onCredListClick)
   }
 
@@ -2420,6 +2422,48 @@
     } catch (err) {
       status.className = 'me-status error'
       status.textContent = t('meFailedColon', escape(err?.message || String(err)))
+    }
+  }
+
+  // ease-of-use ①TC-ME — member "test connection": probe the typed BYO key
+  // WITHOUT saving it, so a wrong key / wrong provider / empty balance is
+  // caught before the member commits it. POSTs the member probe
+  // (/api/me/test-llm-key — provider-restricted to anthropic/openai, no
+  // baseURL → zero arbitrary-endpoint surface) and renders the verdict via the
+  // SAME describeKeyTest() words map the setup wizard + admin form use.
+  async function submitTestCredential() {
+    const status = document.getElementById('me-cred-status')
+    const provider = document.getElementById('me-cred-provider').value
+    const apiKey = document.getElementById('me-cred-key').value.trim()
+    const btn = document.getElementById('me-cred-test')
+    if (!apiKey) {
+      status.className = 'me-status error'
+      status.textContent = t('testConnNeedKey')
+      return
+    }
+    status.className = 'me-status'
+    status.textContent = t('testConnTesting')
+    if (btn) btn.disabled = true
+    try {
+      const r = await fetch('/api/me/test-llm-key', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider, apiKey }),
+      })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        status.className = 'me-status error'
+        status.textContent = j?.error || `HTTP ${r.status}`
+        return
+      }
+      const d = window.AipeHub.describeKeyTest(await r.json())
+      status.className = 'me-status ' + (d.level === 'ok' ? 'ok' : 'error')
+      status.textContent = d.text
+    } catch (err) {
+      status.className = 'me-status error'
+      status.textContent = err?.message || String(err)
+    } finally {
+      if (btn) btn.disabled = false
     }
   }
 

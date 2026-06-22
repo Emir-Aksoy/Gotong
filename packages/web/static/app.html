@@ -355,6 +355,10 @@
             <input type="text" id="me-cred-label" name="label" data-i18n-placeholder="meCredLabelPh" placeholder="我的个人 key" />
           </div>
           <div class="me-own-agent-actions">
+            <!-- ease-of-use ①TC-ME — probe the typed key before saving it, so a
+                 wrong key / wrong provider / empty balance is caught here. Same
+                 verdict words as the setup wizard + admin form (describeKeyTest). -->
+            <button type="button" id="me-cred-test" class="me-secondary-btn" data-i18n="testConnBtn">测试连接</button>
             <button type="submit" id="me-cred-submit" class="me-primary-btn" data-i18n="meCredSubmit">保存密钥</button>
             <span id="me-cred-status" class="me-status"></span>
           </div>

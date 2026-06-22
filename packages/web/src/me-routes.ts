@@ -807,6 +807,31 @@ export interface HandleMeRouteCtx {
    * hide the 管家 panel.
    */
   hubSteward: MeHubStewardSurface | undefined
+  /**
+   * ease-of-use ①TC-ME — member "test connection" probe for a BYO key. Same
+   * object the setup/admin probe uses (server.ts `ctx.llmKeyTest`), inlined here
+   * as a narrow duck-type to avoid a me-routes ↔ server import cycle. Undefined
+   * when the host wired no key-test surface; `POST /api/me/test-llm-key` then
+   * returns 503. The member route restricts `provider` to the BYO set
+   * (anthropic/openai) and never forwards a baseURL, so this carries NO
+   * arbitrary-endpoint (SSRF) surface — strictly safer than the admin probe.
+   */
+  llmKeyTest:
+    | {
+        testLlmKey(input: {
+          provider: string
+          apiKey: string
+          baseURL?: string
+          model?: string
+        }): Promise<{
+          ok: boolean
+          model: string
+          latencyMs: number
+          code?: string
+          message?: string
+        }>
+      }
+    | undefined
 }
 
 export async function handleMeRoute(
@@ -961,6 +986,16 @@ export async function handleMeRoute(
       await handleMeDeleteCredential(ctx, res, userId, decodeURIComponent(m[1]!))
       return
     }
+  }
+  // ease-of-use ①TC-ME — "test connection" for a BYO key BEFORE the member
+  // saves it (mirror of the setup-wizard / admin probe, member-scoped). Sends
+  // ONE tiny request with the typed key; nothing is stored. Restricted to the
+  // providers a member may bring (anthropic/openai), and no baseURL is ever
+  // forwarded, so there's no arbitrary-endpoint / SSRF surface — the
+  // operator probe (with baseURL) stays admin-only.
+  if (method === 'POST' && path === '/api/me/test-llm-key') {
+    await handleMeTestLlmKey(ctx, req, res, userId)
+    return
   }
   // GO-LIVE GL-1c — member IM-account linking. GET returns whether a bridge is
   // running + the caller's own bindings; POST mints a one-time binding code the
@@ -2213,6 +2248,58 @@ async function handleMeDeleteCredential(
     sendJson(res, { ok: true, removed })
   } catch (err) {
     sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+/**
+ * ease-of-use ①TC-ME — POST /api/me/test-llm-key. A member verifies a BYO key
+ * works (one tiny provider ping) BEFORE saving it, so a wrong key / empty
+ * balance is caught here instead of silently failing a workflow later. Mirror
+ * of the setup-wizard / admin probe, but member-scoped and SAFER: provider is
+ * restricted to the BYO set (anthropic/openai), no baseURL is accepted, the key
+ * is never stored, and the response echoes only the structured verdict the UI's
+ * describeKeyTest() reads — never the key, never a free-text diagnostic.
+ */
+async function handleMeTestLlmKey(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  // Each probe is an outbound LLM request; rate-limit per-user (same budget
+  // machinery as /me/dispatch) so a member can't loop it to hammer a provider.
+  if (!checkMeRateLimit(ctx, userId, 'me-test-key')) {
+    sendRateLimited(res, 'too many connection tests; try again in a minute')
+    return
+  }
+  if (!ctx.llmKeyTest) {
+    sendJson(res, { error: 'connection test unavailable (key-test surface not wired)' }, 503)
+    return
+  }
+  const body = (await readJsonBody(req).catch(() => ({}))) as Record<string, unknown>
+  const provider = typeof body.provider === 'string' ? body.provider.trim().toLowerCase() : ''
+  const apiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
+  // Mirror HostMeCredentialsService.MEMBER_CREDENTIAL_PROVIDERS: a member may
+  // only bring a RAW bearer key for these two first-party providers. Both have
+  // fixed endpoints, so we never accept/forward a baseURL → no SSRF probe.
+  if (provider !== 'anthropic' && provider !== 'openai') {
+    sendJson(res, { error: 'provider must be one of anthropic, openai' }, 400)
+    return
+  }
+  if (!apiKey) {
+    sendJson(res, { error: 'apiKey required' }, 400)
+    return
+  }
+  try {
+    const result = await ctx.llmKeyTest.testLlmKey({ provider, apiKey })
+    sendJson(res, {
+      ok: result.ok,
+      model: result.model,
+      latencyMs: result.latencyMs,
+      ...(result.code ? { code: result.code } : {}),
+    })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
   }
 }
 

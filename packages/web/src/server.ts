@@ -1866,6 +1866,10 @@ async function handle(
         workflowEdit: ctx.workflowEdit,
         // SW-M6 — the hub steward ("管家"); undefined → /me/steward/* returns 503.
         hubSteward: ctx.hubSteward,
+        // ease-of-use ①TC-ME — member "test connection" for a BYO key; the SAME
+        // probe surface the setup/admin routes use. undefined → /api/me/test-llm-key
+        // returns 503. Member route is provider-restricted + no baseURL (no SSRF).
+        llmKeyTest: ctx.llmKeyTest,
       },
       req,
       res,
