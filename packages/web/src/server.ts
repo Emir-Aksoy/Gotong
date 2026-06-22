@@ -311,6 +311,14 @@ export interface WebServerOptions {
    */
   workflowAssist?: WorkflowAssistSurface
   /**
+   * ease-of-use ① — optional "test connection" probe. The host always
+   * wires this (it needs no config — it uses the key the caller types).
+   * When absent (e.g. a test harness that doesn't provide it), the
+   * `POST /api/setup/test-llm-key` and `POST /api/admin/test-llm-key`
+   * endpoints return 503 and the UI can hide the 测试连接 button.
+   */
+  llmKeyTest?: LlmKeyTestSurface
+  /**
    * Optional Hub Services admin surface (PR-11). The host wires
    * `hubServices.asAdminSurface()` here. When absent, all
    * `/api/admin/services/...` endpoints return 503 so the admin UI
@@ -762,6 +770,32 @@ export interface WorkflowAssistSurface {
 }
 
 /**
+ * ease-of-use ① — structural mirror of `@aipehub/host`'s `LlmKeyTestSurface`.
+ * Kept as a duck-typed duplicate so Web stays free of any host/llm runtime
+ * dependency (same posture as `WorkflowAssistSurface`). The host wires the
+ * real probe; Web only forwards the typed JSON back to the browser.
+ */
+export interface LlmKeyTestSurface {
+  testLlmKey(input: {
+    provider: string
+    apiKey: string
+    baseURL?: string
+    model?: string
+  }): Promise<LlmKeyTestResult>
+}
+
+/** Mirror of `@aipehub/host`'s `LlmKeyTestResult`. */
+export interface LlmKeyTestResult {
+  ok: boolean
+  model: string
+  latencyMs: number
+  /** Stable code the UI maps to localized words; absent when `ok:true`. */
+  code?: string
+  /** Short, key-scrubbed diagnostic (never contains the key). */
+  message?: string
+}
+
+/**
  * Mirror of `@aipehub/workflow-assistant`'s `WorkflowAssistantPayload.contextHints`.
  * Kept as a structural duplicate so Web has zero workflow-assistant dep.
  */
@@ -1058,6 +1092,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     meCredentials: opts.meCredentials,
     meIm: opts.meIm,
     workflowAssist: opts.workflowAssist,
+    llmKeyTest: opts.llmKeyTest,
     services: opts.services,
     growthReports: opts.growthReports,
     inbox: opts.inbox,
@@ -1211,6 +1246,8 @@ interface HandlerCtx {
   meIm: MeImSurface | undefined
   /** Phase 13 M3 — see WebServerOptions.workflowAssist doc above. */
   workflowAssist: WorkflowAssistSurface | undefined
+  /** ease-of-use ① — see WebServerOptions.llmKeyTest doc above. */
+  llmKeyTest: LlmKeyTestSurface | undefined
   services: ServicesAdminSurface | undefined
   growthReports: GrowthReportsAdminSurface | undefined
   /** Phase 16 — see WebServerOptions.inbox doc above. */
@@ -1877,7 +1914,7 @@ async function handle(
   // any credential exists. See setup-routes.ts for the loopback trust model.
   if (path.startsWith('/api/setup/')) {
     const handled = await handleSetupRoute(
-      { identity: ctx.identity },
+      { identity: ctx.identity, llmKeyTest: ctx.llmKeyTest },
       req, res, method, path,
     )
     if (handled) return
@@ -2070,6 +2107,36 @@ async function handle(
       req, res, method, path,
     )
     if (handled) return
+  }
+
+  // ease-of-use ① — admin "test connection" probe. Lets the agent-create
+  // form verify a provider+key (and baseURL/model) BEFORE saving an agent
+  // that would otherwise silently never reply. Sends one minimal request
+  // with the supplied key; never logs it. Mirrors the loopback setup-route
+  // version but behind admin auth (remote hosts have no loopback window).
+  if (path === '/api/admin/test-llm-key' && method === 'POST') {
+    if (!(await requireAdmin(ctx, req, res))) return
+    if (!ctx.llmKeyTest) {
+      sendJson(res, { error: 'llm key test not available on this host' }, 503)
+      return
+    }
+    let body: unknown
+    try { body = await readJsonBody(req) }
+    catch { sendJson(res, { error: 'invalid JSON body' }, 400); return }
+    const b = (body ?? {}) as {
+      provider?: unknown; apiKey?: unknown; baseURL?: unknown; model?: unknown
+    }
+    const provider = typeof b.provider === 'string' ? b.provider.trim() : ''
+    const apiKey = typeof b.apiKey === 'string' ? b.apiKey : ''
+    const baseURL = typeof b.baseURL === 'string' && b.baseURL.trim() ? b.baseURL.trim() : undefined
+    const model = typeof b.model === 'string' && b.model.trim() ? b.model.trim() : undefined
+    if (!provider) { sendJson(res, { error: 'provider is required' }, 400); return }
+    if (!apiKey.trim()) { sendJson(res, { error: 'apiKey is required' }, 400); return }
+    const result = await ctx.llmKeyTest.testLlmKey({ provider, apiKey, baseURL, model })
+    // Verbatim verdict — `ok`/`code`/`message`/`model`/`latencyMs`. The probe
+    // never throws, so a 200 here always carries a usable verdict (ok or not).
+    sendJson(res, result)
+    return
   }
 
   // Hub MCP server registry (install / list / uninstall) in mcp-routes.ts.

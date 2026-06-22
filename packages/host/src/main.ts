@@ -226,6 +226,7 @@ import {
   createWorkflowAssistAgent,
   resolveWorkflowAssistConfig,
 } from './workflow-assist-agent.js'
+import { createLlmKeyTestSurface } from './llm-key-test.js'
 import {
   createHubStewardService,
   resolveStewardConfig,
@@ -2268,6 +2269,10 @@ async function main(): Promise<void> {
     // on /api/admin/workflows/assist in that case so the UI can hide
     // the "AI assistant" button cleanly.
     ...(workflowAssist ? { workflowAssist } : {}),
+    // ease-of-use ① — "test connection" probe. Always available: it uses
+    // the key the caller types, no host config. Powers the 测试连接 button
+    // in the setup wizard and the agent-create form.
+    llmKeyTest: createLlmKeyTestSurface(),
     // services may be undefined if bootstrap failed; serveWeb handles
     // that by responding 503 on the /api/admin/services/* routes.
     ...(services ? { services: services.asAdminSurface() } : {}),

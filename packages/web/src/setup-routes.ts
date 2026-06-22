@@ -43,6 +43,26 @@ import type { IdentitySurface } from './identity-routes.js'
 
 export interface SetupRoutesCtx {
   identity?: IdentitySurface
+  /**
+   * ease-of-use ① — optional "test connection" probe. Structurally identical
+   * to server.ts's `LlmKeyTestSurface`; inlined here (not imported) to avoid a
+   * setup-routes ↔ server circular import. server.ts passes `ctx.llmKeyTest`
+   * straight through, so duck typing keeps them in lockstep.
+   */
+  llmKeyTest?: {
+    testLlmKey(input: {
+      provider: string
+      apiKey: string
+      baseURL?: string
+      model?: string
+    }): Promise<{
+      ok: boolean
+      model: string
+      latencyMs: number
+      code?: string
+      message?: string
+    }>
+  }
 }
 
 // -- helpers --------------------------------------------------------------
@@ -284,6 +304,44 @@ export async function handleSetupRoute(
       } catch { /* audit failure is non-fatal */ }
     }
     sendJson(res, { ok: true, provider })
+    return true
+  }
+
+  // ease-of-use ① — first-run "test connection" probe. The wizard offers a
+  // 测试连接 button right next to the key field so the lowest-capability user
+  // gets an immediate verdict instead of discovering a dead key much later.
+  // Loopback-only (same trust model as owner-llm-key) — sends ONE minimal
+  // request with the typed key; the host service never logs it.
+  if (path === '/api/setup/test-llm-key' && method === 'POST') {
+    if (!ctx.llmKeyTest) {
+      sendJson(res, { error: 'llm key test not available on this host' }, 503)
+      return true
+    }
+    if (!isLoopbackReq(req)) {
+      sendJson(
+        res,
+        { error: 'setup test-llm-key is loopback-only; use the admin test-connection on a remote host' },
+        403,
+      )
+      return true
+    }
+    let body: unknown
+    try { body = await readJsonBody(req) }
+    catch { sendJson(res, { error: 'invalid JSON body' }, 400); return true }
+    const b = (body ?? {}) as {
+      provider?: unknown; apiKey?: unknown; baseURL?: unknown; model?: unknown
+    }
+    const provider = typeof b.provider === 'string' ? b.provider.trim() : ''
+    const apiKey = typeof b.apiKey === 'string' ? b.apiKey : ''
+    const baseURL = typeof b.baseURL === 'string' && b.baseURL.trim() ? b.baseURL.trim() : undefined
+    const model = typeof b.model === 'string' && b.model.trim() ? b.model.trim() : undefined
+    if (!provider) { sendJson(res, { error: 'provider is required' }, 400); return true }
+    if (!apiKey.trim()) { sendJson(res, { error: 'apiKey is required' }, 400); return true }
+    // The probe classifies every error into the verdict — a 200 here always
+    // carries a usable result (ok or a friendly code), so the UI never has to
+    // interpret a thrown 500.
+    const result = await ctx.llmKeyTest.testLlmKey({ provider, apiKey, baseURL, model })
+    sendJson(res, result)
     return true
   }
 
