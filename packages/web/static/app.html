@@ -189,6 +189,18 @@
       <div class="me-steward">
         <h2 data-i18n="meStewardTitle">管家</h2>
         <p class="me-meta" data-i18n="meStewardHint">用大白话跟管家说你想做什么 — 它能帮你搭 / 改自己的 AI 助手,或按你的说法改你的工作流。管家只会「提议」,你预览后再决定执行;删除助手、跨 hub 的工作流改动会送到下面「待处理任务」里让你再确认一次。</p>
+        <!-- ease-of-use ⑨-M1 (B1) — starter prompts. A beginner staring at an
+             empty box doesn't know what to say; these one-tap chips fill the
+             input with a concrete, steward-actionable request so the very first
+             interaction is a real success (say one line → the steward builds you
+             a helper). The chip's visible (already-localized) text IS the fill
+             text, so there's no separate fill key to drift. -->
+        <div id="me-steward-suggest" class="me-steward-suggest">
+          <span class="me-steward-suggest-label" data-i18n="meStewardTryLabel">试试这些：</span>
+          <button type="button" class="me-steward-chip" data-i18n="meStewardEg1">帮我建一个每天把新闻总结成一段中文的助手</button>
+          <button type="button" class="me-steward-chip" data-i18n="meStewardEg2">帮我建一个帮我回客户消息的客服小助手</button>
+          <button type="button" class="me-steward-chip" data-i18n="meStewardEg3">帮我建一个把英文邮件翻译成中文的助手</button>
+        </div>
         <textarea id="me-steward-input" rows="3" data-i18n-placeholder="meStewardPlaceholder" placeholder="例如:帮我建一个把每天工单总结成一段中文的助手"></textarea>
         <button id="me-steward-send" type="button" class="me-primary-btn" data-i18n="meStewardSend">问管家</button>
         <div id="me-steward-status" class="me-status"></div>

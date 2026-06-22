@@ -581,6 +581,12 @@
         '用大白话跟管家说你想做什么 — 它能帮你搭 / 改自己的 AI 助手,或按你的说法改你的工作流。管家只会「提议」,你预览后再决定执行;删除助手、跨 hub 的工作流改动会送到下面「待处理任务」里让你再确认一次。',
       meStewardPlaceholder: '例如:帮我建一个把每天工单总结成一段中文的助手',
       meStewardSend: '问管家',
+      // ease-of-use ⑨-M1 (B1) — starter prompts (all "build an assistant" so a
+      // fresh hub with no workflows still yields a real create_agent success).
+      meStewardTryLabel: '试试这些：',
+      meStewardEg1: '帮我建一个每天把新闻总结成一段中文的助手',
+      meStewardEg2: '帮我建一个帮我回客户消息的客服小助手',
+      meStewardEg3: '帮我建一个把英文邮件翻译成中文的助手',
       meStewardThinking: '管家在想…',
       meStewardEmptyInput: '请先用一句话告诉管家你想做什么。',
       meStewardNoActions: '(管家这次只是回话,没有要执行的动作。)',
@@ -2191,6 +2197,11 @@
         'Tell the steward in plain language what you want — it can build / edit your own AI helpers, or change your workflows the way you describe. The steward only PROPOSES; you preview, then decide to run it. Deleting a helper or a cross-hub workflow change is sent to “Pending tasks” below for a second confirmation.',
       meStewardPlaceholder: 'e.g. build me a helper that summarizes each day’s tickets into one paragraph',
       meStewardSend: 'Ask',
+      // ease-of-use ⑨-M1 (B1) — starter prompts.
+      meStewardTryLabel: 'Try one of these:',
+      meStewardEg1: 'Build me an assistant that summarizes the day’s news into one Chinese paragraph',
+      meStewardEg2: 'Build me a support assistant that replies to customer messages',
+      meStewardEg3: 'Build me an assistant that translates English emails into Chinese',
       meStewardThinking: 'The steward is thinking…',
       meStewardEmptyInput: 'Tell the steward in one line what you want to do.',
       meStewardNoActions: '(The steward just replied — nothing to run this time.)',

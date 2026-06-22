@@ -557,6 +557,8 @@
     // are re-rendered, but #me-steward-output is stable.
     bindOnce(document.getElementById('me-steward-send'), 'click', submitStewardPlan)
     bindOnce(document.getElementById('me-steward-output'), 'click', onStewardOutputClick)
+    // ease-of-use ⑨-M1 (B1) — starter-prompt chips fill the steward box.
+    bindOnce(document.getElementById('me-steward-suggest'), 'click', onStewardSuggestClick)
     // WFEDIT-M4 — open the NL editor for the currently-selected workflow.
     bindOnce(document.getElementById('me-wf-edit-load-btn'), 'click', loadWorkflowEditor)
     bindOnce(document.getElementById('me-refresh-reports-btn'), 'click', loadMyReports)
@@ -1256,6 +1258,19 @@
     }
     const inboxBtn = ev.target.closest && ev.target.closest('.me-steward-goto-inbox')
     if (inboxBtn) gotoMyInbox()
+  }
+
+  // ease-of-use ⑨-M1 (B1) — one-tap starter prompts. The chip's visible text
+  // is already localized by applyStaticI18n, so we just copy it into the
+  // steward box (WYSIWYG) and focus, leaving the user free to edit before
+  // asking. Delegated on the stable #me-steward-suggest container.
+  function onStewardSuggestClick(ev) {
+    const chip = ev.target.closest && ev.target.closest('.me-steward-chip')
+    if (!chip) return
+    const input = document.getElementById('me-steward-input')
+    if (!input) return
+    input.value = chip.textContent.trim()
+    input.focus()
   }
 
   async function applyStewardAction(btn) {

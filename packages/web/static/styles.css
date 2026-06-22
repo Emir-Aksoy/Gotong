@@ -2464,6 +2464,16 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 /* SW-M7 — hub steward ("管家") chat panel: reply + per-action proposal cards
    with a tier badge (safe green / dangerous red / cross-hub amber / forbidden
    grey). The tier colour echoes the existing run-status / wf-edit palette. */
+/* ease-of-use ⑨-M1 (B1) — one-tap starter prompts above the steward box. */
+.me-steward-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin: 0.2rem 0 0.55rem; }
+.me-steward-suggest-label { color: #777; font-size: 0.82rem; }
+.me-steward-chip {
+  border: 1px solid #d6cfc4; background: #faf7f2; color: #5b4a36;
+  border-radius: 999px; padding: 0.28rem 0.72rem; font-size: 0.84rem;
+  cursor: pointer; line-height: 1.3; text-align: left;
+}
+.me-steward-chip:hover { background: #f0e7d8; border-color: #b5651d; color: #7a3f0d; }
+
 .me-steward-output { margin-top: 0.6rem; display: flex; flex-direction: column; gap: 0.6rem; }
 .me-steward-reply { white-space: pre-wrap; color: #333; font-size: 0.92rem; line-height: 1.5; }
 .me-steward-card {
