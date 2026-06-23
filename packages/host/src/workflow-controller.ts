@@ -30,6 +30,8 @@ import { join } from 'node:path'
 import { createLogger, extractRequiredCapabilities, type Hub, type HubLink } from '@aipehub/core'
 import { NEVER_RESUME_AT } from '@aipehub/inbox'
 
+import { scrubSecrets } from './scrub-secrets.js'
+
 const log = createLogger('workflow-ctl')
 import {
   RunStore,
@@ -378,12 +380,23 @@ export class WorkflowController {
    * workbench's "my recent runs". Same projection as {@link listRuns} but
    * scoped to `triggeredByOrigin.userId` (the attribution `/api/me/dispatch`
    * stamps), so a member sees only the runs they kicked off.
+   *
+   * ease-of-use ❶-M2: a failed run's `error` (the wrapped provider error) is
+   * shown to the member so the `/me` recent-runs row can explain WHY it failed
+   * (the frontend runs it through `describeError`). Because that string can echo
+   * a provider request — and a member must never read another participant's key
+   * off a shared run row — the host scrubs it here, at the member-facing seam.
+   * The admin run-detail path (`readRun`) keeps full fidelity: operators see the
+   * raw error.
    */
   async listRunsByUser(
     userId: string,
     opts?: { workflowId?: string; limit?: number },
   ): Promise<RunSummary[]> {
-    return this.runStore.listByUser(userId, opts)
+    const rows = await this.runStore.listByUser(userId, opts)
+    return rows.map((r) =>
+      r.error === undefined ? r : { ...r, error: scrubSecrets(r.error) },
+    )
   }
 
   /**

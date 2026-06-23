@@ -745,6 +745,9 @@
     bindDepthGroup('me-wf-create-depth', (d) => { createDepth = d })
     bindOnce(document.getElementById('me-refresh-reports-btn'), 'click', loadMyReports)
     bindOnce(document.getElementById('me-runs-refresh-btn'), 'click', loadMyRuns)
+    // ease-of-use ❶-M2 — delegated「去补 key」on a failed run row. #me-runs-tbody
+    // is stable (only its innerHTML is rebuilt), so one binding survives refreshes.
+    bindOnce(document.getElementById('me-runs-tbody'), 'click', onRunsClick)
     bindOnce(document.getElementById('me-agents-refresh-btn'), 'click', loadMyAgents)
     bindOnce(document.getElementById('me-inbox-refresh-btn'), 'click', loadMyInbox)
     // Delegated: the list is re-rendered, but #me-inbox-list is stable.
@@ -1989,12 +1992,44 @@
               <td>${renderRunStatus(run.status)}</td>
               <td>${escape(formatTs(run.startedAt))}</td>
               <td>${run.endedAt ? escape(formatTs(run.endedAt)) : `<span class="me-meta">${t('meInProgress')}</span>`}</td>
-            </tr>`,
+            </tr>${renderRunFailure(run)}`,
         )
         .join('')
     } catch (err) {
       tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${escape(t('meLoadFailedErr', err?.message || String(err)))}</td></tr>`
     }
+  }
+
+  // ease-of-use ❶-M2 — when a run FAILED, turn its (host-scrubbed) error into a
+  // plain-language reason + an actionable fix, reusing the SAME describeError
+  // classifier the quick-chat uses (③TC) so the member never reads a raw stack.
+  // Rendered as a second row spanning all columns, only for failed runs that
+  // carry an error. When the cause is key/quota-related, append a「去补 key」
+  // button that jumps to the member's BYO-key panel — delegated via
+  // data-me-runs-fix-key because #me-runs-tbody is rebuilt on every refresh.
+  function renderRunFailure(run) {
+    if (run.status !== 'failed' || !run.error) return ''
+    const d = window.AipeHub.describeError(run.error)
+    const fix = d.fix ? ` <span class="me-run-reason-fix">${escape(d.fix)}</span>` : ''
+    const keyBtn = d.fixIsKey
+      ? ` <button type="button" class="me-chat-fix-btn" data-me-runs-fix-key>${escape(t('meChatGoAddKey'))}</button>`
+      : ''
+    const raw = `<details class="me-run-reason-raw"><summary>${escape(t('workflowRunErrorRaw'))}</summary><pre>${escape(String(run.error))}</pre></details>`
+    return `
+      <tr class="me-run-reason-row">
+        <td colspan="4">
+          <span class="me-run-reason-label">${escape(t('meRunFailReason'))}</span>
+          <span class="me-run-reason-text">${escape(d.text)}</span>${fix}${keyBtn}
+          ${raw}
+        </td>
+      </tr>`
+  }
+
+  // Delegated click for the recent-runs table: the only interactive element a
+  // run row carries is the「去补 key」fix button (renderRunFailure above), which
+  // reveals the member's BYO-key panel — same destination as the quick-chat fix.
+  function onRunsClick(ev) {
+    if (ev.target.closest && ev.target.closest('[data-me-runs-fix-key]')) revealMyKeyPanel()
   }
 
   // Map a RunStatus to a coloured pill. Falls back to the raw status string so a

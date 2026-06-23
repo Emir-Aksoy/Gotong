@@ -679,6 +679,7 @@
       meRunStatusFailed: '失败',
       meRunStatusCancelled: '已取消',
       meRunStatusSuspended: '挂起',
+      meRunFailReason: '失败原因：',
       // Inbox
       meInboxEmpty: '暂无待处理任务。',
       meInboxHandoff: (n) => `📨 交接说明：${n}`,
@@ -2418,6 +2419,7 @@
       meRunStatusFailed: 'failed',
       meRunStatusCancelled: 'cancelled',
       meRunStatusSuspended: 'suspended',
+      meRunFailReason: 'Why it failed:',
       // Inbox
       meInboxEmpty: 'No pending tasks.',
       meInboxHandoff: (n) => `📨 Handoff note: ${n}`,

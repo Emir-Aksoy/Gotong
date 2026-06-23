@@ -2865,6 +2865,19 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .me-run-failed { background: #c0392b; }
 .me-run-cancelled { background: #999; }
 .me-run-suspended { background: #d29922; }
+/* ease-of-use ❶-M2 — failed-run reason row (describeError reason + fix). */
+.me-run-reason-row > td {
+  padding: 0.35rem 0.6rem 0.6rem; border-top: 0; background: #fff5f5;
+  font-size: 0.85rem; color: #86181d;
+}
+.me-run-reason-label { font-weight: 600; margin-right: 0.25rem; }
+.me-run-reason-fix { color: #9a6700; }
+.me-run-reason-raw { margin-top: 0.3rem; }
+.me-run-reason-raw > summary { cursor: pointer; color: #6a737d; font-size: 0.8rem; }
+.me-run-reason-raw pre {
+  margin: 0.25rem 0 0; padding: 0.4rem 0.5rem; background: #fff; border: 1px solid #f0c6c6;
+  border-radius: 4px; white-space: pre-wrap; word-break: break-word; font-size: 0.78rem; color: #4a4a4a;
+}
 .me-agents-list { margin-top: 0.5rem; display: flex; flex-wrap: wrap; gap: 0.6rem; }
 .me-agent-card {
   border: 1px solid #e2e2e2; border-radius: 6px; padding: 0.6rem 0.75rem;
