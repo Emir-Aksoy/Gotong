@@ -32,7 +32,7 @@
  */
 ;(() => {
   function install(deps) {
-    const { dom, state, ma, wf, refreshWorkflows } = deps
+    const { dom, state, ma, wf, mcp, refreshWorkflows } = deps
     const fetchFn = deps.fetch || window.fetch.bind(window)
 
     // window.AipeHub is fully populated by the time install() runs (app-core.js
@@ -352,7 +352,9 @@
 
       try {
         // 把当前 hub 已有的 agents + workflow ids 当 contextHints — 让 LLM
-        // 用真名而不是编名字。MCP servers 暂不喂(admin UI 没有 /api 暴露)。
+        // 用真名而不是编名字。MCD-M4: 也把已装的 MCP server 名喂进去,让架构师
+        // 优先围绕「可直接组装的组件」建、少编造后端 (assistant 把它们渲染成
+        // "Available MCP servers:";server 名非 capability,deepCheck 不校验)。
         const contextHints = {}
         if (Array.isArray(ma?.agents) && ma.agents.length > 0) {
           contextHints.agents = ma.agents.map((a) => {
@@ -374,6 +376,16 @@
           body.subjectYaml = subjectYaml || ''
         } else {
           body.description = description
+          // MCD-M4 — fetch installed MCP server names fresh. The MCP tab is
+          // lazy-loaded (main.js boots agents/workflows eagerly but NOT MCP),
+          // so mcp.state.servers may be cold; the dedicated loader does its own
+          // light GET. Best-effort — [] just means no MCP hint this round.
+          if (mcp && typeof mcp.loadInstalledMcpServerNames === 'function') {
+            try {
+              const names = await mcp.loadInstalledMcpServerNames()
+              if (Array.isArray(names) && names.length > 0) contextHints.mcpServers = names
+            } catch { /* best-effort — omit the hint on any failure */ }
+          }
           if (Object.keys(contextHints).length > 0) body.contextHints = contextHints
         }
 

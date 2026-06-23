@@ -131,6 +131,8 @@ interface BuildOpts {
    */
   sticky?: string[]
   failPersist?: Error
+  /** MCD-M4 — installed MCP server names fed into the architect's contextHints. */
+  mcpServerNames?: () => Promise<ReadonlyArray<string>> | ReadonlyArray<string>
 }
 
 function buildDeps(opts: BuildOpts) {
@@ -140,6 +142,8 @@ function buildDeps(opts: BuildOpts) {
     assistDescriptions: [] as string[],
     /** D4 — whether each assist call carried a per-call chunk sink. */
     assistHadOnChunk: [] as boolean[],
+    /** MCD-M4 — the MCP server names the assistant saw via contextHints. */
+    assistMcpServers: [] as Array<ReadonlyArray<string> | undefined>,
     publish: [] as Array<{ id: string; text?: string; by?: string }>,
     saveDraft: [] as Array<{ text: string; by?: string }>,
   }
@@ -177,6 +181,7 @@ function buildDeps(opts: BuildOpts) {
         calls.assist++
         calls.assistDescriptions.push(input.description)
         calls.assistHadOnChunk.push(typeof input.onChunk === 'function')
+        calls.assistMcpServers.push(input.contextHints?.mcpServers)
         // D4 — exercise the per-call streaming path when the caller wired one.
         input.onChunk?.('chunk-1')
         input.onChunk?.('chunk-2')
@@ -186,6 +191,7 @@ function buildDeps(opts: BuildOpts) {
     },
     participants: () => opts.participants ?? [{ id: 'local-agent', capabilities: ['wf.draft'] }],
     ...(opts.peerCapabilities ? { peerCapabilities: opts.peerCapabilities } : {}),
+    ...(opts.mcpServerNames ? { mcpServerNames: opts.mcpServerNames } : {}),
     ...(opts.sticky !== undefined
       ? { crossHubMarkers: { get: async () => opts.sticky as string[] } }
       : {}),
@@ -610,6 +616,51 @@ describe('MeWorkflowEditService — streaming edit preview (D4)', () => {
     const r = await service.edit({ ...REQ, instruction: '改点东西' })
     expect(r.ok).toBe(true)
     expect(calls.assistHadOnChunk).toEqual([false])
+  })
+})
+
+describe('MeWorkflowEditService.edit — MCD-M4 MCP hints', () => {
+  it('feeds installed MCP server names into the assistant contextHints', async () => {
+    const { service, calls } = buildDeps({
+      currentYaml: LOCAL_WF,
+      assist: assistOk(LOCAL_WF),
+      mcpServerNames: () => ['chroma-rag', 'obsidian-notes'],
+    })
+    const r = await service.edit({ ...REQ, instruction: '改点东西' })
+    expect(r.ok).toBe(true)
+    // The architect edits AROUND components that are already wired.
+    expect(calls.assistMcpServers).toEqual([['chroma-rag', 'obsidian-notes']])
+  })
+
+  it('omits the MCP hint when no servers are installed (empty list)', async () => {
+    const { service, calls } = buildDeps({
+      currentYaml: LOCAL_WF,
+      assist: assistOk(LOCAL_WF),
+      mcpServerNames: () => [],
+    })
+    const r = await service.edit({ ...REQ, instruction: '改点东西' })
+    expect(r.ok).toBe(true)
+    expect(calls.assistMcpServers).toEqual([undefined])
+  })
+
+  it('omits the MCP hint entirely when no provider is wired (the default)', async () => {
+    const { service, calls } = buildDeps({ currentYaml: LOCAL_WF, assist: assistOk(LOCAL_WF) })
+    const r = await service.edit({ ...REQ, instruction: '改点东西' })
+    expect(r.ok).toBe(true)
+    expect(calls.assistMcpServers).toEqual([undefined])
+  })
+
+  it('is best-effort: a registry read failure just omits the hint (edit still succeeds)', async () => {
+    const { service, calls } = buildDeps({
+      currentYaml: LOCAL_WF,
+      assist: assistOk(LOCAL_WF),
+      mcpServerNames: () => {
+        throw new Error('registry off')
+      },
+    })
+    const r = await service.edit({ ...REQ, instruction: '改点东西' })
+    expect(r.ok).toBe(true) // the MCP hint is advisory — its failure never blocks editing
+    expect(calls.assistMcpServers).toEqual([undefined])
   })
 })
 

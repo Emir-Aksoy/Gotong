@@ -137,6 +137,8 @@ interface BuildOpts {
   failPersist?: Error
   perMemberDraftCap?: number
   ownedDrafts?: number
+  /** MCD-M4 — installed MCP server names fed into the architect's contextHints. */
+  mcpServerNames?: () => Promise<ReadonlyArray<string>> | ReadonlyArray<string>
 }
 
 function buildDeps(opts: BuildOpts) {
@@ -148,6 +150,7 @@ function buildDeps(opts: BuildOpts) {
       detail?: WorkflowDetailLevel
       subjectYaml?: string
       hadOnChunk: boolean
+      mcpServers?: ReadonlyArray<string>
     }>,
     saveDraft: [] as Array<{ text: string; by?: string }>,
     grants: [] as Array<{ workflowId: string; userId: string; perm: string }>,
@@ -183,6 +186,7 @@ function buildDeps(opts: BuildOpts) {
           detail: input.detail,
           subjectYaml: input.subjectYaml,
           hadOnChunk: typeof input.onChunk === 'function',
+          mcpServers: input.contextHints?.mcpServers,
         })
         input.onChunk?.('chunk-1')
         input.onChunk?.('chunk-2')
@@ -192,6 +196,7 @@ function buildDeps(opts: BuildOpts) {
     },
     participants: () => opts.participants ?? [{ id: 'local-agent', capabilities: ['wf.draft'] }],
     ...(opts.peerCapabilities ? { peerCapabilities: opts.peerCapabilities } : {}),
+    ...(opts.mcpServerNames ? { mcpServerNames: opts.mcpServerNames } : {}),
     ...(typeof opts.perMemberDraftCap === 'number'
       ? { perMemberDraftCap: opts.perMemberDraftCap, countOwnedDrafts: () => opts.ownedDrafts ?? 0 }
       : {}),
@@ -388,6 +393,48 @@ describe('MeWorkflowCreateService.create — optional per-member draft cap', () 
     const { service } = buildDeps({ assist: assistOk(LOCAL_WF) })
     const r = await service.create({ instruction: 'x', userId: 'alice' })
     expect(r.ok).toBe(true)
+  })
+})
+
+// --- MCD-M4: installed MCP server names in the architect's contextHints ------
+
+describe('MeWorkflowCreateService.create — MCD-M4 MCP hints', () => {
+  it('feeds installed MCP server names into the assistant contextHints', async () => {
+    const { service, calls } = buildDeps({
+      assist: assistOk(LOCAL_WF),
+      mcpServerNames: () => ['chroma-rag', 'obsidian-notes'],
+    })
+    const r = await service.create({ instruction: 'x', userId: 'alice' })
+    expect(r.ok).toBe(true)
+    // The architect is told which MCP backends are already wired, so it builds
+    // around 可直接组装的组件 instead of inventing names.
+    expect(calls.assistInputs[0]?.mcpServers).toEqual(['chroma-rag', 'obsidian-notes'])
+  })
+
+  it('omits the MCP hint when no servers are installed (empty list)', async () => {
+    const { service, calls } = buildDeps({ assist: assistOk(LOCAL_WF), mcpServerNames: () => [] })
+    const r = await service.create({ instruction: 'x', userId: 'alice' })
+    expect(r.ok).toBe(true)
+    expect(calls.assistInputs[0]?.mcpServers).toBeUndefined()
+  })
+
+  it('omits the MCP hint entirely when no provider is wired (the default)', async () => {
+    const { service, calls } = buildDeps({ assist: assistOk(LOCAL_WF) })
+    const r = await service.create({ instruction: 'x', userId: 'alice' })
+    expect(r.ok).toBe(true)
+    expect(calls.assistInputs[0]?.mcpServers).toBeUndefined()
+  })
+
+  it('is best-effort: a registry read failure just omits the hint (create still succeeds)', async () => {
+    const { service, calls } = buildDeps({
+      assist: assistOk(LOCAL_WF),
+      mcpServerNames: () => {
+        throw new Error('registry off')
+      },
+    })
+    const r = await service.create({ instruction: 'x', userId: 'alice' })
+    expect(r.ok).toBe(true) // the MCP hint is advisory — its failure never blocks authoring
+    expect(calls.assistInputs[0]?.mcpServers).toBeUndefined()
   })
 })
 

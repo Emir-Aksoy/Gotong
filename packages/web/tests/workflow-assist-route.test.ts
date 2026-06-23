@@ -184,6 +184,43 @@ describe('POST /api/admin/workflows/assist', () => {
     expect(call.by).toBe(b.adminId)
   })
 
+  // ── MCD-M4 — architect prefers installed MCP components ──────────
+
+  it('forwards contextHints.mcpServers verbatim to the surface', async () => {
+    // The admin's wf-assist client fills `contextHints.mcpServers` with the
+    // names of MCP servers already installed on the hub. The route forwards
+    // `body.contextHints` verbatim, so installed-component names ride through
+    // alongside agents/existingWorkflowIds — the architect prefers building
+    // around components that are already wired.
+    b = await boot()
+    const hints = {
+      agents: [{ id: 'librarian', capabilities: ['retrieve'] }],
+      existingWorkflowIds: ['x-1'],
+      mcpServers: ['chroma-rag', 'obsidian-notes', 'mcp-registry-search'],
+    }
+    const r = await fetch(`${b.baseUrl}/api/admin/workflows/assist`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${b.adminToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        description: 'answer questions from my notes',
+        contextHints: hints,
+      }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.assistCalls.length).toBe(1)
+    const call = b.assistCalls[0]!
+    // The whole hints object — including mcpServers — forwards verbatim.
+    expect(call.contextHints).toEqual(hints)
+    expect(call.contextHints?.mcpServers).toEqual([
+      'chroma-rag',
+      'obsidian-notes',
+      'mcp-registry-search',
+    ])
+  })
+
   it('200 forwards `invalid` draftStatus + validationError verbatim', async () => {
     b = await boot()
     b.assistResponse = {

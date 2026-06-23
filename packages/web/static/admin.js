@@ -505,7 +505,19 @@
         el.hidden = !remote;
       });
     }
-    return { refreshMcp, submitMcpForm, syncMcpTransportFields, state: mcp };
+    async function loadInstalledMcpServerNames() {
+      try {
+        const r = await fetch("/api/admin/mcp-servers");
+        if (!r.ok) return [];
+        const j = await r.json();
+        const servers = j.servers || [];
+        mcp.servers = servers;
+        return servers.map((rec) => rec?.spec?.name).filter(Boolean);
+      } catch {
+        return [];
+      }
+    }
+    return { refreshMcp, submitMcpForm, syncMcpTransportFields, loadInstalledMcpServerNames, state: mcp };
   }
 
   // admin-src/managed-agents.js
@@ -3886,6 +3898,10 @@
         state,
         ma,
         wf,
+        // MCD-M4 — the assistant prefers already-installed MCP backends when
+        // the directory has any. Pass the mcp module so it can read the live
+        // installed-server list (mcp.state.servers) into contextHints.
+        mcp,
         refreshWorkflows: () => workflows.refreshWorkflows()
       }) : null;
       updateDispatchVisibility();

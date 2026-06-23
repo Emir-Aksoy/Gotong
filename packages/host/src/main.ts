@@ -1392,6 +1392,14 @@ async function main(): Promise<void> {
   // (for per-workflow editor RBAC); absent either → null → the /me edit routes
   // degrade to 503. Persistence + the structure hard-gate are the controller's
   // existing publish/saveDraft, so this adds no new write path.
+  // MCD-M4 — installed hub MCP server names for the architect's contextHints.
+  // The assistant renders these as "Available MCP servers:" so it authors/edits
+  // around components that are already wired (少编造后端). Names only — deepCheck
+  // never validates MCP server names (they're not capabilities). Reads the live
+  // on-disk registry per call; best-effort (the services swallow any failure).
+  const mcpServerNames = async (): Promise<string[]> =>
+    (await space.mcpServers()).map((r) => r.spec.name)
+
   const meWorkflowEdit =
     workflowAssist && identity
       ? new MeWorkflowEditService({
@@ -1400,6 +1408,7 @@ async function main(): Promise<void> {
           assist: workflowAssist,
           participants: () => hub.participants(),
           peerCapabilities: peerCapabilitiesView,
+          mcpServerNames,
           // WFEDIT-S2 — same store the controller captures into, so an offline
           // peer can't open a window to silently retarget a cross-hub hop.
           crossHubMarkers,
@@ -1420,6 +1429,7 @@ async function main(): Promise<void> {
           assist: workflowAssist,
           participants: () => hub.participants(),
           peerCapabilities: peerCapabilitiesView,
+          mcpServerNames,
         })
       : null
 

@@ -191,6 +191,7 @@ export interface WorkflowAssistAuthorView {
     subjectYaml?: string
     contextHints?: {
       agents?: ReadonlyArray<{ id: string; capabilities: ReadonlyArray<string>; description?: string }>
+      mcpServers?: ReadonlyArray<string>
       existingWorkflowIds?: ReadonlyArray<string>
     }
     by: string
@@ -213,6 +214,15 @@ export interface MeWorkflowCreateDeps {
   assist: WorkflowAssistAuthorView
   /** Local participants — drives the local-capability set + assistant contextHints. */
   participants: () => ReadonlyArray<LocalParticipantView>
+  /**
+   * MCD-M4 — installed hub MCP server names (optional). When present, fed to the
+   * architect's contextHints so it prefers already-assemblable MCP backends over
+   * invented ones (the assistant renders them as "Available MCP servers:").
+   * Best-effort: a throw or empty list just omits the hint. Names only — a
+   * server name isn't a capability, so deepCheck never validates against it.
+   * Async because the host reads the registry from disk (space.mcpServers()).
+   */
+  mcpServerNames?: () => Promise<ReadonlyArray<string>> | ReadonlyArray<string>
   /**
    * Off-hub capability view (optional). Absent ⇒ single-hub: nothing is off-hub
    * so the cross-hub reject never fires. Present ⇒ the SAME view the controller's
@@ -268,7 +278,7 @@ export class MeWorkflowCreateService {
         description: composeCreatePrompt(instruction, history),
         mode: 'author',
         ...(req.detail ? { detail: req.detail } : {}),
-        contextHints: this.contextHints(),
+        contextHints: await this.contextHints(),
         by: userId,
         ...(req.onChunk ? { onChunk: req.onChunk } : {}),
       })
@@ -375,7 +385,7 @@ export class MeWorkflowCreateService {
         mode: 'explain',
         detail,
         subjectYaml: yaml,
-        contextHints: this.contextHints(),
+        contextHints: await this.contextHints(),
         by: userId,
         ...(req.onChunk ? { onChunk: req.onChunk } : {}),
       })
@@ -419,12 +429,28 @@ export class MeWorkflowCreateService {
   /**
    * Real local agent capabilities → assistant `contextHints`, so it authors
    * using the hub's actual capability names AND the deep-check has a live
-   * inventory to flag fabricated capabilities against.
+   * inventory to flag fabricated capabilities against. MCD-M4: also the
+   * installed MCP server names (best-effort) so the architect prefers already-
+   * assemblable backends. Async because the MCP names come from the on-disk
+   * registry.
    */
-  private contextHints(): { agents: Array<{ id: string; capabilities: string[] }> } {
-    return {
+  private async contextHints(): Promise<{
+    agents: Array<{ id: string; capabilities: string[] }>
+    mcpServers?: string[]
+  }> {
+    const hints: { agents: Array<{ id: string; capabilities: string[] }>; mcpServers?: string[] } = {
       agents: this.deps.participants().map((p) => ({ id: p.id, capabilities: [...p.capabilities] })),
     }
+    if (this.deps.mcpServerNames) {
+      try {
+        const names = await this.deps.mcpServerNames()
+        const filtered = (names || []).filter(Boolean)
+        if (filtered.length > 0) hints.mcpServers = filtered
+      } catch {
+        // best-effort — a registry read failure just omits the MCP hint.
+      }
+    }
+    return hints
   }
 }
 

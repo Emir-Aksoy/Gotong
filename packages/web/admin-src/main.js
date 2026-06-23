@@ -2395,6 +2395,10 @@ import { createWorkflows } from './workflows.js'
           state,
           ma,
           wf,
+          // MCD-M4 — the assistant prefers already-installed MCP backends when
+          // the directory has any. Pass the mcp module so it can read the live
+          // installed-server list (mcp.state.servers) into contextHints.
+          mcp,
           refreshWorkflows: () => workflows.refreshWorkflows(),
         })
       : null

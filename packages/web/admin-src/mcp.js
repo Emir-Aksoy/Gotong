@@ -292,5 +292,25 @@ export function createMcp() {
     document.querySelectorAll('.mcp-remote-only').forEach((el) => { el.hidden = !remote })
   }
 
-  return { refreshMcp, submitMcpForm, syncMcpTransportFields, state: mcp }
+  // MCD-M4 — installed MCP server names for the workflow architect's
+  // contextHints. The MCP tab is lazy-loaded (refreshMcp only runs when that
+  // tab is the active one — main.js boots agents/workflows eagerly but NOT
+  // MCP), so the assist can't trust mcp.state.servers being warm. This does
+  // its own light GET (no DOM render, no connector catalog) and returns just
+  // the names. Best-effort by design: a 503 (registry off) or any failure
+  // yields [] so the hint is simply omitted, never a thrown error.
+  async function loadInstalledMcpServerNames() {
+    try {
+      const r = await fetch('/api/admin/mcp-servers')
+      if (!r.ok) return [] // 503 (registry not wired) or any failure → no hint
+      const j = await r.json()
+      const servers = j.servers || []
+      mcp.servers = servers // keep the cache warm as a side benefit
+      return servers.map((rec) => rec?.spec?.name).filter(Boolean)
+    } catch {
+      return []
+    }
+  }
+
+  return { refreshMcp, submitMcpForm, syncMcpTransportFields, loadInstalledMcpServerNames, state: mcp }
 }

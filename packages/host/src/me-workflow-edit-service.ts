@@ -183,6 +183,11 @@ export interface WorkflowAssistView {
     contextHints?: {
       agents?: ReadonlyArray<{ id: string; capabilities: ReadonlyArray<string>; description?: string }>
       existingWorkflowIds?: ReadonlyArray<string>
+      // MCD-M4 — installed MCP server names. The assistant renders these as
+      // "Available MCP servers:" so it edits around components that are already
+      // wired. Names only (deepCheck never validates them — they're not
+      // capabilities).
+      mcpServers?: ReadonlyArray<string>
     }
     by: string
     onChunk?: (chunk: string) => void
@@ -214,6 +219,13 @@ export interface MeWorkflowEditDeps {
   assist: WorkflowAssistView
   /** Local participants — drives the local-capability set + assistant contextHints. */
   participants: () => ReadonlyArray<LocalParticipantView>
+  /**
+   * MCD-M4 — installed MCP server names for the assistant's contextHints.
+   * Optional + best-effort: the architect prefers components that are already
+   * wired. Names only (deepCheck never validates MCP server names — they're not
+   * capabilities). Async because it reads the on-disk hub MCP registry.
+   */
+  mcpServerNames?: () => Promise<ReadonlyArray<string>> | ReadonlyArray<string>
   /**
    * Off-hub capability view (optional). Absent ⇒ single-hub: egress is empty so
    * only the trigger is locked. Present ⇒ the SAME view the controller's
@@ -276,7 +288,7 @@ export class MeWorkflowEditService {
     try {
       assist = await this.deps.assist.assist({
         description: composeEditPrompt(currentYaml, instruction, history),
-        contextHints: this.contextHints(),
+        contextHints: await this.contextHints(),
         by: userId,
         ...(req.onChunk ? { onChunk: req.onChunk } : {}),
       })
@@ -421,11 +433,27 @@ export class MeWorkflowEditService {
   /**
    * Real local agent capabilities → assistant `contextHints`, so it edits using
    * the hub's actual capability names AND the deep-check has a live inventory.
+   * MCD-M4: also feed installed MCP server names so the architect edits around
+   * components that are already wired (best-effort — a registry read failure
+   * just omits the MCP hint).
    */
-  private contextHints(): { agents: Array<{ id: string; capabilities: string[] }> } {
-    return {
+  private async contextHints(): Promise<{
+    agents: Array<{ id: string; capabilities: string[] }>
+    mcpServers?: string[]
+  }> {
+    const hints: { agents: Array<{ id: string; capabilities: string[] }>; mcpServers?: string[] } = {
       agents: this.deps.participants().map((p) => ({ id: p.id, capabilities: [...p.capabilities] })),
     }
+    if (this.deps.mcpServerNames) {
+      try {
+        const names = await this.deps.mcpServerNames()
+        const filtered = (names || []).filter(Boolean)
+        if (filtered.length > 0) hints.mcpServers = filtered
+      } catch {
+        // best-effort — a registry read failure just omits the MCP hint.
+      }
+    }
+    return hints
   }
 }
 
