@@ -705,6 +705,15 @@
       }
       if (dom.maQcInput) dom.maQcInput.focus();
     }
+    function appendKeyFixButton(d) {
+      if (!d.fixIsKey || !dom.maQcStatus) return;
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "ma-chat-fix-btn";
+      btn.textContent = t3.meChatGoAddKey;
+      btn.addEventListener("click", openKeysModal);
+      dom.maQcStatus.append(" ", btn);
+    }
     async function quickChat() {
       const agentId = ma._quickChatAgentId;
       if (!agentId || !dom.maQcInput || !dom.maQcStatus) return;
@@ -744,6 +753,7 @@
         dom.maQcStatus.textContent = t3.quickChatFailed(d.fix ? `${d.text} ${d.fix}` : d.text);
         dom.maQcStatus.classList.remove("ok");
         dom.maQcStatus.classList.add("err");
+        appendKeyFixButton(d);
       } finally {
         if (btn) {
           btn.disabled = false;
@@ -782,6 +792,7 @@
       dom.maQcStatus.textContent = t3.quickChatAgentFailed(friendly);
       dom.maQcStatus.classList.remove("ok");
       dom.maQcStatus.classList.add("err");
+      appendKeyFixButton(d);
     }
     async function submitAgentForm(e) {
       e.preventDefault();

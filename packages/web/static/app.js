@@ -2200,12 +2200,11 @@
   // BYO key is missing / invalid / out of quota. The ③TC fix text already says "go
   // add a key", and the member's「我的 API 密钥」panel (with the 拿key向导) sits right
   // here on the same /me page — just under a different name ("我的 API 密钥" vs the
-  // generic "API Key 管理" wording). So for those two key-related codes, make the fix
-  // a one-click jump instead of plain text the member has to hunt for. invalid_key /
-  // insufficient_quota are exactly the codes whose ERROR_FIX_KEYS === the key panel.
-  function chatFixIsKey(code) {
-    return code === 'invalid_key' || code === 'insufficient_quota'
-  }
+  // generic "API Key 管理" wording). So when the failure is key/quota-related, make the
+  // fix a one-click jump instead of plain text the member has to hunt for. Whether a
+  // failure is key-fixable is decided ONCE, by describeError's `fixIsKey` flag (③TC-ADMIN
+  // hoisted it there so the admin quick-chat reads the same source) — this surface no
+  // longer re-encodes the invalid_key/insufficient_quota code list.
   // Scroll to + open the member BYO-key panel and its key-acquisition guide so the
   // member can paste a key right away. preventScroll on focus so it doesn't fight
   // the smooth scroll.
@@ -2224,7 +2223,7 @@
     if (!statusEl) return
     statusEl.className = 'me-status error'
     statusEl.textContent = t(msgKey, d.fix ? `${d.text} ${d.fix}` : d.text)
-    if (chatFixIsKey(d.code)) {
+    if (d.fixIsKey) {
       const btn = document.createElement('button')
       btn.type = 'button'
       btn.className = 'me-chat-fix-btn'

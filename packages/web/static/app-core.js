@@ -3923,13 +3923,19 @@
     if (/\b5\d\d\b|internal server error|bad gateway|service unavailable|overloaded|upstream/.test(s)) return 'upstream'
     return 'unknown'
   }
-  // Returns { code, text, fix } — `text` is the friendly explanation, `fix` is
-  // the actionable next step ('' when none applies). Caller composes them.
+  // Returns { code, text, fix, fixIsKey } — `text` is the friendly explanation,
+  // `fix` is the actionable next step ('' when none applies), and `fixIsKey` is
+  // the one authoritative "this failure is fixed by adding/replacing an LLM key"
+  // flag: it is TRUE exactly for the codes whose fix hint is errFixKey
+  // (invalid_key + insufficient_quota). Both the member quick-chat (③TC-ME) and
+  // the admin quick-chat (③TC-ADMIN) read THIS flag to decide whether to show a
+  // one-click "go add a key" button, so the code→is-key-fix mapping lives in
+  // ERROR_FIX_KEYS alone and neither surface re-encodes the code list.
   function describeError(raw) {
     const code = classifyErrorText(raw)
     const text = t[KEY_TEST_CODE_KEYS[code]] || t.testConnUnknown
     const fixKey = ERROR_FIX_KEYS[code]
-    return { code, text, fix: fixKey ? (t[fixKey] || '') : '' }
+    return { code, text, fix: fixKey ? (t[fixKey] || '') : '', fixIsKey: fixKey === 'errFixKey' }
   }
 
   // --- expose -------------------------------------------------------------

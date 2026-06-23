@@ -371,6 +371,24 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     if (dom.maQcInput) dom.maQcInput.focus()
   }
 
+  // ease-of-use ③TC-ADMIN — when a quick-chat failure is key/quota-related,
+  // append a one-click「去补 key →」button that opens the「API Key 管理」keys modal
+  // (openKeysModal), so the operator doesn't have to hunt for it. Whether a failure
+  // is key-fixable is decided by describeError's `fixIsKey` flag — the SAME single
+  // source the member /me quick-chat (③TC-ME) reads, so the two surfaces never drift.
+  // textContent-first everywhere else means this real button node is dropped on the
+  // next send (each new state resets maQcStatus.textContent, clearing children); no
+  // innerHTML, nothing to escape.
+  function appendKeyFixButton(d) {
+    if (!d.fixIsKey || !dom.maQcStatus) return
+    const btn = document.createElement('button')
+    btn.type = 'button'
+    btn.className = 'ma-chat-fix-btn'
+    btn.textContent = t.meChatGoAddKey
+    btn.addEventListener('click', openKeysModal)
+    dom.maQcStatus.append(' ', btn)
+  }
+
   // Send one message to the brand-new agent and render its reply inline.
   // Reuses the existing wait:true dispatch path (the same one the MCP server
   // uses) — explicit→to targets the agent by id, so no capability guessing.
@@ -410,6 +428,7 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
       dom.maQcStatus.textContent = t.quickChatFailed(d.fix ? `${d.text} ${d.fix}` : d.text)
       dom.maQcStatus.classList.remove('ok')
       dom.maQcStatus.classList.add('err')
+      appendKeyFixButton(d)
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = prevLabel || t.quickChatSend }
     }
@@ -459,6 +478,7 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     dom.maQcStatus.textContent = t.quickChatAgentFailed(friendly)
     dom.maQcStatus.classList.remove('ok')
     dom.maQcStatus.classList.add('err')
+    appendKeyFixButton(d)
   }
 
   async function submitAgentForm(e) {
