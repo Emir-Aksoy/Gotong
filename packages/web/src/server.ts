@@ -67,6 +67,7 @@ import { handleAdminRoute } from './admin-routes.js'
 import {
   handleMcpRoute,
   handleMcpFederationRoute,
+  handleMcpConnectorsRoute,
   type McpRegistrySurface,
   type McpFederationSurface,
 } from './mcp-routes.js'
@@ -2184,6 +2185,16 @@ async function handle(
         mcpRegistry: ctx.mcpRegistry,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
       },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // MCD-M2 — built-in MCP connector directory (browse + one-click install
+  // reuses the mcp-servers route above). Pure web constant; admin-gated.
+  if (path.startsWith('/api/admin/mcp-connectors')) {
+    const handled = await handleMcpConnectorsRoute(
+      { requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs) },
       req, res, method, path,
     )
     if (handled) return

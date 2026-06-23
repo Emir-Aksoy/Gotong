@@ -29,6 +29,7 @@ import {
   type PeerSharedMcp,
   type WebServerHandle,
 } from '../src/server.js'
+import { BUILTIN_MCP_CONNECTORS } from '../src/builtin-mcp-connectors.js'
 
 interface Boot {
   tmp: string
@@ -303,5 +304,45 @@ describe('/api/admin/mcp-shared (#2-M3.4b)', () => {
     b.federationThrows = true
     const r = await fetch(`${b.baseUrl}/api/admin/mcp-shared`, { headers: auth(b) })
     expect(r.status).toBe(500)
+  })
+})
+
+describe('/api/admin/mcp-connectors/catalog (MCD-M2)', () => {
+  let b: Boot
+  afterEach(async () => { await teardown(b) })
+
+  it('401 when unauthenticated', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}/api/admin/mcp-connectors/catalog`)
+    expect(r.status).toBe(401)
+  })
+
+  it('GET returns the built-in connector directory', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}/api/admin/mcp-connectors/catalog`, { headers: auth(b) })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(Array.isArray(j.connectors)).toBe(true)
+    expect(j.connectors).toHaveLength(BUILTIN_MCP_CONNECTORS.length)
+    // The discovery (fetch-recipe) entry must be present — that's the whole
+    // "let the agent search the mainstream registry" story.
+    const discovery = j.connectors.find((c: { category: string }) => c.category === 'discovery')
+    expect(discovery?.spec?.name).toBe('registry_search')
+  })
+
+  it('catalog is available even with no registry surface wired (pure constant, never 503)', async () => {
+    b = await boot({ withRegistry: false })
+    const r = await fetch(`${b.baseUrl}/api/admin/mcp-connectors/catalog`, { headers: auth(b) })
+    expect(r.status).toBe(200)
+    expect((await r.json()).connectors.length).toBeGreaterThan(0)
+  })
+
+  it('405 on a non-GET method to the catalog', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}/api/admin/mcp-connectors/catalog`, {
+      method: 'POST',
+      headers: auth(b),
+    })
+    expect(r.status).toBe(405)
   })
 })

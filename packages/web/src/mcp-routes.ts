@@ -22,6 +22,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import type { AdminRecord, HubMcpServerRecord, McpServerSpec } from '@aipehub/core'
 import { createLogger } from '@aipehub/core'
 
+import { BUILTIN_MCP_CONNECTORS } from './builtin-mcp-connectors.js'
 import { readJsonBody, sendJson } from './http-helpers.js'
 import { validateMcpServersArray, ManifestError } from './manifest.js'
 
@@ -87,6 +88,7 @@ export interface McpFederationRoutesCtx {
 
 const PREFIX = '/api/admin/mcp-servers'
 const FED_PREFIX = '/api/admin/mcp-shared'
+const CONNECTORS_PREFIX = '/api/admin/mcp-connectors'
 
 /**
  * Handle `/api/admin/mcp-servers` routes. Returns `true` if the request
@@ -218,5 +220,41 @@ export async function handleMcpFederationRoute(
     log.error('mcp-shared list failed', { by: admin.id, err: msg })
     sendJson(res, { error: msg }, 500)
   }
+  return true
+}
+
+/** Ctx for the built-in connector directory — admin gate only, no host surface. */
+export interface McpConnectorsRoutesCtx {
+  requireAdmin: (req: IncomingMessage, res: ServerResponse) => Promise<AdminRecord | null>
+}
+
+/**
+ * Handle `GET /api/admin/mcp-connectors/catalog` — the built-in MCP connector
+ * directory (MCD-M2). Pure web constant (`BUILTIN_MCP_CONNECTORS`), so unlike
+ * the registry route there's NO host surface to inject and never a 503: the
+ * directory is always available to browse. Installing one of these is the
+ * existing `POST /api/admin/mcp-servers` route — the directory only suggests.
+ *
+ * Admin-gated like the rest of `/api/admin/*`: browsing the directory is the
+ * front door to installing an MCP server, which is an operator action.
+ */
+export async function handleMcpConnectorsRoute(
+  ctx: McpConnectorsRoutesCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  method: string,
+  path: string,
+): Promise<boolean> {
+  if (path !== CONNECTORS_PREFIX && !path.startsWith(`${CONNECTORS_PREFIX}/`)) return false
+
+  const admin = await ctx.requireAdmin(req, res)
+  if (!admin) return true
+
+  if (path === `${CONNECTORS_PREFIX}/catalog` && method === 'GET') {
+    sendJson(res, { connectors: BUILTIN_MCP_CONNECTORS })
+    return true
+  }
+
+  sendJson(res, { error: `method ${method} not allowed on ${path}` }, 405)
   return true
 }
