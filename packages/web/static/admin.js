@@ -796,6 +796,17 @@
       }
       if (dom.maQcInput) dom.maQcInput.focus();
     }
+    function openAgentChat(agentId) {
+      if (!dom.maFormModal) return;
+      if (dom.maFormTitle) dom.maFormTitle.textContent = t3.healthTestTitle(agentId);
+      if (dom.maFormEditWarning) dom.maFormEditWarning.hidden = true;
+      if (dom.maFormMsg) {
+        dom.maFormMsg.textContent = "";
+        dom.maFormMsg.classList.remove("ok", "err");
+      }
+      dom.maFormModal.hidden = false;
+      openQuickChat(agentId);
+    }
     function appendKeyFixButton(d) {
       if (!d.fixIsKey || !dom.maQcStatus) return;
       const btn = document.createElement("button");
@@ -1344,6 +1355,7 @@
       submitAgentForm,
       testConnection,
       quickChat,
+      openAgentChat,
       openImportModal,
       openKeysModal,
       closeKeysModal,
@@ -3082,6 +3094,112 @@
         });
       }
     }
+    let hubHealthBusy = false;
+    let lastHealthSnap = null;
+    function hubHealthSignalRow(level, text, btnHtml) {
+      return `<li class="hh-signal hh-${level}">
+      <span class="hh-dot" aria-hidden="true"></span>
+      <span class="hh-text">${escapeHtml5(text)}</span>
+      ${btnHtml || ""}
+    </li>`;
+    }
+    function renderHubHealthHtml(snap) {
+      const agents = snap.agents || [];
+      const mcp2 = snap.mcpServers || [];
+      const signals = [];
+      for (const a of agents) {
+        if (a.missingKey) {
+          signals.push(hubHealthSignalRow(
+            "red",
+            t5.healthAgentMissingKey(a.id, a.provider),
+            `<button type="button" class="hh-btn" data-hh="key">${escapeHtml5(t5.healthGoAddKey)}</button>`
+          ));
+        }
+      }
+      for (const m of mcp2) {
+        if (!m.wired) {
+          signals.push(hubHealthSignalRow(
+            "yellow",
+            t5.healthMcpUnwired(m.name),
+            `<button type="button" class="hh-btn" data-hh="mcp">${escapeHtml5(t5.healthGoMcp)}</button>`
+          ));
+        }
+      }
+      if (snap.spaceWritable === false) {
+        signals.push(hubHealthSignalRow("red", t5.healthSpaceUnwritable(snap.spacePath || ""), ""));
+      }
+      const allGreen = signals.length === 0;
+      const head = `
+      <div class="hh-head">
+        <h2 class="hh-title">${escapeHtml5(t5.healthTitle)}</h2>
+        <button type="button" class="hh-refresh" data-hh="refresh">${escapeHtml5(t5.healthRefresh)}</button>
+      </div>
+      <p class="hh-sub ${allGreen ? "hh-ok" : "hh-warn"}">${escapeHtml5(allGreen ? t5.healthAllGreen : t5.healthHasIssues(signals.length))}</p>`;
+      const signalList = allGreen ? "" : `<ul class="hh-signals">${signals.join("")}</ul>`;
+      const roster = `
+      <div class="hh-roster">
+        <h3 class="hh-roster-title">${escapeHtml5(t5.healthRosterTitle(snap.onlineCount || 0, snap.managedCount || 0))}</h3>
+        <ul class="hh-agents">
+          ${agents.map((a) => `
+            <li class="hh-agent">
+              <span class="hh-agent-dot ${a.online ? "on" : "off"}" aria-hidden="true"></span>
+              <span class="hh-agent-id">${escapeHtml5(a.id)}</span>
+              <span class="hh-agent-provider">${escapeHtml5(a.provider)}</span>
+              ${a.online ? `<button type="button" class="hh-btn hh-test" data-hh="test" data-agent="${escapeHtml5(a.id)}">${escapeHtml5(t5.healthTest)}</button>` : `<span class="hh-agent-offline">${escapeHtml5(t5.healthOffline)}</span>`}
+            </li>`).join("")}
+        </ul>
+      </div>`;
+      return head + signalList + roster;
+    }
+    async function renderHubHealth(opts = {}) {
+      const host = document.getElementById("hub-health");
+      if (!host) return;
+      if (hubHealthBusy) return;
+      if (opts.useCache && lastHealthSnap) {
+        if ((lastHealthSnap.managedCount || 0) === 0) {
+          host.hidden = true;
+          return;
+        }
+        host.innerHTML = renderHubHealthHtml(lastHealthSnap);
+        host.hidden = false;
+        return;
+      }
+      hubHealthBusy = true;
+      try {
+        let snap;
+        try {
+          snap = await fetchJson4("/api/admin/health");
+        } catch {
+          host.hidden = true;
+          return;
+        }
+        lastHealthSnap = snap;
+        if (!snap || (snap.managedCount || 0) === 0) {
+          host.hidden = true;
+          return;
+        }
+        host.innerHTML = renderHubHealthHtml(snap);
+        host.hidden = false;
+      } finally {
+        hubHealthBusy = false;
+      }
+    }
+    function onHubHealthClick(e) {
+      const btn = e.target instanceof HTMLElement ? e.target.closest("[data-hh]") : null;
+      if (!btn) return;
+      const action = btn.dataset.hh;
+      if (action === "key") {
+        dom.maKeysBtn?.click();
+      } else if (action === "mcp") {
+        gotoTab("mcp");
+      } else if (action === "test") {
+        const id = btn.dataset.agent;
+        if (id) managedAgents.openAgentChat(id);
+      } else if (action === "refresh") {
+        renderHubHealth().catch(() => {
+        });
+      }
+    }
     function renderGrowthReports(reports) {
       if (!dom.grTbody) return;
       if (dom.grSummary) {
@@ -3916,8 +4034,12 @@
         if (e.detail?.name === "workflows") refreshGrowthReports().catch(() => {
         });
         if (e.detail?.name === "mcp") mcp.refreshMcp().catch((err) => console.warn("mcp refresh failed:", err));
-        if (e.detail?.name === "overview") renderStartHere().catch(() => {
-        });
+        if (e.detail?.name === "overview") {
+          renderStartHere().catch(() => {
+          });
+          renderHubHealth().catch(() => {
+          });
+        }
       });
       dom.dStrategy.addEventListener("change", updateDispatchVisibility);
       dom.dispatchForm.addEventListener("submit", submitDispatch);
@@ -4203,6 +4325,9 @@
       renderStartHere().catch(() => {
       });
       document.getElementById("start-here")?.addEventListener("click", onStartHereClick);
+      renderHubHealth().catch(() => {
+      });
+      document.getElementById("hub-health")?.addEventListener("click", onHubHealthClick);
       if (dom.grRefreshBtn) {
         dom.grRefreshBtn.addEventListener("click", () => {
           refreshGrowthReports().catch((err) => console.warn("manual growth-reports refresh:", err));
@@ -4264,6 +4389,8 @@
         applyStaticI18n();
         renderAll();
         renderStartHere().catch(() => {
+        });
+        renderHubHealth({ useCache: true }).catch(() => {
         });
       });
       const switchToWorkerBtn = document.getElementById("switch-to-worker-btn");

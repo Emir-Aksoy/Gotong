@@ -1388,6 +1388,145 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 }
 .start-here .sh-btn-ghost:hover { color: #c66a48; }
 
+/* ===== ease-of-use ❷-M2 — "hub 体检" health-check panel (overview tab) =====
+   Shares the overview slot with .start-here (mutually exclusive). A NEUTRAL
+   card — it's a status readout, not the warm onboarding nudge — with
+   red/yellow/green signal rows + a roster of agents each carrying a manual
+   「测连接」button. */
+.hub-health {
+  grid-column: 1 / -1;
+  /* Override the generic `section { overflow: auto }`: on a CSS-grid item,
+     overflow:auto zeroes the automatic minimum size, so under grid
+     height-pressure (overview full of agents/activity) the auto row collapses
+     below content and clips the panel. This banner is static — restore
+     overflow:visible so the row sizes to content. */
+  overflow: visible;
+  margin: 14px 1.25rem 0;
+  padding: 16px 18px 18px;
+  background: #fff;
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+}
+.hub-health .hh-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.hub-health .hh-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+.hub-health .hh-title::before { content: "🩺 "; }
+.hub-health .hh-refresh {
+  flex: none;
+  font-size: 0.74rem;
+  color: #667085;
+  background: none;
+  border: 1px solid #d0d5dd;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 3px 10px;
+  font-family: inherit;
+}
+.hub-health .hh-refresh:hover { background: #f5f6f8; color: #344054; }
+.hub-health .hh-sub {
+  margin: 6px 0 12px;
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+.hub-health .hh-sub.hh-ok { color: #1a8a4a; }
+.hub-health .hh-sub.hh-warn { color: #b25a3a; }
+.hub-health .hh-signals {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hub-health .hh-signal {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  border: 1px solid transparent;
+}
+.hub-health .hh-signal.hh-red { background: #fef3f2; border-color: #fcd9d4; color: #93371f; }
+.hub-health .hh-signal.hh-yellow { background: #fffaeb; border-color: #fde9b8; color: #8a5a07; }
+.hub-health .hh-dot {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+}
+.hub-health .hh-red .hh-dot { background: #d0432e; }
+.hub-health .hh-yellow .hh-dot { background: #dd9a09; }
+.hub-health .hh-text { flex: 1; line-height: 1.4; }
+.hub-health .hh-btn {
+  flex: none;
+  font-size: 0.76rem;
+  font-weight: 600;
+  padding: 4px 11px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+  background: #fff;
+  color: #344054;
+  border: 1px solid #d0d5dd;
+}
+.hub-health .hh-btn:hover { background: #f5f6f8; }
+.hub-health .hh-roster {
+  border-top: 1px solid #eceef1;
+  padding-top: 12px;
+}
+.hub-health .hh-roster-title {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #475467;
+}
+.hub-health .hh-agents {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hub-health .hh-agent {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 0.82rem;
+}
+.hub-health .hh-agent-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.hub-health .hh-agent-dot.on { background: #1a8a4a; }
+.hub-health .hh-agent-dot.off { background: #c0c6cf; }
+.hub-health .hh-agent-id { font-weight: 600; color: #1a1a1a; }
+.hub-health .hh-agent-provider {
+  font-size: 0.72rem;
+  color: #667085;
+  background: #f2f4f7;
+  padding: 1px 7px;
+  border-radius: 999px;
+}
+.hub-health .hh-agent-offline {
+  margin-left: auto;
+  font-size: 0.72rem;
+  color: #98a2b3;
+}
+.hub-health .hh-test { margin-left: auto; }
+
 /* scripted steward demo overlay (appended to <body>, not under .start-here) */
 .sh-demo-overlay {
   position: fixed;

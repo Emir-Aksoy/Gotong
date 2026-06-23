@@ -1293,6 +1293,133 @@ import { createWorkflows } from './workflows.js'
     }
   }
 
+  // ===== ease-of-use ❷-M2 — "hub 体检" (health-check) overview panel =====
+  // Complements #start-here: start-here shows on a FRESH hub (no agents/workflows)
+  // to bootstrap the first one; once the hub HAS managed agents, THIS panel takes
+  // over the same overview slot and answers "where is my hub red right now?"
+  // without the admin hunting across the agents / MCP / setup tabs. It fetches the
+  // read-only /api/admin/health snapshot (host-side STATIC aggregation — zero LLM
+  // ping, never spends tokens on open) and renders red/yellow signal rows, each
+  // with a jump-to-fix entry. The one ON-DEMAND live probe is the per-agent
+  // 「测连接」button (reuses quick-chat via managedAgents.openAgentChat).
+  let hubHealthBusy = false
+  let lastHealthSnap = null
+
+  function hubHealthSignalRow(level, text, btnHtml) {
+    return `<li class="hh-signal hh-${level}">
+      <span class="hh-dot" aria-hidden="true"></span>
+      <span class="hh-text">${escapeHtml(text)}</span>
+      ${btnHtml || ''}
+    </li>`
+  }
+
+  function renderHubHealthHtml(snap) {
+    const agents = snap.agents || []
+    const mcp = snap.mcpServers || []
+    const signals = []
+    // RED — managed agents whose key does not resolve (the headline signal).
+    for (const a of agents) {
+      if (a.missingKey) {
+        signals.push(hubHealthSignalRow('red',
+          t.healthAgentMissingKey(a.id, a.provider),
+          `<button type="button" class="hh-btn" data-hh="key">${escapeHtml(t.healthGoAddKey)}</button>`))
+      }
+    }
+    // YELLOW — MCP servers configured but referenced by no agent ("installed,
+    // unused"). Advisory, not an error — it just means a connector is idle.
+    for (const m of mcp) {
+      if (!m.wired) {
+        signals.push(hubHealthSignalRow('yellow',
+          t.healthMcpUnwired(m.name),
+          `<button type="button" class="hh-btn" data-hh="mcp">${escapeHtml(t.healthGoMcp)}</button>`))
+      }
+    }
+    // RED (rare) — the host can no longer WRITE to its space dir (disk-full /
+    // permission-drift early warning). Informational: the fix is host-side.
+    if (snap.spaceWritable === false) {
+      signals.push(hubHealthSignalRow('red', t.healthSpaceUnwritable(snap.spacePath || ''), ''))
+    }
+
+    const allGreen = signals.length === 0
+    const head = `
+      <div class="hh-head">
+        <h2 class="hh-title">${escapeHtml(t.healthTitle)}</h2>
+        <button type="button" class="hh-refresh" data-hh="refresh">${escapeHtml(t.healthRefresh)}</button>
+      </div>
+      <p class="hh-sub ${allGreen ? 'hh-ok' : 'hh-warn'}">${escapeHtml(allGreen ? t.healthAllGreen : t.healthHasIssues(signals.length))}</p>`
+    const signalList = allGreen ? '' : `<ul class="hh-signals">${signals.join('')}</ul>`
+
+    // Agent roster with a per-agent manual「测连接」. Online agents only — an
+    // offline one isn't registered, so there's nothing to reach (its reason,
+    // usually a missing key, is already a red signal above).
+    const roster = `
+      <div class="hh-roster">
+        <h3 class="hh-roster-title">${escapeHtml(t.healthRosterTitle(snap.onlineCount || 0, snap.managedCount || 0))}</h3>
+        <ul class="hh-agents">
+          ${agents.map((a) => `
+            <li class="hh-agent">
+              <span class="hh-agent-dot ${a.online ? 'on' : 'off'}" aria-hidden="true"></span>
+              <span class="hh-agent-id">${escapeHtml(a.id)}</span>
+              <span class="hh-agent-provider">${escapeHtml(a.provider)}</span>
+              ${a.online
+                ? `<button type="button" class="hh-btn hh-test" data-hh="test" data-agent="${escapeHtml(a.id)}">${escapeHtml(t.healthTest)}</button>`
+                : `<span class="hh-agent-offline">${escapeHtml(t.healthOffline)}</span>`}
+            </li>`).join('')}
+        </ul>
+      </div>`
+    return head + signalList + roster
+  }
+
+  async function renderHubHealth(opts = {}) {
+    const host = document.getElementById('hub-health')
+    if (!host) return
+    if (hubHealthBusy) return
+    // Lang change: re-render the cached snapshot with the new i18n strings — no
+    // network round-trip. Falls through to a fetch if we have no cache yet.
+    if (opts.useCache && lastHealthSnap) {
+      if ((lastHealthSnap.managedCount || 0) === 0) { host.hidden = true; return }
+      host.innerHTML = renderHubHealthHtml(lastHealthSnap)
+      host.hidden = false
+      return
+    }
+    hubHealthBusy = true
+    try {
+      let snap
+      try {
+        snap = await fetchJson('/api/admin/health')
+      } catch {
+        // 503 (host wired no health surface) / network — hide, never error the
+        // overview. The panel is advisory; its absence is silent.
+        host.hidden = true
+        return
+      }
+      lastHealthSnap = snap
+      // A fresh hub (no managed agents) is #start-here's domain — stay hidden
+      // there so the two overview cards never both show.
+      if (!snap || (snap.managedCount || 0) === 0) { host.hidden = true; return }
+      host.innerHTML = renderHubHealthHtml(snap)
+      host.hidden = false
+    } finally {
+      hubHealthBusy = false
+    }
+  }
+
+  function onHubHealthClick(e) {
+    const btn = e.target instanceof HTMLElement ? e.target.closest('[data-hh]') : null
+    if (!btn) return
+    const action = btn.dataset.hh
+    if (action === 'key') {
+      dom.maKeysBtn?.click() // same proven "API Key 管理" entry as #start-here
+    } else if (action === 'mcp') {
+      gotoTab('mcp')
+    } else if (action === 'test') {
+      const id = btn.dataset.agent
+      if (id) managedAgents.openAgentChat(id)
+    } else if (action === 'refresh') {
+      renderHubHealth().catch(() => {})
+    }
+  }
+
   function renderGrowthReports(reports) {
     if (!dom.grTbody) return
     if (dom.grSummary) {
@@ -2419,7 +2546,10 @@ import { createWorkflows } from './workflows.js'
       // ⑦-M1 — re-probe the "start here" card whenever the user lands on
       // overview (it self-hides once the hub gains an agent/workflow or the
       // card is dismissed; the guard inside makes this a no-op after that).
-      if (e.detail?.name === 'overview') renderStartHere().catch(() => {})
+      if (e.detail?.name === 'overview') {
+        renderStartHere().catch(() => {})
+        renderHubHealth().catch(() => {}) // ❷-M2 — refresh health on overview focus
+      }
     })
 
     dom.dStrategy.addEventListener('change', updateDispatchVisibility)
@@ -2752,6 +2882,11 @@ import { createWorkflows } from './workflows.js'
     // or dismissed hub). Its CTAs are delegated through onStartHereClick.
     renderStartHere().catch(() => {})
     document.getElementById('start-here')?.addEventListener('click', onStartHereClick)
+    // ❷-M2 — the hub-health panel shares the overview slot: it self-hides on a
+    // fresh hub (start-here's domain) and renders once the hub has agents. The
+    // delegated click survives innerHTML re-renders (host element is stable).
+    renderHubHealth().catch(() => {})
+    document.getElementById('hub-health')?.addEventListener('click', onHubHealthClick)
     if (dom.grRefreshBtn) {
       dom.grRefreshBtn.addEventListener('click', () => {
         refreshGrowthReports().catch((err) => console.warn('manual growth-reports refresh:', err))
@@ -2828,6 +2963,9 @@ import { createWorkflows } from './workflows.js'
       // ⑦-M1 — re-render the start-here card in the new language while it's
       // still showing (no-op once settled, i.e. dismissed / non-fresh).
       renderStartHere().catch(() => {})
+      // ❷-M2 — re-render the hub-health panel from cache in the new language
+      // (useCache → no network round-trip on a mere lang toggle).
+      renderHubHealth({ useCache: true }).catch(() => {})
     })
 
     // View switcher — jump to the worker (`/`) view. Both views share

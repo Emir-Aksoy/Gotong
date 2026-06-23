@@ -371,6 +371,25 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     if (dom.maQcInput) dom.maQcInput.focus()
   }
 
+  // ease-of-use ❷-M2 — open the quick-chat box pointed at an ALREADY-SAVED
+  // agent, as the per-agent manual「测连接」(connection test) for the hub-health
+  // panel. The plan said reuse the testLlmKey route, but that route needs a
+  // TYPED apiKey in the request body — a saved agent's key lives in the vault and
+  // is never sent to the browser, so testLlmKey can't probe an existing agent.
+  // Quick-chat is the honest substitute: it dispatches a real message to the
+  // agent BY ID (explicit→to), exercising the real spawn + vault key resolution +
+  // provider call. So a reply proves "this saved agent is reachable right now",
+  // and any failure flows through the SAME describeError → human text +「去补 key」
+  // path the post-create quick-chat already uses (no second error classifier).
+  function openAgentChat(agentId) {
+    if (!dom.maFormModal) return
+    if (dom.maFormTitle) dom.maFormTitle.textContent = t.healthTestTitle(agentId)
+    if (dom.maFormEditWarning) dom.maFormEditWarning.hidden = true
+    if (dom.maFormMsg) { dom.maFormMsg.textContent = ''; dom.maFormMsg.classList.remove('ok', 'err') }
+    dom.maFormModal.hidden = false
+    openQuickChat(agentId) // hides the form, shows the quick-chat panel, focuses input
+  }
+
   // ease-of-use ③TC-ADMIN — when a quick-chat failure is key/quota-related,
   // append a one-click「去补 key →」button that opens the「API Key 管理」keys modal
   // (openKeysModal), so the operator doesn't have to hunt for it. Whether a failure
@@ -1032,6 +1051,7 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
     submitAgentForm,
     testConnection,
     quickChat,
+    openAgentChat,
     openImportModal,
     openKeysModal,
     closeKeysModal,

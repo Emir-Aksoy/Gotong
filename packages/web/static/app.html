@@ -474,6 +474,13 @@
            NO new capability/route. Pure launcher-layer nudge; zero host change. -->
       <section id="start-here" class="start-here" data-tab="overview" hidden></section>
 
+      <!-- ease-of-use ❷-M2 — "hub 体检" health-check panel. Shares the overview
+           slot with #start-here (mutually exclusive: start-here on a FRESH hub,
+           this once the hub has agents). Body is rendered by main.js renderHubHealth
+           from the read-only /api/admin/health snapshot; self-hides on a fresh hub
+           or when the host wires no health surface. -->
+      <section id="hub-health" class="hub-health" data-tab="overview" hidden></section>
+
       <!-- SW-M9 A-M8 — the OPERATOR-console hub steward ("站点管家"). The
            site-wide twin of the member steward (which sits atop the "我的" home
            tab). Owner/admin only (gated by main[data-roles] above) + the

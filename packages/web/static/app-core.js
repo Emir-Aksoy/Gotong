@@ -886,6 +886,20 @@
       startHereDemoDone: '✓ 已创建助手「客服助手」— 这就是用大白话管理 hub 的样子。',
       startHereDemoCta: '想真正用起来?配置一个模型密钥,或一键接入本地 Ollama(免费、零云端 key)。',
       startHereDemoClose: '关闭演示',
+      // --- ease-of-use ❷-M2 — overview「hub 体检」health-check panel ---
+      healthTitle: 'hub 体检',
+      healthRefresh: '刷新',
+      healthAllGreen: '一切正常 — 没有需要处理的问题。',
+      healthHasIssues: (n) => `发现 ${n} 项需要处理`,
+      healthAgentMissingKey: (id, provider) => `智能体「${id}」(${provider}) 缺少可用的模型密钥`,
+      healthGoAddKey: '去补 key →',
+      healthMcpUnwired: (name) => `MCP 服务「${name}」已配置,但还没有智能体接入`,
+      healthGoMcp: '去 MCP 集成 →',
+      healthSpaceUnwritable: (path) => `数据目录不可写:${path} — 请检查磁盘空间和目录权限`,
+      healthRosterTitle: (online, total) => `智能体(${online}/${total} 在线)`,
+      healthTest: '测连接',
+      healthOffline: '未上线',
+      healthTestTitle: (id) => `测试连接 — ${id}`,
       // --- peer-manifest-ui.js (联邦 tab — peer capability manifest) ---
       pmTitle: 'Peer 能力清单(federation manifest)',
       pmDesc: '每个已连接 peer 通过认证 mesh 链路广播的能力(<code>peer.manifest</code> RPC)。' +
@@ -2629,6 +2643,20 @@
       startHereDemoDone: '✓ Created assistant “Support assistant” — that’s what managing a hub in plain language looks like.',
       startHereDemoCta: 'Ready for the real thing? Configure a model key, or one-click connect a local Ollama (free, no cloud key).',
       startHereDemoClose: 'Close demo',
+      // --- ease-of-use ❷-M2 — overview "hub health" health-check panel ---
+      healthTitle: 'Hub health',
+      healthRefresh: 'Refresh',
+      healthAllGreen: 'All clear — nothing needs attention.',
+      healthHasIssues: (n) => (n === 1 ? '1 item needs attention' : `${n} items need attention`),
+      healthAgentMissingKey: (id, provider) => `Agent "${id}" (${provider}) has no usable model key`,
+      healthGoAddKey: 'Add key →',
+      healthMcpUnwired: (name) => `MCP server "${name}" is configured but no agent uses it`,
+      healthGoMcp: 'Open MCP →',
+      healthSpaceUnwritable: (path) => `Data directory not writable: ${path} — check disk space and permissions`,
+      healthRosterTitle: (online, total) => `Agents (${online}/${total} online)`,
+      healthTest: 'Test',
+      healthOffline: 'Offline',
+      healthTestTitle: (id) => `Test connection — ${id}`,
       // --- peer-manifest-ui.js (federation tab — peer capability manifest) ---
       pmTitle: 'Peer capability manifest (federation manifest)',
       pmDesc: 'Capabilities each connected peer advertises over the authenticated mesh link (<code>peer.manifest</code> RPC). ' +
