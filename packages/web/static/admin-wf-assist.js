@@ -49,7 +49,79 @@
     // onLangChange subscriber below re-invokes it if the modal is still up.
     let lastRender = null
 
-    function open() {
+    // workflow-architect ARCH-M4 — dialog state beyond the result render:
+    //   selectedDetail — which explanation depth the three buttons select.
+    //   currentMode    — 'author' (NL → new draft) or 'explain' (narrate an
+    //                    existing workflow's YAML at the chosen depth).
+    //   subjectYaml/Id — in explain mode, the YAML to narrate (sent verbatim,
+    //                    never regenerated) and its id (for the title).
+    // Defaults reproduce today's author-mode behavior exactly.
+    let selectedDetail = 'brief'
+    let currentMode = 'author'
+    let subjectYaml = null
+    let subjectId = null
+
+    // Reflect selectedDetail onto the three depth buttons (single source of
+    // truth for the .is-active highlight). Called on open + on each click.
+    function syncDepthButtons() {
+      const row = dom.wfAssistDepthRow
+      if (!row) return
+      for (const btn of row.querySelectorAll('.wfa-depth-btn')) {
+        btn.classList.toggle('is-active', btn.dataset.detail === selectedDetail)
+      }
+    }
+
+    // Paint the mode-dependent chrome: title, generate-button label, and
+    // whether the free-text description row + hint show (explain mode hides
+    // them — there's nothing to describe, the subject YAML is fixed). Read at
+    // call time so a language flip while open repaints it (onLangChange).
+    function applyModeChrome() {
+      const explain = currentMode === 'explain'
+      if (dom.wfAssistTitle) {
+        dom.wfAssistTitle.textContent = explain
+          ? t().wfaArchExplainTitle(subjectId || '?')
+          : t().wfAssistModalTitle
+      }
+      if (dom.wfAssistGenerate) {
+        dom.wfAssistGenerate.textContent = explain ? t().wfaArchExplainBtn : t().wfaGenerateBtn
+      }
+      if (dom.wfAssistDescRow) dom.wfAssistDescRow.hidden = explain
+      if (dom.wfAssistHint) dom.wfAssistHint.hidden = explain
+    }
+
+    // Render (or clear) the inline workflow diagram. The host returns a pure
+    // `graph` projection on valid YAML; the shared standalone renderer draws
+    // the SVG and the download anchor gets a self-contained data: URL. `t` and
+    // escapeHtml are passed in so that module stays coupled to neither side.
+    function renderGraph(graph) {
+      const wrap = dom.wfAssistGraphWrap
+      const body = dom.wfAssistGraphBody
+      const dl = dom.wfAssistGraphDownload
+      const G = window.AipeHubWorkflowGraph
+      if (!wrap || !body) return
+      if (!graph || !G) {
+        wrap.hidden = true
+        body.innerHTML = ''
+        return
+      }
+      const svg = G.renderWorkflowGraphSvg(graph, { t: t(), escapeHtml: AH.escapeHtml })
+      body.innerHTML = svg
+      if (dl) {
+        dl.href = G.svgDownloadHref(svg)
+        dl.setAttribute('download', (graph.workflowId || 'workflow') + '.svg')
+      }
+      wrap.hidden = false
+    }
+
+    // opts (workflow-architect ARCH-M4): { mode?: 'author'|'explain',
+    // subjectYaml?, subjectId? }. Omitted → author mode (today's behavior).
+    // Explain mode does NOT auto-submit — the user picks a depth, then clicks
+    // the (relabeled) generate button to narrate the fixed subject YAML.
+    function open(opts) {
+      const o = opts || {}
+      currentMode = o.mode === 'explain' ? 'explain' : 'author'
+      subjectYaml = currentMode === 'explain' ? o.subjectYaml || '' : null
+      subjectId = currentMode === 'explain' ? o.subjectId || null : null
       dom.wfAssistDescription.value = ''
       dom.wfAssistMsg.textContent = ''
       dom.wfAssistMsg.classList.remove('ok', 'err')
@@ -63,13 +135,19 @@
       if (dom.wfAssistStreaming) dom.wfAssistStreaming.hidden = true
       if (dom.wfAssistStreamingText) dom.wfAssistStreamingText.textContent = ''
       if (dom.wfAssistStreamingMeta) dom.wfAssistStreamingMeta.textContent = ''
+      // Reset the inline diagram so a previous run's graph doesn't linger.
+      renderGraph(null)
       // Defensive: if a previous run's watcher leaked (modal closed
       // before fetch resolved), clear it so it can't taint this run.
       state.assistWatcher = null
       // Nothing rendered yet this session — drop any stale re-render closure.
       lastRender = null
+      syncDepthButtons()
+      applyModeChrome()
       dom.wfAssistModal.hidden = false
-      setTimeout(() => dom.wfAssistDescription?.focus(), 0)
+      // In explain mode there's no description box to focus; the depth row is
+      // the first thing the user touches, so skip the autofocus.
+      if (currentMode === 'author') setTimeout(() => dom.wfAssistDescription?.focus(), 0)
     }
 
     function close() {
@@ -81,6 +159,7 @@
       // is just belt-and-suspenders.
       state.assistWatcher = null
       if (dom.wfAssistStreaming) dom.wfAssistStreaming.hidden = true
+      renderGraph(null)
     }
 
     function renderStatusChip(status, deepCheck) {
@@ -203,9 +282,12 @@
       // YAML preview. Save is still allowed when deepCheck.ok=false (admin
       // decides), so we only gate the save button on draftStatus.
       renderDeepCheck(result.deepCheck)
-      // 仅当 schema 合法时才允许 "保存为工作流" — 把 yaml 缓存在 button
-      // 的 dataset 上,save 时直接读。
-      if (result.draftStatus === 'valid' && result.yaml) {
+      // workflow-architect ARCH-M4 — inline the workflow diagram (host returns
+      // a pure `graph` projection on valid YAML; null/invalid → panel hidden).
+      renderGraph(result.graph)
+      // 仅当 schema 合法 *且作者模式* 时才允许 "保存为工作流"。Explain 模式
+      // 讲解的是一个已存在的工作流,"保存" 只会撞 id / 重复导入 — 关掉它。
+      if (currentMode === 'author' && result.draftStatus === 'valid' && result.yaml) {
         dom.wfAssistSave.disabled = false
         dom.wfAssistSave.dataset.yaml = result.yaml
       } else {
@@ -215,10 +297,13 @@
     }
 
     async function submit() {
+      const explain = currentMode === 'explain'
       const description = (dom.wfAssistDescription.value || '').trim()
       dom.wfAssistMsg.textContent = ''
       dom.wfAssistMsg.classList.remove('ok', 'err')
-      if (!description) {
+      // Author mode needs a description; explain mode narrates a fixed subject
+      // YAML, so there's nothing to type — skip the guard.
+      if (!explain && !description) {
         dom.wfAssistMsg.textContent = t().wfaNeedDescription
         dom.wfAssistMsg.classList.add('err')
         return
@@ -280,8 +365,17 @@
           contextHints.existingWorkflowIds = wf.workflows.map((w) => w.id)
         }
 
-        const body = { description }
-        if (Object.keys(contextHints).length > 0) body.contextHints = contextHints
+        // workflow-architect ARCH-M4 — always carry the chosen explanation
+        // depth. Explain mode sends the fixed subject YAML (host narrates it
+        // without regenerating); author mode sends the description + hints.
+        const body = { detail: selectedDetail }
+        if (explain) {
+          body.mode = 'explain'
+          body.subjectYaml = subjectYaml || ''
+        } else {
+          body.description = description
+          if (Object.keys(contextHints).length > 0) body.contextHints = contextHints
+        }
 
         const r = await fetchFn('/api/admin/workflows/assist', {
           method: 'POST',
@@ -306,7 +400,9 @@
         dom.wfAssistMsg.classList.add('err')
       } finally {
         dom.wfAssistGenerate.disabled = false
-        dom.wfAssistGenerate.textContent = t().wfaGenerateBtn
+        // Restore the mode-appropriate button label (explain vs author).
+        dom.wfAssistGenerate.textContent =
+          currentMode === 'explain' ? t().wfaArchExplainBtn : t().wfaGenerateBtn
         // Tear down the streaming watcher + collapse the live preview.
         // The result panel (with final yaml + deep-check) is now the
         // canonical view — the streaming pane was only useful while
@@ -346,6 +442,20 @@
       }
     }
 
+    // workflow-architect ARCH-M4 — depth selector. Click any of the three
+    // buttons to set selectedDetail; the highlight follows via syncDepthButtons.
+    // Wired once at install (the row is static markup, never re-created).
+    if (dom.wfAssistDepthRow) {
+      dom.wfAssistDepthRow.addEventListener('click', (ev) => {
+        const btn = ev.target.closest('.wfa-depth-btn')
+        if (!btn || !dom.wfAssistDepthRow.contains(btn)) return
+        const d = btn.dataset.detail
+        if (d !== 'oneliner' && d !== 'brief' && d !== 'detailed') return
+        selectedDetail = d
+        syncDepthButtons()
+      })
+    }
+
     // Live re-render: if the language flips while the assist modal is OPEN,
     // repaint the last rendered result in the new language. "Modal open" =
     // the modal element not hidden. Static-message-only states (e.g. an error
@@ -353,6 +463,9 @@
     // new language on the next action — acceptable best-effort.
     AH.onLangChange(() => {
       if (!dom.wfAssistModal || dom.wfAssistModal.hidden) return
+      // Repaint mode chrome (the explain-mode title interpolates an id, the
+      // generate-button label is mode-dependent) + the last result render.
+      applyModeChrome()
       if (lastRender) lastRender()
     })
 

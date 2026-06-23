@@ -1333,6 +1333,9 @@
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="open-workflow-graph"
                   data-id="${escapeHtml4(w.id)}">${escapeHtml4(t4.workflowGraphBtn)}</button>
+          <button type="button" class="ma-btn ma-btn-secondary"
+                  data-act="explain-workflow"
+                  data-id="${escapeHtml4(w.id)}">${escapeHtml4(t4.workflowExplainBtn)}</button>
           ${lifecycleButtons(w.id, state)}
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="remove-workflow"
@@ -2278,6 +2281,16 @@
         wfAssistStreamingMeta: $("wf-assist-streaming-meta"),
         wfAssistSave: $("wf-assist-save"),
         wfAssistRegenerate: $("wf-assist-regenerate"),
+        // workflow-architect ARCH-M4 — depth selector + inline diagram + explain
+        // mode (the architect dialog: depth-adjustable prose + bound graph,
+        // and "explain this workflow" from a card → explain mode).
+        wfAssistTitle: $("wf-assist-title"),
+        wfAssistHint: $("wf-assist-hint"),
+        wfAssistDescRow: $("wf-assist-desc-row"),
+        wfAssistDepthRow: $("wf-assist-depth-row"),
+        wfAssistGraphWrap: $("wf-assist-graph-wrap"),
+        wfAssistGraphBody: $("wf-assist-graph-body"),
+        wfAssistGraphDownload: $("wf-assist-graph-download"),
         // Run history modal (v0.3)
         wfRunsModal: $("wf-runs-modal"),
         wfRunsTarget: $("wf-runs-target"),
@@ -3669,6 +3682,20 @@
     function saveAssistedWorkflow() {
       return wfAssist?.save();
     }
+    async function openWorkflowAssistExplain(id) {
+      if (!wfAssist) return;
+      try {
+        const r = await fetch(`/api/admin/workflows/${encodeURIComponent(id)}/source`);
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.ok || typeof j.yaml !== "string") {
+          alert((window.AipeHub?.t?.wfaArchExplainLoadFailed || "Failed to load workflow") + (j.error ? `: ${j.error}` : ""));
+          return;
+        }
+        wfAssist.open({ mode: "explain", subjectYaml: j.yaml, subjectId: id });
+      } catch (err) {
+        alert((window.AipeHub?.t?.wfaArchExplainLoadFailed || "Failed to load workflow") + `: ${err.message || err}`);
+      }
+    }
     function renderKnownRoster() {
       if (!dom.knownAdminsList || !dom.knownWorkersList) return;
       dom.knownAdminsList.innerHTML = state.known.admins.map(
@@ -4009,6 +4036,8 @@
           workflows.openWorkflowRunsModal(id);
         } else if (act === "open-workflow-graph") {
           workflows.openWorkflowGraphModal(id);
+        } else if (act === "explain-workflow") {
+          openWorkflowAssistExplain(id);
         } else if (act === "open-workflow-run") {
           const runId = target.dataset.runId;
           if (runId) workflows.openWorkflowRunDetail(runId);

@@ -94,6 +94,9 @@ export function createWorkflows({ wf }) {
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="open-workflow-graph"
                   data-id="${escapeHtml(w.id)}">${escapeHtml(t.workflowGraphBtn)}</button>
+          <button type="button" class="ma-btn ma-btn-secondary"
+                  data-act="explain-workflow"
+                  data-id="${escapeHtml(w.id)}">${escapeHtml(t.workflowExplainBtn)}</button>
           ${lifecycleButtons(w.id, state)}
           <button type="button" class="ma-btn ma-btn-secondary"
                   data-act="remove-workflow"

@@ -159,16 +159,37 @@
     )
   }
 
+  // The inline render leans on the page's wf-graph-* rules in styles.css. A
+  // downloaded file has no page, so the same class names resolve to nothing and
+  // the .svg opens blank. Mirror the on-page rules into an embedded <style> so
+  // the standalone file is legible on its own (box fills, text, edges, arrows).
+  const STANDALONE_STYLE =
+    'svg{background:#fcfcfa}' +
+    '.wf-graph-box{stroke-width:1.5}' +
+    '.wf-graph-box-trigger,.wf-graph-box-output{fill:#d6ecdb;stroke:#9cc9ab}' +
+    '.wf-graph-box-step{fill:#f9f9f5;stroke:#d8d8cf}' +
+    '.wf-graph-box-parallel{fill:#e0e8f4;stroke:#aac1e0}' +
+    '.wf-graph-box-branch{fill:#f4f6fb;stroke:#cdd8ec}' +
+    '.wf-graph-box-xhub{stroke:#1d5fa8;stroke-width:2}' +
+    '.wf-graph-title{font-size:13px;font-weight:600;fill:#1a1a1a}' +
+    '.wf-graph-sub{font-size:11px;fill:#555}' +
+    '.wf-graph-tag{font-size:9.5px;font-weight:700;letter-spacing:.04em;fill:#2a5a85}' +
+    '.wf-graph-when{font-size:10.5px;fill:#9a6700}' +
+    '.wf-graph-xhub-tag{font-size:10.5px;font-weight:600;fill:#1d5fa8}' +
+    '.wf-graph-edge-seq{fill:none;stroke:#8a8a82;stroke-width:1.6}' +
+    '.wf-graph-edge-data{fill:none;stroke:#b58acb;stroke-width:1.3;stroke-dasharray:4 3}' +
+    '.wf-graph-arrowhead{fill:#8a8a82}' +
+    '.wf-graph-arrowhead-data{fill:#b58acb}'
+
   // A downloadable href for an SVG string. data: URL keeps it client-side —
   // the host renders nothing (the architect plan's "inline SVG + downloadable,
-  // host zero render burden"). The SVG carries its own colors via CSS classes
-  // resolved at render time in the browser; for a standalone file we inline a
-  // minimal style block so the downloaded .svg is legible on its own.
+  // host zero render burden"). Inject the xmlns (so it opens as a real file)
+  // and the embedded style block (so it carries its own colors). `<defs>` is
+  // always emitted by renderWorkflowGraphSvg, so it's a stable anchor.
   function svgDownloadHref(svgString) {
-    const standalone = svgString.replace(
-      '<svg ',
-      '<svg xmlns="http://www.w3.org/2000/svg" ',
-    )
+    const standalone = svgString
+      .replace('<svg ', '<svg xmlns="http://www.w3.org/2000/svg" ')
+      .replace('<defs>', `<defs><style>${STANDALONE_STYLE}</style>`)
     return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(standalone)
   }
 

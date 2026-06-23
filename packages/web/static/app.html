@@ -844,21 +844,33 @@
         <div class="modal-backdrop" data-act="close-modal"></div>
         <div class="modal-card" role="dialog" aria-modal="true" style="max-width: 48rem;">
           <header class="modal-head">
-            <h3 data-i18n="wfAssistModalTitle">AI 助手 — 生成工作流草稿</h3>
+            <h3 id="wf-assist-title" data-i18n="wfAssistModalTitle">工作流架构师 — 生成工作流草稿</h3>
             <button type="button" class="modal-close" data-act="close-modal" data-i18n-aria="close" aria-label="关闭">×</button>
           </header>
           <div class="dispatch-form">
-            <p class="hint" data-i18n-html="wfAssistModalHint">
+            <!-- workflow-architect ARCH-M4 — the description row + intro hint are
+                 author-mode only; explain mode hides them (the subject is an
+                 existing workflow, not a typed description). -->
+            <p id="wf-assist-hint" class="hint" data-i18n-html="wfAssistModalHint">
               用一句话描述你想要的工作流(中文 / 英文都行)。AI 会按
               <code>aipehub.workflow/v1</code> 生成 YAML 草稿,自动 validate
               通过后才能保存。
             </p>
-            <label>
+            <label id="wf-assist-desc-row">
               <span data-i18n="wfAssistDescLabel">描述</span>
               <textarea id="wf-assist-description" rows="4"
                         data-i18n-placeholder="wfAssistDescPh"
                         placeholder="例:每周一爬 5 个新闻源、用 DeepSeek 总结、发到 Telegram 群"></textarea>
             </label>
+            <!-- workflow-architect ARCH-M4 —講解深度 selector. Maps to the agent's
+                 `detail` dimension (oneliner / brief / detailed). Default = brief
+                 (today's behavior). Active button carries .is-active. -->
+            <div id="wf-assist-depth-row" class="wfa-depth-row">
+              <span class="hint" data-i18n="wfAssistDepthLabel">讲解深度</span>
+              <button type="button" class="wfa-depth-btn" data-detail="oneliner" data-i18n="wfAssistDepthOneliner">一句话</button>
+              <button type="button" class="wfa-depth-btn is-active" data-detail="brief" data-i18n="wfAssistDepthBrief">简要</button>
+              <button type="button" class="wfa-depth-btn" data-detail="detailed" data-i18n="wfAssistDepthDetailed">详细</button>
+            </div>
             <button type="button" id="wf-assist-generate" class="ma-btn" data-i18n="wfAssistGenerate">生成草稿</button>
             <p id="wf-assist-msg" class="form-msg"></p>
 
@@ -885,6 +897,19 @@
                 <span id="wf-assist-status-chip" class="lb-summary"></span>
               </div>
               <div id="wf-assist-explanation" class="hint" style="margin: 0.4rem 0 0.8rem;"></div>
+              <!-- workflow-architect ARCH-M4 — inline SVG diagram of the workflow.
+                   Rendered client-side from result.graph by the shared renderer
+                   (window.AipeHubWorkflowGraph). "下载 SVG" is a client-only
+                   data: URL — the host renders nothing. Hidden when the YAML
+                   isn't valid (no graph to draw). -->
+              <div id="wf-assist-graph-wrap" hidden style="margin-bottom: 0.8rem;">
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.4rem;">
+                  <strong data-i18n="wfAssistGraphLabel">流程图</strong>
+                  <a id="wf-assist-graph-download" class="ma-btn ma-btn-secondary"
+                     download="workflow.svg" data-i18n="wfAssistGraphDownload">下载 SVG</a>
+                </div>
+                <div id="wf-assist-graph-body" class="wf-graph-scroll"></div>
+              </div>
               <details open>
                 <summary data-i18n="wfAssistYamlSummary">YAML 草稿</summary>
                 <pre style="background: #f5f5f5; padding: 0.6rem; overflow-x: auto;

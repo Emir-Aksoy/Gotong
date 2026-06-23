@@ -542,6 +542,34 @@ export async function handleWorkflowRoute(
     return true
   }
 
+  // workflow-architect ARCH-M4 — GET /api/admin/workflows/:id/source — the raw
+  // definition YAML of a loaded workflow. Admin-gated read (same posture as
+  // graph / revisions: reading a workflow's source is an operator read, not a
+  // mutation). Feeds the architect dialog's "explain this workflow" entry,
+  // which passes the YAML back as `subjectYaml` to the assist endpoint in
+  // explain mode (no regeneration — the agent only re-derives prose + graph).
+  const sourceMatch = path.match(/^\/api\/admin\/workflows\/([^/]+)\/source$/)
+  if (method === 'GET' && sourceMatch) {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    if (!ctx.workflows) {
+      sendJson(res, { error: 'workflow surface not enabled on this host' }, 404)
+      return true
+    }
+    const id = decodeURIComponent(sourceMatch[1]!)
+    try {
+      const yaml = await ctx.workflows.exportDefinitionText(id)
+      if (yaml == null) {
+        sendJson(res, { error: `unknown workflow '${id}'` }, 404)
+        return true
+      }
+      sendJson(res, { ok: true, yaml })
+    } catch (err) {
+      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 500)
+    }
+    return true
+  }
+
   // P2-M5b — workflow grant management (resource RBAC). Owner-gated; operators
   // (org owner / v3 admin) bypass. Wired before the catch-all DELETE /:id; the
   // extra /grants segment(s) keep these unambiguous. When RBAC is off (no

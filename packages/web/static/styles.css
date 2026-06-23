@@ -2183,6 +2183,35 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   margin-right: 5px;
 }
 
+/* workflow-architect ARCH-M4 — explanation-depth selector (oneliner / brief /
+   detailed). A label + three pill buttons; the active one carries .is-active
+   and takes the blue accent used elsewhere for the selected/cross-hub state. */
+.wfa-depth-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.2rem 0 0.6rem;
+}
+.wfa-depth-row .hint { margin-right: 0.2rem; }
+.wfa-depth-btn {
+  padding: 0.2rem 0.7rem;
+  border: 1px solid #cdd8ec;
+  border-radius: 999px;
+  background: #f4f6fb;
+  color: #36506f;
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+.wfa-depth-btn:hover { border-color: #aac1e0; background: #e8eff8; }
+.wfa-depth-btn.is-active {
+  background: #1d5fa8;
+  border-color: #1d5fa8;
+  color: #fff;
+  font-weight: 600;
+}
+
 .wf-rev-row {
   display: grid;
   grid-template-columns: auto 1fr auto;
