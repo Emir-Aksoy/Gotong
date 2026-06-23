@@ -42,7 +42,13 @@ import {
 } from '@aipehub/llm'
 import type { Task } from '@aipehub/core'
 
-import { parseWorkflow, WORKFLOW_SCHEMA_V1, WorkflowSchemaError } from '@aipehub/workflow'
+import {
+  parseWorkflow,
+  projectWorkflowGraph,
+  WORKFLOW_SCHEMA_V1,
+  WorkflowSchemaError,
+  type WorkflowGraphView,
+} from '@aipehub/workflow'
 import {
   checkWorkflowStructure,
   type WorkflowInventory,
@@ -55,10 +61,55 @@ import {
 // agree on what they're sending / receiving.
 // ---------------------------------------------------------------------------
 
+/**
+ * Which job the architect is doing on this call.
+ *
+ *   - `'author'`  (default) — turn `description` into a brand-new workflow YAML.
+ *   - `'explain'` — describe an EXISTING workflow given in `subjectYaml`; the
+ *     YAML is NOT regenerated (the LLM only writes prose), so what comes back
+ *     is the same workflow, just narrated.
+ */
+export type WorkflowAssistMode = 'author' | 'explain'
+
+/**
+ * How deep the natural-language explanation should be. Affects ONLY the
+ * prose — the YAML and the DAG graph are identical at every depth.
+ *
+ *   - `'oneliner'` — a single sentence: what it does, nothing else.
+ *   - `'brief'`    — 2-4 sentences (the historical default).
+ *   - `'detailed'` — step-by-step walk-through with data flow + gates.
+ */
+export type WorkflowDetailLevel = 'oneliner' | 'brief' | 'detailed'
+
 /** What you put in `Task.payload` when dispatching to a `workflow:assist` agent. */
 export interface WorkflowAssistantPayload {
-  /** Required. Natural-language description of the workflow the user wants. */
+  /**
+   * Required. In `author` mode: the natural-language description of the
+   * workflow the user wants. In `explain` mode: an optional question /
+   * focus for the explanation (may be empty — `subjectYaml` is the subject).
+   */
   description: string
+  /**
+   * Optional. `'author'` (default) produces a new workflow from `description`;
+   * `'explain'` narrates the existing workflow in `subjectYaml` without
+   * regenerating it. Existing callers (WFEDIT / steward / admin dialog) omit
+   * this and get the historical author behavior.
+   */
+  mode?: WorkflowAssistMode
+  /**
+   * Optional. Depth of the prose explanation — `'oneliner'` / `'brief'`
+   * (default) / `'detailed'`. When omitted the user message is left exactly
+   * as before (no depth instruction injected), so author-mode behavior is
+   * byte-for-byte unchanged for callers that don't ask for a depth.
+   */
+  detail?: WorkflowDetailLevel
+  /**
+   * Required when `mode === 'explain'`: the existing workflow's YAML. The
+   * output's `yaml` and `graph` are derived deterministically from THIS
+   * string (never from the LLM's echo, which can't be trusted to be
+   * faithful). Ignored in author mode.
+   */
+  subjectYaml?: string
   /**
    * Optional. What's actually available in the hub right now. The
    * assistant will prefer these over making up capability names.
@@ -150,6 +201,15 @@ export interface WorkflowAssistantOutput extends LlmTaskOutput {
    * decides whether to let the admin save it anyway.
    */
   deepCheck?: WorkflowStructureCheckResult
+  /**
+   * The DAG projection of the produced (author mode) or subject (explain
+   * mode) workflow — `nodes` + `edges`, computed by `projectWorkflowGraph`
+   * (pure, no LLM). Present iff `draftStatus === 'valid'` (unparseable YAML
+   * can't be projected). The UI renders this as an inline, downloadable SVG
+   * flowchart — the "工作流图片介绍" the user asked for. Same shape the admin
+   * DAG route returns, so the frontend reuses one renderer.
+   */
+  graph?: WorkflowGraphView
 }
 
 /**
@@ -249,12 +309,24 @@ workflow:
 
 Respond with:
 
-  1. A 1-3 sentence explanation in the user's language (English / 中文 / mixed
-     follows the user's prompt).
+  1. A natural-language explanation in the user's language (English / 中文 /
+     mixed follows the user's prompt). MATCH THE REQUESTED DEPTH — the user
+     message may ask for a one-sentence, a brief, or a detailed explanation.
+     Default to brief (2-4 sentences) when no depth is requested.
   2. One \`\`\`yaml ... \`\`\` code fence containing exactly the workflow YAML.
 
 Do NOT include any other code fences. The first \`\`\`yaml block in your
-response is treated as authoritative.`
+response is treated as authoritative.
+
+# Modes
+
+By default you AUTHOR a new workflow: produce the explanation + one yaml
+fence exactly as in "Output format" above.
+
+If the user message instead asks you to EXPLAIN an existing workflow — it
+shows you the YAML and says "respond with prose explanation ONLY, no code
+fence" — then do NOT emit a yaml fence. The workflow is already decided; you
+only describe it, in prose, at the requested depth.`
 
 // ---------------------------------------------------------------------------
 // Class
@@ -313,7 +385,23 @@ export class WorkflowAssistantAgent extends LlmAgent {
    */
   protected override buildRequest(task: Task): LlmRequest {
     const payload = task.payload as WorkflowAssistantPayload | undefined
-    if (!payload || typeof payload !== 'object' || typeof payload.description !== 'string') {
+    if (!payload || typeof payload !== 'object') {
+      throw new Error(
+        'workflow:assist payload must be { description: string, contextHints?: {...} }',
+      )
+    }
+
+    // Explain mode: narrate an EXISTING workflow. `subjectYaml` is the
+    // subject (required); `description` is just an optional focus question.
+    if (payload.mode === 'explain') {
+      if (typeof payload.subjectYaml !== 'string' || payload.subjectYaml.trim().length === 0) {
+        throw new Error('workflow:assist explain mode requires a non-empty subjectYaml')
+      }
+      return this.buildLlmRequest(renderExplainMessage(payload))
+    }
+
+    // Author mode (default): produce a new workflow from `description`.
+    if (typeof payload.description !== 'string') {
       throw new Error(
         'workflow:assist payload must be { description: string, contextHints?: {...} }',
       )
@@ -321,9 +409,15 @@ export class WorkflowAssistantAgent extends LlmAgent {
     if (payload.description.trim().length === 0) {
       throw new Error('workflow:assist payload.description must be non-empty')
     }
+    return this.buildLlmRequest(renderUserMessage(payload))
+  }
 
-    const userMessage = renderUserMessage(payload)
-
+  /**
+   * Wrap a rendered user message into the `LlmRequest` with the assistant's
+   * pinned system prompt + construction-time defaults. Shared by author and
+   * explain modes so the two paths can't drift on request shape.
+   */
+  private buildLlmRequest(userMessage: string): LlmRequest {
     const req: LlmRequest = {
       messages: [{ role: 'user', content: userMessage }],
       // Always re-attach the assistant's system prompt. The base class
@@ -361,12 +455,38 @@ export class WorkflowAssistantAgent extends LlmAgent {
     _toolRounds = 0,
   ): WorkflowAssistantOutput {
     const raw = response.text
-    const { yaml, explanation } = extractYamlAndExplanation(raw)
     const payload = task.payload as WorkflowAssistantPayload | undefined
-    const verdict = verdictForYamlWithDeepCheck(
-      yaml,
-      payload?.contextHints ? inventoryFromContextHints(payload.contextHints) : undefined,
-    )
+    const inventory = payload?.contextHints
+      ? inventoryFromContextHints(payload.contextHints)
+      : undefined
+
+    // Explain mode: the subject YAML is authoritative — we do NOT trust the
+    // LLM to echo it faithfully. `yaml` + `graph` are derived deterministically
+    // from `payload.subjectYaml`; the LLM only produced the prose explanation.
+    if (payload?.mode === 'explain') {
+      const subject = typeof payload.subjectYaml === 'string' ? payload.subjectYaml : ''
+      const verdict = verdictForYamlWithDeepCheck(subject, inventory)
+      return this.finishOutput(response, subject, raw.trim(), verdict)
+    }
+
+    // Author mode (default): extract the YAML fence the LLM produced.
+    const { yaml, explanation } = extractYamlAndExplanation(raw)
+    const verdict = verdictForYamlWithDeepCheck(yaml, inventory)
+    return this.finishOutput(response, yaml, explanation, verdict)
+  }
+
+  /**
+   * Assemble a {@link WorkflowAssistantOutput} from the response + the
+   * resolved yaml / explanation / verdict. Shared by author and explain
+   * modes so the optional-field plumbing (validationError / deepCheck /
+   * graph / usage) lives in exactly one place.
+   */
+  private finishOutput(
+    response: LlmResponse,
+    yaml: string,
+    explanation: string,
+    verdict: YamlVerdict,
+  ): WorkflowAssistantOutput {
     const out: WorkflowAssistantOutput = {
       // LlmTaskOutput contract: `text` is what transcript / SDK
       // consumers see. We use the explanation (human-readable) rather
@@ -376,15 +496,12 @@ export class WorkflowAssistantAgent extends LlmAgent {
       by: this.provider.name,
       yaml,
       explanation,
-      raw,
+      raw: response.text,
       draftStatus: verdict.status,
     }
-    if (verdict.validationError !== undefined) {
-      out.validationError = verdict.validationError
-    }
-    if (verdict.deepCheck !== undefined) {
-      out.deepCheck = verdict.deepCheck
-    }
+    if (verdict.validationError !== undefined) out.validationError = verdict.validationError
+    if (verdict.deepCheck !== undefined) out.deepCheck = verdict.deepCheck
+    if (verdict.graph !== undefined) out.graph = verdict.graph
     if (response.usage) out.usage = response.usage
     return out
   }
@@ -434,24 +551,35 @@ export function verdictForYaml(yaml: string): {
  * agent's `parseResponse` uses — keeping the verdict shape stable across
  * call sites avoids "agent says X, route says Y" drift.
  */
-export function verdictForYamlWithDeepCheck(
-  yaml: string,
-  inventory: WorkflowInventory | undefined,
-): {
+/**
+ * What {@link verdictForYamlWithDeepCheck} returns: the draft status plus the
+ * structural extras attached only when the YAML is valid. Named so the
+ * agent's `finishOutput` helper and route / SDK callers share one type.
+ */
+export interface YamlVerdict {
   status: WorkflowDraftStatus
   validationError?: string
   deepCheck?: WorkflowStructureCheckResult
-} {
+  /** DAG projection of the workflow. Present iff `status === 'valid'`. */
+  graph?: WorkflowGraphView
+}
+
+export function verdictForYamlWithDeepCheck(
+  yaml: string,
+  inventory: WorkflowInventory | undefined,
+): YamlVerdict {
   const base = verdictForYaml(yaml)
   if (base.status !== 'valid') return base
-  if (inventory === undefined) return base
-  // Safe: status='valid' guarantees parseWorkflow succeeded once. We
-  // re-parse here because verdictForYaml doesn't hand back the parsed
-  // definition — keeping its signature byte-for-byte stable matters more
-  // than the microsecond saved.
+  // Valid YAML: parse once, then project the DAG graph (pure, no LLM, no
+  // inventory needed — this is the "工作流图片介绍" payload) and, ONLY when an
+  // inventory was supplied, run the deep structural check. We re-parse here
+  // because verdictForYaml doesn't hand back the parsed definition; keeping
+  // its signature byte-for-byte stable matters more than the microsecond.
   const parsed = parseWorkflow(yaml)
+  const graph = projectWorkflowGraph(parsed)
+  if (inventory === undefined) return { status: 'valid', graph }
   const deepCheck = checkWorkflowStructure(parsed, inventory)
-  return { status: 'valid', deepCheck }
+  return { status: 'valid', deepCheck, graph }
 }
 
 /**
@@ -509,8 +637,32 @@ export function buildSystemPrompt(
 }
 
 /**
- * Build the user-facing message: description + contextHints rendered as
- * a compact list. Kept stable so test snapshots don't churn.
+ * Meta-instruction injected into the user message telling the LLM how deep
+ * the prose explanation should be. Exported so routes / tests can assert the
+ * exact depth wording without reaching into the agent.
+ *
+ * Note these constrain ONLY the explanation prose — the YAML and the DAG
+ * graph are identical at every depth.
+ */
+export function detailInstruction(detail: WorkflowDetailLevel): string {
+  switch (detail) {
+    case 'oneliner':
+      return 'Keep the explanation to exactly ONE concise sentence — what the workflow does, nothing else.'
+    case 'detailed':
+      return 'Make the explanation detailed: walk through every step in order, name the capability or agent each step dispatches to, describe how data flows between steps via $-refs, and call out any human-approval or cross-hub gates. Several short paragraphs are fine.'
+    case 'brief':
+    default:
+      return 'Keep the explanation brief — 2-4 sentences covering the trigger and the main steps.'
+  }
+}
+
+/**
+ * Build the user-facing message for AUTHOR mode: description + contextHints
+ * rendered as a compact list, with an optional depth instruction appended.
+ *
+ * Kept stable so test snapshots don't churn — the depth line is appended
+ * ONLY when `payload.detail` is explicitly set, so callers that don't ask
+ * for a depth get the exact same message as before.
  */
 export function renderUserMessage(payload: WorkflowAssistantPayload): string {
   const lines: string[] = [payload.description.trim()]
@@ -539,6 +691,33 @@ export function renderUserMessage(payload: WorkflowAssistantPayload): string {
       lines.push(...ctx)
     }
   }
+  if (payload.detail) {
+    lines.push('')
+    lines.push('---')
+    lines.push(detailInstruction(payload.detail))
+  }
+  return lines.join('\n')
+}
+
+/**
+ * Build the user-facing message for EXPLAIN mode: present the existing
+ * workflow YAML and ask for prose only (no code fence), at the requested
+ * depth. The agent ignores any YAML the LLM might echo and uses
+ * `payload.subjectYaml` as the authoritative source.
+ */
+export function renderExplainMessage(payload: WorkflowAssistantPayload): string {
+  const subject = (payload.subjectYaml ?? '').trim()
+  const ask = payload.description?.trim()
+  const lines: string[] = [
+    ask && ask.length > 0 ? ask : 'Explain what the following AipeHub workflow does.',
+    '',
+    'Explain the workflow below. Do NOT rewrite it and do NOT output any code fence — respond with the prose explanation ONLY.',
+    detailInstruction(payload.detail ?? 'brief'),
+    '',
+    '```yaml',
+    subject,
+    '```',
+  ]
   return lines.join('\n')
 }
 

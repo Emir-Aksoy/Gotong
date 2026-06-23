@@ -27,12 +27,14 @@
 import { describe, expect, it } from 'vitest'
 import { Hub } from '@aipehub/core'
 import { MockLlmProvider } from '@aipehub/llm'
-import { parseWorkflow } from '@aipehub/workflow'
+import { parseWorkflow, projectWorkflowGraph } from '@aipehub/workflow'
 
 import {
   buildSystemPrompt,
+  detailInstruction,
   extractYamlAndExplanation,
   inventoryFromContextHints,
+  renderExplainMessage,
   renderUserMessage,
   verdictForYaml,
   verdictForYamlWithDeepCheck,
@@ -693,5 +695,224 @@ workflow:
     expect(out.draftStatus).toBe('invalid')
     expect(out.deepCheck).toBeUndefined()
     expect(out.validationError).toBeTruthy()
+  })
+})
+
+// ───────────────────────────────────────────────────────────────────
+// Workflow Architect evolution — adjustable-depth explanation,
+// explain mode, and the bound DAG graph.
+// ───────────────────────────────────────────────────────────────────
+
+describe('detailInstruction', () => {
+  it('oneliner asks for exactly one sentence', () => {
+    expect(detailInstruction('oneliner')).toContain('ONE')
+    expect(detailInstruction('oneliner')).toMatch(/sentence/i)
+  })
+
+  it('brief asks for 2-4 sentences (the historical default)', () => {
+    expect(detailInstruction('brief')).toMatch(/brief/i)
+    expect(detailInstruction('brief')).toContain('2-4')
+  })
+
+  it('detailed asks for a step-by-step walk-through with data flow + gates', () => {
+    const d = detailInstruction('detailed')
+    expect(d).toMatch(/detailed/i)
+    expect(d).toMatch(/every step/i)
+    expect(d).toMatch(/\$-ref/i)
+    expect(d).toMatch(/gate/i)
+  })
+
+  it('the three depths produce distinct instructions', () => {
+    const set = new Set([
+      detailInstruction('oneliner'),
+      detailInstruction('brief'),
+      detailInstruction('detailed'),
+    ])
+    expect(set.size).toBe(3)
+  })
+})
+
+describe('renderUserMessage — depth', () => {
+  it('appends the depth instruction under a divider when detail is set', () => {
+    const msg = renderUserMessage({ description: 'crawl news weekly', detail: 'detailed' })
+    expect(msg).toContain('crawl news weekly')
+    expect(msg).toContain('---')
+    expect(msg).toContain(detailInstruction('detailed'))
+  })
+
+  it('does NOT append anything when detail is absent (byte-for-byte unchanged)', () => {
+    expect(renderUserMessage({ description: 'crawl news weekly' })).toBe('crawl news weekly')
+  })
+
+  it('depth stacks below contextHints when both are present', () => {
+    const msg = renderUserMessage({
+      description: 'crawl',
+      contextHints: { agents: [{ id: 'writer', capabilities: ['draft'] }] },
+      detail: 'oneliner',
+    })
+    expect(msg).toContain('writer [draft]')
+    expect(msg).toContain(detailInstruction('oneliner'))
+  })
+})
+
+describe('renderExplainMessage', () => {
+  it('presents the subject YAML and asks for prose only at the requested depth', () => {
+    const msg = renderExplainMessage({
+      description: '',
+      mode: 'explain',
+      subjectYaml: SAMPLE_YAML,
+      detail: 'detailed',
+    })
+    expect(msg).toContain('prose explanation ONLY')
+    expect(msg).toContain('do NOT output any code fence')
+    expect(msg).toContain(detailInstruction('detailed'))
+    expect(msg).toContain('id: news-digest')
+    expect(msg).toContain('```yaml')
+  })
+
+  it('defaults to brief depth when no detail is given', () => {
+    const msg = renderExplainMessage({ description: '', mode: 'explain', subjectYaml: SAMPLE_YAML })
+    expect(msg).toContain(detailInstruction('brief'))
+  })
+
+  it('uses the description as a focus question when one is provided', () => {
+    const msg = renderExplainMessage({
+      description: 'Where could this fail at runtime?',
+      mode: 'explain',
+      subjectYaml: SAMPLE_YAML,
+    })
+    expect(msg).toContain('Where could this fail at runtime?')
+  })
+})
+
+describe('verdictForYamlWithDeepCheck — bound graph', () => {
+  it('attaches the projected DAG graph on valid yaml (even without inventory)', () => {
+    const v = verdictForYamlWithDeepCheck(SAMPLE_YAML.trim(), undefined)
+    expect(v.status).toBe('valid')
+    expect(v.graph).toEqual(projectWorkflowGraph(parseWorkflow(SAMPLE_YAML.trim())))
+    expect(v.graph?.workflowId).toBe('news-digest')
+  })
+
+  it('attaches the graph alongside deepCheck when inventory is present', () => {
+    const v = verdictForYamlWithDeepCheck(SAMPLE_YAML.trim(), {
+      agents: [
+        { id: 'crawler', capabilities: ['crawl-news'] },
+        { id: 'summarizer', capabilities: ['summarize'] },
+      ],
+    })
+    expect(v.status).toBe('valid')
+    expect(v.deepCheck?.ok).toBe(true)
+    expect(v.graph?.workflowId).toBe('news-digest')
+  })
+
+  it('omits the graph on no_yaml and invalid', () => {
+    expect(verdictForYamlWithDeepCheck('', undefined).graph).toBeUndefined()
+    expect(verdictForYamlWithDeepCheck('not a workflow', undefined).graph).toBeUndefined()
+  })
+})
+
+describe('WorkflowAssistantAgent — author mode attaches graph', () => {
+  it('valid author output carries the DAG graph', async () => {
+    const provider = new MockLlmProvider({ reply: SAMPLE_RESPONSE_TEXT })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(makeAssistantTask({ description: 'crawl' }))
+    await hub.stop()
+
+    const out = (result as { output: WorkflowAssistantOutput }).output
+    expect(out.draftStatus).toBe('valid')
+    expect(out.graph).toEqual(projectWorkflowGraph(parseWorkflow(SAMPLE_YAML.trim())))
+  })
+
+  it('detail is injected into the user message the LLM sees', async () => {
+    let userMsg = ''
+    const provider = new MockLlmProvider({
+      reply: (req) => {
+        const c = req.messages[0]?.content
+        userMsg = typeof c === 'string' ? c : ''
+        return SAMPLE_RESPONSE_TEXT
+      },
+    })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    await hub.dispatch(makeAssistantTask({ description: 'crawl', detail: 'detailed' }))
+    await hub.stop()
+
+    expect(userMsg).toContain(detailInstruction('detailed'))
+  })
+})
+
+describe('WorkflowAssistantAgent — explain mode', () => {
+  it('echoes the subject YAML + graph deterministically, ignoring the LLM yaml echo', async () => {
+    // The mock returns prose AND a bogus, DIFFERENT yaml fence. Explain mode
+    // must ignore that fence entirely: yaml + graph come from subjectYaml.
+    const bogus = `Here is what it does.\n\n\`\`\`yaml\nschema: aipehub.workflow/v1\nworkflow:\n  id: WRONG\n  trigger: { capability: nope }\n  steps:\n    - id: x\n      dispatch: { strategy: { kind: capability, capabilities: [nope] }, payload: {} }\n\`\`\``
+    let userMsg = ''
+    const provider = new MockLlmProvider({
+      reply: (req) => {
+        const c = req.messages[0]?.content
+        userMsg = typeof c === 'string' ? c : ''
+        return bogus
+      },
+    })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(
+      makeAssistantTask({ description: '', mode: 'explain', subjectYaml: SAMPLE_YAML, detail: 'brief' }),
+    )
+    await hub.stop()
+
+    const out = (result as { output: WorkflowAssistantOutput }).output
+    // YAML + graph are the SUBJECT, never the LLM's WRONG echo.
+    expect(out.yaml).toBe(SAMPLE_YAML)
+    expect(out.draftStatus).toBe('valid')
+    expect(out.graph).toEqual(projectWorkflowGraph(parseWorkflow(SAMPLE_YAML.trim())))
+    expect(out.graph?.workflowId).toBe('news-digest')
+    // Explanation is the full prose response (no fence extraction).
+    expect(out.explanation).toBe(bogus.trim())
+    // The LLM was shown the subject + a prose-only instruction + depth.
+    expect(userMsg).toContain('prose explanation ONLY')
+    expect(userMsg).toContain('id: news-digest')
+    expect(userMsg).toContain(detailInstruction('brief'))
+  })
+
+  it('reports draftStatus=invalid when the subject YAML is itself broken', async () => {
+    const broken = 'schema: aipehub.workflow/v1\nworkflow:\n  id: broken\n  trigger: {}\n  steps: []\n'
+    const provider = new MockLlmProvider({ reply: 'It looks broken.' })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(
+      makeAssistantTask({ description: '', mode: 'explain', subjectYaml: broken }),
+    )
+    await hub.stop()
+
+    const out = (result as { output: WorkflowAssistantOutput }).output
+    expect(out.draftStatus).toBe('invalid')
+    expect(out.graph).toBeUndefined()
+    expect(out.validationError).toBeTruthy()
+    // We still echo the subject and surface the prose.
+    expect(out.yaml).toBe(broken)
+    expect(out.explanation).toBe('It looks broken.')
+  })
+
+  it('explain mode with an empty subjectYaml is a failed dispatch', async () => {
+    const provider = new MockLlmProvider({ reply: 'x' })
+    const hub = Hub.inMemory()
+    await hub.start()
+    hub.register(new WorkflowAssistantAgent({ provider }))
+
+    const result = await hub.dispatch(
+      makeAssistantTask({ description: 'explain please', mode: 'explain', subjectYaml: '   ' }),
+    )
+    await hub.stop()
+    expect(result.kind).toBe('failed')
   })
 })

@@ -16,6 +16,8 @@ export {
   WorkflowAssistantAgent,
   buildSystemPrompt,
   renderUserMessage,
+  renderExplainMessage,
+  detailInstruction,
   extractYamlAndExplanation,
   verdictForYaml,
   verdictForYamlWithDeepCheck,
@@ -28,9 +30,21 @@ export type {
   WorkflowAssistantPayload,
   WorkflowAssistantOutput,
   WorkflowAssistantOptions,
+  WorkflowAssistMode,
+  WorkflowDetailLevel,
   WorkflowDraftStatus,
   WorkflowExample,
+  YamlVerdict,
 } from './assistant.js'
+
+// Architect evolution — re-export the DAG graph shape so callers that
+// consume `output.graph` can type it without a separate `@aipehub/workflow`
+// import. (web duck-types its own copy; host already depends on workflow.)
+export type {
+  WorkflowGraphView,
+  WorkflowGraphNode,
+  WorkflowGraphEdge,
+} from '@aipehub/workflow'
 
 // Phase 13 follow-up — few-shot example loader. Bundled templates ship
 // inside the package's `templates/` dir; callers can also supply their
