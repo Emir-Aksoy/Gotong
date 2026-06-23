@@ -24,8 +24,10 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
+  applyFixes,
   collectChecks,
   doctor,
+  mkdirpReal,
   probePortReal,
   probePathReal,
   type DoctorDeps,
@@ -162,6 +164,70 @@ describe('doctor — exit codes + output', () => {
   })
 })
 
+describe('applyFixes — safe, reversible repairs only (--fix)', () => {
+  it('creates a missing data dir (creatable) and reports it fixed', async () => {
+    const mkdirp = vi.fn(async () => {})
+    const actions = await applyFixes({ env: { AIPE_SPACE: '/data/.aipehub' }, probePath: async () => 'creatable', mkdirp })
+    expect(mkdirp).toHaveBeenCalledWith('/data/.aipehub')
+    expect(actions).toEqual([{ outcome: 'fixed', text: expect.stringContaining('Created data dir /data/.aipehub') }])
+  })
+
+  it('attempts a blocked dir too (mkdir -p can build a missing chain) and reports failure honestly', async () => {
+    const mkdirp = vi.fn(async () => {
+      const e = new Error('denied') as NodeJS.ErrnoException
+      e.code = 'EACCES'
+      throw e
+    })
+    const actions = await applyFixes({ env: { AIPE_SPACE: '/root/.aipehub' }, probePath: async () => 'blocked', mkdirp })
+    expect(mkdirp).toHaveBeenCalledOnce()
+    expect(actions[0].outcome).toBe('failed')
+    expect(actions[0].text).toContain('EACCES')
+  })
+
+  it('does NOT touch an already-writable dir', async () => {
+    const mkdirp = vi.fn(async () => {})
+    const actions = await applyFixes({ probePath: async () => 'writable', mkdirp })
+    expect(mkdirp).not.toHaveBeenCalled()
+    expect(actions[0].outcome).toBe('skipped')
+  })
+
+  it('refuses to chmod a read-only dir or remove a file in the way — advises only', async () => {
+    for (const probe of ['exists-readonly', 'not-a-dir'] as const) {
+      const mkdirp = vi.fn(async () => {})
+      const actions = await applyFixes({ probePath: async () => probe, mkdirp })
+      expect(mkdirp).not.toHaveBeenCalled()
+      expect(actions[0].outcome).toBe('skipped')
+      expect(actions[0].text).toContain('not auto-changed')
+    }
+  })
+})
+
+describe('doctor --fix', () => {
+  it('runs the fix section before the checks and accepts --fix (not a stray arg)', async () => {
+    const out: string[] = []
+    const mkdirp = vi.fn(async () => {})
+    const code = await doctor(['--fix'], greenDeps({ probePath: async () => 'creatable', mkdirp, out: (l) => out.push(l) }))
+    const text = out.join('')
+    expect(text).toContain('Applying safe fixes (--fix)')
+    expect(text).toContain('Created data dir')
+    expect(mkdirp).toHaveBeenCalledOnce()
+    expect(code).toBe(0) // creatable space is ok → no blockers
+  })
+
+  it('without --fix never calls mkdirp (report-only)', async () => {
+    const mkdirp = vi.fn(async () => {})
+    await doctor([], greenDeps({ probePath: async () => 'creatable', mkdirp, out: () => {} }))
+    expect(mkdirp).not.toHaveBeenCalled()
+  })
+
+  it('still rejects a stray argument even alongside --fix', async () => {
+    const err: string[] = []
+    const code = await doctor(['--fix', '--bogus'], greenDeps({ err: (l) => err.push(l) }))
+    expect(code).toBe(2)
+    expect(err.join('\n')).toContain('unexpected argument: --bogus')
+  })
+})
+
 describe('probePortReal (real mechanism)', () => {
   it('reports in-use while a server holds the port, free after it closes', async () => {
     const srv = createServer()
@@ -192,6 +258,24 @@ describe('probePathReal (real mechanism)', () => {
     const file = join(dir, 'a-file')
     await writeFile(file, 'x')
     expect(await probePathReal(file)).toBe('not-a-dir')
+  })
+})
+
+describe('mkdirpReal (real mechanism)', () => {
+  const tmps: string[] = []
+  afterEach(async () => {
+    for (const p of tmps.splice(0)) await rm(p, { recursive: true, force: true })
+  })
+
+  it('creates a missing dir AND its missing parents, idempotently', async () => {
+    const base = await mkdtemp(join(tmpdir(), 'aipe-fix-'))
+    tmps.push(base)
+    const nested = join(base, 'a', 'b', '.aipehub')
+
+    expect(await probePathReal(nested)).toBe('blocked') // whole parent chain absent
+    await mkdirpReal(nested)
+    expect(await probePathReal(nested)).toBe('writable') // now exists + writable
+    await mkdirpReal(nested) // idempotent — re-creating must not throw
   })
 })
 

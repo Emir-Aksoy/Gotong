@@ -8,6 +8,11 @@
  * know why" becomes a list you can act on. It is the first thing to run on a
  * fresh box.
  *
+ * With `--fix` it first applies the SAFE, REVERSIBLE repairs (today: `mkdir -p`
+ * the data dir) and then re-checks. It never auto-changes anything risky — a
+ * live port, directory permissions, a read-only mount, or the master key are
+ * reported, not touched (see `applyFixes`).
+ *
  * Privacy: it reports the NAMES of key env vars, never their values.
  *
  * Exit code: 0 when there are no ✖ blockers (⚠ warnings are advisory), 1 when
@@ -18,7 +23,7 @@
  * binds a real port — and the real probe mechanisms get their own focused test.
  */
 
-import { access, stat } from 'node:fs/promises'
+import { access, mkdir, stat } from 'node:fs/promises'
 import { constants as FS } from 'node:fs'
 import { createServer } from 'node:net'
 import { dirname, resolve } from 'node:path'
@@ -60,6 +65,8 @@ export interface DoctorDeps {
   resolveHost?: () => string | null
   probePort?: (host: string, port: number) => Promise<PortProbe>
   probePath?: (path: string) => Promise<PathProbe>
+  /** `--fix` seam: create AIPE_SPACE (recursive). Defaults to a real `mkdir -p`. */
+  mkdirp?: (path: string) => Promise<void>
   out?: (line: string) => void
   err?: (line: string) => void
 }
@@ -98,6 +105,67 @@ export async function probePathReal(p: string): Promise<PathProbe> {
     } catch {
       return 'blocked'
     }
+  }
+}
+
+/** The real `--fix` mkdir: create the dir and any missing parents. */
+export function mkdirpReal(p: string): Promise<void> {
+  return mkdir(resolve(p), { recursive: true }).then(() => undefined)
+}
+
+/** What `--fix` did (or refused to do) for one repairable item. */
+export type FixOutcome = 'fixed' | 'skipped' | 'failed'
+
+export interface FixAction {
+  outcome: FixOutcome
+  text: string
+}
+
+/**
+ * Apply the SAFE, REVERSIBLE auto-fixes for `--fix`. Today that is exactly one
+ * thing: create the data directory (AIPE_SPACE) when it's missing — `mkdir -p`,
+ * which an operator can trivially undo (`rmdir`) and which the host would do on
+ * first boot anyway; doing it here lets `doctor` confirm it's writable BEFORE
+ * you start, instead of trusting "will be created on first run".
+ *
+ * Deliberately NOT auto-fixed (they're a live process or a permission/security
+ * change we won't make for you — only advise):
+ *   • a port already in use            (might be your running hub)
+ *   • a read-only / not-a-dir space    (chmod or rm is destructive)
+ *   • master key / privileged ports    (security; surfaced by the checks)
+ *
+ * Pure given its seams (`probePath` / `mkdirp`) — returns what it did, prints
+ * nothing. A `blocked` space is still ATTEMPTED (mkdir -p can create a whole
+ * missing chain if some ancestor is writable) and reported honestly if it can't.
+ */
+export async function applyFixes(deps: DoctorDeps = {}): Promise<FixAction[]> {
+  const env = deps.env ?? process.env
+  const probePath = deps.probePath ?? probePathReal
+  const mkdirp = deps.mkdirp ?? mkdirpReal
+  const space = env.AIPE_SPACE?.trim() || '.aipehub'
+
+  const probe = await probePath(space)
+  switch (probe) {
+    case 'writable':
+      return [{ outcome: 'skipped', text: `Data dir ${space} already exists and is writable — nothing to fix.` }]
+    case 'creatable':
+    case 'blocked':
+      try {
+        await mkdirp(space)
+        return [{ outcome: 'fixed', text: `Created data dir ${space}.` }]
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code ?? 'UNKNOWN'
+        return [
+          {
+            outcome: 'failed',
+            text: `Could not create ${space} (${code}) — create it with write access manually, or point AIPE_SPACE somewhere writable.`,
+          },
+        ]
+      }
+    case 'exists-readonly':
+      return [{ outcome: 'skipped', text: `Data dir ${space} exists but is not writable — fix its permissions manually (not auto-changed).` }]
+    case 'not-a-dir':
+      return [{ outcome: 'skipped', text: `${space} is a file, not a directory — move it aside manually (not auto-changed).` }]
   }
 }
 
@@ -208,6 +276,7 @@ export async function collectChecks(deps: DoctorDeps = {}): Promise<DoctorCheck[
 }
 
 const MARK: Record<CheckLevel, string> = { ok: '✓', warn: '⚠', error: '✖' }
+const FIX_MARK: Record<FixOutcome, string> = { fixed: '✓', skipped: '•', failed: '✖' }
 
 export async function doctor(args: readonly string[], deps: DoctorDeps = {}): Promise<number> {
   const out = deps.out ?? ((l: string) => { process.stdout.write(l) })
@@ -217,15 +286,26 @@ export async function doctor(args: readonly string[], deps: DoctorDeps = {}): Pr
     out(DOCTOR_HELP)
     return 0
   }
-  const stray = args.find((a) => a !== '--help' && a !== '-h')
+  const fix = args.includes('--fix')
+  const stray = args.find((a) => a !== '--help' && a !== '-h' && a !== '--fix')
   if (stray) {
     err(`[aipehub doctor] unexpected argument: ${stray}`)
     err('Run `aipehub doctor --help`.')
     return 2
   }
 
-  const checks = await collectChecks(deps)
   out('aipehub doctor — pre-flight check\n\n')
+
+  // `--fix` runs BEFORE the checks so the re-probe below reflects anything it
+  // just created (e.g. a freshly mkdir'd AIPE_SPACE shows up ✓ writable).
+  if (fix) {
+    const actions = await applyFixes(deps)
+    out('Applying safe fixes (--fix):\n')
+    for (const a of actions) out(`  ${FIX_MARK[a.outcome]} ${a.text}\n`)
+    out('\n')
+  }
+
+  const checks = await collectChecks(deps)
   for (const c of checks) {
     out(`  ${MARK[c.level]} ${c.label} — ${c.detail}\n`)
     if (c.fix && c.level !== 'ok') out(`      → ${c.fix}\n`)
@@ -261,11 +341,17 @@ reads — WITHOUT booting it — and prints, per check, ✓ / ⚠ / ✖ with a f
 It reports the NAMES of key env vars, never their values. Exit code is 0 when
 there are no ✖ blockers (⚠ are advisory), 1 otherwise.
 
+With --fix it FIRST applies the safe, reversible repairs, then re-checks:
+  - creates AIPE_SPACE (mkdir -p) when it's missing
+It will NOT auto-change anything risky — a port already in use, directory
+permissions, a read-only mount, or the master key are reported, not touched.
+
 Configuration it reads (12-factor, same as \`aipehub start\`):
   AIPE_HOST=127.0.0.1   AIPE_WEB_PORT=3000   AIPE_WS_PORT=4000
   AIPE_SPACE=.aipehub   AIPE_MASTER_KEY_PROVIDER   AIPE_MASTER_KEY
 
 Examples:
   aipehub doctor
+  aipehub doctor --fix
   AIPE_WEB_PORT=8080 aipehub doctor
 `
