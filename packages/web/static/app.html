@@ -236,6 +236,24 @@
         <div id="me-dispatch-status" class="me-status"></div>
       </div>
 
+      <!-- ARCH-M7 — workflow architect: EXPLAIN the selected workflow at an
+           adjustable depth (一句话/简要/详细) + draw its flowchart. Operates on
+           the #me-wf-select above (same as the editor's load button). The graph
+           is a pure projection of the YAML the architect agent returns; the
+           shared standalone renderer draws it inline as a downloadable SVG. -->
+      <div class="me-wf-explain">
+        <h2 data-i18n="meWfExplainTitle">看懂这个工作流</h2>
+        <p class="me-meta" data-i18n="meWfExplainHint">让「工作流架构师」用大白话讲讲上面选中的工作流是干什么的,并画出流程图。可以选讲得多细。</p>
+        <div class="me-wf-depth" id="me-wf-explain-depth" role="group" data-i18n-aria="meWfDepthLabel" aria-label="讲解详细程度">
+          <button type="button" class="me-depth-btn" data-depth="oneliner" data-i18n="meWfDepthOneliner">一句话</button>
+          <button type="button" class="me-depth-btn is-active" data-depth="brief" data-i18n="meWfDepthBrief">简要</button>
+          <button type="button" class="me-depth-btn" data-depth="detailed" data-i18n="meWfDepthDetailed">详细</button>
+        </div>
+        <button id="me-wf-explain-btn" type="button" class="me-secondary-btn" data-i18n="meWfExplainBtn">讲讲这个工作流</button>
+        <div id="me-wf-explain-body"></div>
+        <div id="me-wf-explain-status" class="me-status"></div>
+      </div>
+
       <!-- WFEDIT-M4 — OpenClaw-style natural-language workflow editing for
            members. Targets the workflow selected above. For a workflow that
            connects to another hub, the cross-hub entry/exit (出入口) is locked:
@@ -248,6 +266,28 @@
         <button id="me-wf-edit-load-btn" type="button" class="me-secondary-btn" data-i18n="meWfEditLoadBtn">打开编辑器</button>
         <div id="me-wf-edit-body"></div>
         <div id="me-wf-edit-status" class="me-status"></div>
+      </div>
+
+      <!-- ARCH-M7 — workflow architect: CREATE a brand-new workflow from one
+           sentence. The architect agent drafts the YAML; the host REJECTS any
+           cross-hub egress (members are local-only) and saves it as a DRAFT
+           owned by you (never auto-published). On success the panel shows the
+           flowchart (downloadable SVG) + a depth-adjustable narration + the
+           collapsed YAML. Multi-turn: a follow-up like「再加一步让我确认」rides
+           the client-held conversation so the architect refines the same idea. -->
+      <div class="me-wf-create">
+        <h2 data-i18n="meWfCreateTitle">用大白话新建工作流</h2>
+        <p class="me-meta" data-i18n="meWfCreateHint">不用写 YAML — 用一句话描述你想要的自动化流程,「工作流架构师」会帮你起草一个,并画出流程图给你看。新建的工作流会先存成草稿(不会自动上线),且只在本 hub 内运行。</p>
+        <div id="me-wf-create-chat"></div>
+        <div class="me-wf-depth" id="me-wf-create-depth" role="group" data-i18n-aria="meWfDepthLabel" aria-label="讲解详细程度">
+          <button type="button" class="me-depth-btn" data-depth="oneliner" data-i18n="meWfDepthOneliner">一句话</button>
+          <button type="button" class="me-depth-btn is-active" data-depth="brief" data-i18n="meWfDepthBrief">简要</button>
+          <button type="button" class="me-depth-btn" data-depth="detailed" data-i18n="meWfDepthDetailed">详细</button>
+        </div>
+        <textarea id="me-wf-create-instruction" rows="3" data-i18n-placeholder="meWfCreatePlaceholder" placeholder="例如:每天早上把我邮箱里的新邮件总结成一段中文,再让我确认要不要回复"></textarea>
+        <button id="me-wf-create-btn" type="button" class="me-primary-btn" data-i18n="meWfCreateBtn">帮我起草</button>
+        <div id="me-wf-create-body"></div>
+        <div id="me-wf-create-status" class="me-status"></div>
       </div>
 
       <div class="me-runs">

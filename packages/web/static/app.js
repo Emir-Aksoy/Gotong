@@ -736,6 +736,13 @@
     bindOnce(document.getElementById('me-steward-suggest'), 'click', onStewardSuggestClick)
     // WFEDIT-M4 — open the NL editor for the currently-selected workflow.
     bindOnce(document.getElementById('me-wf-edit-load-btn'), 'click', loadWorkflowEditor)
+    // ARCH-M7 — workflow architect: explain the selected workflow / author a
+    // brand-new one. The depth groups (一句话/简要/详细) are wired once; both
+    // submit buttons stream their result (graph + narration) into their body.
+    bindOnce(document.getElementById('me-wf-explain-btn'), 'click', submitWorkflowExplain)
+    bindOnce(document.getElementById('me-wf-create-btn'), 'click', submitWorkflowCreate)
+    bindDepthGroup('me-wf-explain-depth', (d) => { explainDepth = d })
+    bindDepthGroup('me-wf-create-depth', (d) => { createDepth = d })
     bindOnce(document.getElementById('me-refresh-reports-btn'), 'click', loadMyReports)
     bindOnce(document.getElementById('me-runs-refresh-btn'), 'click', loadMyRuns)
     bindOnce(document.getElementById('me-agents-refresh-btn'), 'click', loadMyAgents)
@@ -1314,6 +1321,295 @@
       id_changed: t('meWfErrIdChanged'),
       structure_failed: t('meWfErrStructureFailed'),
       assistant_unavailable: t('meWfErrAssistantUnavailable'),
+    }
+    if (code && byCode[code]) return byCode[code]
+    return t('meOpFailedHttp', httpStatus)
+  }
+
+  // ===== ARCH-M7 — workflow architect: NL create + explain (member SPA) ======
+  //
+  // Two plain-language workflow tools sitting on the SAME architect agent the
+  // admin console uses (capability workflow:assist). CREATE authors a brand-new
+  // DRAFT from one sentence — the host rejects any cross-hub egress, so members
+  // are local-only. EXPLAIN narrates the selected catalog workflow at a chosen
+  // depth (一句话/简要/详细). Both emit a pure `graph` projection of the YAML
+  // that the shared standalone renderer (window.AipeHubWorkflowGraph — the same
+  // module the admin dialog uses) draws inline as a downloadable SVG. The depth
+  // only affects the prose; the YAML + graph are identical at every depth.
+
+  // The depth each panel last picked (client-only UI state; 'brief' = default,
+  // which leaves author-mode behaviour unchanged vs not sending a depth at all).
+  let createDepth = 'brief'
+  let explainDepth = 'brief'
+  // This authoring conversation (client-held; the hub stores nothing between
+  // requests). Sent with each create so a follow-up like「再加一步让我确认 /
+  // 改成每天触发」refines the SAME draft instead of starting over.
+  let createChat = []
+
+  // Wire a depth button-group: a click sets the active button + reports the
+  // chosen depth via `setDepth`. Idempotent (bindOnce), so it survives the
+  // home re-renders. Delegated — the buttons are static in app.html.
+  function bindDepthGroup(groupId, setDepth) {
+    const group = document.getElementById(groupId)
+    if (!group) return
+    bindOnce(group, 'click', (e) => {
+      const btn = e.target.closest('.me-depth-btn')
+      if (!btn || !group.contains(btn)) return
+      const depth = btn.getAttribute('data-depth')
+      if (!depth) return
+      for (const b of group.querySelectorAll('.me-depth-btn')) b.classList.toggle('is-active', b === btn)
+      setDepth(depth)
+    })
+  }
+
+  // Render an architect result (create OR explain) into `body`: the inline SVG
+  // flowchart (+ a download-SVG link), the narration, and a collapsed YAML
+  // view. The graph is drawn by the shared standalone module so the admin +
+  // member renderers never diverge — `window.AipeHub.t` is the live i18n dict
+  // it expects (NOT this file's `t` function). `headKey` titles the section.
+  function renderArchitectResult(body, j, headKey) {
+    if (!body) return
+    const yaml = String((j && j.yaml) || '')
+    const explanation = String((j && j.explanation) || '')
+    const wid = (j && j.workflowId) || 'workflow'
+    const parts = []
+    if (headKey) parts.push(`<h4 class="me-wf-arch-head">${t(headKey, escape(wid))}</h4>`)
+    // The diagram — only when the YAML parsed (graph present) AND the shared
+    // renderer is loaded. The download link carries a self-contained data: URL
+    // (embedded styles) so a saved .svg opens legible on its own.
+    const G = window.AipeHubWorkflowGraph
+    if (j && j.graph && G) {
+      const svg = G.renderWorkflowGraphSvg(j.graph, { t: window.AipeHub.t, escapeHtml: escape })
+      const href = G.svgDownloadHref(svg)
+      parts.push(
+        `<div class="me-wf-arch-graph">${svg}</div>` +
+          G.graphLegend({ t: window.AipeHub.t, escapeHtml: escape }) +
+          `<a class="me-secondary-btn me-wf-arch-dl" href="${href}" download="${escape(wid)}.svg">${t('meWfArchDownloadSvg')}</a>`,
+      )
+    }
+    if (explanation) parts.push(`<div class="me-wf-arch-explanation">${escape(explanation)}</div>`)
+    if (yaml) {
+      parts.push(
+        `<details class="me-wf-arch-yaml"><summary>${t('meWfArchViewYaml')}</summary><pre>${escape(yaml)}</pre></details>`,
+      )
+    }
+    body.innerHTML = parts.join('')
+  }
+
+  // The create conversation log (above the depth picker). Recreated each turn;
+  // empty → cleared. Mirrors the editor's chat so refinements read as a thread.
+  function renderCreateChat() {
+    const el = document.getElementById('me-wf-create-chat')
+    if (!el) return
+    if (!createChat.length) {
+      el.innerHTML = ''
+      return
+    }
+    el.innerHTML =
+      `<div class="me-wf-chat"><h4>${t('meWfCreateChatHistory')}</h4>` +
+      createChat
+        .map(
+          (turn) =>
+            `<div class="me-wf-chat-turn"><div class="me-wf-chat-user">${t('meWfCreateChatYou')}${escape(turn.instruction)}</div>` +
+            `<div class="me-wf-chat-outcome${turn.ok ? '' : ' err'}">${escape(turn.outcome || '')}</div></div>`,
+        )
+        .join('') +
+      `</div>`
+  }
+
+  async function submitWorkflowCreate() {
+    const ta = document.getElementById('me-wf-create-instruction')
+    const body = document.getElementById('me-wf-create-body')
+    const status = document.getElementById('me-wf-create-status')
+    if (!ta || !body || !status) return
+    const instruction = (ta.value || '').trim()
+    if (!instruction) {
+      status.className = 'me-status error'
+      status.textContent = t('meWfCreateDescribeFirst')
+      return
+    }
+    status.className = 'me-status'
+    status.textContent = t('meWfArchWorking')
+    body.innerHTML = ''
+    try {
+      const r = await fetch('/api/me/workflows/create', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        // stream=true → NDJSON live typing. Errors raised before the stream
+        // opens (auth / rate-limit / 503) still come back as plain JSON, so
+        // both shapes are handled below. Prior turns ride along as `history`.
+        body: JSON.stringify({
+          instruction,
+          detail: createDepth,
+          stream: true,
+          history: createChat.map((c) => ({ instruction: c.instruction, outcome: c.outcome })),
+        }),
+      })
+      let j
+      if ((r.headers.get('content-type') || '').includes('application/x-ndjson') && r.body) {
+        j = await readArchStream(r, 'me-wf-create-body')
+        removeArchStreamPane('me-wf-create-body')
+        if (!j) {
+          status.className = 'me-status error'
+          status.textContent = t('meWfArchStreamBroken')
+          return
+        }
+      } else {
+        j = await r.json().catch(() => ({}))
+      }
+      if (r.ok && j && j.ok !== false) {
+        status.className = 'me-status ok'
+        status.textContent = t('meWfCreateSuccessLine', String(j.workflowId || ''))
+        renderArchitectResult(body, j, 'meWfCreateResultHead')
+        createChat.push({ instruction, outcome: t('meWfCreateChatSuccess', String(j.workflowId || '')), ok: true })
+        renderCreateChat()
+        // A freshly authored DRAFT isn't in the published /me catalog, so the
+        // dispatch / edit selects above don't change — nothing else to refresh.
+        return
+      }
+      status.className = 'me-status error'
+      const errText = archErrorText(r.status, j)
+      status.textContent = errText
+      createChat.push({ instruction, outcome: t('meWfCreateChatFailure', errText), ok: false })
+      renderCreateChat()
+    } catch (err) {
+      removeArchStreamPane('me-wf-create-body')
+      status.className = 'me-status error'
+      status.textContent = t('meWfArchSaveFailedErr', err?.message || err)
+    }
+  }
+
+  async function submitWorkflowExplain() {
+    const sel = document.getElementById('me-wf-select')
+    const body = document.getElementById('me-wf-explain-body')
+    const status = document.getElementById('me-wf-explain-status')
+    if (!sel || !body || !status) return
+    if (!sel.value) {
+      status.className = 'me-status error'
+      status.textContent = t('meWfExplainSelectFirst')
+      return
+    }
+    status.className = 'me-status'
+    status.textContent = t('meWfArchWorking')
+    body.innerHTML = ''
+    try {
+      const r = await fetch(`/api/me/workflows/${encodeURIComponent(sel.value)}/explain`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ detail: explainDepth, stream: true }),
+      })
+      let j
+      if ((r.headers.get('content-type') || '').includes('application/x-ndjson') && r.body) {
+        j = await readArchStream(r, 'me-wf-explain-body')
+        removeArchStreamPane('me-wf-explain-body')
+        if (!j) {
+          status.className = 'me-status error'
+          status.textContent = t('meWfArchStreamBroken')
+          return
+        }
+      } else {
+        j = await r.json().catch(() => ({}))
+      }
+      if (r.ok && j && j.ok !== false) {
+        status.className = 'me-status'
+        status.textContent = ''
+        renderArchitectResult(body, j, 'meWfExplainResultHead')
+        return
+      }
+      status.className = 'me-status error'
+      status.textContent = archErrorText(r.status, j)
+    } catch (err) {
+      removeArchStreamPane('me-wf-explain-body')
+      status.className = 'me-status error'
+      status.textContent = t('meWfArchLoadFailedErr', err?.message || err)
+    }
+  }
+
+  // Consume the architect NDJSON stream: paint `chunk` lines into the live pane
+  // inside `bodyId`, return the final `result` line (or null when the stream
+  // died first). Same wire shape as the editor stream — kept separate so the
+  // pane id is parameterised (two panels can stream independently).
+  async function readArchStream(r, bodyId) {
+    const reader = r.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    let result = null
+    const handleLine = (line) => {
+      if (!line.trim()) return
+      let msg
+      try {
+        msg = JSON.parse(line)
+      } catch {
+        return
+      }
+      if (msg && msg.kind === 'chunk' && typeof msg.text === 'string') appendArchStreamText(bodyId, msg.text)
+      else if (msg && msg.kind === 'result') result = msg
+    }
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let nl
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          handleLine(buf.slice(0, nl))
+          buf = buf.slice(nl + 1)
+        }
+      }
+      if (buf) handleLine(buf)
+    } catch {
+      /* dropped mid-stream — caller treats a missing result as the error */
+    }
+    return result
+  }
+
+  function ensureArchStreamPane(bodyId) {
+    const body = document.getElementById(bodyId)
+    if (!body) return null
+    let el = body.querySelector('.me-wf-stream')
+    if (!el) {
+      el = document.createElement('div')
+      el.className = 'me-wf-stream'
+      el.innerHTML = `<div class="me-wf-stream-head">${t('meWfArchAiTyping')}</div><pre></pre>`
+      body.appendChild(el)
+    }
+    return el
+  }
+
+  function appendArchStreamText(bodyId, text) {
+    const el = ensureArchStreamPane(bodyId)
+    if (!el) return
+    const pre = el.querySelector('pre')
+    if (!pre) return
+    pre.textContent += text
+    pre.scrollTop = pre.scrollHeight
+  }
+
+  function removeArchStreamPane(bodyId) {
+    document.querySelector(`#${bodyId} .me-wf-stream`)?.remove()
+  }
+
+  // Friendly message for a create / explain error response. Prefers the
+  // server's human text, then maps a few reason codes (some shared with the
+  // editor), then falls back to the HTTP status.
+  function archErrorText(httpStatus, j) {
+    const msg = j && (j.message || j.error)
+    if (msg) return String(msg)
+    const code = j && j.code
+    const byCode = {
+      not_wired: t('meWfErrAssistantUnavailable'),
+      bad_request: t('meWfArchBadRequest'),
+      forbidden: t('meWfErrForbidden'),
+      not_found: t('meWfErrNotFound'),
+      no_source: t('meWfErrNoSource'),
+      cross_hub: t('meWfArchCrossHub'),
+      id_exists: t('meWfArchIdExists'),
+      draft_cap: t('meWfArchDraftCap'),
+      assistant_failed: t('meWfErrAssistantFailed'),
+      parse_failed: t('meWfErrParseFailed'),
+      structure_failed: t('meWfErrStructureFailed'),
+      assistant_unavailable: t('meWfErrAssistantUnavailable'),
+      internal: t('meWfArchInternal'),
     }
     if (code && byCode[code]) return byCode[code]
     return t('meOpFailedHttp', httpStatus)
