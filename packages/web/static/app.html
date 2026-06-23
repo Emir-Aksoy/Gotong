@@ -1374,6 +1374,18 @@
       <section id="mcp" class="managed-agents" data-tab="mcp">
         <h2><span data-i18n="mcpPanel">MCP 集成</span></h2>
         <p class="hint" data-i18n="mcpIntro">把外部 MCP server 装进 hub，智能体在「编辑」表单里按名勾选即可调用其工具。凭证请用 ${ENV} 引用，别填明文。</p>
+
+        <!-- MCD-M3 — built-in connector directory: browse framework-level
+             ready-made MCP components and install one with a click (reuses the
+             install route below). Hidden until the catalog loads; also hidden
+             when the registry surface is disabled (nothing to install into). -->
+        <section id="mcp-directory" class="mcp-directory" hidden>
+          <h2 style="margin-top:1rem"><span data-i18n="mcpDirTitle">浏览内置连接器</span></h2>
+          <p class="hint" data-i18n="mcpDirIntro">从这些现成的 MCP 组件里挑一个一键装上。没有想要的？装上「MCP 注册站搜索」，让智能体去主流注册站实时找。</p>
+          <p id="mcp-directory-msg" class="form-msg" aria-live="polite"></p>
+          <div id="mcp-directory-cards" class="mcp-cards"></div>
+        </section>
+
         <div id="mcp-disabled" class="empty-state" hidden data-i18n="mcpDisabled">此主机未启用 MCP 注册表</div>
         <div id="mcp-empty" class="empty-state" hidden data-i18n="mcpEmpty">尚未安装任何 MCP server</div>
         <table id="mcp-table" class="services-table" hidden>

@@ -1894,6 +1894,59 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .tg-card-result { font-size: 0.74rem; color: #666; min-height: 0; }
 .tg-card-result.ok { color: #3a7d4f; }
 .tg-card-result.err { color: #c0392b; }
+/* MCD-M3 — built-in MCP connector directory cards (mirror .tg-card). */
+.mcp-directory { margin-bottom: 1rem; }
+.mcp-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(18rem, 1fr));
+  gap: 0.7rem;
+  margin: 0.4rem 0 0.2rem;
+}
+.mcp-card {
+  border: 1px solid #e6e6e0;
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  background: #fcfcfa;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.mcp-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.mcp-card-name { font-size: 0.92rem; line-height: 1.3; }
+.mcp-cat-badge {
+  flex: 0 0 auto;
+  font-size: 0.7rem;
+  color: #555;
+  background: #efefe9;
+  border-radius: 999px;
+  padding: 0.1rem 0.5rem;
+  white-space: nowrap;
+}
+.mcp-card-what { margin: 0; font-size: 0.78rem; color: #555; line-height: 1.45; }
+.mcp-card-env {
+  margin: 0;
+  font-size: 0.74rem;
+  color: #7a6320;
+  background: #fbf6e6;
+  border-radius: 5px;
+  padding: 0.25rem 0.45rem;
+  line-height: 1.4;
+}
+.mcp-card-caveat { margin: 0; font-size: 0.74rem; color: #9a4a2a; line-height: 1.4; }
+.mcp-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: auto;
+}
+.mcp-card-home { font-size: 0.76rem; }
+.mcp-card-install, .mcp-card-installed { margin-left: auto; }
+.mcp-card-installed { font-size: 0.76rem; color: #3a7d4f; font-weight: 600; }
 .tg-result-summary { margin-bottom: 0.3rem; }
 .tg-checklist { color: #555; }
 .tg-checklist > summary { cursor: pointer; font-weight: 600; color: #b5651d; }

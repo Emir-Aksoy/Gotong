@@ -256,8 +256,10 @@
     const mcp = {
       servers: [],
       // HubMcpServerRecord[] — [{ spec, createdAt, description? }]
-      disabled: false
+      disabled: false,
       // host didn't wire the registry surface (GET → 503)
+      connectors: null
+      // built-in connector directory (MCD-M3), cached after first fetch
     };
     async function refreshMcp() {
       const tableEl = document.getElementById("mcp-table");
@@ -275,6 +277,8 @@
           if (emptyEl) emptyEl.hidden = true;
           const form = document.getElementById("mcp-form");
           if (form) form.hidden = true;
+          const dirEl = document.getElementById("mcp-directory");
+          if (dirEl) dirEl.hidden = true;
           return;
         }
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -295,6 +299,7 @@
         tableEl.hidden = false;
       }
       renderMcpTable();
+      refreshConnectors().catch((err) => console.warn("mcp: connector refresh failed", err));
     }
     function transportOf(spec) {
       return spec.transport || "stdio";
@@ -324,6 +329,80 @@
         tr.querySelector('[data-action="share"]').addEventListener("change", (e) => setShared(rec, e.target));
         tr.querySelector('[data-action="uninstall"]').addEventListener("click", () => uninstallServer(spec.name));
         tbodyEl.appendChild(tr);
+      }
+    }
+    async function refreshConnectors() {
+      const sectionEl = document.getElementById("mcp-directory");
+      if (!sectionEl) return;
+      if (mcp.disabled) {
+        sectionEl.hidden = true;
+        return;
+      }
+      if (!mcp.connectors) {
+        try {
+          const j = await fetchJson2("/api/admin/mcp-connectors/catalog");
+          mcp.connectors = j.connectors || [];
+        } catch (err) {
+          console.warn("mcp: connector catalog fetch failed", err);
+          sectionEl.hidden = true;
+          return;
+        }
+      }
+      sectionEl.hidden = false;
+      renderConnectorCards();
+    }
+    function renderConnectorCards() {
+      const cardsEl = document.getElementById("mcp-directory-cards");
+      if (!cardsEl) return;
+      const installed = new Set(mcp.servers.map((r) => (r.spec || {}).name));
+      cardsEl.innerHTML = "";
+      for (const c of mcp.connectors || []) {
+        const card = document.createElement("div");
+        card.className = "mcp-card";
+        const isInstalled = installed.has(c.spec?.name);
+        const catLabel = t2.mcpDirCat && t2.mcpDirCat[c.category] || c.category;
+        const homepage = c.homepage ? `<a class="mcp-card-home" href="${escapeHtml2(c.homepage)}" target="_blank" rel="noopener noreferrer">${escapeHtml2(t2.mcpDirHomepage)}</a>` : "";
+        const needsEnv = c.needsEnv && c.needsEnv.length ? `<p class="mcp-card-env">${escapeHtml2(t2.mcpDirNeedsEnv(c.needsEnv.join(", ")))}</p>` : "";
+        const caveat = c.caveat ? `<p class="mcp-card-caveat">${escapeHtml2(c.caveat)}</p>` : "";
+        const action = isInstalled ? `<span class="mcp-card-installed">${escapeHtml2(t2.mcpInstalled)}</span>` : `<button type="button" class="mcp-card-install">${escapeHtml2(t2.mcpInstallBtn)}</button>`;
+        card.innerHTML = `
+        <div class="mcp-card-head">
+          <strong class="mcp-card-name">${escapeHtml2(c.name)}</strong>
+          <span class="mcp-cat-badge">${escapeHtml2(catLabel)}</span>
+        </div>
+        <p class="mcp-card-what">${escapeHtml2(c.whatFor)}</p>
+        ${needsEnv}
+        ${caveat}
+        <div class="mcp-card-foot">${homepage}${action}</div>
+      `;
+        if (!isInstalled) {
+          card.querySelector(".mcp-card-install").addEventListener("click", () => installConnector(c));
+        }
+        cardsEl.appendChild(card);
+      }
+    }
+    async function installConnector(connector) {
+      const msgEl = document.getElementById("mcp-directory-msg");
+      if (msgEl) {
+        msgEl.textContent = "";
+        msgEl.classList.remove("ok", "err");
+      }
+      try {
+        await fetchJson2("/api/admin/mcp-servers", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ spec: connector.spec, description: connector.whatFor })
+        });
+        if (msgEl) {
+          msgEl.textContent = t2.mcpDirInstalledMsg(connector.name);
+          msgEl.classList.add("ok");
+        }
+        await refreshMcp();
+      } catch (err) {
+        if (msgEl) {
+          msgEl.textContent = err?.message || String(err);
+          msgEl.classList.add("err");
+        }
       }
     }
     async function setShared(rec, checkboxEl) {

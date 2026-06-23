@@ -87,6 +87,13 @@
       mcpAgentOffline: '（当前不可达）',
       mcpShared: '共享给 peer',
       mcpSharedHint: '勾选后，peer hub 上的智能体可通过联邦链路调用此 server 的工具；凭证 / 子进程仍留在本机（凭证各归各家）。',
+      // --- MCD-M3: built-in connector directory ---
+      mcpDirTitle: '浏览内置连接器',
+      mcpDirIntro: '从这些现成的 MCP 组件里挑一个一键装上。没有想要的？装上「MCP 注册站搜索」，让智能体去主流注册站实时找。',
+      mcpDirHomepage: '官网',
+      mcpDirNeedsEnv: (vars) => `需在 host 环境设 ${vars}（只填变量名，密钥不入库）`,
+      mcpDirInstalledMsg: (name) => `已安装「${name}」。可在上方列表查看，或在智能体「编辑」表单里按名勾选。`,
+      mcpDirCat: { discovery: '发现', rag: 'RAG', notes: '笔记', search: '搜索', files: '文件', web: '网络' },
       // --- services tab (v2.2) ---
       servicesPanel: 'Hub 服务',
       servicesEmpty: '尚未注册任何服务插件',
@@ -1823,6 +1830,13 @@
       mcpAgentOffline: '(currently unreachable)',
       mcpShared: 'Shared to peers',
       mcpSharedHint: 'When checked, agents on peer hubs can call this server’s tools over the federation link; its credentials / subprocess stay on this host.',
+      // --- MCD-M3: built-in connector directory ---
+      mcpDirTitle: 'Browse built-in connectors',
+      mcpDirIntro: 'Pick a ready-made MCP component and install it with one click. Don’t see what you need? Install “MCP registry search” and let an agent search the mainstream registry live.',
+      mcpDirHomepage: 'Homepage',
+      mcpDirNeedsEnv: (vars) => `Set ${vars} in the host environment (variable names only — secrets are never stored)`,
+      mcpDirInstalledMsg: (name) => `Installed “${name}”. See it in the list above, or tick it by name on an agent’s Edit form.`,
+      mcpDirCat: { discovery: 'Discovery', rag: 'RAG', notes: 'Notes', search: 'Search', files: 'Files', web: 'Web' },
       // --- services tab (v2.2) ---
       servicesPanel: 'Hub Services',
       servicesEmpty: 'No service plugins registered',

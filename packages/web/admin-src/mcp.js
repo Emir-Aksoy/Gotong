@@ -18,6 +18,7 @@ export function createMcp() {
   const mcp = {
     servers: [],     // HubMcpServerRecord[] — [{ spec, createdAt, description? }]
     disabled: false, // host didn't wire the registry surface (GET → 503)
+    connectors: null, // built-in connector directory (MCD-M3), cached after first fetch
   }
 
   async function refreshMcp() {
@@ -38,6 +39,9 @@ export function createMcp() {
         if (emptyEl) emptyEl.hidden = true
         const form = document.getElementById('mcp-form')
         if (form) form.hidden = true
+        // No registry to install into → hide the connector directory too.
+        const dirEl = document.getElementById('mcp-directory')
+        if (dirEl) dirEl.hidden = true
         return
       }
       if (!r.ok) throw new Error(`HTTP ${r.status}`)
@@ -58,6 +62,9 @@ export function createMcp() {
       tableEl.hidden = false
     }
     renderMcpTable()
+    // Built-in connector directory rides the same refresh (MCD-M3): its
+    // "already installed" badges depend on the list we just fetched.
+    refreshConnectors().catch((err) => console.warn('mcp: connector refresh failed', err))
   }
 
   // stdio is the implicit transport when none is declared (R4 union).
@@ -92,6 +99,89 @@ export function createMcp() {
       tr.querySelector('[data-action="share"]').addEventListener('change', (e) => setShared(rec, e.target))
       tr.querySelector('[data-action="uninstall"]').addEventListener('click', () => uninstallServer(spec.name))
       tbodyEl.appendChild(tr)
+    }
+  }
+
+  // —— MCD-M3: built-in connector directory (browse + one-click install) ——
+  // The catalog (`GET /api/admin/mcp-connectors/catalog`) is a static web
+  // constant, so fetch it once and cache; only the "already installed" badges
+  // change as servers come and go. Installing one reuses the existing
+  // `POST /api/admin/mcp-servers` route — the directory only suggests.
+  async function refreshConnectors() {
+    const sectionEl = document.getElementById('mcp-directory')
+    if (!sectionEl) return
+    // No registry surface on this host → nothing to install into; stay hidden.
+    if (mcp.disabled) { sectionEl.hidden = true; return }
+
+    if (!mcp.connectors) {
+      try {
+        const j = await fetchJson('/api/admin/mcp-connectors/catalog')
+        mcp.connectors = j.connectors || []
+      } catch (err) {
+        console.warn('mcp: connector catalog fetch failed', err)
+        sectionEl.hidden = true
+        return
+      }
+    }
+    sectionEl.hidden = false
+    renderConnectorCards()
+  }
+
+  function renderConnectorCards() {
+    const cardsEl = document.getElementById('mcp-directory-cards')
+    if (!cardsEl) return
+    const installed = new Set(mcp.servers.map((r) => (r.spec || {}).name))
+    cardsEl.innerHTML = ''
+    for (const c of mcp.connectors || []) {
+      const card = document.createElement('div')
+      card.className = 'mcp-card'
+      const isInstalled = installed.has(c.spec?.name)
+      const catLabel = (t.mcpDirCat && t.mcpDirCat[c.category]) || c.category
+      const homepage = c.homepage
+        ? `<a class="mcp-card-home" href="${escapeHtml(c.homepage)}" target="_blank" rel="noopener noreferrer">${escapeHtml(t.mcpDirHomepage)}</a>`
+        : ''
+      const needsEnv = c.needsEnv && c.needsEnv.length
+        ? `<p class="mcp-card-env">${escapeHtml(t.mcpDirNeedsEnv(c.needsEnv.join(', ')))}</p>`
+        : ''
+      const caveat = c.caveat ? `<p class="mcp-card-caveat">${escapeHtml(c.caveat)}</p>` : ''
+      const action = isInstalled
+        ? `<span class="mcp-card-installed">${escapeHtml(t.mcpInstalled)}</span>`
+        : `<button type="button" class="mcp-card-install">${escapeHtml(t.mcpInstallBtn)}</button>`
+      card.innerHTML = `
+        <div class="mcp-card-head">
+          <strong class="mcp-card-name">${escapeHtml(c.name)}</strong>
+          <span class="mcp-cat-badge">${escapeHtml(catLabel)}</span>
+        </div>
+        <p class="mcp-card-what">${escapeHtml(c.whatFor)}</p>
+        ${needsEnv}
+        ${caveat}
+        <div class="mcp-card-foot">${homepage}${action}</div>
+      `
+      if (!isInstalled) {
+        card.querySelector('.mcp-card-install').addEventListener('click', () => installConnector(c))
+      }
+      cardsEl.appendChild(card)
+    }
+  }
+
+  // One-click install: POST the curated spec to the existing registry route.
+  // We only suggest the spec + a description (the connector's whatFor); the
+  // server-side validateMcpServersArray is still the source of truth.
+  async function installConnector(connector) {
+    const msgEl = document.getElementById('mcp-directory-msg')
+    if (msgEl) { msgEl.textContent = ''; msgEl.classList.remove('ok', 'err') }
+    try {
+      await fetchJson('/api/admin/mcp-servers', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ spec: connector.spec, description: connector.whatFor }),
+      })
+      if (msgEl) { msgEl.textContent = t.mcpDirInstalledMsg(connector.name); msgEl.classList.add('ok') }
+      // Re-renders the installed table AND the connector badges (the just-
+      // installed card flips to "已装").
+      await refreshMcp()
+    } catch (err) {
+      if (msgEl) { msgEl.textContent = err?.message || String(err); msgEl.classList.add('err') }
     }
   }
 
