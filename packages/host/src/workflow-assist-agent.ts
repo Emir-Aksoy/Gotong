@@ -77,6 +77,26 @@ export interface WorkflowAssistSurface {
   assist(input: {
     description: string
     contextHints?: WorkflowAssistantPayload['contextHints']
+    /**
+     * ARCH-M2 — authoring vs explain. Default 'author' (today's behavior:
+     * generate a fresh draft from `description`). 'explain' echoes
+     * `subjectYaml` verbatim and produces ONLY a depth-controlled prose
+     * explanation of that existing workflow (no regeneration).
+     */
+    mode?: WorkflowAssistantPayload['mode']
+    /**
+     * ARCH-M2 — explanation depth ('oneliner' | 'brief' | 'detailed').
+     * Default 'brief' ⇒ author-mode prose is byte-for-byte unchanged.
+     * Affects only the prose; the yaml + graph are unaffected by depth.
+     */
+    detail?: WorkflowAssistantPayload['detail']
+    /**
+     * ARCH-M2 — the existing workflow YAML to explain. Required (non-empty)
+     * when mode==='explain'; ignored in author mode. The agent derives
+     * `output.yaml` + `output.graph` deterministically from THIS value,
+     * never from the LLM's echo.
+     */
+    subjectYaml?: WorkflowAssistantPayload['subjectYaml']
     /** Caller (admin) participant id — stamped onto the dispatched task's `from`. */
     by: ParticipantId
     /**
@@ -318,6 +338,13 @@ export function createWorkflowAssistAgent(deps: {
     async assist(input) {
       const payload: WorkflowAssistantPayload = { description: input.description }
       if (input.contextHints) payload.contextHints = input.contextHints
+      // ARCH-M2 — thread the architect dimensions through verbatim. All
+      // optional; absent ⇒ author mode at brief depth (today's behavior).
+      // The returned `output` (incl. `graph?`) is echoed verbatim below, so
+      // no output-side change is needed — graph rides the same return.
+      if (input.mode) payload.mode = input.mode
+      if (input.detail) payload.detail = input.detail
+      if (input.subjectYaml !== undefined) payload.subjectYaml = input.subjectYaml
       // WFEDIT-D4 — one-shot private key ties THIS dispatch's chunks to THIS
       // caller's sink. The key only ever reaches the sink registry and the
       // task payload (assistant tolerates extra payload fields), and is

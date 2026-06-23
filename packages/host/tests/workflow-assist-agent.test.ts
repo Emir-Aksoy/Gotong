@@ -233,4 +233,60 @@ describe('createWorkflowAssistAgent', () => {
       expect(out.draftStatus).toBe('valid')
     })
   })
+
+  // ARCH-M2 — architect dimensions threaded through the surface: `graph` rides
+  // the verbatim output, and mode/detail/subjectYaml reach the agent payload.
+  describe('architect dimensions (ARCH-M2)', () => {
+    it('author mode now attaches a graph for a valid draft', async () => {
+      const surface = createWorkflowAssistAgent({ hub, config: { provider: 'mock' }, logger })
+      const out = await surface!.assist({ description: 'author with graph', by: 'admin' })
+      expect(out.draftStatus).toBe('valid')
+      // The mock draft's id is 'assistant-mock-draft'; the graph is the pure
+      // projection of THAT parsed YAML, so its workflowId matches.
+      expect(out.graph).toBeDefined()
+      expect(out.graph?.workflowId).toBe('assistant-mock-draft')
+      expect(out.graph?.nodes.length).toBeGreaterThan(0)
+    })
+
+    it('explain mode echoes subjectYaml verbatim + projects ITS graph (not the LLM echo)', async () => {
+      const subject = [
+        'schema: aipehub.workflow/v1',
+        'workflow:',
+        '  id: explain-subject',
+        '  trigger:',
+        '    capability: kickoff',
+        '  steps:',
+        '    - id: do-thing',
+        '      dispatch:',
+        '        strategy: { kind: capability, capabilities: [chat] }',
+        '        payload: {}',
+      ].join('\n')
+      const surface = createWorkflowAssistAgent({ hub, config: { provider: 'mock' }, logger })
+      const out = await surface!.assist({
+        description: 'ignored in explain mode',
+        mode: 'explain',
+        detail: 'detailed',
+        subjectYaml: subject,
+        by: 'admin',
+      })
+      // YAML is the subject verbatim — never the mock's own 'assistant-mock-draft'.
+      expect(out.yaml).toBe(subject)
+      expect(out.yaml).not.toContain('assistant-mock-draft')
+      expect(out.draftStatus).toBe('valid')
+      // Graph is projected from the subject, so its id is the subject's id.
+      expect(out.graph?.workflowId).toBe('explain-subject')
+    })
+
+    it('explain mode with an unparseable subject → invalid + no graph', async () => {
+      const surface = createWorkflowAssistAgent({ hub, config: { provider: 'mock' }, logger })
+      const out = await surface!.assist({
+        description: 'ignored',
+        mode: 'explain',
+        subjectYaml: 'not: a: valid: workflow',
+        by: 'admin',
+      })
+      expect(out.draftStatus).toBe('invalid')
+      expect(out.graph).toBeUndefined()
+    })
+  })
 })
