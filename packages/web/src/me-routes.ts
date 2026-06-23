@@ -668,6 +668,16 @@ export interface MeWorkflowEditSurface {
 // steward's `action`); the client renders the DAG SVG from `graph`.
 // ---------------------------------------------------------------------------
 
+/**
+ * ARCH-M6 — the architect's depth levels, mirrored locally so the web layer
+ * takes NO runtime dep on `@aipehub/workflow-assistant`. Same duck-typing
+ * discipline as the rest of this surface (e.g. `WorkflowGraphView` echoed as
+ * `unknown`). Kept narrow so the host's `MeWorkflowCreateRequest.detail`
+ * (`WorkflowDetailLevel`) is assignable into the surface contract under
+ * `strictFunctionTypes`.
+ */
+export type MeWorkflowDetailLevel = 'oneliner' | 'brief' | 'detailed'
+
 export type MeWorkflowCreateResult =
   | {
       ok: true
@@ -715,7 +725,7 @@ export interface MeWorkflowCreateSurface {
     instruction: string
     userId: string
     /** Explanation depth — 'oneliner' | 'brief' | 'detailed'. Default brief. */
-    detail?: string
+    detail?: MeWorkflowDetailLevel
     /** Prior turns of this authoring conversation (client-held; host re-sanitizes + caps). */
     history?: Array<{ instruction: string; outcome?: string }>
     /** Live LLM chunks of THIS call (host routes them per-call; absent ⇒ no streaming). */
@@ -729,7 +739,7 @@ export interface MeWorkflowCreateSurface {
   explain(args: {
     workflowId: string
     userId: string
-    detail?: string
+    detail?: MeWorkflowDetailLevel
     /** Optional focus question for the narration. */
     focus?: string
     onChunk?: (chunk: string) => void
@@ -1751,11 +1761,13 @@ async function handleMeWorkflowEdit(
 // own request/response pair).
 // ---------------------------------------------------------------------------
 
-const WORKFLOW_DETAIL_LEVELS = new Set(['oneliner', 'brief', 'detailed'])
+const WORKFLOW_DETAIL_LEVELS = new Set<MeWorkflowDetailLevel>(['oneliner', 'brief', 'detailed'])
 
 /** Accept only a known depth level; anything else → undefined (host default brief). */
-function coerceWorkflowDetail(raw: unknown): string | undefined {
-  return typeof raw === 'string' && WORKFLOW_DETAIL_LEVELS.has(raw) ? raw : undefined
+function coerceWorkflowDetail(raw: unknown): MeWorkflowDetailLevel | undefined {
+  return typeof raw === 'string' && WORKFLOW_DETAIL_LEVELS.has(raw as MeWorkflowDetailLevel)
+    ? (raw as MeWorkflowDetailLevel)
+    : undefined
 }
 
 /**
