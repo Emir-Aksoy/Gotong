@@ -6,6 +6,12 @@ AipeHub 自带一个 [Model Context Protocol](https://modelcontextprotocol.io)
 server，让任何支持 MCP 的客户端可以**派任务**进 Hub、读**谁在线**、
 浏览**贡献榜**、给完成的任务**附评价** —— 全程不用碰管理 web UI。
 
+> **反过来：给 hub 的 agent 挂 MCP 工具(client 方向)** —— admin「MCP 集成」标签页
+> 自带一个**内置连接器目录**(Chroma RAG / Obsidian / Elasticsearch / 文件系统 +
+> 一个去官方注册站实时搜的 fetch 配方),一键装进 hub 的 MCP 注册表,agent 表单即可
+> 按名勾选;工作流架构师还会**优先推荐已装的可组装组件**。见
+> [MCP-CONNECTOR-DIRECTORY](MCP-CONNECTOR-DIRECTORY.md)。
+
 本文覆盖：
 
 1. 你能做什么

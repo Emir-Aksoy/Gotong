@@ -65,6 +65,10 @@
 
 - `contextHints` 双重用途：① 喂进 prompt 让 LLM 用真名而不是编 capability；
   ② 当 `inventory` 喂给 `deepCheck` 做运行时校验（见 §三）。
+  - `contextHints.mcpServers`（hub 已装的 MCP server 名）让架构师**优先围绕
+    可直接组装的组件**建工作流 —— 见 [MCP-CONNECTOR-DIRECTORY](MCP-CONNECTOR-DIRECTORY.md)
+    （内置连接器目录 + 一键装 + 喂这条 dead seam）。注意 MCP 名只进 prompt 提示，
+    **不进 deepCheck**（server 名非 capability，无运行时 inventory 可校验）。
 - `draftStatus` 三态：`'valid'`（parseWorkflow 过）/ `'invalid'`（解析失败，
   附 `validationError`）/ `'no_yaml'`（LLM 没给 YAML，全文当 explanation）。
 
