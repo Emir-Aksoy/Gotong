@@ -2102,7 +2102,8 @@
       <textarea data-chat-input="${id}" rows="2" placeholder="${escape(t('quickChatInputLabel'))}"></textarea>
       <button type="button" class="me-primary-btn" data-chat-send="${id}">${t('quickChatSend')}</button>
       <p class="me-status" data-chat-status="${id}"></p>
-      <pre class="me-chat-reply" data-chat-reply="${id}" hidden></pre>`
+      <pre class="me-chat-reply" data-chat-reply="${id}" hidden></pre>
+      <div class="me-chat-next" data-chat-next="${id}" hidden></div>`
   }
 
   // Open (rendering once) the quick-chat box for a specific card — used right
@@ -2134,6 +2135,7 @@
     const input = card.querySelector('[data-chat-input]')
     const statusEl = card.querySelector('[data-chat-status]')
     const replyEl = card.querySelector('[data-chat-reply]')
+    const nextEl = card.querySelector('[data-chat-next]')
     if (!input || !statusEl) return
     const prompt = String(input.value || '').trim()
     if (!prompt) {
@@ -2146,6 +2148,9 @@
     statusEl.className = 'me-status'
     statusEl.textContent = t('quickChatSending')
     if (replyEl) { replyEl.hidden = true; replyEl.textContent = '' }
+    // ②TC-NEXT-ME — drop any prior next-step card before the new send; it only
+    // reappears if THIS attempt succeeds (replaceChildren clears the buttons).
+    if (nextEl) { nextEl.hidden = true; nextEl.replaceChildren() }
     try {
       const r = await fetch(`/api/me/agents/${encodeURIComponent(agentId)}/chat`, {
         method: 'POST',
@@ -2159,7 +2164,7 @@
         setChatFailure(statusEl, window.AipeHub.describeError(j?.error || `HTTP ${r.status}`), 'quickChatFailed')
         return
       }
-      renderMeChatReply(j?.result, statusEl, replyEl)
+      renderMeChatReply(j?.result, statusEl, replyEl, nextEl)
     } catch (err) {
       setChatFailure(statusEl, window.AipeHub.describeError(err?.message || String(err)), 'quickChatFailed')
     } finally {
@@ -2172,7 +2177,7 @@
   // error returns kind:'ok' with output.stopReason==='error' and the raw text
   // in output.text — rendering that green would read as if the agent answered,
   // so it's treated as a failure and folded through describeError too (③TC).
-  function renderMeChatReply(result, statusEl, replyEl) {
+  function renderMeChatReply(result, statusEl, replyEl, nextEl) {
     if (!statusEl) return
     if (!result) {
       statusEl.className = 'me-status error'
@@ -2186,6 +2191,9 @@
       if (replyEl) { replyEl.textContent = text; replyEl.hidden = false }
       statusEl.className = 'me-status ok'
       statusEl.textContent = t('quickChatOk')
+      // ②TC-NEXT-ME — the agent demonstrably works; surface the next real step
+      // (run a workflow / 问管家) so the member isn't stranded at "it replied".
+      renderChatNextSteps(nextEl)
       return
     }
     const raw = result.kind === 'ok'
@@ -2194,6 +2202,45 @@
     const d = window.AipeHub.describeError(raw)
     if (replyEl) { replyEl.hidden = true; replyEl.textContent = '' }
     setChatFailure(statusEl, d, 'quickChatAgentFailed')
+  }
+
+  // ②TC-NEXT-ME — render the post-success "now do something real" card into the
+  // card's next-step pane. Both targets live on THIS same home tab, so each button
+  // just scrolls to + focuses the real element — no tab switch, no backend call.
+  // "发起一个工作流" is offered ONLY when the member actually has runnable workflows
+  // (__myWorkflows is the same array the picker is built from, so it never points at
+  // an empty picker). "问管家" is always offered: the 管家 box is a permanent, visible
+  // part of /me home, so the button always lands on a real element (whether the host
+  // has the steward configured is the box's own concern, surfaced when used).
+  // createElement + textContent throughout — no innerHTML, nothing to escape.
+  function focusNextTarget(id) {
+    const el = document.getElementById(id)
+    if (!el) return
+    el.scrollIntoView?.({ behavior: 'smooth', block: 'center' })
+    el.focus?.({ preventScroll: true })
+  }
+  function renderChatNextSteps(nextEl) {
+    if (!nextEl) return
+    nextEl.replaceChildren()
+    const lead = document.createElement('span')
+    lead.className = 'me-chat-next-lead'
+    lead.textContent = t('meChatNextLead')
+    nextEl.append(lead)
+    if (Array.isArray(__myWorkflows) && __myWorkflows.length > 0) {
+      const wf = document.createElement('button')
+      wf.type = 'button'
+      wf.className = 'me-chat-next-btn'
+      wf.textContent = t('meChatNextRunWf')
+      wf.addEventListener('click', () => focusNextTarget('me-wf-select'))
+      nextEl.append(' ', wf)
+    }
+    const steward = document.createElement('button')
+    steward.type = 'button'
+    steward.className = 'me-chat-next-btn'
+    steward.textContent = t('meChatNextAskSteward')
+    steward.addEventListener('click', () => focusNextTarget('me-steward-input'))
+    nextEl.append(' ', steward)
+    nextEl.hidden = false
   }
 
   // ease-of-use ③TC-ME — a member's first quick-chat most often fails because their

@@ -2767,9 +2767,13 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .me-chat-wrap textarea { width: 100%; box-sizing: border-box; margin-bottom: 0.4rem; }
 .me-chat-reply { white-space: pre-wrap; word-break: break-word; background: #f4f6f8; border-radius: 6px; padding: 0.5rem 0.7rem; margin-top: 0.5rem; font-size: 0.85rem; }
 /* ease-of-use ③TC-ME / ③TC-ADMIN — one-click jump from a key/quota chat failure to the
-   key panel (member /me) or the「API Key 管理」keys modal (admin). Same pill affordance. */
-.me-chat-fix-btn, .ma-chat-fix-btn { display: inline-block; margin-left: 0.4rem; padding: 0.05rem 0.5rem; font-size: 0.78rem; line-height: 1.5; border: 1px solid #1f6feb; border-radius: 999px; background: transparent; color: #1f6feb; cursor: pointer; vertical-align: baseline; }
-.me-chat-fix-btn:hover, .ma-chat-fix-btn:hover { background: #1f6feb; color: #fff; }
+   key panel (member /me) or the「API Key 管理」keys modal (admin). Same pill affordance.
+   ②TC-NEXT-ME — the post-success next-step buttons reuse the identical pill. */
+.me-chat-fix-btn, .ma-chat-fix-btn, .me-chat-next-btn { display: inline-block; margin-left: 0.4rem; padding: 0.05rem 0.5rem; font-size: 0.78rem; line-height: 1.5; border: 1px solid #1f6feb; border-radius: 999px; background: transparent; color: #1f6feb; cursor: pointer; vertical-align: baseline; }
+.me-chat-fix-btn:hover, .ma-chat-fix-btn:hover, .me-chat-next-btn:hover { background: #1f6feb; color: #fff; }
+/* ②TC-NEXT-ME — "now do something real" card under a successful quick-chat reply. */
+.me-chat-next { margin-top: 0.5rem; font-size: 0.82rem; }
+.me-chat-next-lead { color: #57606a; }
 /* v5 A-M4 — inline "manage access" (share an owned agent) panel */
 .me-grants-wrap { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px dashed #d6dbe0; }
 .me-grants-list { display: flex; flex-direction: column; gap: 0.35rem; }

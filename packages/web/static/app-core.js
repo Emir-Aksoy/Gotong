@@ -667,6 +667,11 @@
       meTryChat: '试聊',
       meChatClose: '收起',
       meChatGoAddKey: '去补 key →',
+      // ②TC-NEXT-ME — after a quick-chat reply lands, the next-step card nudges
+      // the member toward real work on the same home page (run a workflow / 问管家).
+      meChatNextLead: '它能用了！接下来：',
+      meChatNextRunWf: '去发起一个工作流 →',
+      meChatNextAskSteward: '问管家帮我多做点 →',
       meConfirmRevokeGrant: '撤销这条访问授权？',
       meGrantKindUser: '用户',
       meGrantKindAgent: '助手',
@@ -2344,6 +2349,11 @@
       meTryChat: 'Try it',
       meChatClose: 'Close',
       meChatGoAddKey: 'Add a key →',
+      // ②TC-NEXT-ME — after a quick-chat reply lands, the next-step card nudges
+      // the member toward real work on the same home page (run a workflow / steward).
+      meChatNextLead: 'It works! Next:',
+      meChatNextRunWf: 'Run a workflow →',
+      meChatNextAskSteward: 'Ask the steward to do more →',
       meConfirmRevokeGrant: 'Revoke this access grant?',
       meGrantKindUser: 'User',
       meGrantKindAgent: 'Assistant',
