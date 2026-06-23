@@ -9,7 +9,7 @@
 >
 > 本文随四个阶段逐步收口。✅ = 已落地;⏳ = 进行中。
 >
-> Last updated: 2026-06-23
+> Last updated: 2026-06-23(❸ 收口)
 
 ---
 
@@ -19,7 +19,7 @@
 |---|---|---|---|
 | ❶ 运行时失败给修复入口 | 工作流 run 跑挂 / `/me` 最近运行只有一个红 pill,都没过 `describeError` | admin run-detail 失败 step + `/me` 最近运行接现成 `describeError` → 人话 + 「去补 key」 | ✅ |
 | ❷ 配置体检总览面板 | 配置散落、无常驻体检,「我的 hub 现在哪里红了」看不见 | host `/api/admin/health` 只读聚合 + admin 总览「hub 体检」面板 + 一键测连接 | ✅ |
-| ❸ 启动兜底 + doctor 自动修 | `friendlyBootError` 只认 `EADDRINUSE`;`doctor` 只报告不修 | 扩三类友好启动错误 + `doctor --fix` 只自动建缺失目录(安全可逆) | ⏳ |
+| ❸ 启动兜底 + doctor 自动修 | `friendlyBootError` 只认 `EADDRINUSE`;`doctor` 只报告不修 | 扩三类友好启动错误 + `doctor --fix` 只自动建缺失目录(安全可逆) | ✅ |
 | ❹ 真机端到端走查 | onboarding 只有 hermetic/mock 测试,从没真 key + 真浏览器走一遍 | 本地新手自检脚本 + `live.yml` onboarding 往返 gate(`skipIf` 无 key) | ⏳ |
 
 **三句话守则**(贯穿四块):
@@ -122,11 +122,73 @@ hub 不过载时侥幸躲过,一旦总览有内容也会塌。修法:本 banner 
 
 ---
 
-## 四、❸ 启动兜底 + doctor 自动修 ⏳
+## 四、❸ 启动兜底 + doctor 自动修 ✅
 
-> 进行中(③-M1 ~ ③-M3)。`friendlyBootError` 扩 `EACCES` / `ENOSPC` / master key
-> 缺失或损坏三类友好提示;`doctor --fix` 只自动建缺失目录(可逆安全),端口占用 / 权限
-> **只提示不自动改**(危险)。落地后补本节。
+### 4.1 为什么
+
+两个边界事件最容易把新手挡在门外:**host 真启动失败** 和 **启动前环境没配对**。两者
+原来都不够友好——`friendlyBootError`(`boot-error.ts`)自认「Today it recognises
+EADDRINUSE」,权限拒绝 / 磁盘满 / master key 缺失全是裸 stack trace;`doctor`
+(`cli/src/commands/doctor.ts`)7 项预检**只报告不修**,缺目录也得手动 `mkdir`。本块把
+这两条缝补齐,但**只做安全可逆的自动修**(D3):危险动作一律只提示。
+
+### 4.2 `friendlyBootError` 扩成 5 类(❸-M1)
+
+`boot-error.ts` 从「只认 `EADDRINUSE`」扩成**有序 5 分支**,每类打出
+`✖ AipeHub could not start — …` + 该改哪个 env + `Run aipehub doctor`,纯函数零副作用
+(调用点 `main.ts` 顶层 boot catch 已接线,零改):
+
+| # | 触发(errno / 特征) | 提示 |
+|---|---|---|
+| 1 | `EADDRINUSE` | 哪个口被占(admin UI / agent WS)、对应 `AIPE_WEB_PORT` / `AIPE_WS_PORT`(body 与原 ⑥-M2 逐字节不变) |
+| 2 | `EACCES`/`EPERM` **on `listen`** | <1024 特权端口提示,改 `AIPE_*_PORT` ≥1024 或挂反代 |
+| 3 | message 含 `"master key"` | vault key 缺失/损坏,默认 file 从备份恢复 `<space>/identity-master.key` / env provider 设 `AIPE_MASTER_KEY` |
+| 4 | `EACCES`/`EPERM`/`EROFS`(fs) | 数据目录不可写,列出具体路径;`EROFS` 显式说「只读挂载」 |
+| 5 | `ENOSPC`/`EDQUOT` | 盘满 / 超配额,清空间或提配额 |
+
+**两处歧义靠硬信号区分,不靠猜**:
+
+- **特权端口 vs 数据目录没权限**:`EACCES`/`EPERM` 两边都会抛,用 `e.syscall === 'listen'`
+  把「绑端口没权限」分支(2)提到「数据目录没权限」分支(4)**之前**——绑 80 口的用户
+  绝不会被错误地叫去 chmod 数据盘。
+- **master key 缺失 vs key 文件 fs 权限错**:identity 抛的是 `IdentityError`,message 必含
+  `"master key"`(带空格);而 key **文件**自身的 fs 权限错 message 里是 `"identity-master.key"`
+  (无空格),**不**匹配 `/master key/i`,正确落到分支 4「数据目录不可写」(修权限才是对的)。
+  分支 3 排在 fs 分支(4)之前,所以 key-config 错不会被当成泛 `EACCES`。
+
+> ⚠️ 一处 TS 坑(已修):`isMasterKeyError` 原写成 `e is Error` 类型谓词,但 `ErrnoLike`
+> 本身 extends `Error`,**收窄谓词会把否定分支(后面的 fs/disk 检查)塌成 `never`**。改回
+> 普通 `boolean` 返回值,`e` 在后续分支保持有类型。21 个纯函数单测钉死全部 5 类 + null 透传。
+
+### 4.3 `doctor --fix` 只自动建缺失目录(❸-M2)
+
+`doctor` 加 `--fix` flag。`applyFixes()`(纯函数 given seams)**只对一件安全可逆的事
+自动修**:数据目录(`AIPE_SPACE`)缺失时 `mkdir -p`——可逆(`rmdir`)、host 首启本来也会建,
+提前建出来好让 doctor 当场复检确认可写。`--fix` 跑在 `collectChecks` **之前**,复检反映刚建
+的目录(creatable → writable ✓)。
+
+**故意不自动改**(只提示「需你手动」):
+
+- 端口被占(可能是你正跑着的 hub);
+- 目录**只读** / 是**文件**(`chmod` / `rm` 有破坏性);
+- master key、特权端口(<1024,security)。
+
+`blocked`(目录不存在且父目录也不可写)仍**尝试** `mkdir -p`(若某祖先可写能建出整条链),
+建不出就如实报 `failed` + errno,不假装成功。8 个新单测(creatable→fixed、blocked+mkdirp
+抛→failed、writable→skipped 不调 mkdirp、readonly/not-a-dir→skipped「not auto-changed」、
+real-mechanism `mkdirpReal` 真建嵌套链)。
+
+### 4.4 文档 + 回归(❸-M3)
+
+- `docs/zh/GO-LIVE.md` 新增 **§十一 启动失败排查**:`doctor` / `--fix` 用法 + 预检 7 项 +
+  `friendlyBootError` 5 类「症状→人话→你要做什么」表 + 两处歧义区分的设计说明;§十二 代码
+  地图补 `boot-error.ts` / `doctor.ts` 两行。
+- 根 `README.md` Quick start 加「Won't start?」小节:`pnpm exec aipehub doctor [--fix]` +
+  指向 GO-LIVE §十一。
+- 回归:host vitest(boot-error 21 + 全量)+ cli vitest(doctor 26)+ 两包 typecheck 全绿。
+
+一句话:**启动前 `doctor` 预检 + 能修的(缺目录)就修;真启动失败 5 类有人话、危险的只提示
+不乱动。**
 
 ---
 

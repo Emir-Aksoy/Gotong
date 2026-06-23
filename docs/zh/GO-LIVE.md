@@ -337,10 +337,53 @@ sudo -u aipehub -H AIPE_SPACE=/srv/aipehub-data \
 
 ---
 
-## 十一、对应的代码 / 文档
+## 十一、启动失败排查（先 `doctor`，启动失败也有人话）
+
+两道防线：**启动前**用 `aipehub doctor` 预检环境；**真启动失败**时 host 把常见、可恢复
+的失败翻成一句话 + 指向 `doctor` 的人话（`friendlyBootError`），而不是甩一坨 stack trace。
+
+### 11.1 `aipehub doctor` —— 启动前预检（不启动 host）
+
+```bash
+aipehub doctor          # 逐项 ✓/⚠/✖ + 修复建议；退出码 0=无 blocker，1=有，2=用法错
+aipehub doctor --fix    # 先做「安全可逆」的自动修，再复检
+```
+
+预检 7 项：Node ≥ 20 / `@aipehub/host` 可解析 / `AIPE_WEB_PORT`、`AIPE_WS_PORT` 真能 bind /
+`AIPE_SPACE` 可写（或首启可建）/ `provider=env` 时 `AIPE_MASTER_KEY` 在 / env 里有没有 LLM
+key。**只报告 env 变量名，绝不打印值**。
+
+`--fix` **只自动建缺失的数据目录**（`mkdir -p AIPE_SPACE`，可逆、host 首启本来也会建——
+提前建出来好让 doctor 当场确认可写）。**危险项一律只提示不自动改**：端口被占（可能是你
+正跑着的 hub）、目录只读 / 是文件（chmod、rm 有破坏性）、master key、特权端口（<1024）——
+这些 doctor 报出来让你手动处理。
+
+### 11.2 host 真启动失败 —— 人话提示
+
+host 启动要绑两个端口 + 开数据目录 + 解密 vault，任一失败时 `friendlyBootError` 认得这几
+类，打出「`✖ AipeHub could not start — …`」+ 该改哪个 env + `Run aipehub doctor`：
+
+| 症状（errno） | 人话提示讲什么 | 你要做什么 |
+|---|---|---|
+| 端口被占（`EADDRINUSE`） | 哪个口被占（admin UI 还是 agent WS）、对应哪个 env | 关掉占口的进程，或把 `AIPE_WEB_PORT` / `AIPE_WS_PORT` 改到空闲口 |
+| 没权限绑端口（`EACCES`/`EPERM` on `listen`） | <1024 是特权端口（**不会**误导你去 chmod 数据目录） | `AIPE_*_PORT` 改到 ≥1024，前面挂反代转 80/443 |
+| master key 缺失 / 损坏 | vault 用 master key 加密 secrets；附上底层原因 | 默认 file：从备份恢复 `<space>/identity-master.key`（新 key 解不开旧 secrets）；env provider：设 `AIPE_MASTER_KEY` + `AIPE_MASTER_KEY_PROVIDER=env` |
+| 数据目录不可写（`EACCES`/`EPERM`/`EROFS`） | 列出写不进的具体路径；只读挂载会显式说 | 修目录属主/权限，或把 `AIPE_SPACE` 指到能写的目录（只读挂载则重挂 rw） |
+| 磁盘满 / 超配额（`ENOSPC`/`EDQUOT`） | 写 `AIPE_SPACE` 时盘满 / 超 quota | 清空间或提配额后重启 |
+
+> 两处区分靠的不是猜：**特权端口**靠 `listen` syscall 跟「数据目录没权限」分开——绑 80 口
+> 的用户不会被错误地叫去 chmod 数据盘；**master key 缺失**靠错误信息里 "master key" 字样
+> 识别——key **文件**自身的 fs 权限错（信息里是 "identity-master.key"，无空格）不会误判成
+> key 配置错，正确落到「数据目录不可写」那条。
+
+---
+
+## 十二、对应的代码 / 文档
 
 | 主题 | 位置 |
 |---|---|
+| 启动失败人话提示（`friendlyBootError`） | `packages/host/src/boot-error.ts` |
+| 启动前预检 + `--fix`（`aipehub doctor`） | `packages/cli/src/commands/doctor.ts` |
 | IM 桥（出站长轮询、`/bind` 路由） | `packages/host/src/im-bridge.ts` |
 | 成员自助出码口 | `packages/host/src/me-im-service.ts` + `/api/me/im/*`（`packages/web/src/me-routes.ts`） |
 | boot 安全自检（暴露即 fail-closed） | `packages/host/src/boot-security.ts` |

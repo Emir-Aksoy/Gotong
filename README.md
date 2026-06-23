@@ -115,6 +115,21 @@ pnpm exec aipehub-host --version    # current host version
 
 After it boots, follow [`docs/OVERVIEW.md`](docs/OVERVIEW.md) for the "what now" walkthrough.
 
+**Won't start?** Run a pre-flight check before booting — it inspects the exact
+`AIPE_*` env the host reads (Node version, ports actually free to bind, data dir
+writable, master key) and prints, per check, ✓ / ⚠ / ✖ with a one-line fix:
+
+```bash
+pnpm exec aipehub doctor          # report only
+pnpm exec aipehub doctor --fix    # also auto-creates a missing data dir (the one safe, reversible repair)
+```
+
+And if a boot *does* fail, the host turns the common, recoverable failures
+(port already in use, no permission to bind a port, missing/invalid master key,
+data dir not writable, disk full) into a one-line human message naming which
+`AIPE_*` var to change — not a stack trace. See the troubleshooting section in
+[`docs/zh/GO-LIVE.md`](docs/zh/GO-LIVE.md) §十一.
+
 ### Deploy to a cloud server (VPS)
 
 Got a fresh Ubuntu/Debian box? Put the checkout on it (`git clone` with your
