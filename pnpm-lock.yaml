@@ -593,6 +593,21 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
+  examples/workflow-architect:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@aipehub/workflow':
+        specifier: workspace:*
+        version: link:../../packages/workflow
+      '@aipehub/workflow-assistant':
+        specifier: workspace:*
+        version: link:../../packages/workflow-assistant
+
   examples/workflow-assistant:
     dependencies:
       '@aipehub/core':

@@ -25,6 +25,7 @@
     "demo:llm:real": "pnpm --filter @aipehub/example-llm-real start",
     "demo:multimodal": "pnpm --filter @aipehub/example-multimodal-vision start",
     "demo:architect-team": "pnpm --filter @aipehub/example-architect-team start",
+    "demo:workflow-architect": "pnpm --filter @aipehub/example-workflow-architect start",
     "demo:long-running-agent": "pnpm --filter @aipehub/example-long-running-agent start",
     "demo:heartbeat-agent": "pnpm --filter @aipehub/example-heartbeat-agent start",
     "demo:coding-agent-bridge": "pnpm --filter @aipehub/example-coding-agent-bridge start",

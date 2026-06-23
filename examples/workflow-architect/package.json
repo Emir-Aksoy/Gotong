@@ -1,0 +1,17 @@
+{
+  "name": "@aipehub/example-workflow-architect",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "工作流架构师 (ARCH-M8) — deterministic, host-free demo of the WorkflowAssistantAgent's three architect behaviors: author a workflow from plain language (with the depth instruction threaded into the prompt), explain an EXISTING workflow without regenerating it, and attach the pure DAG graph (the 工作流图片介绍) to both. A mock LLM keyed off markers makes every claim self-asserting with no key and no network.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/llm": "workspace:*",
+    "@aipehub/workflow": "workspace:*",
+    "@aipehub/workflow-assistant": "workspace:*"
+  }
+}
