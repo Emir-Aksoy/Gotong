@@ -28,6 +28,11 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="AipeHub" />
     <link rel="stylesheet" href="/styles.css" />
+    <!-- Shared workflow-graph SVG renderer (workflow-architect ARCH-M4):
+         attaches window.AipeHubWorkflowGraph, consumed by the member SPA
+         (app.js) AND the admin console (admin.js, injected later by app.js).
+         Loads first so the global exists before any consumer runs. -->
+    <script src="/workflow-graph.js" defer></script>
     <script src="/app-core.js" defer></script>
     <script src="/app.js" defer></script>
   </head>

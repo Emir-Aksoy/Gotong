@@ -1509,7 +1509,8 @@
           return;
         }
         if (dom.wfGraphBody) {
-          dom.wfGraphBody.innerHTML = `<div class="wf-graph-scroll">${renderWorkflowGraphSvg(graph)}</div>` + graphLegend();
+          const G = window.AipeHubWorkflowGraph;
+          dom.wfGraphBody.innerHTML = `<div class="wf-graph-scroll">${G.renderWorkflowGraphSvg(graph, { t: t4, escapeHtml: escapeHtml4 })}</div>` + G.graphLegend({ t: t4, escapeHtml: escapeHtml4 });
         }
       } catch (err) {
         if (dom.wfGraphBody) dom.wfGraphBody.innerHTML = "";
@@ -1521,94 +1522,6 @@
     }
     function closeWorkflowGraphModal() {
       if (dom.wfGraphModal) dom.wfGraphModal.hidden = true;
-    }
-    function graphLegend() {
-      return `<div class="wf-graph-legend"><span class="wf-graph-legend-seq">${escapeHtml4(t4.workflowGraphLegendSeq)}</span><span class="wf-graph-legend-data">${escapeHtml4(t4.workflowGraphLegendData)}</span></div>`;
-    }
-    function renderWorkflowGraphSvg(graph) {
-      const MARGIN_X = 92, MARGIN_Y = 30, ROW_H = 100, COL_W = 250;
-      const BOX_W = 224, BRANCH_W = 198, BOX_H = 62, RIGHT_PAD = 56;
-      const boxW = (node) => node.kind === "branch" ? BRANCH_W : BOX_W;
-      const pos = /* @__PURE__ */ new Map();
-      let row = 0, maxCol = 0;
-      for (const node of graph.nodes) {
-        const col = node.kind === "branch" ? 1 : 0;
-        if (col > maxCol) maxCol = col;
-        pos.set(node.id, { col, row, node });
-        row++;
-      }
-      const left = (p) => MARGIN_X + p.col * COL_W;
-      const cx = (p) => left(p) + boxW(p.node) / 2;
-      const top = (p) => MARGIN_Y + p.row * ROW_H;
-      const bottom = (p) => top(p) + BOX_H;
-      const midY = (p) => top(p) + BOX_H / 2;
-      const width = MARGIN_X + maxCol * COL_W + BOX_W + RIGHT_PAD;
-      const height = MARGIN_Y * 2 + row * ROW_H;
-      const clip = (s, n) => {
-        s = String(s == null ? "" : s);
-        return s.length > n ? s.slice(0, n - 1) + "…" : s;
-      };
-      const destText = (node) => {
-        const d = node.destination;
-        if (!d) return "";
-        if (d.kind === "explicit") return t4.workflowGraphDestExplicit(d.to || "");
-        if (d.kind === "broadcast") return t4.workflowGraphDestBroadcast((d.capabilities || []).join(", "));
-        return t4.workflowGraphDestCapability((d.capabilities || []).join(", "));
-      };
-      const dataEdges = [], seqEdges = [];
-      for (const e of graph.edges || []) {
-        const a = pos.get(e.from), b = pos.get(e.to);
-        if (!a || !b) continue;
-        if (e.kind === "data") {
-          const x1 = left(a), y1 = midY(a), x2 = left(b), y2 = midY(b);
-          const apex = Math.min(x1, x2) - 30;
-          const my = (y1 + y2) / 2;
-          dataEdges.push(
-            `<path d="M ${x1} ${y1} Q ${apex} ${my}, ${x2} ${y2}" class="wf-graph-edge-data" marker-end="url(#wf-graph-arrow-data)" />`
-          );
-        } else if (b.node.kind === "branch") {
-          const x1 = cx(a), y1 = bottom(a), x2 = left(b), y2 = midY(b);
-          seqEdges.push(
-            `<path d="M ${x1} ${y1} C ${x1} ${y1 + 26}, ${x2 - 40} ${y2}, ${x2} ${y2}" class="wf-graph-edge-seq" marker-end="url(#wf-graph-arrow)" />`
-          );
-        } else {
-          seqEdges.push(
-            `<path d="M ${cx(a)} ${bottom(a)} L ${cx(b)} ${top(b)}" class="wf-graph-edge-seq" marker-end="url(#wf-graph-arrow)" />`
-          );
-        }
-      }
-      const boxes = graph.nodes.map((node) => {
-        const p = pos.get(node.id);
-        const w = boxW(node), x = left(p), y = top(p);
-        const cls = "wf-graph-box wf-graph-box-" + node.kind + (node.crossHub ? " wf-graph-box-xhub" : "");
-        const title = node.kind === "output" ? t4.workflowGraphOutput : node.label;
-        const tag = node.kind === "parallel" ? t4.workflowGraphParallel : node.kind === "branch" ? t4.workflowGraphBranch : node.kind === "trigger" ? t4.workflowGraphTrigger : "";
-        const parts = [`<rect x="${x}" y="${y}" width="${w}" height="${BOX_H}" rx="8" class="${cls}" />`];
-        if (tag) {
-          parts.push(`<text x="${x + w - 8}" y="${y + 15}" text-anchor="end" class="wf-graph-tag">${escapeHtml4(tag)}</text>`);
-        }
-        parts.push(`<text x="${x + 12}" y="${y + 25}" class="wf-graph-title">${escapeHtml4(clip(title, 26))}</text>`);
-        if (node.kind === "step" || node.kind === "branch") {
-          let sub = destText(node);
-          const extras = [];
-          if (node.readsTrigger) extras.push(t4.workflowGraphReadsTrigger);
-          if (Array.isArray(node.dataClasses) && node.dataClasses.length) extras.push(node.dataClasses.join("/"));
-          if (extras.length) sub = sub ? sub + " · " + extras.join(" · ") : extras.join(" · ");
-          if (sub) parts.push(`<text x="${x + 12}" y="${y + 43}" class="wf-graph-sub">${escapeHtml4(clip(sub, 36))}</text>`);
-        }
-        let ay = bottom(p) + 14;
-        if (node.when) {
-          parts.push(`<text x="${x + 2}" y="${ay}" class="wf-graph-when">${escapeHtml4(clip(t4.workflowGraphWhen(node.when), 42))}</text>`);
-          ay += 14;
-        }
-        if (node.crossHub) {
-          const dest = node.crossHub.peerLabel || node.crossHub.peer;
-          parts.push(`<text x="${x + 2}" y="${ay}" class="wf-graph-xhub-tag">${escapeHtml4(clip(t4.workflowGraphCrossHub(dest), 42))}</text>`);
-        }
-        return parts.join("");
-      }).join("");
-      const defs = `<defs><marker id="wf-graph-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="wf-graph-arrowhead" /></marker><marker id="wf-graph-arrow-data" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="wf-graph-arrowhead-data" /></marker></defs>`;
-      return `<svg class="wf-graph-svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" role="img" aria-label="workflow graph">` + defs + dataEdges.join("") + seqEdges.join("") + boxes + `</svg>`;
     }
     function renderRevisions(current) {
       if (!dom.wfRevList) return;
