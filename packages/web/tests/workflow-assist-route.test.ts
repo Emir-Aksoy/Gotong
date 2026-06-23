@@ -346,4 +346,89 @@ describe('POST /api/admin/workflows/assist', () => {
     const j = await r.json()
     expect(j.deepCheck).toBeUndefined()
   })
+
+  // ── ARCH-M3 — architect dimensions (mode / detail / subjectYaml + graph) ──
+
+  it('forwards mode/detail/subjectYaml to the surface (explain mode)', async () => {
+    b = await boot()
+    const subject =
+      'schema: aipehub.workflow/v1\nworkflow:\n  id: subj\n  trigger:\n    capability: go\n  steps:\n    - id: s\n      dispatch:\n        strategy: { kind: capability, capabilities: [go] }\n'
+    const r = await fetch(`${b.baseUrl}/api/admin/workflows/assist`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${b.adminToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ mode: 'explain', detail: 'detailed', subjectYaml: subject }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.assistCalls.length).toBe(1)
+    const call = b.assistCalls[0]!
+    expect(call.mode).toBe('explain')
+    expect(call.detail).toBe('detailed')
+    expect(call.subjectYaml).toBe(subject)
+  })
+
+  it('echoes the surface `graph` verbatim under the JSON body', async () => {
+    b = await boot()
+    b.assistResponse = {
+      ...b.assistResponse,
+      graph: {
+        workflowId: 'stub',
+        nodes: [
+          { id: 'trigger', kind: 'trigger', label: 'chat' },
+          { id: 'a', kind: 'step', label: 'a' },
+        ],
+        edges: [{ from: 'trigger', to: 'a', kind: 'sequence' }],
+      },
+    }
+    const r = await fetch(`${b.baseUrl}/api/admin/workflows/assist`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${b.adminToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ description: 'with graph' }),
+    })
+    expect(r.status).toBe(200)
+    const j = await r.json()
+    expect(j.graph.workflowId).toBe('stub')
+    expect(j.graph.nodes).toHaveLength(2)
+    expect(j.graph.edges).toEqual([{ from: 'trigger', to: 'a', kind: 'sequence' }])
+  })
+
+  it('400 in explain mode when subjectYaml is missing / empty', async () => {
+    b = await boot()
+    const r = await fetch(`${b.baseUrl}/api/admin/workflows/assist`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${b.adminToken}`,
+        'content-type': 'application/json',
+      },
+      // explain mode without subjectYaml — description must NOT satisfy it.
+      body: JSON.stringify({ mode: 'explain', description: 'ignored in explain' }),
+    })
+    expect(r.status).toBe(400)
+    const j = await r.json()
+    expect(j.error).toMatch(/subjectYaml/i)
+    // The surface was never called — the gate short-circuited.
+    expect(b.assistCalls.length).toBe(0)
+  })
+
+  it('explain mode does not require a description (subject suffices)', async () => {
+    b = await boot()
+    const subject =
+      'schema: aipehub.workflow/v1\nworkflow:\n  id: subj\n  trigger:\n    capability: go\n  steps:\n    - id: s\n      dispatch:\n        strategy: { kind: capability, capabilities: [go] }\n'
+    const r = await fetch(`${b.baseUrl}/api/admin/workflows/assist`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${b.adminToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ mode: 'explain', subjectYaml: subject }),
+    })
+    expect(r.status).toBe(200)
+    expect(b.assistCalls.length).toBe(1)
+    expect(b.assistCalls[0]!.mode).toBe('explain')
+  })
 })

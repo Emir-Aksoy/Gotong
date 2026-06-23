@@ -235,15 +235,22 @@ export async function handleWorkflowRoute(
   // cleanly.
   //
   // Request body (JSON):
-  //   { description: string, contextHints?: WorkflowAssistContextHints }
+  //   { description: string, contextHints?: WorkflowAssistContextHints,
+  //     mode?: 'author'|'explain', detail?: 'oneliner'|'brief'|'detailed',
+  //     subjectYaml?: string }
+  //   - ARCH-M3 — `mode='explain'` + `subjectYaml` describes an EXISTING
+  //     workflow at `detail` depth (no regeneration); `mode='author'`
+  //     (default) generates a fresh draft from `description`.
   // Response body (200):
   //   { ok: true, yaml, explanation, raw, draftStatus, validationError?,
-  //     by?, stopReason?, deepCheck? }
+  //     by?, stopReason?, deepCheck?, graph? }
   //   - `deepCheck` (Phase 13 M4) is populated iff the request carried
   //     `contextHints` AND the YAML parsed cleanly. Caller treats
   //     `deepCheck.ok=false` as a yellow "warnings" state — admin can
   //     still save, but the workflow references hub entities that don't
   //     currently exist. See WorkflowDeepCheckResult in server.ts.
+  //   - `graph` (ARCH-M1) is the bound flowchart; present iff
+  //     draftStatus==='valid'. The admin UI renders it inline as SVG.
   // Response body (4xx/5xx): { error: string }
   if (method === 'POST' && path === '/api/admin/workflows/assist') {
     const admin = await ctx.requireAdmin(req, res)
@@ -253,11 +260,33 @@ export async function handleWorkflowRoute(
       return true
     }
     const body = (await readJsonBody(req).catch(() => undefined)) as
-      | { description?: unknown; contextHints?: WorkflowAssistContextHints }
+      | {
+          description?: unknown
+          contextHints?: WorkflowAssistContextHints
+          // ARCH-M3 — architect dimensions. `mode='explain'` describes an
+          // EXISTING workflow (subjectYaml) at a chosen `detail` depth; the
+          // graph rides back on the verbatim `...result` spread either way.
+          mode?: unknown
+          detail?: unknown
+          subjectYaml?: unknown
+        }
       | undefined
     const description =
       body && typeof body.description === 'string' ? body.description : ''
-    if (description.trim().length === 0) {
+    const mode = body?.mode === 'explain' ? 'explain' : 'author'
+    const detail =
+      body?.detail === 'oneliner' || body?.detail === 'brief' || body?.detail === 'detailed'
+        ? body.detail
+        : undefined
+    const subjectYaml = typeof body?.subjectYaml === 'string' ? body.subjectYaml : ''
+    // Per-mode required-input gate: explain needs a non-empty subject; author
+    // needs a non-empty description (today's behavior).
+    if (mode === 'explain') {
+      if (subjectYaml.trim().length === 0) {
+        sendJson(res, { error: 'subjectYaml is required (non-empty) in explain mode' }, 400)
+        return true
+      }
+    } else if (description.trim().length === 0) {
       sendJson(res, { error: 'description is required (non-empty string)' }, 400)
       return true
     }
@@ -265,6 +294,8 @@ export async function handleWorkflowRoute(
       const result = await ctx.workflowAssist.assist({
         description,
         ...(body?.contextHints ? { contextHints: body.contextHints } : {}),
+        ...(mode === 'explain' ? { mode, subjectYaml } : {}),
+        ...(detail ? { detail } : {}),
         by: admin.id,
       })
       sendJson(res, { ok: true, ...result })

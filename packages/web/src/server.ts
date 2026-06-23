@@ -764,6 +764,17 @@ export interface WorkflowAssistSurface {
     description: string
     /** Optional hints — agent ids / MCP servers / existing workflow ids in this hub. */
     contextHints?: WorkflowAssistContextHints
+    /**
+     * ARCH-M2/M3 — authoring vs explain. Default 'author' (generate a fresh
+     * draft from `description`). 'explain' echoes `subjectYaml` verbatim and
+     * produces ONLY a depth-controlled prose explanation of that existing
+     * workflow (no regeneration; yaml + graph derive from the subject).
+     */
+    mode?: 'author' | 'explain'
+    /** ARCH — explanation depth. Default 'brief'; affects prose only. */
+    detail?: 'oneliner' | 'brief' | 'detailed'
+    /** ARCH — the existing workflow YAML to explain (required when mode==='explain'). */
+    subjectYaml?: string
     /** Caller (admin) participant id — stamped onto the dispatched task's `from`. */
     by: ParticipantId
   }): Promise<WorkflowAssistResult>
@@ -830,6 +841,14 @@ export interface WorkflowAssistResult {
    * duck-typed structural copy so the web layer has zero evals dep.
    */
   deepCheck?: WorkflowDeepCheckResult
+  /**
+   * ARCH-M1 — the bound flowchart, the "工作流图片介绍". Present iff
+   * `draftStatus==='valid'`. Pure projection of the parsed YAML
+   * (`projectWorkflowGraph`), so it's consistent with what will actually
+   * run. The admin UI renders it inline as a downloadable SVG. Reuses the
+   * `WorkflowGraphView` duck-type already defined for the DAG viz route.
+   */
+  graph?: WorkflowGraphView
 }
 
 /** Mirror of `WorkflowStructureCheckResult` (see `@aipehub/evals`). */
