@@ -2225,15 +2225,16 @@ import { createWorkflows } from './workflows.js'
   // so it has access to dom / state / ma / wf without us re-declaring
   // any shared mutable state. The returned bag (open/close/submit/save)
   // is consumed by the event-listener block further down.
-  const wfAssist = (window.AipeHub && window.AipeHub.installWorkflowAssist)
-    ? window.AipeHub.installWorkflowAssist({
-        dom,
-        state,
-        ma,
-        wf,
-        refreshWorkflows: () => workflows.refreshWorkflows(),
-      })
-    : null
+  // wfAssist is constructed in boot() AFTER resolveDom(), NOT here at module
+  // init. The factory captures `dom` BY VALUE (admin-wf-assist.js does
+  // `const { dom } = deps`) and dereferences it synchronously to wire the
+  // depth-row click. At module-init `dom` is still null (resolveDom runs in
+  // boot at ~2382), so constructing here would (a) crash on the null deref —
+  // ARCH-M4b regression that killed the whole admin boot — and (b) freeze a
+  // null dom into the modal's closures. Mirrors managedAgents/workflows
+  // .setDom(dom), which likewise receive the resolved dom in boot. The
+  // wrappers below tolerate wfAssist===null via optional chaining until then.
+  let wfAssist = null
   function openWorkflowAssistModal() { wfAssist?.open() }
   function closeWorkflowAssistModal() { wfAssist?.close() }
   function submitWorkflowAssist() { return wfAssist?.submit() }
@@ -2385,6 +2386,18 @@ import { createWorkflows } from './workflows.js'
     // render/mutate after init.
     managedAgents.setDom(dom)
     workflows.setDom(dom)
+    // Construct the workflow-AI-assistant factory now that `dom` is resolved.
+    // It captures dom by value + wires the depth-row click synchronously, so
+    // it must run AFTER resolveDom() (see the `let wfAssist = null` note above).
+    wfAssist = (window.AipeHub && window.AipeHub.installWorkflowAssist)
+      ? window.AipeHub.installWorkflowAssist({
+          dom,
+          state,
+          ma,
+          wf,
+          refreshWorkflows: () => workflows.refreshWorkflows(),
+        })
+      : null
     updateDispatchVisibility()
 
     // R14b — app.js owns the tabbar clicks + hashchange + setActiveTab and

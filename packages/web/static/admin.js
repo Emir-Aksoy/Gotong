@@ -3663,13 +3663,7 @@
         if (btn instanceof HTMLButtonElement) btn.disabled = false;
       }
     }
-    const wfAssist = window.AipeHub && window.AipeHub.installWorkflowAssist ? window.AipeHub.installWorkflowAssist({
-      dom,
-      state,
-      ma,
-      wf,
-      refreshWorkflows: () => workflows.refreshWorkflows()
-    }) : null;
+    let wfAssist = null;
     function openWorkflowAssistModal() {
       wfAssist?.open();
     }
@@ -3808,6 +3802,13 @@
       resolveDom();
       managedAgents.setDom(dom);
       workflows.setDom(dom);
+      wfAssist = window.AipeHub && window.AipeHub.installWorkflowAssist ? window.AipeHub.installWorkflowAssist({
+        dom,
+        state,
+        ma,
+        wf,
+        refreshWorkflows: () => workflows.refreshWorkflows()
+      }) : null;
       updateDispatchVisibility();
       window.addEventListener("aipehub:tabchange", (e) => {
         if (e.detail?.name === "workflows") refreshGrowthReports().catch(() => {
