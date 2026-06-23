@@ -51,6 +51,7 @@ import {
   type MeCredentialsSurface,
   type MeImSurface,
   type MeWorkflowEditSurface,
+  type MeWorkflowCreateSurface,
   type MeHubStewardSurface,
 } from './me-routes.js'
 import {
@@ -350,6 +351,14 @@ export interface WebServerOptions {
    * has no runtime dep on the host — `MeWorkflowEditSurface` is a duck type.
    */
   workflowEdit?: MeWorkflowEditSurface
+  /**
+   * ARCH-M6 — optional member natural-language workflow-AUTHOR surface ("工作流
+   * 架构师"). The host wires a `MeWorkflowCreateService` here. When absent,
+   * `POST /api/me/workflows/create` and `POST /api/me/workflows/:id/explain`
+   * return 503 so the member UI can hide the "用大白话新建工作流" panel. Web
+   * has no runtime dep on the host — `MeWorkflowCreateSurface` is a duck type.
+   */
+  workflowCreate?: MeWorkflowCreateSurface
   /**
    * SW-M6 — optional hub steward ("管家") surface. The host wires a
    * `HostStewardService` here. When absent, `POST /api/me/steward/plan` and
@@ -1116,6 +1125,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     growthReports: opts.growthReports,
     inbox: opts.inbox,
     workflowEdit: opts.workflowEdit,
+    workflowCreate: opts.workflowCreate,
     hubSteward: opts.hubSteward,
     operatorSteward: opts.operatorSteward,
     readinessGate: opts.readinessGate,
@@ -1273,6 +1283,8 @@ interface HandlerCtx {
   inbox: InboxSurface | undefined
   /** WFEDIT-M3 — see WebServerOptions.workflowEdit doc above. */
   workflowEdit: MeWorkflowEditSurface | undefined
+  /** ARCH-M6 — see WebServerOptions.workflowCreate doc above. */
+  workflowCreate: MeWorkflowCreateSurface | undefined
   /** SW-M6 — see WebServerOptions.hubSteward doc above. */
   hubSteward: MeHubStewardSurface | undefined
   /** SW-M9 A-M6 — see WebServerOptions.operatorSteward doc above. */
@@ -1883,6 +1895,9 @@ async function handle(
         // WFEDIT-M3 — member NL workflow editing; undefined → /me/workflows/:id
         // edit + editable routes return 503.
         workflowEdit: ctx.workflowEdit,
+        // ARCH-M6 — member NL workflow AUTHORING + explain; undefined →
+        // /me/workflows/create + /me/workflows/:id/explain return 503.
+        workflowCreate: ctx.workflowCreate,
         // SW-M6 — the hub steward ("管家"); undefined → /me/steward/* returns 503.
         hubSteward: ctx.hubSteward,
         // ease-of-use ①TC-ME — member "test connection" for a BYO key; the SAME

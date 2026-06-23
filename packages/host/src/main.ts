@@ -207,6 +207,7 @@ import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
 import { HostInboxService } from './inbox-service.js'
 import { FileCrossHubMarkerStore } from './cross-hub-marker.js'
 import { MeWorkflowEditService } from './me-workflow-edit-service.js'
+import { MeWorkflowCreateService } from './me-workflow-create-service.js'
 import { HostMeAgentService } from './me-agent-service.js'
 import { HostMeAgentGrantsService } from './me-agent-grants-service.js'
 import { HostMeCredentialsService } from './me-credentials-service.js'
@@ -1405,6 +1406,23 @@ async function main(): Promise<void> {
         })
       : null
 
+  // ARCH-M5/M6 — the member-facing "工作流架构师": author a brand-new workflow
+  // from plain language (rejecting any cross-hub egress — members are local-only)
+  // + explain any catalog workflow at an adjustable depth (with its flowchart).
+  // Same duck-typed deps as the editor MINUS the sticky cross-hub markers (a
+  // brand-new workflow has no prior egress to protect) and with NO draft cap by
+  // default (opt-in anti-abuse — `perMemberDraftCap`/`countOwnedDrafts` stay off).
+  const meWorkflowCreate =
+    workflowAssist && identity
+      ? new MeWorkflowCreateService({
+          grants: identity,
+          workflows: workflowController,
+          assist: workflowAssist,
+          participants: () => hub.participants(),
+          peerCapabilities: peerCapabilitiesView,
+        })
+      : null
+
   // allowedHosts is resolved earlier (Route B P0-M6 boot self-check).
   const adminRateMax = envInt('AIPE_ADMIN_RATE_MAX', 10)
   const adminRateSec = envInt('AIPE_ADMIN_RATE_SEC', 60)
@@ -2258,6 +2276,10 @@ async function main(): Promise<void> {
     // WFEDIT — member NL workflow editing; null when no assistant / identity, in
     // which case /api/me/workflows/:id/{editable,edit} return 503.
     ...(meWorkflowEdit ? { workflowEdit: meWorkflowEdit } : {}),
+    // ARCH-M6 — member NL workflow AUTHORING ("工作流架构师") + explain; null when
+    // no assistant / identity, in which case /api/me/workflows/create and
+    // /api/me/workflows/:id/explain return 503.
+    ...(meWorkflowCreate ? { workflowCreate: meWorkflowCreate } : {}),
     // SW (hub-steward) — the 管家 conversational surface; null when the member
     // agent service / workflow editor / identity / steward key is missing, in
     // which case /api/me/steward/{plan,apply} return 503.

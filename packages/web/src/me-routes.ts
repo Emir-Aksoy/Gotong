@@ -658,6 +658,85 @@ export interface MeWorkflowEditSurface {
 }
 
 // ---------------------------------------------------------------------------
+// ARCH-M6 — member workflow AUTHORING ("工作流架构师" from the /me side). The
+// sibling of `MeWorkflowEditSurface`: that one RESHAPES an existing workflow;
+// this one CREATES a brand-new one from plain language, and EXPLAINS any
+// catalog workflow at an adjustable depth (with its flowchart). Duck-typed so
+// the web layer takes NO runtime dep on the host — the host's
+// `MeWorkflowCreateService` satisfies it. `graph` / `deepCheck` ride through as
+// `unknown` (verbatim echo, same discipline as the editor's `deepCheck` and the
+// steward's `action`); the client renders the DAG SVG from `graph`.
+// ---------------------------------------------------------------------------
+
+export type MeWorkflowCreateResult =
+  | {
+      ok: true
+      /** The id of the freshly-created draft. */
+      workflowId: string
+      /** The YAML now persisted as a draft. */
+      yaml: string
+      /** The architect's plain-language summary (depth follows `detail`). */
+      explanation: string
+      /** DAG projection — the inline/downloadable flowchart. Echoed verbatim. */
+      graph?: unknown
+      /** Advisory deep-check (unknown agent/capability warnings). Echoed verbatim. */
+      deepCheck?: unknown
+    }
+  | {
+      ok: false
+      reason: string
+      message: string
+      detail?: string
+      draftStatus?: string
+    }
+
+export type MeWorkflowExplainResult =
+  | {
+      ok: true
+      workflowId: string
+      /** The workflow's YAML (explain mode never regenerates it). */
+      yaml: string
+      explanation: string
+      /** The depth used ('oneliner' | 'brief' | 'detailed'). */
+      detail: string
+      graph?: unknown
+      deepCheck?: unknown
+    }
+  | { ok: false; reason: string; message: string; detail?: string }
+
+export interface MeWorkflowCreateSurface {
+  /**
+   * Author a brand-new workflow from a member's plain-language description. The
+   * host drafts it + seeds the member as owner; a workflow with any cross-hub
+   * egress hop is rejected (members are local-only). The editing/creating userId
+   * is server-forced (the route passes the session user).
+   */
+  create(args: {
+    instruction: string
+    userId: string
+    /** Explanation depth — 'oneliner' | 'brief' | 'detailed'. Default brief. */
+    detail?: string
+    /** Prior turns of this authoring conversation (client-held; host re-sanitizes + caps). */
+    history?: Array<{ instruction: string; outcome?: string }>
+    /** Live LLM chunks of THIS call (host routes them per-call; absent ⇒ no streaming). */
+    onChunk?: (chunk: string) => void
+  }): Promise<MeWorkflowCreateResult>
+  /**
+   * Narrate an existing workflow at an adjustable depth (plus its flowchart).
+   * The route gates VISIBILITY via `resolveMeWorkflow` before calling this, so
+   * the host executor only fetches the YAML + runs the architect in explain mode.
+   */
+  explain(args: {
+    workflowId: string
+    userId: string
+    detail?: string
+    /** Optional focus question for the narration. */
+    focus?: string
+    onChunk?: (chunk: string) => void
+  }): Promise<MeWorkflowExplainResult>
+}
+
+// ---------------------------------------------------------------------------
 // SW-M6 — the hub steward ("管家"). A member manages THEIR OWN agents +
 // workflows by talking to it in plain language. Duck-typed so the web layer
 // takes NO runtime dep on `@aipehub/hub-steward` (mirroring InboxSurface /
@@ -801,6 +880,14 @@ export interface HandleMeRouteCtx {
    */
   workflowEdit: MeWorkflowEditSurface | undefined
   /**
+   * ARCH-M6 — member natural-language workflow AUTHORING (新建) + member EXPLAIN.
+   * Undefined when the host wired no create service (no AI assistant key /
+   * identity); the `/api/me/workflows/create` and `/api/me/workflows/:id/explain`
+   * routes then return 503. The architect drafts a member-owned, local-only
+   * workflow; explain narrates any catalog-visible workflow at depth.
+   */
+  workflowCreate: MeWorkflowCreateSurface | undefined
+  /**
    * SW-M6 — the hub steward ("管家"). Undefined when the host wired no steward
    * service (disabled, or no LLM key for the configured provider); the
    * `/api/me/steward/{plan,apply}` routes then return 503 so the member UI can
@@ -877,9 +964,24 @@ export async function handleMeRoute(
       await handleMeWorkflowEditable(ctx, res, userId, decodeURIComponent(ed[1]!))
       return
     }
+    // ARCH-M6 — member workflow AUTHORING. `create` is an EXACT path (POST): none
+    // of the `/:id/{editable,edit,explain}` regexes match a bare `/create`, so it
+    // never collides. The architect drafts a member-owned, local-only workflow.
+    if (method === 'POST' && path === '/api/me/workflows/create') {
+      await handleMeWorkflowCreate(ctx, req, res, userId)
+      return
+    }
     const edit = /^\/api\/me\/workflows\/([^/]+)\/edit$/.exec(path)
     if (edit && method === 'POST') {
       await handleMeWorkflowEdit(ctx, req, res, userId, decodeURIComponent(edit[1]!))
+      return
+    }
+    // ARCH-M6 — member EXPLAIN: narrate a catalog workflow at depth + its
+    // flowchart. Visibility-gated by the caller's role (handler runs
+    // `resolveMeWorkflow` first), so a member can only explain what they can see.
+    const explain = /^\/api\/me\/workflows\/([^/]+)\/explain$/.exec(path)
+    if (explain && method === 'POST') {
+      await handleMeWorkflowExplain(ctx, req, res, userId, v4.role, decodeURIComponent(explain[1]!))
       return
     }
   }
@@ -1636,6 +1738,310 @@ async function handleMeWorkflowEdit(
       ...(r.draftStatus ? { draftStatus: r.draftStatus } : {}),
     },
     statusForEditReason(r.reason),
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ARCH-M6 — member workflow AUTHORING (新建) + member EXPLAIN ("工作流架构师").
+// `create` authors a brand-new draft from plain language (local-only — cross-hub
+// egress rejected by the host); `explain` narrates a catalog-visible workflow at
+// an adjustable depth + emits its flowchart. Both server-force userId, drive an
+// LLM call (rate-limited), and support per-call NDJSON streaming (same member-
+// safety-by-construction as the editor: chunks only ever flow into the caller's
+// own request/response pair).
+// ---------------------------------------------------------------------------
+
+const WORKFLOW_DETAIL_LEVELS = new Set(['oneliner', 'brief', 'detailed'])
+
+/** Accept only a known depth level; anything else → undefined (host default brief). */
+function coerceWorkflowDetail(raw: unknown): string | undefined {
+  return typeof raw === 'string' && WORKFLOW_DETAIL_LEVELS.has(raw) ? raw : undefined
+}
+
+/**
+ * Shape-coerce an untrusted authoring `history[]` (same discipline as the edit
+ * route): keep `{instruction: string}` turns (carry a string `outcome`), drop the
+ * rest, clip to the last 12. The host service owns trimming / turn caps.
+ */
+function coerceArchitectHistory(raw: unknown): Array<{ instruction: string; outcome?: string }> {
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter(
+      (t): t is { instruction: string; outcome?: unknown } =>
+        !!t && typeof t === 'object' && typeof (t as { instruction?: unknown }).instruction === 'string',
+    )
+    .slice(-12)
+    .map((t) => ({
+      instruction: t.instruction,
+      ...(typeof t.outcome === 'string' ? { outcome: t.outcome } : {}),
+    }))
+}
+
+function statusForCreateReason(reason: string): number {
+  switch (reason) {
+    case 'cross_hub':
+    case 'id_exists':
+      return 409
+    case 'draft_cap':
+      return 429
+    case 'assistant_failed':
+    case 'parse_failed':
+    case 'structure_failed':
+      return 422
+    case 'assistant_unavailable':
+      return 503
+    default:
+      return 400
+  }
+}
+
+function statusForExplainReason(reason: string): number {
+  switch (reason) {
+    case 'forbidden':
+      return 403
+    case 'not_found':
+      return 404
+    case 'no_source':
+      return 409
+    case 'assistant_failed':
+      return 422
+    case 'assistant_unavailable':
+      return 503
+    default:
+      return 400
+  }
+}
+
+/**
+ * ARCH-M6 — `POST /api/me/workflows/create`, body `{ instruction, detail?,
+ * history?, stream? }`. Authors a brand-new workflow from plain language: the
+ * host service runs the architect (author mode), REJECTS any cross-hub egress
+ * (members are local-only), and saves a DRAFT owned by the member. The creating
+ * userId is the SESSION user, never a client value.
+ */
+async function handleMeWorkflowCreate(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.workflowCreate) {
+    sendJson(res, { error: '工作流新建暂未启用(需要 AI 助手)。', code: 'not_wired' }, 503)
+    return
+  }
+  // Authoring drives one assistant LLM call — same quota concern as edit / dispatch.
+  if (!checkMeRateLimit(ctx, userId, 'me-wf-create')) {
+    sendRateLimited(res, '建得太频繁了,过一会儿再试。')
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (err) {
+    sendJson(res, { error: (err as Error).message ?? 'bad body', code: 'bad_request' }, 400)
+    return
+  }
+  const instruction =
+    body && typeof body === 'object' && typeof (body as { instruction?: unknown }).instruction === 'string'
+      ? (body as { instruction: string }).instruction.trim()
+      : ''
+  if (!instruction) {
+    sendJson(res, { error: '请用一句话描述你想要的工作流。', code: 'bad_request' }, 400)
+    return
+  }
+  const rawHistory = body && typeof body === 'object' ? (body as { history?: unknown }).history : undefined
+  if (rawHistory !== undefined && !Array.isArray(rawHistory)) {
+    sendJson(res, { error: 'history 必须是一个数组。', code: 'bad_request' }, 400)
+    return
+  }
+  const history = coerceArchitectHistory(rawHistory)
+  const detail = coerceWorkflowDetail(
+    body && typeof body === 'object' ? (body as { detail?: unknown }).detail : undefined,
+  )
+  const stream = !!(body && typeof body === 'object' && (body as { stream?: unknown }).stream === true)
+
+  // Streaming mode (body `stream: true`): NDJSON over THIS response. Chunks only
+  // ever flow into the member's own request/response pair → member-safe by
+  // construction (no global stream, nothing to mis-scope).
+  if (stream) {
+    res.writeHead(200, {
+      'content-type': 'application/x-ndjson; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-accel-buffering': 'no',
+    })
+    const writeLine = (obj: unknown) => {
+      try {
+        res.write(JSON.stringify(obj) + '\n')
+      } catch {
+        /* ignore — client may have hung up; the draft save still finishes */
+      }
+    }
+    let r: MeWorkflowCreateResult
+    try {
+      r = await ctx.workflowCreate.create({
+        instruction,
+        userId,
+        ...(detail ? { detail } : {}),
+        ...(history.length ? { history } : {}),
+        onChunk: (chunk) => writeLine({ kind: 'chunk', text: chunk }),
+      })
+    } catch (err) {
+      writeLine({
+        kind: 'result',
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        code: 'internal',
+      })
+      res.end()
+      return
+    }
+    if (r.ok) {
+      writeLine({ kind: 'result', ...r })
+    } else {
+      writeLine({
+        kind: 'result',
+        ok: false,
+        error: r.message,
+        code: r.reason,
+        ...(r.detail ? { detail: r.detail } : {}),
+        ...(r.draftStatus ? { draftStatus: r.draftStatus } : {}),
+      })
+    }
+    res.end()
+    return
+  }
+
+  const r = await ctx.workflowCreate.create({
+    instruction,
+    userId,
+    ...(detail ? { detail } : {}),
+    ...(history.length ? { history } : {}),
+  })
+  if (r.ok) {
+    sendJson(res, r, 200)
+    return
+  }
+  sendJson(
+    res,
+    {
+      error: r.message,
+      code: r.reason,
+      ...(r.detail ? { detail: r.detail } : {}),
+      ...(r.draftStatus ? { draftStatus: r.draftStatus } : {}),
+    },
+    statusForCreateReason(r.reason),
+  )
+}
+
+/**
+ * ARCH-M6 — `POST /api/me/workflows/:id/explain`, body `{ detail?, focus?,
+ * stream? }`. Narrates a workflow at an adjustable depth + emits its flowchart.
+ * VISIBILITY-GATED: the id must resolve through `resolveMeWorkflow` (published +
+ * surface.me + the caller's role), exactly like dispatch — null → 403, so a
+ * member can only explain workflows visible in THEIR catalog and an unknown /
+ * hidden id never leaks its existence.
+ */
+async function handleMeWorkflowExplain(
+  ctx: HandleMeRouteCtx,
+  req: IncomingMessage,
+  res: ServerResponse,
+  userId: string,
+  role: string,
+  workflowId: string,
+): Promise<void> {
+  if (!ctx.workflowCreate) {
+    sendJson(res, { error: '工作流讲解暂未启用(需要 AI 助手)。', code: 'not_wired' }, 503)
+    return
+  }
+  // Explaining drives one assistant LLM call — same quota concern as edit / dispatch.
+  if (!checkMeRateLimit(ctx, userId, 'me-wf-explain')) {
+    sendRateLimited(res, '问得太频繁了,过一会儿再试。')
+    return
+  }
+  // ★ Visibility gate — a member can only explain a workflow visible in THEIR
+  //   catalog (the SAME gate dispatch uses); null → 403, never leak which ids exist.
+  const visible = await resolveMeWorkflow(ctx, workflowId, role)
+  if (!visible) {
+    sendJson(res, { error: '找不到这个工作流,或者你没有权限查看。', code: 'forbidden' }, 403)
+    return
+  }
+  let body: unknown
+  try {
+    body = await readJsonBody(req)
+  } catch (err) {
+    sendJson(res, { error: (err as Error).message ?? 'bad body', code: 'bad_request' }, 400)
+    return
+  }
+  const detail = coerceWorkflowDetail(
+    body && typeof body === 'object' ? (body as { detail?: unknown }).detail : undefined,
+  )
+  const focus =
+    body && typeof body === 'object' && typeof (body as { focus?: unknown }).focus === 'string'
+      ? (body as { focus: string }).focus
+      : undefined
+  const stream = !!(body && typeof body === 'object' && (body as { stream?: unknown }).stream === true)
+
+  if (stream) {
+    res.writeHead(200, {
+      'content-type': 'application/x-ndjson; charset=utf-8',
+      'cache-control': 'no-store',
+      'x-accel-buffering': 'no',
+    })
+    const writeLine = (obj: unknown) => {
+      try {
+        res.write(JSON.stringify(obj) + '\n')
+      } catch {
+        /* ignore */
+      }
+    }
+    let r: MeWorkflowExplainResult
+    try {
+      r = await ctx.workflowCreate.explain({
+        workflowId,
+        userId,
+        ...(detail ? { detail } : {}),
+        ...(focus !== undefined ? { focus } : {}),
+        onChunk: (chunk) => writeLine({ kind: 'chunk', text: chunk }),
+      })
+    } catch (err) {
+      writeLine({
+        kind: 'result',
+        ok: false,
+        error: err instanceof Error ? err.message : String(err),
+        code: 'internal',
+      })
+      res.end()
+      return
+    }
+    if (r.ok) {
+      writeLine({ kind: 'result', ...r })
+    } else {
+      writeLine({
+        kind: 'result',
+        ok: false,
+        error: r.message,
+        code: r.reason,
+        ...(r.detail ? { detail: r.detail } : {}),
+      })
+    }
+    res.end()
+    return
+  }
+
+  const r = await ctx.workflowCreate.explain({
+    workflowId,
+    userId,
+    ...(detail ? { detail } : {}),
+    ...(focus !== undefined ? { focus } : {}),
+  })
+  if (r.ok) {
+    sendJson(res, r, 200)
+    return
+  }
+  sendJson(
+    res,
+    { error: r.message, code: r.reason, ...(r.detail ? { detail: r.detail } : {}) },
+    statusForExplainReason(r.reason),
   )
 }
 
