@@ -360,6 +360,11 @@ Anthropic Haiku / OpenAI gpt-4o-mini 是这个 10–50 倍。Claude Sonnet 4 是
 
 ## 八、入口指南
 
+> **已演进 →「工作流架构师」**：本阶段的 `WorkflowAssistantAgent` 后来加上了
+> 「按深度讲解」+「绑定流程图」+「成员 `/me` 大白话新建工作流」三件能力
+> （capability `workflow:assist` 与 id `workflow-assistant` 不变）。完整设计、
+> 治理边界与验收门见 [`docs/zh/WORKFLOW-ARCHITECT.md`](WORKFLOW-ARCHITECT.md)。
+
 - 想用：admin UI workflow tab → 「AI 助手 (beta)」按钮
 - 想 demo：[`examples/workflow-assistant`](../../examples/workflow-assistant)
 - 想理解 assistant 代码：[`packages/workflow-assistant/src/assistant.ts`](../../packages/workflow-assistant/src/assistant.ts)
