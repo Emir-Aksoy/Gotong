@@ -1990,15 +1990,22 @@
         dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml4(err.message || String(err))}</p>`;
       }
     }
+    function friendlyError(raw) {
+      const d = window.AipeHub.describeError(raw);
+      const fix = d.fix ? ` <span class="wf-err-fix">${escapeHtml4(d.fix)}</span>` : "";
+      const keyBtn = d.fixIsKey ? ` <button type="button" class="ma-chat-fix-btn" data-act="goto-key">${escapeHtml4(t4.meChatGoAddKey)}</button>` : "";
+      const rawBlock = raw ? `<details class="wf-err-raw"><summary>${escapeHtml4(t4.workflowRunErrorRaw)}</summary><pre class="wf-pre">${escapeHtml4(String(raw))}</pre></details>` : "";
+      return `<div class="form-msg err wf-step-err">${escapeHtml4(d.text)}${fix}${keyBtn}${rawBlock}</div>`;
+    }
     function renderWorkflowRunDetail(run) {
       if (!dom.wfRunDetail) return;
       const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t4.workflowRunStillRunning;
-      const finalBlock = run.status === "failed" ? `<p class="form-msg err">${escapeHtml4(run.error || "")}</p>` : run.finalOutput !== void 0 ? `<details open><summary>${escapeHtml4(t4.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml4(JSON.stringify(run.finalOutput, null, 2))}</pre></details>` : "";
+      const finalBlock = run.status === "failed" ? friendlyError(run.error || "") : run.finalOutput !== void 0 ? `<details open><summary>${escapeHtml4(t4.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml4(JSON.stringify(run.finalOutput, null, 2))}</pre></details>` : "";
       const steps = (run.steps || []).map((s) => {
         const sDur = s.endedAt ? `${s.endedAt - s.startedAt}ms` : "—";
         const subtasks = (s.subTaskIds || []).length ? `<small class="hint">${escapeHtml4(t4.workflowRunSubTasks)}: ${s.subTaskIds.map(escapeHtml4).join(", ")}</small>` : "";
         const out = s.output !== void 0 ? `<details><summary>${escapeHtml4(t4.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml4(JSON.stringify(s.output, null, 2))}</pre></details>` : "";
-        const err = s.error ? `<p class="form-msg err">${escapeHtml4(s.error)}</p>` : "";
+        const err = s.error ? friendlyError(s.error) : "";
         const awaiting = !!s.crossHub && s.status === "suspended";
         const dest = s.crossHub ? String(s.crossHub.peerLabel || s.crossHub.peer) : "";
         const xhub = s.crossHub && !awaiting ? `<span class="wf-xhub-peer">${escapeHtml4(

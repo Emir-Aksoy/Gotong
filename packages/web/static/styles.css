@@ -2362,6 +2362,19 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   margin: 0.3rem 0 0;
 }
 
+/* ease-of-use ❶-M1 — friendly run/step error block: classifier text + fix +
+   optional「去补 key」button (.ma-chat-fix-btn already styled above), with the
+   raw provider error demoted into a collapsed <details>. */
+.wf-step-err { margin: 0.3rem 0; }
+.wf-err-fix { color: #9a6700; }
+.wf-err-raw { margin-top: 0.3rem; }
+.wf-err-raw > summary {
+  cursor: pointer;
+  font-size: 0.72rem;
+  color: #777;
+  font-weight: normal;
+}
+
 /* ── Services tab (v2.2) ────────────────────────────────────────── */
 .services-table {
   width: 100%;

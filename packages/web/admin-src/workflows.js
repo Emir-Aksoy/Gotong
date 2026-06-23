@@ -815,12 +815,35 @@ export function createWorkflows({ wf }) {
     }
   }
 
+  // ease-of-use ❶-M1 — a failed step/run carries the raw provider error string
+  // verbatim (StepRecord.error / RunState.error, copied by the workflow runner's
+  // describeFailure from the LlmAgent TaskResult). That text ("[auth_error] 401
+  // …") is opaque to a non-technical operator. Run it through the SAME
+  // window.AipeHub.describeError classifier the admin + member quick-chat already
+  // use — the code→friendly-text and code→is-key-fix maps live ONLY in
+  // app-core.js, so the three surfaces never drift. A key/quota failure reads as
+  // plain words + an actionable fix + a one-click「去补 key」button (the global
+  // `goto-key` handler opens the API-key modal; it's dispatched before main.js's
+  // `!id` guard so a data-id-less button resolves). The raw string is preserved
+  // in a collapsed <details> for debugging — nothing is hidden, just demoted.
+  function friendlyError(raw) {
+    const d = window.AipeHub.describeError(raw)
+    const fix = d.fix ? ` <span class="wf-err-fix">${escapeHtml(d.fix)}</span>` : ''
+    const keyBtn = d.fixIsKey
+      ? ` <button type="button" class="ma-chat-fix-btn" data-act="goto-key">${escapeHtml(t.meChatGoAddKey)}</button>`
+      : ''
+    const rawBlock = raw
+      ? `<details class="wf-err-raw"><summary>${escapeHtml(t.workflowRunErrorRaw)}</summary><pre class="wf-pre">${escapeHtml(String(raw))}</pre></details>`
+      : ''
+    return `<div class="form-msg err wf-step-err">${escapeHtml(d.text)}${fix}${keyBtn}${rawBlock}</div>`
+  }
+
   function renderWorkflowRunDetail(run) {
     if (!dom.wfRunDetail) return
     const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t.workflowRunStillRunning
     const finalBlock =
       run.status === 'failed'
-        ? `<p class="form-msg err">${escapeHtml(run.error || '')}</p>`
+        ? friendlyError(run.error || '')
         : run.finalOutput !== undefined
           ? `<details open><summary>${escapeHtml(t.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml(JSON.stringify(run.finalOutput, null, 2))}</pre></details>`
           : ''
@@ -832,9 +855,7 @@ export function createWorkflows({ wf }) {
       const out = s.output !== undefined
         ? `<details><summary>${escapeHtml(t.workflowRunOutput)}</summary><pre class="wf-pre">${escapeHtml(JSON.stringify(s.output, null, 2))}</pre></details>`
         : ''
-      const err = s.error
-        ? `<p class="form-msg err">${escapeHtml(s.error)}</p>`
-        : ''
+      const err = s.error ? friendlyError(s.error) : ''
       // Stream G day-3 — post-launch CONFIRMATION: the host annotated this step
       // with where it ACTUALLY ran when that was off this hub (resolved from the
       // persisted executedBy). The card's crossHubPanel was the PREDICTION; this

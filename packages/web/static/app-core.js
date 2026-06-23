@@ -252,6 +252,7 @@
       workflowRunOutput: '输出',
       workflowRunSubTasks: '子任务',
       workflowRunNoSteps: '尚未开始任何步骤。',
+      workflowRunErrorRaw: '原始错误',
       workflowRunAttempts: (n) => `${n} 次尝试`,
       // Phase 15 — workflow lifecycle (state badge on cards + revision history)
       workflowStateLabel: (s) =>
@@ -1995,6 +1996,7 @@
       workflowRunOutput: 'Output',
       workflowRunSubTasks: 'Sub-tasks',
       workflowRunNoSteps: 'No steps recorded yet.',
+      workflowRunErrorRaw: 'Raw error',
       workflowRunAttempts: (n) => `${n} attempt${n === 1 ? '' : 's'}`,
       // Phase 15 — workflow lifecycle (state badge on cards + revision history)
       workflowStateLabel: (s) =>
