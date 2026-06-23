@@ -175,6 +175,7 @@ function findOwnerUserId(identity: IdentityStore): string | null {
 // (store + admin API, no env), so they persist and are admin-editable. The
 // registration block lives in main() where identity is in scope.
 
+import { createAdminHealthService } from './admin-health.js'
 import { LocalAgentPool } from './local-agent-pool.js'
 import { loadPricingTable } from './pricing.js'
 import { McpProxyHost, fetchPeerSharedMcp } from './mcp-proxy.js'
@@ -2235,6 +2236,17 @@ async function main(): Promise<void> {
     llmKeyProbe: {
       resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
     },
+    // ease-of-use ❷-M1 — read-only "hub 体检" snapshot for the admin overview
+    // panel. Static signals only (agents missing a key / MCP servers nobody
+    // wired / space still writable); reuses the SAME key-resolution chain as the
+    // probe above so the panel never disagrees with whether an agent will start.
+    adminHealth: createAdminHealthService({
+      listAgents: () => space.agents(),
+      liveIds: () => new Set(hub.participants().map((p) => p.id)),
+      resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
+      listMcpServers: () => space.mcpServers(),
+      spacePath: space.root,
+    }),
     reconcileHeartbeats,
     mcpRegistry,
     mcpFederation,

@@ -249,6 +249,12 @@ export interface WebServerOptions {
    */
   llmKeyProbe?: LlmKeyProbe
   /**
+   * ❷-M1 — optional read-only "hub 体检" aggregator for the admin overview
+   * panel. The host wires `createAdminHealthService`. Absent → the
+   * `GET /api/admin/health` route answers 503 and the panel hides.
+   */
+  adminHealth?: AdminHealthSurface
+  /**
    * v5 D-M4 — optional host callback to reconcile proactive-heartbeat rows
    * after a managed-agent create / edit / delete. The host wires this to its
    * HeartbeatScheduler (lazily spinning the engine up on first opt-in). When
@@ -756,6 +762,40 @@ export interface WorkflowSurface {
 }
 
 /**
+ * ❷-M1 — read-only "hub 体检" snapshot echoed to the admin overview panel.
+ * Mirror of the host's `HealthSnapshot` (the host owns the aggregation; the
+ * Web layer is a thin requireAdmin → JSON echo, so it never imports the host).
+ * Every field is a zero-cost STATIC signal — no LLM ping happens here (that's a
+ * per-agent manual button in ②-M2).
+ */
+export interface HealthSnapshot {
+  agents: {
+    id: string
+    provider: string
+    /** true = managed LLM agent whose API key does not currently resolve. */
+    missingKey: boolean
+    online: boolean
+  }[]
+  agentsMissingKey: number
+  managedCount: number
+  onlineCount: number
+  mcpServers: { name: string; wired: boolean }[]
+  mcpUnwired: number
+  spaceWritable: boolean
+  spacePath: string
+  checkedAt: string
+}
+
+/**
+ * ❷-M1 — host-injected hub health surface. The host wires the aggregation
+ * (`createAdminHealthService`); absent when a host is embedded without it, in
+ * which case `GET /api/admin/health` answers 503 and the panel hides itself.
+ */
+export interface AdminHealthSurface {
+  snapshot(): Promise<HealthSnapshot>
+}
+
+/**
  * Phase 13 M3 — host-injected workflow assistant surface. Wraps a
  * registered `WorkflowAssistantAgent` so the Web layer can answer
  * `POST /api/admin/workflows/assist` without taking a runtime dep on
@@ -1112,6 +1152,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     workerCreateLimiter,
     lifecycle: opts.lifecycle,
     llmKeyProbe: opts.llmKeyProbe,
+    adminHealth: opts.adminHealth,
     reconcileHeartbeats: opts.reconcileHeartbeats,
     workflows: opts.workflows,
     templatePersonnel: opts.templatePersonnel,
@@ -1259,6 +1300,7 @@ interface HandlerCtx {
   lifecycle: ManagedAgentLifecycle | undefined
   /** ease-of-use ③-M1 — see WebServerOptions.llmKeyProbe doc above. */
   llmKeyProbe: LlmKeyProbe | undefined
+  adminHealth: AdminHealthSurface | undefined
   /** v5 D-M4 — see WebServerOptions.reconcileHeartbeats doc above. */
   reconcileHeartbeats: (() => Promise<void>) | undefined
   workflows: WorkflowSurface | undefined
@@ -2370,6 +2412,23 @@ async function handle(
       'content-type': 'text/plain; version=0.0.4; charset=utf-8',
     })
     res.end(text)
+    return
+  }
+
+  // --- admin: hub 体检 (ease-of-use ❷-M1) -------------------------------
+  // Read-only health snapshot for the overview panel: managed agents missing
+  // an LLM key, MCP servers configured-but-unused, and whether the space dir is
+  // still writable. All static (zero-cost) signals — the host owns the
+  // aggregation, this route just gates + echoes. 503 when the host didn't wire
+  // the surface (embedded use), so the panel can hide itself cleanly.
+  if (method === 'GET' && path === '/api/admin/health') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.adminHealth) {
+      sendJson(res, { error: 'health surface unavailable' }, 503)
+      return
+    }
+    sendJson(res, await ctx.adminHealth.snapshot())
     return
   }
 
