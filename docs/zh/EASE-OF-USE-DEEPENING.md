@@ -9,7 +9,7 @@
 >
 > 本文随四个阶段逐步收口。✅ = 已落地;⏳ = 进行中。
 >
-> Last updated: 2026-06-23(❸ 收口)
+> Last updated: 2026-06-23(❹ 收口 —— 四块全清)
 
 ---
 
@@ -20,7 +20,7 @@
 | ❶ 运行时失败给修复入口 | 工作流 run 跑挂 / `/me` 最近运行只有一个红 pill,都没过 `describeError` | admin run-detail 失败 step + `/me` 最近运行接现成 `describeError` → 人话 + 「去补 key」 | ✅ |
 | ❷ 配置体检总览面板 | 配置散落、无常驻体检,「我的 hub 现在哪里红了」看不见 | host `/api/admin/health` 只读聚合 + admin 总览「hub 体检」面板 + 一键测连接 | ✅ |
 | ❸ 启动兜底 + doctor 自动修 | `friendlyBootError` 只认 `EADDRINUSE`;`doctor` 只报告不修 | 扩三类友好启动错误 + `doctor --fix` 只自动建缺失目录(安全可逆) | ✅ |
-| ❹ 真机端到端走查 | onboarding 只有 hermetic/mock 测试,从没真 key + 真浏览器走一遍 | 本地新手自检脚本 + `live.yml` onboarding 往返 gate(`skipIf` 无 key) | ⏳ |
+| ❹ 真机端到端走查 | onboarding 只有 hermetic/mock 测试,从没真 key 走一遍 `testLlmKey` 自救路径 | 本地新手自检脚本 + `live.yml` onboarding 往返 gate(`skipIf` 无 key) | ✅ |
 
 **三句话守则**(贯穿四块):
 1. **复用不重造** —— 接现成 `window.AipeHub.describeError()`、现成 `testLlmKey` /
@@ -192,11 +192,78 @@ real-mechanism `mkdirpReal` 真建嵌套链)。
 
 ---
 
-## 五、❹ 真机端到端走查 ⏳
+## 五、❹ 真机端到端走查 ✅
 
-> 进行中(④-M1 ~ ④-M2)。本地新手自检脚本(启动 → 建 agent → 试聊 → 故意错 key →
-> 断言看到 `describeError` 自救路径,真 key 走 env、缺 key 优雅跳过)+ `live.yml`
-> onboarding 往返 gate(`skipIf` 无 key、nightly、非阻塞)。落地后补本节。
+### 5.1 为什么
+
+前三块都是「把已存在的能力接到还没接的地方」,但**那些能力本身从没在真 key 上端到端
+走过一遍**。onboarding 的核心承诺只有一句:**新手粘进一个静默不工作的 key 时,不会
+盯着一个死掉的 agent,而是被分类成人话 + 一个一键「去补 key」**。这条路径的每一环都有
+hermetic / mock 单测(`llm-key-test.test.ts` 注入假 401、快聊用 `buildProvider` 注入),
+但**没人把整条探针对真厂商走过**。❹ 就是这一遍走查——分两层,按成本。
+
+**关键复用点 = `testLlmKey`**(`packages/host/src/llm-key-test.ts`):首启向导的「测试
+连接」按钮、建 agent 表单、成员 BYO key 面板调的是**同一个** `testLlmKey`;它构造**和真
+agent 路径同款**的 provider 类,发一条最小 `stream()`,把厂商错误归一成 9 类 `code`。
+所以「探针绿了」≈「真 agent 路径也通」,「探针把错 key 归类成 `invalid_key`」≈「UI 会
+亮起救援按钮」。❹ 的两层都只是**驱动这个同款原语**,不造新东西。
+
+**自救信号的权威集**(前端 `app-core.js` `ERROR_FIX_KEYS` 的镜像):`describeError(raw)`
+把失败标成「加/换一个 LLM key 能修」(`fixIsKey:true` → 「去补 key →」按钮)**恰好**对
+两个 code —— `invalid_key` / `insufficient_quota`。脚本与 live 测试都内联同一个
+`KEY_FIX_CODES = {invalid_key, insufficient_quota}` 集合,断言**只有**这两类亮救援按钮,
+传输错(`network` / `timeout`)**不**亮(死 Base URL 不该被叫去补 key)。
+
+### 5.2 本地新手自检脚本(④-M1)
+
+`scripts/local-onboarding-check.mjs`(`pnpm check:onboarding`)——零依赖、可在**任何**
+开发机跑,从 `packages/host/dist` 导入编译好的 `testLlmKey`(相对 dist 导入绕开 host
+`exports` 映射)。**三层**:
+
+| 层 | 何时跑 | 做什么 | 断言 |
+|---|---|---|---|
+| 1 HERMETIC | **总是**(无网络、零花费) | 注入 401-形状 provider / 空 key / 网络错 provider | 401 + 空 key → `invalid_key` 且 ∈ `KEY_FIX_CODES`;网络错 → `network` 且 ∉ `KEY_FIX_CODES` |
+| 2 真 key 往返 | opt-in(env 有 key) | 真 key 走真线 | `ok:true` |
+| 3 错 key 走真线 | opt-in(同上) | 同款真端点 + 故意 garbage key | ∈ `KEY_FIX_CODES`(其它 code → soft-skip,1a 已钉分类器) |
+
+第 1 层就是**零花费证明自救保证**:注入一个 `stream()` 抛 401 的假 provider,断言探针把它
+送上「去补 key」,把网络错送上「检查网络」。第 2/3 层 env 契约**逐字镜像 `live.yml`**
+(Anthropic 优先,否则 OpenAI 兼容路径覆盖 OpenAI / DeepSeek via `OPENAI_BASE_URL`)。
+key 从 env 读、传给探针、**永不打印**(探针自身 `message` 已 scrub key,脚本只打 code /
+model / latency)。缺 key 优雅跳过、**不假红**(镜像 DeepSeek demo 策略):退出码 0 = 跑了
+的检查全过,1 = 跑了的检查失败。
+
+README「Won't start?」之后加一小段「Verify the key probe works (no real key needed)」:
+`pnpm check:onboarding` hermetic 证明坏/空 key → 「去补 key」、网络错 → 「检查 URL」;
+`ANTHROPIC_API_KEY=… pnpm check:onboarding` 往返真 key(opt-in,缺则跳过)。
+
+### 5.3 `live.yml` onboarding 往返 gate(④-M2)
+
+`packages/host/tests/live-onboarding.test.ts`——`describe.skipIf(!HAS_KEY)`,镜像
+`live-workflow.test.ts` 结构(同款 `liveProvider()` / 64-token cap / cheap 模型默认 /
+30–60s 超时)。三个 `it`:
+
+1. **建好的 agent 真答一条 dispatch**——真 `Space.init` → `Hub` → `LlmAgent`(一个
+   capability、terse system、64-token cap)→ `hub.dispatch` → 断言 `kind==='ok'` 且
+   `output.text` 非空。这就是「我建了个助手,它真能答」那一刻(不过度断言确切回复,真
+   模型会漂)。
+2. **探针对真线放行真 key**——`testLlmKey(realInput)` → `ok:true` + 无 code + 有 model。
+   = 真「测试连接」按钮真能用。
+3. **错 key 对真线归类成「去补 key」根因**——同款真端点 + garbage key →
+   `testLlmKey` → `code ∈ KEY_FIX_CODES`。= 权威「断言根因分类」,厂商的 401 必须落进
+   救援集 UI 才亮一键修复。
+
+`live.yml` 的 run step 从「三个 gated 文件」扩成**四个**(provider round-trip ×2 +
+workflow + onboarding),env 契约不变(secrets 缺 → 空串 → skipIf 跳过 → green-by-skip)。
+**故意不是发布硬阻塞**——这些测真打付费、非确定的第三方 API,厂商抖动 / 限流绝不能挡发
+布;nightly cron + workflow_dispatch 按需手动跑,红了当「去查」不当「禁发」(同 live gate
+其余文件一贯立场)。
+
+### 5.4 一句话
+
+**自救路径(粘错 key → 分类成人话 → 一键去补)第一次被真 key 端到端走过**:本地零花费
+hermetic 自检 + opt-in 真线往返,加 nightly live gate 对真厂商盯着,缺 key 永远 skip-clean
+不假红。
 
 ---
 

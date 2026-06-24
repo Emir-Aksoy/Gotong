@@ -2,8 +2,8 @@
 #
 # Unlike ci.yml (which mocks the wire and must stay deterministic + free),
 # this workflow spends real tokens. It runs the gated `live.test.ts` /
-# `live-workflow.test.ts` files that `ci.yml` skips, with an API key supplied
-# from repo secrets.
+# `live-workflow.test.ts` / `live-onboarding.test.ts` files that `ci.yml`
+# skips, with an API key supplied from repo secrets.
 #
 # Triggers:
 #   - schedule — nightly signal. If the tool-use contract or a provider's
@@ -78,15 +78,19 @@ jobs:
         # packages, so the workspace must be built before vitest runs.
         run: pnpm -r build
 
-      - name: Run live gate (provider round-trips + workflow)
-        # Three gated files only — not the whole suite. Each skips cleanly when
+      - name: Run live gate (provider round-trips + workflow + onboarding)
+        # Four gated files only — not the whole suite. Each skips cleanly when
         # its key is absent, so this step is green-by-skip until secrets exist
-        # and only red on a genuine live failure.
+        # and only red on a genuine live failure. live-onboarding pins the
+        # ease-of-use self-rescue path: a freshly-built agent answers, a real
+        # key probes ok, and a wrong key classifies into the "去补 key" code the
+        # UI lights its rescue button on.
         run: |
           set -euo pipefail
           pnpm -C packages/llm-anthropic exec vitest run tests/live.test.ts
           pnpm -C packages/llm-openai exec vitest run tests/live.test.ts
           pnpm -C packages/host exec vitest run tests/live-workflow.test.ts
+          pnpm -C packages/host exec vitest run tests/live-onboarding.test.ts
         env:
           # Secrets — unset ones arrive as the empty string, which the
           # skipIf(!key) gate reads as "no key" and skips. Configure whichever
