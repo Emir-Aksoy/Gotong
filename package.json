@@ -73,7 +73,8 @@
     "host": "pnpm --filter @aipehub/host start",
     "test": "pnpm -r test",
     "test:python": "cd python-sdk && PYTHONPATH=src .venv/bin/python -m pytest -q",
-    "test:all": "pnpm -r test && pnpm -r typecheck && pnpm test:python"
+    "test:all": "pnpm -r test && pnpm -r typecheck && pnpm test:python",
+    "check:onboarding": "node scripts/local-onboarding-check.mjs"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

@@ -130,6 +130,21 @@ data dir not writable, disk full) into a one-line human message naming which
 `AIPE_*` var to change — not a stack trace. See the troubleshooting section in
 [`docs/zh/GO-LIVE.md`](docs/zh/GO-LIVE.md) §十一.
 
+**Verify the key probe works (no real key needed).** The most common first-run
+trap is a pasted LLM key that silently doesn't work. The setup wizard catches
+this with a one-click "去补 key" rescue path; this command walks that same probe
+end to end so you know the rescue path is wired before you onboard:
+
+```bash
+pnpm check:onboarding          # hermetic — proves a bad/empty key → "go add a key", a network error → "check the URL"
+ANTHROPIC_API_KEY=… pnpm check:onboarding   # also round-trips a REAL key over the wire (opt-in; skipped without one)
+```
+
+It's hermetic by default (no network, no spend) and never logs your key.
+Exit 0 = every check that ran passed. The opt-in real-key check mirrors the
+live gate's env contract (`OPENAI_API_KEY` + `OPENAI_BASE_URL=https://api.deepseek.com`
++ `AIPE_LIVE_OPENAI_MODEL=deepseek-chat` for the DeepSeek path).
+
 ### Deploy to a cloud server (VPS)
 
 Got a fresh Ubuntu/Debian box? Put the checkout on it (`git clone` with your
