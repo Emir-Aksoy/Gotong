@@ -783,6 +783,14 @@ export interface HealthSnapshot {
   mcpUnwired: number
   spaceWritable: boolean
   spacePath: string
+  /**
+   * EH-M1 配置进度计数 — 喂体检面板「下一步建议」常驻引导。verbatim echo, web
+   * 不解读; 派生文案 + CTA 在前端 (i18n)。可选: host 未接 workflow controller 时
+   * 整个缺席 (诚实的「未知」), 前端据此跳过工作流相关建议。
+   */
+  workflowCount?: number
+  publishedWorkflowCount?: number
+  runCount?: number
   checkedAt: string
 }
 

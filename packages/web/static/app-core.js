@@ -900,6 +900,15 @@
       healthTest: '测连接',
       healthOffline: '未上线',
       healthTestTitle: (id) => `测试连接 — ${id}`,
+      // --- EH-M1 — 体检面板「下一步建议」配置进度引导 ---
+      healthNextLabel: '下一步建议',
+      healthNextNoWorkflow: '你已经有智能体了 — 接下来装一个工作流模板,或用架构师用大白话建一个。',
+      healthNextNoPublished: '你有还没发布的草稿工作流 — 发布后成员才能在「我的」里用它。',
+      healthNextNoRun: '工作流已就绪,还没跑过 — 跑一次看看效果。',
+      healthNextNoMcp: '想让助手能查资料、连知识库?接一个 MCP 连接器试试。',
+      healthGoWorkflows: '去工作流 →',
+      healthGoPublish: '去发布 →',
+      healthGoRun: '去运行 →',
       // --- peer-manifest-ui.js (联邦 tab — peer capability manifest) ---
       pmTitle: 'Peer 能力清单(federation manifest)',
       pmDesc: '每个已连接 peer 通过认证 mesh 链路广播的能力(<code>peer.manifest</code> RPC)。' +
@@ -2657,6 +2666,15 @@
       healthTest: 'Test',
       healthOffline: 'Offline',
       healthTestTitle: (id) => `Test connection — ${id}`,
+      // --- EH-M1 — health panel "next step" config-progress guidance ---
+      healthNextLabel: 'Suggested next step',
+      healthNextNoWorkflow: 'You have an agent — next, install a workflow template or build one in plain language with the architect.',
+      healthNextNoPublished: 'You have a draft workflow that is not published yet — publish it so members can use it under "Home".',
+      healthNextNoRun: 'Your workflow is ready but has never run — give it a test run.',
+      healthNextNoMcp: 'Want your assistant to look things up or reach a knowledge base? Hook up an MCP connector.',
+      healthGoWorkflows: 'Go to Workflows →',
+      healthGoPublish: 'Publish →',
+      healthGoRun: 'Run it →',
       // --- peer-manifest-ui.js (federation tab — peer capability manifest) ---
       pmTitle: 'Peer capability manifest (federation manifest)',
       pmDesc: 'Capabilities each connected peer advertises over the authenticated mesh link (<code>peer.manifest</code> RPC). ' +

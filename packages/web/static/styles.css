@@ -1467,6 +1467,30 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .hub-health .hh-red .hh-dot { background: #d0432e; }
 .hub-health .hh-yellow .hh-dot { background: #dd9a09; }
 .hub-health .hh-text { flex: 1; line-height: 1.4; }
+/* EH-M1 — forward "next step" guidance. Green/neutral (a suggestion), visually
+   distinct from the red/yellow signal rows above (which mean "something wrong"). */
+.hub-health .hh-next {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.82rem;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
+}
+.hub-health .hh-next-label {
+  flex: none;
+  font-weight: 700;
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  opacity: 0.75;
+}
+.hub-health .hh-next-text { flex: 1; line-height: 1.4; }
+.hub-health .hh-next-btn { flex: none; }
 .hub-health .hh-btn {
   flex: none;
   font-size: 0.76rem;

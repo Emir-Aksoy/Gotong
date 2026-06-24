@@ -2246,6 +2246,17 @@ async function main(): Promise<void> {
       resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
       listMcpServers: () => space.mcpServers(),
       spacePath: space.root,
+      // EH-M1 — 配置进度 (工作流总/可跑 + run 总数) 喂体检面板的「下一步建议」
+      // 常驻引导。listAll 含全状态草稿, list 只含可跑 (published/live); countRuns
+      // 取 active 集精确总数。全只读, 复用 workflowController 现成方法零新机制。
+      countWorkflows: async () => {
+        const [all, live] = await Promise.all([
+          workflowController.listAll(),
+          workflowController.list(),
+        ])
+        return { total: all.length, published: live.length }
+      },
+      countRuns: async () => (await workflowController.countRuns()).total,
     }),
     reconcileHeartbeats,
     mcpRegistry,

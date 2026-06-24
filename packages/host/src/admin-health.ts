@@ -69,6 +69,20 @@ export interface HealthSnapshot {
   spaceWritable: boolean
   /** The space directory path (shown next to the writability signal). */
   spacePath: string
+  /**
+   * EH-M1 配置进度计数 — 喂 overview 体检面板的「下一步建议」常驻引导, 补
+   * #start-here 配完第一个 agent 就永久隐藏后留下的引导缺口。纯只读投影, 零
+   * schema。host 只数数; 派生「建议配什么」的文案 + CTA 在前端 (i18n)。
+   *
+   * **可选 = 诚实的「未知」信号**: host 未注入 workflow controller (`countWorkflows`
+   * 缺) 时字段整个缺席, 而非默认 0 — 否则前端分不清「真的 0 个工作流」和「host
+   * 没接」, 会错误地建议「去建个工作流」。缺席 → 前端跳过工作流相关建议。
+   */
+  workflowCount?: number
+  /** 其中可跑的 (published / live)。 */
+  publishedWorkflowCount?: number
+  /** 跑过的 run 总数 (active 集, archived 除外)。countRuns 未注入时缺席。 */
+  runCount?: number
   /** ISO timestamp the snapshot was taken. */
   checkedAt: string
 }
@@ -106,6 +120,13 @@ export interface AdminHealthDeps {
   spacePath: string
   /** Injected for tests; defaults to a real `fs.access(W_OK)` check. */
   probeWritable?(path: string): Promise<boolean>
+  /**
+   * EH-M1 — 工作流计数 (总 + 可跑), 派生「下一步建议」。可选: absent → 计数 0,
+   * 前端不显示工作流相关建议 (host 未接 workflow controller 的诚实降级)。
+   */
+  countWorkflows?(): Promise<{ total: number; published: number }>
+  /** EH-M1 — 跑过的 run 总数 (active 集)。可选: absent → 0。 */
+  countRuns?(): Promise<number>
 }
 
 /** The duck-typed surface injected into `serveWeb`. */
@@ -171,6 +192,26 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
 
       const spaceWritable = await probeWritable(deps.spacePath)
 
+      // EH-M1 配置进度 — 仅当对应 dep 注入时才包含 (缺席 = 诚实的「未知」, 前端
+      // 跳过工作流建议)。数数本身 best-effort: dep 在但抛错 → 当 0 (advisory, 不
+      // 阻塞、不炸整张快照); dep 不在 → 字段整个 undefined。
+      let workflowCounts: { total: number; published: number } | undefined
+      if (deps.countWorkflows) {
+        try {
+          workflowCounts = await deps.countWorkflows()
+        } catch {
+          workflowCounts = { total: 0, published: 0 } // 数得失败但 dep 在 → 当「0 个」
+        }
+      }
+      let runCount: number | undefined
+      if (deps.countRuns) {
+        try {
+          runCount = await deps.countRuns()
+        } catch {
+          runCount = 0
+        }
+      }
+
       return {
         agents: rows,
         agentsMissingKey: rows.filter((r) => r.missingKey).length,
@@ -180,6 +221,13 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
         mcpUnwired: mcpServers.filter((s) => !s.wired).length,
         spaceWritable,
         spacePath: deps.spacePath,
+        ...(workflowCounts
+          ? {
+              workflowCount: workflowCounts.total,
+              publishedWorkflowCount: workflowCounts.published,
+            }
+          : {}),
+        ...(runCount !== undefined ? { runCount } : {}),
         checkedAt: new Date().toISOString(),
       }
     },

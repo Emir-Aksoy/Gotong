@@ -1313,6 +1313,37 @@ import { createWorkflows } from './workflows.js'
     </li>`
   }
 
+  // EH-M1 — the single most-relevant "what should I configure next" suggestion.
+  // Distinct from the red/yellow signals above (those are "something is wrong");
+  // this is forward guidance (green/neutral) that fills the gap #start-here left
+  // when it hid itself after the first agent. Returns ONE rung of the config
+  // ladder, not a list — answers "next?" with a single clear action.
+  //
+  // workflowCount等 are OPTIONAL: absent = host didn't wire the workflow counts
+  // (honest "unknown"), so we skip the whole workflow ladder rather than wrongly
+  // suggest "build a workflow" when we simply can't see them.
+  function hubHealthNextStep(snap) {
+    if (typeof snap.workflowCount === 'number') {
+      if (snap.workflowCount === 0) {
+        return { text: t.healthNextNoWorkflow, cta: t.healthGoWorkflows, action: 'workflows' }
+      }
+      if ((snap.publishedWorkflowCount || 0) === 0) {
+        return { text: t.healthNextNoPublished, cta: t.healthGoPublish, action: 'workflows' }
+      }
+      // Only assert "never run" when runCount is actually known.
+      if (typeof snap.runCount === 'number' && snap.runCount === 0) {
+        return { text: t.healthNextNoRun, cta: t.healthGoRun, action: 'workflows' }
+      }
+    }
+    // Workflow ladder satisfied (or unseen) + zero MCP connectors → gently
+    // suggest hooking a knowledge base. Lowest priority so it never crowds out
+    // the workflow progression.
+    if ((snap.mcpServers || []).length === 0) {
+      return { text: t.healthNextNoMcp, cta: t.healthGoMcp, action: 'mcp' }
+    }
+    return null
+  }
+
   function renderHubHealthHtml(snap) {
     const agents = snap.agents || []
     const mcp = snap.mcpServers || []
@@ -1349,6 +1380,18 @@ import { createWorkflows } from './workflows.js'
       <p class="hh-sub ${allGreen ? 'hh-ok' : 'hh-warn'}">${escapeHtml(allGreen ? t.healthAllGreen : t.healthHasIssues(signals.length))}</p>`
     const signalList = allGreen ? '' : `<ul class="hh-signals">${signals.join('')}</ul>`
 
+    // EH-M1 — forward "what should I configure next" guidance. Shows
+    // independently of the red/yellow signals (green/neutral styling), so even
+    // an all-clear hub still gets nudged toward its next config rung.
+    const next = hubHealthNextStep(snap)
+    const nextHtml = next
+      ? `<div class="hh-next">
+          <span class="hh-next-label">${escapeHtml(t.healthNextLabel)}</span>
+          <span class="hh-next-text">${escapeHtml(next.text)}</span>
+          <button type="button" class="hh-btn hh-next-btn" data-hh="${escapeHtml(next.action)}">${escapeHtml(next.cta)}</button>
+        </div>`
+      : ''
+
     // Agent roster with a per-agent manual「测连接」. Online agents only — an
     // offline one isn't registered, so there's nothing to reach (its reason,
     // usually a missing key, is already a red signal above).
@@ -1367,7 +1410,7 @@ import { createWorkflows } from './workflows.js'
             </li>`).join('')}
         </ul>
       </div>`
-    return head + signalList + roster
+    return head + signalList + nextHtml + roster
   }
 
   async function renderHubHealth(opts = {}) {
@@ -1412,6 +1455,8 @@ import { createWorkflows } from './workflows.js'
       dom.maKeysBtn?.click() // same proven "API Key 管理" entry as #start-here
     } else if (action === 'mcp') {
       gotoTab('mcp')
+    } else if (action === 'workflows') {
+      gotoTab('workflows') // EH-M1 next-step CTAs (build / publish / run a workflow)
     } else if (action === 'test') {
       const id = btn.dataset.agent
       if (id) managedAgents.openAgentChat(id)

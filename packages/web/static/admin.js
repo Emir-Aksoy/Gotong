@@ -3103,6 +3103,23 @@
       ${btnHtml || ""}
     </li>`;
     }
+    function hubHealthNextStep(snap) {
+      if (typeof snap.workflowCount === "number") {
+        if (snap.workflowCount === 0) {
+          return { text: t5.healthNextNoWorkflow, cta: t5.healthGoWorkflows, action: "workflows" };
+        }
+        if ((snap.publishedWorkflowCount || 0) === 0) {
+          return { text: t5.healthNextNoPublished, cta: t5.healthGoPublish, action: "workflows" };
+        }
+        if (typeof snap.runCount === "number" && snap.runCount === 0) {
+          return { text: t5.healthNextNoRun, cta: t5.healthGoRun, action: "workflows" };
+        }
+      }
+      if ((snap.mcpServers || []).length === 0) {
+        return { text: t5.healthNextNoMcp, cta: t5.healthGoMcp, action: "mcp" };
+      }
+      return null;
+    }
     function renderHubHealthHtml(snap) {
       const agents = snap.agents || [];
       const mcp2 = snap.mcpServers || [];
@@ -3136,6 +3153,12 @@
       </div>
       <p class="hh-sub ${allGreen ? "hh-ok" : "hh-warn"}">${escapeHtml5(allGreen ? t5.healthAllGreen : t5.healthHasIssues(signals.length))}</p>`;
       const signalList = allGreen ? "" : `<ul class="hh-signals">${signals.join("")}</ul>`;
+      const next = hubHealthNextStep(snap);
+      const nextHtml = next ? `<div class="hh-next">
+          <span class="hh-next-label">${escapeHtml5(t5.healthNextLabel)}</span>
+          <span class="hh-next-text">${escapeHtml5(next.text)}</span>
+          <button type="button" class="hh-btn hh-next-btn" data-hh="${escapeHtml5(next.action)}">${escapeHtml5(next.cta)}</button>
+        </div>` : "";
       const roster = `
       <div class="hh-roster">
         <h3 class="hh-roster-title">${escapeHtml5(t5.healthRosterTitle(snap.onlineCount || 0, snap.managedCount || 0))}</h3>
@@ -3149,7 +3172,7 @@
             </li>`).join("")}
         </ul>
       </div>`;
-      return head + signalList + roster;
+      return head + signalList + nextHtml + roster;
     }
     async function renderHubHealth(opts = {}) {
       const host = document.getElementById("hub-health");
@@ -3192,6 +3215,8 @@
         dom.maKeysBtn?.click();
       } else if (action === "mcp") {
         gotoTab("mcp");
+      } else if (action === "workflows") {
+        gotoTab("workflows");
       } else if (action === "test") {
         const id = btn.dataset.agent;
         if (id) managedAgents.openAgentChat(id);

@@ -25,6 +25,10 @@ function svc(opts: {
   mcp?: HealthMcpLike[]
   writable?: boolean
   spacePath?: string
+  // EH-M1 — config-progress deps are OPTIONAL by design; absent → snapshot
+  // omits the counts entirely (honest "unknown", not a defaulted 0).
+  countWorkflows?: () => Promise<{ total: number; published: number }>
+  countRuns?: () => Promise<number>
 }) {
   return createAdminHealthService({
     listAgents: async () => opts.agents,
@@ -33,6 +37,8 @@ function svc(opts: {
     listMcpServers: async () => opts.mcp ?? [],
     spacePath: opts.spacePath ?? '/tmp/space',
     probeWritable: async () => opts.writable ?? true,
+    ...(opts.countWorkflows ? { countWorkflows: opts.countWorkflows } : {}),
+    ...(opts.countRuns ? { countRuns: opts.countRuns } : {}),
   })
 }
 
@@ -111,6 +117,46 @@ describe('createAdminHealthService.snapshot', () => {
     expect(ok.spacePath).toBe('/data/.aipehub')
     const bad = await svc({ agents: [], writable: false }).snapshot()
     expect(bad.spaceWritable).toBe(false)
+  })
+
+  // EH-M1 — config-progress counts feed the panel's "next step" guidance. The
+  // optional shape is load-bearing: an absent count must stay absent (not 0), so
+  // the frontend can tell "host didn't wire workflows" from "truly 0 workflows"
+  // and not wrongly suggest "go build one".
+  it('omits config-progress counts entirely when those deps are not injected', async () => {
+    const s = await svc({ agents: [managed('a1', 'openai')] }).snapshot()
+    expect('workflowCount' in s).toBe(false)
+    expect('publishedWorkflowCount' in s).toBe(false)
+    expect('runCount' in s).toBe(false)
+  })
+
+  it('includes workflow + run counts when those deps are injected', async () => {
+    const s = await svc({
+      agents: [managed('a1', 'openai')],
+      countWorkflows: async () => ({ total: 3, published: 2 }),
+      countRuns: async () => 7,
+    }).snapshot()
+    expect(s.workflowCount).toBe(3)
+    expect(s.publishedWorkflowCount).toBe(2)
+    expect(s.runCount).toBe(7)
+  })
+
+  it('best-effort: a counting dep that throws degrades to 0, never breaks the snapshot', async () => {
+    const s = await svc({
+      agents: [managed('a1', 'openai')],
+      countWorkflows: async () => {
+        throw new Error('controller offline')
+      },
+      countRuns: async () => {
+        throw new Error('run store offline')
+      },
+    }).snapshot()
+    // dep present but faulted → count as 0 (advisory), and the rest of the
+    // snapshot still resolves (agent row intact).
+    expect(s.workflowCount).toBe(0)
+    expect(s.publishedWorkflowCount).toBe(0)
+    expect(s.runCount).toBe(0)
+    expect(s.managedCount).toBe(1)
   })
 
   it('empty hub → all-green zero snapshot with a timestamp', async () => {
