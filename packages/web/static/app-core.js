@@ -900,6 +900,9 @@
       healthTest: '测连接',
       healthOffline: '未上线',
       healthTestTitle: (id) => `测试连接 — ${id}`,
+      // --- EH-M2 — agents tab 每行「缺 key」健康徽章 (badge 本身即修复按钮) ---
+      agentKeyWarnBadge: '缺 key',
+      agentKeyWarnHint: '这个智能体的 API key 没配好,离线多半因此 — 点这里去补',
       // --- EH-M1 — 体检面板「下一步建议」配置进度引导 ---
       healthNextLabel: '下一步建议',
       healthNextNoWorkflow: '你已经有智能体了 — 接下来装一个工作流模板,或用架构师用大白话建一个。',
@@ -2666,6 +2669,9 @@
       healthTest: 'Test',
       healthOffline: 'Offline',
       healthTestTitle: (id) => `Test connection — ${id}`,
+      // --- EH-M2 — agents-tab per-row "missing key" health badge (the badge IS the fix button) ---
+      agentKeyWarnBadge: 'No key',
+      agentKeyWarnHint: 'This agent has no working API key — likely why it is offline. Click to add it.',
       // --- EH-M1 — health panel "next step" config-progress guidance ---
       healthNextLabel: 'Suggested next step',
       healthNextNoWorkflow: 'You have an agent — next, install a workflow template or build one in plain language with the architect.',

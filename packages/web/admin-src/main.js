@@ -2853,6 +2853,10 @@ import { createWorkflows } from './workflows.js'
         managedAgents.openAccessModal(id)
       } else if (act === 'remove-agent') {
         managedAgents.removeAgent(id)
+      } else if (act === 'fix-agent-key') {
+        // EH-M2 — the per-row「key 未配置」badge IS the fix button: route to the
+        // same proven "API Key 管理" entry as #start-here / the 体检 panel.
+        dom.maKeysBtn?.click()
       } else if (act === 'remove-workflow') {
         workflows.removeWorkflow(id)
       } else if (act === 'open-workflow-runs') {

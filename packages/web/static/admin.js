@@ -530,10 +530,11 @@
     async function refreshManagedAgents() {
       if (!dom?.maList) return;
       try {
-        const [agentsResp, provResp, secretsResp] = await Promise.all([
+        const [agentsResp, provResp, secretsResp, healthResp] = await Promise.all([
           fetchJson3("/api/admin/agents"),
           fetchJson3("/api/admin/agents/providers"),
-          fetchJson3("/api/admin/secrets")
+          fetchJson3("/api/admin/secrets"),
+          fetchJson3("/api/admin/health").catch(() => null)
         ]);
         ma.agents = agentsResp.agents || [];
         ma.providers = provResp.providers || [];
@@ -542,6 +543,10 @@
           agents: secretsResp.agents || {},
           env: secretsResp.env || {}
         };
+        ma.health = {};
+        for (const row of healthResp?.agents || []) {
+          ma.health[row.id] = { missingKey: !!row.missingKey };
+        }
         renderManagedAgents();
         syncProviderSelect();
       } catch (err) {
@@ -599,12 +604,14 @@
         <button class="ma-action" data-act="export-agent" data-id="${escapeHtml3(a.id)}">${escapeHtml3(t3.export_)}</button>
         <button class="ma-action ma-danger" data-act="remove-agent" data-id="${escapeHtml3(a.id)}">${escapeHtml3(t3.remove)}</button>
       ` : "";
+        const keyWarn = managed && ma.health?.[a.id]?.missingKey ? `<button type="button" class="ma-keywarn" data-act="fix-agent-key" data-id="${escapeHtml3(a.id)}" title="${escapeHtml3(t3.agentKeyWarnHint)}">${escapeHtml3(t3.agentKeyWarnBadge)}</button>` : "";
         return `
         <div class="ma-row ${onlineCls}">
           <div class="ma-head">
             <strong class="ma-id">${escapeHtml3(a.displayName || a.id)}</strong>
             ${a.displayName ? `<code class="ma-realid">${escapeHtml3(a.id)}</code>` : ""}
             <span class="ma-status">${escapeHtml3(onlineLabel)}</span>
+            ${keyWarn}
           </div>
           <div class="ma-meta">${meta}</div>
           <div class="ma-caps">${caps}</div>
@@ -4280,6 +4287,8 @@
           managedAgents.openAccessModal(id);
         } else if (act === "remove-agent") {
           managedAgents.removeAgent(id);
+        } else if (act === "fix-agent-key") {
+          dom.maKeysBtn?.click();
         } else if (act === "remove-workflow") {
           workflows.removeWorkflow(id);
         } else if (act === "open-workflow-runs") {

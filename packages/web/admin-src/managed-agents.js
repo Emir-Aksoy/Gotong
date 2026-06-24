@@ -28,10 +28,17 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
   async function refreshManagedAgents() {
     if (!dom?.maList) return
     try {
-      const [agentsResp, provResp, secretsResp] = await Promise.all([
+      // EH-M2 — also pull the hub health snapshot so each agent row can carry a
+      // per-agent「key 未配置」badge (the same missingKey signal the overview 体检
+      // panel computes). `.catch(()=>null)` keeps it best-effort: a 503 (host
+      // wired no health surface) or fetch fault must never break the agent list,
+      // it just leaves ma.health empty → no badges. Static endpoint, zero LLM
+      // cost, so piggy-backing it on the agents refresh is cheap.
+      const [agentsResp, provResp, secretsResp, healthResp] = await Promise.all([
         fetchJson('/api/admin/agents'),
         fetchJson('/api/admin/agents/providers'),
         fetchJson('/api/admin/secrets'),
+        fetchJson('/api/admin/health').catch(() => null),
       ])
       ma.agents = agentsResp.agents || []
       ma.providers = provResp.providers || []
@@ -39,6 +46,12 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
         providers: secretsResp.providers || {},
         agents: secretsResp.agents || {},
         env: secretsResp.env || {},
+      }
+      // Map agentId → missingKey for the row badge. Only managed LLM agents
+      // appear in the snapshot; everyone else is simply absent (no badge).
+      ma.health = {}
+      for (const row of healthResp?.agents || []) {
+        ma.health[row.id] = { missingKey: !!row.missingKey }
       }
       renderManagedAgents()
       syncProviderSelect()
@@ -116,12 +129,24 @@ export function createManagedAgents({ ma, openBundleImportModal }) {
         <button class="ma-action" data-act="export-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.export_)}</button>
         <button class="ma-action ma-danger" data-act="remove-agent" data-id="${escapeHtml(a.id)}">${escapeHtml(t.remove)}</button>
       ` : ''
+      // EH-M2 — per-row「key 未配置」warning, cross-referenced from the health
+      // snapshot (ma.health, populated by refreshManagedAgents). Keys off
+      // missingKey regardless of online status: a missing key is THE actionable
+      // reason a managed agent fails to start, so surfacing it right on the row
+      // (not just the overview 体检 panel) closes the「offline — why? → fix」loop.
+      // The badge is itself the fix button (data-act=fix-agent-key opens the
+      // keys modal). ma.health may be absent (direct render w/o refresh, or 503)
+      // → optional-chained to no badge, never a crash.
+      const keyWarn = (managed && ma.health?.[a.id]?.missingKey)
+        ? `<button type="button" class="ma-keywarn" data-act="fix-agent-key" data-id="${escapeHtml(a.id)}" title="${escapeHtml(t.agentKeyWarnHint)}">${escapeHtml(t.agentKeyWarnBadge)}</button>`
+        : ''
       return `
         <div class="ma-row ${onlineCls}">
           <div class="ma-head">
             <strong class="ma-id">${escapeHtml(a.displayName || a.id)}</strong>
             ${a.displayName ? `<code class="ma-realid">${escapeHtml(a.id)}</code>` : ''}
             <span class="ma-status">${escapeHtml(onlineLabel)}</span>
+            ${keyWarn}
           </div>
           <div class="ma-meta">${meta}</div>
           <div class="ma-caps">${caps}</div>

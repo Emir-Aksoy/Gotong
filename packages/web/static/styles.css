@@ -1879,6 +1879,24 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   font-weight: 600;
 }
 .agent-online .ma-status { background: #d6ecdb; color: #1a6a3a; }
+/* EH-M2 — per-row「缺 key」badge. A real <button> (reset its chrome) styled as a
+   red pill so it reads as a warning AND an affordance: clicking opens the keys
+   modal. Sits just after .ma-status (which has margin-left:auto, so this rides
+   the far right edge next to the online/offline pill). */
+.ma-keywarn {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 1px 6px;
+  border: 1px solid #f3b4b4;
+  border-radius: 3px;
+  background: #fdecec;
+  color: #b42318;
+  font-weight: 600;
+  cursor: pointer;
+  line-height: 1.5;
+}
+.ma-keywarn:hover { background: #fbd9d9; }
 .ma-meta {
   font-size: 0.72rem;
   color: #555;
