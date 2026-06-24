@@ -740,10 +740,45 @@ export function createWorkflows({ wf }) {
   // full `RunState` from /api/admin/workflows/runs/:id; the detail
   // renders each step with its status + timing + sub-task ids.
 
+  // RT (live run progress) — the runner persists run state after EVERY step
+  // (runner.ts executeStartingAt → persist() inside the step loop), so polling
+  // the existing run-detail endpoint shows progress with ZERO backend change.
+  // Poll while the run is still moving; stop the moment it reaches a terminal
+  // status OR parks waiting on a human. A run parked at an outbound-approval /
+  // HITL gate keeps disk status `running` (suspendWorkflow never touches
+  // state.status), so "a step is suspended with no finite machine wake-time" is
+  // the parked-on-human signal — the day-4 awaiting-approval affordance already
+  // tells the user to go approve, so busy-polling it forever is wasteful. A
+  // finite resumeAt means the resume sweep will auto-advance it (cross-hub
+  // long-running / A2A lifecycle steps), so those keep polling honestly.
+  const WF_RUN_POLL_MS = 2000
+  const WF_NEVER_RESUME_AT = 9_999_999_999_000
+  function runIsActive(run) {
+    if (!run) return false
+    if (run.status === 'done' || run.status === 'failed' || run.status === 'cancelled') {
+      return false
+    }
+    const parkedOnHuman = (run.steps || []).some(
+      (s) => s.status === 'suspended' && (s.resumeAt == null || s.resumeAt >= WF_NEVER_RESUME_AT),
+    )
+    return !parkedOnHuman
+  }
+
+  // Bumping the generation invalidates any in-flight fetch or scheduled poll:
+  // a stale callback compares its captured gen against the live one and bails.
+  // `wf.runs.pollGen` / `pollTimer` are lazily defaulted so main.js's run-state
+  // init stays untouched.
+  function stopRunPoll() {
+    wf.runs.pollGen = (wf.runs.pollGen || 0) + 1
+    clearTimeout(wf.runs.pollTimer)
+    wf.runs.pollTimer = null
+  }
+
   async function openWorkflowRunsModal(workflowId) {
     wf.runs.workflowId = workflowId
     wf.runs.selectedRunId = null
     wf.runs.rows = []
+    stopRunPoll() // RT — a fresh modal open invalidates any prior live poll
     if (dom.wfRunsTarget) dom.wfRunsTarget.textContent = workflowId
     if (dom.wfRunsMsg) dom.wfRunsMsg.textContent = ''
     if (dom.wfRunsList) dom.wfRunsList.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
@@ -772,6 +807,7 @@ export function createWorkflows({ wf }) {
 
   function closeWorkflowRunsModal() {
     if (dom.wfRunsModal) dom.wfRunsModal.hidden = true
+    stopRunPoll() // RT — stop the live poll when the modal closes
   }
 
   function renderWorkflowRunsList() {
@@ -798,21 +834,51 @@ export function createWorkflows({ wf }) {
 
   async function openWorkflowRunDetail(runId) {
     wf.runs.selectedRunId = runId
+    stopRunPoll() // switching runs invalidates any poll for the previous run
+    const gen = wf.runs.pollGen
     renderWorkflowRunsList()
     if (!dom.wfRunDetail) return
     dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml(t.loading)}</p>`
+    await fetchAndRenderRun(runId, gen)
+  }
+
+  // RT — shared fetch+render for one run's detail, used by both the user click
+  // (with a loading flash) and the silent live-poll. `gen` is the poll
+  // generation captured when this view opened; if the user has since switched
+  // runs or closed the modal `wf.runs.pollGen` advances and a stale in-flight
+  // result is dropped instead of clobbering whatever is now on screen.
+  async function fetchAndRenderRun(runId, gen) {
     try {
       const r = await fetch(`/api/admin/workflows/runs/${encodeURIComponent(runId)}`)
+      if (gen !== wf.runs.pollGen || wf.runs.selectedRunId !== runId) return
       if (!r.ok) {
         const body = await r.json().catch(() => ({}))
         dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml(body.error || `${r.status}`)}</p>`
         return
       }
       const body = await r.json()
+      if (gen !== wf.runs.pollGen || wf.runs.selectedRunId !== runId) return
       renderWorkflowRunDetail(body.run)
+      scheduleRunPoll(body.run, runId, gen)
     } catch (err) {
+      if (gen !== wf.runs.pollGen || wf.runs.selectedRunId !== runId) return
       dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml(err.message || String(err))}</p>`
     }
+  }
+
+  // RT — re-poll the open run detail after WF_RUN_POLL_MS while it's still
+  // moving. setTimeout (not setInterval) so each render decides afresh whether
+  // to continue; it naturally stops at a terminal/parked state. Guarded on gen
+  // + modal visibility so a closed modal or a switched run kills the loop.
+  function scheduleRunPoll(run, runId, gen) {
+    clearTimeout(wf.runs.pollTimer)
+    if (!runIsActive(run)) return
+    if (dom.wfRunsModal && dom.wfRunsModal.hidden) return
+    wf.runs.pollTimer = setTimeout(() => {
+      if (gen !== wf.runs.pollGen || wf.runs.selectedRunId !== runId) return
+      if (dom.wfRunsModal && dom.wfRunsModal.hidden) return
+      fetchAndRenderRun(runId, gen)
+    }, WF_RUN_POLL_MS)
   }
 
   // ease-of-use ❶-M1 — a failed step/run carries the raw provider error string
@@ -841,6 +907,11 @@ export function createWorkflows({ wf }) {
   function renderWorkflowRunDetail(run) {
     if (!dom.wfRunDetail) return
     const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t.workflowRunStillRunning
+    // RT — a pulsing「实时刷新中」tag whenever this run is still being polled, so
+    // the operator knows the view updates itself (vs. a frozen snapshot).
+    const liveTag = runIsActive(run)
+      ? `<span class="wf-run-live">${escapeHtml(t.workflowRunLive)}</span>`
+      : ''
     const finalBlock =
       run.status === 'failed'
         ? friendlyError(run.error || '')
@@ -949,6 +1020,7 @@ export function createWorkflows({ wf }) {
       <h4>
         <span class="wf-run-status wf-run-${escapeHtml(run.status)}">${escapeHtml(run.status)}</span>
         <code>${escapeHtml(run.runId)}</code>
+        ${liveTag}
       </h4>
       ${parkedBanner}
       <p class="hint">${escapeHtml(t.workflowRunDuration)}: ${escapeHtml(dur)} · ${escapeHtml(t.workflowRunTriggeredBy)}: <code>${escapeHtml(run.triggeredByTaskId)}</code></p>

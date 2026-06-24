@@ -2223,6 +2223,31 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .wf-run-cancelled { background: #e9e9e9; color: #888; }
 .wf-run-suspended { background: #e2e0fb; color: #50469a; }
 
+/* ease-of-use RT-M1 — live-poll indicator in the run-detail header. A pulsing
+   green dot signals the open run is still advancing and the panel is
+   auto-refreshing; it disappears the moment runIsActive() goes false (terminal
+   or parked-on-human), so the dot is also the "we stopped polling" signal. */
+.wf-run-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  color: #1f7a4d;
+  font-weight: 600;
+}
+.wf-run-live::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2ea36b;
+  animation: wf-run-live-pulse 1.4s ease-in-out infinite;
+}
+@keyframes wf-run-live-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
 /* Phase 15 — workflow lifecycle state badge (on cards) + revision rows.
    Same chip shape as .wf-run-status; one colour per lifecycle state. */
 .wf-state {

@@ -1938,10 +1938,28 @@
         dom.wfImportMsg.classList.add("err");
       }
     }
+    const WF_RUN_POLL_MS = 2e3;
+    const WF_NEVER_RESUME_AT = 9999999999e3;
+    function runIsActive(run) {
+      if (!run) return false;
+      if (run.status === "done" || run.status === "failed" || run.status === "cancelled") {
+        return false;
+      }
+      const parkedOnHuman = (run.steps || []).some(
+        (s) => s.status === "suspended" && (s.resumeAt == null || s.resumeAt >= WF_NEVER_RESUME_AT)
+      );
+      return !parkedOnHuman;
+    }
+    function stopRunPoll() {
+      wf.runs.pollGen = (wf.runs.pollGen || 0) + 1;
+      clearTimeout(wf.runs.pollTimer);
+      wf.runs.pollTimer = null;
+    }
     async function openWorkflowRunsModal(workflowId) {
       wf.runs.workflowId = workflowId;
       wf.runs.selectedRunId = null;
       wf.runs.rows = [];
+      stopRunPoll();
       if (dom.wfRunsTarget) dom.wfRunsTarget.textContent = workflowId;
       if (dom.wfRunsMsg) dom.wfRunsMsg.textContent = "";
       if (dom.wfRunsList) dom.wfRunsList.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
@@ -1969,6 +1987,7 @@
     }
     function closeWorkflowRunsModal() {
       if (dom.wfRunsModal) dom.wfRunsModal.hidden = true;
+      stopRunPoll();
     }
     function renderWorkflowRunsList() {
       if (!dom.wfRunsList) return;
@@ -1993,21 +2012,40 @@
     }
     async function openWorkflowRunDetail(runId) {
       wf.runs.selectedRunId = runId;
+      stopRunPoll();
+      const gen = wf.runs.pollGen;
       renderWorkflowRunsList();
       if (!dom.wfRunDetail) return;
       dom.wfRunDetail.innerHTML = `<p class="hint">${escapeHtml4(t4.loading)}</p>`;
+      await fetchAndRenderRun(runId, gen);
+    }
+    async function fetchAndRenderRun(runId, gen) {
       try {
         const r = await fetch(`/api/admin/workflows/runs/${encodeURIComponent(runId)}`);
+        if (gen !== wf.runs.pollGen || wf.runs.selectedRunId !== runId) return;
         if (!r.ok) {
           const body2 = await r.json().catch(() => ({}));
           dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml4(body2.error || `${r.status}`)}</p>`;
           return;
         }
         const body = await r.json();
+        if (gen !== wf.runs.pollGen || wf.runs.selectedRunId !== runId) return;
         renderWorkflowRunDetail(body.run);
+        scheduleRunPoll(body.run, runId, gen);
       } catch (err) {
+        if (gen !== wf.runs.pollGen || wf.runs.selectedRunId !== runId) return;
         dom.wfRunDetail.innerHTML = `<p class="form-msg err">${escapeHtml4(err.message || String(err))}</p>`;
       }
+    }
+    function scheduleRunPoll(run, runId, gen) {
+      clearTimeout(wf.runs.pollTimer);
+      if (!runIsActive(run)) return;
+      if (dom.wfRunsModal && dom.wfRunsModal.hidden) return;
+      wf.runs.pollTimer = setTimeout(() => {
+        if (gen !== wf.runs.pollGen || wf.runs.selectedRunId !== runId) return;
+        if (dom.wfRunsModal && dom.wfRunsModal.hidden) return;
+        fetchAndRenderRun(runId, gen);
+      }, WF_RUN_POLL_MS);
     }
     function friendlyError(raw) {
       const d = window.AipeHub.describeError(raw);
@@ -2019,6 +2057,7 @@
     function renderWorkflowRunDetail(run) {
       if (!dom.wfRunDetail) return;
       const dur = run.endedAt ? `${run.endedAt - run.startedAt}ms` : t4.workflowRunStillRunning;
+      const liveTag = runIsActive(run) ? `<span class="wf-run-live">${escapeHtml4(t4.workflowRunLive)}</span>` : "";
       const finalBlock = run.status === "failed" ? friendlyError(run.error || "") : run.finalOutput !== void 0 ? `<details open><summary>${escapeHtml4(t4.workflowRunFinal)}</summary><pre class="wf-pre">${escapeHtml4(JSON.stringify(run.finalOutput, null, 2))}</pre></details>` : "";
       const steps = (run.steps || []).map((s) => {
         const sDur = s.endedAt ? `${s.endedAt - s.startedAt}ms` : "—";
@@ -2071,6 +2110,7 @@
       <h4>
         <span class="wf-run-status wf-run-${escapeHtml4(run.status)}">${escapeHtml4(run.status)}</span>
         <code>${escapeHtml4(run.runId)}</code>
+        ${liveTag}
       </h4>
       ${parkedBanner}
       <p class="hint">${escapeHtml4(t4.workflowRunDuration)}: ${escapeHtml4(dur)} · ${escapeHtml4(t4.workflowRunTriggeredBy)}: <code>${escapeHtml4(run.triggeredByTaskId)}</code></p>
