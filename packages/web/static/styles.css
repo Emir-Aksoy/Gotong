@@ -2248,6 +2248,26 @@ body.admin[data-active-tab="activity"] main.admin-grid {
   50% { opacity: 1; }
 }
 
+/* ease-of-use RT-M2 — member recent-runs live indicator (in the「最近运行」
+   heading). Reuses the wf-run-live-pulse keyframe above; sized for the h2. */
+.me-runs-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.72rem;
+  color: #1f7a4d;
+  font-weight: 600;
+  vertical-align: middle;
+}
+.me-runs-live::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #2ea36b;
+  animation: wf-run-live-pulse 1.4s ease-in-out infinite;
+}
+
 /* Phase 15 — workflow lifecycle state badge (on cards) + revision rows.
    Same chip shape as .wf-run-status; one colour per lifecycle state. */
 .wf-state {

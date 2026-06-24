@@ -1966,36 +1966,128 @@
     return r.json()
   }
 
-  // Member recent runs (Phase 19 P1-M2). Lists the caller's own workflow runs,
-  // newest first — server-scoped, so a member never sees another user's runs.
-  async function loadMyRuns() {
-    const tbody = document.getElementById('me-runs-tbody')
-    if (!tbody) return
-    tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${t('meLoading')}</td></tr>`
-    try {
-      const r = await fetch('/api/me/runs')
-      if (!r.ok) {
-        tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${t('meLoadFailedHttp', r.status)}</td></tr>`
-        return
-      }
-      const j = await r.json()
-      const runs = Array.isArray(j?.runs) ? j.runs : []
-      if (runs.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${t('meNoRuns')}</td></tr>`
-        return
-      }
-      tbody.innerHTML = runs
-        .map(
-          (run) => `
+  // ease-of-use RT-M2 — recent-runs live polling. A member's run table is a
+  // passive view, so while a run is still 'running' we re-poll the SAME
+  // /api/me/runs list (zero backend change — the runner persists run state after
+  // every step, so each fetch returns a more-complete picture) and update the
+  // table in place. Two honest bounds keep it gentle: (1) the list-level status
+  // can't tell "actively running" from "parked on a human" (a parked run keeps
+  // disk status 'running'), so instead of polling forever we cap the total
+  // window and back the interval off as it runs; (2) polling pauses when the
+  // table is off-screen (another tab). A generation counter voids in-flight
+  // polls when the member refreshes, navigates, or the language toggles.
+  const WF_MY_RUNS_POLL_BASE_MS = 4000
+  const WF_MY_RUNS_POLL_MAX_MS = 20000
+  const WF_MY_RUNS_POLL_CAP_MS = 120000
+  const myRunsPoll = { timer: null, gen: 0, startMs: 0 }
+
+  function myRunsActive(runs) {
+    return runs.some((r) => r && r.status === 'running')
+  }
+  function setMyRunsLive(on) {
+    const el = document.getElementById('me-runs-live')
+    if (!el) return
+    el.hidden = !on
+    if (on) el.textContent = t('workflowRunLive')
+  }
+  function stopMyRunsPoll() {
+    myRunsPoll.gen += 1
+    if (myRunsPoll.timer) { clearTimeout(myRunsPoll.timer); myRunsPoll.timer = null }
+    setMyRunsLive(false)
+  }
+  // Shared row template, used by both the flash-load and the quiet poll refresh
+  // so the rendered markup stays identical across the two paths.
+  function myRunsRowsHtml(runs) {
+    return runs
+      .map(
+        (run) => `
             <tr>
               <td>${escape(run.workflowId || '?')}</td>
               <td>${renderRunStatus(run.status)}</td>
               <td>${escape(formatTs(run.startedAt))}</td>
               <td>${run.endedAt ? escape(formatTs(run.endedAt)) : `<span class="me-meta">${t('meInProgress')}</span>`}</td>
             </tr>${renderRunFailure(run)}`,
-        )
-        .join('')
+      )
+      .join('')
+  }
+  // Decide whether to keep polling. Stops when nothing is running, the table is
+  // hidden (another tab) or gone, or the bounded window elapsed — the time cap
+  // is the honest stop for a run parked on a human that never leaves 'running'.
+  function scheduleMyRunsPoll(runs, gen) {
+    if (gen !== myRunsPoll.gen) return
+    if (myRunsPoll.timer) { clearTimeout(myRunsPoll.timer); myRunsPoll.timer = null }
+    const tbody = document.getElementById('me-runs-tbody')
+    const elapsed = Date.now() - myRunsPoll.startMs
+    if (!myRunsActive(runs) || !tbody || tbody.offsetParent === null || elapsed >= WF_MY_RUNS_POLL_CAP_MS) {
+      setMyRunsLive(false)
+      return
+    }
+    setMyRunsLive(true)
+    // back the interval off the longer it runs, so a long-lived run isn't hammered
+    const delay = Math.min(WF_MY_RUNS_POLL_BASE_MS + elapsed / 4, WF_MY_RUNS_POLL_MAX_MS)
+    myRunsPoll.timer = setTimeout(() => refreshMyRunsQuiet(gen), delay)
+  }
+  // Re-render the table from a fresh fetch WITHOUT the loading flash, then
+  // re-arm. Used by the poll tick and by a return-to-home tab change (the panel
+  // isn't re-rendered on tab switch, so loadMyRuns doesn't re-run on its own).
+  async function refreshMyRunsQuiet(gen) {
+    if (gen !== myRunsPoll.gen) return
+    const tbody = document.getElementById('me-runs-tbody')
+    if (!tbody) { setMyRunsLive(false); return }
+    try {
+      const r = await fetch('/api/me/runs')
+      if (gen !== myRunsPoll.gen) return
+      if (!r.ok) { setMyRunsLive(false); return } // quiet stop on transient error
+      const j = await r.json()
+      if (gen !== myRunsPoll.gen) return
+      const runs = Array.isArray(j?.runs) ? j.runs : []
+      tbody.innerHTML = runs.length === 0
+        ? `<tr><td colspan="4" class="me-meta">${t('meNoRuns')}</td></tr>`
+        : myRunsRowsHtml(runs)
+      scheduleMyRunsPoll(runs, gen)
+    } catch {
+      if (gen !== myRunsPoll.gen) return
+      setMyRunsLive(false) // quiet stop; manual refresh / new dispatch re-arms
+    }
+  }
+  // On returning to the home tab, re-arm the poll (renderHome doesn't re-run on
+  // a tab switch). Quiet — no loading flash — so a finished run just settles in.
+  function armMyRunsPollOnReturn() {
+    if (!SIGNED_IN) return
+    const tbody = document.getElementById('me-runs-tbody')
+    if (!tbody || tbody.offsetParent === null) return
+    stopMyRunsPoll()
+    myRunsPoll.startMs = Date.now()
+    refreshMyRunsQuiet(myRunsPoll.gen)
+  }
+
+  // Member recent runs (Phase 19 P1-M2). Lists the caller's own workflow runs,
+  // newest first — server-scoped, so a member never sees another user's runs.
+  async function loadMyRuns() {
+    const tbody = document.getElementById('me-runs-tbody')
+    if (!tbody) return
+    stopMyRunsPoll()
+    const gen = myRunsPoll.gen
+    myRunsPoll.startMs = Date.now()
+    tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${t('meLoading')}</td></tr>`
+    try {
+      const r = await fetch('/api/me/runs')
+      if (gen !== myRunsPoll.gen) return
+      if (!r.ok) {
+        tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${t('meLoadFailedHttp', r.status)}</td></tr>`
+        return
+      }
+      const j = await r.json()
+      if (gen !== myRunsPoll.gen) return
+      const runs = Array.isArray(j?.runs) ? j.runs : []
+      if (runs.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${t('meNoRuns')}</td></tr>`
+        return
+      }
+      tbody.innerHTML = myRunsRowsHtml(runs)
+      scheduleMyRunsPoll(runs, gen)
     } catch (err) {
+      if (gen !== myRunsPoll.gen) return
       tbody.innerHTML = `<tr><td colspan="4" class="me-meta">${escape(t('meLoadFailedErr', err?.message || String(err)))}</td></tr>`
     }
   }
@@ -3306,6 +3398,13 @@
       applyOrgMode().catch((err) => console.warn('[app] applyOrgMode (lang) failed', err))
       renderHome().catch((err) => console.error('[app] renderHome (lang) failed', err))
       renderSettings().catch((err) => console.error('[app] renderSettings (lang) failed', err))
+    })
+    // ease-of-use RT-M2 — when the member navigates back to the home tab, re-arm
+    // the recent-runs poll (the panel isn't re-rendered on a tab switch). Wired
+    // AFTER wireTabs above, so the boot-time tabchange has already fired and
+    // this listener doesn't trigger a redundant startup fetch.
+    window.addEventListener('aipehub:tabchange', (ev) => {
+      if (ev?.detail?.name === 'home') armMyRunsPollOnReturn()
     })
   })
 
