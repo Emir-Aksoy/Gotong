@@ -110,6 +110,20 @@ Decisions (updated 2026-06-08) — each is independent and any can stay
     workflow (gated on the GitHub-upload freeze); ② optional macOS +
     Windows code-signing (paid certs — see the "Deferred" footer in
     `release.yml`).
+  - ⚠️ **Capability caveat (proven 2026-06-25).** The `bun --compile`
+    single-file binaries boot the web server but **drop the identity
+    layer**: `better-sqlite3` (the one native addon) can't be `dlopen`'d
+    from the embedded `/$bunfs/` FS, so only the memory/artifact plugins
+    seed (`BINARY_SAFE_PLUGINS`), not `datastore-sqlite`. For a
+    **full-capability** zero-Node/Docker artifact there is now
+    [`scripts/build-portable.mjs`](../scripts/build-portable.mjs) — an
+    embedded-runtime portable bundle (pinned Node + `pnpm deploy --prod`
+    host + real on-disk `node_modules`, double-click via the tier-0
+    branch in [`deploy/AipeHub.command`](../deploy/AipeHub.command)).
+    Real Node → `isCompiledBinary()` false → host runs the full
+    identity-backed path. Built on demand, **not committed** (`dist-portable/`
+    is gitignored); macOS arm64 this round. Write-up:
+    [`docs/zh/PORTABLE-BUNDLE.md`](../docs/zh/PORTABLE-BUNDLE.md).
 
 ## Documentation polish
 

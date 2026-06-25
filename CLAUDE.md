@@ -497,6 +497,7 @@ UX 入口都从 admin 视角进。**个人用户应该有 first-class 入口**:
 | 移动端 / PWA | ✓ Phase 12 M9-M11 完 — PWA app-shell (manifest + SW, `/api/*` 不缓存) + `@media` 响应式 admin SPA (单列 + 横滚表格 + 触控目标) |
 | IM bridge(微信/Telegram/Slack) | ✓ Phase 12 完 — 6 bridge (telegram/matrix/lark/discord/slack/qq) + router + cookbook; **IM 官方化完** — 有官方的全切官方直连 (QQ OneBot→官方 Bot webhook / Lark webhook→官方长连接 / Slack webhook→Socket Mode), host `startImBridges` env-gate 4 桥; 详见 [`docs/zh/IM-OFFICIAL-REARCH.md`](docs/zh/IM-OFFICIAL-REARCH.md) |
 | 交互式 CLI shell | ✓ Phase 12 M12 完 — `aipehub repl` + `:`-prefix 元命令 |
+| 桌面分发 (下载双击即跑) | ✓ 嵌入式运行时便携包完 — `scripts/build-portable.mjs` (pnpm deploy --prod host + pinned Node + 真 node_modules 含原生 `better_sqlite3.node`) → 双击 `deploy/AipeHub.command` tier-0 分支, **零系统 Node/Docker, 全能力** (真 Node → `isCompiledBinary` false → identity/原生 sqlite/动态插件全活); 对比 bun `--compile` 单文件丢 identity 层; 按需构建不入库 (`dist-portable/` gitignore), mac-arm64 本轮; 详见 [`docs/zh/PORTABLE-BUNDLE.md`](docs/zh/PORTABLE-BUNDLE.md) |
 
 补的话从 IM bridge 起步成本最低 — 复用 MCP server 思路, 一个 bot
 进程把 IM 消息翻成 Hub dispatch, 把 transcript 推回 IM。
@@ -633,6 +634,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 内置 MCP 连接器目录 + 主流注册站搜索 + 架构师优先推荐 (admin「MCP 集成」标签页内置连接器卡片 + 一键装复用 `POST /api/admin/mcp-servers`; 主流搜索=fetch 配方指向官方注册站 REST 不自研; 架构师喂 `contextHints.mcpServers` 优先围绕已装组件建; step→capability→agent→MCP 心智 + 三交付 + SSRF 警示 + 未来自建导航站种子) | `docs/zh/MCP-CONNECTOR-DIRECTORY.md` |
 | Services 插件 RFC 系列 | `docs/services-rfc.md` 及 `*-rfc.md` |
 | 上线 runbook — 三拓扑准备上线 (**T1** 家用主机+IM / **T2** 云服务器+IM / **T3** 云服务器+直连 IP; IM 桥出站长轮询故 NAT 后家用机不需内网穿透; **家用 vs 云差异 = 二进制/数据目录/配置/IM 全一样, 差异 100% 在周界**; 成员 IM 绑定流程 + 云 IP 暴露风险表 + master key 挪出数据盘 + 远程首启 mint-admin-token; 配置模板 `deploy/.env.home`/`.env.cloud`/`deploy/README.md`; 加固脚本 `scripts/cloud-harden.sh`) | `docs/zh/GO-LIVE.md` |
+| 便携包分发 — 下载双击即跑 (零 Node/Docker; **三道墙诊断** 认知/获取/装运行时 — 小白死在启动**之前** + SEA/bun/嵌入式**对照表** [SEA 不能嵌 `.node` / bun `--compile` 从 `/$bunfs/` 解析不到 better-sqlite3 → identity 整层静默失效 / **仅嵌入式运行时交付全能力**] + `scripts/build-portable.mjs` **承重机制** [`pnpm deploy --prod` 产真去符号链接 node_modules + pinned Node + `isCompiledBinary()` 真 Node 返 false 走全能力路径, **运行时源码零改**] + launcher tier-0 自包含分支 + 平台扩展 + 产物不入库按需构建诚实边界 + 真机启动证明 [`/healthz` 200 + `datastore:sqlite` 插件 load]) | `docs/zh/PORTABLE-BUNDLE.md` |
 | 部署 / 运维 / 监控 | `docs/zh/DEPLOY.md`, `docs/OPERATIONS.md`, `docs/MONITORING.md` |
 | 历史 commit 流水账 | `CHANGELOG-v3-dev.md`, `CHANGELOG.md` |
 | 历史外部审计 | `audits/<date>-<auditor>/` (按时间归档, `audits/README.md` 是索引) |

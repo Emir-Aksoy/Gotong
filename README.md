@@ -59,6 +59,26 @@ Contributing? See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security issues: [`SECUR
 
 ## Quick start
 
+### Non-technical user? Double-click, zero Node/Docker
+
+The path that needs **no terminal, no Node, no Docker** on the machine that runs
+it. A maintainer builds a self-contained portable bundle once:
+
+```bash
+node scripts/build-portable.mjs        # → dist-portable/AipeHub-macos-arm64/
+```
+
+Then hand the whole `AipeHub-macos-arm64/` folder to anyone. They **double-click
+`AipeHub.command`** → the browser opens the 5-minute setup wizard. The bundle
+ships its own pinned Node runtime + the compiled host + a real on-disk
+`node_modules` (including the native SQLite binding), so it runs the **full**
+identity-backed host on a machine with nothing installed. Data lives in
+`~/.aipehub` (outside the folder), so replacing the bundle never loses data.
+
+Built on demand, not a committed/published download yet (that's the post-1.0
+plan) — for now "download & run" means *build the folder once, share the folder*.
+macOS arm64 this round. Full write-up: [`docs/zh/PORTABLE-BUNDLE.md`](docs/zh/PORTABLE-BUNDLE.md).
+
 ### Get running in 30 seconds — pick one
 
 ```bash
