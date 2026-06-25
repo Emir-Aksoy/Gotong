@@ -25,27 +25,42 @@ export function sendJson(res: ServerResponse, data: unknown, status = 200): void
 }
 
 /**
+ * Buffer a request body as a UTF-8 string, enforcing {@link MAX_BODY_BYTES}
+ * on the *byte* length rather than the accumulated string's `.length`.
+ *
+ * Node delivers `data` chunks as Buffers; `String(chunk).length` counts
+ * UTF-16 code units, and CJK text is 3 UTF-8 bytes per single code unit — so
+ * a `.length` check silently let a body grow to ~3× the intended ceiling
+ * before tripping. Counting bytes incrementally keeps the cap honest (and
+ * still bounds memory: we reject before `buf` can grow past the limit).
+ */
+function bufferBody(req: IncomingMessage): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let buf = ''
+    let bytes = 0
+    req.on('data', (chunk: Buffer | string) => {
+      bytes += Buffer.byteLength(chunk)
+      if (bytes > MAX_BODY_BYTES) {
+        req.destroy()
+        reject(new Error('body too large'))
+        return
+      }
+      buf += typeof chunk === 'string' ? chunk : chunk.toString('utf8')
+    })
+    req.on('end', () => resolve(buf))
+    req.on('error', reject)
+  })
+}
+
+/**
  * Buffer a request body and `JSON.parse` it. Resolves `undefined` for an
  * empty body, rejects on a parse error or once the body exceeds
  * {@link MAX_BODY_BYTES}.
  */
-export function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    let buf = ''
-    req.on('data', (chunk: string) => {
-      buf += chunk
-      if (buf.length > MAX_BODY_BYTES) {
-        req.destroy()
-        reject(new Error('body too large'))
-      }
-    })
-    req.on('end', () => {
-      if (!buf) return resolve(undefined)
-      try { resolve(JSON.parse(buf)) }
-      catch (err) { reject(err) }
-    })
-    req.on('error', reject)
-  })
+export async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+  const buf = await bufferBody(req)
+  if (!buf) return undefined
+  return JSON.parse(buf)
 }
 
 /**
@@ -54,18 +69,7 @@ export function readJsonBody(req: IncomingMessage): Promise<unknown> {
  * {@link readJsonBody}.
  */
 export function readTextBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let buf = ''
-    req.on('data', (chunk: string) => {
-      buf += chunk
-      if (buf.length > MAX_BODY_BYTES) {
-        req.destroy()
-        reject(new Error('body too large'))
-      }
-    })
-    req.on('end', () => resolve(buf))
-    req.on('error', reject)
-  })
+  return bufferBody(req)
 }
 
 /** Read a single cookie value out of the request's `Cookie` header. */
