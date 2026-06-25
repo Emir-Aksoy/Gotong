@@ -1,6 +1,8 @@
 node_modules/
 dist/
 build/
+# Portable bundle output (scripts/build-portable.mjs) — built on demand, never committed.
+dist-portable/
 *.tsbuildinfo
 .DS_Store
 *.log
