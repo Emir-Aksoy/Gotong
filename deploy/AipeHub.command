@@ -42,6 +42,18 @@ launch() {
   exec "$@"
 }
 
+# Tier 0 — self-contained portable bundle. When this launcher sits next to a
+# pinned Node runtime and a deployed host (the scripts/build-portable.mjs
+# output), run them directly: zero system Node, zero Docker. Data lives in
+# ~/.aipehub (outside the bundle), so deleting or replacing the bundle never
+# loses data. Not a bundle? This branch simply doesn't match and we fall
+# through to the source-checkout / CLI / npx paths below — byte-for-byte
+# unchanged for anyone running this from a repo.
+if [ -x "$SCRIPT_DIR/runtime/bin/node" ] && [ -f "$SCRIPT_DIR/app/dist/main.js" ]; then
+  export AIPE_SPACE="${AIPE_SPACE:-$HOME/.aipehub}"
+  launch "$SCRIPT_DIR/runtime/bin/node" "$SCRIPT_DIR/app/dist/main.js"
+fi
+
 # Walk up from the script for a monorepo checkout (pnpm-workspace.yaml +
 # packages/host). If you double-clicked this file inside your own checkout,
 # that is almost certainly the host you mean to run.
