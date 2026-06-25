@@ -249,11 +249,18 @@ export function validateSamlResponse(input: ValidateSamlResponseInput): SamlAsse
     throw new SamlError('status_not_success', `SAML status is not Success: ${statusValue ?? 'missing'}`)
   }
 
-  // Response-level InResponseTo (when we initiated the flow).
+  // Response-level InResponseTo. We only ever drive SP-initiated flows, so a
+  // set `expectedInResponseTo` means we sent an AuthnRequest and a *solicited*
+  // response MUST echo its ID (SAML core §3.2.2). A MISSING InResponseTo is
+  // NOT "skip the check" — for an SP-initiated flow it means the response is
+  // not a reply to our request (a stray or IdP-initiated assertion replayed
+  // into our own RelayState), so reject it fail-closed. This is the
+  // authoritative request↔response binding; the SubjectConfirmationData echo
+  // below is only a secondary cross-check.
   if (input.expectedInResponseTo) {
     const rIrt = attr(response, 'InResponseTo')
-    if (rIrt && rIrt !== input.expectedInResponseTo) {
-      throw new SamlError('bad_in_response_to', 'Response InResponseTo does not match the AuthnRequest id')
+    if (rIrt !== input.expectedInResponseTo) {
+      throw new SamlError('bad_in_response_to', 'Response InResponseTo is missing or does not match the AuthnRequest id')
     }
   }
 

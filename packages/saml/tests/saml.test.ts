@@ -311,6 +311,22 @@ describe('validateSamlResponse — condition checks', () => {
     expectCode(() => validate(signedAssertionResponse({ inResponseTo: '_someoneElsesRequest' })), 'bad_in_response_to')
   })
 
+  it('rejects a missing InResponseTo on a solicited (SP-initiated) response', () => {
+    // We sent an AuthnRequest (expectedInResponseTo is set), so a response with
+    // NO InResponseTo is not "skip the check" — it's a stray / IdP-initiated
+    // assertion replayed into our own RelayState. Reject it fail-closed rather
+    // than letting a missing value bypass the request↔response binding.
+    expectCode(() => validate(signedAssertionResponse({ inResponseTo: null })), 'bad_in_response_to')
+  })
+
+  it('accepts a missing InResponseTo for an UNSOLICITED (IdP-initiated) flow', () => {
+    // When we did NOT initiate (no expectedInResponseTo), a response legitimately
+    // carries no InResponseTo — the binding check simply doesn't apply. This pins
+    // that the fail-closed tightening above is scoped to solicited flows only.
+    const a = validate(signedAssertionResponse({ inResponseTo: null }), { expectedInResponseTo: undefined })
+    expect(a.nameId).toBe('alice@example.com')
+  })
+
   it('rejects an expired assertion (past NotOnOrAfter beyond skew)', () => {
     expectCode(() => validate(signedAssertionResponse(), { now: NOW + 60 * 60_000 }), 'assertion_expired')
   })
