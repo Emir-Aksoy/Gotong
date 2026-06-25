@@ -194,6 +194,14 @@ export function buildDeliveryRequest(
  * discord/lark are incoming-webhook posts (the token lives in `url`); telegram
  * is a bot-API call whose token (secret, from env) goes in the path and whose
  * chat id is `target`.
+ *
+ * SECURITY: the bot token / webhook secret rides in the request URL — this is
+ * inherent to both the Telegram Bot API path scheme (`/bot<token>/sendMessage`)
+ * and incoming-webhook URLs, not a choice we can avoid. It is read from env
+ * per-send and never persisted (the channel row stores only the env-var *name*,
+ * never the value), but a URL-logging forward proxy sitting between this host
+ * and the platform would capture it. Don't route alert delivery through such a
+ * proxy, or scrub the path in its access logs if you must.
  */
 function buildImRequest(
   channel: PeerSummaryAlertChannel,

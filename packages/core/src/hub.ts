@@ -921,11 +921,11 @@ export class Hub {
      *
      * The hub rejects the dispatch up-front when:
      *   - chain length is already at `MAX_DISPATCH_DEPTH` (depth gate)
-     *   - the new task's `from` already appears on the chain (cycle:
-     *     A is dispatching while still on the call stack from a
-     *     previous task A dispatched)
-     *   - an `explicit` strategy targets an id already on the chain
-     *     (cycle: A → B → A pattern)
+     *   - an `explicit` strategy targets an id that already appears on
+     *     the chain as some ancestor's executor (`by`) — the A → B → A
+     *     cycle pattern. Recursive self-dispatch (A → A → A …) is *not*
+     *     gated here; it bottoms out at the depth gate and is a valid
+     *     design (see `checkDispatchGates`).
      *
      * Rejected dispatches still create a task entry in the transcript
      * (so audit shows what was attempted) plus an immediate failed
