@@ -33,6 +33,10 @@
     "./check": {
       "types": "./dist/workspace-check.d.ts",
       "import": "./dist/workspace-check.js"
+    },
+    "./ops": {
+      "types": "./dist/ops-core.d.ts",
+      "import": "./dist/ops-core.js"
     }
   },
   "files": [
