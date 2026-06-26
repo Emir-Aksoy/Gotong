@@ -31,6 +31,12 @@ import { dirname, resolve } from 'node:path'
 import { resolveModule } from './start.js'
 
 const HOST_PKG = '@aipehub/host'
+// A variable, not a string literal, on purpose: tsc only resolves
+// `import("literal")` at build time, so this dynamic import does NOT make
+// `@aipehub/host` a build-time dependency of the tiny CLI (same trick as
+// `start` / `check`). The deep definitions check runs the host's own
+// validators via its non-booting `./check` subpath.
+const CHECK_PKG = '@aipehub/host/check'
 
 /** Repo `engines.node` floor — keep in sync with the workspace package.json. */
 const MIN_NODE_MAJOR = 20
@@ -67,8 +73,46 @@ export interface DoctorDeps {
   probePath?: (path: string) => Promise<PathProbe>
   /** `--fix` seam: create AIPE_SPACE (recursive). Defaults to a real `mkdir -p`. */
   mkdirp?: (path: string) => Promise<void>
+  /**
+   * Deep definitions-check seam: validate the workspace's loaded workflows +
+   * agents (the host-owned validators). Defaults to importing
+   * `@aipehub/host/check` and running `validateWorkspace`. Tests inject a fake.
+   */
+  runWorkspaceCheck?: (
+    spaceDir: string,
+    env: Record<string, string | undefined>,
+  ) => Promise<WorkspaceCheckSummary>
   out?: (line: string) => void
   err?: (line: string) => void
+}
+
+/**
+ * Just the definitions counts the doctor needs from a workspace check —
+ * structural so the CLI takes NO build-time type dependency on `@aipehub/host`.
+ * (The detailed per-file report is what `aipehub check` prints; the doctor only
+ * summarises "do they load".)
+ */
+export interface WorkspaceCheckSummary {
+  workflows: { ok: number; bad: number }
+  agents: { ok: number; bad: number }
+}
+
+/** Default deep-check: run the host's `validateWorkspace` via its `./check` subpath. */
+async function defaultRunWorkspaceCheck(
+  spaceDir: string,
+  env: Record<string, string | undefined>,
+): Promise<WorkspaceCheckSummary> {
+  const mod = (await import(CHECK_PKG)) as {
+    validateWorkspace: (o: {
+      spaceDir: string
+      env: Record<string, string | undefined>
+    }) => Promise<WorkspaceCheckSummary>
+  }
+  const r = await mod.validateWorkspace({ spaceDir, env })
+  // Take ONLY the definitions counts — the config 体检 inside validateWorkspace
+  // overlaps the doctor's own env checks (ports/space/master key), so we don't
+  // re-surface it here and risk double-reporting.
+  return { workflows: r.workflows, agents: r.agents }
 }
 
 /** Bind-and-release probe: the only honest way to know a port is actually free. */
@@ -275,6 +319,83 @@ export async function collectChecks(deps: DoctorDeps = {}): Promise<DoctorCheck[
   ]
 }
 
+/** Map definitions counts to doctor ✓/✖ lines (summary; details are `aipehub check`). */
+function definitionChecks(s: WorkspaceCheckSummary): DoctorCheck[] {
+  const out: DoctorCheck[] = []
+  const wTotal = s.workflows.ok + s.workflows.bad
+  out.push(
+    s.workflows.bad > 0
+      ? {
+          level: 'error',
+          label: 'Workflow definitions',
+          detail: `${s.workflows.bad} of ${wTotal} won't parse`,
+          fix: 'Run `aipehub check` for the details, fix the YAML, or set AIPE_STRICT_DEFINITIONS=1 to refuse to boot on a broken file.',
+        }
+      : {
+          level: 'ok',
+          label: 'Workflow definitions',
+          detail: wTotal ? `${s.workflows.ok} file(s) parse` : 'none yet',
+        },
+  )
+  out.push(
+    s.agents.bad > 0
+      ? {
+          level: 'error',
+          label: 'Agents (agents.json)',
+          detail: `${s.agents.bad} broken row(s)`,
+          fix: 'Run `aipehub check` for the details, then fix agents.json.',
+        }
+      : {
+          level: 'ok',
+          label: 'Agents (agents.json)',
+          detail: s.agents.ok ? `${s.agents.ok} row(s) loadable` : 'none yet',
+        },
+  )
+  return out
+}
+
+/**
+ * Deep check of the workspace's loaded definitions (workflows + agents) — the
+ * same deterministic validators the host runs at boot, surfaced in the
+ * pre-flight. Gated, and best-effort:
+ *
+ *   - Definitions live UNDER AIPE_SPACE, so there's nothing to check until the
+ *     directory exists — on a fresh box (space `creatable`/`blocked`/not-a-dir)
+ *     this returns [] and the section is omitted entirely.
+ *   - The validators ship in `@aipehub/host`; without it resolvable we skip
+ *     (the env section already warns the host isn't installed here).
+ *   - A probe error never breaks the pre-flight — it degrades to one ⚠ that
+ *     points at `aipehub check`.
+ *
+ * Pure given its seams (`probePath` / `resolveHost` / `runWorkspaceCheck`).
+ */
+export async function collectDefinitionChecks(deps: DoctorDeps = {}): Promise<DoctorCheck[]> {
+  const env = deps.env ?? process.env
+  const resolveHost = deps.resolveHost ?? (() => resolveModule(HOST_PKG))
+  const probePath = deps.probePath ?? probePathReal
+  const runCheck = deps.runWorkspaceCheck ?? defaultRunWorkspaceCheck
+  const space = env.AIPE_SPACE?.trim() || '.aipehub'
+
+  const probe = await probePath(space)
+  if (probe !== 'writable' && probe !== 'exists-readonly') return []
+  if (!resolveHost()) return []
+
+  let summary: WorkspaceCheckSummary
+  try {
+    summary = await runCheck(space, env)
+  } catch (e) {
+    return [
+      {
+        level: 'warn',
+        label: 'Definitions',
+        detail: `could not check workflows/agents (${e instanceof Error ? e.message : String(e)})`,
+        fix: 'Run `aipehub check` directly to see why.',
+      },
+    ]
+  }
+  return definitionChecks(summary)
+}
+
 const MARK: Record<CheckLevel, string> = { ok: '✓', warn: '⚠', error: '✖' }
 const FIX_MARK: Record<FixOutcome, string> = { fixed: '✓', skipped: '•', failed: '✖' }
 
@@ -312,8 +433,22 @@ export async function doctor(args: readonly string[], deps: DoctorDeps = {}): Pr
   }
   out('\n')
 
-  const errors = checks.filter((c) => c.level === 'error').length
-  const warns = checks.filter((c) => c.level === 'warn').length
+  // Deep definitions check — runs the host's own validators against the loaded
+  // workflows + agents when the host + a seeded AIPE_SPACE are present (skipped,
+  // not failed, on a fresh box). Printed as its own section under the env checks.
+  const defChecks = await collectDefinitionChecks(deps)
+  if (defChecks.length) {
+    out('Definitions (workflows + agents):\n')
+    for (const c of defChecks) {
+      out(`  ${MARK[c.level]} ${c.label} — ${c.detail}\n`)
+      if (c.fix && c.level !== 'ok') out(`      → ${c.fix}\n`)
+    }
+    out('\n')
+  }
+
+  const all = [...checks, ...defChecks]
+  const errors = all.filter((c) => c.level === 'error').length
+  const warns = all.filter((c) => c.level === 'warn').length
   if (errors > 0) {
     out(`✖ ${errors} blocker${errors > 1 ? 's' : ''}${warns ? `, ${warns} warning${warns > 1 ? 's' : ''}` : ''} — fix the ✖ items above, then re-run.\n`)
     return 1
@@ -337,6 +472,9 @@ reads — WITHOUT booting it — and prints, per check, ✓ / ⚠ / ✖ with a f
   - AIPE_SPACE writable (or creatable on first run)
   - master key: AIPE_MASTER_KEY present when provider=env
   - an LLM provider key in the env (optional — the setup wizard can set one)
+  - workflow + agent definitions parse — when @aipehub/host and a seeded
+    AIPE_SPACE are present (same validators as \`aipehub check\`; skipped on a
+    fresh box where there's nothing loaded yet)
 
 It reports the NAMES of key env vars, never their values. Exit code is 0 when
 there are no ✖ blockers (⚠ are advisory), 1 otherwise.

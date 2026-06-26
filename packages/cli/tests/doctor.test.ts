@@ -26,6 +26,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   applyFixes,
   collectChecks,
+  collectDefinitionChecks,
   doctor,
   mkdirpReal,
   probePortReal,
@@ -42,6 +43,10 @@ function greenDeps(over: Partial<DoctorDeps> = {}): DoctorDeps {
     resolveHost: () => '/fake/node_modules/@aipehub/host/dist/index.js',
     probePort: async () => ({ status: 'free' }),
     probePath: async () => 'writable',
+    // The deep definitions check needs the host package; in CLI tests that's
+    // injected so the default (which imports @aipehub/host/check, unavailable
+    // here) never runs. Clean by default — individual tests dirty one knob.
+    runWorkspaceCheck: async () => ({ workflows: { ok: 1, bad: 0 }, agents: { ok: 1, bad: 0 } }),
     ...over,
   }
 }
@@ -161,6 +166,148 @@ describe('doctor — exit codes + output', () => {
     const text = out.join('')
     expect(text).toContain('ANTHROPIC_API_KEY')
     expect(text).not.toContain('sk-super-secret-do-not-leak')
+  })
+
+  it('prints the Definitions section with ✓ when the host + a seeded space load clean', async () => {
+    const out: string[] = []
+    const code = await doctor(
+      [],
+      greenDeps({ env: { ANTHROPIC_API_KEY: 'x', AIPE_SPACE: '/x/.aipehub' }, out: (l) => out.push(l) }),
+    )
+    const text = out.join('')
+    expect(text).toContain('Definitions (workflows + agents):')
+    expect(text).toContain('✓ Workflow definitions')
+    expect(text).toContain('✓ Agents (agents.json)')
+    expect(code).toBe(0)
+  })
+
+  it('a broken definition is a blocker → exit 1 with a ✖ in the Definitions section', async () => {
+    const out: string[] = []
+    const code = await doctor(
+      [],
+      greenDeps({
+        env: { ANTHROPIC_API_KEY: 'x', AIPE_SPACE: '/x/.aipehub' },
+        runWorkspaceCheck: async () => ({ workflows: { ok: 0, bad: 1 }, agents: { ok: 1, bad: 0 } }),
+        out: (l) => out.push(l),
+      }),
+    )
+    const text = out.join('')
+    expect(text).toContain('✖ Workflow definitions')
+    expect(text).toContain('blocker')
+    expect(code).toBe(1)
+  })
+
+  it('omits the Definitions section on a fresh box (space not created yet)', async () => {
+    const out: string[] = []
+    // 'creatable' = space doesn't exist yet → nothing loaded → section skipped,
+    // and a creatable space is itself ok, so the run stays green.
+    await doctor([], greenDeps({ probePath: async () => 'creatable', out: (l) => out.push(l) }))
+    expect(out.join('')).not.toContain('Definitions (workflows + agents):')
+  })
+})
+
+describe('collectDefinitionChecks — deep workspace check (gated, best-effort)', () => {
+  const present = () => '/fake/node_modules/@aipehub/host/dist/index.js'
+  const clean = async (): Promise<{ workflows: { ok: number; bad: number }; agents: { ok: number; bad: number } }> => ({
+    workflows: { ok: 1, bad: 0 },
+    agents: { ok: 1, bad: 0 },
+  })
+
+  // Definitions live UNDER AIPE_SPACE: on a fresh box there's nothing to parse
+  // yet, so the check skips entirely (and never even runs the validators).
+  it.each(['creatable', 'blocked', 'not-a-dir'] as const)(
+    'returns [] when the space probe is %s (fresh box — nothing loaded)',
+    async (probe) => {
+      const ran = vi.fn(clean)
+      const checks = await collectDefinitionChecks({
+        env: { AIPE_SPACE: '/x/.aipehub' },
+        probePath: async () => probe,
+        resolveHost: present,
+        runWorkspaceCheck: ran,
+      })
+      expect(checks).toEqual([])
+      expect(ran).not.toHaveBeenCalled()
+    },
+  )
+
+  it('returns [] when @aipehub/host is not resolvable here', async () => {
+    const ran = vi.fn(clean)
+    const checks = await collectDefinitionChecks({
+      env: { AIPE_SPACE: '/x/.aipehub' },
+      probePath: async () => 'writable',
+      resolveHost: () => null,
+      runWorkspaceCheck: ran,
+    })
+    expect(checks).toEqual([])
+    expect(ran).not.toHaveBeenCalled()
+  })
+
+  it('two ✓ checks when the seeded space loads clean', async () => {
+    const checks = await collectDefinitionChecks({
+      env: { AIPE_SPACE: '/x/.aipehub' },
+      probePath: async () => 'writable',
+      resolveHost: present,
+      runWorkspaceCheck: clean,
+    })
+    expect(checks.map((c) => [c.level, c.label])).toEqual([
+      ['ok', 'Workflow definitions'],
+      ['ok', 'Agents (agents.json)'],
+    ])
+  })
+
+  it('a broken workflow file → a ✖ on "Workflow definitions" pointing at `aipehub check`', async () => {
+    const checks = await collectDefinitionChecks({
+      env: { AIPE_SPACE: '/x/.aipehub' },
+      probePath: async () => 'writable',
+      resolveHost: present,
+      runWorkspaceCheck: async () => ({ workflows: { ok: 2, bad: 1 }, agents: { ok: 1, bad: 0 } }),
+    })
+    const wf = checks.find((c) => c.label === 'Workflow definitions')!
+    expect(wf.level).toBe('error')
+    expect(wf.detail).toContain("1 of 3 won't parse")
+    expect(wf.fix).toContain('aipehub check')
+    // one bad domain does NOT taint the other — a clean agents file stays ✓.
+    expect(checks.find((c) => c.label === 'Agents (agents.json)')?.level).toBe('ok')
+  })
+
+  it('a broken agents row → a ✖ on "Agents (agents.json)", workflows "none yet"', async () => {
+    const checks = await collectDefinitionChecks({
+      env: { AIPE_SPACE: '/x/.aipehub' },
+      probePath: async () => 'writable',
+      resolveHost: present,
+      runWorkspaceCheck: async () => ({ workflows: { ok: 0, bad: 0 }, agents: { ok: 1, bad: 2 } }),
+    })
+    const ag = checks.find((c) => c.label === 'Agents (agents.json)')!
+    expect(ag.level).toBe('error')
+    expect(ag.detail).toContain('2 broken row(s)')
+    expect(checks.find((c) => c.label === 'Workflow definitions')?.detail).toBe('none yet')
+  })
+
+  it('degrades to one ⚠ (never throws) when the validator run blows up', async () => {
+    const checks = await collectDefinitionChecks({
+      env: { AIPE_SPACE: '/x/.aipehub' },
+      probePath: async () => 'writable',
+      resolveHost: present,
+      runWorkspaceCheck: async () => {
+        throw new Error('host check exploded')
+      },
+    })
+    expect(checks).toHaveLength(1)
+    expect(checks[0].level).toBe('warn')
+    expect(checks[0].label).toBe('Definitions')
+    expect(checks[0].detail).toContain('host check exploded')
+    expect(checks[0].fix).toContain('aipehub check')
+  })
+
+  it('still runs on an exists-readonly space (a seeded read-only mount still parses)', async () => {
+    const ran = vi.fn(clean)
+    await collectDefinitionChecks({
+      env: { AIPE_SPACE: '/x/.aipehub' },
+      probePath: async () => 'exists-readonly',
+      resolveHost: present,
+      runWorkspaceCheck: ran,
+    })
+    expect(ran).toHaveBeenCalledOnce()
   })
 })
 

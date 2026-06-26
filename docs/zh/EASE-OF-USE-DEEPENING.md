@@ -9,7 +9,7 @@
 >
 > 本文随四个阶段逐步收口。✅ = 已落地;⏳ = 进行中。
 >
-> Last updated: 2026-06-23(RT 系列收口 —— 运行实时进度,见 §六)
+> Last updated: 2026-06-26(VALID 系列收口 —— 主机配置体检 + 载入定义校验,见 §七)
 
 ---
 
@@ -369,7 +369,79 @@ detail 层用 step 级三态精确停,list 层用时间上限退避诚实停,跑
 
 ---
 
-## 七、显式推迟
+## 七、定义校验(VALID 系列)✅
+
+> 用户:「有没有可以快速完成基本配置的启动机器人,最好还能**自动审核涉及主进程的
+> 改动**(这个用**设置检查而不是用 AI**),也增加对**载入工作流、智能体正确性**的
+> 审核(**只审核文件是否有语法错误**)。」
+>
+> 两个锁定决策:**Q1** = 主机配置体检 = **确定性规则**校验 host 运行时配置(端口 /
+> gating / 语言 / 安全 / master key / 凭证),boot + 按需都跑;**Q2** = 工作流/智能体
+> 文件坏了**默认跳过 + 响亮横幅**(单个坏文件**绝不**拖垮在跑的 hub),
+> `AIPE_STRICT_DEFINITIONS=1` 才切「拒启」给 CI / 严格场景。
+
+### 7.1 一处真相,三个面
+
+校验深度故意停在**语法 / schema**(`parseWorkflow` + `agents.json` 结构检查)——
+**不是 AI 审核**,是确定性规则。更深的 `checkWorkflowStructure`(unknown_agent /
+bad_ref / self_trigger_cycle…需要 live inventory)仍**opt-in / 默认关**。
+
+唯一真相是 host 的 `packages/host/src/workspace-check.ts`,经**不启动 host** 的
+`@aipehub/host/check` 子路径导出。它复用早就存在的确定性校验器,**零新分类器**:
+
+| 域 | 复用的校验器 | 坏在哪 |
+|---|---|---|
+| config 体检 | `auditBootSecurity` + env 校验 | 端口冲突 / gating 默认 / master key 缺损 / 凭证 |
+| 工作流定义 | `loadWorkflows` → `parseWorkflow`(含 self-trigger-cycle) | YAML 解析失败 / schema 不合法 |
+| 智能体 | `checkAgentsFile`(`agents.json` 结构) | 重复 id / 坏 provider / 缺字段 |
+
+**数的是坏「行」不是坏「发现」**:一行 agent 同时 dup-id + bad-provider = **1 个坏行、
+2 条 finding**。
+
+三个触达面,同一套校验器:
+
+1. **`aipehub check`(CLI,按需)** —— tiny CLI 懒解析 host,动态 import 那个
+   **不启动**的 `./check` 子路径跑 `runCheckCli`。host 不在场 → 给安装提示 + 返 1
+   (VALID-M2,commit `6b4de6f`)。
+2. **boot 横幅 + `AIPE_STRICT_DEFINITIONS`(host main.ts)** —— 启动时
+   `loadWorkflows` → `checkAgentsFile` → `definitionsReport`;有坏 → `log.warn` +
+   控制台**响亮横幅**说明「这 N 个坏定义已**跳过**,hub 没带它们起来」;设了 strict →
+   `console.error` 横幅 + `process.exit(1)` 拒启。ready-banner 多一行
+   `Defns : N workflow(s) · M agent(s)`(VALID-M3,commit `caf240c`)。
+3. **`doctor` 深度校验段(CLI,预检)** —— `collectDefinitionChecks` 在 host **且**
+   一个已 seed 的 `AIPE_SPACE` 都在场时,跑同一批校验器,在 `doctor` 输出里多一段
+   「Definitions (workflows + agents)」。**门控 + best-effort**:fresh box(space
+   `creatable`/`blocked`/not-a-dir)→ 整段省略;host 不可解析 → 跳过;校验器抛错 →
+   降级成一条 ⚠ 指向 `aipehub check`,**绝不**让预检崩(VALID-M4,本轮)。
+
+### 7.2 为什么 `definitionsReport` 故意不带 config 域
+
+`definitionsReport(workflowReport, agentsCheck)` 是**纯拼接 + 计数**,**只**含
+工作流 + 智能体两域,**故意省掉 config 域** —— 因为 config 的 fail-closed 在 boot
+更早就由 `auditBootSecurity` 强制过了(boot 面),在预检由 `doctor` 自己的 env 段
+覆盖(doctor 面)。**带上 config 就会双重报告**。所以:`aipehub check` 看全三域,
+boot 横幅与 doctor 深度段只看「定义」两域。
+
+### 7.3 复用 / 边界
+
+- **复用不重造** —— 不写新校验器,把 `loadWorkflows` / `auditBootSecurity` /
+  `checkAgentsFile` 接到「还没接的地方」(同 §一守则)。
+- **CLI 委托 host** —— `@aipehub/host/check` 用**变量**(非字面量)动态 import,
+  `tsc` 不把 host 变成 CLI 的构建期依赖(同 `start` / `doctor` 老把戏)。
+- **爆炸半径锁 `cli` + `host`** —— **core / protocol / identity / runner 零改**,
+  host 路由 `handleImMessage` 逐字节不变。
+- **测试** —— host `workspace-check` 单测 + cli `check` 6 测 + `doctor` 38 测
+  (含 +11 新:`collectDefinitionChecks` 门控/降级/清污隔离 + `doctor()` 三段断言)。
+
+### 7.4 一句话
+
+**主进程改动 + 载入定义的「能不能跑」,在三个面用同一套确定性规则审了** —— 不是 AI,
+是 `parseWorkflow` / `auditBootSecurity` 本人;坏文件默认**跳过 + 横幅**不拖垮 hub,
+strict 才拒启。
+
+---
+
+## 八、显式推迟
 
 1. 凭证**主动**过期倒计时告警(需凭证带过期元数据,可能 schema)—— 本轮只做「运行时
    失败 → 这个 key 可能失效 → 去补」的反向链接;
@@ -383,3 +455,8 @@ detail 层用 step 级三态精确停,list 层用时间上限退避诚实停,跑
    `readRun`,后端零改)。**仍推迟**:推送式实时(SSE / WebSocket run 事件,免轮询、
    亚秒延迟),以及 list 层用专门的 `parked` run 状态把「停着等人」与「真在跑」分开
    (现 RT-M2 用时间上限退避当诚实停止,不区分二者 —— 见 §6.3 的不对称)。
+8. 定义校验的**深度结构检查**(`checkWorkflowStructure`:unknown_agent / bad_ref /
+   forward_ref / self_trigger_cycle / id_collision,需要 live inventory)—— VALID
+   只做语法 / schema 层(用户明说「只审核文件是否有语法错误」),深度检查仍 opt-in /
+   默认关;以及把 `aipehub check` 接进 admin 「hub 体检」面板当一个常驻信号
+   (现只在 CLI + boot + doctor 三面,UI 体检面板暂不调它)。
