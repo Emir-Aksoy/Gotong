@@ -29,6 +29,10 @@
     "./mcp-proxy": {
       "types": "./dist/mcp-proxy.d.ts",
       "import": "./dist/mcp-proxy.js"
+    },
+    "./check": {
+      "types": "./dist/workspace-check.d.ts",
+      "import": "./dist/workspace-check.js"
     }
   },
   "files": [
