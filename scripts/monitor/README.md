@@ -24,42 +24,96 @@ cron. This is the one alert that can't be host-internal.
 - **Never restarts anything.** systemd owns restart. A watchdog that also
   restarts fights the unit and masks flapping. This observes and alerts only.
 - **Retries** before declaring down, so a transient blip doesn't page anyone.
-- **No secrets in logs.** The Feishu webhook URL (the secret) is read from a
-  0600 file or env var and is never written to the log or the alert text.
+- **No secrets in logs.** Whichever Feishu channel is used, the secret (app
+  secret / bearer token / webhook URL) is read from env or a 0600 file and is
+  never written to the log or the alert text.
+
+## Two alert channels (tried in order)
+
+The script picks the first channel that's configured:
+
+1. **Feishu app bot** (`im/v1/messages`) — reuses the **same app the IM bridge
+   already runs** (App ID / App Secret). Needs only the `im:message` scope — no
+   `im:chat:*`, no custom-bot webhook. Pages a person by DM (`open_id`, an
+   `ou_…` id) or a group (`chat_id`, an `oc_…` id). Use this when your Feishu
+   tenant has **custom bots disabled** and only an app bot is available. The
+   two-step token-fetch + send runs in the bundled `feishu-app-send.mjs`, so the
+   App Secret never lands on a command line.
+2. **Feishu custom-bot webhook** — a plain hook URL, when your tenant allows
+   custom bots in a group.
+
+If neither is configured the script runs **log-only**.
 
 ## Deploy on the host box (mirrors `backup-cron.sh`)
 
-1. The repo is already on the box (e.g. `~/aipehub/app/`), so the script
-   ships with it: `~/aipehub/app/scripts/monitor/healthcheck.sh`.
+The two script files (`healthcheck.sh` + `feishu-app-send.mjs`) live **outside**
+`app/` so a `git pull` / re-rsync of the source tree can't clobber them:
 
-2. Create a Feishu **custom bot** in a group → copy its webhook URL → save it
-   to a 0600 file (the URL is the secret, keep it off logs and out of git):
+```bash
+mkdir -p ~/aipehub/monitor
+cp ~/aipehub/app/scripts/monitor/healthcheck.sh   ~/aipehub/monitor/
+cp ~/aipehub/app/scripts/monitor/feishu-app-send.mjs ~/aipehub/monitor/
+chmod +x ~/aipehub/monitor/healthcheck.sh
+```
 
-   ```bash
-   install -m 600 /dev/stdin ~/aipehub/feishu-alert-webhook.txt <<<'https://open.feishu.cn/open-apis/bot/v2/hook/XXXX'
-   ```
+### Option A — Feishu app bot (this deployment)
 
-3. Thin cron wrapper `~/aipehub/healthcheck-cron.sh` (mirrors your
-   `backup-cron.sh`):
+Reuses the IM bridge's app (App ID / App Secret already in `~/aipehub/aipehub.env`)
+and DMs the bound owner. No new bot, no console scope change — only `im:message`.
 
-   ```bash
-   #!/usr/bin/env bash
-   export FEISHU_WEBHOOK_FILE="$HOME/aipehub/feishu-alert-webhook.txt"
-   export AIPE_WEB_PORT=3000          # match your host config
-   exec "$HOME/aipehub/app/scripts/monitor/healthcheck.sh" "$HOME/aipehub/monitor-state"
-   ```
-   `chmod +x ~/aipehub/healthcheck-cron.sh`
+Thin cron wrapper `~/aipehub/healthcheck-cron.sh` (mirrors `backup-cron.sh`).
+It reads the two app creds out of `aipehub.env` with `grep` (no `source` — the
+env file has values with spaces) and pages an `open_id` (the owner's Feishu id,
+read once from `im_bindings`):
 
-4. Cron entry — every 3 minutes:
+```bash
+#!/usr/bin/env bash
+export NODE_BIN=/usr/local/bin/node
+export AIPE_LARK_APP_ID="$(grep -E '^AIPE_LARK_APP_ID=' "$HOME/aipehub/aipehub.env" | head -1 | cut -d= -f2-)"
+export AIPE_LARK_APP_SECRET="$(grep -E '^AIPE_LARK_APP_SECRET=' "$HOME/aipehub/aipehub.env" | head -1 | cut -d= -f2-)"
+export FEISHU_ALERT_RECEIVE_ID="ou_xxxxxxxx"      # the bound owner's open_id
+export FEISHU_ALERT_RECEIVE_ID_TYPE=open_id
+export AIPE_WEB_PORT=3000
+export HEALTHCHECK_LABEL=aipehub-prod
+exec "$HOME/aipehub/monitor/healthcheck.sh" "$HOME/aipehub/monitor-state"
+```
+`chmod +x ~/aipehub/healthcheck-cron.sh`
 
-   ```cron
-   */3 * * * * /home/ubuntu/aipehub/healthcheck-cron.sh >> /home/ubuntu/aipehub/monitor-state/cron.log 2>&1
-   ```
+To find the owner's `open_id` (it's the Feishu `platform_user_id` of the bound
+member):
 
-5. Test it end-to-end: `~/aipehub/healthcheck-cron.sh` while the host is up
-   (silent, exit 0), then `sudo systemctl stop aipehub` and run it again —
-   you should get a Feishu "DOWN" message; `start` and run once more for the
-   "RECOVERED" message.
+```bash
+sqlite3 ~/aipehub/data/identity.sqlite \
+  "SELECT platform_user_id FROM im_bindings WHERE platform='lark' LIMIT 1;"
+```
+
+### Option B — Feishu custom-bot webhook (if your tenant allows custom bots)
+
+```bash
+install -m 600 /dev/stdin ~/aipehub/feishu-alert-webhook.txt <<<'https://open.feishu.cn/open-apis/bot/v2/hook/XXXX'
+```
+…then in the wrapper `export FEISHU_WEBHOOK_FILE="$HOME/aipehub/feishu-alert-webhook.txt"`
+instead of the app-bot vars.
+
+### Cron entry — every 3 minutes
+
+```cron
+*/3 * * * * /home/ubuntu/aipehub/healthcheck-cron.sh >> /home/ubuntu/aipehub/monitor-state/cron.log 2>&1
+```
+
+### Smoke test (don't touch the real service)
+
+Run the wrapper against a **dead port** with a **separate** state dir so the real
+`.down` marker is untouched — a real DOWN alert should reach the owner's Feishu:
+
+```bash
+HEALTHCHECK_URL=http://127.0.0.1:59999/healthz HEALTHCHECK_RETRIES=1 \
+  bash -c 'source <(grep -E "^export" ~/aipehub/healthcheck-cron.sh | sed "s#monitor-state#monitor-state-test#"); \
+           ~/aipehub/monitor/healthcheck.sh ~/aipehub/monitor-state-test'
+```
+
+A steady-state run (`~/aipehub/healthcheck-cron.sh` while the host is up) is
+silent and exits 0.
 
 ## Tuning (env vars)
 

@@ -30,11 +30,18 @@
 #   - RETRIES before declaring down, so a single transient blip (a GC pause,
 #     a momentary port hiccup) doesn't page anyone.
 #
-#   - The alert channel is a Feishu custom-bot webhook. The webhook URL is
-#     secret-grade (it contains the hook id) — it is read from a 0600 file
-#     or an env var and is NEVER written to the log or the alert text. No
-#     other secret is touched. Alert text is plain human prose with a
-#     hostname + timestamp; no tokens, no payloads.
+#   - The alert channel has two modes, tried in order:
+#       1. Feishu APP BOT (im/v1/messages) — the same app the IM bridge uses
+#          (App ID/Secret), needing only the `im:message` scope. Sends a DM
+#          (receive_id_type=open_id) or a group message (chat_id). Use this
+#          when the tenant has no custom-bot webhook. The token fetch + send is
+#          done by the bundled `feishu-app-send.mjs` so the App Secret never
+#          lands on a command line.
+#       2. Feishu CUSTOM-BOT webhook — a plain hook URL (secret-grade: it holds
+#          the hook id), read from a 0600 file or an env var.
+#     Either secret is read from env/file and is NEVER written to the log or
+#     the alert text. No other secret is touched. Alert text is plain human
+#     prose with a hostname + timestamp; no tokens, no payloads.
 #
 # Usage:
 #   ./healthcheck.sh <state-dir>
@@ -44,13 +51,21 @@
 #   HEALTHCHECK_TIMEOUT      per-try seconds  (default 5)
 #   HEALTHCHECK_RETRIES      tries before down(default 3)
 #   HEALTHCHECK_RETRY_SLEEP  seconds between  (default 3)
+#   HEALTHCHECK_LABEL        name shown in the alert (default: `hostname`)
+#   --- mode 1: Feishu app bot (preferred when there's no custom-bot webhook) ---
+#   AIPE_LARK_APP_ID         Feishu app id     (the same app the IM bridge uses)
+#   AIPE_LARK_APP_SECRET     Feishu app secret (read by the node helper only)
+#   FEISHU_ALERT_RECEIVE_ID  who to page: an open_id (ou_…) or a chat_id (oc_…)
+#   FEISHU_ALERT_RECEIVE_ID_TYPE  open_id (default) | chat_id | user_id | email
+#   NODE_BIN                 node binary for the helper       (default `node`)
+#   FEISHU_APP_SENDER        path to feishu-app-send.mjs (default: next to this script)
+#   --- mode 2: Feishu custom-bot webhook ---
 #   FEISHU_WEBHOOK_URL       Feishu bot hook URL (the secret itself)
 #   FEISHU_WEBHOOK_FILE      path to a 0600 file holding the URL (preferred)
-#   HEALTHCHECK_LABEL        name shown in the alert (default: `hostname`)
 #
-# If neither FEISHU_WEBHOOK_URL nor FEISHU_WEBHOOK_FILE is set, the script
-# runs in LOG-ONLY mode (state changes go to the log, no push). That's a
-# valid degraded mode for a box you watch by hand — it warns once.
+# If no app-bot creds (+ receive id) and no webhook are configured, the script
+# runs in LOG-ONLY mode (state changes go to the log, no push). That's a valid
+# degraded mode for a box you watch by hand — it warns once.
 #
 # Exit codes:
 #   0 — host is up (this run)
@@ -105,14 +120,40 @@ resolve_webhook() {
   printf '%s' "${FEISHU_WEBHOOK_URL:-}"
 }
 
-# Send a Feishu text alert. Arg 1 = message text. Best-effort: a dead webhook
-# must never abort the watchdog (then it couldn't update its own state and
-# would re-alert forever). We log the delivery outcome, never the URL.
+# Feishu APP-BOT delivery (im/v1/messages). The same app the IM bridge uses,
+# needing only the `im:message` scope. Delegates token-fetch + send to the
+# bundled node helper so the App Secret never lands on a command line; the text
+# is piped in on stdin. Returns 0 when app-bot mode is configured (delivery
+# attempted, outcome logged) so the caller does NOT also fire the webhook; 1
+# when it is not configured (caller falls through). Best-effort: a failed send
+# is logged, never fatal.
+NODE_BIN="${NODE_BIN:-node}"
+APP_SENDER="${FEISHU_APP_SENDER:-$(cd "$(dirname "$0")" && pwd)/feishu-app-send.mjs}"
+
+try_app_bot() {
+  local text="$1"
+  [ -n "${AIPE_LARK_APP_ID:-}" ] && [ -n "${AIPE_LARK_APP_SECRET:-}" ] \
+    && [ -n "${FEISHU_ALERT_RECEIVE_ID:-}" ] && [ -f "$APP_SENDER" ] || return 1
+  if printf '%s' "$text" | "$NODE_BIN" "$APP_SENDER" >/dev/null 2>&1; then
+    log "alert delivered via Feishu app bot (im/v1/messages)"
+  else
+    log "alert delivery via Feishu app bot FAILED — host state still recorded"
+  fi
+  return 0
+}
+
+# Send an alert. Arg 1 = message text. Tries the app bot, then the custom-bot
+# webhook, then log-only. Best-effort throughout: a dead channel must never
+# abort the watchdog (then it couldn't update its own state and would re-alert
+# forever). We log the delivery outcome, never any secret.
 send_alert() {
   local text="$1" hook
+  # Mode 1: Feishu app bot.
+  if try_app_bot "$text"; then return 0; fi
+  # Mode 2: Feishu custom-bot webhook.
   hook="$(resolve_webhook)"
   if [ -z "$hook" ]; then
-    log "ALERT (log-only, no webhook configured): $text"
+    log "ALERT (log-only, no channel configured): $text"
     return 0
   fi
   # Feishu custom-bot text message. JSON-escape the text minimally (it's our
