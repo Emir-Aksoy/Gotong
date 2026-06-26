@@ -136,8 +136,13 @@ function parseArgs(args: readonly string[]): ParsedRepl | null {
  * answer for prior question" mode and never re-emits a `line` event.
  * Switching to a line-event queue plus an EOF flag works in both
  * TTY and pipe paths (verified with `printf ... | aipehub repl`).
+ *
+ * Exported so the `setting` console's interactive sub-shell reuses the SAME
+ * readline + SIGINT→abort seam (it consumes the `ReplIo` contract, not the
+ * `runReplLoop` machinery — that one hardcodes `hub.dispatch`, which the
+ * deterministic ops engine has no use for).
  */
-function makeReadlineIo(signal: AbortSignal): ReplIo {
+export function makeReadlineIo(signal: AbortSignal): ReplIo {
   const rl = createInterface({ input, output, terminal: process.stdout.isTTY })
   let closed = false
   let eof = false

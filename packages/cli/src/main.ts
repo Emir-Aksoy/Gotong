@@ -32,6 +32,7 @@ import { ping } from './commands/ping.js'
 import { repl } from './commands/repl.js'
 import { connect } from './commands/connect.js'
 import { mintPeerToken } from './commands/mint-peer-token.js'
+import { setting } from './commands/setting.js'
 import { printHelp } from './commands/help.js'
 
 export async function runCli(argv: readonly string[] = process.argv.slice(2)): Promise<number> {
@@ -81,6 +82,8 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
         return connect(rest)
       case 'mint-peer-token':
         return mintPeerToken(rest)
+      case 'setting':
+        return await setting(rest)
       default:
         console.error(`unknown command: ${cmd}`)
         printHelp()

@@ -17,6 +17,7 @@ Commands:
   repl                        Start an interactive shell against an in-memory hub
   connect [agent]             Print MCP quick-connect config for a coding agent
   mint-peer-token             Generate a federation peer bearer token
+  setting [subcommand]        Deterministic ops console (status/check/cold-start/restore/…)
   help [command]              Show usage for a specific command
   --version                   Print the CLI version
 
@@ -31,6 +32,7 @@ Examples:
   aipehub repl
   aipehub connect claude-code --bin=/abs/packages/mcp-server/bin/aipehub-mcp.js
   aipehub mint-peer-token --peer-id=partner-hub
+  aipehub setting status
 `
 
 const PER_COMMAND: Readonly<Record<string, string>> = {
@@ -239,6 +241,45 @@ Examples:
   aipehub mint-peer-token
   aipehub mint-peer-token --peer-id=partner-hub --endpoint=wss://partner/federation
   aipehub mint-peer-token > peer-token.txt   # token only; hint on stderr
+`,
+  setting: `aipehub setting [<subcommand> [args]]
+
+The unified deterministic (NON-AI) operations console. ONE namespace over the
+whole lifecycle — cold-start → crash-rescue → re-read definitions → config check.
+With NO subcommand it opens an interactive sub-shell. The same engine is reachable
+from the admin web UI and (online commands only) an IM command mode.
+
+The ops engine ships in the SEPARATE @aipehub/host package; \`setting\` resolves
+it lazily and drives its non-booting ./ops entry, so the host must be installed —
+\`setting\` prints how to get it if it isn't.
+
+Online commands — safe everywhere (CLI, admin web, IM command mode):
+  status               Where the hub is now (definition counts, config verdict,
+                       live health when the hub is running).
+  check [--strict]     Deterministic config + workflow + agent validation.
+  list                 Every setting command, its tier, and where it can run.
+  inventory            Backup recovery candidates (read-only, newest first).
+  fix-dirs             Create missing workspace directories (mkdir -p; idempotent).
+
+Destructive, offline — CLI ONLY (the hub is down or being replaced while they
+run, so the web/IM surfaces physically can't reach them). Each confirms first;
+pass --yes to skip the prompt:
+  cold-start [--force] Pre-flight (doctor) → validate definitions (check) → boot.
+                       Aborts on pre-flight problems unless --force.
+  restore <file> <target> [--force]
+                       Extract a backup tarball into a target workspace (runs
+                       verify.sh). Stop the hub first.
+  rotate-master-key    Rotate the identity-vault master key (local-file provider).
+
+Reads the same AIPE_* env the host reads (AIPE_SPACE, default .aipehub). Exit
+code 0 on success, non-zero on failure or a declined confirmation.
+
+Examples:
+  aipehub setting status
+  aipehub setting check --strict
+  aipehub setting                       # interactive sub-shell
+  aipehub setting restore aipehub-prod-20260626T101530Z.tar.gz /opt/aipehub --yes
+  aipehub setting rotate-master-key
 `,
 }
 
