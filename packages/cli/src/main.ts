@@ -26,6 +26,7 @@
 import { init } from './commands/init.js'
 import { start } from './commands/start.js'
 import { doctor } from './commands/doctor.js'
+import { check } from './commands/check.js'
 import { newAgent } from './commands/new-agent.js'
 import { ping } from './commands/ping.js'
 import { repl } from './commands/repl.js'
@@ -63,6 +64,8 @@ export async function runCli(argv: readonly string[] = process.argv.slice(2)): P
         return await start(rest)
       case 'doctor':
         return await doctor(rest)
+      case 'check':
+        return await check(rest)
       case 'new': {
         const [kind, ...args] = rest
         if (kind === 'agent') return await newAgent({ language: 'ts', args })

@@ -10,6 +10,7 @@ Commands:
   init                        Initialize a workspace (personal mode by default)
   start                       Launch the host (delegates to @aipehub/host)
   doctor                      Pre-flight environment check (ports, space, keys)
+  check [--strict]            Validate workspace config + workflow/agent files (no AI)
   new agent <name>            Scaffold a TypeScript sidecar agent project
   new python-agent <name>     Scaffold a Python sidecar agent project
   ping <ws-url>               Verify a Hub is reachable (HELLO/WELCOME handshake)
@@ -23,6 +24,7 @@ Examples:
   aipehub init
   aipehub start
   aipehub doctor
+  aipehub check
   aipehub new agent greeter
   aipehub new python-agent classifier --capabilities=triage,classify
   aipehub ping ws://127.0.0.1:4000
@@ -90,6 +92,35 @@ there are no ✖ blockers (⚠ are advisory), 1 otherwise, 2 on a usage error.
 Examples:
   aipehub doctor
   AIPE_WEB_PORT=8080 aipehub doctor
+`,
+  check: `aipehub check [--strict]
+
+Deterministic (non-AI) self-check of a workspace. Validates three things,
+WITHOUT booting the hub or calling any LLM:
+
+  - host config 体检   ports / gating / language / security defaults / master
+                       key presence (reuses the same boot-security audit)
+  - workflow files     every <space>/workflows/definitions/*.yaml parses
+                       (parseWorkflow — syntax / schema only)
+  - agent definitions  <space>/agents.json is well-formed (ids unique,
+                       provider/kind known, openai-compatible has a baseURL)
+
+The validators live in @aipehub/host (they need parseWorkflow, the Space
+layout) and run through the host's non-booting ./check entry, so the host
+must be installed — \`check\` prints how to get it if it isn't.
+
+Reads the workspace at AIPE_SPACE (default: .aipehub) and the same AIPE_*
+env the host reads. Exit code is 0 when there are no ✖ errors, 1 when any
+error is found (or any ⚠ warning under --strict), 2 on a usage error.
+
+Options:
+  --strict            Treat warnings as failures (exit 1 on any ⚠)
+  --help / -h         Show this message
+
+Examples:
+  aipehub check
+  AIPE_SPACE=/opt/aipehub aipehub check
+  aipehub check --strict
 `,
   new: `aipehub new <agent|python-agent> <name> [options]
 
