@@ -223,6 +223,24 @@ export interface WorkflowCheckResult {
 }
 
 /**
+ * Map a workflow loader `LoadReport` to check findings — one error per file the
+ * loader couldn't parse. Shared by `checkWorkflowFiles` (the CLI path, which
+ * re-loads) and the host boot banner (which ALREADY holds a `LoadReport` from
+ * its own load and must NOT re-read), so "what `aipehub check` flags" and "what
+ * boot flags" can never drift.
+ */
+export function workflowFindingsFromReport(report: LoadReport): CheckFinding[] {
+  return report.failed.map((f) => ({
+    domain: 'workflow' as const,
+    level: 'error' as const,
+    code: 'workflow.parse_failed',
+    message: f.error,
+    fix: 'fix the YAML/JSON so it parses as aipehub.workflow/v1, or remove the file.',
+    file: f.file,
+  }))
+}
+
+/**
  * Validate every workflow file under `dir` by reusing `loadWorkflows` — so a
  * file passes here iff the host would actually parse it at boot. Each
  * `report.failed` row becomes an error finding; a clean directory (or a missing
@@ -233,15 +251,11 @@ export async function checkWorkflowFiles(
   loadImpl: typeof loadWorkflows = loadWorkflows,
 ): Promise<WorkflowCheckResult> {
   const report: LoadReport = await loadImpl({ dir })
-  const findings: CheckFinding[] = report.failed.map((f) => ({
-    domain: 'workflow' as const,
-    level: 'error' as const,
-    code: 'workflow.parse_failed',
-    message: f.error,
-    fix: 'fix the YAML/JSON so it parses as aipehub.workflow/v1, or remove the file.',
-    file: f.file,
-  }))
-  return { findings, ok: report.loaded.length, bad: report.failed.length }
+  return {
+    findings: workflowFindingsFromReport(report),
+    ok: report.loaded.length,
+    bad: report.failed.length,
+  }
 }
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -481,6 +495,32 @@ export async function validateWorkspace(
     warnings,
     workflows: { ok: wf.ok, bad: wf.bad },
     agents: { ok: ag.ok, bad: ag.bad },
+  }
+}
+
+/**
+ * Build a `WorkspaceCheckReport` covering ONLY the loaded definitions (workflows
+ * + agents), from data the host already holds at boot — a workflow loader
+ * `LoadReport` and an `AgentsCheckResult` — WITHOUT re-reading anything. The
+ * host boot path uses this for its loud "these files won't load" banner: the
+ * config 体检 is enforced separately at boot (`auditBootSecurity` fails closed
+ * on its fatals), so this subset deliberately omits the `config` domain.
+ * `formatCheckReport` renders it.
+ */
+export function definitionsReport(
+  workflowReport: LoadReport,
+  agentsCheck: AgentsCheckResult,
+): WorkspaceCheckReport {
+  const findings: CheckFinding[] = [
+    ...workflowFindingsFromReport(workflowReport),
+    ...agentsCheck.findings,
+  ]
+  return {
+    findings,
+    errors: findings.filter((f) => f.level === 'error').length,
+    warnings: findings.filter((f) => f.level === 'warn').length,
+    workflows: { ok: workflowReport.loaded.length, bad: workflowReport.failed.length },
+    agents: { ok: agentsCheck.ok, bad: agentsCheck.bad },
   }
 }
 

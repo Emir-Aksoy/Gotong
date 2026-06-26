@@ -205,6 +205,12 @@ import {
 import { createUploadSurface } from './uploads.js'
 import { createWorkflowController, type PeerCapabilityView } from './workflow-controller.js'
 import { formatLoadReport, loadWorkflows } from './workflow-loader.js'
+import {
+  checkAgentsFile,
+  definitionsReport,
+  formatCheckReport,
+  type WorkspaceCheckReport,
+} from './workspace-check.js'
 import { HostInboxService } from './inbox-service.js'
 import { FileCrossHubMarkerStore } from './cross-hub-marker.js'
 import { MeWorkflowEditService } from './me-workflow-edit-service.js'
@@ -1260,6 +1266,50 @@ async function main(): Promise<void> {
   const workflowReport = await loadWorkflows({ dir: workflowsDir })
   const wfMsg = formatLoadReport(workflowReport)
   if (wfMsg) log.info('workflow loader', { report: wfMsg })
+
+  // VALID-M3 — deterministic (non-AI) review of the definitions we just loaded.
+  // The workflow loader already SKIPS a file it can't parse (workflowReport.failed)
+  // and the agent pool already SKIPS a row it can't spawn, but both degrade
+  // SILENTLY — one typo buries a workflow/agent behind a single quiet log line.
+  // Surface them together in ONE loud banner so the operator sees, at boot,
+  // exactly which files won't load. Reuses the SAME validators `aipehub check`
+  // runs (the loader's own report + checkAgentsFile), so a clean boot means what
+  // the CLI means — no second source of truth. The config 体检 is enforced
+  // separately above by `auditBootSecurity` (fail-closed on its fatals), so this
+  // banner is definitions-only.
+  //
+  // Posture is the operator's locked decision: default = warn loud + keep
+  // serving (one bad file must never take down a live hub); AIPE_STRICT_DEFINITIONS
+  // = refuse to start (CI / strict deploys) by exiting BEFORE the web server binds.
+  // Note: a wholly malformed agents.json (not a bad row) already throws inside the
+  // agent pool above; `aipehub check` is the friendly pre-boot tool for that case.
+  const agentsCheck = await checkAgentsFile(join(SPACE_DIR, 'agents.json'))
+  const defns: WorkspaceCheckReport = definitionsReport(workflowReport, agentsCheck)
+  if (defns.errors > 0) {
+    const banner = formatCheckReport(defns)
+    log.warn('definition check found problems', {
+      workflowsBad: defns.workflows.bad,
+      agentsBad: defns.agents.bad,
+    })
+    if (envBool('AIPE_STRICT_DEFINITIONS', false)) {
+      console.error('\n=== AipeHub 定义校验失败 / definition check failed ===')
+      console.error(banner)
+      console.error(
+        `\nFATAL: AIPE_STRICT_DEFINITIONS is set and ${defns.errors} definition file(s)/row(s) are broken — refusing to start.\n` +
+          `       Fix the files above (or run \`aipehub check\`), or unset\n` +
+          `       AIPE_STRICT_DEFINITIONS to start anyway (the broken ones are skipped).\n`,
+      )
+      process.exit(1)
+    }
+    console.warn('\n=== AipeHub 定义校验警告 / definition check warning ===')
+    console.warn(banner)
+    console.warn(
+      `\n⚠ The ${defns.errors} broken definition(s) above were SKIPPED — the hub is\n` +
+        `  starting WITHOUT them. Fix them and restart, or set AIPE_STRICT_DEFINITIONS=1\n` +
+        `  to refuse to start on a broken file.\n`,
+    )
+  }
+
   // Stream G day-2 / H — off-hub capability view for "this step leaves the
   // hub" flags on workflow summaries. Read LAZILY via forward-declared refs:
   // both the peer registry and the A2A manager are built further down, but
@@ -2445,6 +2495,14 @@ async function main(): Promise<void> {
   console.log(`WebSocket : ${ws.url}`)
   console.log(`Gating    : ${config.gating}`)
   console.log(`CookieSec : ${config.cookieSecure ? 'on (HTTPS expected)' : 'off (HTTP / dev)'}`)
+  // VALID-M3 — definitions at a glance: how many workflow files / agent rows
+  // loaded, and a flag if any were skipped (details are in the warning banner
+  // printed earlier in this boot).
+  console.log(
+    `Defns     : ${defns.workflows.ok} workflow(s)${defns.workflows.bad ? `, ${defns.workflows.bad} BAD` : ''}` +
+      ` · ${defns.agents.ok} agent(s)${defns.agents.bad ? `, ${defns.agents.bad} BAD` : ''}` +
+      `${defns.errors > 0 ? '  ⚠ see definition warnings above' : ''}`,
+  )
   console.log(
     `HostCheck : ${
       allowedHosts
