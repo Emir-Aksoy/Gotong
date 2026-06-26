@@ -161,16 +161,31 @@ export function loadPricingTable(overridePath?: string): PricingTable {
       `pricing override ${overridePath} is not valid JSON: ${(err as Error).message}`,
     )
   }
+  const own = validatePricingTable(parsed, overridePath)
+  return { ...DEFAULT_PRICING, ...own }
+}
+
+/**
+ * Validate a parsed pricing object's OWN entries (NO default merge) and return
+ * it as a typed {@link PricingTable}. Throws loud on a non-object top level or
+ * any bad entry. This is the single shape authority, reused by both boot-time
+ * {@link loadPricingTable} AND the deterministic `setting` config-write editor —
+ * so a price written through the console is rejected the same way and BEFORE it
+ * lands on disk, never silently at the next boot. `label` names the source in
+ * error messages (an override path at boot; e.g. "pricing.json" for the editor),
+ * so the boot-path messages stay byte-identical to before.
+ */
+export function validatePricingTable(parsed: unknown, label: string): PricingTable {
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     throw new Error(
-      `pricing override ${overridePath} must be a JSON object of { model: { inputPer1M, outputPer1M, … } }`,
+      `pricing override ${label} must be a JSON object of { model: { inputPer1M, outputPer1M, … } }`,
     )
   }
-  const merged: PricingTable = { ...DEFAULT_PRICING }
+  const table: PricingTable = {}
   for (const [model, value] of Object.entries(parsed as Record<string, unknown>)) {
-    merged[model] = validatePrice(model, value, overridePath)
+    table[model] = validatePrice(model, value, label)
   }
-  return merged
+  return table
 }
 
 // ---------------------------------------------------------------------------

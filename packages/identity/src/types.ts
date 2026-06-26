@@ -613,6 +613,14 @@ export const AUDIT_ACTIONS = {
   // structure export is the safe default and is intentionally NOT audited.
   // metadata carries { name, agentIds, workflowIds, includeSecrets, includePersonnel }.
   TEMPLATE_EXPORT: 'template_export',
+  // setting-ops M3 — a deterministic (NON-AI) config write through the unified
+  // `setting` console: a managed env knob (<space>/aipehub.env) or a pricing.json
+  // override, owner-gated and validated before it lands. ONE verb for both write
+  // kinds; metadata carries { kind: 'env'|'pricing', surface, key?/model? }. NEVER
+  // carries a secret value — secret-name keys are hard-refused before any write
+  // (the editor only ever references env-var NAMES, mirroring the steward
+  // discipline). Same additive-audit-action shape as WORKFLOW_IMPORT / TEMPLATE_EXPORT.
+  SETTING_CONFIG_WRITE: 'setting_config_write',
 } as const
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[keyof typeof AUDIT_ACTIONS]

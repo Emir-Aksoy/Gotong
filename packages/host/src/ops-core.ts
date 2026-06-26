@@ -52,6 +52,12 @@ import {
   type CheckFinding,
 } from './workspace-check.js'
 import type { AdminHealthSurface, HealthSnapshot } from './admin-health.js'
+import {
+  applyEnvKnob,
+  applyPricingUpsert,
+  readEffectiveConfig,
+  type ConfigWriteAuditSink,
+} from './ops-config-write.js'
 
 // Re-export the read-tier validators so `@aipehub/host/ops` is a one-stop
 // import — a consumer can reach the same deterministic validators the boot path
@@ -59,6 +65,17 @@ import type { AdminHealthSurface, HealthSnapshot } from './admin-health.js'
 // above so the handlers below can call them directly.)
 export { validateWorkspace, formatCheckReport, definitionsReport }
 export type { WorkspaceCheckReport, CheckFinding, AdminHealthSurface, HealthSnapshot }
+// Re-export the config-write surface so the CLI / web adapters reach the env-knob
+// whitelist, secret-var list and template through the same `@aipehub/host/ops`
+// import (M3). The writers themselves are only reachable via `runOpsCommand`'s
+// gated handlers — never exported for a surface to call directly.
+export { ENV_KNOBS, SECRET_ENV_VARS, isSecretKey, generateEnvTemplate } from './ops-config-write.js'
+export type {
+  ConfigWriteAuditSink,
+  EffectiveConfigView,
+  EffectiveKnobView,
+  EnvKnobSpec,
+} from './ops-config-write.js'
 
 // ───────────────────────────────────────────────────────────────────────────
 // Tier model + caller context
@@ -157,12 +174,26 @@ export interface OpsDeps {
    * no inventory dir, reported honestly rather than guessed).
    */
   backupDir?: string
+  // ── config-write (M3) ──
+  /** Managed env file written by `config-set`. Defaults to <space>/aipehub.env. */
+  envFilePath?: string
+  /** Pricing override file written by `config-price`. Defaults to <space>/pricing.json. */
+  pricingPath?: string
+  /**
+   * Best-effort audit sink for config-write. The SURFACE binds the actor context
+   * (CLI = system, web owner = their session) and passes a sink here; ops-core
+   * supplies only the per-write metadata. Absent → writes still happen, unaudited
+   * (e.g. a fully offline CLI with no identity store).
+   */
+  audit?: ConfigWriteAuditSink
   // ── seams (tests inject fakes; defaults hit the real fs / validators) ──
   validate?: typeof validateWorkspace
   readdirImpl?: (dir: string) => Promise<string[]>
   statSizeImpl?: (p: string) => Promise<number | undefined>
   probePathImpl?: (p: string) => Promise<OpsPathProbe>
   mkdirpImpl?: (p: string) => Promise<void>
+  readFileImpl?: (p: string) => Promise<string>
+  writeFileImpl?: (p: string, data: string) => Promise<void>
 }
 
 // ── default fs seams (host-side; mirror the doctor's probe/mkdir) ────────────
@@ -387,8 +418,8 @@ function runnableOnSurface(tier: OpsTier, caller: OpsCaller): boolean {
 const CLI_HINT = 'Run it from the server CLI: the hub is down (or being replaced) during this operation, so only the CLI can.'
 const OWNER_HINT = 'A hub owner makes this change from the admin web UI or the server CLI.'
 
-// The catalog. M1 ships read + safe-mutate + the destructive-offline listings;
-// config-write commands are ADDED to this array in M3.
+// The catalog: read + safe-mutate + config-write (M3) handlers, plus the
+// destructive-offline listings (display-only here — the CLI adapter runs them).
 const COMMANDS: OpsCommandDef[] = [
   {
     id: 'status',
@@ -424,6 +455,30 @@ const COMMANDS: OpsCommandDef[] = [
     title: 'Create missing dirs',
     summary: 'Ensure the workspace directories exist (mkdir -p; idempotent, reversible).',
     run: runFixDirs,
+  },
+  // ── config-write (M3): owner-gated + audited; CLI + web(owner), never IM ──
+  {
+    id: 'config',
+    tier: 'read',
+    title: 'Effective config',
+    summary: 'Show the managed env knobs, secret env vars (set/unset only) and pricing override status.',
+    run: runConfig,
+  },
+  {
+    id: 'config-set',
+    tier: 'config-write',
+    title: 'Set an env knob',
+    summary: 'Set one whitelisted non-secret env knob in <space>/aipehub.env (takes effect on restart).',
+    whereToRun: OWNER_HINT,
+    run: runConfigSet,
+  },
+  {
+    id: 'config-price',
+    tier: 'config-write',
+    title: 'Set a model price',
+    summary: 'Upsert one model price in <space>/pricing.json — validated before it lands (takes effect on restart).',
+    whereToRun: OWNER_HINT,
+    run: runConfigPrice,
   },
   // ── destructive-offline: listed for display, run ONLY from the CLI adapter ──
   {
@@ -631,6 +686,92 @@ async function runFixDirs(_args: readonly string[], _caller: OpsCaller, deps: Op
     return `  ${mark}  ${o.dir}${o.detail ? ` — ${o.detail}` : ''}`
   })
   return { command: 'fix-dirs', tier: 'safe-mutate', lines: ['ensure workspace directories:', ...lines], data: { outcomes } }
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// config: read view + config-write handlers (M3)
+// ───────────────────────────────────────────────────────────────────────────
+
+function envFileOf(deps: OpsDeps): string {
+  return deps.envFilePath ?? join(deps.spaceDir, 'aipehub.env')
+}
+function pricingFileOf(deps: OpsDeps): string {
+  return deps.pricingPath ?? join(deps.spaceDir, 'pricing.json')
+}
+
+/** read tier — effective config, tokens shown set/unset only (never by value). */
+async function runConfig(_args: readonly string[], _caller: OpsCaller, deps: OpsDeps): Promise<OpsResult> {
+  const view = await readEffectiveConfig({
+    spaceDir: deps.spaceDir,
+    env: deps.env ?? {},
+    envFilePath: envFileOf(deps),
+    pricingPath: pricingFileOf(deps),
+    ...(deps.readFileImpl ? { readFileImpl: deps.readFileImpl } : {}),
+  })
+
+  const lines: string[] = ['config (effective — managed knobs take effect on the NEXT restart):', '  knobs:']
+  for (const k of view.knobs) {
+    const file = k.fileValue ?? '—'
+    const env = k.envValue ?? '—'
+    lines.push(`    ${k.key.padEnd(18)} file=${file}  env=${env}  (default ${k.default})`)
+  }
+  lines.push('  secrets (name + set/unset only — values never shown):')
+  for (const s of view.secrets) lines.push(`    ${s.key.padEnd(26)} ${s.set ? 'set' : 'unset'}`)
+  if (!view.pricing.present) {
+    lines.push(`  pricing: ${view.pricing.path} — not set (defaults in use).`)
+  } else if (view.pricing.corrupt) {
+    lines.push(`  pricing: ${view.pricing.path} — present but CORRUPT (fix it or it fails at boot).`)
+  } else {
+    lines.push(`  pricing: ${view.pricing.path} — present, ${view.pricing.overrideModels} override(s).`)
+  }
+  return { command: 'config', tier: 'read', lines, data: { ...view } }
+}
+
+/** config-write tier — set one whitelisted, non-secret env knob. */
+async function runConfigSet(args: readonly string[], caller: OpsCaller, deps: OpsDeps): Promise<OpsResult> {
+  const [key, ...rest] = args
+  if (!key) throw new OpsError('invalid_input', 'usage: config-set <KEY> <value>')
+  const result = await applyEnvKnob(
+    { key, value: rest.join(' ') },
+    {
+      envFilePath: envFileOf(deps),
+      surface: caller.surface,
+      ...(deps.audit ? { audit: deps.audit } : {}),
+      ...(deps.readFileImpl ? { readFileImpl: deps.readFileImpl } : {}),
+      ...(deps.writeFileImpl ? { writeFileImpl: deps.writeFileImpl } : {}),
+      ...(deps.mkdirpImpl ? { mkdirpImpl: deps.mkdirpImpl } : {}),
+    },
+  )
+  return { command: 'config-set', tier: 'config-write', lines: result.lines, data: result.data }
+}
+
+/** config-write tier — upsert one model's price in pricing.json (validated first). */
+async function runConfigPrice(args: readonly string[], caller: OpsCaller, deps: OpsDeps): Promise<OpsResult> {
+  const [model, inRate, outRate, cacheWrite, cacheRead] = args
+  if (!model || inRate === undefined || outRate === undefined) {
+    throw new OpsError(
+      'invalid_input',
+      'usage: config-price <model> <inputPer1M> <outputPer1M> [cacheWritePer1M] [cacheReadPer1M]',
+    )
+  }
+  // Build the price object from positional args; `validatePricingTable` (inside
+  // applyPricingUpsert) rejects any non-finite/negative rate (NaN from a bad
+  // token included), so a malformed price is refused BEFORE the write.
+  const price: Record<string, unknown> = { inputPer1M: Number(inRate), outputPer1M: Number(outRate) }
+  if (cacheWrite !== undefined) price.cacheWritePer1M = Number(cacheWrite)
+  if (cacheRead !== undefined) price.cacheReadPer1M = Number(cacheRead)
+  const result = await applyPricingUpsert(
+    { model, price },
+    {
+      pricingPath: pricingFileOf(deps),
+      surface: caller.surface,
+      ...(deps.audit ? { audit: deps.audit } : {}),
+      ...(deps.readFileImpl ? { readFileImpl: deps.readFileImpl } : {}),
+      ...(deps.writeFileImpl ? { writeFileImpl: deps.writeFileImpl } : {}),
+      ...(deps.mkdirpImpl ? { mkdirpImpl: deps.mkdirpImpl } : {}),
+    },
+  )
+  return { command: 'config-price', tier: 'config-write', lines: result.lines, data: result.data }
 }
 
 function humanSize(bytes: number): string {
