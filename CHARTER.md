@@ -1,5 +1,8 @@
 # AipeHub — Project Charter
 
+**Version 0.1** · adopted 2026-06-27 · ratified by the founding steward
+([`MAINTAINERS.md`](MAINTAINERS.md))
+
 > This is the project's constitution: the slowest-changing document in the
 > repository, the one every other doc, design decision, and line of code is
 > answerable to. The README is a doorway and [`docs/OVERVIEW.md`](docs/OVERVIEW.md)
@@ -258,6 +261,12 @@ change reaches, the higher the bar:
   that argues the *why*, reviewed against the North Star, merged by lazy
   consensus per [`GOVERNANCE.md`](GOVERNANCE.md).
 
+Every accepted amendment bumps the version recorded at the top of this document
+(which is distinct from the software's version): a minor bump for an ordinary
+change, and a major bump reserved for a change to the North Star — the one change
+that means the project has become something else. The version is how a reader
+knows which constitution they are holding.
+
 If you are unsure whether something you want to build fits, this charter is the
 document to argue with. That is what it is for.
 
@@ -288,6 +297,11 @@ the wider graph as a peer, exactly as the architecture intends.
 ---
 
 ## Appendix A — HubLink, the federation protocol
+
+*These appendices summarize the current shape of each format for orientation. The
+authoritative, versioned specifications live in the referenced sources and evolve
+faster than this charter; where they differ, the referenced spec governs the wire
+and the charter governs the principle (§9).*
 
 **HubLink** is the governed link between two hubs: a symmetric, peer-to-peer
 WebSocket channel where either side can dispatch a task to the other, publish a
