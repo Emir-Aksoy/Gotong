@@ -210,7 +210,7 @@ money, no token, and no bounty layer, because an economic layer would muddy the
 file-first, decentralized trust model the whole project rests on. The four
 pillars of that system — the citation leaderboard, the maintainer ladder,
 frictionless sharing, and shared exemplars — are consolidated in
-[`docs/zh/RECOGNITION-SYSTEM.md`](docs/zh/RECOGNITION-SYSTEM.md).
+[`docs/RECOGNITION-SYSTEM.md`](docs/RECOGNITION-SYSTEM.md).
 
 How to contribute, and the bar a community template must clear (license clear,
 parses, zero plaintext secrets, provenance declared), are in
