@@ -2,9 +2,9 @@
 
 [English](README.md) · [中文文档](docs/zh/README.md)
 
-**AI + Person + Hub** — a TypeScript framework for orchestrating agent clusters and humans as first-class collaborative participants.
+**AI + Person + Hub** — a self-hosted substrate where people and AI agents collaborate as equal participants, and organizations federate without handing over their keys, data, or billing.
 
-AipeHub is not an agent. It is a **communication space**: a registry, a message bus, a task router, and an append-only transcript. Agents — local or remote — and humans plug in through adapters and talk to each other; the Hub keeps the signals flowing.
+AipeHub is not an agent — and not another agent framework. It's the **layer underneath them**: a registry, a message bus, a task router, a governed federation link, and an append-only transcript. LangGraph / CrewAI agents, CLI coding agents (Claude Code, Codex), and humans all plug in as the same `Participant`. The Hub keeps the signals flowing and the boundaries enforced — it never runs the LLM, so every decision stays with the participants.
 
 ## Core ideas
 
@@ -16,7 +16,7 @@ AipeHub is not an agent. It is a **communication space**: a registry, a message 
 
 ## Status
 
-**v2.0 — File-first.** A workspace is a directory on disk (`.aipehub/`). Drop the directory, drop the space. Copy it, hand the room to a teammate. Admins, workers, sessions, transcript, and pending admissions are all files; HttpOnly cookies are the only browser-side state. Restarts are transparent.
+**Self-hosted, file-first, and governed for multi-org use.** A workspace is a directory on disk (`.aipehub/`) — drop the directory and the space is gone; copy it and you've handed the room to a teammate; restarts are transparent. On top of that: a per-org credential vault, cross-org federation with per-link trust contracts (capability allowlist · data-class gate · quota · revocation), human-in-the-loop approval inboxes, and a usage / cost ledger. The Hub still never runs an LLM — every decision stays with the participants.
 
 The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI. License: [MIT](LICENSE).
 
