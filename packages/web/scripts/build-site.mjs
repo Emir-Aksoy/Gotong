@@ -453,13 +453,25 @@ async function collectSources() {
   return out.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0))
 }
 
-async function main() {
+/** Sweep the validated corpus (flagship examples/ + community submissions),
+ * assign each its public slug, and extract the display + provenance record.
+ * Exported so the leaderboard-doc generator (build-leaderboard-doc.mjs) reads
+ * the EXACT same corpus and edges as the storefront — one source of truth, so
+ * the checked-in FLAGSHIP table and the generated site can never disagree about
+ * who is cited how often. Does IO; only runs when called (the test importing
+ * this module must not sweep the filesystem). */
+export async function loadCorpus() {
   const sources = assignSlugs(await collectSources())
   const templates = []
   for (const s of sources) {
     const text = await readFile(s.abs, 'utf8')
     templates.push(extractTemplate(text, s.rel, s.origin, s.slug))
   }
+  return templates
+}
+
+async function main() {
+  const templates = await loadCorpus()
   const model = buildModel(templates)
 
   for (const u of model.unresolved) {
