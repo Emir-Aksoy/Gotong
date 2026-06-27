@@ -117,6 +117,14 @@ they are yours. Three properties make that true, and they are the project's moat
   you can read. Because the framework never runs the model, there is no hidden
   judgment call to take on faith.
 
+And the authority is yours, not ours. AipeHub supplies the mechanism — the gate,
+the vault, the transcript — but the policy is set and held by whoever runs the hub,
+not by this project. Which actions count as consequential, what a whitelist allows,
+who answers the inbox: the operator decides, and the operator holds the decision. In
+the family-learning hub it is the parent — not AipeHub — who sets the gate and
+confirms at it. We do not keep a vendor's seat at your decisions; the framework hands
+you the controls and steps out of the way.
+
 This is the wedge: not "more capable than the others," but *trustworthy with
 the things you would never hand to a black box.*
 
@@ -131,6 +139,15 @@ others' trust. A control plane may *observe* (with opt-in, privacy-preserving,
 counts-only summaries), but it never *takes over*. A graph like this cannot be
 cornered: there is no center to capture, no landlord to charge rent, and no single
 party whose permission you need to keep running.
+
+The participants on that graph are not only people and software agents. Embodied
+intelligence — robots, sensors, the machines that act in the physical world — is
+arriving on the same timeline, and AipeHub is built to take it in: wherever such a
+system speaks **MCP**, it joins as one more `Participant` behind the same governed
+boundary — dispatched tasks, held to the same gates, written into the same
+transcript as everything else. The framework is naturally suited to manage people,
+agents, and embodied systems under one roof, because it already treats them as one
+kind of thing.
 
 On top of that graph grows a **governed market of reusable components** —
 templates, adapters, knowledge-base connectors — built so that you can hand a
@@ -161,7 +178,8 @@ all of them:
   link; sovereignty stays intact on both sides.
 
 The surfaces are plural on purpose: a browser admin UI, the `/me` member desktop,
-IM bridges (Telegram, Lark, Slack, Discord, Matrix, QQ), an interactive CLI/REPL,
+IM bridges (Telegram, Lark, Slack, and QQ today; Discord and Matrix planned), an
+interactive CLI/REPL,
 MCP for tools and external clients, and an installable PWA. AipeHub speaks the
 ecosystem's open protocols where they exist — **MCP** (tools and data, both
 directions), **A2A** (agent-to-agent, both directions), **ACP** (driving a held
@@ -236,11 +254,12 @@ compatible.
 The formats AipeHub invented are open as specifications, not only as running code.
 The workflow and agent definition language (`aipehub.workflow/v1` and the agent,
 team, and template manifests) and **HubLink** — the federation protocol between two
-hubs — are our own work, and we share them freely: anyone may read them, implement
-them, build a competing runtime on them, and ship that in commercial software, with
-no fee and no permission asked. We keep only attribution — acknowledge the lineage
-with a link back to this project. Their shapes are set out in **Appendix A**
-(HubLink) and **Appendix B** (the definition formats).
+hubs — are our own design, and they belong to everyone: anyone may read them,
+implement them, build a competing runtime on them, and ship that in commercial
+software, with no fee and no permission asked. A format is a shared language, not
+property; these are simply the project's specifications, and we make no claim on them
+beyond having been the ones to write them down. Their shapes are set out in
+**Appendix A** (HubLink) and **Appendix B** (the definition formats).
 
 Openness here is not only a license; it is the architecture. Your workspace is a
 directory you can read, copy, back up, and walk away with. There is no lock-in to
@@ -325,9 +344,9 @@ allowlist, data-class gate, quota, revocation, knowledge-base allowlist — so a
 workflow can reach across an organizational line while credentials, data, and
 billing stay home on both sides.
 
-HubLink is AipeHub's own design. We offer it as a free, open specification:
-implement it in any language or product, commercial or not, no fee and no permission
-needed, attribution only. The reference implementation lives in
+HubLink is AipeHub's own design, offered as an open specification that belongs to
+everyone: implement it in any language or product, commercial or not, with no fee and
+no permission needed. The reference implementation lives in
 `packages/transport-ws/`.
 
 ---
@@ -335,9 +354,9 @@ needed, attribution only. The reference implementation lives in
 ## Appendix B — the workflow and agent definition formats
 
 These YAML formats are how a hub's structure is written down, governed, and shared.
-All are AipeHub's own design, and all are offered on the same terms as HubLink: a
-free, open specification — implement them anywhere, commercial or not, no fee, no
-permission, attribution only.
+All are AipeHub's own design, and all are offered on the same terms as HubLink: an
+open specification that belongs to everyone — implement them anywhere, commercial or
+not, with no fee and no permission asked.
 
 - **`aipehub.workflow/v1`** — a declarative workflow: a `trigger`, a list of `steps`
   that each dispatch to a *capability* (not a named agent), a dispatch graph wired by
