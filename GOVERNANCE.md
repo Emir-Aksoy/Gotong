@@ -210,6 +210,81 @@ date.
 
 ---
 
+## Regional chapters
+
+The end state is a free graph of sovereign hubs, not one central platform — and the
+human side of that graph is **regional chapters**: local, language-, or
+community-rooted groups that run their own hubs, curate templates for their people,
+and help newcomers in their own tongue. The charter ([`CHARTER.md`](CHARTER.md) §11)
+welcomes them; this section says how one works in practice.
+
+A chapter is **sovereign, not a franchise.** It owns its room and answers to no
+central landlord. Nobody's permission is required to *start* one — that would
+contradict the whole "no single party whose permission you need to keep running"
+premise the project rests on. You can stand up a hub, gather a local community, and
+curate templates for them today, and call it an AipeHub chapter.
+
+What a chapter is **not**:
+
+- **Not an official voice of the project.** A chapter speaks for its own community,
+  not for AipeHub. It does not set the design line, ratify the charter, or decide
+  what is promoted to flagship — those stay with the maintainers and the steward on
+  the canonical repository ([`MAINTAINERS.md`](MAINTAINERS.md)).
+- **Not a fork that holds the line.** A chapter may run a modified build for its own
+  people, but the authoritative charter, protocol, and flagship set live in the
+  canonical repository. A chapter that wants its changes to be *the* AipeHub sends
+  them upstream as pull requests, like anyone else.
+
+### Recognition is optional and light
+
+Running a chapter needs no blessing. Being **listed** as a recognized chapter — linked
+from the project so newcomers can find you — is a small, opt-in step, and it works much
+like template promotion:
+
+1. **Announce it in Discussions** — who you are, the region / language / community you
+   serve, and where your hub lives.
+2. **A maintainer endorses it on a public issue.** The bar is honesty, not size: you
+   represent the project truthfully, you follow the
+   [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md), and you do not claim official status you
+   do not have.
+3. **Recognition can be withdrawn** the same way it was given — on a public issue, with
+   reasons — if a chapter misrepresents the project or breaks the conduct line. The
+   project cannot (and will not try to) shut down a chapter's hub — that is its
+   sovereign room — but it can stop listing it and ask it to stop implying an
+   endorsement it no longer has.
+
+When the **component committee** stands up (see above), curating the chapter list and
+resolving disputes between chapters becomes a natural part of its mandate; until then
+it is a light maintainer call.
+
+---
+
+## Using the AipeHub name
+
+The code is [MIT](LICENSE) — you may embed it, modify it, and ship it in commercial or
+closed-source products, with the license and copyright line preserved. The **license
+covers the code; it does not hand over the project's name and identity.** There is no
+registered trademark here, and we will not pretend otherwise — what follows is a
+**community norm**, asked for in good faith, not a legal threat:
+
+- **Descriptive use is welcome.** "Built on AipeHub," "an AipeHub hub," "the AipeHub
+  Malaysia chapter" — say these freely. They are true, and we are glad you are saying
+  them.
+- **Do not imply an endorsement you do not have.** Do not name a product, fork, or
+  service in a way that presents it *as* AipeHub-the-project or as officially blessed
+  by it — no "AipeHub Official," no look-alike that poses as the canonical download.
+- **Do not rebrand the canonical project.** A modified distribution is yours to ship,
+  but the authoritative "AipeHub" — the charter, the design line, the flagship set — is
+  the one in the canonical repository. If your fork diverges in spirit, give it your own
+  name; the MIT license guarantees you can, and an honest name serves your users better
+  than a borrowed one.
+
+This is the lightest version of name protection that works: enough that "AipeHub" keeps
+meaning the governed, file-first, human-in-the-loop thing the charter describes, and no
+more.
+
+---
+
 ## Amending this document
 
 Governance changes the same way code does: open an issue, send a PR, get
