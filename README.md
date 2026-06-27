@@ -66,7 +66,7 @@ The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI. L
 
 Both paths plug into the same Hub. Mix freely — a room can have host-managed `writer-zh` next to your private SDK-connected `rag-agent`.
 
-Contributing? See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security issues: [`SECURITY.md`](SECURITY.md). Version history: [`CHANGELOG.md`](CHANGELOG.md).
+What this project is — and what it refuses to become: [`CHARTER.md`](CHARTER.md). Contributing? See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security issues: [`SECURITY.md`](SECURITY.md). Version history: [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Quick start
 

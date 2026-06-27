@@ -6,6 +6,11 @@ gallery, and what happens when people disagree. It is deliberately small —
 the project is young, and a heavy governance structure on a small project is
 just ceremony. We will grow this document as the community grows, not before.
 
+This document sits under the project's constitution, [`CHARTER.md`](CHARTER.md):
+the charter says *what* AipeHub is and what it refuses to become; this says *how*
+we decide. Where the two meet — e.g. "the framework does not run the LLM" — the
+charter is the source and this is the enforcement.
+
 If you only read one thing: **the design line is not up for negotiation, but
 almost everything else is.** See [The one non-negotiable](#the-one-non-negotiable).
 
