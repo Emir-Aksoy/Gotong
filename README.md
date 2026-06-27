@@ -6,6 +6,16 @@
 
 AipeHub is not an agent — and not another agent framework. It's the **layer underneath them**: a registry, a message bus, a task router, a governed federation link, and an append-only transcript. LangGraph / CrewAI agents, CLI coding agents (Claude Code, Codex), and humans all plug in as the same `Participant`. The Hub keeps the signals flowing and the boundaries enforced — it never runs the LLM, so every decision stays with the participants.
 
+### AI you can actually trust with the consequential stuff
+
+Most AI tools give you two options: hand everything to a cloud you don't control, or wire it all together yourself. AipeHub is the third option — **AI you can point at your home, your family, or your money, because the boundaries are real and yours:**
+
+- **A human is in the loop where it matters.** Reversible actions (turn off the lights) just happen; irreversible ones (lock the door, spend money, send a child's data across a link) wait for a person to confirm in an inbox. The workflow can't skip the gate.
+- **Your keys and data stay on your disk.** Credentials live encrypted in your own `.aipehub/` directory. Federating with another hub shares a capability, not your vault.
+- **Nothing decides in the dark.** Every dispatch and result is an append-only transcript you can read. The framework never runs the model, so there's no hidden judgment call.
+
+→ See the [**flagship templates**](docs/zh/FLAGSHIP-TEMPLATES.md) for hubs a non-technical person can import and run today (smart home, café ops, a family learning hub, a personal coding hub), each with the governance gate shown plainly and a one-command demo. Want to share your own? [`templates/community/templates/`](templates/community/templates/).
+
 ## Core ideas
 
 - **The Hub is dumb on purpose.** It does not run LLMs or own agent loops. It routes messages, dispatches tasks, persists the transcript, and emits events. Decisions stay with participants.
@@ -30,6 +40,7 @@ The npm packages are scoped `@aipehub/*`; the Python SDK is `aipehub` on PyPI. L
 | 🧑 **A worker / admin joining a room** | [`docs/HUMAN.md`](docs/HUMAN.md) | Open the URL the operator gave you; pick a nickname; you're in. |
 | 🤖 **Writing an agent to plug in** | [`docs/AGENT.md`](docs/AGENT.md) | `@aipehub/sdk-node` or Python `aipehub`. Subclass `AgentParticipant`. |
 | 🧩 **Bringing in an LLM agent without writing code** | [`docs/TEMPLATES.md`](docs/TEMPLATES.md) + [`templates/`](templates/) | YAML manifest → paste / upload in admin UI → host spawns it for you. Two sets: project-original (`templates/agents/`) and CC0/MIT community-adapted (`templates/community/`). |
+| ⭐ **Just want a hub that does something useful** | [`docs/zh/FLAGSHIP-TEMPLATES.md`](docs/zh/FLAGSHIP-TEMPLATES.md) (zh) | Curated, trust-framed gallery — import one and it works. Smart home, café ops, family learning, personal coding. Each shows what it can/can't touch + a no-key demo. |
 | 🔧 **Running the server** | [`docs/DEPLOY.md`](docs/DEPLOY.md) | `pnpm host` for local, Caddy + systemd for public. |
 | 🚀 **Going live (3 topologies)** | [`docs/zh/GO-LIVE.md`](docs/zh/GO-LIVE.md) + [`deploy/`](deploy/) | Home host + IM, cloud host + IM, or cloud + direct IP. Copy `deploy/.env.home` / `.env.cloud`, follow the runbook. IM bridge is outbound long-poll → a NAT'd home box needs no tunnel. (Runbook is zh; English pending.) |
 | 🪢 **Federating two hubs (team → org)** | [`docs/FEDERATION.md`](docs/FEDERATION.md) | `TeamBridgeAgent` makes a whole sub-Hub appear upstream as one agent — keeps internal members / keys / sub-tasks private. |

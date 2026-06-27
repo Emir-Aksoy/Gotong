@@ -76,6 +76,24 @@ If you want a low-context starter task, look for issues labelled
 - **A11y / i18n in the admin UI**: vanilla JS, no framework, small
   surface area.
 
+## Contributing a template
+
+You don't have to write TypeScript to contribute. AipeHub ships **templates** —
+self-contained YAML that someone imports to get a working hub (agents +
+workflows + knowledge-base references, never secrets or knowledge content).
+
+- A single adapted prompt → [`templates/community/`](templates/community/).
+- A whole importable hub (multi-agent + workflows) →
+  [`templates/community/templates/`](templates/community/templates/) — that
+  README walks the 5-step flow: copy a flagship example, adapt it, declare
+  provenance (`derivedFrom`), validate locally with `pnpm check:templates`,
+  open a PR.
+
+The bar to be *merged as a community template* (license is clear, it parses,
+no literal secrets) is lower than the bar to be *shipped as a flagship*
+(deterministic demo, stated governance posture, maintained). See
+[`GOVERNANCE.md`](GOVERNANCE.md).
+
 ## Reporting bugs
 
 A useful bug report has:

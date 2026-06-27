@@ -32,6 +32,7 @@
     "build:admin": "node scripts/build-admin-ui.mjs",
     "build:assets": "node scripts/build-admin-ui.mjs && node scripts/build-static-assets.mjs",
     "build:templates": "node scripts/build-builtin-templates.mjs",
+    "build:site": "node scripts/build-site.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

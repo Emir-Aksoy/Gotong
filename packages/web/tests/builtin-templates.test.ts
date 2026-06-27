@@ -32,6 +32,7 @@ const EXPECTED_IDS = [
   'codex-deepseek-hub',
   'personal-research-hub',
   'battle-monk-training',
+  'smart-home-hub',
   'cafe-ops',
   'warband-club',
   'tea-supply-link',

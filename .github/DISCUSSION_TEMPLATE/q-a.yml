@@ -1,0 +1,61 @@
+# Discussion form for the "Q&A" category (slug: q-a). GitHub attaches this
+# automatically once Discussions is enabled — see docs/zh/COMMUNITY-DISCUSSIONS.md
+# for the one-time enable steps (a repo setting, not something CI can flip).
+title: "[Q&A] "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Stuck on something? Ask here — this is the help desk. 卡住了就在这里问。
+
+        Before you post:
+        - **Bugs go to [Issues](../issues/new/choose)**, not here. If it's clearly broken, file a bug.
+        - **Security issues do NOT go here** — report privately via [`SECURITY.md`](../blob/main/SECURITY.md).
+        - Skim the [5-minute overview](../blob/main/docs/OVERVIEW.md) (中文版 in `docs/zh/`); your answer may be one map away.
+  - type: textarea
+    id: goal
+    attributes:
+      label: What are you trying to do?
+      description: The outcome you want, not just the error. One paragraph.
+      placeholder: |
+        I'm setting up a personal hub and want my agent to read my Obsidian vault, but …
+    validations:
+      required: true
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you tried?
+      description: Commands, config, the workflow/agent YAML — the more concrete, the faster someone can help.
+      render: shell
+  - type: input
+    id: version
+    attributes:
+      label: Version / commit
+      description: "`git rev-parse HEAD` or the `@aipehub/host` version. Skip if you haven't installed yet."
+      placeholder: "e.g. 1f3a2c4 or @aipehub/host@3.1.0"
+  - type: dropdown
+    id: shape
+    attributes:
+      label: How are you running it?
+      multiple: false
+      options:
+        - "Haven't installed yet — just exploring"
+        - "Local (pnpm host / desktop launcher on my machine)"
+        - "Portable bundle (downloaded, double-click)"
+        - "LAN / home server"
+        - "Cloud VPS"
+        - "Docker"
+        - "Embedded library (my own binary using @aipehub/core)"
+        - "Other / unsure"
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing Discussions & Issues for the same question
+          required: true
+        - label: This is **not** a security issue (those go via SECURITY.md)
+          required: true

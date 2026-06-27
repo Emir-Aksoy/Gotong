@@ -33,6 +33,20 @@ template:
 
   version: 1
 
+  # ── 传承署名(引用图 / 上线前清单 item 6)──────────────────────────────────────
+  # derivedFrom 是加性的引用边:声明本模板「基于谁改的」。这条边是真的、也写在
+  # CLAUDE.md 里 —— 本案例是 personal-coding-hub 的姊妹,照搬同一套分派骨架。
+  # 落地页排行榜按「有多少模板 derive 自我」给上游算入度,这条边让
+  # personal-coding-hub 在榜上得 1 票。
+  provenance:
+    derivedFrom:
+      - personal-coding-hub
+    notes: |-
+      codex-deepseek-hub 是 personal-coding-hub 的姊妹案例:同一套「路由模型分析任务
+      + 结合用户安排」的分派骨架、共享工作区(AGENTS.md/PROGRESS.md)、大白话改分工,
+      只把 coder 阵容从 Claude Code × Codex 换成 Codex(快手实现)× DeepSeek TUI
+      (推理主理)。
+
   # ── 1 个 agent:配对导师,挂方法论知识库(mcp-obsidian)──────────────────────
   # host spawn 时拉起 mcp-obsidian 子进程,把它的工具(coder_pairing_methodology
   # 槽位背后那台 obsidian server → obsidian__search / obsidian__get_file_contents)

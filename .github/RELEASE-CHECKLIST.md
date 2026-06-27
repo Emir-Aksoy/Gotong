@@ -150,7 +150,14 @@ Decisions (updated 2026-06-08) — each is independent and any can stay
       `.github/PULL_REQUEST_TEMPLATE.md`. Done — four issue forms
       (`bug_report.yml`, `feature_request.yml`, `documentation.yml`,
       `config.yml`) plus the PR template.
-- [ ] Enable GitHub Discussions; seed categories: Q&A, Show & Tell, Ideas.
+- [ ] Enable GitHub Discussions (a repo **Settings → Features** toggle — the
+      one human action left; CI can't flip it). Scaffolding is already in the
+      repo and auto-activates the moment it's on: three discussion forms
+      (`.github/DISCUSSION_TEMPLATE/q-a.yml`, `ideas.yml`, `show-and-tell.yml`)
+      attach to GitHub's default Q&A / Ideas / Show-and-tell categories, the
+      issue-config "💬 Question or discussion" link stops 404'ing, and a
+      ready-to-paste welcome post + enable steps live in
+      [`docs/zh/COMMUNITY-DISCUSSIONS.md`](../docs/zh/COMMUNITY-DISCUSSIONS.md).
 - [x] Add `.github/dependabot.yml` for npm + pnpm + GitHub Actions
       updates. Done — weekly cadence, grouped by `patch-and-minor` /
       `test-tooling` / `actions`. First batch (#4–#11) landed

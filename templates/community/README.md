@@ -54,7 +54,13 @@ community/
 
   teams/
     tech-content-team.yaml      # tech-writer + english-improver + prompt-engineer 协作（改造组合，仍归 CC0）
+
+  templates/                    # 整套 hub 模板（aipehub.template/v1）—— 多 agent + 工作流 + KB 引用
+    README.md                   # 提交流程 + 3 个「照着改」范例 + 本地校验 + 溯源（derivedFrom）
 ```
+
+> 想分享**单个 prompt** 进 `agents/`；想分享**一整套能导入即跑的 hub**
+> （多 agent + 工作流 + 知识库接线），看 [`templates/README.md`](./templates/README.md)。
 
 ## 改造原则（写新文件请参考）
 

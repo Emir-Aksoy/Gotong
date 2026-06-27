@@ -48,6 +48,8 @@
     "demo:battle-monk-training:template": "pnpm --filter @aipehub/example-battle-monk-training load-template",
     "demo:cafe-ops": "pnpm --filter @aipehub/example-cafe-ops start",
     "demo:cafe-ops:template": "pnpm --filter @aipehub/example-cafe-ops load-template",
+    "demo:smart-home-hub": "pnpm --filter @aipehub/example-smart-home-hub start",
+    "demo:smart-home-hub:template": "pnpm --filter @aipehub/example-smart-home-hub load-template",
     "demo:warband-club": "pnpm --filter @aipehub/example-warband-club start",
     "demo:warband-club:template": "pnpm --filter @aipehub/example-warband-club load-template",
     "demo:cross-hub-workflow": "pnpm --filter @aipehub/example-cross-hub-workflow start",
@@ -74,7 +76,9 @@
     "test": "pnpm -r test",
     "test:python": "cd python-sdk && PYTHONPATH=src .venv/bin/python -m pytest -q",
     "test:all": "pnpm -r test && pnpm -r typecheck && pnpm test:python",
-    "check:onboarding": "node scripts/local-onboarding-check.mjs"
+    "check:onboarding": "node scripts/local-onboarding-check.mjs",
+    "check:templates": "pnpm -C packages/web exec vitest run tests/all-templates-parse.test.ts",
+    "build:site": "pnpm -C packages/web build:site"
   },
   "devDependencies": {
     "typescript": "^5.6.0",

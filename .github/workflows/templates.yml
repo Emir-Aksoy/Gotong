@@ -1,0 +1,77 @@
+# Template validation gate — parse every aipehub.template/v1 manifest.
+#
+# A community template is just a file. The only merge bar it needs is
+# "license-clear + actually parses" (see GOVERNANCE.md / CONTRIBUTING.md and
+# templates/community/templates/README.md). This workflow is the executable
+# half of that bar: it runs the repo-wide sweep test
+# (packages/web/tests/all-templates-parse.test.ts) — the same thing a
+# contributor runs locally with `pnpm check:templates` — pushing every shipped
+# example AND every community submission through the REAL parseTemplate +
+# parseWorkflow. A malformed manifest, or a workflow block that isn't valid
+# aipehub.workflow/v1, fails the PR by file name instead of blowing up on
+# someone's hub at one-click install.
+#
+# Lean by design — runs ONLY when a template file actually changes:
+#   - pull_request with a paths filter (the two roots that hold manifests)
+#   - workflow_dispatch for an on-demand run
+# It does NOT run on every push, so it costs no Actions minutes on normal code
+# changes. (Heads up: this repo's Actions are currently paused on a spending
+# limit — this file is scaffolding that activates the moment minutes return; it
+# never needs to run for the gate to work, because `pnpm check:templates` is the
+# same gate and runs locally for free.)
+#
+# Supply-chain hardening mirrors ci.yml / live.yml: third-party actions pinned
+# to a 40-char commit SHA (with `# vX.Y.Z` for humans); harden-runner first.
+
+name: Templates
+
+on:
+  pull_request:
+    paths:
+      - "templates/community/templates/**"
+      - "examples/**/template/**"
+      # Re-run if the gate itself, the parser, or the runner change.
+      - "packages/web/tests/all-templates-parse.test.ts"
+      - "packages/web/src/template-manifest.ts"
+      - "packages/workflow/src/**"
+  workflow_dispatch:
+
+# Read-only token: this workflow parses files, it never writes to the repo.
+permissions:
+  contents: read
+
+# One run per ref — a force-push supersedes the in-flight run rather than
+# stacking a second one.
+concurrency:
+  group: templates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate aipehub.template/v1 manifests
+    runs-on: ubuntu-latest
+    # Parsing a few dozen small YAML files is fast; the time goes to the build
+    # of the parser packages. 10min is comfortable headroom.
+    timeout-minutes: 10
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+
+      - name: Setup workspace
+        uses: ./.github/actions/setup-workspace
+
+      - name: Build the parser packages
+        # The gate imports the built dist of @aipehub/web's workspace deps
+        # (@aipehub/core, @aipehub/workflow). `@aipehub/web...` builds web plus
+        # its full dependency closure — leaner than `pnpm -r build` (all 33
+        # packages) while still covering parseTemplate + parseWorkflow.
+        run: pnpm --filter "@aipehub/web..." build
+
+      - name: Validate templates
+        # Same gate a contributor runs locally — see CONTRIBUTING.md.
+        run: pnpm check:templates

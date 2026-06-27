@@ -1,0 +1,60 @@
+# Discussion form for the "Ideas" category (slug: ideas). Auto-attached once
+# Discussions is enabled — see docs/zh/COMMUNITY-DISCUSSIONS.md.
+title: "[Idea] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Got an idea for where AipeHub should go? Pitch it here. 有想法就在这里提。
+
+        AipeHub has a deliberate spine — it helps to aim with it, not against it:
+        - **The hub never runs an LLM.** It routes messages, dispatches tasks, writes transcripts. Decisions live with the participants (agents / people / services).
+        - **People and agents are the same `Participant`.** A human isn't a "request_human_input tool."
+        - **State is files on disk.** Copy the directory, move the room.
+        - **Federation is peer-to-peer.** Workflows can cross org boundaries, but credentials / data / billing each stay home.
+
+        See [`GOVERNANCE.md`](../blob/main/GOVERNANCE.md) for how a decision gets made and who makes the call.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's the problem?
+      description: Start with the pain, not the solution. What can't you do today, or what's awkward?
+      placeholder: |
+        When I share a hub template, there's no way for a teammate to …
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like to see?
+      description: Your proposed direction. Rough is fine — this is a conversation, not a spec.
+    validations:
+      required: true
+  - type: dropdown
+    id: layer
+    attributes:
+      label: Which layer does this touch?
+      description: AipeHub's three layers (see the README north star). Pick the closest.
+      multiple: false
+      options:
+        - "Layer 1 — Person ↔ their own AI / agent (my AI desktop)"
+        - "Layer 2 — Person/agent ↔ other people/agents/orgs (cross-org collaboration)"
+        - "Layer 3 — The framework itself (clarity / stability / adapters)"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: fit
+    attributes:
+      label: How does it fit the spine? (optional but persuasive)
+      description: If it needs the hub to run an LLM, hold hidden state, or centralize credentials, say so honestly — that's not a dealbreaker, but it shapes the discussion.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing Discussions & Issues for a similar idea
+          required: true
+        - label: I read the north star in the README / GOVERNANCE
+          required: true

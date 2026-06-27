@@ -104,6 +104,25 @@ export interface ParsedTemplateWorkflow {
   yaml: string
 }
 
+/**
+ * Optional, additive provenance for a template (community citation graph).
+ * Carries NO structural meaning — the importer ignores it; it exists so credit
+ * can flow back upstream and a static leaderboard can rank "how many templates
+ * derive from X". Absent ⇒ original / unattributed, which is fine.
+ */
+export interface TemplateProvenance {
+  /** Free-text author / handle of this template. */
+  author?: string
+  /**
+   * Citation edges: ids/slugs of the templates this one was derived from. Each
+   * entry is a pointer back upstream (a template id, not a URL); the leaderboard
+   * tallies inbound edges. Deduped, order-preserved. Empty/absent ⇒ original.
+   */
+  derivedFrom?: string[]
+  /** Free-text note on what was adapted / why. */
+  notes?: string
+}
+
 export interface ParsedTemplate {
   schema: typeof TEMPLATE_SCHEMA_V1
   name: string
@@ -114,6 +133,8 @@ export interface ParsedTemplate {
   workflows: ParsedTemplateWorkflow[]
   knowledgeBases: TemplateKnowledgeBase[]
   apiKeyPrompt?: BundleApiKeyPrompt
+  /** Additive citation/attribution metadata (no structural meaning). */
+  provenance?: TemplateProvenance
   /**
    * B-M3 sensitive sidecar (present iff the export opted into secrets/personnel).
    * Opaque AES-256-GCM blob; the importer (B-M4) decrypts it with the
@@ -215,7 +236,63 @@ export function parseTemplate(raw: string): ParsedTemplate {
     }
     out.encrypted = t.encrypted
   }
+  // Additive provenance (citation graph) — known fields are validated loudly so
+  // a typo'd `derivedFrom` surfaces at import instead of silently dropping a
+  // citation edge. An empty block (no recognized fields) is treated as absent.
+  const provenance = parseTemplateProvenance(t.provenance)
+  if (provenance) out.provenance = provenance
   return out
+}
+
+/**
+ * Validate an optional `template.provenance` block. Returns `undefined` when
+ * absent or empty (original / unattributed templates are the common case).
+ * Known fields are type-checked and throw `ManifestError` on mismatch; unknown
+ * keys are ignored (lenient on extras, strict on what we recognize).
+ */
+function parseTemplateProvenance(raw: unknown): TemplateProvenance | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ManifestError('template.provenance must be an object when present')
+  }
+  const p = raw as Record<string, unknown>
+  const out: TemplateProvenance = {}
+
+  if (p.author !== undefined) {
+    if (typeof p.author !== 'string' || p.author.trim().length === 0) {
+      throw new ManifestError('template.provenance.author must be a non-empty string when present')
+    }
+    out.author = p.author.trim()
+  }
+
+  if (p.derivedFrom !== undefined) {
+    if (!Array.isArray(p.derivedFrom)) {
+      throw new ManifestError('template.provenance.derivedFrom must be an array of template ids when present')
+    }
+    const seen = new Set<string>()
+    const edges: string[] = []
+    for (const entry of p.derivedFrom) {
+      if (typeof entry !== 'string' || entry.trim().length === 0) {
+        throw new ManifestError('template.provenance.derivedFrom entries must be non-empty strings')
+      }
+      const id = entry.trim()
+      if (seen.has(id)) continue // dedupe, keep first-seen order
+      seen.add(id)
+      edges.push(id)
+    }
+    if (edges.length > 0) out.derivedFrom = edges
+  }
+
+  if (p.notes !== undefined) {
+    if (typeof p.notes !== 'string') {
+      throw new ManifestError('template.provenance.notes must be a string when present')
+    }
+    if (p.notes.trim().length > 0) out.notes = p.notes.trim()
+  }
+
+  return out.author === undefined && out.derivedFrom === undefined && out.notes === undefined
+    ? undefined
+    : out
 }
 
 /**
@@ -383,6 +460,8 @@ export interface RenderTemplateInput {
   /** Addressable KB slots — raw template-shaped objects (validated by a re-parse gate). */
   knowledgeBases?: Array<Record<string, unknown>>
   apiKeyPrompt?: BundleApiKeyPrompt
+  /** Additive citation/attribution metadata; emitted verbatim, round-trips through parseTemplate. */
+  provenance?: TemplateProvenance
 }
 
 export interface RenderTemplateResult {
@@ -435,6 +514,17 @@ export function renderTemplate(input: RenderTemplateInput): RenderTemplateResult
   if (workflows.length > 0) template.workflows = workflows
   if (knowledgeBases.length > 0) template.knowledgeBases = knowledgeBases
   if (input.apiKeyPrompt) template.defaults = { apiKeyPrompt: { ...input.apiKeyPrompt } }
+  // Emit provenance only when it carries something — keep the export tidy so an
+  // original template's manifest has no empty `provenance: {}` noise.
+  if (input.provenance) {
+    const prov: Record<string, unknown> = {}
+    if (input.provenance.author) prov.author = input.provenance.author
+    if (input.provenance.derivedFrom && input.provenance.derivedFrom.length > 0) {
+      prov.derivedFrom = [...input.provenance.derivedFrom]
+    }
+    if (input.provenance.notes) prov.notes = input.provenance.notes
+    if (Object.keys(prov).length > 0) template.provenance = prov
+  }
   return { template: { schema: TEMPLATE_SCHEMA_V1, template }, secrets }
 }
 

@@ -3,6 +3,11 @@ dist/
 build/
 # Portable bundle output (scripts/build-portable.mjs) — built on demand, never committed.
 dist-portable/
+# Community storefront output (packages/web/scripts/build-site.mjs) — the static
+# landing page + template gallery + leaderboard, built on demand from the
+# validated template corpus, deployed to a free static host. Never committed
+# (same stance as dist-portable/).
+site/
 *.tsbuildinfo
 .DS_Store
 *.log

@@ -1,0 +1,53 @@
+# Discussion form for the "Show and tell" category (slug: show-and-tell).
+# Auto-attached once Discussions is enabled — see docs/zh/COMMUNITY-DISCUSSIONS.md.
+title: "[Show & Tell] "
+labels: ["show-and-tell"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Built a hub, a workflow, an agent, a template, a connector? Show it off. 把你做的东西亮出来。
+
+        This is the trophy shelf. Screenshots and short demos are very welcome.
+
+        **If you built a reusable template**, consider submitting it to the gallery so others can install it in one click:
+        - Read [`templates/community/templates/README.md`](../blob/main/templates/community/templates/README.md) (the 5-step submit flow).
+        - Add a `provenance.derivedFrom` edge if you forked an existing template — that's how credit flows back, and how the [leaderboard](../blob/main/docs/zh/FLAGSHIP-TEMPLATES.md) ranks upstreams.
+        - Two hard rules: credentials are `${ENV}` placeholders only, and templates carry **structure + references**, never knowledge content or personnel.
+  - type: textarea
+    id: what
+    attributes:
+      label: What did you build?
+      description: One paragraph. What does it do, who's it for?
+      placeholder: |
+        A bakery-ops hub — staff onboarding, shift scheduling, and an overtime-claim workflow where the manager approves the amount.
+    validations:
+      required: true
+  - type: textarea
+    id: how
+    attributes:
+      label: How does it use AipeHub?
+      description: Which agents / workflows / KB slots / federation / human-in-the-loop steps? What's the interesting part?
+    validations:
+      required: true
+  - type: input
+    id: slug
+    attributes:
+      label: Template slug (if you're sharing a template)
+      description: The public handle — the gallery / leaderboard / `derivedFrom` all use this. Leave blank if it's not a template.
+      placeholder: "e.g. my-bakery-ops"
+  - type: input
+    id: derived
+    attributes:
+      label: Derived from (if you forked one)
+      description: Which upstream template(s) you started from. This seeds the citation leaderboard. Comma-separated slugs.
+      placeholder: "e.g. cafe-ops"
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: If you're sharing a template
+      description: Skip these if you're just showing a screenshot. They're the gallery's intake rules.
+      options:
+        - label: Credentials are `${ENV}` placeholders only — zero plaintext keys
+        - label: No knowledge content and no personnel baked in (structure + references only)
+        - label: Provenance declared if it's derived from another template

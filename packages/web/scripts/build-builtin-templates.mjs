@@ -43,6 +43,7 @@ const CURATED = [
   { id: 'codex-deepseek-hub', file: 'examples/codex-deepseek-hub/template/codex-deepseek-hub.template.yaml' },
   { id: 'personal-research-hub', file: 'examples/personal-research-hub/template/personal-research-hub.template.yaml' },
   { id: 'battle-monk-training', file: 'examples/battle-monk-training/template/battle-monk-training.template.yaml' },
+  { id: 'smart-home-hub', file: 'examples/smart-home-hub/template/smart-home-hub.template.yaml' },
   { id: 'cafe-ops', file: 'examples/cafe-ops/template/cafe-ops.template.yaml' },
   { id: 'warband-club', file: 'examples/warband-club/template/warband-club.template.yaml' },
   { id: 'tea-supply-link', file: 'examples/tea-supply-link/template/tea-shop.template.yaml' },

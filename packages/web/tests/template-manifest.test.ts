@@ -631,6 +631,83 @@ describe('injectAgentSecrets (B-M4 re-injection)', () => {
   })
 })
 
+// The additive provenance block is the community citation graph: it carries no
+// structural meaning, but a typo'd field must fail loud at import (not silently
+// drop a citation edge), and it must round-trip through render → parse so a
+// shared template keeps its attribution. These pin both halves down (item 6).
+describe('template provenance (citation graph)', () => {
+  it('parses author + derivedFrom + notes', () => {
+    const t = parseTemplate(
+      tmpl({
+        agents: [llmAgent('a')],
+        provenance: {
+          author: 'alice',
+          derivedFrom: ['cafe-ops', 'smart-home-hub'],
+          notes: 'added a baking-prep workflow',
+        },
+      }),
+    )
+    expect(t.provenance).toEqual({
+      author: 'alice',
+      derivedFrom: ['cafe-ops', 'smart-home-hub'],
+      notes: 'added a baking-prep workflow',
+    })
+  })
+
+  it('is undefined when absent (original / unattributed is the common case)', () => {
+    const t = parseTemplate(tmpl({ agents: [llmAgent('a')] }))
+    expect(t.provenance).toBeUndefined()
+  })
+
+  it('dedupes derivedFrom (first-seen order) and trims entries', () => {
+    const t = parseTemplate(
+      tmpl({ agents: [llmAgent('a')], provenance: { derivedFrom: ['cafe-ops', ' cafe-ops ', 'warband-club'] } }),
+    )
+    expect(t.provenance?.derivedFrom).toEqual(['cafe-ops', 'warband-club'])
+  })
+
+  it('treats an empty provenance block as absent (no empty {} noise)', () => {
+    expect(parseTemplate(tmpl({ agents: [llmAgent('a')], provenance: {} })).provenance).toBeUndefined()
+    // A whitespace-only notes / empty derivedFrom collapses to absent too.
+    expect(
+      parseTemplate(tmpl({ agents: [llmAgent('a')], provenance: { notes: '   ', derivedFrom: [] } })).provenance,
+    ).toBeUndefined()
+  })
+
+  it('fails loud on a malformed provenance block (typo surfaces at import)', () => {
+    const bad = (prov: unknown) => () => parseTemplate(tmpl({ agents: [llmAgent('a')], provenance: prov }))
+    expect(bad(['cafe-ops'])).toThrow(ManifestError) // array, not object
+    expect(bad({ derivedFrom: 'cafe-ops' })).toThrow(ManifestError) // string, not array
+    expect(bad({ derivedFrom: ['cafe-ops', 42] })).toThrow(ManifestError) // non-string entry
+    expect(bad({ derivedFrom: ['cafe-ops', ''] })).toThrow(ManifestError) // empty entry
+    expect(bad({ author: '' })).toThrow(ManifestError) // empty author
+    expect(bad({ author: '   ' })).toThrow(ManifestError) // whitespace author
+    expect(bad({ notes: 7 })).toThrow(ManifestError) // non-string notes
+  })
+
+  it('round-trips through renderTemplate → parseTemplate', () => {
+    const { template: out } = renderTemplate({
+      name: 'derived',
+      knowledgeBases: [{ name: 'kb', useMcpServer: 'm' }],
+      provenance: { author: 'bob', derivedFrom: ['cafe-ops'], notes: 'tweaked' },
+    })
+    const t = parseTemplate(JSON.stringify(out))
+    expect(t.provenance).toEqual({ author: 'bob', derivedFrom: ['cafe-ops'], notes: 'tweaked' })
+  })
+
+  it('emits no provenance key for an original template (tidy export)', () => {
+    const { template: out } = renderTemplate({ name: 'original', knowledgeBases: [{ name: 'kb', useMcpServer: 'm' }] })
+    expect((out.template as Record<string, unknown>).provenance).toBeUndefined()
+    // An empty derivedFrom doesn't emit the field either.
+    const { template: out2 } = renderTemplate({
+      name: 'still-original',
+      knowledgeBases: [{ name: 'kb', useMcpServer: 'm' }],
+      provenance: { derivedFrom: [] },
+    })
+    expect((out2.template as Record<string, unknown>).provenance).toBeUndefined()
+  })
+})
+
 // ── helpers ──────────────────────────────────────────────────────────────
 
 /** Build a `template:` document around an arbitrary inner object (JSON form). */
