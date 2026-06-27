@@ -90,6 +90,7 @@ import { handleSamlRoute, type SamlLoginSurface } from './saml-routes.js'
 import { handleSamlAdminRoute, type SamlProviderAdminSurface } from './saml-admin-routes.js'
 import { handleA2aAdminRoute, type A2aAgentAdminSurface } from './a2a-admin-routes.js'
 import { handleAcpAdminRoute, type AcpAgentAdminSurface } from './acp-admin-routes.js'
+import { handleSettingRoute, type SettingOpsSurface } from './setting-routes.js'
 
 export type { PeerManifestFederationSurface, PeerManifestRow } from './peer-routes.js'
 export type {
@@ -115,6 +116,13 @@ export type { SamlLoginSurface } from './saml-routes.js'
 export type { SamlProviderAdminSurface, SamlProviderView } from './saml-admin-routes.js'
 export type { A2aAgentAdminSurface, A2aAgentView } from './a2a-admin-routes.js'
 export type { AcpAgentAdminSurface, AcpAgentView } from './acp-admin-routes.js'
+export type {
+  SettingOpsSurface,
+  SettingOpsActor,
+  SettingCommandInfo,
+  SettingOpsResult,
+  SettingTier,
+} from './setting-routes.js'
 
 export type {
   IdentitySurface,
@@ -562,6 +570,16 @@ export interface WebServerOptions {
    * liveness so the UI can show "saved but inactive: disabled" honestly.
    */
   acpAgents?: AcpAgentAdminSurface
+  /**
+   * setting-ops M4 — host-injected deterministic ops console surface (the WEB
+   * face of `ops-core`). When wired, `/api/admin/setting/*` lets an admin run the
+   * read / safe-mutate / config-write(owner) ops commands and browse the whole
+   * lifecycle catalog. Absent → those routes 503 and the console tab hides. There
+   * are deliberately NO destructive routes: cold-start / restore /
+   * rotate-master-key are CLI-only by physics, and the host surface's
+   * `runOpsCommand` chokepoint refuses any destructive id reached via `/run`.
+   */
+  settingOps?: SettingOpsSurface
   /**
    * Route B P0-M7 — bearer token for the internal `/metrics` scrape route.
    * When set, a Prometheus scraper presenting `Authorization: Bearer <token>`
@@ -1195,6 +1213,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     samlAdmin: opts.samlAdmin,
     a2aAgents: opts.a2aAgents,
     acpAgents: opts.acpAgents,
+    settingOps: opts.settingOps,
     httpStats: new HttpStats(),
     metricsToken: opts.metricsToken,
   }
@@ -1372,6 +1391,8 @@ interface HandlerCtx {
   a2aAgents: A2aAgentAdminSurface | undefined
   /** ACP-OUT-M3 — see WebServerOptions.acpAgents doc above. */
   acpAgents: AcpAgentAdminSurface | undefined
+  /** setting-ops M4 — see WebServerOptions.settingOps doc above. */
+  settingOps: SettingOpsSurface | undefined
   /**
    * Counters incremented on every HTTP response. Surfaced via
    * `/api/admin/metrics` so Prometheus can compute 5xx-rate (and a
@@ -2345,6 +2366,26 @@ async function handle(
       {
         acpAgents: ctx.acpAgents,
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req, res, method, path,
+    )
+    if (handled) return
+  }
+
+  // setting-ops M4 — the deterministic ops console (status / check / fix-dirs /
+  // config + owner config-write). NO destructive routes exist here; the host
+  // surface refuses any destructive id via OpsTierError (→ 403). The actor's
+  // owner flag (the shared `resolveResourceActor` closure) IS the config-write
+  // gate — in a v3/personal hub the admin-token holder is the owner.
+  if (path === '/api/admin/setting' || path.startsWith('/api/admin/setting/')) {
+    const handled = await handleSettingRoute(
+      {
+        settingOps: ctx.settingOps,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+        resolveActor: (rq) => {
+          const a = resolveResourceActor(rq)
+          return { userId: a.userId, isOwner: a.isOperator }
+        },
       },
       req, res, method, path,
     )

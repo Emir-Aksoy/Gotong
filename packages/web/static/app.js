@@ -3339,6 +3339,9 @@
       // SW-M9 A-M8 — operator-console steward panel (overview tab). Self-contained
       // like the federation panels; only needs window.AipeHub + its own DOM.
       .then(() => inject('/operator-steward-ui.js'))
+      // setting-ops M4 — unified deterministic "运维 / 设置" console (overview tab).
+      // Self-contained; loads its catalog on overview-tab focus, self-hides on 503.
+      .then(() => inject('/setting-ops-ui.js'))
       .then(() => inject('/identity-ui.js'))
       .then(() => inject('/quotas-ui.js'))
       .then(() => inject('/reputation-ui.js'))

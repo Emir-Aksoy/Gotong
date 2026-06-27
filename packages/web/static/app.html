@@ -481,6 +481,17 @@
            or when the host wires no health surface. -->
       <section id="hub-health" class="hub-health" data-tab="overview" hidden></section>
 
+      <!-- setting-ops M4 — the unified deterministic "运维 / 设置" console. The
+           WEB surface of the host ops-core engine (CLI + web + IM share it).
+           Owner/admin only (gated by main[data-roles] above) + the
+           /api/admin/setting routes; rendered by /setting-ops-ui.js. Starts
+           hidden and self-reveals once the catalog loads; on 503 (host didn't
+           wire the surface) it stays hidden, like #hub-health. Lists the FULL
+           ops lifecycle but only runs the safe online subset — destructive ops
+           (cold-start / restore / rotate-master-key) are listed with a "去 CLI
+           跑" hint and no button (CLI-only by physics). -->
+      <section id="setting-ops-panel" class="setting-ops-panel" data-tab="overview" hidden></section>
+
       <!-- SW-M9 A-M8 — the OPERATOR-console hub steward ("站点管家"). The
            site-wide twin of the member steward (which sits atop the "我的" home
            tab). Owner/admin only (gated by main[data-roles] above) + the

@@ -176,6 +176,7 @@ function findOwnerUserId(identity: IdentityStore): string | null {
 // registration block lives in main() where identity is in scope.
 
 import { createAdminHealthService } from './admin-health.js'
+import { createSettingOpsService } from './setting-ops-service.js'
 import { LocalAgentPool } from './local-agent-pool.js'
 import { loadPricingTable } from './pricing.js'
 import { McpProxyHost, fetchPeerSharedMcp } from './mcp-proxy.js'
@@ -2275,6 +2276,44 @@ async function main(): Promise<void> {
     }
   }
 
+  // ❷-M1 — the read-only "hub 体检" snapshot, lifted to a const so the
+  // setting-ops console (below) can reuse the SAME live-health surface for its
+  // `status` command. Static signals only; reuses the pool's key-resolution
+  // chain so the panel never disagrees with whether an agent will start.
+  const adminHealth = createAdminHealthService({
+    listAgents: () => space.agents(),
+    liveIds: () => new Set(hub.participants().map((p) => p.id)),
+    resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
+    listMcpServers: () => space.mcpServers(),
+    spacePath: space.root,
+    // EH-M1 — 配置进度 (工作流总/可跑 + run 总数) 喂体检面板的「下一步建议」
+    // 常驻引导。listAll 含全状态草稿, list 只含可跑 (published/live); countRuns
+    // 取 active 集精确总数。全只读, 复用 workflowController 现成方法零新机制。
+    countWorkflows: async () => {
+      const [all, live] = await Promise.all([
+        workflowController.listAll(),
+        workflowController.list(),
+      ])
+      return { total: all.length, published: live.length }
+    },
+    countRuns: async () => (await workflowController.countRuns()).total,
+  })
+
+  // setting-ops M4 — the deterministic ops console surface (the WEB face of
+  // ops-core). One host service, three surfaces (CLI / web / IM). It binds
+  // ops-core's deps ONCE: the space root (env-knob + pricing files default off
+  // it — `<space>/aipehub.env`, `<space>/pricing.json`, the file the host
+  // actually reads at boot), the live `adminHealth` surface for `status`, and
+  // the IdentityStore as the config-write audit sink (absent → writes still land,
+  // unaudited). The owner gate + destructive-offline chokepoint live in ops-core,
+  // driven by the actor flag the web layer resolves.
+  const settingOps = createSettingOpsService({
+    spaceDir: space.root,
+    env: process.env,
+    health: adminHealth,
+    ...(identity ? { audit: identity } : {}),
+  })
+
   const web = await serveWeb(hub, {
     host: config.host,
     port: config.webPort,
@@ -2287,27 +2326,12 @@ async function main(): Promise<void> {
       resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
     },
     // ease-of-use ❷-M1 — read-only "hub 体检" snapshot for the admin overview
-    // panel. Static signals only (agents missing a key / MCP servers nobody
-    // wired / space still writable); reuses the SAME key-resolution chain as the
-    // probe above so the panel never disagrees with whether an agent will start.
-    adminHealth: createAdminHealthService({
-      listAgents: () => space.agents(),
-      liveIds: () => new Set(hub.participants().map((p) => p.id)),
-      resolvesKey: (id, provider) => localAgents.hasResolvableLlmKey(id, provider),
-      listMcpServers: () => space.mcpServers(),
-      spacePath: space.root,
-      // EH-M1 — 配置进度 (工作流总/可跑 + run 总数) 喂体检面板的「下一步建议」
-      // 常驻引导。listAll 含全状态草稿, list 只含可跑 (published/live); countRuns
-      // 取 active 集精确总数。全只读, 复用 workflowController 现成方法零新机制。
-      countWorkflows: async () => {
-        const [all, live] = await Promise.all([
-          workflowController.listAll(),
-          workflowController.list(),
-        ])
-        return { total: all.length, published: live.length }
-      },
-      countRuns: async () => (await workflowController.countRuns()).total,
-    }),
+    // panel (lifted to a const above so the setting-ops console reuses it).
+    adminHealth,
+    // setting-ops M4 — deterministic ops console (status / check / fix-dirs /
+    // config + owner config-write). No destructive routes; ops-core's chokepoint
+    // refuses cold-start / restore / rotate-master-key (CLI-only by physics).
+    settingOps,
     reconcileHeartbeats,
     mcpRegistry,
     mcpFederation,
