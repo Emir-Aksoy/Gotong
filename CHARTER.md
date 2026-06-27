@@ -81,6 +81,15 @@ dumb on purpose; `Participant` stays the one abstraction; protocols, credentials
 and quotas all have explicit, visible edges. The framework's own job is to keep
 up with how fast AI moves without betraying layers 1 and 2.
 
+AI, agents, and the multi-agent frameworks now arriving will fold into daily life
+at remarkable speed. The largest model vendors, the communication platforms, and
+other incumbents are moving just as fast to occupy that ground as a monopoly — a
+position whose whole value is the leverage to extract from everyone who comes to
+depend on it. AipeHub exists to keep an alternative on the table: to blunt that
+leverage by integrating AI, agents, and workflows into one stack and releasing it
+open-source, so that anyone can obtain it, deploy it, and run it themselves — no
+gatekeeper, no rent, no permission to ask.
+
 It exists for the person who wants AI to *do something that matters* — run the
 home, help the family, handle the money, coordinate the team — and who is not
 willing to hand a cloud they don't control the keys to do it.
@@ -116,7 +125,9 @@ The end state is a **free graph, not a tree.** Not one central platform that
 tenants rent space inside, but many sovereign hubs that interlink peer-to-peer —
 each owned by the person or organization that runs it, none of them owning the
 others' trust. A control plane may *observe* (with opt-in, privacy-preserving,
-counts-only summaries), but it never *takes over*.
+counts-only summaries), but it never *takes over*. A graph like this cannot be
+cornered: there is no center to capture, no landlord to charge rent, and no single
+party whose permission you need to keep running.
 
 On top of that graph grows a **governed market of reusable components** —
 templates, adapters, knowledge-base connectors — built so that you can hand a
@@ -219,6 +230,15 @@ line preserved ([`LICENSE`](LICENSE), [`docs/LICENSE-FAQ.md`](docs/LICENSE-FAQ.m
 Community templates carry their own CC0/MIT provenance, all commercial-use
 compatible.
 
+The formats AipeHub invented are open as specifications, not only as running code.
+The workflow and agent definition language (`aipehub.workflow/v1` and the agent,
+team, and template manifests) and **HubLink** — the federation protocol between two
+hubs — are our own work, and we share them freely: anyone may read them, implement
+them, build a competing runtime on them, and ship that in commercial software, with
+no fee and no permission asked. We keep only attribution — acknowledge the lineage
+with a link back to this project. Their shapes are set out in **Appendix A**
+(HubLink) and **Appendix B** (the definition formats).
+
 Openness here is not only a license; it is the architecture. Your workspace is a
 directory you can read, copy, back up, and walk away with. There is no lock-in to
 escape because there was never custody to begin with.
@@ -240,3 +260,86 @@ change reaches, the higher the bar:
 
 If you are unsure whether something you want to build fits, this charter is the
 document to argue with. That is what it is for.
+
+---
+
+## 11. Home, and an open invitation
+
+The canonical home of this project is its GitHub repository,
+**[github.com/Emir-Aksoy/AipeHub](https://github.com/Emir-Aksoy/AipeHub)** — the
+original, and the record of truth. Forks are welcome and encouraged, but this is
+where the design line is held and where the charter, the protocol, and the flagship
+templates are authoritative.
+
+Bring your workflows back. A workflow you built for your home, your shop, or your
+team — however small, however rough — is worth sharing: one person's afternoon hack
+is another person's five-minute start. Open a pull request, file it as a community
+template, or simply show it in Discussions. The bar is safety and honesty, not
+polish ([`CONTRIBUTING.md`](CONTRIBUTING.md)).
+
+**Everyone is welcome to join** — to use, to contribute, to maintain, and to earn a
+real say in where this goes ([`GOVERNANCE.md`](GOVERNANCE.md)). And because the end
+state is a free graph of sovereign hubs rather than one central platform, **we
+welcome regional chapters**: local, language-, or community-rooted groups that run
+their own hubs, curate templates for their people, and help newcomers in their own
+tongue. A chapter owns its own room and answers to no central landlord; it links to
+the wider graph as a peer, exactly as the architecture intends.
+
+---
+
+## Appendix A — HubLink, the federation protocol
+
+**HubLink** is the governed link between two hubs: a symmetric, peer-to-peer
+WebSocket channel where either side can dispatch a task to the other, publish a
+message, or close the link. It is JSON frames over `ws://` / `wss://`, versioned by
+`MESH_PROTOCOL_VERSION`, and deliberately separate from the agent↔Hub wire protocol
+([`docs/PROTOCOL.md`](docs/PROTOCOL.md)) — a peer link needs none of that protocol's
+admission gating or agent registry.
+
+The frames, each a self-contained JSON object with a `type` discriminator:
+
+| Frame | Direction | Meaning |
+|---|---|---|
+| `MESH_HELLO` / `MESH_HELLO_ACK` | handshake | mutual peer authentication (per-link credential, fail-closed) |
+| `MESH_TASK` / `MESH_RESULT` | either way | dispatch a task / return its result (matched by task id) |
+| `MESH_MESSAGE` | either way | fire-and-forget message |
+| `MESH_PING` / `MESH_PONG` | either way | keepalive |
+| `MESH_GOODBYE` | either way | cooperative close |
+
+What crosses the link is bounded by a per-link **trust contract** — capability
+allowlist, data-class gate, quota, revocation, knowledge-base allowlist — so a
+workflow can reach across an organizational line while credentials, data, and
+billing stay home on both sides.
+
+HubLink is AipeHub's own design. We offer it as a free, open specification:
+implement it in any language or product, commercial or not, no fee and no permission
+needed, attribution only. The reference implementation lives in
+`packages/transport-ws/`.
+
+---
+
+## Appendix B — the workflow and agent definition formats
+
+These YAML formats are how a hub's structure is written down, governed, and shared.
+All are AipeHub's own design, and all are offered on the same terms as HubLink: a
+free, open specification — implement them anywhere, commercial or not, no fee, no
+permission, attribution only.
+
+- **`aipehub.workflow/v1`** — a declarative workflow: a `trigger`, a list of `steps`
+  that each dispatch to a *capability* (not a named agent), a dispatch graph wired by
+  `$ref`, and the control-flow sugar `when:` (conditional), `parallel:` (fan-out),
+  and `human:` (a human-in-the-loop step). Optional `surface.me` exposes it on the
+  member desktop and `governance` declares its risk posture. The YAML is the
+  governed, versioned root of a workflow — each run is pinned to an immutable
+  revision so it never drifts.
+- **`aipehub.agent/v1`** and **`aipehub.team/v1`** — an agent manifest, one agent or
+  a whole team in one file: provider, model, system prompt, capabilities, MCP
+  servers, a sub-agent dispatch allow-list, and an optional heartbeat.
+- **`aipehub.template/v1`** — a template packs N agents, N workflows, addressable
+  knowledge-base *slots*, and a one-prompt key setup into a single shareable file. It
+  carries structure and references only — never the knowledge content, your people,
+  or your secrets.
+
+Reference implementations: `packages/workflow/` (the workflow runner and schema) and
+`packages/web/src/manifest.ts` / `template-manifest.ts` (the agent, team, and
+template manifests).
