@@ -18,13 +18,42 @@ We keep three roles. There is no secret fourth tier.
 | Role | What it means | How you get it |
 |---|---|---|
 | **Contributor** | Anyone who opens an issue, sends a PR, files a template, or helps in Discussions. | Just show up. No application. |
-| **Maintainer** | Can review and merge PRs, triage issues, and publish releases. Responsible for a subsystem or the project as a whole. | Invited by existing maintainers after a track record of good, on-line-with-the-design contributions. |
+| **Maintainer** | Can review and merge PRs, triage issues, and publish releases. Responsible for a subsystem or the project as a whole. | A track record of good, design-aligned contributions, then nominated in the open — see [Becoming a maintainer](#becoming-a-maintainer). |
 | **Steward** | Final tie-breaker on contested decisions and the keeper of the design line. Today this is the founding maintainer. | Held by the founder until the project is large enough to elect stewards (see [Component committee](#path-to-a-component-committee)). |
 
-Maintainers are listed in [`MAINTAINERS.md`](MAINTAINERS.md) once there is
-more than one. Until then, the founding maintainer is the steward, the
-reviewer, and the release manager — and this document exists precisely so
-that arrangement is **temporary and written down**, not a habit.
+Current maintainers are listed in [`MAINTAINERS.md`](MAINTAINERS.md) — today
+that is just the founding maintainer, who is also the steward, the reviewer, and
+the release manager. This document exists precisely so that arrangement is
+**temporary and written down**, not a habit, and the next section is the path
+the second maintainer takes.
+
+### Becoming a maintainer
+
+The ladder is deliberately light — this is a young project, and the goal is to
+grow a bench of people who hold the design line, not to gate-keep. A rough
+guideline, not a checklist to game:
+
+- **A track record, not a tally.** On the order of ~5 non-trivial merged PRs —
+  or the equivalent: a flagship template you keep maintained, a substantial
+  adapter, or sustained review / triage help — over a couple of months. The
+  number is a floor for "we've seen enough of your work to trust your
+  judgement," never a target to farm with drive-by PRs.
+- **A feel for the design line.** Your PRs and reviews show you reach for a
+  *participant*, not the Hub, when logic needs a home (see
+  [The one non-negotiable](#the-one-non-negotiable)).
+- **Nominated in the open.** An existing maintainer nominates you on a public
+  issue — self-nomination is fine, just say why. Approval is lazy consensus
+  among maintainers and the steward confirms; your name lands in
+  [`MAINTAINERS.md`](MAINTAINERS.md) in that same PR.
+
+What you take on: reviewing others' PRs in your area, upholding the design line,
+and answering issues for what you maintain. It is a responsibility you can also
+set down — step back any time and we move you to emeritus in `MAINTAINERS.md`
+rather than pretend you're still on call.
+
+Today there is exactly one maintainer — the founding steward — so this ladder is
+**written but dormant**: there is no one to nominate yet. It is here so the
+*second* maintainer joins by a known path, not an ad-hoc tap on the shoulder.
 
 ---
 
