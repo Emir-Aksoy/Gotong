@@ -42,6 +42,27 @@ launch() {
   exec "$@"
 }
 
+# Source the managed, NON-SECRET env file the `setting` ops console writes
+# (config-write tier → <space>/aipehub.env), so the env knobs a hub owner changed
+# there (AIPE_MODE / AIPE_WEB_PORT / AIPE_WS_PORT / AIPE_OPEN_BROWSER …) take
+# effect on the next start. The host itself still reads ONLY process.env — this
+# just makes that file the env-source, exactly like a systemd `EnvironmentFile=`,
+# so the boot read-path is byte-for-byte unchanged. By construction it carries no
+# secrets: the config-write whitelist hard-refuses *_TOKEN / *_SECRET / *_KEY /
+# master-key (credentials stay in the vault). Sourced AFTER the space dir is known
+# and BEFORE exec; an absent file is a no-op (zero behavior change for anyone who
+# never touched the console).
+source_managed_env() {
+  local space="$1"
+  local envfile="$space/aipehub.env"
+  [ -f "$envfile" ] || return 0
+  echo "→ sourcing managed env: $envfile"
+  set -a
+  # shellcheck disable=SC1090,SC1091
+  . "$envfile"
+  set +a
+}
+
 # Tier 0 — self-contained portable bundle. When this launcher sits next to a
 # pinned Node runtime and a deployed host (the scripts/build-portable.mjs
 # output), run them directly: zero system Node, zero Docker. Data lives in
@@ -51,6 +72,7 @@ launch() {
 # unchanged for anyone running this from a repo.
 if [ -x "$SCRIPT_DIR/runtime/bin/node" ] && [ -f "$SCRIPT_DIR/app/dist/main.js" ]; then
   export AIPE_SPACE="${AIPE_SPACE:-$HOME/.aipehub}"
+  source_managed_env "$AIPE_SPACE"
   launch "$SCRIPT_DIR/runtime/bin/node" "$SCRIPT_DIR/app/dist/main.js"
 fi
 
@@ -75,6 +97,7 @@ if REPO_ROOT="$(find_repo_root "$SCRIPT_DIR")"; then
       echo "Dependencies not installed at $REPO_ROOT — run 'pnpm install' there first." >&2
     fi
     cd "$REPO_ROOT"
+    source_managed_env "${AIPE_SPACE:-$REPO_ROOT/.aipehub}"
     launch pnpm --filter @aipehub/host start
   fi
   echo "Found a checkout at $REPO_ROOT, but 'pnpm' is not on PATH." >&2
@@ -83,11 +106,13 @@ fi
 
 # Installed CLI: `aipehub start` delegates to @aipehub/host if present.
 if command -v aipehub >/dev/null 2>&1; then
+  source_managed_env "${AIPE_SPACE:-$PWD/.aipehub}"
   launch aipehub start
 fi
 
 # Installed host package, fetched on demand (works once it is published).
 if command -v npx >/dev/null 2>&1; then
+  source_managed_env "${AIPE_SPACE:-$PWD/.aipehub}"
   launch npx -y @aipehub/host
 fi
 

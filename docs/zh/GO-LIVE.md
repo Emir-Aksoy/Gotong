@@ -236,6 +236,22 @@ sudo $EDITOR /etc/aipehub.env            # 改域名；master key 从 secret 注
   §C.4（systemd）+ §C.5（Caddyfile）+ §C.6（防火墙）起反向代理，成员浏览器开
   `https://hub.example.com`（PWA 可装到手机桌面）。
 
+> **托管 env 文件（`setting` 控制台写的那一个）**：[`setting` 运维控制台](SETTING-OPS-CONSOLE.md)
+> 的 `config-set`（owner 在网页 / CLI 改）把 `AIPE_MODE` / `AIPE_WEB_PORT` / `AIPE_WS_PORT` /
+> `AIPE_OPEN_BROWSER` 这类**非密钥**旋钮写进 `<AIPE_SPACE>/aipehub.env`。让它生效 = host 启动前
+> 有人 source 它；systemd 用 `EnvironmentFile=` 干这件事（host 自己仍只读 `process.env`，boot
+> 读路径逐字节不变）。在 `[Service]` 段加一行（前缀 `-` = 文件缺失不报错）：
+>
+> ```ini
+> EnvironmentFile=-/var/lib/aipehub/.aipehub/aipehub.env   # 路径 = <AIPE_SPACE>/aipehub.env
+> ```
+>
+> 它和上面那份 `/etc/aipehub.env`（操作员手填的过线防御 + master key provider）是**两份不同的
+> 文件**：`/etc/aipehub.env` 是你部署时一次写好的基线，`<space>/aipehub.env` 是 owner 之后经
+> 控制台调过的旋钮。`setting` 白名单**按构造拒一切密钥键**，所以 `<space>/aipehub.env` 里永远不会
+> 有 token / master key —— 密钥仍走 §T2/T3.2 的 systemd secret。便携双击 launcher
+> （`deploy/AipeHub.command` / `.sh`）已自带同款 source，云端只需补这一行 systemd 配置。
+
 ### T2/T3.2 master key 挪出数据盘（云端关键）
 
 云盘会被快照、可能被盗。把凭证库主密钥（KEK）从数据盘挪到环境里，盘的镜像里就

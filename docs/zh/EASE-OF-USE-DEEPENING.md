@@ -441,7 +441,28 @@ strict 才拒启。
 
 ---
 
-## 八、显式推迟
+## 八、统一 `setting` 运维控制台 ✅
+
+§五–§七 把易用性的几块(修复入口 / 体检 / 启动兜底 / 真机走查 / 实时进度 / 定义校验)各自接到
+「还没接的地方」。**setting 控制台是把它们串成一条线**: 确定性运维全生命周期(冷启动 → 崩溃救援 →
+定义校验 → 配置管理)聚合进**一个 `setting` 命名空间**, 经一个零 LLM 的 ops-core 铺到 **CLI /
+服务器本地网页 / IM 命令模式**三个入口。
+
+- §七 的 VALID 校验(`@aipehub/host/check`)就是 setting 的 `check` / `status` read-tier 复用进来;
+  doctor 预检 + boot 横幅那条线被 `cold-start` 编排起来。
+- **tier 模型是脊柱**: `read` / `safe-mutate` 三面都跑; `config-write`(owner-gated + 审计 + 密钥
+  硬拒)只 CLI + 网页; `destructive-offline`(冷启动 / restore / rotate-master-key)**只 CLI** ——
+  因为 hub 宕了的时候, 跑它们的 web/IM 进程本身没起来, **物理上跑不动**。`runOpsCommand` 对
+  destructive-offline 一律抛 `OpsTierError` = 单一不可绕过 chokepoint。
+- config-write **严格 grounded** 在 host 真读的文件上: `<space>/aipehub.env`(非密钥白名单旋钮)+
+  `<space>/pricing.json`, 全标「重启后生效」(不发明热重载)。
+
+完整 tier 矩阵 / 三入口 / config-write 范围 / 物理边界论证 / systemd `EnvironmentFile=` 操作说明 ——
+见 [`SETTING-OPS-CONSOLE.md`](SETTING-OPS-CONSOLE.md)。
+
+---
+
+## 九、显式推迟
 
 1. 凭证**主动**过期倒计时告警(需凭证带过期元数据,可能 schema)—— 本轮只做「运行时
    失败 → 这个 key 可能失效 → 去补」的反向链接;
