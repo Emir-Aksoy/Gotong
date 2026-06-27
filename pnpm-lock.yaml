@@ -533,6 +533,21 @@ importers:
         specifier: workspace:*
         version: link:../../packages/transport-ws
 
+  examples/smart-home-hub:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/inbox':
+        specifier: workspace:*
+        version: link:../../packages/inbox
+      '@aipehub/workflow':
+        specifier: workspace:*
+        version: link:../../packages/workflow
+      yaml:
+        specifier: ^2.6.0
+        version: 2.9.0
+
   examples/tea-chain-hq:
     dependencies:
       '@aipehub/core':

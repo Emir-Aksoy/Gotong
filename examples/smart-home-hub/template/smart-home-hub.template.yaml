@@ -1,0 +1,145 @@
+# 智能家居 (小米经 Home Assistant) — 可载入模板 (aipehub.template/v1)
+#
+# 一个**小而完整**的智能家居 hub:一个家居管家 (home-steward) 经 Home Assistant 控制
+# 你的小米设备, 跑一条「晚安例程」—— 可逆动作 (关灯、空调切睡眠) 直接做, 不可逆的
+# 物理/安防动作 (锁门、布防) 经住户确认后才执行。
+#
+# ── 设备怎么进来 (米家 → Home Assistant → AipeHub) ───────────────────────────────
+#   小米设备 ──(官方 ha_xiaomi_home 集成)──▶ Home Assistant ──(HA MCP Server 集成)──▶
+#   一个 MCP server ──▶ home-steward 的 tool-use 循环。
+# 也就是说:**凡是能进 Home Assistant 的设备, 就能连这个 hub** —— 不止小米, 也包括
+# 特斯拉 (HA Tesla Fleet)、美的 (社区 midea_ac_lan) 等任何有 HA 集成的设备。这个模板
+# 用小米举例, 因为 ha_xiaomi_home 是官方维护、最省心的一条路。
+#
+# 装走的是「能干活的骨架」:
+#   - 1 个托管 LLM agent (home-steward), 挂一个 Home Assistant MCP server,
+#     服务两条能力 (home.apply-scene / home.secure)。
+#   - 1 条声明式工作流 (晚安例程), 带一个 human: 安防确认步 (Phase 16 收件箱审批)。
+#   - 一次性 DeepSeek apiKeyPrompt。
+#
+# **模版/框架分离** (这个模板没有 KB 槽位, 是有意的): 智能家居的「知识」就是 Home
+#   Assistant 里的实时设备状态, 经 MCP server 拿到 —— 没有单独的 Obsidian 知识库要带。
+#   而**接哪个 Home Assistant、用哪个 token** 是运行时配置 (下面 ${HA_MCP_SSE_URL} /
+#   ${HA_TOKEN} 占位符), 既不在模板里写死, 也不在工作流里点名设备。
+#
+# 导入:admin UI →「工作流 / 模板画廊」→ 导入,或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/smart-home-hub/template/smart-home-hub.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+schema: aipehub.template/v1
+template:
+  name: 智能家居(小米 / Home Assistant)
+  description: |-
+    一个个人智能家居 hub:家居管家经 Home Assistant 控制你的小米设备, 跑「晚安例程」——
+    关灯、空调切睡眠这类可逆动作直接做, 锁门、布防这类不可逆的物理/安防动作经住户在
+    收件箱确认后才执行。模板带 1 个托管 agent (家居管家) + 1 条声明式工作流 (晚安例程,
+    含 human: 安防确认步) + 一次性 DeepSeek key 提示。导入即用:把你自己的 Home Assistant
+    MCP 端点和长期令牌填进运行时配置 (${HA_MCP_SSE_URL} / ${HA_TOKEN}) 就能落地。
+
+  version: 1
+
+  # ── 1 个 agent:家居管家 ──────────────────────────────────────────────────────
+  # home-steward 挂一个 Home Assistant MCP server。host spawn 时拉起 mcp-proxy 子进程,
+  # 把 HA 的工具 (HassTurnOff / HassClimateSetTemperature / lock.lock / alarm 布防 …)
+  # 暴露给该 agent 的 tool-use 循环 (server 名 = `homeassistant` → 工具命名
+  # homeassistant__*)。HA 再把这些动作经官方 ha_xiaomi_home 集成路由到你的小米设备。
+  agents:
+    - id: home-steward
+      displayName: 家居管家
+      capabilities: [home.apply-scene, home.secure]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是住户的家居管家, 经 Home Assistant 控制家里的小米设备。语气简洁、就事论事,
+        只做被派到的那件事, 不擅自联动别的设备。
+
+        场景执行 (capability home.apply-scene):
+        - 按场景 (如 goodnight 晚安) 调用 HA 工具执行**可逆**动作: 关公共区域的灯
+          (HassTurnOff)、把卧室空调切到睡眠温度 (HassClimateSetTemperature) 等。
+        - 这类动作随手可逆, 直接做; 做完如实回报你改了哪些设备。
+
+        安防执行 (capability home.secure):
+        - 这是**不可逆的物理 / 安防**动作: 锁大门 (lock.lock)、布防
+          (alarm_control_panel.alarm_arm_away)。
+        - 这一步只会在住户**已经确认**之后才被派给你 —— 工作流里有一道人工确认闸。
+          你被派到这步, 就照实执行并回报; 你自己不要绕过确认去锁门或布防。
+
+        永远不要把「建议」说成「已执行」, 也不要在没被派到 home.secure 时主动锁门 /
+        布防。可逆的直接做, 不可逆的等确认 —— 这是这个家的规矩。
+      mcpServers:
+        # Home Assistant 官方「MCP Server」集成走 SSE; mcp-proxy 把它桥成 stdio 供
+        # agent 的 tool-use 循环用。两个 ${ENV} 是运行时填的:你的 HA MCP 端点 +
+        # 一个长期访问令牌 (令牌只以环境变量名的形式存在, 永不写进模板)。
+        - name: homeassistant
+          command: uvx
+          args: [mcp-proxy]
+          env:
+            SSE_URL: ${HA_MCP_SSE_URL}
+            API_ACCESS_TOKEN: ${HA_TOKEN}
+
+  # ── 1 条声明式工作流:晚安例程 ─────────────────────────────────────────────────
+  # 导入时 parseTemplate 会把这个内层 block 重新序列化成完整 workflow yaml 交给 runtime
+  # 校验 + 注册。surface.me 让住户能在 /me 一键跑; human: 安防确认步派到 aipehub.human/v1
+  # → host 收件箱 broker 挂起, 住户批了才跑 secure (Phase 16)。
+  workflows:
+    - id: home-goodnight
+      name: 晚安例程
+      description: 睡前关灯 + 空调切睡眠 (直接做), 锁门布防经你确认后执行。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        required_human_roles: [住户 (resident)]
+        external_systems: [home-assistant (米家设备 via ha_xiaomi_home)]
+        notes: 关灯/空调可逆直接做; 锁门布防是物理/安防动作, 须住户在收件箱确认才执行。
+      trigger:
+        capability: home.run-goodnight
+        payload_schema:
+          - id: approver_id
+            label: 安防确认人 (userId)
+            type: text
+            required: true
+      surface:
+        me:
+          enabled: true
+          label: 跑晚安例程
+          description: 一键关灯 + 空调切睡眠; 锁门布防由你确认后执行。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: resident_id
+      steps:
+        - id: wind-down
+          description: 关公共区域的灯 + 卧室空调切睡眠 (可逆, 直接做)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [home.apply-scene] }
+            title: 晚安场景
+            payload:
+              scene: goodnight
+        - id: confirm-lock
+          description: 睡前是否锁好大门并布防? 物理/安防动作, 等住户确认。
+          human:
+            assignee: $trigger.payload.approver_id
+            kind: approval
+            title: 睡前安防确认
+            prompt: 是否锁好大门并布防?
+        - id: secure
+          description: 锁大门 + 布防 (仅住户批准后才跑; 拒绝则跳过, 门保持不锁 = fail-closed)。
+          when: "$confirm-lock.output.approved == true"
+          dispatch:
+            strategy: { kind: capability, capabilities: [home.secure] }
+            title: 锁门布防
+            payload:
+              action: lock-and-arm
+      output:
+        windDown: $wind-down.output
+        approval: $confirm-lock.output
+        secured: $secure.output
+
+  # ── 一键:导入时提示填一次 API key,自动应用到 home-steward ─────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek

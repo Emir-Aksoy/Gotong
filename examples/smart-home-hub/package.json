@@ -1,0 +1,17 @@
+{
+  "name": "@aipehub/example-smart-home-hub",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "load-template": "tsx src/load-template.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/workflow": "workspace:*",
+    "@aipehub/inbox": "workspace:*",
+    "yaml": "^2.6.0"
+  }
+}

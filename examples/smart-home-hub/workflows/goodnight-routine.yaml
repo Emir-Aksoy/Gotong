@@ -1,0 +1,65 @@
+# 晚安例程 — 可逆动作直接做, 物理/安防动作要人确认 (HITL)。
+#
+# 这是小米设备经 Home Assistant 接进 AipeHub 后的一条最常见的家居例程:
+#   1. wind-down  (home.apply-scene) — 关公共区灯 + 卧室空调切睡眠。可逆 → 直接做。
+#   2. confirm-lock (human: approval) — 睡前是否锁门布防? 物理/安防动作, 等人拍板。
+#   3. secure     (home.secure, when 批准才跑) — 锁大门 + 布防。拒绝则这步跳过, 门不锁。
+#
+# 为什么锁门要人确认而关灯不用: 关灯随手可逆; 锁门可能把人锁在外, 布防是安全决策 ——
+# 这正是 AipeHub 的治理立场 (可逆的直接做, 不可逆的物理动作要人确认) 落到一个家里。
+schema: aipehub.workflow/v1
+workflow:
+  id: home-goodnight
+  name: 晚安例程
+  description: 睡前关灯 + 空调切睡眠 (直接做), 锁门布防经你确认后执行。
+  governance:
+    data_sensitivity: internal
+    required_credentials: [deepseek]
+    required_human_roles: [住户 (resident)]
+    external_systems: [home-assistant (米家设备 via ha_xiaomi_home)]
+    notes: 关灯/空调可逆直接做; 锁门布防是物理/安防动作, 须住户在收件箱确认才执行。
+  trigger:
+    capability: home.run-goodnight
+    payload_schema:
+      - id: approver_id
+        label: 安防确认人 (userId)
+        type: text
+        required: true
+  surface:
+    me:
+      enabled: true
+      label: 跑晚安例程
+      description: 一键关灯 + 空调切睡眠; 锁门布防由你确认后执行。
+      allowed_roles: [owner, admin, member]
+      user_scope_field: resident_id
+  steps:
+    - id: wind-down
+      description: 关公共区域的灯 + 卧室空调切睡眠 (可逆, 直接做)。
+      dispatch:
+        strategy: { kind: capability, capabilities: [home.apply-scene] }
+        title: 晚安场景
+        payload:
+          scene: goodnight
+    # human: 糖 → 派到 aipehub.human/v1 → HumanInboxParticipant 挂起任务,
+    # 落成住户 /me 收件箱里一条 approval, 批了才跑下一步 (Phase 16)。
+    - id: confirm-lock
+      description: 睡前是否锁好大门并布防? 物理/安防动作, 等住户确认。
+      human:
+        assignee: $trigger.payload.approver_id
+        kind: approval
+        title: 睡前安防确认
+        prompt: 是否锁好大门并布防?
+    - id: secure
+      description: 锁大门 + 布防 (仅住户批准后才跑; 拒绝则跳过, 门保持不锁 = fail-closed)。
+      # ★ 没有这道 when, 收件箱里点「拒绝」也只是把 {approved:false} 当普通输出往下流,
+      #   secure 照样跑 = 工作流层 fail-OPEN。审批要真能拦, 这步必须读审批结果。
+      when: "$confirm-lock.output.approved == true"
+      dispatch:
+        strategy: { kind: capability, capabilities: [home.secure] }
+        title: 锁门布防
+        payload:
+          action: lock-and-arm
+  output:
+    windDown: $wind-down.output
+    approval: $confirm-lock.output
+    secured: $secure.output
