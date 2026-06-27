@@ -177,6 +177,11 @@ function findOwnerUserId(identity: IdentityStore): string | null {
 
 import { createAdminHealthService } from './admin-health.js'
 import { createSettingOpsService } from './setting-ops-service.js'
+// setting-ops M5 — the IM `/setting` console drives ops-core directly with an
+// `im` caller (surface='im', allowConfigWrite=false), so config-write AND
+// destructive-offline are both refused by the chokepoint. Built inline below
+// once identity + the live health surface are in scope.
+import { listOpsCommands, runOpsCommand } from './ops-core.js'
 import { LocalAgentPool } from './local-agent-pool.js'
 import { loadPricingTable } from './pricing.js'
 import { McpProxyHost, fetchPeerSharedMcp } from './mcp-proxy.js'
@@ -1930,18 +1935,20 @@ async function main(): Promise<void> {
     acpOutbound.registerAllFromStore()
   }
 
-  // GO-LIVE GL-1 — outbound IM bridges (Telegram). OFF unless
-  // AIPE_TELEGRAM_BOT_TOKEN is set, so an existing deployment is byte-for-
-  // byte unaffected. Telegram long-polls (no public endpoint), which is
-  // exactly what lets a home box behind NAT run a hub with zero tunnelling
-  // — the IM cloud is the public relay. Members link their IM identity by
-  // DMing the bot `/bind <code>` with a code issued in the admin UI / 我的;
-  // every dispatch then carries the bound `origin.userId`. Needs identity
-  // for the binding store — without it there's nothing to bind against.
+  // GO-LIVE GL-1 — outbound IM bridges (Telegram, …). OFF unless a bridge's
+  // env is set, so an existing deployment is byte-for-byte unaffected. Telegram
+  // long-polls (no public endpoint), which is exactly what lets a home box
+  // behind NAT run a hub with zero tunnelling — the IM cloud is the public
+  // relay. Members link their IM identity by DMing the bot `/bind <code>` with a
+  // code issued in the admin UI / 我的; every dispatch then carries the bound
+  // `origin.userId`. Needs identity for the binding store.
+  //
+  // setting-ops M5 — the DECLARATION lives here (the `HostMeImService` closure
+  // below reads it lazily), but the actual `startImBridges(...)` call is DEFERRED
+  // to just before `serveWeb` so the IM `/setting` console can be wired with the
+  // SAME live `adminHealth` surface the overview panel uses (built ~400 lines
+  // down). Until then `imBridges` is `undefined`, exactly as before.
   let imBridges: ImBridgesHandle | undefined
-  if (identity) {
-    imBridges = await startImBridges({ hub, identity, log })
-  }
 
   // Phase 18 C-M3 — inbound A2A message/send endpoint. OFF by default (it
   // exposes the hub to external A2A callers); enable with
@@ -2313,6 +2320,52 @@ async function main(): Promise<void> {
     health: adminHealth,
     ...(identity ? { audit: identity } : {}),
   })
+
+  // setting-ops M5 — start the IM bridges HERE (deferred from ~400 lines up) so
+  // the IM `/setting` console reuses the SAME live `adminHealth` surface as the
+  // web overview, and the IM `status` command never disagrees with it. The
+  // bridges' existing branches (/help, /bind, /unbind, /agents, /workflow,
+  // free-text chat) are byte-for-byte unchanged; this only adds the
+  // owner/operator-gated `/setting` command mode. Still env-gated: with no
+  // bridge env set, `startImBridges` returns `undefined` and the `setting`
+  // config is simply never consumed.
+  if (identity) {
+    const identityForIm = identity
+    // D3 — the entry gate is the admin bar (owner OR admin), matching
+    // `requireAdmin`. A regular bound member who DMs `/setting` is refused
+    // 「命令模式仅限管理员」. Keyed by the bound AipeHub userId, never the raw
+    // IM handle.
+    const imIsOperator = (userId: string): boolean => {
+      const role = identityForIm.getMembership(userId)?.role
+      return role === 'owner' || role === 'admin'
+    }
+    // The "who is in command mode" flag — owned here because `handleImMessage`
+    // is a stateless function. One Map for the host's lifetime.
+    const imSettingMode = new Map<string, boolean>()
+    // The IM caller is ALWAYS surface='im' + allowConfigWrite=false, so
+    // ops-core's chokepoint refuses config-write AND destructive-offline for it
+    // (they are LISTED with "run it on the web/CLI" hints, never executed). Only
+    // read + safe-mutate run here. Reuses the live `adminHealth` so IM `status`
+    // matches the overview panel.
+    const imOpsCaller = { surface: 'im' as const, allowConfigWrite: false }
+    const imOpsDeps = { spaceDir: space.root, env: process.env, health: adminHealth }
+    imBridges = await startImBridges({
+      hub,
+      identity,
+      log,
+      setting: {
+        isOperator: imIsOperator,
+        mode: imSettingMode,
+        ops: {
+          list: () => listOpsCommands(imOpsCaller),
+          run: async (id, args) => {
+            const r = await runOpsCommand(id, args, imOpsCaller, imOpsDeps)
+            return { lines: r.lines }
+          },
+        },
+      },
+    })
+  }
 
   const web = await serveWeb(hub, {
     host: config.host,

@@ -105,6 +105,55 @@ export type ImWorkflowResolver = (input: {
   userId: string
 }) => Promise<{ payload: unknown; strategy: DispatchStrategy; title?: string } | null>
 
+// ── setting console (setting-ops M5) ─────────────────────────────────────────
+// The IM face of the unified deterministic `setting` ops console — the THIRD
+// surface over the one host `ops-core` (CLI + admin web + IM). An operator DMs
+// the bot `/setting` to enter a command mode; each subsequent line is an ops
+// subcommand until `exit`. Owner/operator only (D3), and ONLY read + safe-mutate
+// execute here: ops-core's chokepoint refuses config-write AND
+// destructive-offline for the `surface:'im'` caller, so the IM console can never
+// write config or run a destructive op — it LISTS them and points the operator
+// at the admin web UI / server CLI, exactly like the other two faces.
+
+/** One catalog row for the IM console banner — a structural mirror of ops-core's
+ *  `OpsCommandInfo`, so the host injects `listOpsCommands({surface:'im',…})`
+ *  verbatim (the extra `summary` field is simply ignored here). */
+export interface ImSettingCommandInfo {
+  id: string
+  tier: string
+  title: string
+  runnableHere: boolean
+  whereToRun?: string
+}
+
+/** The deterministic ops runner the IM console drives. Production binds it to
+ *  ops-core (`listOpsCommands` / `runOpsCommand`, surface='im'); `run` throws an
+ *  ops error whose `.message` already says where a refused tier must run. */
+export interface ImSettingOps {
+  list(): ImSettingCommandInfo[]
+  run(id: string, args: readonly string[]): Promise<{ lines: string[] }>
+}
+
+/**
+ * IM command-console wiring. Present only when the host wired the console
+ * (identity + ops-core available). ABSENT (the default) → `handleImMessage`'s
+ * `/setting` pre-branch is skipped and every existing branch runs byte-for-byte
+ * unchanged — the same zero-behaviour-change-when-unset property as the env gate.
+ */
+export interface HostImSettingConfig {
+  /** Owner/operator gate (D3): only an admin may enter the console. Keyed by the
+   *  bound AipeHub userId (resolved from the binding), never the raw IM handle. */
+  isOperator: (userId: string) => boolean | Promise<boolean>
+  /**
+   * Per-user "in command mode" flag, OWNED by the orchestration layer
+   * (`startImBridges`) so the stateless `handleImMessage` can read / flip it.
+   * Command mode is conversational and intended for a DM with the bot.
+   */
+  mode: Map<string, boolean>
+  /** The deterministic ops runner (read + safe-mutate only on IM). */
+  ops: ImSettingOps
+}
+
 export interface HostImConfig {
   hub: Hub
   resolver: ImBindingResolver
@@ -117,6 +166,12 @@ export interface HostImConfig {
   /** Optional `/workflow` resolver; absent → router replies "not enabled". */
   resolveWorkflow?: ImWorkflowResolver
   log: ImLogger
+  /**
+   * setting-ops M5 — owner/operator-only deterministic ops command mode, entered
+   * by DMing `/setting`. Absent → the `/setting` branch is inert and the bridge
+   * behaves exactly as before.
+   */
+  setting?: HostImSettingConfig
 }
 
 const HELP_TEXT = [
@@ -142,6 +197,15 @@ export async function handleImMessage(
 ): Promise<void> {
   const platform = bridge.platform
   const cmd = parseImCommand(msg.text ?? '')
+
+  // setting-ops M5 — additive `/setting` pre-branch. Claims the message iff it
+  // is `/setting` OR the sender is already in command mode; otherwise returns
+  // false and every existing branch below runs byte-for-byte unchanged. Inert
+  // unless the host wired `config.setting`.
+  if (config.setting) {
+    const claimed = await handleSettingConsole(bridge, msg, config, config.setting)
+    if (claimed) return
+  }
 
   // /help and /bind are the two commands that work before binding.
   if (cmd.kind === 'help') {
@@ -252,6 +316,150 @@ export async function handleImMessage(
 }
 
 // ---------------------------------------------------------------------------
+// setting console (setting-ops M5) — the IM command mode.
+// ---------------------------------------------------------------------------
+
+/** Matches the `/setting` trigger (bare, or with trailing args / whitespace). */
+const SETTING_TRIGGER_RE = /^\/setting(?:\s|$)/i
+
+/**
+ * The IM setting console. Returns `true` iff it CLAIMED the message (the caller
+ * then returns without running any other branch); `false` means "not mine" and
+ * the normal router continues — so a non-mode user's `/help` or chat flows on
+ * byte-for-byte unchanged.
+ *
+ * Claims a message when it is the `/setting` trigger, OR when the resolved user
+ * is already in command mode.
+ */
+async function handleSettingConsole(
+  bridge: ImBridge,
+  msg: ImMessage,
+  config: HostImConfig,
+  setting: HostImSettingConfig,
+): Promise<boolean> {
+  const text = msg.text ?? ''
+  const isTrigger = SETTING_TRIGGER_RE.test(text.trim())
+
+  // Resolve the binding once. Command mode is keyed by AipeHub userId, so an
+  // unbound sender can never be "in mode".
+  const userId = await config.resolver.resolveUserId(bridge.platform, msg.from.platformUserId)
+  const inMode = userId !== null && setting.mode.get(userId) === true
+
+  // Not the trigger and not in mode → not ours; let the normal router run.
+  if (!isTrigger && !inMode) return false
+
+  // From here the message is ours to answer (either `/setting`, or a line typed
+  // while already in command mode).
+
+  // `/setting` from an unbound sender → bind first (mirrors the main nudge).
+  if (userId === null) {
+    await reply(
+      bridge,
+      msg,
+      '你还没有绑定 AipeHub 账户，无法进入命令模式。先私信我 `/bind <code>`。\n' +
+        'You must link your account before using the setting console — DM me `/bind <code>` first.',
+    )
+    return true
+  }
+
+  // Owner/operator gate (D3). Re-checked on EVERY line, so a demotion mid-session
+  // is honoured: a non-operator is refused and any stale mode flag is dropped.
+  const operator = await setting.isOperator(userId)
+  if (!operator) {
+    setting.mode.delete(userId)
+    await reply(bridge, msg, '命令模式仅限管理员。/ The setting console is for hub operators only.')
+    return true
+  }
+
+  // `/setting` → (re)enter command mode and show the runnable catalog.
+  if (isTrigger) {
+    setting.mode.set(userId, true)
+    await reply(bridge, msg, settingEnterText(setting))
+    return true
+  }
+
+  // In command mode: treat the whole line as one ops subcommand.
+  const parsed = parseSettingLine(text)
+  if (parsed.kind === 'empty') return true
+  if (parsed.kind === 'exit') {
+    setting.mode.delete(userId)
+    await reply(bridge, msg, '已退出命令模式。/ Left the setting console.')
+    return true
+  }
+  if (parsed.kind === 'help') {
+    await reply(bridge, msg, settingHelpText(setting))
+    return true
+  }
+
+  // parsed.kind === 'command'
+  try {
+    const result = await setting.ops.run(parsed.id, parsed.args)
+    const body = result.lines.length > 0 ? result.lines.join('\n') : '(no output)'
+    await reply(bridge, msg, body)
+  } catch (err) {
+    // ops-core throws typed errors whose `.message` already says where a refused
+    // tier (config-write / destructive-offline) must run instead, and names an
+    // unknown command. Surface it verbatim — that IS the operator guidance.
+    const message = err instanceof Error ? err.message : String(err)
+    await reply(bridge, msg, `✗ ${message}`)
+  }
+  return true
+}
+
+/** A parsed line typed inside the setting console. */
+type ParsedSettingLine =
+  | { kind: 'empty' }
+  | { kind: 'exit' }
+  | { kind: 'help' }
+  | { kind: 'command'; id: string; args: string[] }
+
+const SETTING_EXIT_WORDS = new Set(['exit', 'quit', 'q', ':exit', ':quit', ':q'])
+const SETTING_HELP_WORDS = new Set(['help', '?', ':help', ':h', 'h'])
+
+/**
+ * Parse one command-mode line. Tolerates a leading `/setting ` prefix and a bare
+ * leading slash on the verb (`/status` ≡ `status`), so an operator can keep
+ * slashing out of muscle memory. Whitespace-split argv, the CLI shell's shape.
+ */
+function parseSettingLine(line: string): ParsedSettingLine {
+  const stripped = line.trim().replace(/^\/?setting\b\s*/i, '')
+  const tokens = stripped.split(/\s+/).filter((t) => t.length > 0)
+  if (tokens.length === 0) return { kind: 'empty' }
+  const head = tokens[0]!.toLowerCase().replace(/^\//, '')
+  if (SETTING_EXIT_WORDS.has(head)) return { kind: 'exit' }
+  if (SETTING_HELP_WORDS.has(head)) return { kind: 'help' }
+  return { kind: 'command', id: tokens[0]!.replace(/^\//, ''), args: tokens.slice(1) }
+}
+
+/** Banner shown on entering command mode — the commands that RUN here. */
+function settingEnterText(setting: HostImSettingConfig): string {
+  const runnable = setting.ops.list().filter((c) => c.runnableHere)
+  return [
+    '进入命令模式 / Setting console — deterministic ops, no LLM.',
+    '可运行 / runnable here (read + safe-mutate):',
+    ...runnable.map((c) => `  • ${c.id} — ${c.title}`),
+    '',
+    '输入命令名运行；`help` 看完整清单（含只在网页/CLI 能跑的）；`exit` 退出。',
+    'Type a command to run it; `help` for the full catalog; `exit` to leave.',
+  ].join('\n')
+}
+
+/** Full catalog — every tier listed, with a mark for what runs here and a hint
+ *  pointing refused tiers at the web UI / server CLI. */
+function settingHelpText(setting: HostImSettingConfig): string {
+  const out = ['命令清单 / setting commands:', '']
+  for (const c of setting.ops.list()) {
+    const mark = c.runnableHere ? '•' : '×'
+    const where = c.runnableHere ? '' : `  → ${c.whereToRun ?? '在网页/CLI 运行 / run on web or CLI'}`
+    out.push(`  ${mark} ${c.id} [${c.tier}] — ${c.title}${where}`)
+  }
+  out.push('')
+  out.push('× = 此面不可运行（破坏性/配置写去网页或服务器 CLI）。`exit` 退出。')
+  out.push('× = not runnable here (config-write / destructive ops live on the web UI or server CLI). `exit` to leave.')
+  return out.join('\n')
+}
+
+// ---------------------------------------------------------------------------
 // Start — env-gated entry point wired from main.ts.
 // ---------------------------------------------------------------------------
 
@@ -263,6 +471,12 @@ export interface StartImBridgesOptions {
   freeTextCapability?: string
   listAgents?: ImAgentLister
   resolveWorkflow?: ImWorkflowResolver
+  /**
+   * setting-ops M5 — owner/operator-only deterministic `/setting` command mode.
+   * Absent → the `/setting` branch is inert (the default; pure env-gated IM is
+   * unaffected). `main.ts` builds it from ops-core once identity is available.
+   */
+  setting?: HostImSettingConfig
 }
 
 export interface ImBridgesHandle {
@@ -385,6 +599,7 @@ export async function startImBridges(
     listAgents: opts.listAgents,
     resolveWorkflow: opts.resolveWorkflow,
     log: opts.log,
+    ...(opts.setting ? { setting: opts.setting } : {}),
   }
 
   const bridges: ImBridge[] = []
