@@ -586,7 +586,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 
 | 想知道什么 | 读哪 |
 |---|---|
-| 项目宪章 (英文核心, 仓库根 `CHARTER.md`: 认知/北极星三不可破[框架不跑 LLM·人与 agent 同 Participant·状态即文件]/三层用途/信任护城河[受治理·本地·可审计]/愿景[自由图非树]/使用方式/治理+荣誉指针/非目标/开源/修宪流程; 比 README[门]/OVERVIEW[图] 更慢变更的根, 与代码冲突时宪章为源) | `CHARTER.md` |
+| 项目宪章 (英文核心, 仓库根 `CHARTER.md`: 认知/北极星三不可破[框架不跑 LLM·人与 agent 同 Participant·状态即文件]/三层用途/信任护城河[受治理·本地·可审计]/愿景[自由图非树]/使用方式/治理+荣誉指针/非目标/开源/修宪流程; 比 README[门]/OVERVIEW[图] 更慢变更的根, 与代码冲突时宪章为源; 版本 0.1 [§10 修宪版本跳格规则]; 中文同步译本 `docs/zh/CHARTER.md` [英文为准]) | `CHARTER.md` · `docs/zh/CHARTER.md` |
 | 5 分钟总览 | `docs/zh/OVERVIEW.md` |
 | 产品定位 — 赛道地图 + 产品级矩阵 (`COMPETITIVE-LANDSCAPE.md` 四支柱赛道地图「谁占哪根」 ↔ `PRODUCT-MATRIX.md` 产品级优势/劣势矩阵各一张 + 「最适合哪类有需求但今天没被满足的用户」+ DeepSeek 降价如何解锁那个格子; 前者赛道,后者目标用户判断,互为配套) | `docs/zh/COMPETITIVE-LANDSCAPE.md` · `docs/zh/PRODUCT-MATRIX.md` |
 | 上手案例 — 5 个开箱即用 hub (3 个人 + 2 组织) 对照表 + 确定性 demo + 真 DeepSeek/Obsidian go-live runbook + 验证锚点分层 | `docs/zh/HANDS-ON-HUBS.md` |
