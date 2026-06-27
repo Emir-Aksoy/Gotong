@@ -9,8 +9,9 @@
 > is a map; this is the anchor. When code and this charter disagree, either the
 > code is wrong or the charter needs an amendment — and §10 says how to make one.
 >
-> English is the canonical version. Translations may follow; where they drift,
-> English governs.
+> English is the canonical version; a synced Chinese translation lives at
+> [`docs/zh/CHARTER.md`](docs/zh/CHARTER.md). Where a translation drifts, English
+> governs.
 
 ---
 
