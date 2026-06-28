@@ -481,7 +481,7 @@ throw new SuspendTaskError({ resumeAt: Date.now() + 5*60_000, state: { step: 'wa
 
 照搬 `CLAUDE.md` §4.1, 提醒自己:
 
-- **GitHub 上传暂停**: 所有 commit 堆本地, 不 push
+- ~~**GitHub 上传暂停**: 所有 commit 堆本地, 不 push~~ (已失效: push 2026-06-16 解冻、repo 2026-06-28 公开; 现纪律=只推 main/fast-forward/绝不强推)
 - **不动备份**: `~/Backups/AipeHub/` 只读
 - **不向前兼容**: Phase 8 删 `complete`, Phase 9 widen content blocks, 都是破坏性的, 不留 shim
 - **一个 task 一个 task**: 每个 M 一个 commit, 不要打包提交

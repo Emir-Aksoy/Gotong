@@ -148,8 +148,9 @@ live.yml  ──setup-workspace + pnpm -r build──▶  dist 就绪
 ## 七、显式推迟 / P1-D 状态 (诚实记录)
 
 - **P1-M12 跑通一次 release**: 需统一全包版本号 (决策 D-4) + 打 tag + `git push` +
-  启用 GitHub PVR —— 受 §四「GitHub 上传暂停」约束**阻塞**, 等用户解禁。本地
-  `release.yml` 五平台产物逻辑已就绪 (bun --compile), 只差实际 push/发版那一步。
+  启用 GitHub PVR。push 冻结已于 2026-06-16 解除、仓库已于 2026-06-28 公开, 原「上传暂停」
+  约束**已不复存在**; 剩下只是版本统一 + 实际打 tag/发版那一步 (Actions 需先重新启用)。本地
+  `release.yml` 五平台产物逻辑已就绪 (bun --compile)。
 - **P1-M14 代码签名 (可选)**: 需付费证书 (Apple $99/yr + Authenticode $200-500/yr,
   决策 D-5)。属财务采购, 需用户拍板, **暂不投**。`release.yml` 尾注释已记录配方。
 - **M13 自身推迟**: 多轮工具链 (multi-tool-call loop) 的 live 覆盖; 多模态 (vision)
