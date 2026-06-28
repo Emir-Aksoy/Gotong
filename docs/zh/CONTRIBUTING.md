@@ -3,7 +3,7 @@
 <!-- doc-version: 1.0 -->
 > **文档版本 1.0** · 中文译本 · 最后更新 2026-06-27 · 权威源：[English](../../CONTRIBUTING.md)。如译文与英文版冲突，以英文版为准。
 
-感谢你考虑参与贡献。AipeHub 还处于早期阶段，我们很乐意接受补丁、缺陷报告、设计反馈和文档改进。
+感谢你考虑参与贡献。AipeHub 还处于早期阶段，我们很乐意接受补丁、缺陷报告、设计反馈和文档改进——**而且我们说的是每一种贡献，无论大小。** 做出新东西，和把项目*带到人面前*，两样都算数：一行错别字修复、一整个可导入的 hub、一份翻译、一个教程视频、一场把人带进来的演讲。这些全都会被认可——见 [`CONTRIBUTORS.md`](CONTRIBUTORS.md)、精选学习陈列 [`LEARN.md`](LEARN.md)，以及我们为什么这么做：[`RECOGNITION-SYSTEM.md`](RECOGNITION-SYSTEM.md)。
 
 ## 基本规矩
 
@@ -71,6 +71,15 @@ docs/             长篇架构 / 协议 / 部署文档
 - 一整个可导入的 hub（多 agent + 工作流）→ [`templates/community/templates/`](../../templates/community/templates/)——那里的 README 讲了 5 步流程：复制一个旗舰示例、改写它、声明溯源（`derivedFrom`）、用 `pnpm check:templates` 在本地校验、开 PR。
 
 被**合并为社区模板**的门槛（license 清楚、能解析、无字面密钥）低于被**作为旗舰发布**的门槛（确定性 demo、声明治理立场、有人维护）。见 [`GOVERNANCE.md`](GOVERNANCE.md)。
+
+## 传播也算数
+
+你不必交代码*或*模板才算贡献。把 AipeHub 带到人面前——一篇博客、一个教程、一场演讲、一个视频、一份翻译、在 Discussions 里回答新人——是真实的工作，而以我们的经验，大多数开源对它认可不足。**我们不一样。** 好产品只有触达到人才会变得更好，认可做这件触达的人，是荣誉激励制度的**支柱 ⑤**（见 [`RECOGNITION-SYSTEM.md`](RECOGNITION-SYSTEM.md)）。
+
+- **每一份努力都被记录，无论大小。** 开一个 PR 把你自己（或别人）加进 [`CONTRIBUTORS.md`](CONTRIBUTORS.md)，配上对应 emoji——📹 视频、📢 演讲、📝 博客、🌍 翻译、💬 社区。一份有分量的传播努力，和一个合并的特性一样登记进 GitHub 记录；没有哪份努力小到不值得记。
+- **做了好视频或教程？一个按格式的 PR 就够了。** 按列出的格式往 [`LEARN.md`](LEARN.md) 加一个条目、开 PR——这就是全部流程。只要忠实、真有用，维护者就会把它策展到新人学习的那个页面上，并给你署名。
+
+我们认可的是*触达的工作*，不是一个触达数字——没有播放量或粉丝排行榜。诚实边界见 [`RECOGNITION-SYSTEM.md`](RECOGNITION-SYSTEM.md)。
 
 ## 报告缺陷
 

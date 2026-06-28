@@ -64,6 +64,10 @@ federated hub.
 
 ## How to submit
 
+**Made a video or tutorial? The whole flow is one format-conformant PR** — no
+extra ceremony, no form to fill out elsewhere. Add your entry in the format and
+open the PR; that's it.
+
 1. **Open a pull request** adding an entry under the right section — yours or
    someone else's. Use the entry format in the `<!-- comment -->` under
    [Videos](#videos).

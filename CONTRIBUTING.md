@@ -5,7 +5,13 @@
 
 Thanks for considering a contribution. AipeHub is an early-stage project
 and we are happy to take patches, bug reports, design feedback, and
-documentation improvements.
+documentation improvements — **and we mean every kind of contribution, big
+or small.** Building something new and *carrying the project to people* both
+count: a one-line typo fix, a whole importable hub, a translation, a tutorial
+video, a talk that brings people in. All of it is recognized — see
+[`CONTRIBUTORS.md`](CONTRIBUTORS.md), the curated learning showcase
+[`LEARN.md`](LEARN.md), and why we do it in
+[`docs/RECOGNITION-SYSTEM.md`](docs/RECOGNITION-SYSTEM.md).
 
 ## Ground rules
 
@@ -96,6 +102,29 @@ The bar to be *merged as a community template* (license is clear, it parses,
 no literal secrets) is lower than the bar to be *shipped as a flagship*
 (deterministic demo, stated governance posture, maintained). See
 [`GOVERNANCE.md`](GOVERNANCE.md).
+
+## Spreading the word counts too
+
+You don't have to ship code *or* a template to contribute. Carrying AipeHub to
+people — a blog post, a tutorial, a talk, a video, a translation, answering
+newcomers in Discussions — is real work, and in our experience most open source
+under-credits it. **We don't.** A good product only gets better by reaching
+people, and recognizing the people who do that reaching is **pillar ⑤** of the
+recognition system (see [`docs/RECOGNITION-SYSTEM.md`](docs/RECOGNITION-SYSTEM.md)).
+
+- **Every effort is recorded, big or small.** Open a PR adding yourself (or
+  someone else) to [`CONTRIBUTORS.md`](CONTRIBUTORS.md) with the matching emoji —
+  📹 video, 📢 talk, 📝 blog, 🌍 translation, 💬 community. A significant spread
+  effort lands in the GitHub record the same as a merged feature; no effort is
+  too small to record.
+- **Made a good video or tutorial? It's one format PR.** Add an entry to
+  [`LEARN.md`](LEARN.md) in the listed format and open the PR — that is the whole
+  flow. If it is accurate and genuinely useful, a maintainer curates it onto the
+  page newcomers learn from, and you get credited.
+
+We recognize the *work of reaching*, not a reach number — there is no view-count
+or follower leaderboard. See the honest boundary in
+[`docs/RECOGNITION-SYSTEM.md`](docs/RECOGNITION-SYSTEM.md#4-what-we-dont-do-honest-boundary).
 
 ## Reporting bugs
 

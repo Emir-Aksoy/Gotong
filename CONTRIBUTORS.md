@@ -4,12 +4,14 @@
 > **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](docs/zh/CONTRIBUTORS.md) · [日本語](docs/ja/CONTRIBUTORS.md) · [Русский](docs/ru/CONTRIBUTORS.md) · [Français](docs/fr/CONTRIBUTORS.md) · [Español](docs/es/CONTRIBUTORS.md) · [한국어](docs/ko/CONTRIBUTORS.md). If a translation conflicts with this English version, the English version governs.
 
 This file records the people who build AipeHub — and **every kind of
-contribution counts, not only code.** Writing the tutorial that finally makes
-federation click, giving the talk that brings fifty people to the project,
-translating the docs into a language the core team doesn't speak, running the
-room where newcomers get unstuck — that is the work that turns *a good framework
-nobody finds* into *a good framework people actually use*, and it is recognized
-here with the same standing as a merged PR.
+contribution counts, big or small, not only code.** Writing the tutorial that
+finally makes federation click, giving the talk that brings fifty people to the
+project, translating the docs into a language the core team doesn't speak,
+running the room where newcomers get unstuck — that is the work that turns *a
+good framework nobody finds* into *a good framework people actually use*, and it
+is recognized here with the same standing as a merged PR. **No effort is too
+small to record, and a significant spread effort lands in this record the same
+as a shipped feature.**
 
 This is the people-facing half of [pillar ⑤ of the Recognition
 System](docs/RECOGNITION-SYSTEM.md#pillar-5).

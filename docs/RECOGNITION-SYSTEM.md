@@ -176,14 +176,15 @@ differentiator, not an afterthought.
 So pillar ⑤ adds two light, file-first artifacts — and nothing heavier:
 
 - **A typed contributor ledger — [`CONTRIBUTORS.md`](../CONTRIBUTORS.md).** A
-  hand-maintained table that records *every* kind of contribution next to code, using the
-  [All Contributors](https://allcontributors.org) emoji vocabulary — 💻 code, 📖 docs,
-  🌍 translation, 📝 blog, 📹 video, 📢 talk, ✅ tutorial, 💬 community support,
-  📋 event organizing. It is **a record, not a ranking**: it states *what you did*, in the
-  open, with your name on it — it does not sort people by a number. We use the
-  All-Contributors *taxonomy* but **not** its bot or GitHub Action (the repo spends no
-  Actions budget on bookkeeping, and a markdown table is the lightest honest thing); you
-  are added by a normal PR.
+  hand-maintained table that records *every* kind of contribution, big or small, next to
+  code, using the [All Contributors](https://allcontributors.org) emoji vocabulary —
+  💻 code, 📖 docs, 🌍 translation, 📝 blog, 📹 video, 📢 talk, ✅ tutorial,
+  💬 community support, 📋 event organizing. It is **a record, not a ranking**: it states
+  *what you did*, in the open, with your name on it — it does not sort people by a number.
+  A significant reach effort lands in the record the same as a merged feature, and no
+  effort is too small to record. We use the All-Contributors *taxonomy* but **not** its bot
+  or GitHub Action (the repo spends no Actions budget on bookkeeping, and a markdown table
+  is the lightest honest thing); you are added by a normal PR.
 - **A curated learning showcase — [`LEARN.md`](../LEARN.md).** The best community-made
   material for learning AipeHub — videos, talks, tutorials, posts — each credited to its
   author and linked from the README. This is the **reach analog of pillar ④**: flagship
