@@ -43,10 +43,13 @@ un groupe de personnes qui tiennent la ligne de conception, pas de faire du filt
 directive approximative, pas une liste à cocher :
 
 - **Un historique, pas un décompte.** De l'ordre de ~5 PRs non triviales fusionnées —
-  ou l'équivalent : un modèle phare que vous maintenez, un adaptateur substantiel, ou une
-  aide soutenue à la relecture / au tri — sur quelques mois. Le nombre est un plancher
-  signifiant « nous avons vu suffisamment de votre travail pour faire confiance à votre
-  jugement », jamais une cible à atteindre avec des PRs de passage.
+  ou l'équivalent : un modèle phare que vous maintenez, un adaptateur substantiel, une
+  aide soutenue à la relecture / au tri, maintenir la documentation vivante dans
+  d'autres langues, animer la communauté, ou du matériel éducatif soutenu (voir
+  [pilier ⑤](RECOGNITION-SYSTEM.md#pillar-5) et
+  [`CONTRIBUTORS.md`](../../CONTRIBUTORS.md)) — sur quelques mois. Le nombre est un
+  plancher signifiant « nous avons vu suffisamment de votre travail pour faire confiance
+  à votre jugement », jamais une cible à atteindre avec des PRs de passage.
 - **Une compréhension de la ligne de conception.** Vos PRs et revues montrent que vous
   cherchez un *participant*, pas le Hub, lorsque la logique a besoin d'un endroit
   (voir [L'unique non-négociable](#lunique-non-négociable)).

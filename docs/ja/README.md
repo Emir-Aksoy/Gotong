@@ -71,6 +71,8 @@ npm パッケージは `@aipehub/*` でスコープされています。Python S
 
 このプロジェクトが何であるか——そして何になることを拒否するか：[`CHARTER.md`](../../CHARTER.md)。貢献する場合は [`CONTRIBUTING.md`](../../CONTRIBUTING.md) を参照。セキュリティ問題：[`SECURITY.md`](../../SECURITY.md)。バージョン履歴：[`CHANGELOG.md`](../../CHANGELOG.md)。
 
+AipeHub を学ぶための最高のコミュニティ制作ビデオ、トーク、チュートリアルのキュレーションされた陳列館は [`LEARN.md`](../../LEARN.md) をご覧ください。プロジェクトの構築に貢献した人々 —— コード、ドキュメント、翻訳、コミュニティ、普及活動をすべて含む —— は [`CONTRIBUTORS.md`](../../CONTRIBUTORS.md) で認定されています。どちらも[表彰システムの支柱⑤](RECOGNITION-SYSTEM.md#pillar-5)の一部です。
+
 ## クイックスタート
 
 ### 非技術ユーザー？ダブルクリック、Node/Docker 不要

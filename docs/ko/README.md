@@ -71,6 +71,12 @@ npm 패키지들은 `@aipehub/*`로 범위가 지정됩니다; Python SDK는 PyP
 
 이 프로젝트가 무엇이며 — 무엇이 되기를 거부하는지: [`CHARTER.md`](../../CHARTER.md). 기여하시겠습니까? [`CONTRIBUTING.md`](../../CONTRIBUTING.md) 참조. 보안 문제: [`SECURITY.md`](../../SECURITY.md). 버전 히스토리: [`CHANGELOG.md`](../../CHANGELOG.md).
 
+동영상, 강연, 또는 튜토리얼로 배우시나요? [`LEARN.md`](LEARN.md)는 커뮤니티가 만든
+최고의 학습 자료의 큐레이션 전시관입니다. 기여자로 기록되고 싶으신가요 — 코드든
+문서든 번역이든 강연이든? [`CONTRIBUTORS.md`](CONTRIBUTORS.md)는 모든 기여
+종류의 장부입니다. 두 파일 모두 전파 작업이 구축 작업과 동등한 인정을 받는
+[기둥 ⑤](RECOGNITION-SYSTEM.md#pillar-5)의 일부입니다.
+
 ## 빠른 시작
 
 ### 비기술적 사용자? 더블클릭, Node/Docker 없음

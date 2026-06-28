@@ -50,13 +50,24 @@ Donc la « monnaie » de ce système est trois choses, et aucune d'elles ne coû
 3. **Un chemin documenté vers un mot à dire** — un bon travail soutenu gagne un
    statut de mainteneur et une vraie voix, pas un paiement.
 
+Ces trois éléments sont aussi le test pour tout ce que nous *ajoutons* au système :
+cela doit ne rien coûter et tirer vers les fichiers et les personnes, pas vers un
+centre. **Le pilier ⑤ ci-dessous — reconnaître la diffusion — est la seule extension
+délibérée.** Il élargit *l'attribution visible* pour couvrir le travail de porter le
+projet vers les gens, que les quatre premiers piliers, tous ancrés dans des artefacts
+du dépôt, ne peuvent structurellement pas voir. Il n'introduit ni argent ni backend de
+suivi ; ce sont deux fichiers markdown.
+
 ---
 
-## 2. Les quatre piliers
+## 2. Les piliers
 
-Ce système est constitué de quatre choses qui **existent déjà et sont déjà câblées**.
-Ce ne sont pas de nouveaux mécanismes — ce document nomme les parties existantes comme
-un seul système.
+Ce système est constitué de cinq piliers. Les quatre premiers (①–④) **existent déjà et
+sont déjà câblés** — ce document nomme les parties existantes comme un seul système
+plutôt que d'inventer un sous-système. Le cinquième (⑤) est **la seule addition
+délibérée** : deux artefacts légers, axés sur les fichiers, qui reconnaissent le travail
+de *porter le projet vers les gens* — le travail que les quatre premiers ne peuvent
+structurellement pas voir.
 
 ### Pilier ① — le classement des citations (le crédit remonte)
 
@@ -151,12 +162,80 @@ sans friction n'a rien à partager et le classement n'a rien à classer. Écrive
 un exemplaire, énoncez clairement sa posture de gouvernance, et les gens le forkent,
 le citent, et font grandir leur propre travail par-dessus.
 
+<a id="pillar-5"></a>
+
+### Pilier ⑤ — reconnaître la diffusion (la portée est un vrai travail)
+
+> Un bon produit ne s'améliore que s'il atteint les gens. Les quatre piliers ci-dessus
+> récompensent tous le travail qui laisse une trace *dans le dépôt* ; porter le projet
+> *vers les gens* ne laisse pas d'arête `derivedFrom` — donc sans cinquième pilier il
+> reste invisible.
+
+Les quatre premiers piliers partagent un angle mort : ils s'ancrent dans des artefacts
+du dépôt. Le classement compte les arêtes `provenance` ; l'échelle des mainteneurs
+compte les PRs fusionnées ; les deux sont aveugles à la personne qui écrit le tutoriel
+qui fait enfin comprendre la fédération, donne la conférence qui amène cinquante
+personnes au projet, tient la salle où les nouveaux se débloquent, ou traduit la
+documentation dans une langue que l'équipe centrale ne parle pas. **Ce travail est la
+différence entre un bon framework que personne ne trouve et un bon framework que les
+gens utilisent vraiment** — et la plupart des projets open source le sous-créditent. À
+l'ère de l'IA, l'écart est plus marqué : construire est moins cher que jamais, donc le
+travail rare et décisif est *la découverte et la confiance* — et c'est précisément le
+travail que les quatre premiers piliers ne peuvent pas voir. Le reconnaître est une
+différenciation délibérée, pas une réflexion après coup.
+
+Le pilier ⑤ ajoute donc deux artefacts légers, axés sur les fichiers — et rien de plus
+lourd :
+
+- **Un registre typé des contributeurs — [`CONTRIBUTORS.md`](../../CONTRIBUTORS.md).**
+  Une table maintenue à la main qui enregistre *chaque* type de contribution, grande ou
+  petite, à côté du code, en utilisant le vocabulaire emoji de
+  [All Contributors](https://allcontributors.org) — 💻 code, 📖 docs, 🌍 traduction,
+  📝 blog, 📹 vidéo, 📢 conférence, ✅ tutoriel, 💬 support communautaire,
+  📋 organisation d'événements. C'est **un registre, pas un classement** : il indique
+  *ce que vous avez fait*, au grand jour, avec votre nom dessus — il ne classe pas les
+  gens selon un chiffre. Un effort de diffusion significatif atterrit dans le registre
+  au même titre qu'une fonctionnalité fusionnée, et aucun effort n'est trop petit pour
+  être enregistré. Nous utilisons la *taxonomie* All Contributors mais **pas** son bot
+  ou GitHub Action (le dépôt ne dépense pas de budget Actions pour la comptabilité, et
+  une table markdown est la chose la plus légère et honnête) ; vous êtes ajouté par un
+  PR ordinaire.
+- **Une vitrine d'apprentissage — [`LEARN.md`](../../LEARN.md).** Les meilleurs
+  matériels communautaires pour apprendre AipeHub — vidéos, conférences, tutoriels,
+  articles — chacun crédité à son auteur et lié depuis le README. C'est **l'analogue de
+  diffusion du pilier ④** : les templates phares sont les meilleures choses à *réutiliser* ;
+  les entrées LEARN sont les meilleures choses dont *apprendre*. Mettre en valeur la
+  vidéo de quelqu'un ici est un acte de reconnaissance concret et visible — et cela
+  double comme l'endroit où un nouveau venu va apprendre du meilleur matériel que la
+  communauté a produit.
+
+**Ce que nous reconnaissons, c'est le travail d'atteindre — pas un score de portée.**
+Nous ne construisons délibérément *pas* de « classement de diffusion » basé sur les
+vues, abonnés ou comptes de référence : ceux-ci sont manipulables, ils nécessiteraient
+un backend de suivi que le North Star ne veut pas (le Hub est simple ; l'état est des
+fichiers), et ils tireraient le projet vers la vanité. Nous ne pouvons pas mesurer
+honnêtement « combien de personnes votre vidéo a amenées », mais nous *pouvons*
+enregistrer honnêtement « vous avez fait la vidéo » et *pouvons* sélectionner « cette
+vidéo est assez bonne pour que nous envoyions les nouveaux vers elle ». Cela enregistre
+la contribution et évite le piège des métriques en un seul mouvement — de la même façon
+que le pilier ① **classe les templates, pas les personnes**, le pilier ⑤ **enregistre
+et sélectionne le travail, pas la taille de l'audience**.
+
+Et la diffusion confère un standing, pas seulement une ligne : l'échelle des mainteneurs
+dans `GOVERNANCE.md` compte le travail de diffusion soutenu — la gestion de la
+localisation, l'animation de la communauté, le matériel éducatif soutenu — comme un
+**parcours équivalent** au code vers une vraie voix dans le projet (pilier ②). Une
+personne qui n'écrit jamais une ligne de code du framework mais maintient la
+documentation vivante dans trois langues et répond aux nouveaux chaque semaine contribue
+exactement le type de jugement soutenu que l'échelle est censée reconnaître.
+
 ---
 
-## 3. Comment les quatre piliers se renforcent mutuellement
+## 3. Comment les piliers se renforcent mutuellement
 
-Les quatre piliers ne sont pas quatre choses isolées — ils forment une **boucle
-d'auto-renforcement** :
+Les piliers ①–④ ne sont pas quatre choses isolées — ils forment une **boucle
+d'auto-renforcement** qui se met en marche une fois qu'une personne est déjà dans le
+dépôt :
 
 ```
    ④ exemplaires  ──fork──▶  ③ partage sans friction  ──PR + provenance honnête──▶  ① classement
@@ -183,6 +262,15 @@ d'auto-renforcement** :
 « ma chose est utile, les gens l'utilisent, mon nom est visible, et ce que je dis
 commence à compter » — pure reconnaissance, et exactement suffisant.
 
+**Où le pilier ⑤ s'inscrit.** La boucle ci-dessus est le volant d'inertie *dans le
+dépôt* — il tourne une fois qu'une personne est déjà là. Le pilier ⑤ élargit l'entrée
+de l'entonnoir : le travail de diffusion (une conférence, une vidéo, une traduction, une
+salle communautaire active) est la façon dont une personne *arrive* aux exemplaires en
+premier lieu, et la façon dont le travail qu'elle publie ensuite trouve son propre
+public. Il ne change pas la boucle à quatre piliers ; il y amène des gens et en porte
+la production vers l'extérieur. Le reconnaître rend visibles les personnes qui font ce
+travail, au lieu de traiter la distribution comme quelque chose qui arrive tout seul.
+
 ---
 
 ## 4. Ce que nous ne faisons pas (frontière honnête)
@@ -190,12 +278,19 @@ commence à compter » — pure reconnaissance, et exactement suffisant.
 - **Pas d'argent / pas de jeton / pas de prime** (candidat C, abandonné).
 - **Le classement ne classe pas les personnes** : il classe combien un modèle est
   réutilisé, pas des points personnels gamifiables.
+- **Nous reconnaissons le travail de diffusion, pas un score de diffusion** : pas de
+  classement vues / abonnés / références — ceux-ci sont manipulables et nécessiteraient
+  un backend de suivi que le North Star refuse. [`CONTRIBUTORS.md`](../../CONTRIBUTORS.md)
+  enregistre *ce que vous avez fait* ; [`LEARN.md`](../../LEARN.md) sélectionne *ce qui
+  vaut la peine d'apprendre* ; aucun des deux ne classe les gens par taille d'audience.
 - **La promotion n'est pas automatique** : ~5 PRs est un plancher, pas un interrupteur ;
   la décision finale est un jugement humain + consensus paresseux sur une issue
   publique, pas un compteur qui se déverrouille.
-- **Aucun nouveau mécanisme inventé pour ça** : les quatre piliers sont des choses qui
-  **existent déjà et sont déjà câblées** ; ce document les nomme comme un seul système,
-  il n'ajoute pas un sous-système.
+- **Presque aucune nouvelle machinerie** : les piliers ①–④ sont des choses qui
+  **existent déjà et sont déjà câblées**. Le pilier ⑤ ajoute exactement deux fichiers
+  markdown maintenus à la main (`CONTRIBUTORS.md`, `LEARN.md`) — pas de bot, pas de
+  GitHub Action, pas de service de suivi. C'est toute la surface « nouvelle », et c'est
+  délibérément la chose la plus légère qui puisse fonctionner.
 
 ---
 
@@ -206,6 +301,8 @@ commence à compter » — pure reconnaissance, et exactement suffisant.
 | Index phare + classement des citations (piliers ①④) | [`zh/FLAGSHIP-TEMPLATES.md`](../zh/FLAGSHIP-TEMPLATES.md) |
 | Processus de décision + échelle des mainteneurs (pilier ②) | [`GOVERNANCE.md`](../../GOVERNANCE.md) |
 | Liste actuelle des mainteneurs (pilier ②) | [`MAINTAINERS.md`](../../MAINTAINERS.md) |
+| Registre typé des contributeurs — tous les types de contributions (pilier ⑤) | [`CONTRIBUTORS.md`](CONTRIBUTORS.md) |
+| Vitrine d'apprentissage / vidéos sélectionnées (pilier ⑤) | [`LEARN.md`](LEARN.md) |
 | Installation en un clic de la galerie de modèles (pilier ③) | [`zh/TEMPLATE-GALLERY.md`](../zh/TEMPLATE-GALLERY.md) |
 | Flux de soumission de modèle communautaire (pilier ③) | [`templates/community/templates/README.md`](../../templates/community/templates/README.md) |
 | Site communautaire zéro-calcul (l'autre cible de rendu du classement) | [`zh/COMMUNITY-SITE.md`](../zh/COMMUNITY-SITE.md) |

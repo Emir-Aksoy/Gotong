@@ -43,9 +43,13 @@ aproximada, no una lista de verificación a manipular:
 
 - **Un historial, no un recuento.** Del orden de ~5 PRs no triviales fusionados —
   o el equivalente: una plantilla de referencia que mantienes actualizada, un adaptador
-  sustancial, o ayuda sostenida de revisión / clasificación — durante un par de meses. El
-  número es un piso para "hemos visto suficiente de tu trabajo para confiar en tu
-  juicio", nunca un objetivo a alcanzar con PRs superficiales.
+  sustancial, ayuda sostenida de revisión / clasificación, mantener la documentación viva
+  en un idioma que el equipo central no habla, gestionar la comunidad para que los nuevos
+  usuarios no se queden atascados, o material educativo sostenido que trae personas al
+  proyecto (ver [pilar ⑤ del sistema de reconocimiento](RECOGNITION-SYSTEM.md#pillar-5)
+  y [`CONTRIBUTORS.md`](../../CONTRIBUTORS.md)) — durante un par de meses. El número es un piso
+  para "hemos visto suficiente de tu trabajo para confiar en tu juicio", nunca un objetivo
+  a alcanzar con PRs superficiales.
 - **Una comprensión de la línea de diseño.** Tus PRs y revisiones muestran que buscas un
   *participante*, no el Hub, cuando la lógica necesita un hogar (ver
   [Lo único no negociable](#lo-único-no-negociable)).

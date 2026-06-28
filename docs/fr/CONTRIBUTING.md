@@ -4,8 +4,15 @@
 > **Version du document 1.0** · Traduction française · Mis à jour le 2026-06-27 · Source faisant autorité : [English](../../CONTRIBUTING.md). En cas de divergence entre la traduction et la version anglaise, la version anglaise prévaut.
 
 Merci de considérer une contribution. AipeHub est un projet en phase précoce
-et nous sommes heureux d'accepter des correctifs, des rapports de bugs, des retours de conception et des
-améliorations de documentation.
+et nous sommes heureux d'accepter des correctifs, des rapports de bugs, des retours de
+conception et des améliorations de documentation — **et nous entendons chaque type de
+contribution, grande ou petite.** Construire quelque chose de nouveau *et porter le
+projet vers les gens* comptent tous les deux : une correction de faute de frappe sur
+une ligne, un hub entier importable, une traduction, une vidéo tutoriel, une
+conférence qui amène des gens. Tout est reconnu — voir
+[`CONTRIBUTORS.md`](../../CONTRIBUTORS.md), la vitrine d'apprentissage
+[`LEARN.md`](../../LEARN.md), et pourquoi nous le faisons dans
+[`RECOGNITION-SYSTEM.md`](RECOGNITION-SYSTEM.md).
 
 ## Règles de base
 
@@ -95,6 +102,31 @@ La barre pour être *fusionné comme modèle communautaire* (la licence est clai
 pas de secrets littéraux) est plus basse que la barre pour être *livré comme phare*
 (démo déterministe, posture de gouvernance déclarée, maintenu). Voir
 [`GOVERNANCE.md`](../../GOVERNANCE.md).
+
+## Diffuser le projet compte aussi
+
+Vous n'avez pas besoin de livrer du code *ni* un modèle pour contribuer. Porter AipeHub
+vers les gens — un billet de blog, un tutoriel, une conférence, une vidéo, une
+traduction, répondre aux nouveaux dans les Discussions — est un vrai travail, et dans
+notre expérience la plupart des projets open source le sous-créditent. **Nous non.**
+Un bon produit ne s'améliore que s'il atteint les gens, et reconnaître les personnes
+qui font ce travail d'atteindre est le **pilier ⑤** du système de reconnaissance
+(voir [`RECOGNITION-SYSTEM.md`](RECOGNITION-SYSTEM.md)).
+
+- **Chaque effort est enregistré, grand ou petit.** Ouvrez une PR en vous ajoutant (ou
+  en ajoutant quelqu'un d'autre) à [`CONTRIBUTORS.md`](../../CONTRIBUTORS.md) avec
+  l'emoji correspondant — 📹 vidéo, 📢 conférence, 📝 blog, 🌍 traduction, 💬
+  communauté. Un effort de diffusion significatif atterrit dans le registre GitHub au
+  même titre qu'une fonctionnalité fusionnée ; aucun effort n'est trop petit pour être
+  enregistré.
+- **Vous avez fait une bonne vidéo ou un tutoriel ? C'est une PR conforme au format.**
+  Ajoutez une entrée à [`LEARN.md`](../../LEARN.md) dans le format listé et ouvrez la
+  PR — c'est tout le flux. Si c'est fidèle et vraiment utile, un maintainer le met en
+  valeur sur la page dont les nouveaux apprennent, et vous êtes crédité.
+
+Nous reconnaissons le *travail d'atteindre*, pas un nombre d'audience — il n'y a pas
+de classement par vues ou abonnés. Voir la limite honnête dans
+[`RECOGNITION-SYSTEM.md`](RECOGNITION-SYSTEM.md).
 
 ## Signaler des bugs
 

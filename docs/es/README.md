@@ -71,6 +71,11 @@ Ambos caminos se conectan al mismo Hub. Mézclalos libremente — una sala puede
 
 Qué es este proyecto — y qué se niega a ser: [`CHARTER.md`](../../CHARTER.md). ¿Contribuyendo? Ver [`CONTRIBUTING.md`](../../CONTRIBUTING.md). Problemas de seguridad: [`SECURITY.md`](../../SECURITY.md). Historial de versiones: [`CHANGELOG.md`](../../CHANGELOG.md).
 
+**Aprende viendo** → [`LEARN.md`](../../LEARN.md) cura los mejores vídeos, charlas y
+tutoriales hechos por la comunidad, cada uno acreditado a su autor. **Todos los que
+construyen *y difunden* AipeHub** → [`CONTRIBUTORS.md`](../../CONTRIBUTORS.md) — porque
+el alcance es trabajo real, y [lo reconocemos](../RECOGNITION-SYSTEM.md#pillar-5).
+
 ## Inicio rápido
 
 ### ¿Usuario no técnico? Doble clic, sin Node/Docker

@@ -3,7 +3,7 @@
 <!-- doc-version: 1.0 -->
 > **Versión del documento 1.0** · Traducción al español · Actualizado el 2026-06-27 · Fuente autorizada: [English](../../CONTRIBUTING.md). Si la traducción entra en conflicto con la versión en inglés, prevalece la versión en inglés.
 
-Gracias por considerar una contribución. AipeHub es un proyecto en fase temprana y nos complace recibir parches, informes de errores, retroalimentación de diseño y mejoras de documentación.
+Gracias por considerar una contribución — y nos referimos a todo tipo de contribución, grande o pequeña. Construir algo nuevo y llevar el proyecto a las personas cuentan igual. Un parche, un informe de error, una traducción, un tutorial, una charla, una respuesta de apoyo en Discussions — todo es bienvenido. Todo se reconoce — ver [`CONTRIBUTORS.md`](../../CONTRIBUTORS.md), el escaparate curado de aprendizaje [`LEARN.md`](../../LEARN.md), y por qué lo hacemos en [`docs/RECOGNITION-SYSTEM.md`](../RECOGNITION-SYSTEM.md).
 
 ## Reglas básicas
 
@@ -71,6 +71,22 @@ No tienes que escribir TypeScript para contribuir. AipeHub incluye **plantillas*
 - Un hub importable completo (multi-agente + flujos de trabajo) → [`templates/community/templates/`](../../templates/community/templates/) — ese README recorre el flujo de 5 pasos: copia un ejemplo insignia, adáptalo, declara la procedencia (`derivedFrom`), valida localmente con `pnpm check:templates`, abre un PR.
 
 La barra para ser *fusionado como plantilla de la comunidad* (la licencia está clara, analiza correctamente, sin secretos literales) es más baja que la barra para ser *enviado como insignia* (demo determinista, postura de gobernanza declarada, mantenido). Ver [`GOVERNANCE.md`](../../GOVERNANCE.md).
+
+## Difundir la palabra también cuenta
+
+Si escribiste un tutorial, diste una charla o mantuviste la documentación viva en
+tu idioma, eso es una contribución de primera clase — no una categoría secundaria.
+
+- **Abre un pull request en [`CONTRIBUTORS.md`](../../CONTRIBUTORS.md)** añadiendo
+  una fila para ti mismo (o para otra persona). Enlaza el artefacto en la
+  descripción del PR para que un maintainer pueda verlo.
+- **Si tu material es un vídeo, tutorial o charla que enseña AipeHub bien**,
+  también puede ser curado en [`LEARN.md`](../../LEARN.md) — el escaparate al
+  que se dirige a los nuevos usuarios. Pide que sea añadido en el mismo PR.
+
+La escalera de mantenedores ([`GOVERNANCE.md`](../../GOVERNANCE.md)) cuenta el
+trabajo sostenido de difusión — localización, gestionar la comunidad, material
+educativo — como **equivalente al código** hacia una voz real en el proyecto.
 
 ## Reportar errores
 

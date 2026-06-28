@@ -71,6 +71,13 @@ Les deux chemins se connectent au même Hub. Mélangez librement — une salle p
 
 Ce qu'est ce projet — et ce qu'il refuse de devenir : [`CHARTER.md`](../../CHARTER.md). Contribuer ? Voir [`CONTRIBUTING.md`](../../CONTRIBUTING.md). Problèmes de sécurité : [`SECURITY.md`](../../SECURITY.md). Historique des versions : [`CHANGELOG.md`](../../CHANGELOG.md).
 
+Vous avez fait une vidéo, un tutoriel ou une conférence sur AipeHub ? Ajoutez-vous à
+[`CONTRIBUTORS.md`](../../CONTRIBUTORS.md) (tous les types de contributions, pas
+seulement le code) ou soumettez votre matériel à la vitrine d'apprentissage
+[`LEARN.md`](../../LEARN.md) — c'est le [pilier ⑤](RECOGNITION-SYSTEM.md#pillar-5)
+du système de reconnaissance : diffuser le projet est un vrai travail, et nous le
+reconnaissons.
+
 ## Démarrage rapide
 
 ### Utilisateur non technique ? Double-clic, zéro Node/Docker
