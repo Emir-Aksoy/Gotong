@@ -49,12 +49,22 @@ So this system's "currency" is three things, and none of them costs anything:
 3. **A documented path to a say** — sustained good work earns maintainer standing and
    a real voice, not a payout.
 
+Those three are also the test for anything we *add* to the system: it must cost nothing
+and pull toward files-and-people, not toward a center. **Pillar ⑤ below — recognizing
+spread — is the one deliberate extension.** It widens *visible attribution* to cover the
+work of carrying the project to people, which the original four pillars, all keyed off
+in-repo artifacts, structurally can't see. It introduces no money and no tracking
+backend; it is two markdown files.
+
 ---
 
-## 2. The four pillars
+## 2. The pillars
 
-This system is made of four things that **already exist and are already wired up**.
-They are not new machinery — this document names existing parts as one system.
+This system is made of five pillars. The first four (①–④) **already exist and are
+already wired up** — this document names existing parts as one system rather than
+inventing a subsystem. The fifth (⑤) is the **one deliberate addition**: two light,
+file-first artifacts that recognize the work of *carrying the project to people* — the
+work the first four structurally cannot see.
 
 ### Pillar ① — the citation leaderboard (credit flows back)
 
@@ -144,11 +154,66 @@ has nothing to share and the leaderboard has nothing to rank. Write an exemplar 
 state its governance posture plainly, and people fork it, cite it, and grow their own
 work on top of it.
 
+<a id="pillar-5"></a>
+
+### Pillar ⑤ — recognizing spread (reach is real work)
+
+> A good product only gets better by reaching people. The four pillars above all reward
+> work that leaves a trace *inside the repo*; carrying the project *to people* leaves no
+> `derivedFrom` edge — so without a fifth pillar it stays invisible.
+
+The first four pillars share a blind spot: they key off in-repo artifacts. The
+leaderboard counts `provenance` edges; the maintainer ladder counts merged PRs; both are
+blind to the person who writes the tutorial that finally makes federation click, gives
+the talk that brings fifty people to the project, runs the room where newcomers get
+unstuck, or translates the docs into a language the core team doesn't speak. **That labor
+is the difference between a good framework nobody finds and a good framework people
+actually use** — and most open source under-credits it. In the AI era the gap is sharper:
+building is cheaper than ever, so the scarce, decisive work is *discovery and trust* — and
+that is exactly the work the first four pillars can't see. Recognizing it is a deliberate
+differentiator, not an afterthought.
+
+So pillar ⑤ adds two light, file-first artifacts — and nothing heavier:
+
+- **A typed contributor ledger — [`CONTRIBUTORS.md`](../CONTRIBUTORS.md).** A
+  hand-maintained table that records *every* kind of contribution next to code, using the
+  [All Contributors](https://allcontributors.org) emoji vocabulary — 💻 code, 📖 docs,
+  🌍 translation, 📝 blog, 📹 video, 📢 talk, ✅ tutorial, 💬 community support,
+  📋 event organizing. It is **a record, not a ranking**: it states *what you did*, in the
+  open, with your name on it — it does not sort people by a number. We use the
+  All-Contributors *taxonomy* but **not** its bot or GitHub Action (the repo spends no
+  Actions budget on bookkeeping, and a markdown table is the lightest honest thing); you
+  are added by a normal PR.
+- **A curated learning showcase — [`LEARN.md`](../LEARN.md).** The best community-made
+  material for learning AipeHub — videos, talks, tutorials, posts — each credited to its
+  author and linked from the README. This is the **reach analog of pillar ④**: flagship
+  templates are the best things to *remix*; LEARN entries are the best things to *learn
+  from*. Curating someone's video here is a concrete, visible act of recognition — and it
+  doubles as the place a newcomer goes to learn from the best material the community has
+  made.
+
+**What we recognize is the work of reaching — not a reach number.** We deliberately do
+*not* build a "spread leaderboard" off views, followers, or referral counts: those are
+gameable, they'd need a tracking backend the North Star doesn't want (the Hub is dumb;
+state is files), and they'd pull the project back toward vanity. We can't honestly measure
+"how many people your video brought," but we *can* honestly record "you made the video"
+and *can* curate "this video is good enough that we send newcomers to it." That records
+the contribution and sidesteps the metric trap in one move — the same way pillar ① **ranks
+templates, not people**, pillar ⑤ **records and curates work, not audience size**.
+
+And spread earns standing, not just a row: `GOVERNANCE.md`'s maintainer ladder counts
+sustained reach work — localization stewardship, running the community, sustained
+educational material — as an **equivalent track** to code toward a real say in the project
+(pillar ②). A person who never writes a line of framework code but keeps the docs alive in
+three languages and answers newcomers every week is contributing exactly the kind of
+sustained judgement the ladder is meant to recognize.
+
 ---
 
-## 3. How the four pillars reinforce each other
+## 3. How the pillars reinforce each other
 
-The four pillars are not four isolated things — they are a **self-reinforcing loop**:
+Pillars ①–④ are not four isolated things — they are a **self-reinforcing loop** that
+turns once a person is already inside the repo:
 
 ```
    ④ exemplars  ──fork──▶  ③ frictionless share  ──PR + honest provenance──▶  ① leaderboard
@@ -174,6 +239,14 @@ The four pillars are not four isolated things — they are a **self-reinforcing 
 it, my name is in the open, and what I say starts to count" — pure recognition, and
 exactly enough.
 
+**Where pillar ⑤ fits.** The loop above is the *in-repo* flywheel — it turns once a
+person is already here. Pillar ⑤ widens the mouth of the funnel: reach work (a talk, a
+video, a translation, a thriving community room) is how a person *arrives* at the
+exemplars in the first place, and how the work they then publish finds its own audience.
+It doesn't change the four-pillar loop; it feeds people into it and carries the loop's
+output back out. Recognizing it keeps the people who do that work visible, instead of
+treating distribution as something that just happens.
+
 ---
 
 ## 4. What we don't do (honest boundary)
@@ -181,11 +254,18 @@ exactly enough.
 - **No money / no token / no bounty** (candidate C, dropped).
 - **The leaderboard does not rank people**: it ranks how much a template is reused, not
   gameable personal points.
+- **We recognize spread work, not a spread score**: no view / follower / referral
+  leaderboard — those are gameable and would need a tracking backend the North Star
+  refuses. [`CONTRIBUTORS.md`](../CONTRIBUTORS.md) records *what you did*;
+  [`LEARN.md`](../LEARN.md) curates *what's worth learning from*; neither sorts people by
+  audience size.
 - **Promotion is not automatic**: ~5 PRs is a floor, not a switch; the final call is a
   human judgement + lazy consensus on a public issue, not a counter that unlocks.
-- **No new machinery invented for it**: all four pillars are things that **already
-  exist and are already wired up**; this document names them as one system, it does not
-  add a subsystem.
+- **Almost no new machinery**: pillars ①–④ are things that **already exist and are
+  already wired up**. Pillar ⑤ adds exactly two hand-maintained markdown files
+  (`CONTRIBUTORS.md`, `LEARN.md`) — no bot, no GitHub Action, no tracking service. That is
+  the whole of the "new" surface, and it is deliberately the lightest thing that could
+  work.
 
 ---
 
@@ -196,6 +276,8 @@ exactly enough.
 | Flagship index + citation leaderboard (pillars ①④) | [`zh/FLAGSHIP-TEMPLATES.md`](zh/FLAGSHIP-TEMPLATES.md) |
 | Decision process + maintainer ladder (pillar ②) | [`GOVERNANCE.md`](../GOVERNANCE.md) |
 | Current maintainer roster (pillar ②) | [`MAINTAINERS.md`](../MAINTAINERS.md) |
+| Typed contributor ledger — all contribution kinds (pillar ⑤) | [`CONTRIBUTORS.md`](../CONTRIBUTORS.md) |
+| Curated learning / video showcase (pillar ⑤) | [`LEARN.md`](../LEARN.md) |
 | Template gallery one-click install (pillar ③) | [`zh/TEMPLATE-GALLERY.md`](zh/TEMPLATE-GALLERY.md) |
 | Community-template submission flow (pillar ③) | [`templates/community/templates/README.md`](../templates/community/templates/README.md) |
 | Zero-compute community site (the leaderboard's other render target) | [`zh/COMMUNITY-SITE.md`](zh/COMMUNITY-SITE.md) |

@@ -42,10 +42,18 @@ grow a bench of people who hold the design line, not to gate-keep. A rough
 guideline, not a checklist to game:
 
 - **A track record, not a tally.** On the order of ~5 non-trivial merged PRs —
-  or the equivalent: a flagship template you keep maintained, a substantial
-  adapter, or sustained review / triage help — over a couple of months. The
-  number is a floor for "we've seen enough of your work to trust your
-  judgement," never a target to farm with drive-by PRs.
+  or the equivalent — over a couple of months. The number is a floor for "we've
+  seen enough of your work to trust your judgement," never a target to farm with
+  drive-by PRs. **"The equivalent" explicitly includes reach work, not only
+  code:** a flagship template you keep maintained, a substantial adapter, or
+  sustained review / triage help — *and equally* keeping the docs alive in a
+  language the core team doesn't speak, running the community so newcomers get
+  unstuck, or sustained educational material that brings people to the project.
+  Carrying AipeHub to people is real work; this ladder counts it as a path to a
+  say, not a lesser track (see [pillar ⑤ of the recognition
+  system](docs/RECOGNITION-SYSTEM.md#pillar-5),
+  and [`CONTRIBUTORS.md`](CONTRIBUTORS.md) where contributions of every kind are
+  recorded).
 - **A feel for the design line.** Your PRs and reviews show you reach for a
   *participant*, not the Hub, when logic needs a home (see
   [The one non-negotiable](#the-one-non-negotiable)).

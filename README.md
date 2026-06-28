@@ -71,6 +71,8 @@ Both paths plug into the same Hub. Mix freely — a room can have host-managed `
 
 What this project is — and what it refuses to become: [`CHARTER.md`](CHARTER.md). Contributing? See [`CONTRIBUTING.md`](CONTRIBUTING.md). Security issues: [`SECURITY.md`](SECURITY.md). Version history: [`CHANGELOG.md`](CHANGELOG.md).
 
+**Learn by watching** → [`LEARN.md`](LEARN.md) curates the best community-made videos, talks, and tutorials, each credited to its author. **Everyone who builds *and spreads* AipeHub** → [`CONTRIBUTORS.md`](CONTRIBUTORS.md) — because reach is real work, and [we recognize it](docs/RECOGNITION-SYSTEM.md#pillar-5).
+
 ## Quick start
 
 ### Non-technical user? Double-click, zero Node/Docker

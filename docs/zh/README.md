@@ -12,6 +12,8 @@
 | 你想知道… | 看这一篇 |
 |---|---|
 | 🧭 项目整体概览（5 分钟读懂） | [`OVERVIEW.md`](OVERVIEW.md) |
+| 📹 看视频 / 教程学习（社区精选） | [`LEARN.md`](LEARN.md) |
+| 🙌 贡献者名册 + 认可传播（支柱 ⑤） | [`CONTRIBUTORS.md`](CONTRIBUTORS.md) · [`RECOGNITION-SYSTEM.md`](RECOGNITION-SYSTEM.md) |
 | 🧑 加入一个 room（admin 或 worker 视角） | [`HUMAN.md`](HUMAN.md) |
 | 🧩 不写代码导入 / 分享 LLM 智能体模板 | [`TEMPLATES.md`](TEMPLATES.md) |
 | 🧪 **真机测试指南**（本机 / 局域网 / 公网 VPS） | [`REAL-WORLD-TESTING.md`](REAL-WORLD-TESTING.md) |
