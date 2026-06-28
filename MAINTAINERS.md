@@ -1,5 +1,8 @@
 # Maintainers
 
+<!-- doc-version: 1.0 -->
+> **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](docs/zh/MAINTAINERS.md) · [日本語](docs/ja/MAINTAINERS.md) · [Русский](docs/ru/MAINTAINERS.md) · [Français](docs/fr/MAINTAINERS.md) · [Español](docs/es/MAINTAINERS.md) · [한국어](docs/ko/MAINTAINERS.md). If a translation conflicts with this English version, the English version governs.
+
 This file lists the people who can review and merge PRs, triage issues, and cut
 releases. For what each role means and how the maintainer ladder works, see
 [`GOVERNANCE.md`](GOVERNANCE.md) — in particular

@@ -122,3 +122,56 @@ REL-7（成员 SPA，用户首屏，优先）→ REL-8（admin，按用户面优
 > 对 app-core.js 头注释「NO localStorage」立场的最小让步如 §四 所述兑现：写的是非 HttpOnly `lang` cookie（≠ localStorage，且头注释已更新说明这一个 cookie 的用途与优先级）。
 
 **REL-9 完。** 剩 REL-10（发布动作清单 + 最终「上公开 + 打 1.0 tag」确认点，属用户动作）。
+
+---
+
+## 八、文档本地化政策（DOC-L10N，2026-06-27 用户决策）
+
+§一~§七 是 **UI 字符串** i18n（web SPA 里的 `data-i18n` / `I18N.zh|en` 字典）。本节记录的是另一条独立工作线：**Markdown 文档的多语言本地化**。两者机制不同、互不耦合。
+
+### 8.1 拍板决策
+
+| 项 | 决策 |
+|---|---|
+| **权威源** | **英文版为唯一权威源**。所有文档以英文版为准；任何译文与英文版冲突时，**以英文版为准**。 |
+| **目录结构** | **`docs/` 根目录 = 英文**；各语言放各自子目录 `docs/<lang>/`（`zh` 已有，后续 `ja` / `ru` / `fr` / `es` / `ko`）。GitHub 约定文件（`README` / `CHARTER` / `CONTRIBUTING` / `GOVERNANCE` / `CODE_OF_CONDUCT` / `MAINTAINERS` / `SECURITY`）**英文版留仓库根**（GitHub 才能识别渲染），其译文放 `docs/<lang>/`。 |
+| **版号** | 每篇文档加统一**文档版号**头：英文版 `Doc version 1.0`，译文 `文档版本 1.0`。**注**：此「文档版号」与 `CHARTER.md` 自带的**宪章修宪版本**（`Version 0.1`，见 CHARTER §10）是**两个正交的轴**——文档版号是本地化/发布基线，宪章版本管修宪，互不覆盖，两者并存。 |
+| **范围** | 仅 **非开发/非技术文档**（治理 + 愿景 + 社区 + 定位，约 15 篇，见下）。开发/技术文档（V4–V6 阶段记录、AUDIT、各类 RFC、PROTOCOL、ARCHITECTURE、DEPLOY、MONITORING 等）**不纳入**多语言翻译，留原位。 |
+| **翻译语言与顺序** | 中文 → 日文 → 俄文 → 法文 → 西班牙文 → 韩文。**已翻译的不重复翻译。** |
+| **位置调整** | 「目前位置不对的就调整」——核查结论：英文已在 `docs/` 根 / 仓库根，中文已在 `docs/zh`，**与决策一致，本轮无需搬动**。 |
+
+### 8.2 纳入范围的 ~15 篇（curated set）
+
+仓库根（GitHub 约定文件，英文留根）：`CHARTER.md` · `README.md` · `CONTRIBUTING.md` · `GOVERNANCE.md` · `CODE_OF_CONDUCT.md` · `MAINTAINERS.md` · `SECURITY.md`
+
+`docs/`（英文）：`OVERVIEW.md` · `RECOGNITION-SYSTEM.md` · `LICENSE-FAQ.md` · `COMPETITIVE-LANDSCAPE.md` · `PRODUCT-MATRIX.md` · `COMMUNITY-SITE.md` · `COMMUNITY-DISCUSSIONS.md` · `FLAGSHIP-TEMPLATES.md`
+
+### 8.3 起步缺口（建表前的真实状态）
+
+- 5 篇定位文档（`COMPETITIVE-LANDSCAPE` / `PRODUCT-MATRIX` / `COMMUNITY-SITE` / `COMMUNITY-DISCUSSIONS` / `FLAGSHIP-TEMPLATES`）**原本只有中文**——按「英文为权威源」需**新建英文权威版**（zh→en）。
+- 5 篇治理文档（`CONTRIBUTING` / `GOVERNANCE` / `CODE_OF_CONDUCT` / `MAINTAINERS` / `SECURITY`）**原本只有英文**——需补**中文译本**（en→zh）。
+- `docs/zh/README.md` 是中文文档**导航索引**（有意为之，非根 README 的逐句翻译），按「已翻译」处理，仅补版号。
+
+### 8.4 本轮（2026-06-27）已落地
+
+1. 本节（设计记录）。
+2. 目录结构核查（已合规，无搬动）。
+3. 英文版加版号 1.0 —— 已有英文的 10 篇全部加头（`<!-- doc-version: 1.0 -->`）。
+4. 中文对齐 —— 已有中文的篇目补版号头。
+5. 补 en/zh 缺口 —— 新建 5 篇英文权威版（zh→en）+ 5 篇中文译本（en→zh）。
+
+### 8.5 已知 follow-up（本轮诚实标注，未做）
+
+- **引用排行榜生成器仍指向中文文档**：`pnpm build:leaderboard`（`packages/web/scripts/build-leaderboard-doc.mjs`）把 `<!-- LEADERBOARD:START/END -->` 标记区写进 `docs/zh/FLAGSHIP-TEMPLATES.md`，防腐测试 `build-leaderboard-doc.test.ts` 也逐字节钉死该 zh 文件。新建的英文权威版 `docs/FLAGSHIP-TEMPLATES.md` 里排行榜是**手工静态快照**并已注明。把生成器/防腐测试改指英文权威版是一项**代码改动**（会动到测试基线），故本轮不动，留作 follow-up——与「英文为权威源」存在这一处张力，已在英文文档内注明现状。
+
+### 8.6 多语言分批（2026-06-27 已全部完成）
+
+日文 → 俄文 → 法文 → 西班牙文 → 韩文，五语言**已全部落地**（5 个并行子代理，每语言一个，经用户同意并行）。每语言一个目录 `docs/ja` / `docs/ru` / `docs/fr` / `docs/es` / `docs/ko`，各 15 篇 curated set 全译，加对应语言版号头（指向英文权威源，注明冲突以英文为准）。
+
+收尾核对：
+- 6 个译本语言（含既有 zh）× 15 篇 = **90 篇译本**，全部带 `<!-- doc-version: 1.0 -->` 头；英文权威 15 篇（7 仓库根 + 8 `docs/`）全带头。
+- 链接深度：Group A（仓库根源）译本前缀 `../../`，Group B（`docs/` 源）译本前缀 `../`，使每条相对链接解析回英文源同一目标。
+- 英文权威版头部 `Translations:` 行已接 6 语言真链接（原 `forthcoming` 占位已替换）。
+- 译本无残留英文权威头、无 `forthcoming`、无重复盖章；ja 子代理输出的非标准头（漏日期/多 zh 链接）已脚本归一化。
+
+**翻译工作线全部完成。** 后续若新增 curated 文档或英文源更新，需同步补译 6 语言并重盖版号（英文为准的原则不变）。

@@ -1,5 +1,8 @@
 # Contributing to AipeHub
 
+<!-- doc-version: 1.0 -->
+> **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](docs/zh/CONTRIBUTING.md) · [日本語](docs/ja/CONTRIBUTING.md) · [Русский](docs/ru/CONTRIBUTING.md) · [Français](docs/fr/CONTRIBUTING.md) · [Español](docs/es/CONTRIBUTING.md) · [한국어](docs/ko/CONTRIBUTING.md). If a translation conflicts with this English version, the English version governs.
+
 Thanks for considering a contribution. AipeHub is an early-stage project
 and we are happy to take patches, bug reports, design feedback, and
 documentation improvements.

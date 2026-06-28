@@ -1,5 +1,8 @@
 # License FAQ
 
+<!-- doc-version: 1.0 -->
+> **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](zh/LICENSE-FAQ.md) · [日本語](ja/LICENSE-FAQ.md) · [Русский](ru/LICENSE-FAQ.md) · [Français](fr/LICENSE-FAQ.md) · [Español](es/LICENSE-FAQ.md) · [한국어](ko/LICENSE-FAQ.md). If a translation conflicts with this English version, the English version governs.
+
 > **AipeHub as a whole is licensed under the [MIT License](../LICENSE).**
 > This page answers the common "may I / must I / what should I watch
 > for" questions in FAQ form. It is not legal advice — for real

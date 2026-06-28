@@ -1,5 +1,8 @@
 # AipeHub — Project Charter
 
+<!-- doc-version: 1.0 -->
+> **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](docs/zh/CHARTER.md) · [日本語](docs/ja/CHARTER.md) · [Русский](docs/ru/CHARTER.md) · [Français](docs/fr/CHARTER.md) · [Español](docs/es/CHARTER.md) · [한국어](docs/ko/CHARTER.md). If a translation conflicts with this English version, the English version governs.
+
 **Version 0.1** · adopted 2026-06-27 · ratified by the founding steward
 ([`MAINTAINERS.md`](MAINTAINERS.md))
 

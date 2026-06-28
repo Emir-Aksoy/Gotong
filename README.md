@@ -1,5 +1,8 @@
 # AipeHub
 
+<!-- doc-version: 1.0 -->
+> **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](docs/zh/README.md) · [日本語](docs/ja/README.md) · [Русский](docs/ru/README.md) · [Français](docs/fr/README.md) · [Español](docs/es/README.md) · [한국어](docs/ko/README.md). If a translation conflicts with this English version, the English version governs.
+
 [English](README.md) · [中文文档](docs/zh/README.md)
 
 **AI + Person + Hub** — a self-hosted substrate where people and AI agents collaborate as equal participants, and organizations federate without handing over their keys, data, or billing.

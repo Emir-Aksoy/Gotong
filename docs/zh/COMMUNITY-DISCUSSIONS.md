@@ -1,5 +1,9 @@
 # GitHub Discussions — 社区「客厅」（零算力，一次性开启）
 
+<!-- doc-version: 1.0 -->
+> **文档版本 1.0** · 中文译本 · 最后更新 2026-06-27 · 权威源：[English](../COMMUNITY-DISCUSSIONS.md)。如译文与英文版冲突，以英文版为准。
+
+
 > 上线前清单 item 8。一句话:**Issues 是工单台,Discussions 是客厅**——问问题、
 > 晒成果、提想法都在这里,GitHub 免费托管,跟落地页/排行榜一样**零算力**。
 

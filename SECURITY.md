@@ -1,5 +1,8 @@
 # Security policy
 
+<!-- doc-version: 1.0 -->
+> **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](docs/zh/SECURITY.md) · [日本語](docs/ja/SECURITY.md) · [Русский](docs/ru/SECURITY.md) · [Français](docs/fr/SECURITY.md) · [Español](docs/es/SECURITY.md) · [한국어](docs/ko/SECURITY.md). If a translation conflicts with this English version, the English version governs.
+
 ## How to report a vulnerability
 
 **Please do not open a public GitHub issue, discussion, or PR for security

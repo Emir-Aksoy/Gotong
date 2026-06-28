@@ -1,5 +1,8 @@
 # AipeHub Overview · 5-minute map
 
+<!-- doc-version: 1.0 -->
+> **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](zh/OVERVIEW.md) · [日本語](ja/OVERVIEW.md) · [Русский](ru/OVERVIEW.md) · [Français](fr/OVERVIEW.md) · [Español](es/OVERVIEW.md) · [한국어](ko/OVERVIEW.md). If a translation conflicts with this English version, the English version governs.
+
 > Looking for the Chinese version? → [`docs/zh/OVERVIEW.md`](./zh/OVERVIEW.md)
 >
 > This is the project's **single-page map**. By the end you'll know what

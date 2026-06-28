@@ -1,5 +1,8 @@
 # Recognition System
 
+<!-- doc-version: 1.0 -->
+> **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](zh/RECOGNITION-SYSTEM.md) · [日本語](ja/RECOGNITION-SYSTEM.md) · [Русский](ru/RECOGNITION-SYSTEM.md) · [Français](fr/RECOGNITION-SYSTEM.md) · [Español](es/RECOGNITION-SYSTEM.md) · [한국어](ko/RECOGNITION-SYSTEM.md). If a translation conflicts with this English version, the English version governs.
+
 > This system hands out **recognition only** — no money, no token, no bounty. Its
 > "currency" is honest provenance, visible attribution, and a documented path to a
 > real say in where the project goes.

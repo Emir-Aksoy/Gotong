@@ -1,5 +1,8 @@
 # AipeHub Governance
 
+<!-- doc-version: 1.0 -->
+> **Doc version 1.0** · English (authoritative source) · Updated 2026-06-27 · Translations: [中文](docs/zh/GOVERNANCE.md) · [日本語](docs/ja/GOVERNANCE.md) · [Русский](docs/ru/GOVERNANCE.md) · [Français](docs/fr/GOVERNANCE.md) · [Español](docs/es/GOVERNANCE.md) · [한국어](docs/ko/GOVERNANCE.md). If a translation conflicts with this English version, the English version governs.
+
 This document describes **how decisions get made** in AipeHub: who maintains
 the project, how a change lands, how a community template enters the official
 gallery, and what happens when people disagree. It is deliberately small —
