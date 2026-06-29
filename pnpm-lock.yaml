@@ -796,6 +796,12 @@ importers:
       '@aipehub/mcp-client':
         specifier: workspace:*
         version: link:../mcp-client
+      '@aipehub/personal-butler':
+        specifier: workspace:*
+        version: link:../personal-butler
+      '@aipehub/personal-memory':
+        specifier: workspace:*
+        version: link:../personal-memory
       '@aipehub/protocol':
         specifier: workspace:*
         version: link:../protocol

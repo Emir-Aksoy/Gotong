@@ -72,6 +72,8 @@
     "@aipehub/llm-anthropic": "workspace:*",
     "@aipehub/llm-openai": "workspace:*",
     "@aipehub/mcp-client": "workspace:*",
+    "@aipehub/personal-butler": "workspace:*",
+    "@aipehub/personal-memory": "workspace:*",
     "@aipehub/protocol": "workspace:*",
     "@aipehub/saml": "workspace:*",
     "@aipehub/service-artifact-file": "workspace:*",
