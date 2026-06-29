@@ -495,6 +495,28 @@ export interface ButlerMemoryView {
   tier?: string
   level?: string
   importance?: number
+  /**
+   * Long-term memory projection (decisions E/F/G/D), all optional so a plain
+   * fact is unchanged — the member's right to inspect extends to HOW the butler
+   * organizes a memory over time, not just its text:
+   *   - `links`       (E) ids of related entries the butler cross-linked
+   *   - `recallCount` (F) how many times this fact has been recalled
+   *   - `lastRecalled`(F) epoch ms it was last recalled
+   *   - `form`        (G) 'procedure' when it's a remembered how-to
+   *   - `steps`       (G) the procedure's ordered steps
+   *   - `validFrom` / `validTo` (D) the fact's validity interval (epoch ms)
+   *   - `active`      (D) whether it is in effect right now — only attached for
+   *                   bitemporal facts (a `validFrom`/`validTo` is set), so a
+   *                   legacy "always true" fact shows no validity badge
+   */
+  links?: string[]
+  recallCount?: number
+  lastRecalled?: number
+  form?: string
+  steps?: string[]
+  validFrom?: number
+  validTo?: number
+  active?: boolean
 }
 
 /** What the privacy panel shows: the distilled profile + recent captured turns. */

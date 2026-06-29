@@ -3121,6 +3121,9 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 .me-upload-status { display: block; margin-top: 0.2rem; }
 .me-upload-status.ok { color: #27ae60; }
 .me-upload-status.error { color: #c0392b; }
+/* Z-M3 — a remembered how-to's ordered steps, under the memory card body */
+.me-mem-steps { margin: 0.35rem 0 0; padding-left: 1.2rem; font-size: 0.82rem; color: #555; }
+.me-mem-steps li { margin: 0.1rem 0; }
 .settings-form { display: block; max-width: 24rem; }
 
 /* v5 A-M2 — "build my own agent" form + owned-agent cards */

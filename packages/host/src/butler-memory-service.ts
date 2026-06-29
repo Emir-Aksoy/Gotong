@@ -23,7 +23,20 @@
  */
 
 import type { Logger } from '@aipehub/core'
-import { importanceOf, levelOf, tierOf } from '@aipehub/personal-memory'
+import {
+  formOf,
+  importanceOf,
+  isActive,
+  isProcedure,
+  lastRecalledOf,
+  levelOf,
+  linksOf,
+  recallCountOf,
+  stepsOf,
+  tierOf,
+  validFromOf,
+  validToOf,
+} from '@aipehub/personal-memory'
 import type { MemoryEntry, MemoryHandle } from '@aipehub/services-sdk'
 import type { WebServerOptions } from '@aipehub/web'
 
@@ -67,13 +80,19 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
       mem.recall({ kinds: ['semantic'], k: 200 }),
       mem.recall({ kinds: ['episodic'], k: RECENT_CAPTURE_LIMIT }),
     ])
-    return { profile: profile.map(projectEntry), recent: recent.map(projectEntry) }
+    // One `now` per call so each entry's bitemporal `active` flag is consistent.
+    const now = this.clock()
+    return {
+      profile: profile.map((e) => projectEntry(e, now)),
+      recent: recent.map((e) => projectEntry(e, now)),
+    }
   }
 
   async export(userId: string): Promise<ButlerMemoryView[]> {
     // Raw list across all kinds for data portability — bounded payload.
     const all = await this.open(userId).list({ limit: EXPORT_LIMIT })
-    return all.map(projectEntry)
+    const now = this.clock()
+    return all.map((e) => projectEntry(e, now))
   }
 
   async forget(userId: string, id: string): Promise<boolean> {
@@ -100,19 +119,35 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
       ...(this.now ? { now: this.now } : {}),
     })
   }
+
+  /** The wall clock (injectable for deterministic tests) — used to flag each
+   *  bitemporal fact as active / closed AT the moment of the read. */
+  private clock(): number {
+    return (this.now ?? Date.now)()
+  }
 }
 
 /**
  * Project a stored entry to the member's view — content + when + tiering tags
- * (decision ③). The tier/level/importance come from `meta` via the same
- * accessors the frozen block uses, so the panel shows exactly the cluster +
- * salience the butler actually filed a fact under. `tier`/`level` are only
- * attached when explicitly set (a flat semantic fact has neither); importance
- * defaults to the mid value, mirroring `importanceOf`.
+ * (decision ③) + long-term memory tags (E/F/G/D). Everything is read from `meta`
+ * via the SAME accessors the memory engine itself uses, so the panel shows
+ * exactly how the butler organizes a fact: which cluster, how important, what it
+ * links to, how often it's recalled, whether it's a how-to, and whether it's
+ * still in effect. All long-term fields are optional and only attached when the
+ * entry actually carries them, so a plain fact projects exactly as before.
+ *
+ * `now` is passed in (resolved once per read/export) so the bitemporal `active`
+ * flag is consistent across the whole snapshot.
  */
-function projectEntry(e: MemoryEntry): ButlerMemoryView {
+function projectEntry(e: MemoryEntry, now: number): ButlerMemoryView {
   const tier = tierOf(e, '')
   const level = levelOf(e)
+  const links = linksOf(e)
+  const recallCount = recallCountOf(e)
+  const lastRecalled = lastRecalledOf(e)
+  const validFrom = validFromOf(e)
+  const validTo = validToOf(e)
+  const hasValidity = validFrom !== undefined || validTo !== undefined
   return {
     id: e.id,
     kind: e.kind,
@@ -121,5 +156,17 @@ function projectEntry(e: MemoryEntry): ButlerMemoryView {
     ...(tier ? { tier } : {}),
     ...(level ? { level } : {}),
     importance: importanceOf(e),
+    // E — associative links (only when the butler cross-linked it).
+    ...(links.length > 0 ? { links } : {}),
+    // F — recall salience (count omitted at 0 = never recalled).
+    ...(recallCount > 0 ? { recallCount } : {}),
+    ...(lastRecalled !== undefined ? { lastRecalled } : {}),
+    // G — a remembered how-to.
+    ...(isProcedure(e) ? { form: formOf(e), steps: stepsOf(e) } : {}),
+    // D — validity interval; `active` only for bitemporal facts so a legacy
+    // "always true" fact shows no validity badge.
+    ...(validFrom !== undefined ? { validFrom } : {}),
+    ...(validTo !== undefined ? { validTo } : {}),
+    ...(hasValidity ? { active: isActive(e, now) } : {}),
   }
 }

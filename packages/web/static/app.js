@@ -3174,6 +3174,23 @@
     if (typeof e.importance === 'number') {
       chips.push(`<span class="me-tag">${escape(t('meButlerMemImportance', e.importance))}</span>`)
     }
+    // Long-term tags (E/F/G/D) — only present when the butler organized the fact
+    // that way, so a plain entry shows nothing extra.
+    if (typeof e.active === 'boolean') {
+      chips.push(`<span class="me-tag">${e.active ? t('meButlerMemActive') : t('meButlerMemClosed')}</span>`)
+    }
+    if (typeof e.recallCount === 'number' && e.recallCount > 0) {
+      chips.push(`<span class="me-tag">${escape(t('meButlerMemRecalls', e.recallCount))}</span>`)
+    }
+    if (Array.isArray(e.links) && e.links.length) {
+      chips.push(`<span class="me-tag">${escape(t('meButlerMemLinks', e.links.length))}</span>`)
+    }
+    if (e.form === 'procedure') {
+      chips.push(`<span class="me-tag">${t('meButlerMemProcedure')}</span>`)
+    }
+    const steps = (e.form === 'procedure' && Array.isArray(e.steps) && e.steps.length)
+      ? `<ol class="me-mem-steps">${e.steps.map((s) => `<li>${escape(String(s))}</li>`).join('')}</ol>`
+      : ''
     return `
       <div class="me-agent-card" data-mem-id="${escape(e.id)}">
         <div class="me-agent-head">
@@ -3181,6 +3198,7 @@
           <span class="me-meta">${when ? escape(when) : ''}</span>
         </div>
         <div class="me-agent-body">${escape(e.text || '')}</div>
+        ${steps}
         <div class="me-own-agent-row-actions">
           <button type="button" class="me-secondary-btn me-danger-btn" data-mem-forget="${escape(e.id)}">${t('meButlerMemForget')}</button>
         </div>
