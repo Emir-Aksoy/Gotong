@@ -244,9 +244,10 @@ function isProfile(e: MemoryEntry): boolean {
 /**
  * Summarize, then enforce the hard cap. One re-summarize attempt asking for a
  * tighter compression; if the result still overflows, throw — never write an
- * over-budget profile.
+ * over-budget profile. Exported so the tiered path reuses the SAME overflow
+ * policy for its durable per-cluster profiles.
  */
-async function distillWithinCap(
+export async function distillWithinCap(
   summarize: MemorySummarizer,
   prompt: { system: string; user: string },
   hardCap: number,

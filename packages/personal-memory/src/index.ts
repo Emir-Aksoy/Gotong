@@ -47,6 +47,7 @@ export {
   consolidate,
   shouldConsolidate,
   consolidateReviewer,
+  distillWithinCap,
   DEFAULT_CONSOLIDATE_SYSTEM,
   DEFAULT_CONSOLIDATE_TRIGGER_ENTRIES,
   DEFAULT_CONSOLIDATE_TRIGGER_BYTES,
@@ -57,6 +58,35 @@ export {
   type ConsolidateOptions,
   type ConsolidateResult,
 } from './consolidate.js'
+export {
+  DEFAULT_TIERS,
+  META_TIER,
+  META_LEVEL,
+  tierOf,
+  levelOf,
+  isDigest,
+  isClusterProfile,
+  isKnownTier,
+  normalizeTier,
+  routeFallback,
+  type TierSpec,
+  type TierConfig,
+  type MemoryLevel,
+} from './tiers.js'
+export {
+  consolidateTiered,
+  promoteCluster,
+  tieredReviewer,
+  DEFAULT_DIGEST_HARD_CAP,
+  DEFAULT_PROMOTE_AFTER_DIGESTS,
+  DEFAULT_PROMOTE_MIN_IMPORTANCE,
+  type ConsolidateTieredOptions,
+  type ConsolidateTieredResult,
+  type TieredDigest,
+  type PromoteClusterOptions,
+  type PromoteClusterResult,
+  type TieredReviewerOptions,
+} from './consolidate-tiered.js'
 export {
   clampImportance,
   importanceOf,
