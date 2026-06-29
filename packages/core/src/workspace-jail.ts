@@ -209,6 +209,21 @@ export interface WrapWithFsJailOptions {
 }
 
 /**
+ * The per-spawn jail config a caller threads to an adapter (cli-runner /
+ * acp-session): the resolved enforcer `kind` (from {@link detectFsJail}) + the
+ * writable roots. The adapter merges in the command/args/cwd at spawn time. One
+ * shared shape so the two outbound adapters don't drift apart.
+ */
+export interface FsJailSpec {
+  /** Directories the spawned process tree may write to. Relative → resolved against the spawn cwd. */
+  allowedRoots: readonly string[]
+  /** Which OS enforcer to apply. `'none'` = no jail (adapter spawns unconfined; caller degrades). */
+  kind: FsJailKind
+  /** Extra writable directories beyond the roots (e.g. a build/tool cache). */
+  extraWritableRoots?: readonly string[]
+}
+
+/**
  * System paths a normal process must still write to (temp, device nodes) so the
  * jail doesn't break it. macOS lists them as Seatbelt writable subpaths; Linux
  * gets them via dedicated bwrap flags (`--dev`, `--tmpfs`, `--proc`).

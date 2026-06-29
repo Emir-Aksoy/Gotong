@@ -14,6 +14,8 @@
 
 import { spawn } from 'node:child_process'
 
+import { wrapWithFsJail, type FsJailSpec } from '@aipehub/core'
+
 export interface CliChunk {
   stream: 'stdout' | 'stderr'
   /** Decoded UTF-8 text of this chunk (not newline-aligned). */
@@ -44,6 +46,14 @@ export interface CliRunOptions {
   timeoutMs?: number
   /** Real-time output sink — fires per data chunk, before the run resolves. */
   onChunk?: (chunk: CliChunk) => void
+  /**
+   * Layer-2 OS kernel jail (FS sandbox). When set with a real `kind`, the child
+   * tree is wrapped under `sandbox-exec` / `bwrap` so it can only WRITE inside the
+   * allowed roots — the real boundary for a coding agent that touches files
+   * freely. `kind: 'none'` (no enforcer available) spawns unconfined; the caller
+   * is expected to have logged the degradation warning + paired a human gate.
+   */
+  fsJail?: FsJailSpec
 }
 
 export interface CliRunResult {
@@ -82,7 +92,26 @@ function buildEnv(overrides?: Record<string, string | undefined>): NodeJS.Proces
 export async function runCliCommand(opts: CliRunOptions): Promise<CliRunResult> {
   // The runner is generic: it receives the FINAL argv. Prompt placement (the
   // `{prompt}` token vs stdin) is a participant concern — see CliParticipant.
-  const args = opts.args ? [...opts.args] : []
+  let command = opts.command
+  let args = opts.args ? [...opts.args] : []
+
+  // Layer-2 FS jail: wrap the command under the OS kernel enforcer so the child
+  // tree can only write inside the roots. `kind: 'none'` passes through unchanged
+  // (the caller degrades). This is the spawn engine's job — it owns OS concerns.
+  if (opts.fsJail && opts.fsJail.kind !== 'none') {
+    const wrapped = wrapWithFsJail({
+      command,
+      args,
+      allowedRoots: opts.fsJail.allowedRoots,
+      kind: opts.fsJail.kind,
+      ...(opts.cwd !== undefined ? { cwd: opts.cwd } : {}),
+      ...(opts.fsJail.extraWritableRoots !== undefined
+        ? { extraWritableRoots: opts.fsJail.extraWritableRoots }
+        : {}),
+    })
+    command = wrapped.command
+    args = wrapped.args
+  }
 
   return await new Promise<CliRunResult>((resolve, reject) => {
     // Already-aborted signal: don't even spawn.
@@ -93,7 +122,7 @@ export async function runCliCommand(opts: CliRunOptions): Promise<CliRunResult> 
 
     let child
     try {
-      child = spawn(opts.command, args, {
+      child = spawn(command, args, {
         cwd: opts.cwd,
         env: buildEnv(opts.env),
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -103,7 +132,7 @@ export async function runCliCommand(opts: CliRunOptions): Promise<CliRunResult> 
         detached: process.platform !== 'win32',
       })
     } catch (err) {
-      reject(asSpawnError(opts.command, err))
+      reject(asSpawnError(command, err))
       return
     }
 
@@ -179,7 +208,7 @@ export async function runCliCommand(opts: CliRunOptions): Promise<CliRunResult> 
       if (settled) return
       settled = true
       cleanup()
-      reject(asSpawnError(opts.command, err))
+      reject(asSpawnError(command, err))
     })
 
     child.on('close', (code) => {

@@ -161,15 +161,18 @@ export {
 } from './workspace-jail.js'
 export type {
   FsJailKind,
+  FsJailSpec,
   WrappedCommand,
   WrapWithFsJailOptions,
 } from './workspace-jail.js'
-export { detectFsJail, resetFsJailCache } from './workspace-jail-detect.js'
+export { detectFsJail, resetFsJailCache, prepareFsJail } from './workspace-jail-detect.js'
 export type {
   FsJailCapability,
   JailProbe,
   JailProbeResult,
   DetectFsJailOptions,
+  PreparedFsJail,
+  PrepareFsJailOptions,
 } from './workspace-jail-detect.js'
 
 export {

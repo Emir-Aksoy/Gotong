@@ -7,7 +7,13 @@
  * streaming (observe seam), abort (terminate seam), timeout, env, spawn failure.
  */
 
-import { describe, expect, it } from 'vitest'
+import { spawnSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
+import { detectFsJail } from '@aipehub/core'
+import { afterAll, describe, expect, it } from 'vitest'
 
 import { runCliCommand, type CliChunk } from '../src/cli-runner.js'
 
@@ -126,5 +132,44 @@ describe('runCliCommand — spawn engine', () => {
     await expect(runCliCommand({ command: 'aipe-no-such-cmd-xyz', args: [] })).rejects.toThrow(
       /command not found/,
     )
+  })
+})
+
+// Layer-2 FS jail — REAL-machine proof that the runner's `fsJail` plumbing
+// confines a spawned child via the host enforcer (not just that wrapWithFsJail
+// builds argv). HOME-based root/denied (NOT /tmp — that's essential-writable).
+// Self-skips when no OS kernel jail is available.
+const realCap = await detectFsJail({ noCache: true })
+const jailBase = mkdtempSync(join(homedir(), '.aipehub-cli-jail-'))
+const jailRoot = join(jailBase, 'root')
+mkdirSync(jailRoot)
+afterAll(() => rmSync(jailBase, { recursive: true, force: true }))
+
+const WRITE = "require('fs').writeFileSync(process.argv[1], 'x')"
+const jailSuite = realCap.kind === 'none' ? describe.skip : describe
+
+jailSuite(`runCliCommand fsJail (${realCap.kind})`, () => {
+  it('confines the child: a write INSIDE the root succeeds', async () => {
+    const ok = join(jailRoot, 'ok.txt')
+    const r = await runCliCommand({
+      command: NODE,
+      args: ['-e', WRITE, ok],
+      cwd: jailRoot,
+      fsJail: { allowedRoots: [jailRoot], kind: realCap.kind },
+    })
+    expect(r.exitCode, r.stderr).toBe(0)
+    expect(existsSync(ok)).toBe(true)
+  })
+
+  it('confines the child: a write OUTSIDE the root is denied', async () => {
+    const denied = join(jailBase, 'denied.txt') // sibling of root → not allowed
+    const r = await runCliCommand({
+      command: NODE,
+      args: ['-e', WRITE, denied],
+      cwd: jailRoot,
+      fsJail: { allowedRoots: [jailRoot], kind: realCap.kind },
+    })
+    expect(r.exitCode).not.toBe(0)
+    expect(existsSync(denied)).toBe(false)
   })
 })

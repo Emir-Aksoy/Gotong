@@ -23,6 +23,7 @@ import {
   AgentParticipant,
   checkOutboundDataClasses,
   SuspendTaskError,
+  type FsJailSpec,
   type ParticipantId,
   type Task,
   type TaskId,
@@ -126,6 +127,15 @@ export interface AcpParticipantOptions {
    * quota. Consulted once at dispatch, before the subprocess starts.
    */
   outboundQuotaGate?: (task: Task) => boolean
+  /**
+   * Layer-2 OS kernel jail (FS sandbox). When set with a real `kind`, the held
+   * bridge subprocess is wrapped under `sandbox-exec` / `bwrap` so every file
+   * write across the session stays inside the roots — the real FS boundary for a
+   * coding agent the hub holds open. Complements the per-tool `gate` (a
+   * governance control on tool intent): the jail is the kernel-enforced
+   * perimeter. `kind: 'none'` runs unconfined (degrade: rely on `gate` + warn).
+   */
+  fsJail?: FsJailSpec
 }
 
 export class AcpParticipant extends AgentParticipant {
@@ -171,6 +181,7 @@ export class AcpParticipant extends AgentParticipant {
       ...(opts.clientCapabilities ? { clientCapabilities: opts.clientCapabilities } : {}),
       ...(opts.authMethodId ? { authMethodId: opts.authMethodId } : {}),
       ...(opts.initTimeoutMs !== undefined ? { initTimeoutMs: opts.initTimeoutMs } : {}),
+      ...(opts.fsJail ? { fsJail: opts.fsJail } : {}),
     })
   }
 

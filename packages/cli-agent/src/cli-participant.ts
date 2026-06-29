@@ -18,7 +18,14 @@
  * a multi-turn conversation with checkpoints.
  */
 
-import { AgentParticipant, SuspendTaskError, type ParticipantId, type Task, type TaskId } from '@aipehub/core'
+import {
+  AgentParticipant,
+  SuspendTaskError,
+  type FsJailSpec,
+  type ParticipantId,
+  type Task,
+  type TaskId,
+} from '@aipehub/core'
 
 import {
   CLI_CHECKPOINT_STATE_V,
@@ -86,6 +93,13 @@ export interface CliParticipantOptions {
    * requested takeover parks the task for a human to steer.
    */
   takeover?: TakeoverController
+  /**
+   * Layer-2 OS kernel jail. When supplied with a real `kind` (from
+   * `prepareFsJail`/`detectFsJail`), every CLI invocation is wrapped so the agent
+   * can only write inside the roots — the real FS boundary. `kind: 'none'` runs
+   * unconfined; pair it with `gate`/`takeover` and log the degradation warning.
+   */
+  fsJail?: FsJailSpec
 }
 
 export class CliParticipant extends AgentParticipant {
@@ -100,6 +114,7 @@ export class CliParticipant extends AgentParticipant {
   protected readonly gate: ((ctx: CliTurnContext) => CliGateVerdict) | undefined
   protected readonly next: ((result: CliRunResult, ctx: CliTurnContext) => string | null) | undefined
   protected readonly takeover: TakeoverController | undefined
+  protected readonly fsJail: FsJailSpec | undefined
 
   /** Live abort handles per running task → `onTaskCancelled` kills the child. */
   private readonly running = new Map<TaskId, AbortController>()
@@ -117,6 +132,7 @@ export class CliParticipant extends AgentParticipant {
     this.gate = opts.gate
     this.next = opts.next
     this.takeover = opts.takeover
+    this.fsJail = opts.fsJail
   }
 
   protected async handleTask(task: Task): Promise<unknown> {
@@ -236,6 +252,7 @@ export class CliParticipant extends AgentParticipant {
       ...(this.promptVia === 'stdin' ? { input: ctx.prompt } : {}),
       ...(this.timeoutMs ? { timeoutMs: this.timeoutMs } : {}),
       ...(this.onChunk ? { onChunk: (c: CliChunk) => this.onChunk!(ctx.taskId, c) } : {}),
+      ...(this.fsJail ? { fsJail: this.fsJail } : {}),
     })
     if (result.aborted) throw new Error('task cancelled')
     if (result.timedOut) throw new Error(`CLI '${this.command}' timed out after ${this.timeoutMs}ms`)

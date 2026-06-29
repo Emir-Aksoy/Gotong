@@ -17,7 +17,7 @@
  * never silently runs unconfined.
  */
 
-import type { FsJailKind } from './workspace-jail.js'
+import type { FsJailKind, FsJailSpec } from './workspace-jail.js'
 
 /** Outcome of probing the host for an OS kernel jail. */
 export interface FsJailCapability {
@@ -91,6 +91,49 @@ export async function detectFsJail(opts: DetectFsJailOptions = {}): Promise<FsJa
 /** Clear the cached capability — for tests, or after an environment change. */
 export function resetFsJailCache(): void {
   cached = undefined
+}
+
+/** Result of {@link prepareFsJail} — a ready-to-thread spec plus the honest degradation signal. */
+export interface PreparedFsJail {
+  /** Hand this to an adapter (`CliRunOptions.fsJail` / `AcpSpawnOptions.fsJail`). */
+  readonly spec: FsJailSpec
+  /** True when an OS kernel jail will actually confine the child tree. */
+  readonly jailed: boolean
+  /** Present iff NOT jailed — a loud message the caller should log AND pair with a human gate. */
+  readonly warning?: string
+}
+
+export interface PrepareFsJailOptions extends DetectFsJailOptions {
+  /** Directories the spawned tree may write to. */
+  allowedRoots: readonly string[]
+  /** Extra writable directories beyond the roots. */
+  extraWritableRoots?: readonly string[]
+}
+
+/**
+ * The one-call host seam: probe the OS jail, then return a {@link FsJailSpec}
+ * ready to hand an adapter. When no enforcer is available (`kind: 'none'`),
+ * `jailed` is false and `warning` carries the reason — the caller MUST log it and
+ * pair the spawn with a human gate, never run unconfined silently. Folds the
+ * detect → spec → degrade dance into one place so cli-agent / acp-agent / the
+ * host don't each re-implement it.
+ */
+export async function prepareFsJail(opts: PrepareFsJailOptions): Promise<PreparedFsJail> {
+  const detectOpts: DetectFsJailOptions = {
+    ...(opts.platform !== undefined ? { platform: opts.platform } : {}),
+    ...(opts.probe !== undefined ? { probe: opts.probe } : {}),
+    ...(opts.noCache !== undefined ? { noCache: opts.noCache } : {}),
+  }
+  const cap = await detectFsJail(detectOpts)
+  const spec: FsJailSpec = {
+    allowedRoots: opts.allowedRoots,
+    kind: cap.kind,
+    ...(opts.extraWritableRoots !== undefined ? { extraWritableRoots: opts.extraWritableRoots } : {}),
+  }
+  if (cap.kind === 'none') {
+    return { spec, jailed: false, warning: cap.reason ?? 'no OS kernel jail available' }
+  }
+  return { spec, jailed: true }
 }
 
 // ---------------------------------------------------------------------------

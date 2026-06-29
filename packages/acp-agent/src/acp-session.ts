@@ -30,6 +30,8 @@
 
 import { spawn, type ChildProcess } from 'node:child_process'
 
+import { wrapWithFsJail, type FsJailSpec } from '@aipehub/core'
+
 import {
   AcpConnection,
   AcpConnectionError,
@@ -100,6 +102,15 @@ export interface AcpSpawnOptions {
   authMethodId?: string
   /** Hard ceiling for the `initialize`(+`authenticate`)+`session/new` handshake. */
   initTimeoutMs?: number
+  /**
+   * Layer-2 OS kernel jail (FS sandbox). When set with a real `kind`, the
+   * long-lived bridge process is wrapped under `sandbox-exec` / `bwrap` so every
+   * file write across the session's lifetime stays inside the allowed roots —
+   * the real boundary for a coding agent the hub holds open. `kind: 'none'` (no
+   * enforcer) spawns unconfined; the caller degrades (per-tool gate + warning).
+   * Ignored when `transport` is injected (tests skip spawning entirely).
+   */
+  fsJail?: FsJailSpec
 }
 
 /** The gate's answer to a permission reverse request. */
@@ -407,9 +418,30 @@ export class AcpSession {
   }
 
   private spawnChild(): AcpTransport {
+    // Layer-2 FS jail: wrap the bridge under the OS kernel enforcer so EVERY file
+    // write over the held session's lifetime is confined to the roots. `kind:
+    // 'none'` passes through unchanged (caller degrades). cwd stays the repo: the
+    // enforcer runs there and (bwrap) re-chdirs the inner process to the same dir.
+    let command = this.opts.command
+    let args = this.opts.args ? [...this.opts.args] : []
+    if (this.opts.fsJail && this.opts.fsJail.kind !== 'none') {
+      const wrapped = wrapWithFsJail({
+        command,
+        args,
+        allowedRoots: this.opts.fsJail.allowedRoots,
+        kind: this.opts.fsJail.kind,
+        ...(this.opts.cwd !== undefined ? { cwd: this.opts.cwd } : {}),
+        ...(this.opts.fsJail.extraWritableRoots !== undefined
+          ? { extraWritableRoots: this.opts.fsJail.extraWritableRoots }
+          : {}),
+      })
+      command = wrapped.command
+      args = wrapped.args
+    }
+
     let child: ChildProcess
     try {
-      child = spawn(this.opts.command, this.opts.args ? [...this.opts.args] : [], {
+      child = spawn(command, args, {
         cwd: this.opts.cwd,
         env: buildEnv(this.opts.env),
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -421,16 +453,16 @@ export class AcpSession {
         detached: process.platform !== 'win32',
       })
     } catch (err) {
-      throw asSpawnError(this.opts.command, err)
+      throw asSpawnError(command, err)
     }
     this.child = child
     child.on('error', (err) => {
       // Async spawn failure (ENOENT): close the connection with the cause so the
       // pending handshake rejects with a clear message, not a generic close.
-      this.conn?.close(asSpawnError(this.opts.command, err))
+      this.conn?.close(asSpawnError(command, err))
     })
     if (!child.stdout || !child.stdin) {
-      throw asSpawnError(this.opts.command, new Error('child stdio not available'))
+      throw asSpawnError(command, new Error('child stdio not available'))
     }
     // stderr is the agent's own logging, not the OBSERVE stream. Route it to the
     // observer if one is set (debuggability), else drain it so a chatty agent
