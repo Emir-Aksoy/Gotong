@@ -39,6 +39,16 @@ import {
   type Importance,
 } from './importance.js'
 import { DEFAULT_LINK_EXPAND, expandByLinks, linksOf } from './links.js'
+import {
+  cleanSteps,
+  formatProcedureSteps,
+  formOf,
+  isProcedure,
+  stepsOf,
+  FORM_PROCEDURE,
+  META_FORM,
+  META_STEPS,
+} from './procedure.js'
 import { lexicalRetriever, type MemoryRetriever } from './retriever.js'
 import { tierOf } from './tiers.js'
 
@@ -100,6 +110,7 @@ export interface MemoryToolsetOptions {
 }
 
 const REMEMBER = 'remember'
+const REMEMBER_PROCEDURE = 'remember_procedure'
 const RECALL = 'recall'
 const FORGET = 'forget'
 
@@ -173,6 +184,39 @@ export class MemoryToolset implements LlmAgentToolset {
         },
       },
       {
+        name: REMEMBER_PROCEDURE,
+        description:
+          'Record HOW you accomplished a multi-step task — the ordered sequence ' +
+          'of actions that worked — so you can repeat it next time. Use this for ' +
+          'reusable know-how ("how I got an overtime claim approved"), not one-off ' +
+          'facts (use `remember` for those). Stored as a lasting semantic memory.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Short name or goal of the procedure. One line.',
+            },
+            steps: {
+              type: 'array',
+              items: { type: 'string' },
+              description:
+                'The ordered steps, each a short action sentence. At least one; ' +
+                'order matters.',
+            },
+            importance: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 5,
+              description:
+                'How important this know-how is, 1–5 (default 3). 5 pins it in ' +
+                'view and protects it from auto-drop under space pressure.',
+            },
+          },
+          required: ['name', 'steps'],
+        },
+      },
+      {
         name: RECALL,
         description:
           'Search past memory for relevant entries by keyword (case-insensitive ' +
@@ -209,6 +253,12 @@ export class MemoryToolset implements LlmAgentToolset {
                 '(e.g. persona / projects / people / commitments / misc). Omit to ' +
                 'search every cluster. Matches entries explicitly tagged with that cluster.',
             },
+            form: {
+              type: 'string',
+              description:
+                'Restrict to one memory form. Use "procedure" to surface only ' +
+                'recorded how-to step sequences. Omit to search every form.',
+            },
           },
         },
       },
@@ -232,6 +282,8 @@ export class MemoryToolset implements LlmAgentToolset {
     switch (name) {
       case REMEMBER:
         return this.doRemember(args)
+      case REMEMBER_PROCEDURE:
+        return this.doRememberProcedure(args)
       case RECALL:
         return this.doRecall(args)
       case FORGET:
@@ -275,6 +327,36 @@ export class MemoryToolset implements LlmAgentToolset {
     }
   }
 
+  private async doRememberProcedure(args: Record<string, unknown>): Promise<LlmToolCallResult> {
+    // A procedure is always a lasting semantic fact — if the toolset can't write
+    // semantic, it can't record procedures.
+    if (!this.writableKinds.has('semantic')) {
+      return errorResult('Procedures are stored as semantic memory, which is not writable here.')
+    }
+    const name = typeof args.name === 'string' ? args.name.trim() : ''
+    if (!name) return errorResult('`name` is required and must be a non-empty string.')
+
+    const steps = cleanSteps(args.steps)
+    if (steps.length === 0) {
+      return errorResult('`steps` must be a non-empty array of step strings.')
+    }
+
+    const importance: Importance | undefined =
+      args.importance === undefined ? undefined : clampImportance(args.importance)
+
+    try {
+      const meta: Record<string, unknown> = {
+        [META_FORM]: FORM_PROCEDURE,
+        [META_STEPS]: steps,
+        ...(importance !== undefined ? { [META_IMPORTANCE]: importance } : {}),
+      }
+      const entry = await this.memory.remember({ kind: 'semantic', text: name, meta })
+      return okResult(`Remembered procedure ${entry.id} (${steps.length} step(s)).`)
+    } catch (err) {
+      return errorResult(`remember_procedure failed: ${errMsg(err)}`)
+    }
+  }
+
   private async doRecall(args: Record<string, unknown>): Promise<LlmToolCallResult> {
     const query = typeof args.query === 'string' && args.query.length > 0 ? args.query : undefined
     const kinds = Array.isArray(args.kinds)
@@ -290,6 +372,8 @@ export class MemoryToolset implements LlmAgentToolset {
       args.minImportance === undefined ? undefined : clampImportance(args.minImportance)
     const tier =
       typeof args.tier === 'string' && args.tier.trim().length > 0 ? args.tier.trim() : undefined
+    const form =
+      typeof args.form === 'string' && args.form.trim().length > 0 ? args.form.trim() : undefined
 
     try {
       const retrieved = await this.retriever.retrieve({
@@ -303,7 +387,8 @@ export class MemoryToolset implements LlmAgentToolset {
       const entries = retrieved.filter(
         (e) =>
           (minImportance === undefined || importanceOf(e) >= minImportance) &&
-          (tier === undefined || tierOf(e, '') === tier),
+          (tier === undefined || tierOf(e, '') === tier) &&
+          (form === undefined || formOf(e, '') === form),
       )
       if (entries.length === 0) return okResult('No matching memories.')
 
@@ -319,7 +404,11 @@ export class MemoryToolset implements LlmAgentToolset {
         const t = tierOf(e, '')
         const tag = t ? `${e.kind}/${t}` : e.kind
         const prefix = seedIds.has(e.id) ? '' : '↪ '
-        return `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, ${new Date(e.ts).toISOString()}) ${e.text}`
+        // A recalled procedure is useless without its steps — show them inline
+        // (recall output is the on-demand path, not the byte-stable frozen block).
+        const steps = isProcedure(e) ? stepsOf(e) : []
+        const suffix = steps.length > 0 ? ` — steps: ${formatProcedureSteps(steps)}` : ''
+        return `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, ${new Date(e.ts).toISOString()}) ${e.text}${suffix}`
       })
       // F-M3: reinforce what the query MATCHED (the seeds), opt-in. Best-effort
       // and AFTER the result is built — a failed reinforce must not turn a good

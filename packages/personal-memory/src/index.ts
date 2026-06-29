@@ -175,6 +175,16 @@ export {
   type LinkPassResult,
 } from './link-pass.js'
 export {
+  formOf,
+  isProcedure,
+  cleanSteps,
+  stepsOf,
+  formatProcedureSteps,
+  FORM_PROCEDURE,
+  META_FORM,
+  META_STEPS,
+} from './procedure.js'
+export {
   effectiveSalience,
   reinforcedMeta,
   recallCountOf,

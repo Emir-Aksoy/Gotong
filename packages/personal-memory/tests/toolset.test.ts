@@ -8,10 +8,10 @@ function textOf(result: { content: ReadonlyArray<unknown> }): string {
 }
 
 describe('MemoryToolset', () => {
-  it('advertises remember/recall/forget with LLM-safe names', () => {
+  it('advertises remember/remember_procedure/recall/forget with LLM-safe names', () => {
     const ts = new MemoryToolset({ memory: makeFakeMemory() })
     const names = ts.listTools().map((t) => t.name)
-    expect(names).toEqual(['remember', 'recall', 'forget'])
+    expect(names).toEqual(['remember', 'remember_procedure', 'recall', 'forget'])
     for (const n of names) expect(n).toMatch(/^[a-zA-Z0-9_-]+$/)
   })
 
@@ -180,6 +180,67 @@ describe('MemoryToolset', () => {
       expect(r.isError).toBeFalsy()
       expect(textOf(r)).toContain('[s1]')
       expect(textOf(r)).not.toContain('↪')
+    })
+  })
+
+  describe('procedural memory (G-M1)', () => {
+    it('stores form+steps as a semantic entry; recall form="procedure" shows steps inline', async () => {
+      const mem = makeFakeMemory()
+      const ts = new MemoryToolset({ memory: mem })
+
+      const r = await ts.callTool('remember_procedure', {
+        name: 'get an overtime claim approved',
+        steps: ['draft the claim', 'check the policy', 'route to the manager'],
+      })
+      expect(r.isError).toBeFalsy()
+      expect(textOf(r)).toMatch(/3 step/)
+
+      const stored = mem.entries.find((e) => (e.meta as { form?: string }).form === 'procedure')!
+      expect(stored.kind).toBe('semantic')
+      expect((stored.meta as { steps?: string[] }).steps).toEqual([
+        'draft the claim',
+        'check the policy',
+        'route to the manager',
+      ])
+
+      await ts.callTool('remember', { text: 'likes oat milk' }) // a plain fact
+
+      const procs = await ts.callTool('recall', { form: 'procedure' })
+      const out = textOf(procs)
+      expect(out).toContain('get an overtime claim approved')
+      expect(out).toContain(
+        'steps: 1. draft the claim; 2. check the policy; 3. route to the manager',
+      )
+      expect(out).not.toContain('oat milk') // non-procedure filtered out by form
+    })
+
+    it('a procedure also surfaces in an unfiltered recall, carrying its steps', async () => {
+      const mem = makeFakeMemory()
+      const ts = new MemoryToolset({ memory: mem })
+      await ts.callTool('remember_procedure', { name: 'brew tea', steps: ['boil', 'steep'] })
+      await ts.callTool('remember', { text: 'likes oat milk' })
+
+      const out = textOf(await ts.callTool('recall', { query: '' }))
+      expect(out).toContain('brew tea — steps: 1. boil; 2. steep')
+      expect(out).toContain('oat milk') // a plain fact has no steps suffix
+      expect(out).not.toMatch(/oat milk[^\n]*steps:/)
+    })
+
+    it('rejects an empty name or empty/blank steps', async () => {
+      const ts = new MemoryToolset({ memory: makeFakeMemory() })
+      expect((await ts.callTool('remember_procedure', { name: '  ', steps: ['x'] })).isError).toBe(
+        true,
+      )
+      expect((await ts.callTool('remember_procedure', { name: 'x', steps: [] })).isError).toBe(true)
+      expect(
+        (await ts.callTool('remember_procedure', { name: 'x', steps: ['', '   '] })).isError,
+      ).toBe(true)
+    })
+
+    it('refuses to record a procedure when semantic is not writable', async () => {
+      const ts = new MemoryToolset({ memory: makeFakeMemory(), writableKinds: ['episodic'] })
+      const r = await ts.callTool('remember_procedure', { name: 'x', steps: ['a'] })
+      expect(r.isError).toBe(true)
     })
   })
 })
