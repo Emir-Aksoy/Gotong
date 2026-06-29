@@ -144,6 +144,16 @@ export {
 } from './compaction.js'
 export { relevanceScore, extractTerms } from './relevance.js'
 export {
+  linkRelated,
+  linksOf,
+  mergeLinks,
+  defaultLinkScorer,
+  META_LINKS,
+  DEFAULT_LINK_TOP_K,
+  type LinkScorer,
+  type LinkRelatedOptions,
+} from './links.js'
+export {
   effectiveSalience,
   reinforcedMeta,
   recallCountOf,
