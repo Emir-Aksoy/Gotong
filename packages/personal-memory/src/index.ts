@@ -136,4 +136,5 @@ export {
   type SaveBeforeCompactOptions,
   type SaveBeforeCompactResult,
 } from './compaction.js'
+export { relevanceScore, extractTerms } from './relevance.js'
 export { PersonalMemoryError, type PersonalMemoryErrorCode } from './errors.js'
