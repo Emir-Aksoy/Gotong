@@ -40,8 +40,8 @@
 
 import type { MemoryEntry, MemoryHandle } from '@aipehub/services-sdk'
 
-import { importanceOf } from './importance.js'
 import type { MemoryReviewer, ReviewContext, ReviewOutcome } from './review.js'
+import { effectiveSalience, type SalienceOptions } from './salience.js'
 import { DEFAULT_TIERS, isClusterProfile, isDigest, type TierConfig } from './tiers.js'
 
 /** How many entries a budget scan pulls. Generous — a consolidated butler holds
@@ -78,7 +78,18 @@ export interface EnforceBudgetOptions {
    * are what the next turn needs. Default {@link DEFAULT_PROTECT_RECENT_EPISODIC}.
    */
   protectRecentEpisodic?: number
-  /** Clock injection (currently unused; kept for reviewer symmetry). */
+  /**
+   * Decay / reinforcement for eviction keep-value (decision F). Omit → within a
+   * level entries are evicted by plain importance-then-recency (byte-identical to
+   * pre-F). With it set (and `now` provided) a faded low-importance entry is
+   * evicted before a reinforced or fresher one of the same level. See
+   * {@link effectiveSalience}.
+   */
+  salience?: SalienceOptions
+  /**
+   * Clock injection. Used only when {@link salience} is set, to age entries; the
+   * reviewer wires `() => ctx.now` so the heartbeat's clock drives decay.
+   */
   now?: () => number
 }
 
@@ -136,14 +147,19 @@ export async function enforceBudget(
 
   // Eviction order: lowest keep-value first.
   //   level rank (episodic 0 → ad-hoc semantic 1 → digest 2 → profile 3)
-  //   then lowest importance, then oldest.
+  //   then lowest salience, then oldest.
+  // `effectiveSalience` with no `salience` option IS importance (an integer), so
+  // this is byte-identical to the pre-F "importance then recency" ordering until
+  // a host opts decay/reinforcement in.
+  const nowMs = opts.now?.()
+  const salienceOf = (e: MemoryEntry): number => effectiveSalience(e, nowMs, opts.salience)
   const candidates = scoped
     .filter((e) => !protectedIds.has(e.id))
     .sort((a, b) => {
       const r = levelRank(a, config) - levelRank(b, config)
       if (r !== 0) return r
-      const imp = importanceOf(a) - importanceOf(b)
-      if (imp !== 0) return imp
+      const s = salienceOf(a) - salienceOf(b)
+      if (s !== 0) return s
       return a.ts - b.ts
     })
 

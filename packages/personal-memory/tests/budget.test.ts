@@ -183,3 +183,93 @@ describe('importanceOf sanity (eviction ordering depends on it)', () => {
     expect(importanceOf(ep('c', 1, 5))).toBe(5)
   })
 })
+
+const DAY = 24 * 60 * 60 * 1000
+
+describe('enforceBudget — salience (decision F-M2), opt-in', () => {
+  it('without salience: eviction is byte-identical to importance-then-recency', async () => {
+    // Two equal-importance episodic, budget drops exactly 1 → oldest goes (ts tiebreak).
+    const mem = makeFakeMemory([ep('old', 0, 3), ep('new', 200, 3)])
+    const res = await enforceBudget({ memory: mem, budgetBytes: 1500, protectRecentEpisodic: 0 })
+    expect(res!.evicted).toBe(1)
+    expect(has(mem, 'new')).toBe(true) // newer survives — unchanged pre-F behavior
+    expect(has(mem, 'old')).toBe(false)
+  })
+
+  it('reinforcement keeps a heavily-recalled entry even though it is older', async () => {
+    // OFF → oldest (hot) evicted. ON → hot has high keep-value, the un-recalled one goes.
+    const hot = ep('hot', 0, 3, { recallCount: 10 })
+    const cold = ep('cold', 200, 3)
+    const mkMem = () => makeFakeMemory([{ ...hot }, { ...cold }])
+
+    const off = mkMem()
+    await enforceBudget({ memory: off, budgetBytes: 1500, protectRecentEpisodic: 0 })
+    expect(has(off, 'hot')).toBe(false) // OFF: older 'hot' evicted
+
+    const on = mkMem()
+    await enforceBudget({
+      memory: on,
+      budgetBytes: 1500,
+      protectRecentEpisodic: 0,
+      salience: { reinforceWeight: 0.5 },
+      now: () => 1000,
+    })
+    expect(has(on, 'hot')).toBe(true) // ON: reinforcement saves 'hot'
+    expect(has(on, 'cold')).toBe(false) // the un-recalled one is dropped instead
+  })
+
+  it('decay can invert importance: a faded high-importance entry is evicted first', async () => {
+    // 'stale' is more important (3) but 4 half-lives old; 'fresh' is less important (2) but new.
+    const stale = ep('stale', 0, 3)
+    const fresh = ep('fresh', 119 * DAY, 2)
+    const mkMem = () => makeFakeMemory([{ ...stale }, { ...fresh }])
+
+    const off = mkMem()
+    await enforceBudget({ memory: off, budgetBytes: 1500, protectRecentEpisodic: 0 })
+    expect(has(off, 'stale')).toBe(true) // OFF: importance 3 > 2 → 'fresh' evicted
+    expect(has(off, 'fresh')).toBe(false)
+
+    const on = mkMem()
+    await enforceBudget({
+      memory: on,
+      budgetBytes: 1500,
+      protectRecentEpisodic: 0,
+      salience: { halfLifeMs: 30 * DAY },
+      now: () => 120 * DAY,
+    })
+    expect(has(on, 'stale')).toBe(false) // ON: decay drops the faded high-importance one
+    expect(has(on, 'fresh')).toBe(true)
+  })
+
+  it('pins never fade under decay — a year-old pin outlives a fresh non-pin', async () => {
+    const pin = ep('pin', 0, 5) // a year old, but pinned
+    const recent = ep('recent', 300 * DAY, 4) // fresh, high-but-not-pin
+    const mem = makeFakeMemory([pin, recent])
+    await enforceBudget({
+      memory: mem,
+      budgetBytes: 1500,
+      protectRecentEpisodic: 0,
+      salience: { halfLifeMs: 30 * DAY },
+      now: () => 365 * DAY,
+    })
+    expect(has(mem, 'pin')).toBe(true) // pin survives despite age (no fade)
+    expect(has(mem, 'recent')).toBe(false)
+  })
+
+  it('decay still respects level rank — a faded profile outlives a fresh episodic', async () => {
+    // Level dominates salience: episodic (rank 0) is dropped before any semantic,
+    // even a much older, faded profile.
+    const freshEp = ep('freshEp', 120 * DAY, 5) // fresh + pinned, but episodic
+    const oldProfile = semProfile('oldProfile', 0, 3) // ancient, lower importance, but profile
+    const mem = makeFakeMemory([freshEp, oldProfile])
+    await enforceBudget({
+      memory: mem,
+      budgetBytes: 1500,
+      protectRecentEpisodic: 0,
+      salience: { halfLifeMs: 30 * DAY },
+      now: () => 120 * DAY,
+    })
+    expect(has(mem, 'freshEp')).toBe(false) // episodic evicted first regardless of salience
+    expect(has(mem, 'oldProfile')).toBe(true)
+  })
+})
