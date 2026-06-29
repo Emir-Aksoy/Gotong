@@ -33,6 +33,7 @@ import {
   type LlmToolUseBlock,
 } from '@aipehub/llm'
 import {
+  DEFAULT_TIERS,
   MemoryAugmentedAgent,
   type MemoryAugmentedAgentOptions,
 } from '@aipehub/personal-memory'
@@ -71,7 +72,15 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     // Benign first, governed last — distinct names, so this is just a stable
     // ordering. `MemoryAugmentedAgent` further composes memory tools in front.
     const composed = ComposedToolset.of(...benignList, opts.governed)
-    super({ ...opts, tools: composed })
+    // The resident butler keeps a multi-topic long-term memory, so its frozen
+    // block is CLUSTERED by default (画像 / 项目 / 人物 / 承诺 / 其它). A caller
+    // can override `tierConfig` (or pass a custom catalog); a plain
+    // MemoryAugmentedAgent still defaults to the flat block.
+    super({
+      ...opts,
+      tools: composed,
+      tierConfig: opts.tierConfig ?? DEFAULT_TIERS,
+    })
     this.governed = opts.governed
   }
 

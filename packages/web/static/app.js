@@ -3146,12 +3146,38 @@
     return escape(kind || '')
   }
 
+  // Decision ③ — show which CLUSTER a fact lives in. A clustered semantic entry
+  // leads with its topic; an untagged / episodic one falls back to the kind.
+  function memTierLabel(tier) {
+    switch (tier) {
+      case 'persona': return t('meButlerMemTierPersona')
+      case 'projects': return t('meButlerMemTierProjects')
+      case 'people': return t('meButlerMemTierPeople')
+      case 'commitments': return t('meButlerMemTierCommitments')
+      case 'misc': return t('meButlerMemTierMisc')
+      default: return escape(tier || '')
+    }
+  }
+  function memLevelLabel(level) {
+    if (level === 'digest') return t('meButlerMemLevelDigest')
+    if (level === 'profile') return t('meButlerMemLevelProfile')
+    return ''
+  }
+
   function renderMemCard(e) {
     const when = e.ts ? new Date(e.ts).toLocaleString() : ''
+    const chips = []
+    // primary tag: cluster for a clustered fact, else the kind
+    chips.push(`<span class="me-tag">${e.tier ? memTierLabel(e.tier) : memKindLabel(e.kind)}</span>`)
+    const lvl = memLevelLabel(e.level)
+    if (lvl) chips.push(`<span class="me-tag">${lvl}</span>`)
+    if (typeof e.importance === 'number') {
+      chips.push(`<span class="me-tag">${escape(t('meButlerMemImportance', e.importance))}</span>`)
+    }
     return `
       <div class="me-agent-card" data-mem-id="${escape(e.id)}">
         <div class="me-agent-head">
-          <span class="me-tag">${memKindLabel(e.kind)}</span>
+          ${chips.join('')}
           <span class="me-meta">${when ? escape(when) : ''}</span>
         </div>
         <div class="me-agent-body">${escape(e.text || '')}</div>

@@ -57,10 +57,36 @@ describe('HostButlerMemoryService', () => {
     expect(snap.recent.map((e) => e.text)).toEqual(
       expect.arrayContaining(['用户说他叫阿明', '用户说在做奶茶店']),
     )
-    // A view carries content + when only — never internal meta.
+    // A view carries content + when + the tiering projection only — never the
+    // raw meta object. Every key must be from the allowed view shape.
+    const allowed = new Set(['id', 'kind', 'text', 'ts', 'tier', 'level', 'importance'])
     for (const e of [...snap.profile, ...snap.recent]) {
-      expect(Object.keys(e).sort()).toEqual(['id', 'kind', 'text', 'ts'])
+      for (const key of Object.keys(e)) expect(allowed.has(key)).toBe(true)
+      expect((e as Record<string, unknown>).meta).toBeUndefined()
+      // importance always projected (defaults to the mid value).
+      expect(typeof e.importance).toBe('number')
     }
+  })
+
+  it('projects tier / level / importance from a clustered entry (decision ③)', async () => {
+    const m = openButlerMemory({ rootDir: tmp, userId: 'alice', logger: silentLogger })
+    await m.remember({
+      kind: 'semantic',
+      text: '阿明对花生过敏',
+      meta: { tier: 'persona', level: 'profile', importance: 5 },
+    })
+    const snap = await svc.read('alice')
+    const card = snap.profile.find((e) => e.text.includes('花生'))!
+    expect(card.tier).toBe('persona')
+    expect(card.level).toBe('profile')
+    expect(card.importance).toBe(5)
+
+    // A flat (untagged) semantic fact carries no tier/level, importance defaults.
+    await m.remember({ kind: 'semantic', text: '随手一记' })
+    const flat = (await svc.read('alice')).profile.find((e) => e.text === '随手一记')!
+    expect(flat.tier).toBeUndefined()
+    expect(flat.level).toBeUndefined()
+    expect(flat.importance).toBe(3)
   })
 
   it('export() returns every entry across kinds (data portability)', async () => {

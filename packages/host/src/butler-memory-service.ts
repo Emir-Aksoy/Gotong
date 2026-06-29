@@ -23,6 +23,7 @@
  */
 
 import type { Logger } from '@aipehub/core'
+import { importanceOf, levelOf, tierOf } from '@aipehub/personal-memory'
 import type { MemoryEntry, MemoryHandle } from '@aipehub/services-sdk'
 import type { WebServerOptions } from '@aipehub/web'
 
@@ -101,7 +102,24 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
   }
 }
 
-/** Project a stored entry to the member's view — content + when, no internal meta. */
+/**
+ * Project a stored entry to the member's view — content + when + tiering tags
+ * (decision ③). The tier/level/importance come from `meta` via the same
+ * accessors the frozen block uses, so the panel shows exactly the cluster +
+ * salience the butler actually filed a fact under. `tier`/`level` are only
+ * attached when explicitly set (a flat semantic fact has neither); importance
+ * defaults to the mid value, mirroring `importanceOf`.
+ */
 function projectEntry(e: MemoryEntry): ButlerMemoryView {
-  return { id: e.id, kind: e.kind, text: e.text, ts: e.ts }
+  const tier = tierOf(e, '')
+  const level = levelOf(e)
+  return {
+    id: e.id,
+    kind: e.kind,
+    text: e.text,
+    ts: e.ts,
+    ...(tier ? { tier } : {}),
+    ...(level ? { level } : {}),
+    importance: importanceOf(e),
+  }
 }

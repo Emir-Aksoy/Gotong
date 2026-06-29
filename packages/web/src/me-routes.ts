@@ -476,7 +476,7 @@ export interface MeCredentialsSurface {
 // a member can only ever see / erase their OWN butler's memory.
 // ---------------------------------------------------------------------------
 
-/** One remembered entry as the member sees it — content + when, no internal meta. */
+/** One remembered entry as the member sees it — content + when + tiering tags. */
 export interface ButlerMemoryView {
   id: string
   /** 'episodic' (a captured turn) or 'semantic' (a distilled fact). */
@@ -484,6 +484,17 @@ export interface ButlerMemoryView {
   text: string
   /** Epoch ms when written. */
   ts: number
+  /**
+   * Tiering projection (decision ③), all optional so a flat entry is unchanged:
+   *   - `tier`       the topic cluster id (persona / projects / … / misc)
+   *   - `level`      'digest' (mid layer) or 'profile' (stable layer)
+   *   - `importance` 1–5 salience
+   * These let the privacy panel show the member WHICH cluster a fact lives in
+   * and HOW important the butler rated it — same right-to-inspect as the text.
+   */
+  tier?: string
+  level?: string
+  importance?: number
 }
 
 /** What the privacy panel shows: the distilled profile + recent captured turns. */

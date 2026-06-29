@@ -165,6 +165,28 @@ describe('/api/me/butler/memory — member butler-memory privacy view (M6c)', ()
     expect(b.stub!.calls).toContainEqual(['export', b.memberUserId])
   })
 
+  it('carries the tiering projection (tier / level / importance) through the route (decision ③)', async () => {
+    b = await boot()
+    // The route echoes the surface view verbatim — assert the clustered fields
+    // survive JSON serialization, while a flat entry stays flat (no bogus tags).
+    const clustered: ButlerMemoryView = {
+      id: 's1',
+      kind: 'semantic',
+      text: '阿明对花生过敏',
+      ts: 1_780_000_000_000,
+      tier: 'persona',
+      level: 'profile',
+      importance: 5,
+    }
+    b.stub!.snapshot = { profile: [clustered], recent: [entry('e1', 'episodic', '随手一记')] }
+    const r = await req(b, 'GET', '/api/me/butler/memory')
+    expect(r.status).toBe(200)
+    expect(r.json.profile[0]).toMatchObject({ tier: 'persona', level: 'profile', importance: 5 })
+    const flat = r.json.recent[0]
+    expect(flat.tier).toBeUndefined()
+    expect(flat.level).toBeUndefined()
+  })
+
   it('DELETE forgets one entry by path id (session user forced)', async () => {
     b = await boot()
     const r = await req(b, 'DELETE', '/api/me/butler/memory/e1')
