@@ -30,7 +30,7 @@ import type {
   LlmToolCallResult,
   LlmToolDefinition,
 } from '@aipehub/llm'
-import type { MemoryHandle, MemoryKind } from '@aipehub/services-sdk'
+import type { MemoryEntry, MemoryHandle, MemoryKind } from '@aipehub/services-sdk'
 
 import {
   clampImportance,
@@ -40,6 +40,21 @@ import {
 } from './importance.js'
 import { lexicalRetriever, type MemoryRetriever } from './retriever.js'
 import { tierOf } from './tiers.js'
+
+/**
+ * Opt-in (decision F-M3): reinforce the entries a recall returned — bump
+ * `recallCount` + stamp `lastRecalledTs` so {@link effectiveSalience} keeps
+ * frequently-used memories under budget pressure. Called best-effort, once per
+ * returned entry.
+ *
+ * The reinforcer MUST update meta IN PLACE preserving `id` + `ts` (so the
+ * frozen-block order — importance, then ts, then id — is untouched; recallCount
+ * / lastRecalledTs are not read by that comparator, and the body prints neither,
+ * so a correct reinforcer leaves the block byte-identical). The handle has no
+ * meta-only update, so the host wires a file-backed patch — see
+ * {@link reinforcedMeta} for the pure meta transform.
+ */
+export type MemoryReinforcer = (entry: MemoryEntry, now: number) => void | Promise<void>
 
 export interface MemoryToolsetOptions {
   /** The (already per-owner-scoped) memory handle the tools act on. */
@@ -55,6 +70,14 @@ export interface MemoryToolsetOptions {
    * answers queries.
    */
   retriever?: MemoryRetriever
+  /**
+   * Opt-in (F-M3): after a recall, reinforce the returned entries. Omit → no
+   * reinforcement (default, byte-identical to pre-F). Best-effort: a failure is
+   * swallowed so it never breaks the recall. See {@link MemoryReinforcer}.
+   */
+  reinforce?: MemoryReinforcer
+  /** Clock for reinforcement timestamps. Default `Date.now`. */
+  now?: () => number
 }
 
 const REMEMBER = 'remember'
@@ -70,6 +93,8 @@ export class MemoryToolset implements LlmAgentToolset {
   private readonly retriever: MemoryRetriever
   private readonly writableKinds: ReadonlySet<MemoryKind>
   private readonly recallDefaultK: number
+  private readonly reinforce: MemoryReinforcer | undefined
+  private readonly now: () => number
 
   constructor(opts: MemoryToolsetOptions) {
     this.memory = opts.memory
@@ -82,6 +107,8 @@ export class MemoryToolset implements LlmAgentToolset {
         : DEFAULT_WRITABLE_KINDS,
     )
     this.recallDefaultK = clamp(opts.recallDefaultK ?? DEFAULT_RECALL_K, 1, RECALL_HARD_CAP)
+    this.reinforce = opts.reinforce
+    this.now = opts.now ?? Date.now
   }
 
   listTools(): LlmToolDefinition[] {
@@ -261,9 +288,26 @@ export class MemoryToolset implements LlmAgentToolset {
         const tag = t ? `${e.kind}/${t}` : e.kind
         return `[${e.id}] (${tag}, p${importanceOf(e)}, ${new Date(e.ts).toISOString()}) ${e.text}`
       })
+      // F-M3: reinforce what was surfaced (opt-in). Best-effort and AFTER the
+      // result is built — a failed reinforce must not turn a good recall into an
+      // error, and it never alters the returned text.
+      await this.reinforceEntries(entries)
       return okResult(lines.join('\n'))
     } catch (err) {
       return errorResult(`recall failed: ${errMsg(err)}`)
+    }
+  }
+
+  /** F-M3: best-effort reinforcement of recalled entries (no-op when not opted in). */
+  private async reinforceEntries(entries: readonly MemoryEntry[]): Promise<void> {
+    if (!this.reinforce || entries.length === 0) return
+    const now = this.now()
+    for (const e of entries) {
+      try {
+        await this.reinforce(e, now)
+      } catch {
+        // best-effort: a reinforcement failure must never break recall
+      }
     }
   }
 

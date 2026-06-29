@@ -22,7 +22,7 @@ export {
   type RenderClusteredFrozenBlockOptions,
 } from './frozen-block.js'
 export { MemorySession, type MemorySessionOptions } from './session.js'
-export { MemoryToolset, type MemoryToolsetOptions } from './toolset.js'
+export { MemoryToolset, type MemoryToolsetOptions, type MemoryReinforcer } from './toolset.js'
 export { handleRetriever, lexicalRetriever, type MemoryRetriever } from './retriever.js'
 export {
   embeddingRetriever,
