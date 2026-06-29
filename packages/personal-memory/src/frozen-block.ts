@@ -15,8 +15,8 @@
  * the SET of entries (independent of input order). {@link MemorySession}
  * supplies the once-per-session memoization. Two facts make the output a pure
  * function of the entry set:
- *   - entries are re-sorted internally (`ts` desc, then `id` asc) so the
- *     caller's ordering / read-interleaving can't shift bytes;
+ *   - entries are re-sorted internally (importance desc, then `ts` desc, then
+ *     `id` asc) so the caller's ordering / read-interleaving can't shift bytes;
  *   - each entry renders to exactly one line (newlines in text are collapsed)
  *     so one entry == one bullet, every time.
  *
@@ -27,15 +27,18 @@
 
 import type { MemoryEntry } from '@aipehub/services-sdk'
 
+import { compareByImportanceThenRecency } from './importance.js'
+
 export interface RenderFrozenBlockOptions {
   /** Heading label (typically the butler/agent id). Stable per session. */
   label?: string
   /**
-   * Soft cap (chars) on the rendered ENTRY BODY. Entries are added
-   * newest-first until the next one would exceed the budget; the
-   * remainder are dropped with a deterministic "(N older … omitted)"
-   * note. The newest entry is always included even if it alone is over
-   * budget. Mirrors Hermes' bounded MEMORY.md. Default 4000.
+   * Soft cap (chars) on the rendered ENTRY BODY. Entries are added in
+   * priority order (importance, then recency) until the next one would
+   * exceed the budget; the remainder are dropped with a deterministic
+   * "(N lower-priority … omitted)" note. The highest-priority entry is
+   * always included even if it alone is over budget. Mirrors Hermes'
+   * bounded MEMORY.md. Default 4000.
    */
   maxChars?: number
 }
@@ -72,19 +75,18 @@ export function renderFrozenBlock(
     return [OPEN_MARKER, heading, '', PREAMBLE, '', '_(no memories yet)_', CLOSE_MARKER].join('\n')
   }
 
-  // Pure ordering: newest first, ties broken by id so the output never
-  // depends on the order recall() happened to return rows in.
-  const sorted = [...entries].sort(
-    (a, b) => b.ts - a.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-  )
+  // Pure ordering: importance first, then recency, ties broken by id so the
+  // output never depends on the order recall() happened to return rows in.
+  // When nothing sets importance this is exactly recency (the old behaviour).
+  const sorted = [...entries].sort(compareByImportanceThenRecency)
 
   const lines: string[] = []
   let used = 0
   let omitted = 0
   for (let i = 0; i < sorted.length; i++) {
     const line = `- ${formatEntry(sorted[i]!)}`
-    // Always take the first (newest) line; after that, stop once the body
-    // budget would be exceeded. `+ 1` accounts for the joining newline.
+    // Always take the first (highest-priority) line; after that, stop once the
+    // body budget would be exceeded. `+ 1` accounts for the joining newline.
     if (lines.length > 0 && used + line.length + 1 > maxChars) {
       omitted = sorted.length - i
       break
@@ -94,7 +96,7 @@ export function renderFrozenBlock(
   }
   if (omitted > 0) {
     lines.push(
-      `- _(${omitted} older ${omitted === 1 ? 'memory' : 'memories'} omitted to fit the memory budget)_`,
+      `- _(${omitted} lower-priority ${omitted === 1 ? 'memory' : 'memories'} omitted to fit the memory budget)_`,
     )
   }
 

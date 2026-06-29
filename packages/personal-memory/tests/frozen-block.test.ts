@@ -61,8 +61,33 @@ describe('renderFrozenBlock', () => {
     )
     const block = renderFrozenBlock(many, { maxChars: 400 })
     expect(block).toContain('[e49]') // newest present
-    expect(block).toMatch(/older memories omitted/)
+    expect(block).toMatch(/lower-priority memories omitted/)
     expect(block).not.toContain('[e00]') // far-older dropped
+  })
+
+  it('orders by importance first, then recency (a critical old fact leads a trivial new one)', () => {
+    const block = renderFrozenBlock([
+      entry('trivialNew', 'semantic', 'trivial recent', 300, { importance: 1 }),
+      entry('criticalOld', 'semantic', 'critical but old', 100, { importance: 5 }),
+      entry('ordinaryMid', 'semantic', 'ordinary', 200), // default importance 3
+    ])
+    const idxCrit = block.indexOf('[criticalOld]')
+    const idxMid = block.indexOf('[ordinaryMid]')
+    const idxTriv = block.indexOf('[trivialNew]')
+    expect(idxCrit).toBeLessThan(idxMid) // 5 > 3, despite being the oldest
+    expect(idxMid).toBeLessThan(idxTriv) // 3 > 1, despite trivial being newest
+  })
+
+  it('drops the LOWEST-importance entries first under the char budget', () => {
+    // One pinned OLD entry + many trivial NEW ones; budget fits ~2 lines.
+    const trivial = Array.from({ length: 10 }, (_, i) =>
+      entry(`t${i}`, 'semantic', 'z'.repeat(80), 2000 + i, { importance: 1 }),
+    )
+    const pinned = entry('pin', 'semantic', 'z'.repeat(80), 100, { importance: 5 })
+    const block = renderFrozenBlock([...trivial, pinned], { maxChars: 200 })
+    expect(block).toContain('[pin]') // oldest, but importance 5 → leads + survives
+    expect(block).toMatch(/lower-priority/)
+    expect(block).not.toContain('[t0]') // lowest priority (trivial + oldest) dropped
   })
 
   it('always includes the newest entry even if it alone exceeds the cap', () => {

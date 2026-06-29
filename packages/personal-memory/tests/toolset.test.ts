@@ -72,6 +72,33 @@ describe('MemoryToolset', () => {
     expect(r.isError).toBe(true)
   })
 
+  it('remember records importance into meta; recall shows it and filters by minImportance', async () => {
+    const mem = makeFakeMemory()
+    const ts = new MemoryToolset({ memory: mem })
+
+    await ts.callTool('remember', { text: 'master key location', importance: 5 })
+    await ts.callTool('remember', { text: 'idle small talk', importance: 1 })
+
+    const stored = mem.entries.find((e) => e.text.includes('master key'))!
+    expect((stored.meta as { importance?: number }).importance).toBe(5)
+
+    // recall surfaces the importance marker (p5)
+    const all = await ts.callTool('recall', { query: '' })
+    expect(textOf(all)).toMatch(/p5/)
+
+    // minImportance filters out the trivial entry
+    const important = await ts.callTool('recall', { minImportance: 4 })
+    expect(textOf(important)).toContain('master key location')
+    expect(textOf(important)).not.toContain('idle small talk')
+  })
+
+  it('clamps an out-of-range importance into 1..5', async () => {
+    const mem = makeFakeMemory()
+    const ts = new MemoryToolset({ memory: mem })
+    await ts.callTool('remember', { text: 'over the top', importance: 99 })
+    expect((mem.entries[0]!.meta as { importance?: number }).importance).toBe(5)
+  })
+
   it('recall clamps k to the hard cap', async () => {
     const seed = Array.from({ length: 80 }, (_, i) =>
       entry(`e${i}`, 'episodic', `note ${i}`, 1000 + i),

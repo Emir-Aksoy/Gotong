@@ -31,6 +31,12 @@ import type {
 } from '@aipehub/llm'
 import type { MemoryHandle, MemoryKind } from '@aipehub/services-sdk'
 
+import {
+  clampImportance,
+  importanceOf,
+  META_IMPORTANCE,
+  type Importance,
+} from './importance.js'
 import { handleRetriever, type MemoryRetriever } from './retriever.js'
 
 export interface MemoryToolsetOptions {
@@ -100,6 +106,15 @@ export class MemoryToolset implements LlmAgentToolset {
                 writable.includes('semantic') ? 'semantic' : writable[0]
               }'.`,
             },
+            importance: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 5,
+              description:
+                'How important this is, 1–5. 1=trivial, 3=ordinary (default), ' +
+                '5=critical/pin (kept first and never auto-dropped under space ' +
+                'pressure). Use 4–5 only for facts that should always stay in view.',
+            },
           },
           required: ['text'],
         },
@@ -125,6 +140,14 @@ export class MemoryToolset implements LlmAgentToolset {
             k: {
               type: 'number',
               description: `Max entries to return (default ${this.recallDefaultK}, hard cap ${RECALL_HARD_CAP}).`,
+            },
+            minImportance: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 5,
+              description:
+                'Only return entries at least this important (1–5). Omit for all. ' +
+                'Use e.g. 4 to surface only the high-salience facts.',
             },
           },
         },
@@ -176,9 +199,17 @@ export class MemoryToolset implements LlmAgentToolset {
       kind = args.kind
     }
 
+    const importance: Importance | undefined =
+      args.importance === undefined ? undefined : clampImportance(args.importance)
+
     try {
-      const entry = await this.memory.remember({ kind, text })
-      return okResult(`Remembered as ${entry.id} (${entry.kind}).`)
+      const meta = importance === undefined ? undefined : { [META_IMPORTANCE]: importance }
+      const entry = await this.memory.remember({ kind, text, ...(meta ? { meta } : {}) })
+      return okResult(
+        `Remembered as ${entry.id} (${entry.kind}${
+          importance !== undefined ? `, importance ${importance}` : ''
+        }).`,
+      )
     } catch (err) {
       return errorResult(`remember failed: ${errMsg(err)}`)
     }
@@ -195,15 +226,26 @@ export class MemoryToolset implements LlmAgentToolset {
       RECALL_HARD_CAP,
     )
 
+    const minImportance: Importance | undefined =
+      args.minImportance === undefined ? undefined : clampImportance(args.minImportance)
+
     try {
-      const entries = await this.retriever.retrieve({
+      const retrieved = await this.retriever.retrieve({
         ...(query !== undefined ? { text: query } : {}),
         ...(kinds && kinds.length > 0 ? { kinds } : {}),
         k,
       })
+      // Importance ranking lives in the default retriever; a custom (vector)
+      // retriever owns its own order. `minImportance` is a universal post-filter
+      // — dropping low-salience entries is safe regardless of how they ranked.
+      const entries =
+        minImportance === undefined
+          ? retrieved
+          : retrieved.filter((e) => importanceOf(e) >= minImportance)
       if (entries.length === 0) return okResult('No matching memories.')
       const lines = entries.map(
-        (e) => `[${e.id}] (${e.kind}, ${new Date(e.ts).toISOString()}) ${e.text}`,
+        (e) =>
+          `[${e.id}] (${e.kind}, p${importanceOf(e)}, ${new Date(e.ts).toISOString()}) ${e.text}`,
       )
       return okResult(lines.join('\n'))
     } catch (err) {

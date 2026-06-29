@@ -23,6 +23,8 @@
 
 import type { MemoryEntry, MemoryHandle, MemoryQuery } from '@aipehub/services-sdk'
 
+import { compareByImportanceThenRecency } from './importance.js'
+
 export interface MemoryRetriever {
   /**
    * Answer a recall query. Same contract as `MemoryHandle.recall`: newest-first,
@@ -34,9 +36,26 @@ export interface MemoryRetriever {
 }
 
 /**
- * The default retriever: the memory handle's own `recall`. Used when no custom
- * retriever is injected, so the `recall` tool behaves exactly as before.
+ * The default retriever: the memory handle's own `recall`, re-ranked by
+ * importance. It pulls a wider recency window from the handle, then orders by
+ * importance-then-recency (a pure comparator) and clamps back to `k` — so a
+ * high-importance fact outranks a merely-newer trivial one within the page.
+ * A smarter backend (vector / hybrid) injected in its place ranks by relevance
+ * and is left untouched; importance ranking is the SUBSTRING backend's job.
+ *
+ * When no entry sets importance this reduces to plain recency (top-k by `ts`),
+ * so the `recall` tool behaves exactly as before for callers that never score.
  */
 export function handleRetriever(memory: MemoryHandle): MemoryRetriever {
-  return { retrieve: (query) => memory.recall(query) }
+  return {
+    async retrieve(query: MemoryQuery): Promise<MemoryEntry[]> {
+      const k = query.k
+      // Pull a wider recency window so importance can outrank pure recency
+      // within the page; a vector backend would not need this.
+      const wideK = k ? Math.min(k * 4, 200) : 200
+      const page = await memory.recall({ ...query, k: wideK })
+      page.sort(compareByImportanceThenRecency)
+      return k ? page.slice(0, k) : page
+    },
+  }
 }

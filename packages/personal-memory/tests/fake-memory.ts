@@ -75,7 +75,13 @@ export function makeFakeMemory(seed: readonly MemoryEntry[] = []): FakeMemory {
   }
 }
 
-/** Terse entry constructor for seeds. */
-export function entry(id: string, kind: MemoryKind, text: string, ts: number): MemoryEntry {
-  return { id, kind, text, ts }
+/** Terse entry constructor for seeds. Optional `meta` carries importance/tier. */
+export function entry(
+  id: string,
+  kind: MemoryKind,
+  text: string,
+  ts: number,
+  meta?: Record<string, unknown>,
+): MemoryEntry {
+  return { id, kind, text, ts, ...(meta !== undefined ? { meta } : {}) }
 }

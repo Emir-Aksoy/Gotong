@@ -57,4 +57,15 @@ export {
   type ConsolidateOptions,
   type ConsolidateResult,
 } from './consolidate.js'
+export {
+  clampImportance,
+  importanceOf,
+  compareByImportanceThenRecency,
+  DEFAULT_IMPORTANCE,
+  MIN_IMPORTANCE,
+  MAX_IMPORTANCE,
+  PIN_IMPORTANCE,
+  META_IMPORTANCE,
+  type Importance,
+} from './importance.js'
 export { PersonalMemoryError, type PersonalMemoryErrorCode } from './errors.js'
