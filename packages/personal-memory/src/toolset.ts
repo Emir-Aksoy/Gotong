@@ -38,6 +38,7 @@ import {
   type Importance,
 } from './importance.js'
 import { handleRetriever, type MemoryRetriever } from './retriever.js'
+import { tierOf } from './tiers.js'
 
 export interface MemoryToolsetOptions {
   /** The (already per-owner-scoped) memory handle the tools act on. */
@@ -149,6 +150,13 @@ export class MemoryToolset implements LlmAgentToolset {
                 'Only return entries at least this important (1–5). Omit for all. ' +
                 'Use e.g. 4 to surface only the high-salience facts.',
             },
+            tier: {
+              type: 'string',
+              description:
+                'Restrict to a single long-term-memory cluster by its id ' +
+                '(e.g. persona / projects / people / commitments / misc). Omit to ' +
+                'search every cluster. Matches entries explicitly tagged with that cluster.',
+            },
           },
         },
       },
@@ -228,6 +236,8 @@ export class MemoryToolset implements LlmAgentToolset {
 
     const minImportance: Importance | undefined =
       args.minImportance === undefined ? undefined : clampImportance(args.minImportance)
+    const tier =
+      typeof args.tier === 'string' && args.tier.trim().length > 0 ? args.tier.trim() : undefined
 
     try {
       const retrieved = await this.retriever.retrieve({
@@ -236,17 +246,19 @@ export class MemoryToolset implements LlmAgentToolset {
         k,
       })
       // Importance ranking lives in the default retriever; a custom (vector)
-      // retriever owns its own order. `minImportance` is a universal post-filter
-      // — dropping low-salience entries is safe regardless of how they ranked.
-      const entries =
-        minImportance === undefined
-          ? retrieved
-          : retrieved.filter((e) => importanceOf(e) >= minImportance)
-      if (entries.length === 0) return okResult('No matching memories.')
-      const lines = entries.map(
+      // retriever owns its own order. `minImportance` / `tier` are universal
+      // post-filters — narrowing the result is safe regardless of how it ranked.
+      const entries = retrieved.filter(
         (e) =>
-          `[${e.id}] (${e.kind}, p${importanceOf(e)}, ${new Date(e.ts).toISOString()}) ${e.text}`,
+          (minImportance === undefined || importanceOf(e) >= minImportance) &&
+          (tier === undefined || tierOf(e, '') === tier),
       )
+      if (entries.length === 0) return okResult('No matching memories.')
+      const lines = entries.map((e) => {
+        const t = tierOf(e, '')
+        const tag = t ? `${e.kind}/${t}` : e.kind
+        return `[${e.id}] (${tag}, p${importanceOf(e)}, ${new Date(e.ts).toISOString()}) ${e.text}`
+      })
       return okResult(lines.join('\n'))
     } catch (err) {
       return errorResult(`recall failed: ${errMsg(err)}`)

@@ -22,7 +22,8 @@
 
 import type { MemoryHandle, MemoryKind } from '@aipehub/services-sdk'
 
-import { renderFrozenBlock } from './frozen-block.js'
+import { renderClusteredFrozenBlock, renderFrozenBlock } from './frozen-block.js'
+import type { TierConfig } from './tiers.js'
 
 export interface MemorySessionOptions {
   /** The (already per-owner-scoped) memory handle this session reads. */
@@ -35,6 +36,13 @@ export interface MemorySessionOptions {
   frozenK?: number
   /** Soft char cap for the rendered block body. Default 4000. */
   frozenMaxChars?: number
+  /**
+   * Cluster catalog (decision ③). When set, the frozen block is rendered
+   * GROUPED BY CLUSTER (`renderClusteredFrozenBlock`) instead of one flat list.
+   * Omit for the flat block (unchanged default — zero regression for callers
+   * that don't use tiering).
+   */
+  tierConfig?: TierConfig
 }
 
 const DEFAULT_FROZEN_KINDS: readonly MemoryKind[] = ['semantic']
@@ -46,6 +54,7 @@ export class MemorySession {
   private readonly frozenKinds: readonly MemoryKind[]
   private readonly frozenK: number
   private readonly frozenMaxChars: number | undefined
+  private readonly tierConfig: TierConfig | undefined
 
   /** Memoized block — `null` until the first `ensureFrozenBlock()` resolves. */
   private frozen: string | null = null
@@ -59,6 +68,7 @@ export class MemorySession {
       opts.frozenKinds && opts.frozenKinds.length > 0 ? opts.frozenKinds : DEFAULT_FROZEN_KINDS
     this.frozenK = opts.frozenK ?? DEFAULT_FROZEN_K
     this.frozenMaxChars = opts.frozenMaxChars
+    this.tierConfig = opts.tierConfig
   }
 
   /**
@@ -74,10 +84,13 @@ export class MemorySession {
         kinds: [...this.frozenKinds],
         k: this.frozenK,
       })
-      const block = renderFrozenBlock(entries, {
+      const renderOpts = {
         ...(this.label !== undefined ? { label: this.label } : {}),
         ...(this.frozenMaxChars !== undefined ? { maxChars: this.frozenMaxChars } : {}),
-      })
+      }
+      const block = this.tierConfig
+        ? renderClusteredFrozenBlock(entries, { ...renderOpts, config: this.tierConfig })
+        : renderFrozenBlock(entries, renderOpts)
       this.frozen = block
       this.pending = null
       return block

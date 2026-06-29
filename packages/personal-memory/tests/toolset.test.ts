@@ -99,6 +99,26 @@ describe('MemoryToolset', () => {
     expect((mem.entries[0]!.meta as { importance?: number }).importance).toBe(5)
   })
 
+  it('recall filters by tier and tags the cluster in the output line', async () => {
+    const mem = makeFakeMemory([
+      entry('p1', 'semantic', 'works at a tea shop', 100, { tier: 'projects', importance: 4 }),
+      entry('q1', 'semantic', 'allergic to peanuts', 101, { tier: 'persona', importance: 5 }),
+      entry('u1', 'semantic', 'untagged note', 102),
+    ])
+    const ts = new MemoryToolset({ memory: mem })
+
+    const proj = await ts.callTool('recall', { tier: 'projects' })
+    const projText = textOf(proj)
+    expect(projText).toContain('tea shop')
+    expect(projText).toContain('semantic/projects') // cluster tag shown
+    expect(projText).not.toContain('peanuts') // other cluster filtered out
+    expect(projText).not.toContain('untagged note')
+
+    // an untagged entry shows just the kind (no slash), and is excluded by a tier filter
+    const all = await ts.callTool('recall', { query: 'untagged' })
+    expect(textOf(all)).toMatch(/\[u1\] \(semantic, p3,/)
+  })
+
   it('recall clamps k to the hard cap', async () => {
     const seed = Array.from({ length: 80 }, (_, i) =>
       entry(`e${i}`, 'episodic', `note ${i}`, 1000 + i),

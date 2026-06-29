@@ -15,7 +15,12 @@
  * See `docs/zh/PERSONAL-BUTLER-DESIGN.md` (milestones M1–M3).
  */
 
-export { renderFrozenBlock, type RenderFrozenBlockOptions } from './frozen-block.js'
+export {
+  renderFrozenBlock,
+  renderClusteredFrozenBlock,
+  type RenderFrozenBlockOptions,
+  type RenderClusteredFrozenBlockOptions,
+} from './frozen-block.js'
 export { MemorySession, type MemorySessionOptions } from './session.js'
 export { MemoryToolset, type MemoryToolsetOptions } from './toolset.js'
 export { handleRetriever, type MemoryRetriever } from './retriever.js'

@@ -9,7 +9,7 @@ import type {
 } from '@aipehub/llm'
 import { describe, expect, it } from 'vitest'
 
-import { MemoryAugmentedAgent, PersonalMemoryError } from '../src/index.js'
+import { DEFAULT_TIERS, MemoryAugmentedAgent, PersonalMemoryError } from '../src/index.js'
 import { entry, makeFakeMemory } from './fake-memory.js'
 
 /** Minimal capturing provider — plain text, no tools. Records every request. */
@@ -102,6 +102,29 @@ describe('MemoryAugmentedAgent', () => {
     await agent.onTask(task('t1', 'hi'))
     const toolNames = (provider.requests[0]!.tools ?? []).map((t) => t.name)
     expect(toolNames).toEqual(expect.arrayContaining(['remember', 'recall', 'forget', 'do_thing']))
+  })
+
+  it('renders the frozen block grouped by cluster when tierConfig is set', async () => {
+    const mem = makeFakeMemory([
+      entry('a', 'semantic', 'likes tea', 100, { tier: 'persona', importance: 5 }),
+      entry('b', 'semantic', 'building aipehub', 101, { tier: 'projects', importance: 4 }),
+    ])
+    const provider = new CaptureProvider()
+    const agent = new MemoryAugmentedAgent({
+      id: 'butler',
+      provider,
+      memory: mem,
+      system: 'base',
+      tierConfig: DEFAULT_TIERS,
+    })
+
+    await agent.onTask(task('t1', 'hi'))
+    const sys = provider.requests[0]!.system!
+    expect(sys).toContain('## 画像')
+    expect(sys).toContain('## 项目')
+    expect(sys).toContain('likes tea')
+    // 画像 cluster comes before 项目 (catalog order)
+    expect(sys.indexOf('## 画像')).toBeLessThan(sys.indexOf('## 项目'))
   })
 
   it("a mid-session remember surfaces in the NEXT session's frozen block, not this one", async () => {

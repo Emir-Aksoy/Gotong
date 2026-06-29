@@ -28,6 +28,7 @@
 import type { MemoryEntry } from '@aipehub/services-sdk'
 
 import { compareByImportanceThenRecency } from './importance.js'
+import { DEFAULT_TIERS, normalizeTier, tierOf, type TierConfig } from './tiers.js'
 
 export interface RenderFrozenBlockOptions {
   /** Heading label (typically the butler/agent id). Stable per session. */
@@ -101,6 +102,94 @@ export function renderFrozenBlock(
   }
 
   return [OPEN_MARKER, heading, '', PREAMBLE, '', ...lines, CLOSE_MARKER].join('\n')
+}
+
+export interface RenderClusteredFrozenBlockOptions extends RenderFrozenBlockOptions {
+  /**
+   * Cluster catalog. Entries are grouped by `meta.tier` (unknown / missing →
+   * `defaultTier`) and rendered as one subsection per non-empty cluster, in
+   * catalog order. Default {@link DEFAULT_TIERS}.
+   */
+  config?: TierConfig
+}
+
+/**
+ * Like {@link renderFrozenBlock} but GROUPED BY CLUSTER (decision ③). Same
+ * byte-stability contract — a pure function of the entry SET — plus two extra
+ * properties that make a tiered long-term memory readable:
+ *
+ *   - **Per-cluster subsections.** Entries are bucketed by `meta.tier` and
+ *     rendered under `## <label>` headings in catalog order. Within a cluster
+ *     the order is the same total order (importance, then recency, then id),
+ *     so a cluster's stable profile (high importance) leads its digests.
+ *   - **Fair budget split.** The char budget is divided evenly across the
+ *     clusters that have content, with each cluster's unused share carried
+ *     forward to later clusters. This stops one busy cluster (e.g. 其它 full
+ *     of stray notes) from starving 画像 / 项目 of the prompt. Each present
+ *     cluster always shows at least its top line, mirroring the flat renderer's
+ *     "highest-priority entry always included" rule.
+ *
+ * Determinism note: every choice above is a pure function of the entry set —
+ * which clusters are present, the catalog order, the within-cluster total
+ * order, and the share/carry arithmetic (count + maxChars). So the same SET
+ * yields byte-identical output, exactly as prompt caching requires.
+ */
+export function renderClusteredFrozenBlock(
+  entries: readonly MemoryEntry[],
+  opts: RenderClusteredFrozenBlockOptions = {},
+): string {
+  const label = opts.label && opts.label.length > 0 ? opts.label : 'personal'
+  const maxChars = clampPositive(opts.maxChars, DEFAULT_MAX_CHARS)
+  const config = opts.config ?? DEFAULT_TIERS
+  const heading = `# Long-term memory — ${label}`
+
+  if (entries.length === 0) {
+    return [OPEN_MARKER, heading, '', PREAMBLE, '', '_(no memories yet)_', CLOSE_MARKER].join('\n')
+  }
+
+  // Bucket every entry into a KNOWN cluster (unknown / missing tier → default),
+  // so a stray meta.tier can never produce an out-of-catalog section.
+  const byTier = new Map<string, MemoryEntry[]>()
+  for (const e of entries) {
+    const key = normalizeTier(config, tierOf(e, config.defaultTier))
+    const arr = byTier.get(key)
+    if (arr) arr.push(e)
+    else byTier.set(key, [e])
+  }
+
+  const present = config.tiers.filter((t) => (byTier.get(t.id)?.length ?? 0) > 0)
+  // Even split, with leftover carried forward so small clusters donate budget.
+  const share = Math.max(1, Math.floor(maxChars / present.length))
+
+  const sections: string[] = []
+  let carry = 0
+  for (const t of present) {
+    const group = [...byTier.get(t.id)!].sort(compareByImportanceThenRecency)
+    const budget = share + carry
+    const lines: string[] = []
+    let used = 0
+    let omitted = 0
+    for (let i = 0; i < group.length; i++) {
+      const line = `- ${formatEntry(group[i]!)}`
+      if (lines.length > 0 && used + line.length + 1 > budget) {
+        omitted = group.length - i
+        break
+      }
+      lines.push(line)
+      used += line.length + 1
+    }
+    if (omitted > 0) {
+      lines.push(
+        `- _(${omitted} lower-priority ${omitted === 1 ? 'memory' : 'memories'} omitted to fit the memory budget)_`,
+      )
+    }
+    carry = budget - used > 0 ? budget - used : 0
+    const clusterLabel = t.label && t.label.length > 0 ? t.label : t.id
+    sections.push(`## ${clusterLabel}`, ...lines, '')
+  }
+  if (sections[sections.length - 1] === '') sections.pop() // drop trailing blank
+
+  return [OPEN_MARKER, heading, '', PREAMBLE, '', ...sections, CLOSE_MARKER].join('\n')
 }
 
 /**

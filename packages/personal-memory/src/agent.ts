@@ -44,6 +44,7 @@ import {
 import { PersonalMemoryError } from './errors.js'
 import type { MemoryRetriever } from './retriever.js'
 import { MemorySession } from './session.js'
+import type { TierConfig } from './tiers.js'
 import { MemoryToolset } from './toolset.js'
 
 export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
@@ -66,6 +67,13 @@ export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
   frozenMemoryK?: number
   /** Soft char cap for the frozen block body. Default 4000. */
   frozenMemoryMaxChars?: number
+  /**
+   * Cluster catalog (decision ③). When set, the frozen block is rendered
+   * GROUPED BY CLUSTER (画像 / 项目 / 人物 / 承诺 / 其它). Omit for the flat
+   * block — the default, so existing memory-augmented agents are unchanged.
+   * The butler opts in with `DEFAULT_TIERS`.
+   */
+  tierConfig?: TierConfig
   /**
    * M2 — automatically record each completed turn into `episodic` memory
    * (decision D5: turn-end is one of the two honest capture points). Default
@@ -133,6 +141,7 @@ export class MemoryAugmentedAgent extends LlmAgent {
       ...(opts.frozenMemoryMaxChars !== undefined
         ? { frozenMaxChars: opts.frozenMemoryMaxChars }
         : {}),
+      ...(opts.tierConfig !== undefined ? { tierConfig: opts.tierConfig } : {}),
     })
   }
 

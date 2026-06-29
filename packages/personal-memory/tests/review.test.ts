@@ -6,6 +6,7 @@ import {
   HEARTBEAT_OK,
   MEMORY_REVIEW_ID,
   MemoryReviewParticipant,
+  tieredReviewer,
   type ReviewContext,
 } from '../src/index.js'
 import { entry, makeFakeMemory } from './fake-memory.js'
@@ -132,6 +133,30 @@ describe('MemoryReviewParticipant', () => {
       reviewer: () => ({ summary: 'x' }),
     })
     expect(await p.review()).toBe(HEARTBEAT_OK)
+  })
+
+  it('wires tieredReviewer as the reviewer — a tick consolidates into a cluster digest', async () => {
+    const mem = makeFakeMemory(episodicSeed(10))
+    const reviewer = tieredReviewer({
+      summarize: async ({ system }) =>
+        system.includes('JSON')
+          ? JSON.stringify({ clusters: { misc: { digest: 'rolled up', importance: 3 } } })
+          : 'STABLE PROFILE',
+      keepRecent: 2,
+      triggerEntries: 1,
+    })
+    const p = new MemoryReviewParticipant({ memory: mem, reviewer })
+
+    const summary = await p.review()
+    expect(summary).toMatch(/tiered/)
+    // the consolidate pass wrote a misc cluster digest (level='digest')
+    expect(
+      mem.entries.some(
+        (e) => e.kind === 'semantic' && (e.meta as { level?: string } | undefined)?.level === 'digest',
+      ),
+    ).toBe(true)
+    // and folded the old episodic (kept 2 of 10)
+    expect(mem.entries.filter((e) => e.kind === 'episodic').length).toBe(2)
   })
 
   it('drives a review through onTask (heartbeat dispatch path)', async () => {
