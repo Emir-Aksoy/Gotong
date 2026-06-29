@@ -147,12 +147,25 @@ export {
   linkRelated,
   linksOf,
   mergeLinks,
+  buildLinkGraph,
+  diffLinkUpdates,
   defaultLinkScorer,
   META_LINKS,
   DEFAULT_LINK_TOP_K,
   type LinkScorer,
   type LinkRelatedOptions,
+  type LinkUpdate,
+  type BuildLinkGraphOptions,
 } from './links.js'
+export {
+  linkPass,
+  linkReviewer,
+  LINK_RECALL_WINDOW,
+  DEFAULT_LINK_TRIGGER_ENTRIES,
+  type MemoryLinkWriter,
+  type LinkPassOptions,
+  type LinkPassResult,
+} from './link-pass.js'
 export {
   effectiveSalience,
   reinforcedMeta,

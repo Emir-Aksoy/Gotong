@@ -14,8 +14,10 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  buildLinkGraph,
   DEFAULT_LINK_TOP_K,
   defaultLinkScorer,
+  diffLinkUpdates,
   linkRelated,
   linksOf,
   mergeLinks,
@@ -162,5 +164,69 @@ describe('mergeLinks', () => {
 
   it('drops self-id and empties (an entry never links to itself)', () => {
     expect(mergeLinks(['a', ''], ['self', 'b'], 'self')).toEqual(['a', 'b'])
+  })
+})
+
+describe('buildLinkGraph', () => {
+  // a—b share 奶茶; b—c share 咖啡; a—c share nothing. With topK 1 and c more
+  // important than a, b's single directed link is c — but a→b still lands a back
+  // in b's set via symmetrization. That's the load-bearing behavior.
+  const a = entry('a', 'semantic', '奶茶 珍珠', 100, { importance: 1 })
+  const b = entry('b', 'semantic', '奶茶 咖啡', 100, { importance: 3 })
+  const c = entry('c', 'semantic', '咖啡 拿铁', 100, { importance: 5 })
+
+  it('builds the symmetric closure — a back-edge appears even outside top-K', () => {
+    const g = buildLinkGraph([a, b, c], { topK: 1 })
+    expect(g.get('a')).toEqual(['b'])
+    expect(g.get('b')).toEqual(['a', 'c']) // 'a' via symmetrization (b's top-1 was c)
+    expect(g.get('c')).toEqual(['b'])
+  })
+
+  it('is order-independent (depends on the set, not input order)', () => {
+    const g1 = buildLinkGraph([a, b, c], { topK: 1 })
+    const g2 = buildLinkGraph([c, b, a], { topK: 1 })
+    for (const id of ['a', 'b', 'c']) expect(g2.get(id)).toEqual(g1.get(id))
+  })
+
+  it('merges onto pre-existing links and never includes self', () => {
+    const a2 = entry('a', 'semantic', '奶茶 珍珠', 100, { importance: 1, links: ['x', 'a'] })
+    const g = buildLinkGraph([a2, b, c], { topK: 1 })
+    expect(g.get('a')).toEqual(['x', 'b']) // 'x' kept, 'a' (self) dropped, 'b' added
+  })
+
+  it('leaves an entry with no overlap link-less', () => {
+    const lonely = entry('lonely', 'semantic', '完全无关的内容', 100)
+    const g = buildLinkGraph([a, b, lonely])
+    expect(g.get('lonely')).toEqual([])
+  })
+})
+
+describe('diffLinkUpdates', () => {
+  it('emits only entries whose link set grew', () => {
+    const a = entry('a', 'semantic', '奶茶 珍珠', 100)
+    const b = entry('b', 'semantic', '奶茶 咖啡', 100)
+    const lonely = entry('lonely', 'semantic', '无关', 100)
+    const g = buildLinkGraph([a, b, lonely])
+    const updates = diffLinkUpdates([a, b, lonely], g)
+    expect(updates.map((u) => u.id).sort()).toEqual(['a', 'b']) // lonely unchanged
+  })
+
+  it('is idempotent — re-diffing after applying yields nothing', () => {
+    const a = entry('a', 'semantic', '奶茶 珍珠', 100)
+    const b = entry('b', 'semantic', '奶茶 咖啡', 100)
+    const g1 = buildLinkGraph([a, b])
+    const updates = diffLinkUpdates([a, b], g1)
+    // Apply: write links back into meta, then rebuild + re-diff → converged.
+    const applied = [a, b].map((e) => {
+      const u = updates.find((x) => x.id === e.id)
+      return u ? { ...e, meta: { ...e.meta, links: u.links } } : e
+    })
+    const g2 = buildLinkGraph(applied)
+    expect(diffLinkUpdates(applied, g2)).toEqual([])
+  })
+
+  it('skips ids absent from the graph', () => {
+    const a = entry('a', 'semantic', '奶茶', 100, { links: ['b'] })
+    expect(diffLinkUpdates([a], new Map())).toEqual([])
   })
 })

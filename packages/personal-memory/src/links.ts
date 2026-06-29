@@ -120,6 +120,79 @@ export function mergeLinks(
   return out
 }
 
+// ---------------------------------------------------------------------------
+// graph layer — symmetric link closure over a set of entries (still pure)
+// ---------------------------------------------------------------------------
+
+/** One entry's final merged link list (what a writer would persist). */
+export interface LinkUpdate {
+  readonly id: string
+  readonly links: string[]
+}
+
+export interface BuildLinkGraphOptions {
+  /** Max directed links computed per entry. Default {@link DEFAULT_LINK_TOP_K}. */
+  topK?: number
+  /** Only link pairs scoring strictly above this. Default 0. */
+  minScore?: number
+  /** Override the relatedness scorer. Default {@link defaultLinkScorer}. */
+  scorer?: LinkScorer
+}
+
+/**
+ * Build the SYMMETRIC link closure over `entries`: each entry's top-K directed
+ * links are unioned with the back-edges of anything that linked to it (A→B in
+ * A's top-K ⇒ B also gets A), then merged onto each entry's pre-existing
+ * `meta.links`. Returns `id → merged link list`.
+ *
+ * Pure and deterministic — new neighbor ids are appended in id-ascending order,
+ * so the result depends only on the entry SET, not its input ordering. Links
+ * only ACCRETE (existing links are preserved, never pruned) — associative memory
+ * grows, like A-MEM; that also makes repeated passes converge (see
+ * {@link diffLinkUpdates}).
+ */
+export function buildLinkGraph(
+  entries: readonly MemoryEntry[],
+  opts: BuildLinkGraphOptions = {},
+): Map<string, string[]> {
+  const adj = new Map<string, Set<string>>()
+  for (const e of entries) adj.set(e.id, new Set<string>())
+
+  for (const e of entries) {
+    for (const n of linkRelated(e, entries, opts)) {
+      adj.get(e.id)?.add(n)
+      adj.get(n)?.add(e.id) // symmetrize: relatedness is mutual
+    }
+  }
+
+  const out = new Map<string, string[]>()
+  for (const e of entries) {
+    const add = [...(adj.get(e.id) ?? [])].sort() // id-asc → order-independent
+    out.set(e.id, mergeLinks(linksOf(e), add, e.id))
+  }
+  return out
+}
+
+/**
+ * Diff a {@link buildLinkGraph} result against the entries' current links and
+ * return only those whose link set actually GREW. Because the graph merges onto
+ * existing links (never prunes), each entry's new set is a superset of its old
+ * one, so "grew" reduces to a size change — idempotent: once linking has
+ * converged a re-run emits nothing (cheap on steady state, like F's reinforce).
+ */
+export function diffLinkUpdates(
+  entries: readonly MemoryEntry[],
+  graph: ReadonlyMap<string, string[]>,
+): LinkUpdate[] {
+  const updates: LinkUpdate[] = []
+  for (const e of entries) {
+    const next = graph.get(e.id)
+    if (!next) continue
+    if (next.length > linksOf(e).length) updates.push({ id: e.id, links: next })
+  }
+  return updates
+}
+
 function jaccard(a: readonly string[], b: readonly string[]): number {
   if (a.length === 0 || b.length === 0) return 0
   const sa = new Set(a)
