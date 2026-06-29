@@ -91,6 +91,6 @@
     "@aipehub/cli-agent": "workspace:*",
     "@aipehub/sdk-node": "workspace:*",
     "@types/ws": "^8.5.13",
-    "vitest": "^3.2.4"
+    "vitest": "^4.1.9"
   }
 }
