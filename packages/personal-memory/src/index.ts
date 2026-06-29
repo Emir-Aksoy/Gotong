@@ -123,4 +123,17 @@ export {
   type ReconcileOptions,
   type ReconcileResult,
 } from './reconcile.js'
+export {
+  extractDurableFacts,
+  saveBeforeCompact,
+  DEFAULT_COMPACTION_SYSTEM,
+  DEFAULT_COMPACTION_MAX_CHARS,
+  DEFAULT_COMPACTION_MIN_MESSAGES,
+  META_COMPACTED,
+  type DurableFact,
+  type CompactionMessage,
+  type ExtractDurableFactsOptions,
+  type SaveBeforeCompactOptions,
+  type SaveBeforeCompactResult,
+} from './compaction.js'
 export { PersonalMemoryError, type PersonalMemoryErrorCode } from './errors.js'
