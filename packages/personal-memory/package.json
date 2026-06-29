@@ -1,0 +1,35 @@
+{
+  "name": "@aipehub/personal-memory",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AipeHub personal-butler memory — file-first MemorySession + prefix-cache-preserving frozen block + remember/recall/forget MemoryToolset + MemoryAugmentedAgent. The memory engine the resident butler stands on (对标 OpenClaw / Hermes).",
+  "license": "MIT",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/llm": "workspace:*",
+    "@aipehub/services-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.4"
+  }
+}
