@@ -146,6 +146,11 @@ export type {
 export { extractRequiredCapabilities, checkOutboundDataClasses } from './peer-acl.js'
 export type { OutboundVerdict } from './peer-acl.js'
 
+// Lightweight FS sandbox — layer 1 (portable argv path jail). Layer 2 (OS
+// kernel jail) wires beside it; both keep hub-driven commands inside the roots.
+export { jailArgv, isInsideRoots, DEFAULT_INTERPRETERS } from './workspace-jail.js'
+export type { JailVerdict, JailParkCode, JailArgvOptions } from './workspace-jail.js'
+
 export {
   FeedbackLedger,
   FileFeedbackStorage,
