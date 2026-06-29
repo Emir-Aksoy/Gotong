@@ -3,10 +3,13 @@
 > 把现有 `HubStewardAgent` 升级成「**可快速投入工作、类似 OpenClaw / Hermes 的常驻个人管家**」:
 > 记忆 + 会话上下文引擎 + 良性灵活调用 + 治理动作审批,落在 AipeHub 北极星上。
 >
-> 本文是**建之前**的设计文档(对标 OpenClaw / Hermes 源码),不是收口。一里程碑一小 commit,
-> 每个里程碑带验收门。建完后另写 `docs/zh/PERSONAL-BUTLER-FINAL.md` 收口。
+> 本文是**建之前**的设计文档(对标 OpenClaw / Hermes 源码)。一里程碑一小 commit,
+> 每个里程碑带验收门。
 >
-> Last updated: 2026-06-28 · 状态:设计
+> **状态:M1–M6 全完。** 收口见 [`docs/zh/PERSONAL-BUTLER-FINAL.md`](PERSONAL-BUTLER-FINAL.md)
+> (commit / 数据流 / §七 验收门结果 / 测试矩阵 / 显式推迟)。
+>
+> Last updated: 2026-06-29 · 状态:M1–M6 全完(收口已写)
 
 ---
 
@@ -156,7 +159,11 @@ MemoryReviewParticipant:蒸馏近段 episodic → semantic profile      ← M3 /
 
 ---
 
-## 六、里程碑(M1–M6)
+## 六、里程碑(M1–M6) — ✅ 全完
+
+> 收口表(commit / 产物)见 [`PERSONAL-BUTLER-FINAL.md` §三](PERSONAL-BUTLER-FINAL.md)。
+> M1 `5cc0d96` · M2 `c60a0f7` · M3 `d9a1189` · M4 `c13dab2` · M5 `d7649cd` ·
+> M6a `32b2556` · M6b `5e7ead1` · M6c `55c7ad4` · M6d `3b1be73` · M6e 本提交。
 
 | M | 做什么 | 复用 | 新建 | 估时 |
 |---|---|---|---|---|
@@ -171,7 +178,9 @@ MemoryReviewParticipant:蒸馏近段 episodic → semantic profile      ← M3 /
 
 ---
 
-## 七、验收门(E2E 承重测试)
+## 七、验收门(E2E 承重测试) — ✅ 4 claims 全过
+
+> 结果详见 [`PERSONAL-BUTLER-FINAL.md` §五](PERSONAL-BUTLER-FINAL.md)。
 
 `packages/host/tests/personal-butler-e2e.test.ts`——真 Hub + 真 IdentityStore + 真 `FileInboxStore` + 真 `memory-file` + 真 `PersonalButlerAgent`(mock LLM 确定性按指令分支,不烧 key),一个测证清:
 
