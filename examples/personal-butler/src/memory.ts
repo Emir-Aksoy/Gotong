@@ -59,6 +59,21 @@ export function inMemoryHandle(): DemoMemory {
         .sort((a, b) => b.ts - a.ts)
         .slice(0, opts.limit ?? 100)
     },
+    async patchMeta(id: string, patch: Record<string, unknown>): Promise<boolean> {
+      // Shallow-merge `patch` over the entry's meta, preserving id/kind/text/ts —
+      // the in-memory twin of the file backend's in-place patch (Z-M1). This is
+      // what makes the injected writers (closeEntry / reinforcer / linkWriter)
+      // REAL in the demo: a reviewer can close an interval, reinforce, or grow
+      // links WITHOUT minting a new id (so the frozen block never moves).
+      // `meta` is readonly, so replace the array slot rather than mutate (also
+      // truer to the file backend, which rewrites the line). Callers must re-read
+      // to see the change — a prior snapshot still holds the old object.
+      const i = entries.findIndex((x) => x.id === id)
+      if (i < 0) return false
+      const e = entries[i]!
+      entries[i] = { ...e, meta: { ...(e.meta ?? {}), ...patch } }
+      return true
+    },
     async forget(id: string): Promise<void> {
       const i = entries.findIndex((e) => e.id === id)
       if (i >= 0) entries.splice(i, 1)
