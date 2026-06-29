@@ -8,9 +8,10 @@
  *   - `MemoryAugmentedAgent`     LlmAgent + frozen-block injection + tools + capture
  *   - `buildTurnCapture` (+ helpers)  turn-end → episodic capture (M2)
  *   - `MemoryReviewParticipant`  heartbeat-driven review loop (M2)
+ *   - `consolidate` (+ `consolidateReviewer`)  episodic→semantic profile distillation (M3)
  *   - `PersonalMemoryError`      typed error
  *
- * See `docs/zh/PERSONAL-BUTLER-DESIGN.md` (milestones M1–M2).
+ * See `docs/zh/PERSONAL-BUTLER-DESIGN.md` (milestones M1–M3).
  */
 
 export { renderFrozenBlock, type RenderFrozenBlockOptions } from './frozen-block.js'
@@ -40,4 +41,18 @@ export {
   type ReviewContext,
   type ReviewOutcome,
 } from './review.js'
+export {
+  consolidate,
+  shouldConsolidate,
+  consolidateReviewer,
+  DEFAULT_CONSOLIDATE_SYSTEM,
+  DEFAULT_CONSOLIDATE_TRIGGER_ENTRIES,
+  DEFAULT_CONSOLIDATE_TRIGGER_BYTES,
+  DEFAULT_CONSOLIDATE_KEEP_RECENT,
+  DEFAULT_PROFILE_HARD_CAP,
+  META_PROFILE,
+  type MemorySummarizer,
+  type ConsolidateOptions,
+  type ConsolidateResult,
+} from './consolidate.js'
 export { PersonalMemoryError, type PersonalMemoryErrorCode } from './errors.js'
