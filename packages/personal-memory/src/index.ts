@@ -193,6 +193,7 @@ export {
 export {
   isActive,
   isClosed,
+  isExpired,
   validFromOf,
   validToOf,
   supersedesOf,

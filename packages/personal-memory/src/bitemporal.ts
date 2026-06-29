@@ -73,6 +73,18 @@ export function isClosed(e: MemoryEntry): boolean {
 }
 
 /**
+ * Whether the entry's interval is closed AND already in the past at `now`
+ * (`validTo <= now`) — i.e. dead history, the safest thing to evict under disk
+ * pressure (D-M3). Distinct from the false case of {@link isActive}: a
+ * not-yet-valid FUTURE fact (`validFrom > now`, no `validTo`) is inactive but
+ * NOT expired — evicting a deliberately-scheduled future fact would lose intent.
+ */
+export function isExpired(e: MemoryEntry, now: number): boolean {
+  const to = validToOf(e)
+  return to !== undefined && now >= to
+}
+
+/**
  * Whether `e` is in effect at `now`. An entry with no validity meta is ALWAYS
  * active (so legacy data and non-bitemporal memory are unaffected). Otherwise
  * active iff `validFrom <= now` (or absent) AND `now < validTo` (or absent) —

@@ -273,3 +273,88 @@ describe('enforceBudget — salience (decision F-M2), opt-in', () => {
     expect(has(mem, 'oldProfile')).toBe(true)
   })
 })
+
+describe('enforceBudget — evictExpiredFirst (decision D, D-M3), opt-in', () => {
+  // A closed-in-the-past profile: highest keep-value level, but dead history.
+  const expiredProfile = (id: string, ts: number, validTo: number, importance = 5) =>
+    entry(id, 'semantic', BODY, ts, {
+      tier: 'misc',
+      level: 'profile',
+      profile: true,
+      importance,
+      validFrom: 0,
+      validTo,
+    })
+
+  it('evicts an expired entry before any LIVE entry — even a live episodic over a dead profile', async () => {
+    // The dramatic inversion: normally profile (rank 3) is evicted LAST and
+    // episodic (rank 0) FIRST. With the flag, the EXPIRED profile drops first.
+    const off = makeFakeMemory([ep('liveEp', 200, 3), expiredProfile('deadProf', 100, 150)])
+    await enforceBudget({ memory: off, budgetBytes: 1500, protectRecentEpisodic: 0 })
+    expect(has(off, 'liveEp')).toBe(false) // OFF: episodic goes first (level order)
+    expect(has(off, 'deadProf')).toBe(true)
+
+    const on = makeFakeMemory([ep('liveEp', 200, 3), expiredProfile('deadProf', 100, 150)])
+    await enforceBudget({
+      memory: on,
+      budgetBytes: 1500,
+      protectRecentEpisodic: 0,
+      evictExpiredFirst: true,
+      now: () => 300, // 300 >= validTo 150 → expired
+    })
+    expect(has(on, 'deadProf')).toBe(false) // ON: dead history drops first
+    expect(has(on, 'liveEp')).toBe(true)
+  })
+
+  it('overrides recency within the same rank — a NEWER expired fact goes before an OLDER live one', async () => {
+    const mem = makeFakeMemory([
+      entry('liveSem', 'semantic', BODY, 100, { validFrom: 50 }), // live, OLDER
+      entry('deadSem', 'semantic', BODY, 200, { validFrom: 0, validTo: 150 }), // expired, NEWER
+    ])
+    // Same level + importance; without the flag the ts tiebreak would evict the
+    // older 'liveSem'. With it, the expired one goes first despite being newer.
+    await enforceBudget({
+      memory: mem,
+      budgetBytes: 1500,
+      protectRecentEpisodic: 0,
+      evictExpiredFirst: true,
+      now: () => 300,
+    })
+    expect(has(mem, 'deadSem')).toBe(false)
+    expect(has(mem, 'liveSem')).toBe(true)
+  })
+
+  it('is a no-op without `now` — falls back to level order even with the flag set', async () => {
+    const mem = makeFakeMemory([ep('liveEp', 200, 3), expiredProfile('deadProf', 100, 150)])
+    await enforceBudget({
+      memory: mem,
+      budgetBytes: 1500,
+      protectRecentEpisodic: 0,
+      evictExpiredFirst: true, // set, but no clock → can't test expiry
+    })
+    expect(has(mem, 'liveEp')).toBe(false) // episodic (rank 0) still first
+    expect(has(mem, 'deadProf')).toBe(true)
+  })
+
+  it('does NOT preferentially evict a not-yet-valid FUTURE fact (inactive ≠ expired)', async () => {
+    const mem = makeFakeMemory([
+      ep('liveEp', 200, 3),
+      entry('future', 'semantic', BODY, 100, {
+        tier: 'misc',
+        level: 'profile',
+        profile: true,
+        importance: 5,
+        validFrom: 9999, // scheduled for later, no validTo
+      }),
+    ])
+    await enforceBudget({
+      memory: mem,
+      budgetBytes: 1500,
+      protectRecentEpisodic: 0,
+      evictExpiredFirst: true,
+      now: () => 300,
+    })
+    expect(has(mem, 'liveEp')).toBe(false) // episodic still goes first (future is NOT expired)
+    expect(has(mem, 'future')).toBe(true) // scheduled future fact is preserved
+  })
+})

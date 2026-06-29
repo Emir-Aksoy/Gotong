@@ -22,12 +22,18 @@
  *
  * # Eviction priority (evicted FIRST → LAST)
  *
- *   episodic (raw)  →  ad-hoc semantic  →  cluster digest  →  profile (essence)
+ *   [expired history]  →  episodic (raw)  →  ad-hoc semantic  →  digest  →  profile
  *
  * within one rank: lowest importance first, then oldest first. The most recent
  * N episodic entries (the live working context the next turn needs) are
  * PROTECTED from eviction — they go last, only if the budget is so tight that
  * nothing else is left.
+ *
+ * The leading `[expired history]` band is opt-in (decision D, D-M3): with
+ * `evictExpiredFirst` set, entries whose validity interval already closed in the
+ * past (a `validTo <= now` — dead history a bitemporal supersession left behind)
+ * are evicted BEFORE anything live, since they no longer hold. Off by default →
+ * byte-identical to the four-rank order above.
  *
  * # Backend-agnostic
  *
@@ -40,6 +46,7 @@
 
 import type { MemoryEntry, MemoryHandle } from '@aipehub/services-sdk'
 
+import { isExpired } from './bitemporal.js'
 import type { MemoryReviewer, ReviewContext, ReviewOutcome } from './review.js'
 import { effectiveSalience, type SalienceOptions } from './salience.js'
 import { DEFAULT_TIERS, isClusterProfile, isDigest, type TierConfig } from './tiers.js'
@@ -87,8 +94,18 @@ export interface EnforceBudgetOptions {
    */
   salience?: SalienceOptions
   /**
-   * Clock injection. Used only when {@link salience} is set, to age entries; the
-   * reviewer wires `() => ctx.now` so the heartbeat's clock drives decay.
+   * Opt-in (decision D, D-M3): evict EXPIRED entries first — those whose
+   * bitemporal interval already closed in the past (`validTo <= now`), i.e. dead
+   * history a supersession left behind. They drop before any live entry of any
+   * level. Requires {@link now}; without it this is a no-op. Off by default →
+   * byte-identical eviction order to pre-D (a not-yet-valid future fact is NOT
+   * expired and is never preferentially evicted).
+   */
+  evictExpiredFirst?: boolean
+  /**
+   * Clock injection. Used when {@link salience} (to age entries) or
+   * {@link evictExpiredFirst} (to test expiry) is set; the reviewer wires
+   * `() => ctx.now` so the heartbeat's clock drives both.
    */
   now?: () => number
 }
@@ -146,16 +163,22 @@ export async function enforceBudget(
   )
 
   // Eviction order: lowest keep-value first.
-  //   level rank (episodic 0 → ad-hoc semantic 1 → digest 2 → profile 3)
-  //   then lowest salience, then oldest.
+  //   [expired band (opt-in)] → level rank (episodic 0 → ad-hoc semantic 1 →
+  //   digest 2 → profile 3) → lowest salience → oldest.
   // `effectiveSalience` with no `salience` option IS importance (an integer), so
   // this is byte-identical to the pre-F "importance then recency" ordering until
-  // a host opts decay/reinforcement in.
+  // a host opts decay/reinforcement in. The expired band needs `now`; without it
+  // (or with the flag off) `expiredRank` is constant → ordering unchanged.
   const nowMs = opts.now?.()
+  const evictExpiredFirst = opts.evictExpiredFirst === true && nowMs !== undefined
+  const expiredRank = (e: MemoryEntry): number =>
+    evictExpiredFirst && isExpired(e, nowMs!) ? 0 : 1
   const salienceOf = (e: MemoryEntry): number => effectiveSalience(e, nowMs, opts.salience)
   const candidates = scoped
     .filter((e) => !protectedIds.has(e.id))
     .sort((a, b) => {
+      const x = expiredRank(a) - expiredRank(b)
+      if (x !== 0) return x
       const r = levelRank(a, config) - levelRank(b, config)
       if (r !== 0) return r
       const s = salienceOf(a) - salienceOf(b)

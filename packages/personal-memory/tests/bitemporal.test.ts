@@ -4,6 +4,7 @@ import {
   closedMeta,
   isActive,
   isClosed,
+  isExpired,
   openedMeta,
   supersedesOf,
   validFromOf,
@@ -67,6 +68,25 @@ describe('bitemporal accessors (D-M1)', () => {
       expect(isActive(e, 500)).toBe(true)
       expect(isActive(e, 700)).toBe(true)
       expect(isActive(e, 900)).toBe(false)
+    })
+  })
+
+  describe('isExpired (D-M3)', () => {
+    it('is true only for a closed interval whose validTo has passed', () => {
+      expect(isExpired(at({ validTo: 900 }), 900)).toBe(true) // at the bound (half-open)
+      expect(isExpired(at({ validTo: 900 }), 1000)).toBe(true)
+      expect(isExpired(at({ validTo: 900 }), 800)).toBe(false) // still open
+    })
+
+    it('is false with no validTo, however far in the future `now` is', () => {
+      expect(isExpired(at({}), 9_999_999)).toBe(false)
+      expect(isExpired(entry('e', 'semantic', 'x', 1), 9_999_999)).toBe(false)
+    })
+
+    it('a not-yet-valid future fact is inactive but NOT expired', () => {
+      const future = at({ validFrom: 5000 }) // no validTo
+      expect(isActive(future, 300)).toBe(false) // not in effect yet
+      expect(isExpired(future, 300)).toBe(false) // but not dead history either
     })
   })
 
