@@ -35,6 +35,12 @@ import {
 } from '@aipehub/llm'
 import type { MemoryHandle, MemoryKind } from '@aipehub/services-sdk'
 
+import {
+  buildTurnCapture,
+  extractReplyText,
+  extractUserText,
+  isHeartbeatPayload,
+} from './capture.js'
 import { PersonalMemoryError } from './errors.js'
 import { MemorySession } from './session.js'
 import { MemoryToolset } from './toolset.js'
@@ -53,11 +59,31 @@ export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
   frozenMemoryK?: number
   /** Soft char cap for the frozen block body. Default 4000. */
   frozenMemoryMaxChars?: number
+  /**
+   * M2 — automatically record each completed turn into `episodic` memory
+   * (decision D5: turn-end is one of the two honest capture points). Default
+   * `true`. Set `false` to opt out (e.g. an agent that captures by some other
+   * means, or a read-only assistant). Heartbeat ticks are never captured.
+   */
+  captureTurns?: boolean
+  /** Soft char cap on a single capture entry's text. */
+  captureMaxChars?: number
+  /**
+   * Static meta merged into every capture entry — e.g. a per-user namespace
+   * key so a multi-user butler's episodic log stays separable (M6). The
+   * frozen block / capture are otherwise per-agent.
+   */
+  captureMeta?: Record<string, unknown>
 }
 
 export class MemoryAugmentedAgent extends LlmAgent {
   private readonly session: MemorySession
   protected readonly memoryToolset: MemoryToolset
+  /** The resolved memory handle — also the capture target (M2). */
+  private readonly memory: MemoryHandle
+  private readonly captureTurns: boolean
+  private readonly captureMaxChars: number | undefined
+  private readonly captureMeta: Record<string, unknown> | undefined
 
   constructor(opts: MemoryAugmentedAgentOptions) {
     const memory = opts.memory ?? opts.services?.memory
@@ -86,7 +112,11 @@ export class MemoryAugmentedAgent extends LlmAgent {
 
     super({ ...opts, tools })
 
+    this.memory = memory
     this.memoryToolset = memoryToolset
+    this.captureTurns = opts.captureTurns ?? true
+    this.captureMaxChars = opts.captureMaxChars
+    this.captureMeta = opts.captureMeta
     this.session = new MemorySession({
       memory,
       label: opts.id,
@@ -105,13 +135,44 @@ export class MemoryAugmentedAgent extends LlmAgent {
    */
   protected override async handleTask(task: Task): Promise<unknown> {
     await this.session.ensureFrozenBlock()
-    return super.handleTask(task)
+    const out = await super.handleTask(task)
+    await this.captureTurn(task, out)
+    return out
   }
 
   /** Same pre-warm on resume so a parked-then-woken task still injects memory. */
   protected override async handleResume(task: Task, state: unknown): Promise<unknown> {
     await this.session.ensureFrozenBlock()
-    return super.handleResume(task, state)
+    const out = await super.handleResume(task, state)
+    await this.captureTurn(task, out)
+    return out
+  }
+
+  /**
+   * M2 — record a completed turn into episodic memory. Best-effort: a capture
+   * failure must never fail the turn the user already got an answer for, so we
+   * swallow + log. Only runs after the turn *completed* — if the tool loop
+   * parked (threw `SuspendTaskError`), `super.handleTask` rethrew above and we
+   * never reach here; the eventual resume captures instead. Heartbeat ticks
+   * are skipped (episodic is the conversation log, not a maintenance record).
+   */
+  private async captureTurn(task: Task, output: unknown): Promise<void> {
+    if (!this.captureTurns) return
+    if (isHeartbeatPayload(task)) return
+    try {
+      const entry = buildTurnCapture({
+        userText: extractUserText(task),
+        replyText: extractReplyText(output),
+        taskId: task.id,
+        from: task.from,
+        ...(this.captureMeta !== undefined ? { meta: this.captureMeta } : {}),
+        ...(this.captureMaxChars !== undefined ? { maxChars: this.captureMaxChars } : {}),
+      })
+      if (entry) await this.memory.remember(entry)
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error(`[personal-memory] turn capture failed for '${this.id}'`, err)
+    }
   }
 
   /**
