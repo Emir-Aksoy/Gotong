@@ -186,6 +186,19 @@ export {
   META_STEPS,
 } from './procedure.js'
 export {
+  isActive,
+  isClosed,
+  validFromOf,
+  validToOf,
+  supersedesOf,
+  openedMeta,
+  closedMeta,
+  META_VALID_FROM,
+  META_VALID_TO,
+  META_SUPERSEDES,
+  type MemoryValidityWriter,
+} from './bitemporal.js'
+export {
   effectiveSalience,
   reinforcedMeta,
   recallCountOf,

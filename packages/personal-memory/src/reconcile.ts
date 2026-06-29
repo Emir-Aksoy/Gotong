@@ -36,6 +36,7 @@
 
 import type { MemoryEntry, MemoryHandle, MemoryKind, NewMemoryEntry } from '@aipehub/services-sdk'
 
+import { openedMeta, type MemoryValidityWriter } from './bitemporal.js'
 import type { MemorySummarizer } from './consolidate.js'
 import { clampImportance, importanceOf, META_IMPORTANCE, type Importance } from './importance.js'
 import type { MemoryReviewer, ReviewContext, ReviewOutcome } from './review.js'
@@ -83,6 +84,21 @@ export interface ReconcileOptions {
   entryMeta?: Record<string, unknown>
   /** Override the reconciliation system prompt. */
   system?: string
+  /**
+   * Opt-in (decision D): bitemporal mode. When true AND {@link closeEntry} is
+   * supplied, an UPDATE keeps the old fact as a CLOSED time-edge (stamps its
+   * `validTo`) and writes the new fact with `validFrom` + `supersedes`, instead
+   * of forgetting the old one; a DELETE closes the interval instead of forgetting.
+   * Default off → overwrite / true-delete, byte-identical to pre-D. Without
+   * `closeEntry` it degrades to that default (the handle can't close in place).
+   */
+  bitemporal?: boolean
+  /**
+   * Required for {@link bitemporal} to take effect: close an entry's interval by
+   * stamping `meta.validTo` in place (the handle has no meta-only update, so the
+   * host wires a file-backed patch — see `closedMeta`).
+   */
+  closeEntry?: MemoryValidityWriter
   now?: () => number
 }
 
@@ -126,6 +142,10 @@ export async function reconcile(opts: ReconcileOptions): Promise<ReconcileResult
 
   const now = (opts.now ?? ((): number => Date.now()))()
   const baseMeta = opts.entryMeta ?? {}
+  // Bitemporal mode needs a way to close intervals in place; without the writer
+  // it degrades to the default overwrite/true-delete (the handle has no meta-only
+  // update). Off by default → byte-identical to pre-D.
+  const bitemporal = opts.bitemporal === true && !!opts.closeEntry
   const touched = new Set<string>() // an id may be acted on once (first op wins)
   let added = 0
   let updated = 0
@@ -140,9 +160,9 @@ export async function reconcile(opts: ReconcileOptions): Promise<ReconcileResult
     if (op.op === 'add') {
       const text = op.text.trim()
       if (!text) continue
-      await opts.memory.remember(
-        makeEntry(kind, text, baseMeta, clampImportance(op.importance), now),
-      )
+      // bitemporal: stamp validFrom so every fact carries when it began.
+      const addMeta = bitemporal ? openedMeta(baseMeta, now) : baseMeta
+      await opts.memory.remember(makeEntry(kind, text, addMeta, clampImportance(op.importance), now))
       added++
       continue
     }
@@ -150,18 +170,25 @@ export async function reconcile(opts: ReconcileOptions): Promise<ReconcileResult
     const target = byId.get(op.id)
     if (!target || touched.has(op.id)) continue
     if (op.op === 'delete') {
-      await opts.memory.forget(op.id)
+      // bitemporal: close the interval (keep the history); else true-delete.
+      if (bitemporal) await opts.closeEntry!(target, now)
+      else await opts.memory.forget(op.id)
       touched.add(op.id)
       deleted++
       continue
     }
-    // update: merge → write the new fact BEFORE forgetting the old (crash → dup).
+    // update: write the new fact BEFORE retiring the old (crash → transient
+    // overlap, never a gap). bitemporal: the new fact carries validFrom +
+    // supersedes and the old one is CLOSED (validTo stamped), not forgotten;
+    // else overwrite — forget the old one.
     const text = op.text.trim()
     if (!text) continue
     const importance =
       op.importance !== undefined ? clampImportance(op.importance) : importanceOf(target)
-    await opts.memory.remember(makeEntry(kind, text, baseMeta, importance, now))
-    await opts.memory.forget(op.id)
+    const updMeta = bitemporal ? openedMeta(baseMeta, now, op.id) : baseMeta
+    await opts.memory.remember(makeEntry(kind, text, updMeta, importance, now))
+    if (bitemporal) await opts.closeEntry!(target, now)
+    else await opts.memory.forget(op.id)
     touched.add(op.id)
     updated++
   }
