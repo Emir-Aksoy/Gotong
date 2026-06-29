@@ -6,7 +6,9 @@ import {
   HEARTBEAT_OK,
   MEMORY_REVIEW_ID,
   MemoryReviewParticipant,
+  composeReviewers,
   tieredReviewer,
+  type MemoryReviewer,
   type ReviewContext,
 } from '../src/index.js'
 import { entry, makeFakeMemory } from './fake-memory.js'
@@ -167,5 +169,58 @@ describe('MemoryReviewParticipant', () => {
     const res = await p.onTask(heartbeatTask())
     expect(res.kind).toBe('ok')
     expect(res.kind === 'ok' && res.output).toBe('ok-active')
+  })
+})
+
+describe('composeReviewers', () => {
+  const ctx = (): ReviewContext => ({ memory: makeFakeMemory(), episodic: [], now: 5_000_000 })
+
+  it('runs reviewers in order and joins their summaries', async () => {
+    const order: string[] = []
+    const a: MemoryReviewer = () => {
+      order.push('a')
+      return { summary: 'pass A' }
+    }
+    const b: MemoryReviewer = () => {
+      order.push('b')
+      return { summary: 'pass B' }
+    }
+    const out = await composeReviewers(a, b)(ctx())
+    expect(order).toEqual(['a', 'b'])
+    expect(out.summary).toBe('pass A; pass B')
+  })
+
+  it('skips empty summaries and sums consolidated counts', async () => {
+    const out = await composeReviewers(
+      () => ({}),
+      () => ({ summary: 'did 2', consolidated: 2 }),
+      () => ({ consolidated: 3 }),
+    )(ctx())
+    expect(out.summary).toBe('did 2')
+    expect(out.consolidated).toBe(5)
+  })
+
+  it('returns {} (idle) when every reviewer is idle', async () => {
+    const out = await composeReviewers(
+      () => ({}),
+      () => ({ summary: '   ' }),
+    )(ctx())
+    expect(out).toEqual({})
+  })
+
+  it('is best-effort: a throwing reviewer is surfaced, the rest still run', async () => {
+    const ran: string[] = []
+    const out = await composeReviewers(
+      () => {
+        throw new Error('semantic_overflow: too big')
+      },
+      () => {
+        ran.push('second')
+        return { summary: 'second ok' }
+      },
+    )(ctx())
+    expect(ran).toEqual(['second']) // not starved by the first throwing
+    expect(out.summary).toMatch(/review error: semantic_overflow/)
+    expect(out.summary).toMatch(/second ok/)
   })
 })

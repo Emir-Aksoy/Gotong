@@ -86,6 +86,43 @@ export interface ReviewOutcome {
  */
 export type MemoryReviewer = (ctx: ReviewContext) => Promise<ReviewOutcome> | ReviewOutcome
 
+/**
+ * Run several reviewers on one heartbeat tick, in order, merging their reports.
+ * The memory-enhancement passes are independent — tiered consolidation
+ * (episodic→digest→profile + budget), reconciliation (ad-hoc dedup), a
+ * save-before-compact extraction — and a butler wants all of them on the same
+ * heartbeat. This composes them into one {@link MemoryReviewer}.
+ *
+ * Each sub-reviewer self-gates (reconcile on its semantic count, budget on
+ * bytes, tiered on its episodic trigger), so the coarse episodic gate on
+ * {@link MemoryReviewParticipant} would otherwise STARVE the non-episodic ones:
+ * when composing, set the participant's `policy.minEpisodic` low (e.g. 1) and
+ * let each pass decide for itself whether to act.
+ *
+ * Best-effort: a throwing sub-reviewer is caught and surfaced as an error note
+ * in the summary (so e.g. `semantic_overflow` is still visible) rather than
+ * aborting the remaining passes — one bad pass never starves the others.
+ */
+export function composeReviewers(...reviewers: ReadonlyArray<MemoryReviewer>): MemoryReviewer {
+  const list = reviewers.filter(Boolean)
+  return async (ctx: ReviewContext): Promise<ReviewOutcome> => {
+    const summaries: string[] = []
+    let consolidated = 0
+    for (const r of list) {
+      try {
+        const out = await r(ctx)
+        const s = out.summary?.trim()
+        if (s) summaries.push(s)
+        if (typeof out.consolidated === 'number') consolidated += out.consolidated
+      } catch (err) {
+        summaries.push(`review error: ${err instanceof Error ? err.message : String(err)}`)
+      }
+    }
+    if (summaries.length === 0) return {}
+    return { summary: summaries.join('; '), ...(consolidated > 0 ? { consolidated } : {}) }
+  }
+}
+
 export interface MemoryReviewParticipantOptions {
   /** Participant id. Default {@link MEMORY_REVIEW_ID}. */
   id?: ParticipantId

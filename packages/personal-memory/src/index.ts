@@ -38,6 +38,7 @@ export {
 } from './capture.js'
 export {
   MemoryReviewParticipant,
+  composeReviewers,
   HEARTBEAT_OK,
   MEMORY_REVIEW_ID,
   DEFAULT_REVIEW_MIN_EPISODIC,
@@ -112,4 +113,14 @@ export {
   type EnforceBudgetResult,
   type MemoryUsageMeasure,
 } from './budget.js'
+export {
+  reconcile,
+  reconcileReviewer,
+  DEFAULT_RECONCILE_SYSTEM,
+  DEFAULT_RECONCILE_TRIGGER_ENTRIES,
+  RECONCILE_RECALL_WINDOW,
+  type ReconcileOp,
+  type ReconcileOptions,
+  type ReconcileResult,
+} from './reconcile.js'
 export { PersonalMemoryError, type PersonalMemoryErrorCode } from './errors.js'
