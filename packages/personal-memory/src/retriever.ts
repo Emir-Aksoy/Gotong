@@ -23,6 +23,7 @@
 
 import type { MemoryEntry, MemoryHandle, MemoryQuery } from '@aipehub/services-sdk'
 
+import { isActive } from './bitemporal.js'
 import { compareByImportanceThenRecency } from './importance.js'
 import { relevanceScore } from './relevance.js'
 
@@ -36,6 +37,32 @@ export interface MemoryRetriever {
   retrieve(query: MemoryQuery): Promise<MemoryEntry[]>
 }
 
+/** Options shared by the built-in retrievers. */
+export interface RetrieverOptions {
+  /**
+   * Opt-in (decision D, D-M2): return only facts that are in effect right now —
+   * drop closed time-edges (e.g. the old "lived in KL" once "moved to Penang"
+   * superseded it) and not-yet-valid facts. A consolidated butler usually wants
+   * CURRENT truth from `recall`; the closed history stays on disk for a future
+   * "what did I used to…" path. Default off → no filtering. An entry with no
+   * validity meta is always active, so legacy data is unaffected even when on.
+   */
+  activeOnly?: boolean
+  /** Clock for {@link activeOnly}. Default `Date.now`. */
+  now?: () => number
+}
+
+/**
+ * Filter a freshly-pulled page to the active slice when `activeOnly` is set.
+ * Returns the page unchanged otherwise — so the default path is allocation-free
+ * and byte-for-byte the pre-D behaviour.
+ */
+function filterActive(page: MemoryEntry[], opts?: RetrieverOptions): MemoryEntry[] {
+  if (!opts?.activeOnly) return page
+  const now = (opts.now ?? ((): number => Date.now()))()
+  return page.filter((e) => isActive(e, now))
+}
+
 /**
  * The default retriever: the memory handle's own `recall`, re-ranked by
  * importance. It pulls a wider recency window from the handle, then orders by
@@ -47,14 +74,14 @@ export interface MemoryRetriever {
  * When no entry sets importance this reduces to plain recency (top-k by `ts`),
  * so the `recall` tool behaves exactly as before for callers that never score.
  */
-export function handleRetriever(memory: MemoryHandle): MemoryRetriever {
+export function handleRetriever(memory: MemoryHandle, opts?: RetrieverOptions): MemoryRetriever {
   return {
     async retrieve(query: MemoryQuery): Promise<MemoryEntry[]> {
       const k = query.k
       // Pull a wider recency window so importance can outrank pure recency
       // within the page; a vector backend would not need this.
       const wideK = k ? Math.min(k * 4, 200) : 200
-      const page = await memory.recall({ ...query, k: wideK })
+      const page = filterActive(await memory.recall({ ...query, k: wideK }), opts)
       page.sort(compareByImportanceThenRecency)
       return k ? page.slice(0, k) : page
     },
@@ -81,7 +108,7 @@ export function handleRetriever(memory: MemoryHandle): MemoryRetriever {
  * effectively the whole store; an injected vector retriever (C-M3) handles
  * unbounded corpora.
  */
-export function lexicalRetriever(memory: MemoryHandle): MemoryRetriever {
+export function lexicalRetriever(memory: MemoryHandle, opts?: RetrieverOptions): MemoryRetriever {
   return {
     async retrieve(query: MemoryQuery): Promise<MemoryEntry[]> {
       const k = query.k
@@ -90,7 +117,7 @@ export function lexicalRetriever(memory: MemoryHandle): MemoryRetriever {
       // the very non-contiguous CJK matches this retriever exists to rank. We
       // pull by recency (honoring kinds / since) and rank `text` ourselves.
       const { text, ...rest } = query
-      const page = await memory.recall({ ...rest, k: wideK })
+      const page = filterActive(await memory.recall({ ...rest, k: wideK }), opts)
 
       const q = text?.trim()
       if (!q) {

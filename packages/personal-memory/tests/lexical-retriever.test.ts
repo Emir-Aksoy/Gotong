@@ -76,3 +76,50 @@ describe('lexicalRetriever', () => {
     expect(recallText(out)).toContain('卖奶茶的小店')
   })
 })
+
+describe('retriever — activeOnly (decision D, D-M2, opt-in)', () => {
+  it('drops a closed time-edge from recall; returns it when activeOnly is off', async () => {
+    const mem = makeFakeMemory([
+      entry('cur', 'semantic', '住在槟城', 200, { validFrom: 150 }),
+      entry('old', 'semantic', '住在吉隆坡', 100, { validFrom: 50, validTo: 150 }),
+    ])
+    const active = await lexicalRetriever(mem, { activeOnly: true, now: () => 300 }).retrieve({ k: 5 })
+    expect(active.map((e) => e.id)).toEqual(['cur']) // closed 'old' dropped
+    // Default (off) is byte-for-byte pre-D — the closed edge is still returned.
+    const all = await lexicalRetriever(mem).retrieve({ k: 5 })
+    expect(all.map((e) => e.id)).toEqual(['cur', 'old'])
+  })
+
+  it('legacy entries (no validity meta) are always active, even with activeOnly on', async () => {
+    const mem = makeFakeMemory([
+      entry('a', 'semantic', 'x', 100),
+      entry('b', 'semantic', 'y', 200),
+    ])
+    const r = await lexicalRetriever(mem, { activeOnly: true, now: () => 9_999 }).retrieve({ k: 5 })
+    expect(r.map((e) => e.id).sort()).toEqual(['a', 'b'])
+  })
+
+  it('drops a not-yet-valid fact (validFrom in the future)', async () => {
+    const mem = makeFakeMemory([
+      entry('now-true', 'semantic', 'p', 100, { validFrom: 50 }),
+      entry('future', 'semantic', 'q', 200, { validFrom: 5000 }),
+    ])
+    const r = await lexicalRetriever(mem, { activeOnly: true, now: () => 300 }).retrieve({ k: 5 })
+    expect(r.map((e) => e.id)).toEqual(['now-true'])
+  })
+
+  it('handleRetriever honors activeOnly the same way', async () => {
+    const mem = makeFakeMemory([
+      entry('cur', 'semantic', 'current', 200, { validFrom: 150 }),
+      entry('old', 'semantic', 'closed', 100, { validTo: 150 }),
+    ])
+    const r = await handleRetriever(mem, { activeOnly: true, now: () => 300 }).retrieve({ k: 5 })
+    expect(r.map((e) => e.id)).toEqual(['cur'])
+  })
+
+  it('a still-open interval (validFrom set, no validTo) stays active', async () => {
+    const mem = makeFakeMemory([entry('open', 'semantic', 'ongoing', 100, { validFrom: 50 })])
+    const r = await lexicalRetriever(mem, { activeOnly: true, now: () => 300 }).retrieve({ k: 5 })
+    expect(r.map((e) => e.id)).toEqual(['open'])
+  })
+})

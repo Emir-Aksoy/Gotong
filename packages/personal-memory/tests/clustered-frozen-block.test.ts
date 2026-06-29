@@ -115,4 +115,21 @@ describe('renderClusteredFrozenBlock', () => {
     expect(clusterPart).not.toContain('[proc1]')
     expect(on).toContain('[p1] likes tea') // a real persona fact stays
   })
+
+  it('activeOnly (D-M2) drops a closed entry, collapsing its now-empty cluster', () => {
+    const entries = [
+      tiered('keep', 'persona', 'lives in Penang', 100, 4),
+      entry('gone', 'semantic', 'old project', 90, {
+        tier: 'projects',
+        validFrom: 50,
+        validTo: 80, // closed before now
+      }),
+    ]
+    const on = renderClusteredFrozenBlock(entries, { activeOnly: true, now: 300 })
+    expect(on).toContain('[keep] lives in Penang')
+    expect(on).not.toContain('[gone]')
+    expect(on).not.toContain('## 项目') // its only member was closed → cluster gone
+    // off → the closed project still shows under its cluster
+    expect(renderClusteredFrozenBlock(entries)).toContain('[gone] old project')
+  })
 })

@@ -29,7 +29,12 @@ export {
   type MemoryReinforcer,
   type MemoryLinkLookup,
 } from './toolset.js'
-export { handleRetriever, lexicalRetriever, type MemoryRetriever } from './retriever.js'
+export {
+  handleRetriever,
+  lexicalRetriever,
+  type MemoryRetriever,
+  type RetrieverOptions,
+} from './retriever.js'
 export {
   embeddingRetriever,
   cosineSimilarity,

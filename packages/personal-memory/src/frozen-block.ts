@@ -27,6 +27,7 @@
 
 import type { MemoryEntry } from '@aipehub/services-sdk'
 
+import { isActive } from './bitemporal.js'
 import { compareByImportanceThenRecency } from './importance.js'
 import { linksOf } from './links.js'
 import { formatProcedureSteps, isProcedure, stepsOf } from './procedure.js'
@@ -68,6 +69,22 @@ export interface RenderFrozenBlockOptions {
    * Default {@link DEFAULT_PROCEDURE_SECTION_MAX}.
    */
   maxProcedures?: number
+  /**
+   * Opt-in (decision D, D-M2): show only facts in effect at {@link now} — drop
+   * closed time-edges (a superseded "lived in KL") and not-yet-valid facts, so
+   * the always-on block reflects CURRENT truth and doesn't spend its budget on
+   * history (which stays on disk). Requires {@link now}; without it this is a
+   * no-op. Still a pure function of (entry SET, `now`) → byte-stable per session.
+   * An entry with no validity meta is always active, so legacy data renders the
+   * same bytes whether or not this is set. Default off.
+   */
+  activeOnly?: boolean
+  /**
+   * The session's frozen "now" (ms) for {@link activeOnly}. A NUMBER, not a
+   * clock: captured once at session start so the block stays byte-identical for
+   * the rest of the session (prompt-cache contract).
+   */
+  now?: number
 }
 
 const DEFAULT_MAX_CHARS = 4000
@@ -99,7 +116,12 @@ export function renderFrozenBlock(
   const maxChars = clampPositive(opts.maxChars, DEFAULT_MAX_CHARS)
   const heading = `# Long-term memory — ${label}`
 
-  if (entries.length === 0) {
+  // D-M2: optionally narrow to the active slice (closed/expired edges dropped).
+  // No-op without `now` or `activeOnly`; legacy data has no validity meta so it
+  // is always active → byte-identical when off OR with no bitemporal entries.
+  const visible = activeSubset(entries, opts.activeOnly, opts.now)
+
+  if (visible.length === 0) {
     // Always emit the markers + heading + preamble so the system-prompt
     // SHAPE is identical whether or not memory exists. Only the body
     // differs ("(no memories yet)" vs bullets) — a butler's first session
@@ -110,7 +132,7 @@ export function renderFrozenBlock(
   // G-M2: optionally lift procedures into their own section. Default off; with
   // no procedures present the partition removes nothing, so the bytes are the
   // same whether or not this is set.
-  const { facts, procedures } = partitionProcedures(entries, opts.showProcedures)
+  const { facts, procedures } = partitionProcedures(visible, opts.showProcedures)
   const procSection = renderProceduresSection(
     procedures,
     clampPositive(opts.maxProcedures, DEFAULT_PROCEDURE_SECTION_MAX),
@@ -120,7 +142,7 @@ export function renderFrozenBlock(
   // output never depends on the order recall() happened to return rows in.
   // When nothing sets importance this is exactly recency (the old behaviour).
   const sorted = [...facts].sort(compareByImportanceThenRecency)
-  const inBlock = opts.showLinks ? new Set(entries.map((e) => e.id)) : undefined
+  const inBlock = opts.showLinks ? new Set(visible.map((e) => e.id)) : undefined
 
   const lines: string[] = []
   let used = 0
@@ -184,13 +206,16 @@ export function renderClusteredFrozenBlock(
   const config = opts.config ?? DEFAULT_TIERS
   const heading = `# Long-term memory — ${label}`
 
-  if (entries.length === 0) {
+  // D-M2: narrow to the active slice (see renderFrozenBlock). No-op when off.
+  const visible = activeSubset(entries, opts.activeOnly, opts.now)
+
+  if (visible.length === 0) {
     return [OPEN_MARKER, heading, '', PREAMBLE, '', '_(no memories yet)_', CLOSE_MARKER].join('\n')
   }
 
   // G-M2: lift procedures into their own section (default off; byte-identical
   // to off when no procedures are present).
-  const { facts, procedures } = partitionProcedures(entries, opts.showProcedures)
+  const { facts, procedures } = partitionProcedures(visible, opts.showProcedures)
   const procSection = renderProceduresSection(
     procedures,
     clampPositive(opts.maxProcedures, DEFAULT_PROCEDURE_SECTION_MAX),
@@ -209,8 +234,8 @@ export function renderClusteredFrozenBlock(
   const present = config.tiers.filter((t) => (byTier.get(t.id)?.length ?? 0) > 0)
   // Even split, with leftover carried forward so small clusters donate budget.
   const share = Math.max(1, Math.floor(maxChars / present.length))
-  // Links span the WHOLE block (cross-cluster associations are the useful ones).
-  const inBlock = opts.showLinks ? new Set(entries.map((e) => e.id)) : undefined
+  // Links span the WHOLE visible block (cross-cluster associations are useful).
+  const inBlock = opts.showLinks ? new Set(visible.map((e) => e.id)) : undefined
 
   const sections: string[] = []
   let carry = 0
@@ -261,6 +286,22 @@ function formatEntry(e: MemoryEntry, inBlock?: ReadonlySet<string>): string {
   if (!inBlock) return base
   const related = linksOf(e).filter((id) => inBlock.has(id))
   return related.length > 0 ? `${base} (related: ${related.join(', ')})` : base
+}
+
+/**
+ * D-M2: narrow to the active slice when `activeOnly` is on AND a `now` is given.
+ * Drops closed time-edges and not-yet-valid facts; an entry with no validity
+ * meta is always active. Returns the input unchanged otherwise — so the default
+ * path (and any store with no bitemporal entries) renders byte-identical bytes.
+ * Pure: it only filters, never reorders.
+ */
+function activeSubset(
+  entries: readonly MemoryEntry[],
+  activeOnly: boolean | undefined,
+  now: number | undefined,
+): readonly MemoryEntry[] {
+  if (!activeOnly || now === undefined) return entries
+  return entries.filter((e) => isActive(e, now))
 }
 
 /**

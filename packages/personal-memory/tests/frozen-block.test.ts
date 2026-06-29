@@ -194,4 +194,46 @@ describe('renderFrozenBlock', () => {
       expect(on).toBe(renderFrozenBlock(entries)) // byte-identical: nothing was lifted
     })
   })
+
+  describe('activeOnly (D-M2) — opt-in, byte-stable per session', () => {
+    const cur = entry('cur', 'semantic', 'lives in Penang', 200, { validFrom: 150 })
+    const old = entry('old', 'semantic', 'lived in KL', 100, { validFrom: 50, validTo: 150 })
+
+    it('is byte-identical on/off when no entry carries validity meta (legacy data)', () => {
+      const legacy = [entry('a', 'semantic', 'likes tea', 200), entry('b', 'semantic', 'in KL', 100)]
+      expect(renderFrozenBlock(legacy, { activeOnly: true, now: 9_999 })).toBe(
+        renderFrozenBlock(legacy),
+      )
+    })
+
+    it('drops a closed time-edge, keeping current truth in the block', () => {
+      const on = renderFrozenBlock([cur, old], { activeOnly: true, now: 300 })
+      expect(on).toContain('[cur] lives in Penang')
+      expect(on).not.toContain('[old]') // closed [50,150) at now=300 → hidden
+      // off → the closed edge still shows (history stays visible without the flag)
+      expect(renderFrozenBlock([cur, old])).toContain('[old] lived in KL')
+    })
+
+    it('is a no-op without `now`, even when activeOnly is set', () => {
+      expect(renderFrozenBlock([cur, old], { activeOnly: true })).toBe(renderFrozenBlock([cur, old]))
+    })
+
+    it('renders the empty block when every fact is closed at `now`', () => {
+      const block = renderFrozenBlock([old], { activeOnly: true, now: 300 })
+      expect(block).toContain('no memories yet')
+    })
+
+    it('hides a closed entry’s links from still-visible entries (no dangling refs)', () => {
+      const a = entry('a', 'semantic', 'likes tea', 200, { validFrom: 50, links: ['old'] })
+      const block = renderFrozenBlock([a, old], { activeOnly: true, now: 300, showLinks: true })
+      expect(block).toContain('[a] likes tea') // 'old' is closed → not in the visible set
+      expect(block).not.toMatch(/\[a\][^\n]*related/)
+    })
+
+    it('is a pure function of (set, now) under activeOnly', () => {
+      expect(renderFrozenBlock([cur, old], { activeOnly: true, now: 300 })).toBe(
+        renderFrozenBlock([old, cur], { activeOnly: true, now: 300 }),
+      )
+    })
+  })
 })
