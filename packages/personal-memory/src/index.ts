@@ -5,6 +5,7 @@
  *   - `renderFrozenBlock`        pure, byte-stable memory → markdown renderer
  *   - `MemorySession`            once-per-session frozen-block memoizer
  *   - `MemoryToolset`            remember / recall / forget as LLM tools
+ *   - `MemoryRetriever`          swappable `recall` backend (vector / chroma-mcp)
  *   - `MemoryAugmentedAgent`     LlmAgent + frozen-block injection + tools + capture
  *   - `buildTurnCapture` (+ helpers)  turn-end → episodic capture (M2)
  *   - `MemoryReviewParticipant`  heartbeat-driven review loop (M2)
@@ -17,6 +18,7 @@
 export { renderFrozenBlock, type RenderFrozenBlockOptions } from './frozen-block.js'
 export { MemorySession, type MemorySessionOptions } from './session.js'
 export { MemoryToolset, type MemoryToolsetOptions } from './toolset.js'
+export { handleRetriever, type MemoryRetriever } from './retriever.js'
 export {
   MemoryAugmentedAgent,
   type MemoryAugmentedAgentOptions,

@@ -42,6 +42,7 @@ import {
   isHeartbeatPayload,
 } from './capture.js'
 import { PersonalMemoryError } from './errors.js'
+import type { MemoryRetriever } from './retriever.js'
 import { MemorySession } from './session.js'
 import { MemoryToolset } from './toolset.js'
 
@@ -53,6 +54,12 @@ export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
   memory?: MemoryHandle
   /** Kinds the `remember` tool may write. Default `['episodic', 'semantic']`. */
   writableMemoryKinds?: readonly MemoryKind[]
+  /**
+   * Swappable backend for the `recall` tool (vector / hybrid / chroma-mcp).
+   * Default = the handle's own `recall`. Only the on-demand `recall` path is
+   * pluggable; the frozen block stays the byte-stable curated profile.
+   */
+  memoryRetriever?: MemoryRetriever
   /** Kinds that seed the frozen block. Default `['semantic']`. */
   frozenMemoryKinds?: readonly MemoryKind[]
   /** Max entries pulled for the frozen block. Default 100. */
@@ -100,6 +107,7 @@ export class MemoryAugmentedAgent extends LlmAgent {
       ...(opts.writableMemoryKinds !== undefined
         ? { writableKinds: opts.writableMemoryKinds }
         : {}),
+      ...(opts.memoryRetriever !== undefined ? { retriever: opts.memoryRetriever } : {}),
     })
 
     // Compose memory tools with any caller toolset. Memory tools FIRST so
@@ -143,9 +151,21 @@ export class MemoryAugmentedAgent extends LlmAgent {
   /** Same pre-warm on resume so a parked-then-woken task still injects memory. */
   protected override async handleResume(task: Task, state: unknown): Promise<unknown> {
     await this.session.ensureFrozenBlock()
-    const out = await super.handleResume(task, state)
+    const out = await this.resumeBody(task, state)
     await this.captureTurn(task, out)
     return out
+  }
+
+  /**
+   * Resume body seam. The default delegates to `LlmAgent.handleResume`
+   * (restore `__llmMessages` working memory and continue the tool loop, or
+   * fall back to a fresh run). A subclass that owns a bespoke suspend/resume
+   * state — e.g. `PersonalButlerAgent`'s approval-gated governed actions —
+   * overrides this to inject its decision, while frozen-block warm-up and
+   * turn capture stay in one place (`handleResume` above) for every subclass.
+   */
+  protected resumeBody(task: Task, state: unknown): Promise<unknown> {
+    return super.handleResume(task, state)
   }
 
   /**

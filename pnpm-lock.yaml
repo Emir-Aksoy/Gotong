@@ -1006,6 +1006,25 @@ importers:
         specifier: ^3.2.4
         version: 3.2.4(@types/node@20.19.41)(tsx@4.22.0)(yaml@2.9.0)
 
+  packages/personal-butler:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../core
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../llm
+      '@aipehub/personal-memory':
+        specifier: workspace:*
+        version: link:../personal-memory
+    devDependencies:
+      '@aipehub/services-sdk':
+        specifier: workspace:*
+        version: link:../services-sdk
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.4(@types/node@20.19.41)(tsx@4.22.0)(yaml@2.9.0)
+
   packages/personal-memory:
     dependencies:
       '@aipehub/core':

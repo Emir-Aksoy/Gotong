@@ -1,0 +1,36 @@
+{
+  "name": "@aipehub/personal-butler",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "AipeHub resident butler — a memory-augmented LlmAgent with a bounded tool-loop and approval-gated governed actions (sensitive → /me inbox). The OpenClaw/Hermes-style butler, but every dangerous action is human-gated (北极星: 框架只提议, 人审阅执行).",
+  "license": "MIT",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@aipehub/core": "workspace:*",
+    "@aipehub/llm": "workspace:*",
+    "@aipehub/personal-memory": "workspace:*"
+  },
+  "devDependencies": {
+    "@aipehub/services-sdk": "workspace:*",
+    "vitest": "^3.2.4"
+  }
+}

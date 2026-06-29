@@ -31,6 +31,8 @@ import type {
 } from '@aipehub/llm'
 import type { MemoryHandle, MemoryKind } from '@aipehub/services-sdk'
 
+import { handleRetriever, type MemoryRetriever } from './retriever.js'
+
 export interface MemoryToolsetOptions {
   /** The (already per-owner-scoped) memory handle the tools act on. */
   memory: MemoryHandle
@@ -38,6 +40,12 @@ export interface MemoryToolsetOptions {
   writableKinds?: readonly MemoryKind[]
   /** Default + hard cap on entries `recall` returns. Default 12, cap 50. */
   recallDefaultK?: number
+  /**
+   * Swappable backend for the `recall` tool (vector / hybrid / chroma-mcp).
+   * Default = the handle's own `recall` (substring). Writes always go to the
+   * handle regardless — the retriever only answers queries.
+   */
+  retriever?: MemoryRetriever
 }
 
 const REMEMBER = 'remember'
@@ -50,11 +58,15 @@ const RECALL_HARD_CAP = 50
 
 export class MemoryToolset implements LlmAgentToolset {
   private readonly memory: MemoryHandle
+  private readonly retriever: MemoryRetriever
   private readonly writableKinds: ReadonlySet<MemoryKind>
   private readonly recallDefaultK: number
 
   constructor(opts: MemoryToolsetOptions) {
     this.memory = opts.memory
+    // Recall goes through the retriever (default wraps `memory.recall`); writes
+    // always hit the handle directly.
+    this.retriever = opts.retriever ?? handleRetriever(opts.memory)
     this.writableKinds = new Set(
       opts.writableKinds && opts.writableKinds.length > 0
         ? opts.writableKinds
@@ -184,7 +196,7 @@ export class MemoryToolset implements LlmAgentToolset {
     )
 
     try {
-      const entries = await this.memory.recall({
+      const entries = await this.retriever.retrieve({
         ...(query !== undefined ? { text: query } : {}),
         ...(kinds && kinds.length > 0 ? { kinds } : {}),
         k,
