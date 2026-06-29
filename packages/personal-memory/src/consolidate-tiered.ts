@@ -29,6 +29,7 @@
  * not both, onto a given memory.
  */
 
+import { enforceBudget, type MemoryUsageMeasure } from './budget.js'
 import {
   DEFAULT_CONSOLIDATE_KEEP_RECENT,
   DEFAULT_PROFILE_HARD_CAP,
@@ -288,6 +289,18 @@ export interface TieredReviewerOptions
   promoteAfterDigests?: number
   /** Hard cap on durable cluster profiles. */
   profileHardCap?: number
+  /**
+   * Whole-namespace byte ceiling. When set, each tick runs `enforceBudget`
+   * AFTER consolidate+promote — consolidation reclaims space non-destructively
+   * first, then deterministic eviction is the hard backstop. Omit = no ceiling
+   * (per-layer caps only, today's behavior).
+   */
+  budgetBytes?: number
+  /** How to measure namespace usage for the budget. Default = entry text+meta
+   *  UTF-8 bytes. Host can inject a real folder `du`. */
+  measureBytes?: MemoryUsageMeasure
+  /** Recent episodic entries the budget never evicts. */
+  protectRecentEpisodic?: number
 }
 
 /**
@@ -320,7 +333,29 @@ export function tieredReviewer(opts: TieredReviewerOptions): MemoryReviewer {
       if (r) promotedDropped += r.droppedDigests
     }
 
-    if (!consolidated && promotedClusters === 0 && promotedDropped === 0) return {}
+    // Hard backstop: after compaction reclaimed what it could, deterministically
+    // evict down to the byte ceiling if one is configured.
+    let evicted = 0
+    let stillOver = false
+    if (opts.budgetBytes !== undefined) {
+      const b = await enforceBudget({
+        memory: ctx.memory,
+        budgetBytes: opts.budgetBytes,
+        config,
+        ...(opts.filter ? { filter: opts.filter } : {}),
+        ...(opts.measureBytes ? { measure: opts.measureBytes } : {}),
+        ...(opts.protectRecentEpisodic !== undefined
+          ? { protectRecentEpisodic: opts.protectRecentEpisodic }
+          : {}),
+        now: () => ctx.now,
+      })
+      if (b) {
+        evicted = b.evicted
+        stillOver = b.stillOverBudget
+      }
+    }
+
+    if (!consolidated && promotedClusters === 0 && promotedDropped === 0 && evicted === 0) return {}
     const parts: string[] = []
     if (consolidated) {
       parts.push(
@@ -331,6 +366,7 @@ export function tieredReviewer(opts: TieredReviewerOptions): MemoryReviewer {
     }
     if (promotedClusters > 0) parts.push(`promoted ${promotedClusters} cluster(s)`)
     if (promotedDropped > 0) parts.push(`dropped ${promotedDropped} trivial digest(s)`)
+    if (evicted > 0) parts.push(`budget evicted ${evicted}${stillOver ? ' (STILL over)' : ''}`)
     return { summary: parts.join('; '), consolidated: consolidated?.consolidatedCount ?? 0 }
   }
 }

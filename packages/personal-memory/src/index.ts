@@ -103,4 +103,13 @@ export {
   META_IMPORTANCE,
   type Importance,
 } from './importance.js'
+export {
+  enforceBudget,
+  budgetReviewer,
+  BUDGET_SCAN_LIMIT,
+  DEFAULT_PROTECT_RECENT_EPISODIC,
+  type EnforceBudgetOptions,
+  type EnforceBudgetResult,
+  type MemoryUsageMeasure,
+} from './budget.js'
 export { PersonalMemoryError, type PersonalMemoryErrorCode } from './errors.js'
