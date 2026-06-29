@@ -152,6 +152,47 @@ export class MemoryFileHandle implements MemoryHandle {
     })
   }
 
+  /**
+   * Patch one entry's `meta` IN PLACE — shallow-merge `patch` over the stored
+   * entry's meta, preserving id/kind/text/ts. Returns true if an entry with
+   * `id` was found and rewritten, false otherwise (an unknown id is a no-op).
+   *
+   * This is the file-backed seam the resident butler's injected meta writers
+   * wire to — close a validity interval, reinforce a recalled fact, grow a link
+   * set — none of which mint a new id/ts, so a renderer keyed on those never
+   * moves. Mirrors `forget`'s read-filter-rewrite and runs through the same
+   * write chain; only the matched line is re-serialized (untouched lines are
+   * rewritten verbatim, including corrupt ones, so patching never drops data).
+   */
+  async patchMeta(id: string, patch: Record<string, unknown>): Promise<boolean> {
+    return this.serializeWrite(async () => {
+      for (const kind of this.config.kinds) {
+        const path = kindFile(this.rootDir, this.owner, kind)
+        if (!await fileExists(path)) continue
+        const raw = await readFile(path, 'utf8')
+        const lines: string[] = []
+        let patched = false
+        for (const line of raw.split('\n')) {
+          if (!line) continue
+          let entry: MemoryEntry | undefined
+          try { entry = JSON.parse(line) as MemoryEntry } catch { /* corrupt — keep verbatim */ }
+          if (entry && entry.id === id) {
+            const next: MemoryEntry = { ...entry, meta: { ...(entry.meta ?? {}), ...patch } }
+            lines.push(JSON.stringify(next))
+            patched = true
+            continue
+          }
+          lines.push(line)
+        }
+        if (patched) {
+          await writeFile(path, lines.join('\n') + '\n', 'utf8')
+          return true
+        }
+      }
+      return false
+    })
+  }
+
   async clear(kind?: MemoryKind): Promise<void> {
     return this.serializeWrite(async () => {
       const kinds = kind ? [kind] : this.config.kinds

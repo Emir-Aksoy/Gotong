@@ -59,6 +59,20 @@ export interface MemoryHandle {
 
   /** Remove all entries (or all of one kind). Used by `clear working`. */
   clear(kind?: MemoryKind): Promise<void>
+
+  /**
+   * Patch one entry's `meta` in place — shallow-merge `patch` over the stored
+   * meta, preserving `id`/`kind`/`text`/`ts`. Returns true if the id was found
+   * and rewritten, false otherwise.
+   *
+   * Optional capability. The MVP recall model only ever appended or removed
+   * whole entries, so it never needed a meta-only update. The long-term memory
+   * engine (validity intervals, recall reinforcement, associative links) DOES:
+   * it must amend an established entry's meta WITHOUT minting a new id/ts (which
+   * would move a renderer keyed on those). Backends that cannot patch in place
+   * simply omit this — callers feature-detect it.
+   */
+  patchMeta?(id: string, patch: Record<string, unknown>): Promise<boolean>
 }
 
 export interface MemoryQuery {

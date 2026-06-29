@@ -233,6 +233,104 @@ describe('corrupt lines tolerated', () => {
   })
 })
 
+describe('patchMeta (Z-M1)', () => {
+  it('shallow-merges patch over existing meta, preserving id/kind/text/ts', async () => {
+    const h = newHandle()
+    const e = await h.remember({ kind: 'semantic', text: 'lives in KL', meta: { importance: 4 } })
+    const ok = await h.patchMeta(e.id, { validTo: 900 })
+    expect(ok).toBe(true)
+    const [got] = await h.recall({ kinds: ['semantic'], k: 1 })
+    expect(got?.id).toBe(e.id)
+    expect(got?.ts).toBe(e.ts)
+    expect(got?.kind).toBe('semantic')
+    expect(got?.text).toBe('lives in KL')
+    // existing key kept, new key merged in
+    expect(got?.meta).toEqual({ importance: 4, validTo: 900 })
+  })
+
+  it('overwrites only the keys in the patch, leaving the rest', async () => {
+    const h = newHandle()
+    const e = await h.remember({
+      kind: 'semantic', text: 'x', meta: { recallCount: 2, lastRecalledTs: 100, links: ['a'] },
+    })
+    await h.patchMeta(e.id, { recallCount: 3, lastRecalledTs: 555 })
+    const [got] = await h.recall({ kinds: ['semantic'], k: 1 })
+    expect(got?.meta).toEqual({ recallCount: 3, lastRecalledTs: 555, links: ['a'] })
+  })
+
+  it('creates meta when the stored entry had none', async () => {
+    const h = newHandle()
+    const e = await h.remember({ kind: 'semantic', text: 'x' })
+    await h.patchMeta(e.id, { links: ['b', 'c'] })
+    const [got] = await h.recall({ kinds: ['semantic'], k: 1 })
+    expect(got?.meta).toEqual({ links: ['b', 'c'] })
+  })
+
+  it('returns false for an unknown id and changes nothing', async () => {
+    const h = newHandle()
+    await h.remember({ kind: 'semantic', text: 'x', meta: { importance: 3 } })
+    const ok = await h.patchMeta('nonexistent', { validTo: 1 })
+    expect(ok).toBe(false)
+    const [got] = await h.recall({ kinds: ['semantic'], k: 1 })
+    expect(got?.meta).toEqual({ importance: 3 })
+  })
+
+  it('finds the entry across kinds (semantic patched while episodic exists)', async () => {
+    const h = newHandle()
+    await h.remember({ kind: 'episodic', text: 'turn' })
+    const s = await h.remember({ kind: 'semantic', text: 'fact' })
+    const ok = await h.patchMeta(s.id, { validTo: 42 })
+    expect(ok).toBe(true)
+    const [got] = await h.recall({ kinds: ['semantic'], k: 1 })
+    expect(got?.meta).toEqual({ validTo: 42 })
+    // the episodic line is untouched (still exactly one, no meta added)
+    const ep = await h.list({ kind: 'episodic' })
+    expect(ep).toHaveLength(1)
+    expect(ep[0]!.meta).toBeUndefined()
+  })
+
+  it('rewrites only the matched line — untouched lines (incl. corrupt) survive verbatim', async () => {
+    const h = newHandle()
+    const a = await h.remember({ kind: 'semantic', text: 'good-a' })
+    // Inject a corrupt line, then add a second good entry to patch.
+    const path = kindFile(rootDir, owner, 'semantic')
+    const before = await readFile(path, 'utf8')
+    await writeFile(path, before + 'not-json{\n', 'utf8')
+    const b = await h.remember({ kind: 'semantic', text: 'good-b' })
+
+    const ok = await h.patchMeta(b.id, { validTo: 7 })
+    expect(ok).toBe(true)
+
+    // The corrupt line is still on disk verbatim (not dropped by the rewrite).
+    const after = await readFile(path, 'utf8')
+    expect(after).toContain('not-json{')
+
+    // Both good entries readable; only b gained the meta, a is unchanged.
+    const items = await h.list({ kind: 'semantic' })
+    const byText = Object.fromEntries(items.map((x) => [x.text, x]))
+    expect(byText['good-a']!.id).toBe(a.id)
+    expect(byText['good-a']!.meta).toBeUndefined()
+    expect(byText['good-b']!.meta).toEqual({ validTo: 7 })
+  })
+
+  it('serializes against concurrent remember (no jsonl corruption)', async () => {
+    const h = newHandle()
+    const e = await h.remember({ kind: 'semantic', text: 'base', meta: { importance: 3 } })
+    // Fire a patch and a remember concurrently — the write chain must serialize them.
+    await Promise.all([
+      h.patchMeta(e.id, { validTo: 10 }),
+      h.remember({ kind: 'semantic', text: 'also' }),
+    ])
+    const raw = await readFile(kindFile(rootDir, owner, 'semantic'), 'utf8')
+    const lines = raw.split('\n').filter((l) => l.length > 0)
+    expect(lines).toHaveLength(2)
+    for (const line of lines) expect(() => JSON.parse(line)).not.toThrow()
+    const items = await h.list({ kind: 'semantic' })
+    expect(items.map((x) => x.text).sort()).toEqual(['also', 'base'])
+    expect(items.find((x) => x.text === 'base')!.meta).toEqual({ importance: 3, validTo: 10 })
+  })
+})
+
 describe('empty state', () => {
   it('list on empty owner returns []', async () => {
     const h = newHandle()
