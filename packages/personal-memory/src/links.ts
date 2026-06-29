@@ -193,6 +193,64 @@ export function diffLinkUpdates(
   return updates
 }
 
+// ---------------------------------------------------------------------------
+// expansion — one-hop walk over links (recall enrichment, still pure)
+// ---------------------------------------------------------------------------
+
+/** Default cap on one-hop neighbors appended during recall expansion. */
+export const DEFAULT_LINK_EXPAND = 5
+
+export interface ExpandByLinksOptions {
+  /** Max one-hop neighbors to append after the seeds. Default {@link DEFAULT_LINK_EXPAND}. */
+  maxExpand?: number
+}
+
+/**
+ * Enrich a recall result by walking ONE hop along links: return the `seeds`
+ * (deduped by id, order preserved) followed by the entries their links point at,
+ * drawn from the already-fetched `neighbors` pool. The host fetches the link
+ * targets by id (the seam {@link MemoryHandle} lacks a get-by-id for); this pure
+ * function just merges and orders them.
+ *
+ * Deterministic: neighbors are appended in seed order, then each seed's
+ * `linksOf` order, skipping ids already present, capped at `maxExpand`. One hop
+ * only — a seed's neighbor's links are NOT followed (bounded, no graph runaway).
+ */
+export function expandByLinks(
+  seeds: readonly MemoryEntry[],
+  neighbors: readonly MemoryEntry[],
+  opts: ExpandByLinksOptions = {},
+): MemoryEntry[] {
+  const cap = Math.max(0, Math.floor(opts.maxExpand ?? DEFAULT_LINK_EXPAND))
+
+  const out: MemoryEntry[] = []
+  const seen = new Set<string>()
+  for (const s of seeds) {
+    if (!seen.has(s.id)) {
+      seen.add(s.id)
+      out.push(s)
+    }
+  }
+  if (cap === 0) return out
+
+  const byId = new Map<string, MemoryEntry>()
+  for (const n of neighbors) if (!byId.has(n.id)) byId.set(n.id, n)
+
+  let added = 0
+  for (const s of seeds) {
+    for (const id of linksOf(s)) {
+      if (added >= cap) return out
+      if (seen.has(id)) continue
+      const hit = byId.get(id)
+      if (!hit) continue
+      seen.add(id)
+      out.push(hit)
+      added++
+    }
+  }
+  return out
+}
+
 function jaccard(a: readonly string[], b: readonly string[]): number {
   if (a.length === 0 || b.length === 0) return 0
   const sa = new Set(a)

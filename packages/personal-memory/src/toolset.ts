@@ -38,6 +38,7 @@ import {
   META_IMPORTANCE,
   type Importance,
 } from './importance.js'
+import { DEFAULT_LINK_EXPAND, expandByLinks, linksOf } from './links.js'
 import { lexicalRetriever, type MemoryRetriever } from './retriever.js'
 import { tierOf } from './tiers.js'
 
@@ -55,6 +56,16 @@ import { tierOf } from './tiers.js'
  * {@link reinforcedMeta} for the pure meta transform.
  */
 export type MemoryReinforcer = (entry: MemoryEntry, now: number) => void | Promise<void>
+
+/**
+ * Opt-in (decision E, E-M3): resolve link-target ids to their entries so
+ * `recall` can expand ONE hop — surfacing what the matched facts associate with.
+ * The host wires a file-backed by-id read (the handle has no get-by-id); tests
+ * inject a fake. Best-effort: a failure leaves the un-expanded seeds.
+ */
+export type MemoryLinkLookup = (
+  ids: readonly string[],
+) => readonly MemoryEntry[] | Promise<readonly MemoryEntry[]>
 
 export interface MemoryToolsetOptions {
   /** The (already per-owner-scoped) memory handle the tools act on. */
@@ -76,6 +87,14 @@ export interface MemoryToolsetOptions {
    * swallowed so it never breaks the recall. See {@link MemoryReinforcer}.
    */
   reinforce?: MemoryReinforcer
+  /**
+   * Opt-in (E-M3): after a recall, expand ONE hop along the matched entries'
+   * links and append the linked entries (marked `↪`). Omit → no expansion
+   * (default, byte-identical to pre-E). See {@link MemoryLinkLookup}.
+   */
+  linkLookup?: MemoryLinkLookup
+  /** Max one-hop neighbors appended per recall when expanding. Default {@link DEFAULT_LINK_EXPAND}. */
+  expandK?: number
   /** Clock for reinforcement timestamps. Default `Date.now`. */
   now?: () => number
 }
@@ -94,6 +113,8 @@ export class MemoryToolset implements LlmAgentToolset {
   private readonly writableKinds: ReadonlySet<MemoryKind>
   private readonly recallDefaultK: number
   private readonly reinforce: MemoryReinforcer | undefined
+  private readonly linkLookup: MemoryLinkLookup | undefined
+  private readonly expandK: number
   private readonly now: () => number
 
   constructor(opts: MemoryToolsetOptions) {
@@ -108,6 +129,8 @@ export class MemoryToolset implements LlmAgentToolset {
     )
     this.recallDefaultK = clamp(opts.recallDefaultK ?? DEFAULT_RECALL_K, 1, RECALL_HARD_CAP)
     this.reinforce = opts.reinforce
+    this.linkLookup = opts.linkLookup
+    this.expandK = Math.max(0, Math.floor(opts.expandK ?? DEFAULT_LINK_EXPAND))
     this.now = opts.now ?? Date.now
   }
 
@@ -283,18 +306,60 @@ export class MemoryToolset implements LlmAgentToolset {
           (tier === undefined || tierOf(e, '') === tier),
       )
       if (entries.length === 0) return okResult('No matching memories.')
-      const lines = entries.map((e) => {
+
+      // E-M3: optionally expand one hop along links (opt-in). The seeds are the
+      // direct matches; neighbors are appended (marked `↪`) so the model sees
+      // what those facts associate with. Neighbors are NOT re-filtered by
+      // minImportance/tier — an explicit association can be exactly the relevant
+      // context even if it is low-importance or in another cluster.
+      const seedIds = new Set(entries.map((e) => e.id))
+      const result = await this.expand(entries, seedIds)
+
+      const lines = result.map((e) => {
         const t = tierOf(e, '')
         const tag = t ? `${e.kind}/${t}` : e.kind
-        return `[${e.id}] (${tag}, p${importanceOf(e)}, ${new Date(e.ts).toISOString()}) ${e.text}`
+        const prefix = seedIds.has(e.id) ? '' : '↪ '
+        return `${prefix}[${e.id}] (${tag}, p${importanceOf(e)}, ${new Date(e.ts).toISOString()}) ${e.text}`
       })
-      // F-M3: reinforce what was surfaced (opt-in). Best-effort and AFTER the
-      // result is built — a failed reinforce must not turn a good recall into an
-      // error, and it never alters the returned text.
+      // F-M3: reinforce what the query MATCHED (the seeds), opt-in. Best-effort
+      // and AFTER the result is built — a failed reinforce must not turn a good
+      // recall into an error, and it never alters the returned text. Expansion
+      // neighbors are surfaced-by-association, not matched, so they're not
+      // reinforced (that would flatten salience across whole neighborhoods).
       await this.reinforceEntries(entries)
       return okResult(lines.join('\n'))
     } catch (err) {
       return errorResult(`recall failed: ${errMsg(err)}`)
+    }
+  }
+
+  /**
+   * E-M3: best-effort one-hop link expansion (no-op when `linkLookup` not set or
+   * `expandK` is 0). Gathers the seeds' link-target ids not already among the
+   * seeds, resolves them via the lookup, and appends them. A lookup failure
+   * leaves the un-expanded seeds.
+   */
+  private async expand(
+    seeds: readonly MemoryEntry[],
+    seedIds: ReadonlySet<string>,
+  ): Promise<readonly MemoryEntry[]> {
+    if (!this.linkLookup || this.expandK === 0) return seeds
+    const wanted: string[] = []
+    const seen = new Set<string>()
+    for (const e of seeds) {
+      for (const id of linksOf(e)) {
+        if (!seedIds.has(id) && !seen.has(id)) {
+          seen.add(id)
+          wanted.push(id)
+        }
+      }
+    }
+    if (wanted.length === 0) return seeds
+    try {
+      const fetched = await this.linkLookup(wanted)
+      return expandByLinks(seeds, fetched, { maxExpand: this.expandK })
+    } catch {
+      return seeds // best-effort: expansion failure must never break recall
     }
   }
 

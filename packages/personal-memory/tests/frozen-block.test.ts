@@ -100,4 +100,41 @@ describe('renderFrozenBlock', () => {
   it('puts the label in the heading', () => {
     expect(renderFrozenBlock([], { label: 'butler-zh' })).toContain('Long-term memory — butler-zh')
   })
+
+  describe('showLinks (E-M3) — opt-in, byte-stable', () => {
+    const a = entry('a', 'semantic', 'likes tea', 200, { links: ['b'] })
+    const b = entry('b', 'semantic', 'runs a tea shop', 100, { links: ['a'] })
+    const c = entry('c', 'semantic', 'lives in KL', 150) // no links
+
+    it('is off by default — byte-identical to no links', () => {
+      const withMeta = renderFrozenBlock([a, b, c])
+      const plain = renderFrozenBlock([
+        entry('a', 'semantic', 'likes tea', 200),
+        entry('b', 'semantic', 'runs a tea shop', 100),
+        c,
+      ])
+      expect(withMeta).toBe(plain) // meta.links present but unrendered
+    })
+
+    it('appends a related tail for intra-block links when enabled', () => {
+      const block = renderFrozenBlock([a, b, c], { showLinks: true })
+      expect(block).toContain('[a] likes tea (related: b)')
+      expect(block).toContain('[b] runs a tea shop (related: a)')
+      expect(block).toContain('[c] lives in KL') // no links → no tail
+      expect(block).not.toMatch(/\[c\][^\n]*related/)
+    })
+
+    it('shows only links whose target is in the block (no dangling refs)', () => {
+      const lonelyRef = entry('a', 'semantic', 'likes tea', 200, { links: ['gone', 'b'] })
+      const block = renderFrozenBlock([lonelyRef, b], { showLinks: true })
+      expect(block).toContain('[a] likes tea (related: b)') // 'gone' not in block → omitted
+      expect(block).not.toContain('gone')
+    })
+
+    it('is a pure function of the set under showLinks (order does not matter)', () => {
+      expect(renderFrozenBlock([a, b, c], { showLinks: true })).toBe(
+        renderFrozenBlock([c, b, a], { showLinks: true }),
+      )
+    })
+  })
 })

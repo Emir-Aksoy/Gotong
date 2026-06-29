@@ -128,4 +128,58 @@ describe('MemoryToolset', () => {
     const lines = textOf(r).split('\n')
     expect(lines.length).toBeLessThanOrEqual(50)
   })
+
+  describe('recall link expansion (E-M3) — opt-in', () => {
+    // s1 matches "preferences" and links to s2/s3 (which do NOT match the query);
+    // they should only appear via one-hop expansion, marked `↪`.
+    function seeded() {
+      return makeFakeMemory([
+        entry('s1', 'semantic', 'tea preferences', 300, { links: ['s2', 's3'] }),
+        entry('s2', 'semantic', 'favorite tea shop', 200),
+        entry('s3', 'semantic', 'tea brewing notes', 100),
+        entry('u1', 'semantic', 'basketball schedule', 50),
+      ])
+    }
+    const lookup = (mem: ReturnType<typeof seeded>) => (ids: readonly string[]) =>
+      ids.map((id) => mem.entries.find((e) => e.id === id)).filter((e): e is NonNullable<typeof e> => !!e)
+
+    it('does not expand by default (no linkLookup)', async () => {
+      const mem = seeded()
+      const ts = new MemoryToolset({ memory: mem })
+      const out = textOf(await ts.callTool('recall', { query: 'preferences' }))
+      expect(out).toContain('[s1] (semantic')
+      expect(out).not.toContain('s2')
+      expect(out).not.toContain('↪')
+    })
+
+    it('appends one-hop neighbors marked ↪ when linkLookup is set', async () => {
+      const mem = seeded()
+      const ts = new MemoryToolset({ memory: mem, linkLookup: lookup(mem) })
+      const out = textOf(await ts.callTool('recall', { query: 'preferences' }))
+      expect(out).toMatch(/(?<!↪ )\[s1\] \(semantic/) // seed: no marker
+      expect(out).toContain('↪ [s2]')
+      expect(out).toContain('↪ [s3]')
+      expect(out).not.toContain('u1') // unrelated, never linked
+    })
+
+    it('caps expansion at expandK', async () => {
+      const mem = seeded()
+      const ts = new MemoryToolset({ memory: mem, linkLookup: lookup(mem), expandK: 1 })
+      const out = textOf(await ts.callTool('recall', { query: 'preferences' }))
+      const neighbors = out.split('\n').filter((l) => l.startsWith('↪ '))
+      expect(neighbors).toHaveLength(1) // only the first linked neighbor
+    })
+
+    it('is best-effort: a throwing lookup yields the un-expanded seeds, not an error', async () => {
+      const mem = seeded()
+      const boom = () => {
+        throw new Error('lookup down')
+      }
+      const ts = new MemoryToolset({ memory: mem, linkLookup: boom })
+      const r = await ts.callTool('recall', { query: 'preferences' })
+      expect(r.isError).toBeFalsy()
+      expect(textOf(r)).toContain('[s1]')
+      expect(textOf(r)).not.toContain('↪')
+    })
+  })
 })

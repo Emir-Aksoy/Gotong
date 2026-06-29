@@ -18,6 +18,7 @@ import {
   DEFAULT_LINK_TOP_K,
   defaultLinkScorer,
   diffLinkUpdates,
+  expandByLinks,
   linkRelated,
   linksOf,
   mergeLinks,
@@ -228,5 +229,48 @@ describe('diffLinkUpdates', () => {
   it('skips ids absent from the graph', () => {
     const a = entry('a', 'semantic', '奶茶', 100, { links: ['b'] })
     expect(diffLinkUpdates([a], new Map())).toEqual([])
+  })
+})
+
+describe('expandByLinks', () => {
+  it('returns seeds followed by their one-hop neighbors from the pool', () => {
+    const a = entry('a', 'semantic', '奶茶', 100, { links: ['n1', 'n2'] })
+    const n1 = entry('n1', 'semantic', '珍珠', 90)
+    const n2 = entry('n2', 'semantic', '咖啡', 80)
+    const n3 = entry('n3', 'semantic', '无关', 70) // in pool but not linked
+    expect(expandByLinks([a], [n1, n2, n3]).map((e) => e.id)).toEqual(['a', 'n1', 'n2'])
+  })
+
+  it('dedups: a neighbor that is already a seed is not re-appended', () => {
+    const a = entry('a', 'semantic', 'x', 100, { links: ['b', 'n1'] })
+    const b = entry('b', 'semantic', 'y', 90)
+    const n1 = entry('n1', 'semantic', 'z', 80)
+    expect(expandByLinks([a, b], [b, n1]).map((e) => e.id)).toEqual(['a', 'b', 'n1'])
+  })
+
+  it('caps neighbors at maxExpand', () => {
+    const a = entry('a', 'semantic', 'x', 100, { links: ['n1', 'n2', 'n3', 'n4'] })
+    const pool = ['n1', 'n2', 'n3', 'n4'].map((id) => entry(id, 'semantic', id, 50))
+    expect(expandByLinks([a], pool, { maxExpand: 2 }).map((e) => e.id)).toEqual(['a', 'n1', 'n2'])
+  })
+
+  it('maxExpand 0 returns only the seeds', () => {
+    const a = entry('a', 'semantic', 'x', 100, { links: ['n1'] })
+    const n1 = entry('n1', 'semantic', 'y', 90)
+    expect(expandByLinks([a], [n1], { maxExpand: 0 }).map((e) => e.id)).toEqual(['a'])
+  })
+
+  it('skips link ids the pool does not contain (host returned fewer)', () => {
+    const a = entry('a', 'semantic', 'x', 100, { links: ['missing', 'n1'] })
+    const n1 = entry('n1', 'semantic', 'y', 90)
+    expect(expandByLinks([a], [n1]).map((e) => e.id)).toEqual(['a', 'n1'])
+  })
+
+  it('follows ONE hop only — a neighbor’s own links are not chased', () => {
+    const a = entry('a', 'semantic', 'x', 100, { links: ['n1'] })
+    const n1 = entry('n1', 'semantic', 'y', 90, { links: ['deep'] })
+    const deep = entry('deep', 'semantic', 'z', 80)
+    // deep is in the pool, but only a's links are followed → deep excluded.
+    expect(expandByLinks([a], [n1, deep]).map((e) => e.id)).toEqual(['a', 'n1'])
   })
 })

@@ -28,6 +28,7 @@
 import type { MemoryEntry } from '@aipehub/services-sdk'
 
 import { compareByImportanceThenRecency } from './importance.js'
+import { linksOf } from './links.js'
 import { DEFAULT_TIERS, normalizeTier, tierOf, type TierConfig } from './tiers.js'
 
 export interface RenderFrozenBlockOptions {
@@ -42,6 +43,15 @@ export interface RenderFrozenBlockOptions {
    * bounded MEMORY.md. Default 4000.
    */
   maxChars?: number
+  /**
+   * Opt-in (decision E, E-M3): append a deterministic ` (related: id, …)` tail
+   * to each line, listing that entry's links that are ALSO present in the block
+   * — turning the block into a navigable little graph. Only INTRA-block links
+   * are shown (a link to an omitted/out-of-block id is noise), so the tail is a
+   * pure function of the entry SET → byte-stable, exactly like the rest of the
+   * block. Default off (byte-identical to pre-E).
+   */
+  showLinks?: boolean
 }
 
 const DEFAULT_MAX_CHARS = 4000
@@ -80,12 +90,13 @@ export function renderFrozenBlock(
   // output never depends on the order recall() happened to return rows in.
   // When nothing sets importance this is exactly recency (the old behaviour).
   const sorted = [...entries].sort(compareByImportanceThenRecency)
+  const inBlock = opts.showLinks ? new Set(entries.map((e) => e.id)) : undefined
 
   const lines: string[] = []
   let used = 0
   let omitted = 0
   for (let i = 0; i < sorted.length; i++) {
-    const line = `- ${formatEntry(sorted[i]!)}`
+    const line = `- ${formatEntry(sorted[i]!, inBlock)}`
     // Always take the first (highest-priority) line; after that, stop once the
     // body budget would be exceeded. `+ 1` accounts for the joining newline.
     if (lines.length > 0 && used + line.length + 1 > maxChars) {
@@ -160,6 +171,8 @@ export function renderClusteredFrozenBlock(
   const present = config.tiers.filter((t) => (byTier.get(t.id)?.length ?? 0) > 0)
   // Even split, with leftover carried forward so small clusters donate budget.
   const share = Math.max(1, Math.floor(maxChars / present.length))
+  // Links span the WHOLE block (cross-cluster associations are the useful ones).
+  const inBlock = opts.showLinks ? new Set(entries.map((e) => e.id)) : undefined
 
   const sections: string[] = []
   let carry = 0
@@ -170,7 +183,7 @@ export function renderClusteredFrozenBlock(
     let used = 0
     let omitted = 0
     for (let i = 0; i < group.length; i++) {
-      const line = `- ${formatEntry(group[i]!)}`
+      const line = `- ${formatEntry(group[i]!, inBlock)}`
       if (lines.length > 0 && used + line.length + 1 > budget) {
         omitted = group.length - i
         break
@@ -197,10 +210,17 @@ export function renderClusteredFrozenBlock(
  * reference an entry when calling the `forget` tool. Internal newlines are
  * collapsed so one entry can never span multiple bullets (which would make
  * the budget accounting — and the byte-stability — order-dependent).
+ *
+ * When `inBlock` is supplied (opt-in `showLinks`), append the entry's links
+ * that are also in the block as ` (related: id, …)` — in `linksOf` order (a
+ * fixed, deduped order for a fixed set), so the tail stays byte-stable.
  */
-function formatEntry(e: MemoryEntry): string {
+function formatEntry(e: MemoryEntry, inBlock?: ReadonlySet<string>): string {
   const text = e.text.replace(/\s*\n\s*/g, ' ').trim()
-  return `[${e.id}] ${text}`
+  const base = `[${e.id}] ${text}`
+  if (!inBlock) return base
+  const related = linksOf(e).filter((id) => inBlock.has(id))
+  return related.length > 0 ? `${base} (related: ${related.join(', ')})` : base
 }
 
 function clampPositive(v: number | undefined, fallback: number): number {

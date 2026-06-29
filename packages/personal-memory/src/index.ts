@@ -22,7 +22,12 @@ export {
   type RenderClusteredFrozenBlockOptions,
 } from './frozen-block.js'
 export { MemorySession, type MemorySessionOptions } from './session.js'
-export { MemoryToolset, type MemoryToolsetOptions, type MemoryReinforcer } from './toolset.js'
+export {
+  MemoryToolset,
+  type MemoryToolsetOptions,
+  type MemoryReinforcer,
+  type MemoryLinkLookup,
+} from './toolset.js'
 export { handleRetriever, lexicalRetriever, type MemoryRetriever } from './retriever.js'
 export {
   embeddingRetriever,
@@ -149,13 +154,16 @@ export {
   mergeLinks,
   buildLinkGraph,
   diffLinkUpdates,
+  expandByLinks,
   defaultLinkScorer,
   META_LINKS,
   DEFAULT_LINK_TOP_K,
+  DEFAULT_LINK_EXPAND,
   type LinkScorer,
   type LinkRelatedOptions,
   type LinkUpdate,
   type BuildLinkGraphOptions,
+  type ExpandByLinksOptions,
 } from './links.js'
 export {
   linkPass,
