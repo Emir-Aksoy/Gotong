@@ -143,4 +143,15 @@ export {
   type SaveBeforeCompactResult,
 } from './compaction.js'
 export { relevanceScore, extractTerms } from './relevance.js'
+export {
+  effectiveSalience,
+  reinforcedMeta,
+  recallCountOf,
+  lastRecalledOf,
+  META_RECALL_COUNT,
+  META_LAST_RECALLED,
+  DEFAULT_SALIENCE_HALF_LIFE_MS,
+  DEFAULT_REINFORCE_WEIGHT,
+  type SalienceOptions,
+} from './salience.js'
 export { PersonalMemoryError, type PersonalMemoryErrorCode } from './errors.js'
