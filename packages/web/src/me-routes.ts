@@ -466,6 +466,46 @@ export interface MeCredentialsSurface {
 }
 
 // ---------------------------------------------------------------------------
+// Member butler-memory privacy view (Personal Butler M6c — 被遗忘权)
+//
+// "What does my butler remember about me?" A member sees their butler's
+// distilled profile (semantic) + recently captured turns (episodic), can
+// FORGET one entry or everything (right to be forgotten), and EXPORT the lot
+// (data portability). Every op is scoped to the SESSION userId server-side —
+// the per-user memory namespace (openButlerMemory) is the no-leak boundary, so
+// a member can only ever see / erase their OWN butler's memory.
+// ---------------------------------------------------------------------------
+
+/** One remembered entry as the member sees it — content + when, no internal meta. */
+export interface ButlerMemoryView {
+  id: string
+  /** 'episodic' (a captured turn) or 'semantic' (a distilled fact). */
+  kind: string
+  text: string
+  /** Epoch ms when written. */
+  ts: number
+}
+
+/** What the privacy panel shows: the distilled profile + recent captured turns. */
+export interface ButlerMemorySnapshot {
+  /** Semantic entries — the durable "what the butler knows about me". */
+  profile: ButlerMemoryView[]
+  /** Episodic entries — recently captured turns, newest first. */
+  recent: ButlerMemoryView[]
+}
+
+export interface ButlerMemorySurface {
+  /** The caller's own butler memory: profile + recent captures. */
+  read(userId: string): Promise<ButlerMemorySnapshot>
+  /** Every entry the caller's butler remembers (for export / portability). */
+  export(userId: string): Promise<ButlerMemoryView[]>
+  /** Forget one entry by id. Returns false if it wasn't there. */
+  forget(userId: string, id: string): Promise<boolean>
+  /** Forget EVERYTHING the butler remembers about this member (被遗忘权). */
+  forgetAll(userId: string): Promise<void>
+}
+
+// ---------------------------------------------------------------------------
 // Member IM-binding surface (GO-LIVE GL-1c)
 //
 // Lets a member link THEIR OWN IM account (Telegram, …): mint a one-time
@@ -869,6 +909,13 @@ export interface HandleMeRouteCtx {
    */
   meCredentials: MeCredentialsSurface | undefined
   /**
+   * Personal Butler M6c — the member's butler-memory privacy view ("what does
+   * my butler remember about me", forget / export). Undefined when the host
+   * wired no butler memory; the /api/me/butler/memory routes then degrade to an
+   * empty snapshot (GET) / 503 (mutations).
+   */
+  butlerMemory: ButlerMemorySurface | undefined
+  /**
    * GO-LIVE GL-1c — member IM-account linking. Undefined when the host wired no
    * identity; the /api/me/im routes then return 503 (empty list on GET).
    */
@@ -1108,6 +1155,29 @@ export async function handleMeRoute(
     const m = /^\/api\/me\/credentials\/([^/]+)$/.exec(path)
     if (m && method === 'DELETE') {
       await handleMeDeleteCredential(ctx, res, userId, decodeURIComponent(m[1]!))
+      return
+    }
+  }
+  // Personal Butler M6c — "what does my butler remember about me" privacy view.
+  // GET reads the profile + recent captures; GET .../export returns everything
+  // (data portability); DELETE one entry or all (right to be forgotten). All
+  // scoped to the session userId server-side — a member sees only THEIR butler.
+  if (method === 'GET' && path === '/api/me/butler/memory') {
+    await handleMeButlerMemoryRead(ctx, res, userId)
+    return
+  }
+  if (method === 'GET' && path === '/api/me/butler/memory/export') {
+    await handleMeButlerMemoryExport(ctx, res, userId)
+    return
+  }
+  if (method === 'DELETE' && path === '/api/me/butler/memory') {
+    await handleMeButlerMemoryForgetAll(ctx, res, userId)
+    return
+  }
+  {
+    const m = /^\/api\/me\/butler\/memory\/([^/]+)$/.exec(path)
+    if (m && method === 'DELETE') {
+      await handleMeButlerMemoryForget(ctx, res, userId, decodeURIComponent(m[1]!))
       return
     }
   }
@@ -2675,6 +2745,84 @@ async function handleMeDeleteCredential(
   }
   try {
     const removed = await ctx.meCredentials.remove(userId, credentialId)
+    sendJson(res, { ok: true, removed })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Member butler-memory privacy view (Personal Butler M6c — 被遗忘权)
+//
+// GET reads the snapshot, GET /export returns everything, DELETE forgets one or
+// all. The host (HostButlerMemoryService) opens the per-user memory handle by
+// the SESSION userId — never a client-supplied id — so the no-leak namespace
+// boundary holds at the route layer. Undefined surface → empty (GET) / 503.
+// ---------------------------------------------------------------------------
+
+async function handleMeButlerMemoryRead(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.butlerMemory) {
+    sendJson(res, { profile: [], recent: [] })
+    return
+  }
+  try {
+    const snapshot = await ctx.butlerMemory.read(userId)
+    sendJson(res, snapshot)
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+async function handleMeButlerMemoryExport(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.butlerMemory) {
+    sendJson(res, { entries: [] })
+    return
+  }
+  try {
+    const entries = await ctx.butlerMemory.export(userId)
+    sendJson(res, { entries })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+async function handleMeButlerMemoryForgetAll(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+): Promise<void> {
+  if (!ctx.butlerMemory) {
+    sendJson(res, { error: 'butler memory unavailable (not wired)' }, 503)
+    return
+  }
+  try {
+    await ctx.butlerMemory.forgetAll(userId)
+    sendJson(res, { ok: true })
+  } catch (err) {
+    sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))
+  }
+}
+
+async function handleMeButlerMemoryForget(
+  ctx: HandleMeRouteCtx,
+  res: ServerResponse,
+  userId: string,
+  id: string,
+): Promise<void> {
+  if (!ctx.butlerMemory) {
+    sendJson(res, { error: 'butler memory unavailable (not wired)' }, 503)
+    return
+  }
+  try {
+    const removed = await ctx.butlerMemory.forget(userId, id)
     sendJson(res, { ok: true, removed })
   } catch (err) {
     sendJson(res, { error: err instanceof Error ? err.message : String(err) }, meAgentErrStatus(err))

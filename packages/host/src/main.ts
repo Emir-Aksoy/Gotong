@@ -224,6 +224,7 @@ import { MeWorkflowCreateService } from './me-workflow-create-service.js'
 import { HostMeAgentService } from './me-agent-service.js'
 import { HostMeAgentGrantsService } from './me-agent-grants-service.js'
 import { HostMeCredentialsService } from './me-credentials-service.js'
+import { HostButlerMemoryService } from './butler-memory-service.js'
 import { HostMeImService } from './me-im-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
 import {
@@ -1991,6 +1992,20 @@ async function main(): Promise<void> {
     ? new HostMeCredentialsService({ identity })
     : undefined
 
+  // Personal Butler M6c — the member's "what does my butler remember about me"
+  // privacy view (read profile + recent captures, forget one/all, export). It's
+  // read-only over the framework — needs only a per-user memory rootDir, NOT a
+  // registered butler agent — so it's ALWAYS wired (the butler agent fold-in is
+  // deferred per design §八; until then the view simply reads an empty tree).
+  // The rootDir is the SAME subtree a folded-in butler will read/write per user,
+  // so "what the butler remembers" and "what the member can erase" are one and
+  // the same bytes. The per-user namespace (openButlerMemory) is the no-leak
+  // boundary — the route forces the session userId, never a client value.
+  const butlerMemory = new HostButlerMemoryService({
+    rootDir: join(space.root, 'butler', 'memory'),
+    logger: log,
+  })
+
   // GO-LIVE GL-1c — member IM-account linking. The binding code a member mints
   // here is what they DM to the bot as `/bind <code>`; bindings live in
   // identity, so this is wired only when identity is present (/api/me/im 503s
@@ -2428,6 +2443,10 @@ async function main(): Promise<void> {
     ...(meAgentGrants ? { meAgentGrants } : {}),
     // v5 A-M3 — member API-credential management (undefined → 503).
     ...(meCredentials ? { meCredentials } : {}),
+    // Personal Butler M6c — member butler-memory privacy view (read profile +
+    // recent, forget one/all, export). Always wired (read-only over a per-user
+    // memory rootDir; no butler-agent dependency).
+    butlerMemory,
     // GO-LIVE GL-1c — member IM-account linking (undefined → 503).
     ...(meIm ? { meIm } : {}),
     // Phase 16 — member task inbox; undefined when identity is unwired, in

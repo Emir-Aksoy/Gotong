@@ -410,6 +410,28 @@
         </form>
         <div id="me-cred-list" class="me-agents-list"></div>
       </div>
+
+      <!-- Personal Butler M6c — "what it remembers about you" privacy view.
+           The butler keeps long-term memory (semantic profile + recent episodic
+           captures), so the member must be able to SEE it, FORGET one entry or
+           everything (right to be forgotten / 被遗忘权), and EXPORT the lot.
+           Front-loaded to the UI to reassure users; reads/erases only the
+           session user's own per-user memory namespace (server-forced userId).
+           Empty until a butler agent is folded into the host (deferred). -->
+      <div class="me-credentials" id="me-butler-memory">
+        <h2 data-i18n="meButlerMemTitle">管家记得你什么</h2>
+        <p class="me-meta" data-i18n="meButlerMemHint">你的管家会记住一些关于你的长期信息（你在做的项目、你的偏好），好在下次对话时记得你。这里能看到它记下的一切，随时忘掉单条或全部，也可以导出。只有你能看、只有你能删。</p>
+        <div class="me-own-agent-actions">
+          <button type="button" id="me-butler-mem-refresh" class="me-secondary-btn" data-i18n="meButlerMemRefresh">刷新</button>
+          <button type="button" id="me-butler-mem-export" class="me-secondary-btn" data-i18n="meButlerMemExport">导出全部</button>
+          <button type="button" id="me-butler-mem-forget-all" class="me-secondary-btn me-danger-btn" data-i18n="meButlerMemForgetAll">忘掉全部</button>
+          <span id="me-butler-mem-status" class="me-status"></span>
+        </div>
+        <h3 class="me-meta" data-i18n="meButlerMemProfile">它对你的长期了解</h3>
+        <div id="me-butler-mem-profile" class="me-agents-list"></div>
+        <h3 class="me-meta" data-i18n="meButlerMemRecent">最近记下的</h3>
+        <div id="me-butler-mem-recent" class="me-agents-list"></div>
+      </div>
     </section>
 
     <!-- Settings tab — visible to every signed-in role. C1a ships only

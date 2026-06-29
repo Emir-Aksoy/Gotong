@@ -725,6 +725,7 @@
     await loadMyAgents()
     await loadMyOwnAgents()
     await loadMyCredentials()
+    await loadButlerMemory()
     bindOnce(document.getElementById('me-dispatch-btn'), 'click', submitDispatch)
     // SW-M7 — the hub steward ("管家"): one chat box drives plan → preview →
     // apply. The send button asks for a proposal; clicks inside the output area
@@ -761,6 +762,13 @@
     // ease-of-use ①TC-ME — test the typed BYO key before saving it.
     bindOnce(document.getElementById('me-cred-test'), 'click', submitTestCredential)
     bindOnce(document.getElementById('me-cred-list'), 'click', onCredListClick)
+    // Personal Butler M6c — privacy view: refresh / export / forget-all +
+    // delegated per-entry forget on both stable list containers.
+    bindOnce(document.getElementById('me-butler-mem-refresh'), 'click', loadButlerMemory)
+    bindOnce(document.getElementById('me-butler-mem-export'), 'click', exportButlerMemory)
+    bindOnce(document.getElementById('me-butler-mem-forget-all'), 'click', forgetAllButlerMemory)
+    bindOnce(document.getElementById('me-butler-mem-profile'), 'click', onButlerMemListClick)
+    bindOnce(document.getElementById('me-butler-mem-recent'), 'click', onButlerMemListClick)
   }
 
   async function renderWhoami() {
@@ -3123,6 +3131,122 @@
       await refreshProviderSelect()
     } catch (err) {
       alert(t('meDeleteFailedErr', err?.message || String(err)))
+    }
+  }
+
+  // ---- Personal Butler M6c — "what it remembers about you" (被遗忘权) ------
+  // The butler keeps long-term memory; this view lets the member SEE it, FORGET
+  // one entry or everything, and EXPORT the lot. All four routes force the
+  // session userId server-side, so this only ever touches the member's OWN
+  // per-user memory namespace. Both lists delegate their forget clicks through
+  // the same handler (the rendered card carries data-mem-forget=<id>).
+  function memKindLabel(kind) {
+    if (kind === 'semantic') return t('meButlerMemKindSemantic')
+    if (kind === 'episodic') return t('meButlerMemKindEpisodic')
+    return escape(kind || '')
+  }
+
+  function renderMemCard(e) {
+    const when = e.ts ? new Date(e.ts).toLocaleString() : ''
+    return `
+      <div class="me-agent-card" data-mem-id="${escape(e.id)}">
+        <div class="me-agent-head">
+          <span class="me-tag">${memKindLabel(e.kind)}</span>
+          <span class="me-meta">${when ? escape(when) : ''}</span>
+        </div>
+        <div class="me-agent-body">${escape(e.text || '')}</div>
+        <div class="me-own-agent-row-actions">
+          <button type="button" class="me-secondary-btn me-danger-btn" data-mem-forget="${escape(e.id)}">${t('meButlerMemForget')}</button>
+        </div>
+      </div>`
+  }
+
+  async function loadButlerMemory() {
+    const profileEl = document.getElementById('me-butler-mem-profile')
+    const recentEl = document.getElementById('me-butler-mem-recent')
+    if (!profileEl || !recentEl) return
+    profileEl.innerHTML = `<p class="me-meta">${t('meButlerMemLoading')}</p>`
+    recentEl.innerHTML = ''
+    try {
+      const r = await fetch('/api/me/butler/memory')
+      if (!r.ok) {
+        profileEl.innerHTML = `<p class="me-meta">${t('meLoadFailedHttp', r.status)}</p>`
+        return
+      }
+      const j = await r.json()
+      const profile = Array.isArray(j?.profile) ? j.profile : []
+      const recent = Array.isArray(j?.recent) ? j.recent : []
+      profileEl.innerHTML = profile.length
+        ? profile.map(renderMemCard).join('')
+        : `<p class="me-meta">${t('meButlerMemEmpty')}</p>`
+      recentEl.innerHTML = recent.length
+        ? recent.map(renderMemCard).join('')
+        : `<p class="me-meta">${t('meButlerMemEmpty')}</p>`
+    } catch (err) {
+      profileEl.innerHTML = `<p class="me-meta">${escape(t('meLoadFailedErr', err?.message || String(err)))}</p>`
+    }
+  }
+
+  async function onButlerMemListClick(e) {
+    const id = e.target?.getAttribute?.('data-mem-forget')
+    if (!id) return
+    if (!confirm(t('meButlerMemForgetConfirm'))) return
+    const status = document.getElementById('me-butler-mem-status')
+    try {
+      const r = await fetch(`/api/me/butler/memory/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        if (status) { status.className = 'me-status error'; status.textContent = t('meFailedColon', escape(j?.error || `HTTP ${r.status}`)) }
+        return
+      }
+      if (status) { status.className = 'me-status ok'; status.textContent = t('meButlerMemForgotten') }
+      await loadButlerMemory()
+    } catch (err) {
+      if (status) { status.className = 'me-status error'; status.textContent = t('meFailedColon', escape(err?.message || String(err))) }
+    }
+  }
+
+  async function forgetAllButlerMemory() {
+    if (!confirm(t('meButlerMemForgetAllConfirm'))) return
+    const status = document.getElementById('me-butler-mem-status')
+    try {
+      const r = await fetch('/api/me/butler/memory', { method: 'DELETE' })
+      if (!r.ok) {
+        const j = await r.json().catch(() => ({}))
+        if (status) { status.className = 'me-status error'; status.textContent = t('meFailedColon', escape(j?.error || `HTTP ${r.status}`)) }
+        return
+      }
+      if (status) { status.className = 'me-status ok'; status.textContent = t('meButlerMemForgotten') }
+      await loadButlerMemory()
+    } catch (err) {
+      if (status) { status.className = 'me-status error'; status.textContent = t('meFailedColon', escape(err?.message || String(err))) }
+    }
+  }
+
+  async function exportButlerMemory() {
+    const status = document.getElementById('me-butler-mem-status')
+    try {
+      const r = await fetch('/api/me/butler/memory/export')
+      if (!r.ok) {
+        if (status) { status.className = 'me-status error'; status.textContent = t('meLoadFailedHttp', r.status) }
+        return
+      }
+      const j = await r.json()
+      const entries = Array.isArray(j?.entries) ? j.entries : []
+      // Trigger a client-side download of the full export as JSON — no server
+      // round-trip, the bytes the member already holds.
+      const blob = new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'butler-memory.json'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+      if (status) { status.className = 'me-status ok'; status.textContent = t('meButlerMemExported', entries.length) }
+    } catch (err) {
+      if (status) { status.className = 'me-status error'; status.textContent = t('meFailedColon', escape(err?.message || String(err))) }
     }
   }
 

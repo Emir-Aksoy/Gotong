@@ -49,6 +49,7 @@ import {
   type MeAgentAdminSurface,
   type MeAgentGrantsSurface,
   type MeCredentialsSurface,
+  type ButlerMemorySurface,
   type MeImSurface,
   type MeWorkflowEditSurface,
   type MeWorkflowCreateSurface,
@@ -310,6 +311,13 @@ export interface WebServerOptions {
    * this only when identity is present; absent → those routes return 503.
    */
   meCredentials?: MeCredentialsSurface
+  /**
+   * Personal Butler M6c — optional member butler-memory privacy view for
+   * `/api/me/butler/memory` ("what does my butler remember about me", forget /
+   * export). The host opens the per-user memory handle by session userId;
+   * absent → GET degrades to an empty snapshot, mutations return 503.
+   */
+  butlerMemory?: ButlerMemorySurface
   /**
    * GO-LIVE GL-1c — optional member IM-linking surface for `/api/me/im/*`
    * (mint a binding code, list/disconnect the caller's own IM bindings).
@@ -1186,6 +1194,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     meAgentAdmin: opts.meAgentAdmin,
     meAgentGrants: opts.meAgentGrants,
     meCredentials: opts.meCredentials,
+    butlerMemory: opts.butlerMemory,
     meIm: opts.meIm,
     workflowAssist: opts.workflowAssist,
     llmKeyTest: opts.llmKeyTest,
@@ -1341,6 +1350,7 @@ interface HandlerCtx {
   meAgentGrants: MeAgentGrantsSurface | undefined
   /** v5 A-M3 — see WebServerOptions.meCredentials doc above. */
   meCredentials: MeCredentialsSurface | undefined
+  butlerMemory: ButlerMemorySurface | undefined
   /** GO-LIVE GL-1c — see WebServerOptions.meIm doc above. */
   meIm: MeImSurface | undefined
   /** Phase 13 M3 — see WebServerOptions.workflowAssist doc above. */
@@ -1957,6 +1967,9 @@ async function handle(
         meAgentGrants: ctx.meAgentGrants,
         // v5 A-M3 — member API-credential management; undefined → 503.
         meCredentials: ctx.meCredentials,
+        // Personal Butler M6c — member butler-memory privacy view; undefined →
+        // empty snapshot (GET) / 503 (forget/export).
+        butlerMemory: ctx.butlerMemory,
         // GO-LIVE GL-1c — member IM-account linking; undefined → 503.
         meIm: ctx.meIm,
         // Phase 19 P1-M4 — member file uploads (same UploadSurface as admin,
