@@ -29,6 +29,7 @@ import type { MemoryEntry } from '@aipehub/services-sdk'
 
 import { compareByImportanceThenRecency } from './importance.js'
 import { linksOf } from './links.js'
+import { formatProcedureSteps, isProcedure, stepsOf } from './procedure.js'
 import { DEFAULT_TIERS, normalizeTier, tierOf, type TierConfig } from './tiers.js'
 
 export interface RenderFrozenBlockOptions {
@@ -52,9 +53,29 @@ export interface RenderFrozenBlockOptions {
    * block. Default off (byte-identical to pre-E).
    */
   showLinks?: boolean
+  /**
+   * Opt-in (decision G, G-M2): append a "Things I know how to do" section
+   * listing recorded procedures (`meta.form === 'procedure'`) with their ordered
+   * steps, and lift those entries OUT of the fact bullets above — a procedure is
+   * a skill, not a stray fact. Pure function of the entry SET → byte-stable.
+   * Default off, AND byte-identical to off whenever no procedures are present:
+   * the partition only removes procedure entries, so a block with none renders
+   * the same bytes whether this is set or not.
+   */
+  showProcedures?: boolean
+  /**
+   * Max procedures listed in the section (excess noted deterministically).
+   * Default {@link DEFAULT_PROCEDURE_SECTION_MAX}.
+   */
+  maxProcedures?: number
 }
 
 const DEFAULT_MAX_CHARS = 4000
+
+/** Default cap on procedures shown in the G-M2 "things I know how to do" section. */
+export const DEFAULT_PROCEDURE_SECTION_MAX = 8
+
+const PROCEDURE_HEADING = 'Things I know how to do'
 
 /** Stable delimiters. NEVER interpolate variable data into these. */
 const OPEN_MARKER = '<!-- aipehub:memory:begin -->'
@@ -86,10 +107,19 @@ export function renderFrozenBlock(
     return [OPEN_MARKER, heading, '', PREAMBLE, '', '_(no memories yet)_', CLOSE_MARKER].join('\n')
   }
 
+  // G-M2: optionally lift procedures into their own section. Default off; with
+  // no procedures present the partition removes nothing, so the bytes are the
+  // same whether or not this is set.
+  const { facts, procedures } = partitionProcedures(entries, opts.showProcedures)
+  const procSection = renderProceduresSection(
+    procedures,
+    clampPositive(opts.maxProcedures, DEFAULT_PROCEDURE_SECTION_MAX),
+  )
+
   // Pure ordering: importance first, then recency, ties broken by id so the
   // output never depends on the order recall() happened to return rows in.
   // When nothing sets importance this is exactly recency (the old behaviour).
-  const sorted = [...entries].sort(compareByImportanceThenRecency)
+  const sorted = [...facts].sort(compareByImportanceThenRecency)
   const inBlock = opts.showLinks ? new Set(entries.map((e) => e.id)) : undefined
 
   const lines: string[] = []
@@ -112,7 +142,7 @@ export function renderFrozenBlock(
     )
   }
 
-  return [OPEN_MARKER, heading, '', PREAMBLE, '', ...lines, CLOSE_MARKER].join('\n')
+  return [OPEN_MARKER, heading, '', PREAMBLE, '', ...lines, ...procSection, CLOSE_MARKER].join('\n')
 }
 
 export interface RenderClusteredFrozenBlockOptions extends RenderFrozenBlockOptions {
@@ -158,10 +188,18 @@ export function renderClusteredFrozenBlock(
     return [OPEN_MARKER, heading, '', PREAMBLE, '', '_(no memories yet)_', CLOSE_MARKER].join('\n')
   }
 
-  // Bucket every entry into a KNOWN cluster (unknown / missing tier → default),
-  // so a stray meta.tier can never produce an out-of-catalog section.
+  // G-M2: lift procedures into their own section (default off; byte-identical
+  // to off when no procedures are present).
+  const { facts, procedures } = partitionProcedures(entries, opts.showProcedures)
+  const procSection = renderProceduresSection(
+    procedures,
+    clampPositive(opts.maxProcedures, DEFAULT_PROCEDURE_SECTION_MAX),
+  )
+
+  // Bucket every FACT entry into a KNOWN cluster (unknown / missing tier →
+  // default), so a stray meta.tier can never produce an out-of-catalog section.
   const byTier = new Map<string, MemoryEntry[]>()
-  for (const e of entries) {
+  for (const e of facts) {
     const key = normalizeTier(config, tierOf(e, config.defaultTier))
     const arr = byTier.get(key)
     if (arr) arr.push(e)
@@ -202,7 +240,9 @@ export function renderClusteredFrozenBlock(
   }
   if (sections[sections.length - 1] === '') sections.pop() // drop trailing blank
 
-  return [OPEN_MARKER, heading, '', PREAMBLE, '', ...sections, CLOSE_MARKER].join('\n')
+  return [OPEN_MARKER, heading, '', PREAMBLE, '', ...sections, ...procSection, CLOSE_MARKER].join(
+    '\n',
+  )
 }
 
 /**
@@ -221,6 +261,52 @@ function formatEntry(e: MemoryEntry, inBlock?: ReadonlySet<string>): string {
   if (!inBlock) return base
   const related = linksOf(e).filter((id) => inBlock.has(id))
   return related.length > 0 ? `${base} (related: ${related.join(', ')})` : base
+}
+
+/**
+ * Split entries into the plain FACTS (the bullet body) and the PROCEDURES (the
+ * G-M2 section), when `show` is on. When off, everything stays a fact — so the
+ * caller renders exactly the pre-G bytes. A procedure with no steps is treated
+ * as a fact (nothing useful to show in the how-to section). Pure: it only
+ * partitions, never reorders.
+ */
+function partitionProcedures(
+  entries: readonly MemoryEntry[],
+  show: boolean | undefined,
+): { facts: readonly MemoryEntry[]; procedures: MemoryEntry[] } {
+  if (!show) return { facts: entries, procedures: [] }
+  const facts: MemoryEntry[] = []
+  const procedures: MemoryEntry[] = []
+  for (const e of entries) {
+    if (isProcedure(e) && stepsOf(e).length > 0) procedures.push(e)
+    else facts.push(e)
+  }
+  return { facts, procedures }
+}
+
+/**
+ * The "things I know how to do" section: one bullet per procedure
+ * (`[id] name — 1. step; 2. step`), ordered by the same total order as the
+ * facts (importance, then recency, then id) and capped at `maxProcedures` with
+ * a deterministic omitted note. `[]` when there are no procedures, so the
+ * caller appends nothing. Pure function of the procedure SET → byte-stable.
+ */
+function renderProceduresSection(
+  procedures: readonly MemoryEntry[],
+  maxProcedures: number,
+): string[] {
+  if (procedures.length === 0) return []
+  const sorted = [...procedures].sort(compareByImportanceThenRecency)
+  const shown = sorted.slice(0, maxProcedures)
+  const lines = shown.map(
+    (e) =>
+      `- [${e.id}] ${e.text.replace(/\s*\n\s*/g, ' ').trim()} — ${formatProcedureSteps(stepsOf(e))}`,
+  )
+  const omitted = sorted.length - shown.length
+  if (omitted > 0) {
+    lines.push(`- _(${omitted} more ${omitted === 1 ? 'procedure' : 'procedures'} omitted)_`)
+  }
+  return [`## ${PROCEDURE_HEADING}`, ...lines]
 }
 
 function clampPositive(v: number | undefined, fallback: number): number {

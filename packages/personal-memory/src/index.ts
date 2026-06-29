@@ -18,6 +18,7 @@
 export {
   renderFrozenBlock,
   renderClusteredFrozenBlock,
+  DEFAULT_PROCEDURE_SECTION_MAX,
   type RenderFrozenBlockOptions,
   type RenderClusteredFrozenBlockOptions,
 } from './frozen-block.js'

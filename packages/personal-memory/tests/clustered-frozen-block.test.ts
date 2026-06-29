@@ -89,4 +89,30 @@ describe('renderClusteredFrozenBlock', () => {
     expect(out).toContain('[p1] short persona fact')
     expect(out).toContain('omitted to fit the memory budget')
   })
+
+  it('lifts procedures out of clusters into the G-M2 section (opt-in)', () => {
+    const entries = [
+      tiered('p1', 'persona', 'likes tea', 100, 4),
+      entry('proc1', 'semantic', 'brew tea', 90, {
+        tier: 'projects',
+        form: 'procedure',
+        steps: ['boil', 'steep'],
+      }),
+    ]
+    // off: the procedure sits in its cluster as a plain bullet
+    const off = renderClusteredFrozenBlock(entries)
+    expect(off).toContain('## 项目')
+    expect(off).toContain('[proc1] brew tea')
+    expect(off).not.toContain('Things I know how to do')
+
+    // on: the procedure leaves the cluster (now empty → no 项目 section) and
+    // appears in the dedicated how-to section with its steps.
+    const on = renderClusteredFrozenBlock(entries, { showProcedures: true })
+    expect(on).toContain('## Things I know how to do')
+    expect(on).toContain('- [proc1] brew tea — 1. boil; 2. steep')
+    expect(on).not.toContain('## 项目') // its only member was lifted out
+    const clusterPart = on.split('## Things I know how to do')[0]!
+    expect(clusterPart).not.toContain('[proc1]')
+    expect(on).toContain('[p1] likes tea') // a real persona fact stays
+  })
 })

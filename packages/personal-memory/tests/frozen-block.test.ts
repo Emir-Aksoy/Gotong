@@ -137,4 +137,61 @@ describe('renderFrozenBlock', () => {
       )
     })
   })
+
+  describe('showProcedures (G-M2) — opt-in, byte-stable', () => {
+    const proc = (id: string, name: string, ts: number, steps: string[], imp?: number) =>
+      entry(id, 'semantic', name, ts, { form: 'procedure', steps, ...(imp ? { importance: imp } : {}) })
+
+    it('is byte-identical on/off when there are no procedures present', () => {
+      const facts = [
+        entry('a', 'semantic', 'likes tea', 200),
+        entry('b', 'semantic', 'lives in KL', 100),
+      ]
+      expect(renderFrozenBlock(facts, { showProcedures: true })).toBe(renderFrozenBlock(facts))
+    })
+
+    it('lifts procedures into a dedicated section with steps, out of the fact bullets', () => {
+      const entries = [entry('f1', 'semantic', 'likes tea', 200), proc('p1', 'brew tea', 150, ['boil', 'steep'])]
+
+      const off = renderFrozenBlock(entries)
+      expect(off).toContain('- [p1] brew tea') // off: procedure is just a fact bullet
+      expect(off).not.toContain('Things I know how to do')
+
+      const on = renderFrozenBlock(entries, { showProcedures: true })
+      expect(on).toContain('## Things I know how to do')
+      expect(on).toContain('- [p1] brew tea — 1. boil; 2. steep')
+      expect(on).toContain('- [f1] likes tea') // a plain fact stays a fact
+      // the procedure no longer appears among the fact bullets
+      const factPart = on.split('## Things I know how to do')[0]!
+      expect(factPart).not.toContain('[p1]')
+    })
+
+    it('is a pure function of the set under showProcedures (order does not matter)', () => {
+      const f1 = entry('f1', 'semantic', 'likes tea', 200)
+      const p1 = proc('p1', 'brew tea', 150, ['boil', 'steep'])
+      const p2 = proc('p2', 'pour coffee', 100, ['grind', 'pour'])
+      expect(renderFrozenBlock([f1, p1, p2], { showProcedures: true })).toBe(
+        renderFrozenBlock([p2, f1, p1], { showProcedures: true }),
+      )
+    })
+
+    it('caps the section at maxProcedures and notes the remainder', () => {
+      const procs = Array.from({ length: 5 }, (_, i) => proc(`p${i}`, `task ${i}`, 100 + i, ['x']))
+      const block = renderFrozenBlock(procs, { showProcedures: true, maxProcedures: 2 })
+      expect(block).toMatch(/3 more procedures omitted/)
+      const shown = block.split('\n').filter((l) => l.startsWith('- [p')).length
+      expect(shown).toBe(2)
+    })
+
+    it('treats a procedure with no steps as an ordinary fact (nothing to show)', () => {
+      const entries = [
+        entry('p0', 'semantic', 'incomplete proc', 100, { form: 'procedure' }), // no steps
+        entry('f0', 'semantic', 'a fact', 200),
+      ]
+      const on = renderFrozenBlock(entries, { showProcedures: true })
+      expect(on).not.toContain('Things I know how to do')
+      expect(on).toContain('- [p0] incomplete proc') // stayed a fact bullet
+      expect(on).toBe(renderFrozenBlock(entries)) // byte-identical: nothing was lifted
+    })
+  })
 })
