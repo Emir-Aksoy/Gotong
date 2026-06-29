@@ -25,6 +25,12 @@ export { MemorySession, type MemorySessionOptions } from './session.js'
 export { MemoryToolset, type MemoryToolsetOptions } from './toolset.js'
 export { handleRetriever, lexicalRetriever, type MemoryRetriever } from './retriever.js'
 export {
+  embeddingRetriever,
+  cosineSimilarity,
+  type Embedder,
+  type EmbeddingRetrieverOptions,
+} from './embedding-retriever.js'
+export {
   MemoryAugmentedAgent,
   type MemoryAugmentedAgentOptions,
 } from './agent.js'

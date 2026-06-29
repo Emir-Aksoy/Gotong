@@ -88,6 +88,19 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
+  examples/butler-vector-recall:
+    dependencies:
+      '@aipehub/personal-memory':
+        specifier: workspace:*
+        version: link:../../packages/personal-memory
+      '@aipehub/services-sdk':
+        specifier: workspace:*
+        version: link:../../packages/services-sdk
+    devDependencies:
+      tsx:
+        specifier: ^4.7.0
+        version: 4.22.0
+
   examples/cafe-ops:
     dependencies:
       '@aipehub/core':

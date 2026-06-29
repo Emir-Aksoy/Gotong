@@ -1,0 +1,18 @@
+{
+  "name": "@aipehub/example-butler-vector-recall",
+  "version": "0.0.0",
+  "type": "module",
+  "private": true,
+  "description": "Semantic recall for the personal butler — embeddingRetriever (local embed + in-frame cosine) and a chroma-mcp-backed MemoryRetriever. The framework never computes a vector; the embedding model / vector store is injected.",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@aipehub/personal-memory": "workspace:*",
+    "@aipehub/services-sdk": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0"
+  }
+}
