@@ -167,9 +167,143 @@ export function isInsideRoots(target: string, roots: readonly string[]): boolean
   })
 }
 
+// ===========================================================================
+// Layer 2 — OS kernel jail (the real boundary). Pure argv/profile builders;
+// the runtime capability probe lives in `workspace-jail-detect.ts` (the only
+// part that spawns), keeping this module side-effect-free.
+// ===========================================================================
+
+/**
+ * Which OS kernel enforcer confines the spawned process tree:
+ *   - `sandbox-exec` — macOS Seatbelt (system built-in; Apple-deprecated but works)
+ *   - `bwrap`        — Linux bubblewrap (`apt install bubblewrap`, unprivileged userns)
+ *   - `none`         — no enforcer available → caller degrades to layer 1 + human gate
+ */
+export type FsJailKind = 'sandbox-exec' | 'bwrap' | 'none'
+
+/** A command transformed (or not) to run under an OS kernel jail. */
+export interface WrappedCommand {
+  /** The command to actually spawn (the enforcer, or the original when unjailed). */
+  readonly command: string
+  /** Its arguments (enforcer flags + the original command + its args, or just the original args). */
+  readonly args: string[]
+  /** True when an OS kernel jail wraps the process; false = unconfined (degrade + warn). */
+  readonly jailed: boolean
+  /** Which enforcer was applied. */
+  readonly kind: FsJailKind
+}
+
+export interface WrapWithFsJailOptions {
+  /** The original command. */
+  command: string
+  /** The original arguments (the freeform payload is fine here — the kernel confines it). */
+  args: readonly string[]
+  /** Directories the process may write to. Relative roots resolve against `cwd`. */
+  allowedRoots: readonly string[]
+  /** Working directory. Default `process.cwd()`. */
+  cwd?: string
+  /** Which enforcer to apply (from {@link detectFsJail}). */
+  kind: FsJailKind
+  /** Extra writable directories beyond the roots (e.g. a build cache). */
+  extraWritableRoots?: readonly string[]
+}
+
+/**
+ * System paths a normal process must still write to (temp, device nodes) so the
+ * jail doesn't break it. macOS lists them as Seatbelt writable subpaths; Linux
+ * gets them via dedicated bwrap flags (`--dev`, `--tmpfs`, `--proc`).
+ */
+export const MAC_ESSENTIAL_WRITABLE: readonly string[] = [
+  '/dev',
+  '/tmp',
+  '/private/tmp',
+  '/var/folders',
+  '/private/var/folders',
+]
+
+/**
+ * Wrap a command to run under the given OS kernel jail, confined to write only
+ * inside `allowedRoots` (+ essentials). Pure: builds the enforcer argv, never
+ * spawns. For `kind: 'none'` the command passes through unchanged with
+ * `jailed: false` so the caller applies its degradation (layer 1 + human gate +
+ * a loud warning — there is no real perimeter).
+ */
+export function wrapWithFsJail(opts: WrapWithFsJailOptions): WrappedCommand {
+  const cwd = opts.cwd ?? process.cwd()
+  const roots = [...opts.allowedRoots, ...(opts.extraWritableRoots ?? [])]
+    .map((r) => r.trim())
+    .filter(Boolean)
+    .map((r) => path.resolve(cwd, r))
+
+  if (opts.kind === 'sandbox-exec') {
+    const profile = buildSeatbeltProfile([...roots, ...MAC_ESSENTIAL_WRITABLE])
+    return {
+      command: 'sandbox-exec',
+      args: ['-p', profile, opts.command, ...opts.args],
+      jailed: true,
+      kind: 'sandbox-exec',
+    }
+  }
+  if (opts.kind === 'bwrap') {
+    return {
+      command: 'bwrap',
+      args: [...buildBwrapArgs(roots, cwd), opts.command, ...opts.args],
+      jailed: true,
+      kind: 'bwrap',
+    }
+  }
+  return { command: opts.command, args: [...opts.args], jailed: false, kind: 'none' }
+}
+
+/**
+ * Build a Seatbelt (SBPL) profile: allow everything by default, then DENY all
+ * file writes, then re-allow writes only under the given subpaths. Reads,
+ * network, and exec stay allowed (an agent needs them); only the write
+ * perimeter is enforced. Last matching rule wins in SBPL, so the re-allow
+ * overrides the blanket deny for the listed subpaths.
+ */
+export function buildSeatbeltProfile(writableRoots: readonly string[]): string {
+  const subpaths = [...new Set(writableRoots)].map((r) => `  (subpath ${sbplString(r)})`)
+  return [
+    '(version 1)',
+    '(allow default)',
+    '(deny file-write*)',
+    '(allow file-write*',
+    ...subpaths,
+    ')',
+  ].join('\n')
+}
+
+/**
+ * Build bubblewrap arguments for a writable jail: bind the whole filesystem
+ * read-only, then re-bind each allowed root read-write (a later bind overrides
+ * the ro-bind for its subtree). Fresh `/dev`, `/proc`, and a tmpfs `/tmp` keep a
+ * normal process working; `--die-with-parent` reaps the tree if the hub exits.
+ * Network is left shared (the agent needs it).
+ */
+export function buildBwrapArgs(writableRoots: readonly string[], cwd: string): string[] {
+  const args = [
+    '--ro-bind', '/', '/',
+    '--dev', '/dev',
+    '--proc', '/proc',
+    '--tmpfs', '/tmp',
+    '--die-with-parent',
+  ]
+  for (const r of [...new Set(writableRoots)]) {
+    args.push('--bind', r, r)
+  }
+  args.push('--chdir', cwd)
+  return args
+}
+
 // ---------------------------------------------------------------------------
 // internals
 // ---------------------------------------------------------------------------
+
+/** Quote a path as an SBPL string literal (escape backslash + double-quote). */
+function sbplString(p: string): string {
+  return `"${p.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
 
 function park(code: JailParkCode, reason: string): JailVerdict {
   return { park: true, reason, code }

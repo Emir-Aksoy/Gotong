@@ -151,6 +151,27 @@ export type { OutboundVerdict } from './peer-acl.js'
 export { jailArgv, isInsideRoots, DEFAULT_INTERPRETERS } from './workspace-jail.js'
 export type { JailVerdict, JailParkCode, JailArgvOptions } from './workspace-jail.js'
 
+// Layer 2 — OS kernel jail. Pure builders (`wrapWithFsJail` + Seatbelt/bwrap
+// generators) here; the spawning capability probe (`detectFsJail`) is separate.
+export {
+  wrapWithFsJail,
+  buildSeatbeltProfile,
+  buildBwrapArgs,
+  MAC_ESSENTIAL_WRITABLE,
+} from './workspace-jail.js'
+export type {
+  FsJailKind,
+  WrappedCommand,
+  WrapWithFsJailOptions,
+} from './workspace-jail.js'
+export { detectFsJail, resetFsJailCache } from './workspace-jail-detect.js'
+export type {
+  FsJailCapability,
+  JailProbe,
+  JailProbeResult,
+  DetectFsJailOptions,
+} from './workspace-jail-detect.js'
+
 export {
   FeedbackLedger,
   FileFeedbackStorage,
