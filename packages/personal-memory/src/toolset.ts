@@ -4,8 +4,9 @@
  *   - `remember`  durably record a fact or note. `semantic` (default) is a
  *                 lasting profile fact that surfaces in next session's frozen
  *                 block; `episodic` is a "what happened" note.
- *   - `recall`    search past memory (episodic + semantic) by substring. This
- *                 is the on-demand path — the frozen block only carries the
+ *   - `recall`    search past memory (episodic + semantic) by relevance —
+ *                 Chinese-aware keyword overlap, not bare substring. This is the
+ *                 on-demand path — the frozen block only carries the
  *                 curated semantic profile, so `recall` is how the model digs
  *                 up older raw history mid-turn.
  *   - `forget`    delete one entry by id (ids appear in the frozen block and
@@ -37,7 +38,7 @@ import {
   META_IMPORTANCE,
   type Importance,
 } from './importance.js'
-import { handleRetriever, type MemoryRetriever } from './retriever.js'
+import { lexicalRetriever, type MemoryRetriever } from './retriever.js'
 import { tierOf } from './tiers.js'
 
 export interface MemoryToolsetOptions {
@@ -49,8 +50,9 @@ export interface MemoryToolsetOptions {
   recallDefaultK?: number
   /**
    * Swappable backend for the `recall` tool (vector / hybrid / chroma-mcp).
-   * Default = the handle's own `recall` (substring). Writes always go to the
-   * handle regardless — the retriever only answers queries.
+   * Default = {@link lexicalRetriever} (Chinese-aware CJK bigram / Latin token
+   * overlap). Writes always go to the handle regardless — the retriever only
+   * answers queries.
    */
   retriever?: MemoryRetriever
 }
@@ -71,9 +73,9 @@ export class MemoryToolset implements LlmAgentToolset {
 
   constructor(opts: MemoryToolsetOptions) {
     this.memory = opts.memory
-    // Recall goes through the retriever (default wraps `memory.recall`); writes
-    // always hit the handle directly.
-    this.retriever = opts.retriever ?? handleRetriever(opts.memory)
+    // Recall goes through the retriever (default = Chinese-aware lexical rank);
+    // writes always hit the handle directly.
+    this.retriever = opts.retriever ?? lexicalRetriever(opts.memory)
     this.writableKinds = new Set(
       opts.writableKinds && opts.writableKinds.length > 0
         ? opts.writableKinds

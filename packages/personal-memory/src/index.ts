@@ -23,7 +23,7 @@ export {
 } from './frozen-block.js'
 export { MemorySession, type MemorySessionOptions } from './session.js'
 export { MemoryToolset, type MemoryToolsetOptions } from './toolset.js'
-export { handleRetriever, type MemoryRetriever } from './retriever.js'
+export { handleRetriever, lexicalRetriever, type MemoryRetriever } from './retriever.js'
 export {
   MemoryAugmentedAgent,
   type MemoryAugmentedAgentOptions,

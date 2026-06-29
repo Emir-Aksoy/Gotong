@@ -24,6 +24,7 @@
 import type { MemoryEntry, MemoryHandle, MemoryQuery } from '@aipehub/services-sdk'
 
 import { compareByImportanceThenRecency } from './importance.js'
+import { relevanceScore } from './relevance.js'
 
 export interface MemoryRetriever {
   /**
@@ -56,6 +57,53 @@ export function handleRetriever(memory: MemoryHandle): MemoryRetriever {
       const page = await memory.recall({ ...query, k: wideK })
       page.sort(compareByImportanceThenRecency)
       return k ? page.slice(0, k) : page
+    },
+  }
+}
+
+/**
+ * The Chinese-aware lexical retriever — the new DEFAULT for the `recall` tool.
+ *
+ * It pulls a recency window WITHOUT handing `text` to the backend (so the
+ * backend's substring filter can't pre-drop a non-contiguous CJK match), then
+ * ranks every candidate by {@link relevanceScore} (CJK bigram / Latin token
+ * overlap), breaking ties by importance-then-recency. It is a strict improvement
+ * over substring matching:
+ *
+ *   - a full-phrase hit still scores 1, Latin tokens still match, an empty query
+ *     still returns importance-then-recency (identical to {@link handleRetriever});
+ *   - but 「奶茶店」 now finds 「卖奶茶的店」 where the substring backend returned
+ *     nothing.
+ *
+ * With a query present, zero-relevance candidates are dropped (the tool still
+ * NARROWS, as a keyword search should). Scope: it ranks over the most recent
+ * `wideK` (cap 200) — for a consolidated, budget-bounded butler that is
+ * effectively the whole store; an injected vector retriever (C-M3) handles
+ * unbounded corpora.
+ */
+export function lexicalRetriever(memory: MemoryHandle): MemoryRetriever {
+  return {
+    async retrieve(query: MemoryQuery): Promise<MemoryEntry[]> {
+      const k = query.k
+      const wideK = k ? Math.min(k * 8, 200) : 200
+      // Drop `text` from the backend query — its substring filter would discard
+      // the very non-contiguous CJK matches this retriever exists to rank. We
+      // pull by recency (honoring kinds / since) and rank `text` ourselves.
+      const { text, ...rest } = query
+      const page = await memory.recall({ ...rest, k: wideK })
+
+      const q = text?.trim()
+      if (!q) {
+        page.sort(compareByImportanceThenRecency)
+        return k ? page.slice(0, k) : page
+      }
+
+      const ranked = page
+        .map((e) => ({ e, r: relevanceScore(q, e.text) }))
+        .filter((x) => x.r > 0)
+        .sort((a, b) => (a.r !== b.r ? b.r - a.r : compareByImportanceThenRecency(a.e, b.e)))
+        .map((x) => x.e)
+      return k ? ranked.slice(0, k) : ranked
     },
   }
 }
