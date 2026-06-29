@@ -448,6 +448,24 @@ importers:
         specifier: workspace:*
         version: link:../../packages/core
 
+  examples/personal-butler:
+    dependencies:
+      '@aipehub/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@aipehub/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
+      '@aipehub/personal-butler':
+        specifier: workspace:*
+        version: link:../../packages/personal-butler
+      '@aipehub/personal-memory':
+        specifier: workspace:*
+        version: link:../../packages/personal-memory
+      '@aipehub/services-sdk':
+        specifier: workspace:*
+        version: link:../../packages/services-sdk
+
   examples/personal-coding-hub:
     dependencies:
       '@aipehub/cli-agent':
