@@ -190,6 +190,11 @@ function validateAgentBody(body: Record<string, unknown>): ParsedAgent {
   if (body.heartbeat !== undefined) {
     managed.heartbeat = validateHeartbeatSpec(body.heartbeat, 'heartbeat')
   }
+  // Butler fold-in opt-in marker: spawn a chat agent as a resident
+  // PersonalButlerAgent (cross-session memory + governed loop). Pure
+  // passthrough — the host owns the upgrade and can also default it on via
+  // AIPE_BUTLER, so most deployments never set this per-agent.
+  if (typeof body.butler === 'boolean') managed.butler = body.butler
   const out: ParsedAgent = { id: body.id, capabilities, managed }
   if (typeof body.displayName === 'string') out.displayName = body.displayName
   return out

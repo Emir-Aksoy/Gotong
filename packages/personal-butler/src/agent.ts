@@ -48,8 +48,16 @@ import { GovernedActionToolset, type GovernedVerdict } from './governed-toolset.
 
 export interface PersonalButlerAgentOptions
   extends Omit<MemoryAugmentedAgentOptions, 'tools'> {
-  /** The approval-gated sensitive-action toolset (change hub / spend / send / delete). */
-  governed: GovernedActionToolset
+  /**
+   * The approval-gated sensitive-action toolset (change hub / spend / send /
+   * delete). OPTIONAL: omit it for a PURE-MEMORY butler — one that remembers
+   * across sessions and runs benign tools inline, but has no governed actions to
+   * park. The host wires it this way for the IM fold-in's first cut (memory only,
+   * near-zero behaviour change for a live chat agent), then injects the governed
+   * steward action set in a later milestone. With no governed toolset the loop
+   * simply never parks for approval — every tool is benign.
+   */
+  governed?: GovernedActionToolset
   /**
    * Benign toolsets composed alongside memory + governed — e.g. a
    * `DispatchToolset` (sub-agents), a workflow-start toolset, an `McpToolset`.
@@ -60,8 +68,9 @@ export interface PersonalButlerAgentOptions
 
 export class PersonalButlerAgent extends MemoryAugmentedAgent {
   /** Held for GATING (governs / classify / describe). Execution routes through
-   *  the composed `this.toolset`, which already includes this. */
-  private readonly governed: GovernedActionToolset
+   *  the composed `this.toolset`, which already includes it. `undefined` for a
+   *  pure-memory butler — the loop then never parks (every tool is benign). */
+  private readonly governed: GovernedActionToolset | undefined
 
   constructor(opts: PersonalButlerAgentOptions) {
     const benignList = opts.benign
@@ -69,9 +78,14 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
         ? opts.benign
         : [opts.benign]
       : []
-    // Benign first, governed last — distinct names, so this is just a stable
-    // ordering. `MemoryAugmentedAgent` further composes memory tools in front.
-    const composed = ComposedToolset.of(...benignList, opts.governed)
+    // Benign first, governed last (distinct names → a stable ordering). A
+    // pure-memory butler (no `governed`) composes only its benign toolsets; with
+    // neither, `tools` stays undefined and `MemoryAugmentedAgent` still composes
+    // the memory tools in front — so the butler ALWAYS has memory either way.
+    const extras: LlmAgentToolset[] = opts.governed
+      ? [...benignList, opts.governed]
+      : benignList
+    const composed = extras.length > 0 ? ComposedToolset.of(...extras) : undefined
     // The resident butler keeps a multi-topic long-term memory, so its frozen
     // block is CLUSTERED by default (画像 / 项目 / 人物 / 承诺 / 其它). A caller
     // can override `tierConfig` (or pass a custom catalog); a plain
@@ -86,7 +100,7 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     // caller can still force any of them off.
     super({
       ...opts,
-      tools: composed,
+      ...(composed ? { tools: composed } : {}),
       tierConfig: opts.tierConfig ?? DEFAULT_TIERS,
       frozenActiveOnly: opts.frozenActiveOnly ?? true,
       frozenShowLinks: opts.frozenShowLinks ?? true,
@@ -153,9 +167,11 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
       // / side-effecting — don't double-call it across the park scan and the
       // execution pass).
       const verdicts = new Map<string, GovernedVerdict>()
+      const governed = this.governed
       for (const tu of toolUses) {
-        if (this.governed.governs(tu.name)) {
-          verdicts.set(tu.id, await this.governed.classify(tu.name, tu.input))
+        // No governed toolset → governs nothing → no verdicts → never parks.
+        if (governed?.governs(tu.name)) {
+          verdicts.set(tu.id, await governed.classify(tu.name, tu.input))
         }
       }
 
@@ -174,7 +190,9 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
               toolUses,
               approval: {
                 toolName: park.name,
-                title: this.governed.describe(park.name, park.input),
+                // A park implies a governed 'approve' verdict, so `governed` is
+                // defined here (the verdict could only be set when it governs).
+                title: governed!.describe(park.name, park.input),
                 reason: v.reason,
               },
             },
@@ -239,7 +257,9 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
 
     const toolResultBlocks: LlmToolResultBlock[] = []
     for (const tu of gate.pending.toolUses) {
-      if (this.governed.governs(tu.name)) {
+      // A pure-memory butler never reaches a governed park, but guard anyway:
+      // undefined governs nothing → the tool runs inline as benign.
+      if (this.governed?.governs(tu.name)) {
         if (decision.approved) {
           toolResultBlocks.push(await this.callOne(tu)) // cleared by a human → execute
         } else {

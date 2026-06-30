@@ -1193,6 +1193,19 @@ export interface ManagedAgentSpec {
    * Absent → no heartbeat (default); zero cost for agents that don't opt in.
    */
   heartbeat?: HeartbeatSpec
+  /**
+   * Opt-in marker: spawn this `chat`-capable LLM agent as a resident
+   * `PersonalButlerAgent` (cross-session memory + governed tool-loop) instead
+   * of a plain `LlmAgent`. The host owns the upgrade — it builds the butler via
+   * an injected factory so the agent stays the SAME live managed participant
+   * (admin / lifecycle / restart / test-connection all unchanged), gaining a
+   * per-user memory routed by `task.origin.userId`.
+   *
+   * The host can also default this ON for the chat agent via `AIPE_BUTLER`, so
+   * a typical single-bot deployment needs no per-agent flag. Absent → host
+   * default (zero behaviour change for a non-chat agent either way).
+   */
+  butler?: boolean
 }
 
 /**

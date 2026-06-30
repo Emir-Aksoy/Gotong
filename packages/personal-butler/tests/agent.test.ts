@@ -338,6 +338,70 @@ describe('PersonalButlerAgent — mixed round parks the WHOLE round', () => {
   })
 })
 
+describe('PersonalButlerAgent — pure-memory (no governed toolset)', () => {
+  // The IM fold-in's first cut: a butler that REMEMBERS across sessions but has
+  // no approval-gated actions yet. With `governed` omitted the loop can never
+  // park — every tool is benign — so a live chat agent gains memory with
+  // near-zero behaviour change.
+  it('runs benign tools inline and never parks when constructed without `governed`', async () => {
+    const log: string[] = []
+    const provider = new ScriptProvider([
+      toolTurn({ id: 't1', name: 'echo', input: { msg: 'hi' } }),
+      textTurn('done'),
+    ])
+    const agent = new PersonalButlerAgent({
+      id: 'butler',
+      provider,
+      memory: emptyMemory(),
+      system: 'base',
+      captureTurns: false,
+      benign: benignToolset(log),
+      // no `governed`
+    })
+
+    const res = await agent.onTask(task('a', 'say hi'))
+    expect(okText(res)).toBe('done')
+    expect(log).toEqual(['echo:hi']) // benign ran inline; nothing parked
+  })
+
+  it('works with NEITHER benign nor governed — memory only, a plain turn finishes', async () => {
+    // Exercises the `composed === undefined` constructor path: the base still
+    // composes the memory tools in front, so the butler always has memory.
+    const provider = new ScriptProvider([textTurn('hello, I remember you')])
+    const agent = new PersonalButlerAgent({
+      id: 'butler',
+      provider,
+      memory: emptyMemory(),
+      system: 'base',
+      captureTurns: false,
+    })
+
+    const res = await agent.onTask(task('a', 'hi'))
+    expect(okText(res)).toBe('hello, I remember you')
+  })
+
+  it('captures the turn into episodic memory so a later session can recall it', async () => {
+    // Capture is THE cross-session-memory mechanism — extractive (no model call),
+    // it runs in handleTask whether or not the model touched a tool. With no
+    // governed toolset (pure-memory butler) it still records the turn verbatim.
+    const mem = emptyMemory()
+    const provider = new ScriptProvider([textTurn('好的，我记住了')])
+    const agent = new PersonalButlerAgent({
+      id: 'butler',
+      provider,
+      memory: mem,
+      system: 'base',
+      captureTurns: true, // turn-end capture ON (the default)
+    })
+
+    const res = await agent.onTask(task('a', '我在做一个奶茶店项目'))
+    expect(res.kind).toBe('ok')
+    // The episodic log holds "User: …奶茶店…\nButler: 好的，我记住了".
+    const stored = await mem.list()
+    expect(stored.some((e) => e.kind === 'episodic' && e.text.includes('奶茶店'))).toBe(true)
+  })
+})
+
 describe('PersonalButlerAgent — bounded', () => {
   it('aborts after maxToolRounds instead of looping forever', async () => {
     const log: string[] = []
