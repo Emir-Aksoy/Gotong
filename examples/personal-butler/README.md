@@ -41,11 +41,14 @@ memory engine — all of it living in `MemoryEntry.meta`, zero schema change:
 | **[4f] MR1** | The default recall is an **inverted index over the whole store**, so a fact buried under 60 newer entries — invisible to a recency window — is still found. |
 | **[4g] MR2** | A background **"dreaming" sweep** promotes what gets asked about (query-diversity) into a distilled profile and prunes stale, never-asked chatter — bounded & reversible, with a DREAMS.md diary. |
 | **[4h] MR3** | The butler **authors a skill** from a 3×-repeated how-to, **self-improves** it in place (`refine_procedure`, same id), then **merges** a near-duplicate into one master "umbrella" — **closing (not deleting)** the originals and back-linking them. `activeProcedures` then yields one clean skill; the host projects exactly that set into `SKILL.md`, the closed originals dropping out for free (auditable & reversible, beating Hermes' destructive archive). |
+| **[5] MR4** | The **6h maintenance heartbeat** — OpenClaw / Hermes "every few hours, tidy yourself" — as **one composed `MemoryReviewer` fired once**: ① 复盘技能 (`umbrellaReviewer` merges redundant skills) · ② 清输出 (`cleanOutputsReviewer` prunes stale `working` scratch) · ③ 合并记忆 (`dreamingReviewer` promotes asked-about facts, prunes never-asked chatter). `composeReviewers` **joins each sub-summary into one line** — and that line is exactly what the host's `statusProjectingReviewer` writes to `STATUS.md` (④写状态), while the resulting `activeProcedures` is what it projects into `SKILL.md`. |
 
 The aux model behind MR3's authoring/merge is a deterministic mock here; in
 production it's the agent itself calling its `LlmProvider`. The leaf stays
-LLM-free — these are `MemoryReviewer`s a heartbeat composes (the 6h maintenance
-pass, MR4).
+LLM-free — these are `MemoryReviewer`s a heartbeat composes. MR4 is that
+composition: the 6h maintenance pass. The host adds only two file projections
+(`SKILL.md` = the active skill set, `STATUS.md` = what the last tick did);
+forget-all wipes both, like `DREAMS.md` — all rebuildable from the jsonl.
 
 ## How it maps to production
 

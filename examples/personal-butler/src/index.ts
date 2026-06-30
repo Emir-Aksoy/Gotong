@@ -30,6 +30,7 @@ import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@aip
 import {
   activeProcedures,
   buildInvertedIndex,
+  cleanOutputsReviewer,
   closedMeta,
   composeReviewers,
   consolidate,
@@ -584,6 +585,84 @@ async function main(): Promise<void> {
   // show this one umbrella, the closed originals dropping out for free.
   console.log('  [4h] MR3 技能自创+合并: 3 次重复操作写成「手冲咖啡」技能, 工具就地补一步, 再与近似技能合并成 1 个 umbrella (原始 2 个封存可回溯) ✓\n')
 
+  // ── [5] MR4 — the 6h maintenance heartbeat: ONE composed tick does all the upkeep ──
+  // The OpenClaw / Hermes "every few hours, tidy yourself" pass, as ONE composed
+  // MemoryReviewer the heartbeat fires. It folds the long-term upkeep into a single
+  // tick: ① 复盘技能 (umbrellaReviewer merges redundant skills) · ② 清输出
+  // (cleanOutputsReviewer prunes stale `working` scratch) · ③ 合并记忆
+  // (dreamingReviewer promotes asked-about facts, prunes never-asked chatter). Each
+  // sub-reviewer returns a one-line summary and composeReviewers JOINS them — and
+  // that merged line is exactly what the host's `statusProjectingReviewer` writes to
+  // STATUS.md (④写状态), while the resulting `activeProcedures` is what it projects
+  // into SKILL.md. The leaf stays LLM-free: every job is a deterministic reviewer;
+  // the host only adds the two file projections (SKILL.md / STATUS.md).
+  const MT_NOW = 5_000_000
+  const mtMem = inMemoryHandle()
+  const mtPatch = mtMem.patchMeta!.bind(mtMem)
+
+  // ① 复盘技能 — two near-duplicate skills the umbrella pass will fold into one.
+  await mtMem.remember({ kind: 'semantic', text: '手冲咖啡', meta: { form: 'procedure', steps: ['烧水', '磨豆', '注水'] } })
+  await mtMem.remember({ kind: 'semantic', text: '手冲咖啡法', meta: { form: 'procedure', steps: ['煮水', '研磨', '冲泡'] } })
+  // ② 清输出 — a stale `working` scratch (tool dump) + a real profile that must survive.
+  await mtMem.remember({ kind: 'working', text: '工具输出: 临时草稿 abc' })
+  await mtMem.remember({ kind: 'semantic', text: '主人的画像: 在做奶茶店项目' })
+  // ③ 合并记忆 — an asked-about hot fact (earns query-diversity) + stale chatter.
+  const mtQueryHit: MemoryQueryHitWriter = (e, fp) => {
+    const delta = queryHitMeta(e, fp)
+    return delta ? Promise.resolve(mtPatch(e.id, delta)).then(() => {}) : Promise.resolve()
+  }
+  const mtHot = await mtMem.remember({ kind: 'episodic', text: '主人最爱喜茶的多肉葡萄', meta: { importance: 5 } })
+  await mtMem.remember({ kind: 'episodic', text: '随口说一句今天有点热', meta: { importance: 1 } })
+  const mtTools = new MemoryToolset({ memory: mtMem, queryHit: mtQueryHit })
+  await mtTools.callTool('recall', { query: '喜茶', kinds: ['episodic'] }) // two DIFFERENT
+  await mtTools.callTool('recall', { query: '葡萄', kinds: ['episodic'] }) // questions → diversity 2
+
+  // THE 6h MAINTENANCE PASS — one composed reviewer, fired once (same staleMs:1000
+  // small-timestamp trick as [4g] so the demo's tiny ts count as stale).
+  const maintenance = composeReviewers(
+    umbrellaReviewer({
+      merge: async () => ({ name: '手冲咖啡(合并)', steps: ['烧水', '磨豆', '注水'] }),
+      minSimilarity: 0.3,
+      minCluster: 2,
+    }),
+    cleanOutputsReviewer({ staleMs: 1000 }),
+    dreamingReviewer({
+      summarize: async () => '主人偏好: 喜茶的多肉葡萄(常被问起)',
+      promoteGate: 8,
+      pruneGate: 1,
+      staleMs: 1000,
+    }),
+  )
+  const mtOut = await maintenance({
+    memory: mtMem,
+    episodic: await mtMem.recall({ kinds: ['episodic'], k: 50 }),
+    now: MT_NOW,
+  })
+
+  // The merged summary reports EACH job — this IS the line host writes to STATUS.md.
+  const mtSummary = mtOut.summary ?? ''
+  assert(/merged \d+ skill cluster/.test(mtSummary), '[5] MR4 ①: maintenance summary must report the skill merge (复盘技能)')
+  assert(/cleaned \d+ stale output/.test(mtSummary), '[5] MR4 ②: maintenance summary must report the scratch cleanup (清输出)')
+  assert(/dreamed: promoted [1-9]/.test(mtSummary), '[5] MR4 ③: maintenance summary must report the dreaming promote (合并记忆)')
+
+  // ① SKILL.md would show ONE umbrella — the closed originals drop out for free.
+  const mtActive = activeProcedures(await mtMem.list({ kind: 'semantic', limit: 50 }), MT_NOW)
+  assert(
+    mtActive.length === 1 && isUmbrella(mtActive[0]!),
+    '[5] MR4 ①: after maintenance exactly one umbrella skill is active (what SKILL.md projects)',
+  )
+  // ② the stale working scratch is gone; the durable profile is untouched.
+  assert((await mtMem.list({ kind: 'working', limit: 50 })).length === 0, '[5] MR4 ②: stale working scratch must be pruned')
+  assert(
+    (await mtMem.list({ kind: 'semantic', limit: 50 })).some((e) => e.text.includes('奶茶店')),
+    '[5] MR4 ②: the durable profile must NOT be touched by the cleanup',
+  )
+  // ③ the asked-about fact is folded into a profile; the never-asked chatter pruned.
+  const mtEp = await mtMem.list({ kind: 'episodic', limit: 50 })
+  assert(!mtEp.some((e) => e.id === mtHot.id), '[5] MR4 ③: the asked-about fact must be folded into the profile')
+  assert(!mtEp.some((e) => e.text.includes('有点热')), '[5] MR4 ③: the never-asked chatter must be pruned')
+  console.log(`  [5] MR4 6h 维护心跳: 一拍把 ①复盘技能 ②清输出 ③合并记忆 全做了 → STATUS.md 那行: 「${mtSummary}」 ✓\n`)
+
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
   console.log('✅ 管家不变量 + 长期记忆增强全部成立:')
   console.log('   [1] 跨会话记住了「奶茶店项目」')
@@ -593,6 +672,7 @@ async function main(): Promise<void> {
   console.log('   [MR1] 默认召回索引跨整个 store, 翻出窗口外的旧记忆')
   console.log('   [MR2] 后台复盘把被问起的记忆升进画像、把没人问的闲聊封存')
   console.log('   [MR3] 重复操作自创技能、工具就地自改、近似技能合并成 umbrella(原始封存可回溯)')
+  console.log('   [MR4] 6h 维护心跳一拍组合复盘技能/清输出/合并记忆, 合并 summary→STATUS.md、活技能→SKILL.md')
   console.log(`   (剩余 agent: ${[...registry].join(', ')})`)
 }
 
