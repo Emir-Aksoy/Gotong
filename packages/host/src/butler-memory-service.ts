@@ -43,6 +43,7 @@ import type { WebServerOptions } from '@aipehub/web'
 import { openButlerDreamDiary, type ButlerDreamDiary } from './personal-butler-dreams.js'
 import { openButlerMemory } from './personal-butler-memory.js'
 import { openButlerSkillFile, type ButlerSkillFile } from './personal-butler-skills.js'
+import { openButlerStatusFile, type ButlerStatusFile } from './personal-butler-status.js'
 
 // Derive the surface contract from the web opts — single source of truth, no
 // re-export needed (same pattern as HostMeCredentialsService).
@@ -84,6 +85,8 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
   private readonly diaries = new Map<string, ButlerDreamDiary>()
   /** Per-user master skill index (SKILL.md) — a derived projection, removed on forget-all. */
   private readonly skillFiles = new Map<string, ButlerSkillFile>()
+  /** Per-user maintenance status (STATUS.md) — read for the "上次维护" line, removed on forget-all. */
+  private readonly statusFiles = new Map<string, ButlerStatusFile>()
 
   constructor(opts: HostButlerMemoryServiceOpts) {
     this.rootDir = opts.rootDir
@@ -95,11 +98,13 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
     const mem = this.open(userId)
     // Semantic = the distilled profile ("what the butler knows about me");
     // episodic = recently captured turns. Both newest-first, content only.
-    // The dream diary's latest sweep rides along — read-only "上次复盘" reassurance.
-    const [profile, recent, lastDream] = await Promise.all([
+    // The dream diary's latest sweep rides along — read-only "上次复盘" reassurance;
+    // the 6h maintenance status (MR4) rides along too — "上次维护" liveness.
+    const [profile, recent, lastDream, lastStatus] = await Promise.all([
       mem.recall({ kinds: ['semantic'], k: 200 }),
       mem.recall({ kinds: ['episodic'], k: RECENT_CAPTURE_LIMIT }),
       this.diary(userId).readLatest(),
+      this.statusFile(userId).read(),
     ])
     // One `now` per call so each entry's bitemporal `active` flag is consistent.
     const now = this.clock()
@@ -107,6 +112,7 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
       profile: profile.map((e) => projectEntry(e, now)),
       recent: recent.map((e) => projectEntry(e, now)),
       ...(lastDream ? { lastDream } : {}),
+      ...(lastStatus ? { lastStatus } : {}),
     }
   }
 
@@ -129,11 +135,13 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
 
   async forgetAll(userId: string): Promise<void> {
     // Right to be forgotten — clear every kind for this member's butler AND the
-    // derived files (§八: forget-all also wipes the per-user dream diary + the
-    // master skill index, both rebuildable projections of the now-empty jsonl).
+    // derived files (§八: forget-all also wipes the per-user dream diary, the
+    // master skill index AND the maintenance status — all rebuildable projections
+    // of the now-empty jsonl).
     await this.open(userId).clear()
     await this.diary(userId).remove()
     await this.skillFile(userId).remove()
+    await this.statusFile(userId).remove()
     this.logger.info('member cleared all butler memory', { userId })
   }
 
@@ -163,6 +171,14 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
     if (cached) return cached
     const file = openButlerSkillFile({ rootDir: this.rootDir, userId, logger: this.logger })
     this.skillFiles.set(userId, file)
+    return file
+  }
+
+  private statusFile(userId: string): ButlerStatusFile {
+    const cached = this.statusFiles.get(userId)
+    if (cached) return cached
+    const file = openButlerStatusFile({ rootDir: this.rootDir, userId, logger: this.logger })
+    this.statusFiles.set(userId, file)
     return file
   }
 

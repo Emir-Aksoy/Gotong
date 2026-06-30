@@ -531,6 +531,14 @@ export interface ButlerDreamSummary {
   profileBytes?: number
 }
 
+/** A one-line summary of the butler's most recent 6h maintenance pass (MR4 ④写状态). */
+export interface ButlerStatusSummary {
+  /** Epoch ms the maintenance pass ran. */
+  writtenAt: number
+  /** What the pass did this tick (the composed reviewer's summary; '' when nothing changed). */
+  summary: string
+}
+
 /** What the privacy panel shows: the distilled profile + recent captured turns. */
 export interface ButlerMemorySnapshot {
   /** Semantic entries — the durable "what the butler knows about me". */
@@ -543,6 +551,12 @@ export interface ButlerMemorySnapshot {
    * ("提升 X 条 / 封存 Y 条"). Omitted when no sweep has run yet.
    */
   lastDream?: ButlerDreamSummary
+  /**
+   * The last 6h "维护" (maintenance pass), if one has run. Read-only liveness — the
+   * member sees the butler self-maintains on a heartbeat and what the last tick
+   * did. Omitted until a maintenance pass has run.
+   */
+  lastStatus?: ButlerStatusSummary
 }
 
 export interface ButlerMemorySurface {

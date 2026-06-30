@@ -1784,6 +1784,8 @@
       meButlerMemRecent: '最近记下的',
       meButlerMemLastDream: (promoted, pruned) =>
         `上次复盘：提升 ${promoted} 条进画像 / 封存 ${pruned} 条陈旧记忆`,
+      meButlerMemLastMaint: (summary) =>
+        summary ? `上次维护：${summary}` : '上次维护：无需改动',
       meButlerMemKindSemantic: '画像',
       meButlerMemKindEpisodic: '记录',
       meButlerMemForget: '忘掉这条',
@@ -3636,6 +3638,8 @@
       meButlerMemRecent: 'Recently noted',
       meButlerMemLastDream: (promoted, pruned) =>
         `Last review: promoted ${promoted} into the profile / archived ${pruned} stale memories`,
+      meButlerMemLastMaint: (summary) =>
+        summary ? `Last maintenance: ${summary}` : 'Last maintenance: nothing to change',
       meButlerMemKindSemantic: 'Profile',
       meButlerMemKindEpisodic: 'Note',
       meButlerMemForget: 'Forget this',

@@ -3232,6 +3232,18 @@
           dreamEl.hidden = true
         }
       }
+      // MR4: read-only "上次维护" line from the last 6h maintenance pass (liveness).
+      const maintEl = document.getElementById('me-butler-mem-maint')
+      if (maintEl) {
+        const s = j?.lastStatus
+        if (s && typeof s.writtenAt === 'number') {
+          maintEl.textContent = t('meButlerMemLastMaint', escape(String(s.summary || '')))
+          maintEl.hidden = false
+        } else {
+          maintEl.textContent = ''
+          maintEl.hidden = true
+        }
+      }
       profileEl.innerHTML = profile.length
         ? profile.map(renderMemCard).join('')
         : `<p class="me-meta">${t('meButlerMemEmpty')}</p>`
