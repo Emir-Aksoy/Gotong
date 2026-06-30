@@ -42,6 +42,7 @@ import type { WebServerOptions } from '@aipehub/web'
 
 import { openButlerDreamDiary, type ButlerDreamDiary } from './personal-butler-dreams.js'
 import { openButlerMemory } from './personal-butler-memory.js'
+import { openButlerSkillFile, type ButlerSkillFile } from './personal-butler-skills.js'
 
 // Derive the surface contract from the web opts — single source of truth, no
 // re-export needed (same pattern as HostMeCredentialsService).
@@ -81,6 +82,8 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
   private readonly handles = new Map<string, MemoryHandle>()
   /** Per-user dream diary (DREAMS.md) — read for the "上次复盘" line, removed on forget-all. */
   private readonly diaries = new Map<string, ButlerDreamDiary>()
+  /** Per-user master skill index (SKILL.md) — a derived projection, removed on forget-all. */
+  private readonly skillFiles = new Map<string, ButlerSkillFile>()
 
   constructor(opts: HostButlerMemoryServiceOpts) {
     this.rootDir = opts.rootDir
@@ -126,9 +129,11 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
 
   async forgetAll(userId: string): Promise<void> {
     // Right to be forgotten — clear every kind for this member's butler AND the
-    // derived dream diary (§八: forget-all also wipes the per-user derived files).
+    // derived files (§八: forget-all also wipes the per-user dream diary + the
+    // master skill index, both rebuildable projections of the now-empty jsonl).
     await this.open(userId).clear()
     await this.diary(userId).remove()
+    await this.skillFile(userId).remove()
     this.logger.info('member cleared all butler memory', { userId })
   }
 
@@ -151,6 +156,14 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
     const diary = openButlerDreamDiary({ rootDir: this.rootDir, userId, logger: this.logger })
     this.diaries.set(userId, diary)
     return diary
+  }
+
+  private skillFile(userId: string): ButlerSkillFile {
+    const cached = this.skillFiles.get(userId)
+    if (cached) return cached
+    const file = openButlerSkillFile({ rootDir: this.rootDir, userId, logger: this.logger })
+    this.skillFiles.set(userId, file)
+    return file
   }
 
   /** The wall clock (injectable for deterministic tests) — used to flag each

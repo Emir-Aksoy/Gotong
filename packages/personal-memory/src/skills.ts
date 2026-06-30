@@ -175,6 +175,11 @@ export function isProcedurized(e: Pick<MemoryEntry, 'meta'>): boolean {
   return typeof v === 'string' && v.length > 0
 }
 
+/** Whether a procedure is a MERGED umbrella skill (vs a directly-recorded one). */
+export function isUmbrella(e: Pick<MemoryEntry, 'meta'>): boolean {
+  return (e.meta as { umbrella?: unknown } | undefined)?.umbrella === true
+}
+
 /**
  * Find repeated multi-step patterns in `episodic` — clusters of `>= minOccurrences`
  * mutually-similar entries — as skill candidates. Entries already turned into a

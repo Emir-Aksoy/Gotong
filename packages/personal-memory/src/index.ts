@@ -250,6 +250,7 @@ export {
   umbrellaReviewer,
   activeProcedures,
   isProcedurized,
+  isUmbrella,
   DEFAULT_AUTHOR_SYSTEM,
   DEFAULT_MERGE_SYSTEM,
   DEFAULT_AUTHOR_MIN_OCCURRENCES,
