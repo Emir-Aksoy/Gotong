@@ -120,4 +120,55 @@ describe('MemorySession', () => {
     expect(next).toContain('second fact')
     expect(next).toContain('first fact')
   })
+
+  // ── refresh(): per-task re-recall for the always-on butler ─────────────────
+  // The default caches forever (the test above). An always-on butler instance
+  // calls refresh() between messages so what it just captured surfaces next turn.
+
+  it('refresh() makes the next ensureFrozenBlock re-recall and pick up new memory', async () => {
+    const mem = makeFakeMemory([entry('a', 'semantic', 'first fact', 100)])
+    const s = new MemorySession({ memory: mem })
+    const before = await s.ensureFrozenBlock()
+    expect(before).toContain('first fact')
+    expect(mem.recallCount).toBe(1)
+
+    await mem.remember({ kind: 'semantic', text: 'second fact' })
+    // Without refresh the cache holds (proving refresh is what changes it).
+    expect((await s.ensureFrozenBlock())).toBe(before)
+    expect(mem.recallCount).toBe(1)
+
+    s.refresh()
+    const after = await s.ensureFrozenBlock()
+    expect(mem.recallCount).toBe(2) // re-recalled
+    expect(after).toContain('second fact')
+    expect(after).toContain('first fact')
+  })
+
+  it('refresh() clears a pending block so a concurrent recompute is honored', async () => {
+    const mem = makeFakeMemory([entry('a', 'semantic', 'x', 100)])
+    const s = new MemorySession({ memory: mem })
+    await s.ensureFrozenBlock()
+    s.refresh()
+    expect(s.isReady).toBe(false) // memoized block dropped
+    expect(s.frozenBlockSync()).toBe('') // synchronous read degrades safely
+    await s.ensureFrozenBlock()
+    expect(s.isReady).toBe(true)
+  })
+
+  it('refresh(now) re-pins the activeOnly clock so newly-closed facts drop', async () => {
+    const mem = makeFakeMemory([
+      entry('live', 'semantic', '现住槟城', 200, { validFrom: 100 }),
+      entry('soon', 'semantic', '暂住吉隆坡', 150, { validFrom: 100, validTo: 250 }),
+    ])
+    // now = 200: the KL edge is still open (validTo 250 > 200) → both show.
+    const s = new MemorySession({ memory: mem, activeOnly: true, now: 200 })
+    const first = await s.ensureFrozenBlock()
+    expect(first).toContain('吉隆坡')
+
+    // Advance the clock past the KL edge's validTo and refresh → it drops.
+    s.refresh(300)
+    const after = await s.ensureFrozenBlock()
+    expect(after).toContain('槟城')
+    expect(after).not.toContain('吉隆坡')
+  })
 })

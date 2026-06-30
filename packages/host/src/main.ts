@@ -182,7 +182,7 @@ import { createSettingOpsService } from './setting-ops-service.js'
 // destructive-offline are both refused by the chokepoint. Built inline below
 // once identity + the live health surface are in scope.
 import { listOpsCommands, runOpsCommand } from './ops-core.js'
-import { LocalAgentPool } from './local-agent-pool.js'
+import { LocalAgentPool, type ButlerFactory } from './local-agent-pool.js'
 import { loadPricingTable } from './pricing.js'
 import { McpProxyHost, fetchPeerSharedMcp } from './mcp-proxy.js'
 import {
@@ -225,6 +225,14 @@ import { HostMeAgentService } from './me-agent-service.js'
 import { HostMeAgentGrantsService } from './me-agent-grants-service.js'
 import { HostMeCredentialsService } from './me-credentials-service.js'
 import { HostButlerMemoryService } from './butler-memory-service.js'
+// BF-M4 — the resident butler fold-in: the registered `chat` agent is built as a
+// per-user `ButlerRouter` (one memory namespace per member) so the IM channel's
+// many bound users each get a butler that remembers ONLY them across sessions.
+import { createButlerRouter } from './butler-router.js'
+import { openButlerMemory } from './personal-butler-memory.js'
+import { openButlerRecallIndex } from './butler-recall-index.js'
+import { butlerApprovalItemFor } from './personal-butler-escalation.js'
+import { PersonalButlerAgent } from '@aipehub/personal-butler'
 import { HostMeImService } from './me-im-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
 import {
@@ -890,6 +898,12 @@ async function main(): Promise<void> {
   // this sink to turn an ACP permission park into a /me approval item; it is a
   // no-op for every other kind of park (and unset when escalation isn't wired).
   let acpEscalationSink: ((task: Task, by: string, state: unknown) => Promise<void>) | undefined
+  // BF-M4 — the sibling sink for the resident butler. A governed butler action
+  // parks with a `ButlerGateState`; this turns that park into a /me approval item
+  // (no-op for a pure-memory butler, which never parks for approval). Set further
+  // down once the member inbox is resolved; the approver is the MEMBER themselves
+  // (you clear your own butler's dangerous moves), taken from `task.origin.userId`.
+  let butlerEscalationSink: ((task: Task, by: string, state: unknown) => Promise<void>) | undefined
   const hub = new Hub({
     space,
     crossHubResolver: (_to, task) => {
@@ -918,6 +932,11 @@ async function main(): Promise<void> {
             // /me approval here (the leaf adapter can't reach the inbox). Awaited
             // so the item exists before dispatch returns `suspended`.
             await acpEscalationSink?.(task, by, suspend.state)
+            // BF-M4 — same for a resident butler that parked a governed action.
+            // Returns null (no write) for every non-governed park, so calling it
+            // for every suspend is safe (no double-write with the ACP / inbox /
+            // approval-gate sinks, which key off their own state shapes).
+            await butlerEscalationSink?.(task, by, suspend.state)
           },
         }
       : {}),
@@ -1226,7 +1245,64 @@ async function main(): Promise<void> {
   }
   const uploadsRef = uploads
 
+  // BF-M4 — the resident butler fold-in. A `chat`-capable managed LLM row is
+  // spawned as a per-user `ButlerRouter` instead of a plain `LlmAgent`: it
+  // registers under the SAME id (admin / lifecycle / restart / test-connection
+  // unchanged) but routes by `task.origin.userId` to a butler with that member's
+  // OWN memory namespace. This is what makes the IM bot REMEMBER each member
+  // across sessions — the headline reason for the fold-in.
+  //
+  // ON by default (`AIPE_BUTLER` ∈ {0,false,off,no} turns it OFF; a per-agent
+  // `managed.butler: false` opts a single row out). The butler is currently
+  // PURE-MEMORY (no `governed` action set — BF-M7) so behaviour change for a live
+  // chat agent is near-zero: it gains cross-session memory + the benign tools the
+  // row already had, and never parks for approval. Memory lives under the SAME
+  // `<space>/butler/memory` subtree the /me privacy view reads (below), so "what
+  // the butler remembers" and "what a member can erase" are one and the same bytes.
+  const butlerMemoryRoot = join(space.root, 'butler', 'memory')
+  const butlerEnv = (process.env.AIPE_BUTLER ?? '').trim().toLowerCase()
+  const butlerDefaultOn = !['0', 'false', 'off', 'no'].includes(butlerEnv)
+  const butlerFactory: ButlerFactory = (base) =>
+    createButlerRouter({
+      id: base.id,
+      // The pool only consults this factory for a `chat`-capable row, so
+      // `capabilities` is always set + includes 'chat'; `?? []` only satisfies
+      // the optional `LlmAgentOptions.capabilities` type.
+      capabilities: base.capabilities ?? [],
+      logger: log,
+      createForUser: (userId) => {
+        // Per-user memory namespace + recall index (whole-store inverted index,
+        // active-only) — the no-leak boundary is the `<rootDir>/user/<userId>/`
+        // tree itself. The base toolset the pool built (dispatch / mcp / …) moves
+        // to `benign` so those tools still run inline; only governed actions could
+        // park, and a pure-memory butler has none.
+        const memory = openButlerMemory({ rootDir: butlerMemoryRoot, userId, logger: log })
+        const recallIndex = openButlerRecallIndex({ rootDir: butlerMemoryRoot, userId, logger: log })
+        const { tools, ...rest } = base
+        return new PersonalButlerAgent({
+          ...rest,
+          memory,
+          memoryRetriever: recallIndex.retriever({ activeOnly: true }),
+          // Until consolidation runs (episodic→semantic, deferred to BF-M8) the
+          // semantic profile is empty, so a fresh session would surface nothing.
+          // Seed the frozen block from episodic too, so captured turns are
+          // remembered IMMEDIATELY in the next session — the cross-session memory
+          // the member is asking for, without waiting on a maintenance pass.
+          frozenMemoryKinds: ['semantic', 'episodic'],
+          // An always-on butler instance serves many independent, history-less IM
+          // messages — re-recall per message so it remembers what it just captured
+          // (without this the block freezes at the first message's contents and the
+          // bot "forgets" mid-conversation). See MemorySession.refresh().
+          frozenRefreshPerTask: true,
+          captureMeta: { userId },
+          ...(tools ? { benign: tools } : {}),
+        })
+      },
+    })
+
   const localAgents = new LocalAgentPool({
+    butlerFactory,
+    butlerDefaultOn,
     hub,
     space,
     services,
@@ -1539,6 +1615,18 @@ async function main(): Promise<void> {
   if (identity) {
     inboxStore = new FileInboxStore(SPACE_DIR)
     inboxStore.ensureDirs()
+    // BF-M4 — wire the butler escalation sink now that the inbox exists. The
+    // approver is the MEMBER who owns the parked task (`origin.userId`): a
+    // PERSONAL butler escalates to the very person it serves. Dormant for the
+    // current pure-memory butler (`butlerApprovalItemFor` returns null without a
+    // governed `pending`), but ready for the governed action set (BF-M7).
+    const store = inboxStore
+    butlerEscalationSink = async (task, by, state) => {
+      const approver = task.origin?.userId
+      if (!approver) return // no member to approve (operator/anon park) → nothing to write
+      const item = butlerApprovalItemFor(task, by, state, { approver })
+      if (item) await store.write(item)
+    }
   }
   if (identity && process.env.AIPE_PEERS_DISABLED !== '1') {
     const spaceMeta = await space.meta()

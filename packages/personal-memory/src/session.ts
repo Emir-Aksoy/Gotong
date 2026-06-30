@@ -99,8 +99,11 @@ export class MemorySession {
   private readonly showLinks: boolean
   private readonly showProcedures: boolean
   private readonly maxProcedures: number | undefined
-  /** Frozen "now" for activeOnly — pinned once so the block never shifts. */
-  private readonly now: number | undefined
+  /** Frozen "now" for activeOnly — pinned per (re)build so the block stays stable
+   *  between refreshes; re-sampled by {@link refresh} when auto-sampled. */
+  private now: number | undefined
+  /** Whether `now` was auto-sampled (vs caller-pinned) — re-sampled on refresh. */
+  private readonly nowAutoSampled: boolean
 
   /** Memoized block — `null` until the first `ensureFrozenBlock()` resolves. */
   private frozen: string | null = null
@@ -122,7 +125,28 @@ export class MemorySession {
     // Pin `now` once: activeOnly needs a frozen number for the whole session, so
     // sample the clock at construction when one isn't supplied. Only sampled
     // when activeOnly is on (otherwise `now` never reaches the renderer).
+    this.nowAutoSampled = opts.now === undefined
     this.now = opts.now ?? (this.activeOnly ? Date.now() : undefined)
+  }
+
+  /**
+   * Drop the memoized block so the NEXT `ensureFrozenBlock()` re-recalls from
+   * disk — surfacing memories written since the last build.
+   *
+   * The Hermes "one session = one stable prefix" default caches forever, which is
+   * right for a bounded conversation (recent turns ride the in-context history,
+   * the block is the long-term profile). But an ALWAYS-ON butler instance handles
+   * many independent IM messages that each arrive as a fresh, history-less task —
+   * so without a refresh the block stays frozen at its first-message contents and
+   * the butler can't "remember" what it just captured. The resident butler opts
+   * into per-task refresh; when `activeOnly` auto-sampled `now`, re-sample it so
+   * the just-now view tracks wall-clock instead of process-start.
+   */
+  refresh(now?: number): void {
+    this.frozen = null
+    this.pending = null
+    if (now !== undefined) this.now = now
+    else if (this.activeOnly && this.nowAutoSampled) this.now = Date.now()
   }
 
   /**

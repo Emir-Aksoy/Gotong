@@ -90,6 +90,17 @@ export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
   /** Pinned frozen "now" (ms) for {@link frozenActiveOnly}; sampled at construction if omitted. */
   frozenNow?: number
   /**
+   * Re-recall the frozen block on EVERY task (vs the Hermes default of once per
+   * session). Default `false` — a bounded conversation rides recent turns on its
+   * in-context history and the block stays a stable prefix. An ALWAYS-ON butler
+   * (one memoized instance serving many independent, history-less IM messages)
+   * sets this `true` so each message sees memories captured since the last one —
+   * the difference between "remembers across sessions" and not. Trades prefix-cache
+   * stability for freshness; for stateless per-message dispatch there's little
+   * cross-message prefix to cache anyway.
+   */
+  frozenRefreshPerTask?: boolean
+  /**
    * M2 — automatically record each completed turn into `episodic` memory
    * (decision D5: turn-end is one of the two honest capture points). Default
    * `true`. Set `false` to opt out (e.g. an agent that captures by some other
@@ -114,6 +125,8 @@ export class MemoryAugmentedAgent extends LlmAgent {
   private readonly captureTurns: boolean
   private readonly captureMaxChars: number | undefined
   private readonly captureMeta: Record<string, unknown> | undefined
+  /** Re-recall the frozen block per task (always-on butler) vs once per session. */
+  private readonly frozenRefreshPerTask: boolean
 
   constructor(opts: MemoryAugmentedAgentOptions) {
     const memory = opts.memory ?? opts.services?.memory
@@ -148,6 +161,7 @@ export class MemoryAugmentedAgent extends LlmAgent {
     this.captureTurns = opts.captureTurns ?? true
     this.captureMaxChars = opts.captureMaxChars
     this.captureMeta = opts.captureMeta
+    this.frozenRefreshPerTask = opts.frozenRefreshPerTask ?? false
     this.session = new MemorySession({
       memory,
       label: opts.id,
@@ -178,6 +192,9 @@ export class MemoryAugmentedAgent extends LlmAgent {
    * Memoized inside the session — cheap on every subsequent task.
    */
   protected override async handleTask(task: Task): Promise<unknown> {
+    // An always-on butler re-recalls per task so it sees what it just captured;
+    // the default keeps the once-per-session cache (a stable prompt prefix).
+    if (this.frozenRefreshPerTask) this.session.refresh()
     await this.session.ensureFrozenBlock()
     const out = await super.handleTask(task)
     await this.captureTurn(task, out)
@@ -186,6 +203,7 @@ export class MemoryAugmentedAgent extends LlmAgent {
 
   /** Same pre-warm on resume so a parked-then-woken task still injects memory. */
   protected override async handleResume(task: Task, state: unknown): Promise<unknown> {
+    if (this.frozenRefreshPerTask) this.session.refresh()
     await this.session.ensureFrozenBlock()
     const out = await this.resumeBody(task, state)
     await this.captureTurn(task, out)
