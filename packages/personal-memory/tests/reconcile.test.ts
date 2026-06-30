@@ -179,6 +179,11 @@ describe('reconcile', () => {
       sem('ad2', 'ad-hoc two', 101),
       semWith('dig1', 'a digest', 102, { tier: 'misc', level: 'digest', importance: 3 }),
       semWith('prof1', 'a profile', 103, { tier: 'misc', level: 'profile', profile: true, importance: 5 }),
+      // A FLAT consolidation profile: `profile: true` but NO `level`. The
+      // tiered `isClusterProfile` guard (level-based) misses this one — only the
+      // `isProfile` guard protects it (Fix A). Without it, a real LLM would see
+      // the curated blob as an editable ad-hoc fact.
+      semWith('flatprof', 'a flat profile', 104, { profile: true, importance: 5 }),
     ])
     // The model tries to touch the digest/profile ids too — they aren't in scope,
     // so those ops are dropped; only the ad-hoc merge happens.
@@ -188,12 +193,14 @@ describe('reconcile', () => {
         { op: 'update', id: 'ad1', text: 'merged ad-hoc' },
         { op: 'delete', id: 'dig1' },
         { op: 'delete', id: 'prof1' },
+        { op: 'delete', id: 'flatprof' },
       ]),
       candidates: ['x'],
     })
     expect(r).toMatchObject({ updated: 1, deleted: 0 })
     expect(has(mem, 'dig1')).toBe(true) // tiered layers untouched
     expect(has(mem, 'prof1')).toBe(true)
+    expect(has(mem, 'flatprof')).toBe(true) // flat profile protected too (Fix A)
   })
 
   it('returns null when there is nothing to do', async () => {

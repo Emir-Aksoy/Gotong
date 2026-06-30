@@ -114,15 +114,25 @@ export function effectiveSalience(
 
 /**
  * Reinforce an entry IN META: bump `recallCount` and stamp `lastRecalledTs`.
- * Pure — returns the new meta object, the caller persists it (F-M3 wires this
- * into the recall path, best-effort and opt-in). Never mutates the input.
+ *
+ * Returns a META DELTA — only the two keys it changes, NOT a re-spread of the
+ * whole meta (mirrors its sibling `closedMeta`, which returns just `{validTo}`).
+ * The caller applies it as a shallow merge onto the CURRENT stored meta: the
+ * host's `patchMeta` and the example's `DemoMemory.patchMeta` both do exactly
+ * that. Returning a delta is the correctness fix — re-spreading `entry.meta`
+ * would write back the reinforcer's possibly-stale snapshot of every other key
+ * (importance, links, validity…), clobbering whatever another writer changed in
+ * between. A delta touches only what it owns. Pure, never mutates the input.
+ *
+ * `recallCountOf(entry)` reads the prior count off the passed entry, so the
+ * caller must hand in the up-to-date entry (the merge target) for the bump to
+ * accumulate.
  */
 export function reinforcedMeta(
   entry: Pick<MemoryEntry, 'meta'>,
   now: number,
 ): Record<string, unknown> {
   return {
-    ...(entry.meta ?? {}),
     [META_RECALL_COUNT]: recallCountOf(entry) + 1,
     [META_LAST_RECALLED]: now,
   }

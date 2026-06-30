@@ -237,7 +237,14 @@ async function pullProfiles(opts: ConsolidateOptions): Promise<MemoryEntry[]> {
   return all.filter(isProfile).filter((e) => (opts.filter ? opts.filter(e) : true))
 }
 
-function isProfile(e: MemoryEntry): boolean {
+/**
+ * A curated profile entry (the flat-consolidation output) is tagged
+ * `meta.profile === true`. Exported so the reconcile pass can protect it: a
+ * flat profile carries NO `meta.level`, so the tiered `isClusterProfile` guard
+ * (which keys off `level`) misses it — reconcile must skip it by THIS predicate
+ * too, or a real LLM would see the curated blob as an editable ad-hoc fact.
+ */
+export function isProfile(e: MemoryEntry): boolean {
   return (e.meta as { profile?: unknown } | undefined)?.profile === true
 }
 

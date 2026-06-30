@@ -156,10 +156,24 @@ example (内联 ~3 行) 各接一次, 同一 `patchMeta` 缝。
               │                                │                                │
               └────────────── 全经 patchMeta in-place 落 per-user jsonl ─────────┘
                                               │
-              recall (C lexical + D activeOnly) → 冻结块 (G 程序小节 + E 链尾)
-                                              │
+                       落盘后两条**独立**读路径 (互不喂给对方):
+              ┌───────────────────────────────┴───────────────────────────────┐
+              ▼                                                                ▼
+   on-demand `recall` 工具                                 会话起一次性冻结块 (MemorySession)
+   C lexical + D activeOnly                                D activeOnly + E 链尾 + G 程序小节
+   (按需翻细节/历史, 每轮可变)                              (前缀缓存, 管家默认三项全开 = 审计 Fix B)
+              └───────────────────────────────┬───────────────────────────────┘
+                                              ▼
                           /me「管家记得你什么」隐私视图 (Z-M3 投影 8 字段)
 ```
+
+> **读路径分两条, 别混。** `recall` 是**按需工具** (模型每轮自己决定查不查, 结果随
+> query 变); 冻结块是**会话起算一次**的策展画像 (`MemorySession` 记住字节, 整个会话
+> 不动 = 前缀缓存契约)。两者都从同一份 per-user jsonl 读, 但 recall **不喂给**冻结块。
+> D 的 `activeOnly` 两条都做 (recall retriever + 冻结块各自过滤); E 链尾 / G 程序小节
+> 只在冻结块。**审计 Fix B** 之前 `MemorySession` 没把 D/E/G 透传进冻结块 (只有 example
+> 直接调 `renderFrozenBlock` 才演示得出来), 现已透传, 且 `PersonalButlerAgent` 默认
+> 三项全开 —— 每项对不带相应 meta 的事实**字节不变**, 故新管家的块不变、长寿管家的块更干净。
 
 example `[4]` 六项自断言全确定性、无 key、改坏即红:
 
@@ -198,5 +212,29 @@ example `[4]` 六项自断言全确定性、无 key、改坏即红:
   但还没有一个「翻历史」的成员入口 / 工具。
 - **E 链的可视化 (导航小图 UI)** —— `/me` 现以 id 列表呈现链, 未画图。
 - **F 衰减/强化默认开** —— 仍 opt-in (host 给 `salience` 选项才生效), 默认零回归。
+
+---
+
+## 八、记忆怎么随规模增长(诚实边界)
+
+> 审计 Fix F 收口: `semantic` 记忆**会无界增长**, 把三道闸的分工讲清, 别让人以为冻结块
+> 自己会兜住。
+
+冻结块**不是**增长的约束 —— 它只拉 `frozenK`(默认 100)条、再按 `maxChars`(默认 4000)
+软截断, 留下的标一句「(N lower-priority … omitted)」。**被截的尾巴没丢**, 留在盘上,
+模型按需用 `recall` 工具够得着。真正管「规模」的是另外两件:
+
+| 维度 | 谁兜住 | 怎么兜 |
+|---|---|---|
+| **盘上累积** | `budgetReviewer` (F/D 驱逐) | 心跳一拍按 `effectiveSalience` 淡的先驱逐 + `evictExpiredFirst` 过期史料最先走 → 盘上有上限, 不是无限堆。 |
+| **召回规模** | 可插拔 `embeddingRetriever` (C-M3 接缝) | 默认 `lexicalRetriever` 是 O(n) 全扫 (无外部依赖, 个人 hub 量级够用); 库大了换向量后端 (chroma-mcp), `recall` 不再线性。 |
+| **常驻 prompt** | `frozenK` / `maxChars` 天花板 | 冻结块永远是个**小而字节稳定**的前缀, 无论盘上多大 —— 这是前缀缓存契约, 故意不随库长。 |
+
+所以三句话: **驱逐管盘、embeddings 管召回、frozenK 管常驻块**。冻结块溢出是**有声**的
+(omitted 提示), 不是静默截断; 尾部事实始终经 `recall` 可达。
+
+**仍未做** (本轮不在范围, 诚实列出): `budgetReviewer` 默认仍 opt-in (host 不给 `salience`
+选项就不驱逐 → 纯靠手动 `forget`); embeddings 默认仍是 lexical; append-only `episodic`
+没有保留窗 (蒸馏成 `semantic` 后旧 episodic 不自动清, 同 `PERSONAL-BUTLER-FINAL.md` 推迟项)。
 
 详见 [`MEMORY-TIERS-FINAL.md`](MEMORY-TIERS-FINAL.md) · [`PERSONAL-BUTLER-FINAL.md`](PERSONAL-BUTLER-FINAL.md) · [`PERSONAL-BUTLER-DESIGN.md`](PERSONAL-BUTLER-DESIGN.md)。

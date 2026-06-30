@@ -112,14 +112,19 @@ describe('meta readers + reinforcedMeta', () => {
     expect(lastRecalledOf(e('a', 0, { lastRecalledTs: 1234 }))).toBe(1234)
   })
 
-  it('reinforcedMeta bumps count + stamps time, preserving other meta, no mutation', () => {
+  it('reinforcedMeta returns a 2-key delta (count + time), no other keys, no mutation', () => {
     const src = e('a', 0, { importance: 4, recallCount: 2, foo: 'bar' })
     const next = reinforcedMeta(src, 9999)
-    expect(next[META_RECALL_COUNT]).toBe(3)
+    expect(next[META_RECALL_COUNT]).toBe(3) // bumped off the entry's prior count
     expect(next[META_LAST_RECALLED]).toBe(9999)
-    expect(next.importance).toBe(4) // preserved
-    expect(next.foo).toBe('bar') // preserved
+    // Delta-only (like closedMeta): it does NOT re-spread the entry's meta, so a
+    // stale snapshot of importance/foo can never clobber a concurrent writer.
+    expect(Object.keys(next).sort()).toEqual([META_LAST_RECALLED, META_RECALL_COUNT].sort())
     expect(src.meta).toEqual({ importance: 4, recallCount: 2, foo: 'bar' }) // input untouched
+    // The caller merges the delta onto the current meta to preserve the rest.
+    const merged = { ...src.meta, ...next }
+    expect(merged.importance).toBe(4)
+    expect(merged.foo).toBe('bar')
   })
 
   it('reinforcedMeta from an entry with no meta starts the count at 1', () => {

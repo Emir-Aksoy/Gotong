@@ -152,6 +152,28 @@ describe('HostButlerMemoryService', () => {
     expect(await svc.forget('alice', 'no-such-id')).toBe(false)
   })
 
+  it('concurrent forgets for one user both land — ops share one write chain (Fix C)', async () => {
+    // THREE entries in the SAME kind file, so two concurrent forgets contend on
+    // one read-modify-write. A `MemoryFileHandle` serializes writes through a
+    // per-instance chain, so this only stays correct if the service reuses ONE
+    // handle per user: with a fresh handle per op the two rewrites would interleave
+    // (both read {1,2,3}; A writes {2,3}; B writes {1,3}) and the last writer would
+    // resurrect the other's deleted entry. The service caches by userId → both land.
+    const m = openButlerMemory({ rootDir: tmp, userId: 'dave', logger: silentLogger })
+    const e1 = await m.remember({ kind: 'semantic', text: '事实一' })
+    const e2 = await m.remember({ kind: 'semantic', text: '事实二' })
+    await m.remember({ kind: 'semantic', text: '事实三' })
+
+    const [okA, okB] = await Promise.all([svc.forget('dave', e1.id), svc.forget('dave', e2.id)])
+    expect(okA).toBe(true)
+    expect(okB).toBe(true)
+
+    const remaining = await svc.export('dave')
+    expect(remaining.some((e) => e.id === e1.id)).toBe(false) // not resurrected
+    expect(remaining.some((e) => e.id === e2.id)).toBe(false)
+    expect(remaining.map((e) => e.text)).toEqual(['事实三']) // exactly the untouched one
+  })
+
   it('forgetAll() clears everything (right to be forgotten)', async () => {
     await seed('alice')
     await svc.forgetAll('alice')

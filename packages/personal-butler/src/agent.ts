@@ -76,10 +76,21 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     // block is CLUSTERED by default (画像 / 项目 / 人物 / 承诺 / 其它). A caller
     // can override `tierConfig` (or pass a custom catalog); a plain
     // MemoryAugmentedAgent still defaults to the flat block.
+    //
+    // It also turns the D/E/G frozen-block features ON by default — the resident
+    // butler is exactly the agent that accrues bitemporal facts, cross-links, and
+    // how-tos over time, so its always-on block should show CURRENT truth (drop
+    // superseded edges), link tails, and a "things I know how to do" section.
+    // Each is byte-identical to off for a fact that carries none of that meta, so
+    // a fresh butler's block is unchanged; a long-lived one reads cleaner. A
+    // caller can still force any of them off.
     super({
       ...opts,
       tools: composed,
       tierConfig: opts.tierConfig ?? DEFAULT_TIERS,
+      frozenActiveOnly: opts.frozenActiveOnly ?? true,
+      frozenShowLinks: opts.frozenShowLinks ?? true,
+      frozenShowProcedures: opts.frozenShowProcedures ?? true,
     })
     this.governed = opts.governed
   }

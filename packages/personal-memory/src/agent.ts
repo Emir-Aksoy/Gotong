@@ -75,6 +75,21 @@ export interface MemoryAugmentedAgentOptions extends LlmAgentOptions {
    */
   tierConfig?: TierConfig
   /**
+   * Opt-in (decision D): the frozen block shows only facts in effect now —
+   * closed time-edges and not-yet-valid facts are dropped. A `now` is pinned at
+   * construction so the block stays byte-stable. Default off (byte-identical to
+   * off for plain stores with no bitemporal meta).
+   */
+  frozenActiveOnly?: boolean
+  /** Opt-in (decision E): the frozen block appends intra-block link tails. Default off. */
+  frozenShowLinks?: boolean
+  /** Opt-in (decision G): the frozen block lifts procedures into a how-to section. Default off. */
+  frozenShowProcedures?: boolean
+  /** Max procedures listed when {@link frozenShowProcedures} is on. */
+  frozenMaxProcedures?: number
+  /** Pinned frozen "now" (ms) for {@link frozenActiveOnly}; sampled at construction if omitted. */
+  frozenNow?: number
+  /**
    * M2 — automatically record each completed turn into `episodic` memory
    * (decision D5: turn-end is one of the two honest capture points). Default
    * `true`. Set `false` to opt out (e.g. an agent that captures by some other
@@ -142,6 +157,18 @@ export class MemoryAugmentedAgent extends LlmAgent {
         ? { frozenMaxChars: opts.frozenMemoryMaxChars }
         : {}),
       ...(opts.tierConfig !== undefined ? { tierConfig: opts.tierConfig } : {}),
+      // D/E/G frozen-block opt-ins — threaded through so a butler can surface
+      // only-in-effect facts, link tails, and a how-to section in its always-on
+      // block. Each is byte-identical to off for stores without that meta.
+      ...(opts.frozenActiveOnly !== undefined ? { activeOnly: opts.frozenActiveOnly } : {}),
+      ...(opts.frozenShowLinks !== undefined ? { showLinks: opts.frozenShowLinks } : {}),
+      ...(opts.frozenShowProcedures !== undefined
+        ? { showProcedures: opts.frozenShowProcedures }
+        : {}),
+      ...(opts.frozenMaxProcedures !== undefined
+        ? { maxProcedures: opts.frozenMaxProcedures }
+        : {}),
+      ...(opts.frozenNow !== undefined ? { now: opts.frozenNow } : {}),
     })
   }
 

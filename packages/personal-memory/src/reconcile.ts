@@ -37,7 +37,7 @@
 import type { MemoryEntry, MemoryHandle, MemoryKind, NewMemoryEntry } from '@aipehub/services-sdk'
 
 import { openedMeta, type MemoryValidityWriter } from './bitemporal.js'
-import type { MemorySummarizer } from './consolidate.js'
+import { isProfile, type MemorySummarizer } from './consolidate.js'
 import { clampImportance, importanceOf, META_IMPORTANCE, type Importance } from './importance.js'
 import type { MemoryReviewer, ReviewContext, ReviewOutcome } from './review.js'
 import { isClusterProfile, isDigest } from './tiers.js'
@@ -258,10 +258,14 @@ async function pullExisting(
 }
 
 /** Default eligibility: for `semantic`, ad-hoc facts only (skip tiered digest/
- *  profile, which the tiered pass owns); for any other kind, all of it. */
+ *  profile AND the flat consolidation profile, which their own passes own); for
+ *  any other kind, all of it. `isClusterProfile` keys off `meta.level` so it
+ *  only catches the TIERED profile; a flat `consolidate` profile carries just
+ *  `meta.profile === true` (no level) → `isProfile` is the guard that protects
+ *  it from being reconciled as if it were an editable ad-hoc fact. */
 function defaultExistingFilter(kind: MemoryKind): (e: MemoryEntry) => boolean {
   if (kind !== 'semantic') return () => true
-  return (e) => !isDigest(e) && !isClusterProfile(e)
+  return (e) => !isDigest(e) && !isClusterProfile(e) && !isProfile(e)
 }
 
 function makeEntry(

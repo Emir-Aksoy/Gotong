@@ -43,9 +43,49 @@ export interface MemorySessionOptions {
    * that don't use tiering).
    */
   tierConfig?: TierConfig
+  /**
+   * Opt-in (decision D): show only facts in effect NOW — drop closed time-edges
+   * and not-yet-valid facts, so the always-on block reflects CURRENT truth. The
+   * `now` is captured ONCE at construction (a frozen number, not a clock) so the
+   * block stays byte-identical for the session. Pass {@link now} to pin it for a
+   * deterministic test; otherwise it is sampled at construction. Default off.
+   */
+  activeOnly?: boolean
+  /**
+   * Opt-in (decision E): append ` (related: id, …)` tails listing intra-block
+   * links — the block becomes a navigable graph. Byte-identical to off when no
+   * entry carries links. Default off.
+   */
+  showLinks?: boolean
+  /**
+   * Opt-in (decision G): lift recorded procedures into a "Things I know how to
+   * do" section. Byte-identical to off when no procedures are present. Default off.
+   */
+  showProcedures?: boolean
+  /** Max procedures listed when {@link showProcedures} is on. */
+  maxProcedures?: number
+  /**
+   * The session's frozen "now" (ms) for {@link activeOnly}. A NUMBER, not a
+   * clock. When `activeOnly` is on and this is omitted, it is sampled ONCE at
+   * construction (`Date.now()`) and held for the session. Supply it for
+   * deterministic tests.
+   */
+  now?: number
 }
 
 const DEFAULT_FROZEN_KINDS: readonly MemoryKind[] = ['semantic']
+/**
+ * Max entries pulled into the always-on block. This is a DELIBERATE CEILING, not
+ * a growth bound: `semantic` memory can hold more than this, and when it does the
+ * renderer keeps the top `frozenK` by (importance, recency) and notes the rest as
+ * "(N lower-priority … omitted)". The omitted tail is NOT lost — it stays on disk
+ * and the model reaches it on demand via the `recall` tool. Two other mechanisms
+ * do the actual scaling: the `budgetReviewer` (decision F/D eviction) bounds how
+ * much accrues on disk in the first place, and the pluggable embedding retriever
+ * (decision C-M3) scales `recall` past the default O(n) lexical scan. So the
+ * frozen block stays a small, byte-stable prompt prefix no matter how large the
+ * store grows. See docs/zh/MEMORY-ADVANCED-FINAL.md §八.
+ */
 const DEFAULT_FROZEN_K = 100
 
 export class MemorySession {
@@ -55,6 +95,12 @@ export class MemorySession {
   private readonly frozenK: number
   private readonly frozenMaxChars: number | undefined
   private readonly tierConfig: TierConfig | undefined
+  private readonly activeOnly: boolean
+  private readonly showLinks: boolean
+  private readonly showProcedures: boolean
+  private readonly maxProcedures: number | undefined
+  /** Frozen "now" for activeOnly — pinned once so the block never shifts. */
+  private readonly now: number | undefined
 
   /** Memoized block — `null` until the first `ensureFrozenBlock()` resolves. */
   private frozen: string | null = null
@@ -69,6 +115,14 @@ export class MemorySession {
     this.frozenK = opts.frozenK ?? DEFAULT_FROZEN_K
     this.frozenMaxChars = opts.frozenMaxChars
     this.tierConfig = opts.tierConfig
+    this.activeOnly = opts.activeOnly ?? false
+    this.showLinks = opts.showLinks ?? false
+    this.showProcedures = opts.showProcedures ?? false
+    this.maxProcedures = opts.maxProcedures
+    // Pin `now` once: activeOnly needs a frozen number for the whole session, so
+    // sample the clock at construction when one isn't supplied. Only sampled
+    // when activeOnly is on (otherwise `now` never reaches the renderer).
+    this.now = opts.now ?? (this.activeOnly ? Date.now() : undefined)
   }
 
   /**
@@ -87,6 +141,13 @@ export class MemorySession {
       const renderOpts = {
         ...(this.label !== undefined ? { label: this.label } : {}),
         ...(this.frozenMaxChars !== undefined ? { maxChars: this.frozenMaxChars } : {}),
+        // D/E/G opt-ins — each byte-identical to off when the data doesn't carry
+        // the relevant meta, so threading them through is safe for plain stores.
+        ...(this.activeOnly ? { activeOnly: true } : {}),
+        ...(this.showLinks ? { showLinks: true } : {}),
+        ...(this.showProcedures ? { showProcedures: true } : {}),
+        ...(this.maxProcedures !== undefined ? { maxProcedures: this.maxProcedures } : {}),
+        ...(this.now !== undefined ? { now: this.now } : {}),
       }
       const block = this.tierConfig
         ? renderClusteredFrozenBlock(entries, { ...renderOpts, config: this.tierConfig })

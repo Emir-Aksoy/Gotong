@@ -69,7 +69,13 @@ describe('recall reinforcement — ON (opt-in)', () => {
     // preserving id + ts + text (the contract a real reinforcer must honor).
     const reinforce: MemoryReinforcer = async (e, now) => {
       const i = mem.entries.findIndex((x) => x.id === e.id)
-      if (i >= 0) mem.entries[i] = { ...mem.entries[i]!, meta: reinforcedMeta(mem.entries[i]!, now) }
+      // reinforcedMeta is a DELTA — merge it onto the current meta (the shallow
+      // merge a real patchMeta does), so importance and friends are preserved.
+      if (i >= 0)
+        mem.entries[i] = {
+          ...mem.entries[i]!,
+          meta: { ...mem.entries[i]!.meta, ...reinforcedMeta(mem.entries[i]!, now) },
+        }
     }
     let clock = 5000
     const ts = new MemoryToolset({ memory: mem, reinforce, now: () => clock })
@@ -98,11 +104,11 @@ describe('frozen block is byte-stable under reinforcement', () => {
 
     // Reinforce each differently — counts vary, timestamps stamped — but only
     // meta.recallCount / meta.lastRecalledTs change; id / ts / text / importance
-    // are preserved (reinforcedMeta spreads existing meta, caller keeps the rest).
+    // are preserved (reinforcedMeta is a delta, the caller merges it on).
     let n = 0
     const reinforced = entries.map((e) => {
       let meta = e.meta
-      for (let i = 0; i < (n++ % 3) + 1; i++) meta = reinforcedMeta({ meta }, 9000 + i)
+      for (let i = 0; i < (n++ % 3) + 1; i++) meta = { ...meta, ...reinforcedMeta({ meta }, 9000 + i) }
       return { ...e, meta }
     })
     const after = renderFrozenBlock(reinforced, { label: 'butler' })

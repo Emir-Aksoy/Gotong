@@ -67,8 +67,9 @@ export function butlerMemoryWriters(handle: MemoryHandle): ButlerMemoryWriters {
     // `closedMeta(undefined, validTo)` is just the `{ validTo }` delta; patchMeta
     // shallow-merges it, so the open interval's `validFrom` / links survive.
     closeEntry: (entry, validTo) => patchMeta(entry.id, closedMeta(undefined, validTo)).then(noop),
-    // `reinforcedMeta` reads the prior recallCount off the entry and returns the
-    // bumped meta; merged over the stored meta it just lifts the two salience keys.
+    // `reinforcedMeta(entry, now)` is just the `{ recallCount, lastRecalledTs }`
+    // delta (same shape contract as closedMeta); patchMeta shallow-merges it, so
+    // it lifts ONLY the two salience keys and never clobbers a concurrent writer.
     reinforcer: (entry, now) => patchMeta(entry.id, reinforcedMeta(entry, now)).then(noop),
     // Each update's `links` is already the merged superset (buildLinkGraph keeps
     // existing); replace the one key, leave the rest of meta untouched.

@@ -65,6 +65,19 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
   private readonly rootDir: string
   private readonly logger: Logger
   private readonly now: (() => number) | undefined
+  /**
+   * One handle per userId, shared across this service's ops. A `MemoryFileHandle`
+   * serializes its writes through a PER-INSTANCE chain, so minting a fresh handle
+   * per request would defeat it: two concurrent `/me` mutations for the same user
+   * (e.g. forget(id1) ‖ forget(id2)) would each read-modify-write the same jsonl
+   * on independent chains and the last writer would clobber the other's delete.
+   * Caching by userId routes every op for a member through ONE chain. rootDir and
+   * `now` are fixed per service instance, so userId is a complete key. (The
+   * deeper unification — sharing this handle with the butler AGENT's writers once
+   * that is folded into main.ts — belongs to that deferred fold-in; today only
+   * this service writes through here.)
+   */
+  private readonly handles = new Map<string, MemoryHandle>()
 
   constructor(opts: HostButlerMemoryServiceOpts) {
     this.rootDir = opts.rootDir
@@ -112,12 +125,16 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
   }
 
   private open(userId: string): MemoryHandle {
-    return openButlerMemory({
+    const cached = this.handles.get(userId)
+    if (cached) return cached
+    const handle = openButlerMemory({
       rootDir: this.rootDir,
       userId,
       logger: this.logger,
       ...(this.now ? { now: this.now } : {}),
     })
+    this.handles.set(userId, handle)
+    return handle
   }
 
   /** The wall clock (injectable for deterministic tests) — used to flag each

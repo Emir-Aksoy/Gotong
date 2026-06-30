@@ -219,9 +219,11 @@ export class MemoryToolset implements LlmAgentToolset {
       {
         name: RECALL,
         description:
-          'Search past memory for relevant entries by keyword (case-insensitive ' +
-          'substring). Use this to dig up older details that are not in the ' +
-          'frozen long-term-memory block at the top of this prompt.',
+          'Search past memory for relevant entries by keyword relevance ' +
+          '(Chinese-aware — overlapping words/characters, not an exact ' +
+          'substring), most relevant first. Use this to dig up older details ' +
+          'that are not in the frozen long-term-memory block at the top of this ' +
+          'prompt. Omit the query to get the most recent entries.',
         inputSchema: {
           type: 'object',
           properties: {
