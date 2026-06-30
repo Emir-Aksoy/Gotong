@@ -6,6 +6,7 @@ import {
   type ManagedAgentSpec,
   type McpServerSpec,
   type HubMcpServerRecord,
+  type Participant,
   type ParticipantId,
   type HubLink,
   type ServiceUseSpec,
@@ -18,6 +19,7 @@ import {
   LlmAgent,
   MockLlmProvider,
   readMultimodalInlineCapFromEnv,
+  type LlmAgentOptions,
   type LlmAgentToolset,
   type LlmArtifactResolver,
   type LlmProvider,
@@ -166,6 +168,30 @@ export interface LlmApiKeyResolution {
 }
 
 /**
+ * Capability a managed agent must advertise to be eligible for the butler
+ * fold-in (BF-M3). The IM bridge dispatches free text under `chat` (its
+ * `freeTextCapability` default), so only `chat`-capable agents stand in front
+ * of the conversational channel; gating on it keeps the butler from swallowing
+ * every back-office LLM agent in the hub.
+ */
+const BUTLER_CHAT_CAPABILITY = 'chat'
+
+/**
+ * BF-M3 — build the resident butler `Participant` for one managed chat agent,
+ * given the pool-built base LLM options (provider / system / model / hooks /
+ * usageSink / streaming / any MCP+dispatch toolset under `tools`). The host
+ * (main.ts) injects the real factory: it returns a per-user {@link
+ * ButlerRouter} that opens a per-user memory namespace and constructs a
+ * `PersonalButlerAgent` reusing exactly these base options. The pool registers
+ * the result under the agent's id just like a plain `LlmAgent`, so admin
+ * lifecycle / restart / test-connection keep working on the same live id.
+ *
+ * Absent in tests and in hosts without identity+inbox — there the chat agent
+ * stays a plain `LlmAgent` (near-zero behaviour change).
+ */
+export type ButlerFactory = (base: LlmAgentOptions) => Participant
+
+/**
  * `LocalAgentPool` is **not** a separate component — it is a small piece
  * of the host binary's startup code, factored into a class so the Web
  * layer can call its `start` / `stop` / `availableProviders` through the
@@ -211,7 +237,15 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
    * agents declaring `uses:` will fail to spawn with a clear error.
    */
   private readonly services?: HubServices
-  private readonly running = new Map<ParticipantId, LlmAgent>()
+  /**
+   * Live participants spawned from `agents.json`, keyed by id. The value is a
+   * `Participant` (not `LlmAgent`) because BF-M3 may register a {@link
+   * ButlerRouter} in place of a plain agent for `chat`-capable rows; every
+   * read here uses only `.keys()` or an existence check, and the MCP hot-add
+   * / liveness helpers go through `mcpToolsetForAgent` (a router has none),
+   * so widening the value type is behaviour-preserving for non-butler agents.
+   */
+  private readonly running = new Map<ParticipantId, Participant>()
   /**
    * Per-agent record of the Owner used to file service data, so
    * `stop(id)` can detach the right handles. Owner derivation depends
@@ -302,6 +336,23 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     apiKey: string | undefined,
     artifactResolver?: LlmArtifactResolver,
   ) => LlmProvider
+  /**
+   * BF-M3 — optional resident-butler factory. When wired (host with identity +
+   * inbox), a `chat`-capable managed LLM row that opts in (per-agent
+   * `managed.butler` or the pool default below) is spawned via this factory —
+   * a per-user {@link ButlerRouter} — instead of a plain `LlmAgent`. Absent →
+   * the row stays a plain `LlmAgent`, so test pools and bare hosts are
+   * unchanged.
+   */
+  private readonly butlerFactory?: ButlerFactory
+  /**
+   * BF-M3 — when true, EVERY `chat`-capable managed LLM agent becomes a butler
+   * (unless it sets `managed.butler === false`). The host sets this from
+   * `AIPE_BUTLER` (default on). Default `false` here so a pool constructed
+   * without the flag (tests, non-butler hosts) keeps the historical behaviour.
+   * Only consulted when `butlerFactory` is present.
+   */
+  private readonly butlerDefaultOn: boolean
 
   constructor(opts: {
     hub: Hub
@@ -343,6 +394,17 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       apiKey: string | undefined,
       artifactResolver?: LlmArtifactResolver,
     ) => LlmProvider
+    /**
+     * BF-M3 — resident-butler factory (see field doc). The host injects a
+     * closure that opens per-user memory and builds a `PersonalButlerAgent`
+     * router; omit to keep chat agents as plain `LlmAgent`s.
+     */
+    butlerFactory?: ButlerFactory
+    /**
+     * BF-M3 — default every `chat`-capable LLM agent to a butler (see field
+     * doc). The host sets this from `AIPE_BUTLER`. Default `false`.
+     */
+    butlerDefaultOn?: boolean
   }) {
     this.hub = opts.hub
     this.space = opts.space
@@ -353,6 +415,8 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     this.pricingTable = opts.pricingTable ?? DEFAULT_PRICING
     this.artifactResolver = opts.artifactResolver
     this.providerFactory = opts.providerFactory ?? buildProvider
+    this.butlerFactory = opts.butlerFactory
+    this.butlerDefaultOn = opts.butlerDefaultOn ?? false
     // Built once: the gate is a stateless closure over `identity`,
     // shared by every managed LlmAgent. Settings (metric/period) are
     // hardcoded here in B2.2.2; C2 will surface them in admin UI.
@@ -611,6 +675,28 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     } catch (err) {
       log.error('agent respawn failed', { id: record.id, err })
     }
+  }
+
+  /**
+   * BF-M3 — does this record spawn as a resident butler? Requires the host to
+   * have wired a {@link butlerFactory}; then:
+   *   - explicit `managed.butler === false` opts OUT (always wins);
+   *   - only the generic `'llm'` kind is eligible (specialized kinds like
+   *     `personal-growth` keep their bespoke behaviour);
+   *   - per-agent `managed.butler === true` opts IN, else the pool default
+   *     {@link butlerDefaultOn} (host sets it from `AIPE_BUTLER`);
+   *   - the agent must advertise `chat`, so the butler only stands in front of
+   *     the conversational / IM channel, not every back-office LLM agent.
+   */
+  private butlerEnabledFor(record: AgentRecord): boolean {
+    if (!this.butlerFactory) return false
+    const m = record.managed
+    if (!m) return false
+    if (m.butler === false) return false
+    const kind = m.kind ?? 'llm'
+    if (kind !== 'llm') return false
+    if (m.butler !== true && !this.butlerDefaultOn) return false
+    return record.allowedCapabilities.includes(BUTLER_CHAT_CAPABILITY)
   }
 
   private async spawn(record: AgentRecord): Promise<void> {
@@ -943,15 +1029,26 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
       onStreamChunk,
       ...(usageSink ? { usageSink } : {}),
     }
-    let agent: LlmAgent
-    switch (record.managed.kind) {
-      case 'personal-growth':
-        agent = new PersonalGrowthAgent(agentOpts)
-        break
-      case 'llm':
-      default:
-        agent = new LlmAgent(agentOpts)
-        break
+    // BF-M3 — a `chat`-capable LLM row that opts in is spawned as a resident
+    // butler (a per-user `ButlerRouter` built by the host-injected factory),
+    // reusing exactly the base options above (provider / system / hooks /
+    // usageSink / streaming / toolset). It registers under the SAME id, so
+    // admin lifecycle / restart / test-connection are unchanged. Every other
+    // row takes the historical class switch.
+    let agent: Participant
+    if (this.butlerEnabledFor(record)) {
+      // butlerFactory is non-null here (butlerEnabledFor checks it first).
+      agent = this.butlerFactory!(agentOpts)
+    } else {
+      switch (record.managed.kind) {
+        case 'personal-growth':
+          agent = new PersonalGrowthAgent(agentOpts)
+          break
+        case 'llm':
+        default:
+          agent = new LlmAgent(agentOpts)
+          break
+      }
     }
     this.hub.register(agent)
     this.running.set(record.id, agent)
