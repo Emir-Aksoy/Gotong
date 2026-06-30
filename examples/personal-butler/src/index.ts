@@ -28,6 +28,7 @@
 import { SuspendTaskError, type Task } from '@aipehub/core'
 import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@aipehub/llm'
 import {
+  activeProcedures,
   buildInvertedIndex,
   closedMeta,
   composeReviewers,
@@ -39,7 +40,10 @@ import {
   invertedIndexRetriever,
   isActive,
   isClosed,
+  isProcedure,
+  isProcedurized,
   isProfile,
+  isUmbrella,
   lexicalRetriever,
   linkReviewer,
   linksOf,
@@ -48,12 +52,15 @@ import {
   MemoryToolset,
   META_LINKS,
   queryDiversityOf,
+  procedureAuthoringReviewer,
   queryHitMeta,
   reconcileReviewer,
   recallCountOf,
   reinforcedMeta,
   renderFrozenBlock,
+  stepsOf,
   supersedesOf,
+  umbrellaReviewer,
   type DreamRecord,
   type MemoryLinkWriter,
   type MemoryQueryHitWriter,
@@ -61,6 +68,7 @@ import {
   type MemoryRetriever,
   type MemorySummarizer,
   type MemoryValidityWriter,
+  type ProcedureDrafter,
   type RetrieverOptions,
 } from '@aipehub/personal-memory'
 import {
@@ -506,6 +514,76 @@ async function main(): Promise<void> {
   )
   console.log('  [4g] MR2 后台复盘: 被反复问起的「春水堂」升进画像, 没人问的「天气」闲聊被封存, 复盘日记记下 1 升 1 封 ✓\n')
 
+  // ── [4h] MR3 — the butler AUTHORS a skill, REFINES it, then MERGES redundant ones ──
+  // The Hermes-style skill loop, bounded + reversible: (1) a recurring multi-step
+  // episode is detected and AUTHORED into a `form:'procedure'` skill by the aux
+  // model; (2) the butler SELF-IMPROVES it in place via the `refine_procedure` tool
+  // (same id, so the frozen block never moves); (3) a near-duplicate skill is MERGED
+  // into one master "umbrella", CLOSING (not deleting) the originals and back-linking
+  // them — so recall + SKILL.md show one clean skill while the history stays auditable
+  // and reversible (beating Hermes' destructive archive). The "SQLite repoint" is free:
+  // closed originals drop out of `activeProcedures` automatically. The aux model is the
+  // agent itself in production; here it's a deterministic mock so the whole loop is
+  // assertable with NO API key. (Reviewers are called directly, the same way the host
+  // skill tests do, so the section doesn't depend on the review participant's gating.)
+  const SK_NOW = 9_000_000
+  const skMem = inMemoryHandle()
+
+  // (1) SELF-AUTHOR — three near-identical episodes of the same how-to → one skill.
+  for (const t of [
+    '今天主人让我手冲咖啡: 烧水 磨豆 注水',
+    '又给主人手冲咖啡: 烧水 磨豆 注水',
+    '主人要手冲咖啡: 烧水 磨豆 注水',
+  ]) {
+    await skMem.remember({ kind: 'episodic', text: t })
+  }
+  const authorDraft: ProcedureDrafter = async () => ({ name: '手冲咖啡', steps: ['烧水', '磨豆', '注水'] })
+  const eps = await skMem.recall({ kinds: ['episodic'], k: 50 })
+  await procedureAuthoringReviewer({ draft: authorDraft })({ memory: skMem, episodic: eps, now: SK_NOW })
+  const authored = (await skMem.list({ kind: 'semantic', limit: 50 })).find(isProcedure)
+  assert(
+    authored !== undefined && stepsOf(authored).length === 3,
+    '[4h] MR3 ①: a recurring 3× episode must be authored into one procedure',
+  )
+  assert(
+    (await skMem.recall({ kinds: ['episodic'], k: 50 })).every((e) => isProcedurized(e)),
+    '[4h] MR3 ①: the source episodes must be stamped so the skill is never re-authored',
+  )
+
+  // (2) SELF-IMPROVE — append a step in place via the tool (same id, no churn).
+  const skTools = new MemoryToolset({ memory: skMem })
+  await skTools.callTool('refine_procedure', { id: authored!.id, appendSteps: ['出杯'] })
+  const refined = (await skMem.list({ kind: 'semantic', limit: 50 })).find((e) => e.id === authored!.id)!
+  assert(
+    stepsOf(refined).length === 4 && stepsOf(refined).includes('出杯'),
+    '[4h] MR3 ②: refine_procedure must grow the steps in place (same id)',
+  )
+
+  // (3) UMBRELLA MERGE — a near-duplicate skill recorded earlier; merge the two.
+  await skMem.remember({ kind: 'semantic', text: '手冲咖啡法', meta: { form: 'procedure', steps: ['煮水', '研磨', '冲泡'] } })
+  const mergeDraft: ProcedureDrafter = async () => ({ name: '手冲咖啡(合并)', steps: ['烧水', '磨豆', '注水', '出杯'] })
+  await umbrellaReviewer({ merge: mergeDraft, minSimilarity: 0.3, minCluster: 2 })({ memory: skMem, episodic: [], now: SK_NOW })
+
+  const skAll = await skMem.list({ kind: 'semantic', limit: 50 })
+  const active = activeProcedures(skAll, SK_NOW)
+  assert(
+    active.length === 1 && isUmbrella(active[0]!),
+    '[4h] MR3 ③: after merge exactly one ACTIVE umbrella skill remains',
+  )
+  const umbrella = active[0]!
+  const originals = skAll.filter((e) => isProcedure(e) && e.id !== umbrella.id)
+  assert(
+    originals.length === 2,
+    '[4h] MR3 ③: the two originals must still be in the store (closed, not deleted)',
+  )
+  assert(
+    originals.every((e) => isClosed(e) && supersedesOf(e) === umbrella.id && linksOf(e).includes(umbrella.id)),
+    '[4h] MR3 ③: each original must be CLOSED, supersede→umbrella, and back-linked (reversible, auditable)',
+  )
+  // The host projects exactly `activeProcedures` into SKILL.md — so SKILL.md would
+  // show this one umbrella, the closed originals dropping out for free.
+  console.log('  [4h] MR3 技能自创+合并: 3 次重复操作写成「手冲咖啡」技能, 工具就地补一步, 再与近似技能合并成 1 个 umbrella (原始 2 个封存可回溯) ✓\n')
+
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
   console.log('✅ 管家不变量 + 长期记忆增强全部成立:')
   console.log('   [1] 跨会话记住了「奶茶店项目」')
@@ -514,6 +592,7 @@ async function main(): Promise<void> {
   console.log('   [4] 长期记忆: 中文召回(C) · 衰减强化(F) · 关联(E) · 程序(G) · 双时态(D) 全接通')
   console.log('   [MR1] 默认召回索引跨整个 store, 翻出窗口外的旧记忆')
   console.log('   [MR2] 后台复盘把被问起的记忆升进画像、把没人问的闲聊封存')
+  console.log('   [MR3] 重复操作自创技能、工具就地自改、近似技能合并成 umbrella(原始封存可回溯)')
   console.log(`   (剩余 agent: ${[...registry].join(', ')})`)
 }
 

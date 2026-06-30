@@ -30,6 +30,23 @@ pnpm demo:personal-butler
 The whole script self-asserts (it `throw`s on any mismatch), so running it IS the
 anti-corrosion gate — break the loop or the memory wiring and the demo goes red.
 
+## Long-term memory (`[4]` + MR1–MR3)
+
+Beyond the three butler invariants, the same script exercises the long-term
+memory engine — all of it living in `MemoryEntry.meta`, zero schema change:
+
+| Section | What it shows |
+|---|---|
+| **[4] C/F/E/G/D** | Chinese mixed recall (substring misses 「卖奶茶的店」, lexical hits) · bitemporal `activeOnly` (only the current 槟城, history still reachable) · associative links + supersede edges · decay/reinforce keep-value · procedural memory in the frozen block's "things I know how to do". |
+| **[4f] MR1** | The default recall is an **inverted index over the whole store**, so a fact buried under 60 newer entries — invisible to a recency window — is still found. |
+| **[4g] MR2** | A background **"dreaming" sweep** promotes what gets asked about (query-diversity) into a distilled profile and prunes stale, never-asked chatter — bounded & reversible, with a DREAMS.md diary. |
+| **[4h] MR3** | The butler **authors a skill** from a 3×-repeated how-to, **self-improves** it in place (`refine_procedure`, same id), then **merges** a near-duplicate into one master "umbrella" — **closing (not deleting)** the originals and back-linking them. `activeProcedures` then yields one clean skill; the host projects exactly that set into `SKILL.md`, the closed originals dropping out for free (auditable & reversible, beating Hermes' destructive archive). |
+
+The aux model behind MR3's authoring/merge is a deterministic mock here; in
+production it's the agent itself calling its `LlmProvider`. The leaf stays
+LLM-free — these are `MemoryReviewer`s a heartbeat composes (the 6h maintenance
+pass, MR4).
+
 ## How it maps to production
 
 | In this demo | In a real hub |
