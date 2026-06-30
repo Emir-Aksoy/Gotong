@@ -67,6 +67,16 @@ export function makeFakeMemory(seed: readonly MemoryEntry[] = []): FakeMemory {
       const i = entries.findIndex((e) => e.id === id)
       if (i >= 0) entries.splice(i, 1)
     },
+    // Mirror the file backend's in-place meta amend (Z-M1): shallow-merge `patch`
+    // over the stored meta, preserving id/kind/text/ts, replacing the array slot so
+    // the live `entries` view reflects it. Returns whether the id was found.
+    async patchMeta(id: string, patch: Record<string, unknown>): Promise<boolean> {
+      const i = entries.findIndex((e) => e.id === id)
+      if (i < 0) return false
+      const cur = entries[i]!
+      entries[i] = { ...cur, meta: { ...(cur.meta ?? {}), ...patch } }
+      return true
+    },
     async clear(kind?: MemoryKind): Promise<void> {
       for (let i = entries.length - 1; i >= 0; i--) {
         if (!kind || entries[i]!.kind === kind) entries.splice(i, 1)

@@ -243,4 +243,23 @@ export {
   type DreamDiaryWriter,
   type DreamingReviewerOptions,
 } from './dreaming.js'
+export {
+  clusterBySimilarity,
+  detectProcedureCandidates,
+  procedureAuthoringReviewer,
+  isProcedurized,
+  DEFAULT_AUTHOR_SYSTEM,
+  DEFAULT_AUTHOR_MIN_OCCURRENCES,
+  DEFAULT_CLUSTER_SIMILARITY,
+  DEFAULT_UMBRELLA_MIN_CLUSTER,
+  DEFAULT_SKILLS_MAX_CANDIDATES,
+  META_PROCEDURIZED,
+  META_UMBRELLA,
+  type DraftedProcedure,
+  type ProcedureDrafter,
+  type ClusterOptions,
+  type ProcedureCandidate,
+  type DetectProcedureOptions,
+  type ProcedureAuthoringReviewerOptions,
+} from './skills.js'
 export { PersonalMemoryError, type PersonalMemoryErrorCode } from './errors.js'
