@@ -18,6 +18,10 @@ export { MemoryFilePlugin } from './plugin.js'
 export { MemoryFileHandle } from './handle.js'
 export { validateMemoryFileConfig } from './config.js'
 export type { MemoryFileConfig } from './config.js'
+// Path layout is one source of truth (asserts owner-id safety) — exported so a
+// derived consumer (e.g. the butler's recall index reading the whole jsonl store,
+// past `list`'s 500 cap) reuses it instead of re-deriving `<rootDir>/user/<id>/…`.
+export { kindFile, ownerDir } from './paths.js'
 
 export default function createMemoryFilePlugin(): MemoryFilePlugin {
   return new MemoryFilePlugin()

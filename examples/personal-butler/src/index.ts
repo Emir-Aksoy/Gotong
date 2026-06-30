@@ -28,12 +28,14 @@
 import { SuspendTaskError, type Task } from '@aipehub/core'
 import type { LlmAgentToolset, LlmToolCallResult, LlmToolDefinition } from '@aipehub/llm'
 import {
+  buildInvertedIndex,
   closedMeta,
   composeReviewers,
   consolidate,
   DEFAULT_REINFORCE_WEIGHT,
   DEFAULT_SALIENCE_HALF_LIFE_MS,
   effectiveSalience,
+  invertedIndexRetriever,
   isActive,
   isClosed,
   lexicalRetriever,
@@ -49,8 +51,10 @@ import {
   supersedesOf,
   type MemoryLinkWriter,
   type MemoryReinforcer,
+  type MemoryRetriever,
   type MemorySummarizer,
   type MemoryValidityWriter,
+  type RetrieverOptions,
 } from '@aipehub/personal-memory'
 import {
   GovernedActionToolset,
@@ -116,6 +120,24 @@ function assert(cond: unknown, msg: string): asserts cond {
   if (!cond) throw new Error(msg)
 }
 
+/**
+ * The butler's default recall, index-backed (MR1). The inverted index ranks over
+ * EVERY remembered fact, so one older than the recency window still surfaces — the
+ * gap `lexicalRetriever` (newest-`wideK` only) left open. In production the host
+ * keeps the index fresh against the jsonl and rebuilds only when a file changed
+ * (`FileBackedInvertedIndex`); against this tiny in-memory demo we just rebuild
+ * from the handle each call — same ranking, simpler. Ranking is still
+ * `relevanceScore`, so the only change vs. lexical is COVERAGE, not order.
+ */
+function indexedRetriever(memory: DemoMemory, opts?: RetrieverOptions): MemoryRetriever {
+  return {
+    retrieve: async (query) => {
+      const all = await memory.list({ limit: 100_000 })
+      return invertedIndexRetriever(buildInvertedIndex(all), opts).retrieve(query)
+    },
+  }
+}
+
 async function main(): Promise<void> {
   const memory: DemoMemory = inMemoryHandle()
   const provider = new ButlerMockProvider()
@@ -124,16 +146,18 @@ async function main(): Promise<void> {
   const governed = governedToolset(registry)
 
   // A fresh butler session — same memory handle, so memory persists across them.
-  // The `recall` tool defaults to the Chinese-aware lexical retriever scoped to
-  // facts in effect NOW (C + D): it finds non-contiguous CJK matches the
-  // substring backend misses, and never surfaces closed history. This is exactly
-  // what the host wires; it doesn't change [1]-[3] (the mock never calls recall).
+  // The `recall` tool defaults to the whole-store inverted index (MR1) scoped to
+  // facts in effect NOW (D): it spans EVERY remembered fact — not just the recency
+  // window — and never surfaces closed history. Ranking stays Chinese-aware
+  // `relevanceScore` (C), so it finds non-contiguous CJK matches the substring
+  // backend misses too. This is exactly what the host wires; it doesn't change
+  // [1]-[3] (the mock never calls recall).
   const newSession = (): PersonalButlerAgent =>
     new PersonalButlerAgent({
       id: 'butler',
       provider,
       memory,
-      memoryRetriever: lexicalRetriever(memory, { activeOnly: true }),
+      memoryRetriever: indexedRetriever(memory, { activeOnly: true }),
       system: BUTLER_SYSTEM,
       benign,
       governed,
@@ -398,12 +422,32 @@ async function main(): Promise<void> {
   )
   console.log('  [4e] G 程序记忆: 冻结块把「怎么给加班费定金额」连步骤抽进「会做的事」小节 ✓\n')
 
+  // ── [4f] MR1 — the default recall index spans the WHOLE store ──
+  // The prior default (lexicalRetriever) ranks only the newest ~wideK entries, so
+  // a relevant fact older than that window is never even a candidate. The inverted
+  // index indexes every fact, so it finds the buried one — the real recall gap for
+  // a resident butler who has been remembering for months. (`indexedRetriever` is
+  // exactly the default wired into every butler session above.)
+  const wMem = inMemoryHandle()
+  await wMem.remember({ kind: 'semantic', text: '主人最爱的奶茶店叫春水堂' }) // oldest by write order
+  for (let i = 0; i < 60; i++) await wMem.remember({ kind: 'episodic', text: `日常闲聊第${i}条` })
+  const wQuery = { text: '奶茶店', k: 5 } as const
+  const windowMiss = await lexicalRetriever(wMem).retrieve(wQuery)
+  const indexHit = await indexedRetriever(wMem).retrieve(wQuery)
+  assert(windowMiss.length === 0, '[4f] MR1: the recency-window retriever must MISS the buried old fact')
+  assert(
+    indexHit.some((e) => e.text.includes('春水堂')),
+    '[4f] MR1: the inverted index must FIND the relevant fact older than the window',
+  )
+  console.log('  [4f] MR1 默认召回索引: 60 条新记录埋住的「春水堂」, 窗口检索漏掉、倒排索引翻出 ✓\n')
+
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
   console.log('✅ 管家不变量 + 长期记忆增强全部成立:')
   console.log('   [1] 跨会话记住了「奶茶店项目」')
   console.log('   [2] 良性工具(查日程)内联执行,无需审批')
   console.log('   [3] 删除 agent 先 park 等批准 — 批准才删 mailer,拒绝则 billing 原封不动')
   console.log('   [4] 长期记忆: 中文召回(C) · 衰减强化(F) · 关联(E) · 程序(G) · 双时态(D) 全接通')
+  console.log('   [MR1] 默认召回索引跨整个 store, 翻出窗口外的旧记忆')
   console.log(`   (剩余 agent: ${[...registry].join(', ')})`)
 }
 

@@ -42,6 +42,12 @@ export {
   type EmbeddingRetrieverOptions,
 } from './embedding-retriever.js'
 export {
+  InvertedIndex,
+  buildInvertedIndex,
+  invertedIndexRetriever,
+  type InvertedIndexSnapshot,
+} from './inverted-index.js'
+export {
   MemoryAugmentedAgent,
   type MemoryAugmentedAgentOptions,
 } from './agent.js'
