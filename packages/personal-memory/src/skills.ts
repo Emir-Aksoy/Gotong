@@ -44,8 +44,16 @@
 
 import type { MemoryEntry } from '@aipehub/services-sdk'
 
-import { defaultLinkScorer } from './links.js'
-import { FORM_PROCEDURE, META_FORM, META_STEPS, cleanSteps, isProcedure } from './procedure.js'
+import { closedMeta, isActive, META_SUPERSEDES } from './bitemporal.js'
+import { defaultLinkScorer, linksOf, mergeLinks, META_LINKS } from './links.js'
+import {
+  FORM_PROCEDURE,
+  META_FORM,
+  META_STEPS,
+  cleanSteps,
+  isProcedure,
+  stepsOf,
+} from './procedure.js'
 import { extractTerms } from './relevance.js'
 import type { MemoryReviewer, ReviewContext, ReviewOutcome } from './review.js'
 
@@ -277,6 +285,134 @@ export function procedureAuthoringReviewer(opts: ProcedureAuthoringReviewerOptio
 }
 
 // ---------------------------------------------------------------------------
+// ③ Umbrella consolidation — sweep ACTIVE skills, merge redundant clusters into
+// one master, CLOSE (not delete) the originals and back-link them to it.
+// ---------------------------------------------------------------------------
+
+/** Default cap on semantic entries scanned per Umbrella sweep (cost guard). */
+export const DEFAULT_SKILLS_SCAN = 200
+
+/** Default system prompt steering the aux model to MERGE a redundant cluster into one master skill. */
+export const DEFAULT_MERGE_SYSTEM =
+  'You are a skill librarian. You are shown several procedures that are REDUNDANT ' +
+  '— they accomplish the SAME goal in slightly different ways. Merge them into ONE ' +
+  'master skill: a single clear one-line NAME and the unified ordered STEPS ' +
+  '(deduplicate, keep the best ordering, cover what all of them did). Output the ' +
+  'merged name and steps.'
+
+/**
+ * The active skills the butler "knows how to do" right now — `form:'procedure'`
+ * entries that are bitemporally active at `now`. The host projects exactly this set
+ * into `SKILL.md`; recall's "things I know how to do" section filters identically,
+ * so a closed (merged-away) original drops out of both for free.
+ */
+export function activeProcedures(entries: readonly MemoryEntry[], now: number): MemoryEntry[] {
+  return entries.filter((e) => isProcedure(e) && isActive(e, now))
+}
+
+export interface UmbrellaReviewerOptions {
+  /** Aux model that merges a redundant cluster into one master name+steps. */
+  merge: ProcedureDrafter
+  /** Min similarity (symmetric term-overlap) two skills need to be "redundant". */
+  minSimilarity?: number
+  /** Min cluster size to merge (a redundant PAIR is enough). Default {@link DEFAULT_UMBRELLA_MIN_CLUSTER}. */
+  minCluster?: number
+  /** Max clusters merged per sweep. Default {@link DEFAULT_SKILLS_MAX_CANDIDATES}. */
+  maxClusters?: number
+  /** Max semantic entries scanned for active procedures. Default {@link DEFAULT_SKILLS_SCAN}. */
+  maxScan?: number
+  /** Scope to one namespace (per-user no-leak). */
+  filter?: (entry: MemoryEntry) => boolean
+  /** Meta merged into every umbrella procedure (e.g. `{ user: 'alice' }`). */
+  procedureMeta?: Record<string, unknown>
+  /** Aux-model system prompt override. */
+  system?: string
+}
+
+/**
+ * Umbrella consolidation as a {@link MemoryReviewer} (heartbeat pass). Each sweep:
+ *   1. fetches the ACTIVE procedures (recall semantic, filter `isProcedure && isActive`);
+ *   2. clusters the REDUNDANT ones ({@link clusterBySimilarity}, `minCluster >= 2`);
+ *   3. for each cluster, asks the aux model to MERGE it into one master skill;
+ *   4. writes the umbrella procedure FIRST (crash-safe — see below), then CLOSES
+ *      each original via {@link closedMeta} (`validTo = now`), stamps `supersedes`
+ *      → the umbrella, and back-LINKS it to the umbrella (E). The closed originals
+ *      drop out of `activeProcedures` / recall automatically — the "SQLite repoint"
+ *      is free from D.
+ *
+ * Converged (no redundant cluster) → `{}`. Idempotent: after a merge the originals
+ * are closed, so next sweep the cluster shrinks to just the umbrella (size 1 < 2)
+ * and nothing re-merges.
+ *
+ * Crash-safety: the umbrella is written BEFORE the originals are closed. A crash in
+ * between leaves the originals active alongside the umbrella; the next sweep simply
+ * re-clusters and re-merges them (converging), never losing a skill.
+ *
+ * Requires `patchMeta` (the meta-amend seam) — without it we'd create a duplicate
+ * ACTIVE umbrella we couldn't retire the originals against, so we refuse and no-op.
+ */
+export function umbrellaReviewer(opts: UmbrellaReviewerOptions): MemoryReviewer {
+  return async (ctx: ReviewContext): Promise<ReviewOutcome> => {
+    const canPatch = typeof ctx.memory.patchMeta === 'function'
+    if (!canPatch) return {} // can't retire originals → don't strand a duplicate active umbrella
+
+    const maxScan = Math.max(1, Math.floor(numOr(opts.maxScan, DEFAULT_SKILLS_SCAN)))
+    const semantic = await ctx.memory.recall({ kinds: ['semantic'], k: maxScan })
+    const active = activeProcedures(semantic, ctx.now)
+    const procs = opts.filter ? active.filter(opts.filter) : active
+
+    const clusters = clusterBySimilarity(procs, {
+      ...(opts.minSimilarity !== undefined ? { minSimilarity: opts.minSimilarity } : {}),
+      minSize: Math.max(2, Math.floor(numOr(opts.minCluster, DEFAULT_UMBRELLA_MIN_CLUSTER))),
+      maxClusters: Math.max(1, Math.floor(numOr(opts.maxClusters, DEFAULT_SKILLS_MAX_CANDIDATES))),
+    })
+    if (clusters.length === 0) return {}
+
+    let merged = 0
+    for (const cluster of clusters) {
+      let drafted: DraftedProcedure
+      try {
+        drafted = await opts.merge({
+          system: opts.system ?? DEFAULT_MERGE_SYSTEM,
+          user: buildMergePrompt(cluster),
+        })
+      } catch {
+        continue // aux model failed on this cluster — leave it active, try the next
+      }
+      const name = (drafted.name ?? '').trim()
+      const steps = cleanSteps(drafted.steps)
+      if (!name || steps.length === 0) continue // unusable merge → leave the cluster intact
+
+      const meta: Record<string, unknown> = {
+        ...(opts.procedureMeta ?? {}),
+        [META_FORM]: FORM_PROCEDURE,
+        [META_STEPS]: steps,
+        [META_UMBRELLA]: true,
+        mergedAt: ctx.now,
+      }
+      // Write the umbrella BEFORE closing the originals (crash-safe ordering).
+      const umbrella = await ctx.memory.remember({ kind: 'semantic', text: name, meta })
+      for (const orig of cluster) {
+        try {
+          await ctx.memory.patchMeta!(orig.id, {
+            ...closedMeta(orig.meta, ctx.now),
+            [META_SUPERSEDES]: umbrella.id,
+            [META_LINKS]: mergeLinks(linksOf(orig), [umbrella.id], orig.id),
+          })
+        } catch {
+          // Best-effort: a straggler stays active and the next sweep re-merges it
+          // with the umbrella (converging) — never a lost skill.
+        }
+      }
+      merged++
+    }
+
+    if (merged === 0) return {}
+    return { summary: `merged ${merged} skill cluster(s)` }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // internals
 // ---------------------------------------------------------------------------
 
@@ -305,6 +441,17 @@ function buildAuthorPrompt(members: readonly MemoryEntry[]): string {
     parts.push(`- ${e.text}`)
   }
   parts.push('', 'Output the skill: a one-line name and the ordered steps.')
+  return parts.join('\n')
+}
+
+/** Render a redundant skill cluster for the aux merge model: each skill's name + steps. */
+function buildMergePrompt(cluster: readonly MemoryEntry[]): string {
+  const parts: string[] = [`[${cluster.length} redundant skills to merge into one master skill]`]
+  for (const p of cluster) {
+    parts.push(`## ${p.text}`)
+    for (const s of stepsOf(p)) parts.push(`- ${s}`)
+  }
+  parts.push('', 'Output the merged master skill: a one-line name and the unified ordered steps.')
   return parts.join('\n')
 }
 

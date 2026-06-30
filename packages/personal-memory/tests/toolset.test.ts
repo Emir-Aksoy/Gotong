@@ -11,7 +11,13 @@ describe('MemoryToolset', () => {
   it('advertises remember/remember_procedure/recall/forget with LLM-safe names', () => {
     const ts = new MemoryToolset({ memory: makeFakeMemory() })
     const names = ts.listTools().map((t) => t.name)
-    expect(names).toEqual(['remember', 'remember_procedure', 'recall', 'forget'])
+    expect(names).toEqual([
+      'remember',
+      'remember_procedure',
+      'refine_procedure',
+      'recall',
+      'forget',
+    ])
     for (const n of names) expect(n).toMatch(/^[a-zA-Z0-9_-]+$/)
   })
 
@@ -241,6 +247,81 @@ describe('MemoryToolset', () => {
       const ts = new MemoryToolset({ memory: makeFakeMemory(), writableKinds: ['episodic'] })
       const r = await ts.callTool('remember_procedure', { name: 'x', steps: ['a'] })
       expect(r.isError).toBe(true)
+    })
+  })
+
+  describe('refine_procedure (MR3 ② self-improve)', () => {
+    async function seedProcedure(): Promise<{ mem: ReturnType<typeof makeFakeMemory>; ts: MemoryToolset; id: string }> {
+      const mem = makeFakeMemory()
+      const ts = new MemoryToolset({ memory: mem })
+      await ts.callTool('remember_procedure', { name: 'brew tea', steps: ['boil', 'steep'] })
+      const id = mem.entries.find((e) => (e.meta as { form?: string }).form === 'procedure')!.id
+      return { mem, ts, id }
+    }
+
+    it('replaces the steps in place, keeping the same id/name', async () => {
+      const { mem, ts, id } = await seedProcedure()
+      const r = await ts.callTool('refine_procedure', { id, steps: ['boil', 'warm pot', 'steep 3min'] })
+      expect(r.isError).toBeFalsy()
+      const after = mem.entries.find((e) => e.id === id)!
+      expect(after.text).toBe('brew tea') // name unchanged
+      expect((after.meta as { steps?: string[] }).steps).toEqual(['boil', 'warm pot', 'steep 3min'])
+      // No new entry was minted — still exactly one procedure.
+      expect(mem.entries.filter((e) => (e.meta as { form?: string }).form === 'procedure')).toHaveLength(1)
+    })
+
+    it('appends steps to the end with appendSteps', async () => {
+      const { mem, ts, id } = await seedProcedure()
+      const r = await ts.callTool('refine_procedure', { id, appendSteps: ['pour', 'serve'] })
+      expect(r.isError).toBeFalsy()
+      expect((mem.entries.find((e) => e.id === id)!.meta as { steps?: string[] }).steps).toEqual([
+        'boil',
+        'steep',
+        'pour',
+        'serve',
+      ])
+    })
+
+    it('a refined procedure surfaces its new steps on recall', async () => {
+      const { ts, id } = await seedProcedure()
+      await ts.callTool('refine_procedure', { id, steps: ['boil', 'steep', 'enjoy'] })
+      const out = textOf(await ts.callTool('recall', { form: 'procedure' }))
+      expect(out).toContain('steps: 1. boil; 2. steep; 3. enjoy')
+    })
+
+    it('rejects giving both steps and appendSteps, or neither', async () => {
+      const { ts, id } = await seedProcedure()
+      expect((await ts.callTool('refine_procedure', { id, steps: ['a'], appendSteps: ['b'] })).isError).toBe(true)
+      expect((await ts.callTool('refine_procedure', { id })).isError).toBe(true)
+      expect((await ts.callTool('refine_procedure', { id, steps: [] })).isError).toBe(true)
+    })
+
+    it('rejects an unknown id or a non-procedure target', async () => {
+      const mem = makeFakeMemory()
+      const ts = new MemoryToolset({ memory: mem })
+      // unknown id
+      expect((await ts.callTool('refine_procedure', { id: 'nope', steps: ['x'] })).isError).toBe(true)
+      // a plain semantic fact is not a procedure
+      await ts.callTool('remember', { text: 'likes oat milk' })
+      const factId = mem.entries.find((e) => e.text.includes('oat milk'))!.id
+      expect((await ts.callTool('refine_procedure', { id: factId, steps: ['x'] })).isError).toBe(true)
+    })
+
+    it('errors when the backend cannot amend meta in place', async () => {
+      // Strip patchMeta from an otherwise-normal handle.
+      const base = makeFakeMemory()
+      await base.remember({ kind: 'semantic', text: 'brew tea', meta: { form: 'procedure', steps: ['boil'] } })
+      const noPatch = {
+        recall: base.recall.bind(base),
+        remember: base.remember.bind(base),
+        list: base.list.bind(base),
+        forget: base.forget.bind(base),
+        clear: base.clear.bind(base),
+      } as unknown as import('@aipehub/services-sdk').MemoryHandle
+      const ts = new MemoryToolset({ memory: noPatch })
+      const r = await ts.callTool('refine_procedure', { id: 'm1', steps: ['x'] })
+      expect(r.isError).toBe(true)
+      expect(textOf(r)).toMatch(/cannot revise/i)
     })
   })
 })

@@ -247,12 +247,16 @@ export {
   clusterBySimilarity,
   detectProcedureCandidates,
   procedureAuthoringReviewer,
+  umbrellaReviewer,
+  activeProcedures,
   isProcedurized,
   DEFAULT_AUTHOR_SYSTEM,
+  DEFAULT_MERGE_SYSTEM,
   DEFAULT_AUTHOR_MIN_OCCURRENCES,
   DEFAULT_CLUSTER_SIMILARITY,
   DEFAULT_UMBRELLA_MIN_CLUSTER,
   DEFAULT_SKILLS_MAX_CANDIDATES,
+  DEFAULT_SKILLS_SCAN,
   META_PROCEDURIZED,
   META_UMBRELLA,
   type DraftedProcedure,
@@ -261,5 +265,6 @@ export {
   type ProcedureCandidate,
   type DetectProcedureOptions,
   type ProcedureAuthoringReviewerOptions,
+  type UmbrellaReviewerOptions,
 } from './skills.js'
 export { PersonalMemoryError, type PersonalMemoryErrorCode } from './errors.js'

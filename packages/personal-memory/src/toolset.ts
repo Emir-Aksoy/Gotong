@@ -120,12 +120,21 @@ export interface MemoryToolsetOptions {
 
 const REMEMBER = 'remember'
 const REMEMBER_PROCEDURE = 'remember_procedure'
+const REFINE_PROCEDURE = 'refine_procedure'
 const RECALL = 'recall'
 const FORGET = 'forget'
 
 const DEFAULT_WRITABLE_KINDS: readonly MemoryKind[] = ['episodic', 'semantic']
 const DEFAULT_RECALL_K = 12
 const RECALL_HARD_CAP = 50
+
+/**
+ * Cap on entries scanned to resolve a procedure by id for {@link MemoryToolset}'s
+ * `refine_procedure`. The handle has no get-by-id, so refine lists semantic
+ * entries and finds the target; this bounds that scan (skills are few — a butler
+ * accumulates dozens, not thousands — so this never truncates a real target).
+ */
+const PROCEDURE_SCAN = 200
 
 export class MemoryToolset implements LlmAgentToolset {
   private readonly memory: MemoryHandle
@@ -228,6 +237,35 @@ export class MemoryToolset implements LlmAgentToolset {
         },
       },
       {
+        name: REFINE_PROCEDURE,
+        description:
+          'Revise the steps of a procedure you already recorded, in place, as you ' +
+          'find a better way to do it — its name and id stay the same (so it keeps ' +
+          'its place in memory). Use `steps` to REPLACE the whole sequence, or ' +
+          '`appendSteps` to ADD steps to the end. Get the id from `recall` (search ' +
+          'form "procedure"). For a brand-new skill use `remember_procedure` instead.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            id: {
+              type: 'string',
+              description: 'The id of the procedure to revise (from `recall`).',
+            },
+            steps: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'New ordered steps that REPLACE the existing ones. Non-empty.',
+            },
+            appendSteps: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Ordered steps to ADD to the end of the existing sequence. Non-empty.',
+            },
+          },
+          required: ['id'],
+        },
+      },
+      {
         name: RECALL,
         description:
           'Search past memory for relevant entries by keyword relevance ' +
@@ -297,6 +335,8 @@ export class MemoryToolset implements LlmAgentToolset {
         return this.doRemember(args)
       case REMEMBER_PROCEDURE:
         return this.doRememberProcedure(args)
+      case REFINE_PROCEDURE:
+        return this.doRefineProcedure(args)
       case RECALL:
         return this.doRecall(args)
       case FORGET:
@@ -367,6 +407,46 @@ export class MemoryToolset implements LlmAgentToolset {
       return okResult(`Remembered procedure ${entry.id} (${steps.length} step(s)).`)
     } catch (err) {
       return errorResult(`remember_procedure failed: ${errMsg(err)}`)
+    }
+  }
+
+  /**
+   * Self-improve (MR3 ②): revise a recorded procedure's steps IN PLACE. Only the
+   * `steps` change — keeping the id/name/ts means the entry stays put (a renamed
+   * skill would mint a new id and move its frozen-block position, which is what
+   * the Umbrella merge is for, not a casual revision). Amends `meta.steps` via the
+   * handle's `patchMeta` (feature-detected); replace with `steps`, or append with
+   * `appendSteps` (exactly one).
+   */
+  private async doRefineProcedure(args: Record<string, unknown>): Promise<LlmToolCallResult> {
+    if (typeof this.memory.patchMeta !== 'function') {
+      return errorResult('This memory backend cannot revise entries in place.')
+    }
+    const id = typeof args.id === 'string' ? args.id.trim() : ''
+    if (!id) return errorResult('`id` is required and must be a non-empty string.')
+
+    const replace = cleanSteps(args.steps)
+    const append = cleanSteps(args.appendSteps)
+    const hasReplace = args.steps !== undefined && replace.length > 0
+    const hasAppend = args.appendSteps !== undefined && append.length > 0
+    if (hasReplace === hasAppend) {
+      // Neither → nothing to do; both → ambiguous intent. Demand exactly one.
+      return errorResult('Provide exactly one of `steps` (replace) or `appendSteps` (append).')
+    }
+
+    try {
+      // No get-by-id on the handle — list semantic entries and find the target.
+      const semantic = await this.memory.list({ kind: 'semantic', limit: PROCEDURE_SCAN })
+      const target = semantic.find((e) => e.id === id)
+      if (!target) return errorResult(`No procedure with id ${id}.`)
+      if (!isProcedure(target)) return errorResult(`${id} is not a procedure (no steps to revise).`)
+
+      const next = hasReplace ? replace : [...stepsOf(target), ...append]
+      const ok = await this.memory.patchMeta(id, { [META_STEPS]: next })
+      if (!ok) return errorResult(`No procedure with id ${id}.`)
+      return okResult(`Refined procedure ${id} (${next.length} step(s)).`)
+    } catch (err) {
+      return errorResult(`refine_procedure failed: ${errMsg(err)}`)
     }
   }
 

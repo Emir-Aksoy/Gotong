@@ -13,15 +13,21 @@
 
 import { describe, expect, it, vi } from 'vitest'
 
-import type { MemoryEntry } from '@aipehub/services-sdk'
+import type { MemoryEntry, MemoryHandle } from '@aipehub/services-sdk'
 
 import {
+  activeProcedures,
   clusterBySimilarity,
   detectProcedureCandidates,
+  isActive,
   isProcedure,
   isProcedurized,
+  linksOf,
   procedureAuthoringReviewer,
   stepsOf,
+  supersedesOf,
+  umbrellaReviewer,
+  validToOf,
   type DraftedProcedure,
   type ProcedureDrafter,
 } from '../src/index.js'
@@ -169,5 +175,168 @@ describe('procedureAuthoringReviewer', () => {
     const mem = makeFakeMemory([])
     const reviewer = procedureAuthoringReviewer({ draft: drafter({ name: 'x', steps: ['y'] }) })
     expect(await reviewer({ memory: mem, episodic: [], now: NOW })).toEqual({})
+  })
+})
+
+// --- ③ Umbrella consolidation -----------------------------------------------
+
+const NOW_U = 9_000_000
+
+/** A `form:'procedure'` semantic entry (the umbrella sweep operates over these). */
+function proc(
+  id: string,
+  name: string,
+  steps: string[],
+  ts: number,
+  extraMeta: Record<string, unknown> = {},
+): MemoryEntry {
+  return entry(id, 'semantic', name, ts, { form: 'procedure', steps, ...extraMeta })
+}
+
+function merger(d: DraftedProcedure): ProcedureDrafter {
+  return async () => d
+}
+
+describe('activeProcedures', () => {
+  it('returns active procedures, excluding closed intervals and non-procedures', () => {
+    const live = proc('p1', '申请加班费', ['起草', '提交'], 100)
+    const closed = proc('p2', '旧加班流程', ['x'], 101, { validTo: NOW_U - 1 }) // closed before now
+    const fact = entry('f1', 'semantic', '一个普通事实', 102) // not a procedure
+    expect(activeProcedures([live, closed, fact], NOW_U).map((e) => e.id)).toEqual(['p1'])
+  })
+})
+
+describe('umbrellaReviewer', () => {
+  it('merges a redundant cluster into one master, closing + back-linking the originals', async () => {
+    // p1 + p2 are the SAME skill named two ways (high name overlap) → redundant.
+    // coffee is unrelated and must survive untouched.
+    const mem = makeFakeMemory([
+      proc('p1', '申请加班费', ['起草申请', '提交经理'], 100),
+      proc('p2', '加班费申请', ['写申请', '交经理审批'], 101),
+      proc('coffee', '购买咖啡机', ['选型号', '下单'], 102),
+    ])
+    const merge = vi.fn<ProcedureDrafter>(
+      merger({ name: '加班费申请(合并)', steps: ['起草申请', '提交经理审批', '记录决定'] }),
+    )
+
+    const out = await umbrellaReviewer({ merge })({ memory: mem, episodic: [], now: NOW_U })
+
+    expect(out.summary).toContain('merged 1')
+    expect(merge).toHaveBeenCalledTimes(1)
+
+    // The umbrella is a fresh, ACTIVE procedure with the merged steps.
+    const umbrella = mem.entries.find((e) => (e.meta as { umbrella?: unknown }).umbrella === true)!
+    expect(umbrella).toBeDefined()
+    expect(umbrella.text).toBe('加班费申请(合并)')
+    expect(stepsOf(umbrella)).toEqual(['起草申请', '提交经理审批', '记录决定'])
+    expect(isActive(umbrella, NOW_U)).toBe(true)
+    expect((umbrella.meta as { mergedAt?: unknown }).mergedAt).toBe(NOW_U)
+
+    // Both originals are CLOSED (validTo=now), supersede → umbrella, link → umbrella.
+    for (const id of ['p1', 'p2']) {
+      const orig = mem.entries.find((e) => e.id === id)!
+      expect(validToOf(orig)).toBe(NOW_U)
+      expect(isActive(orig, NOW_U)).toBe(false)
+      expect(supersedesOf(orig)).toBe(umbrella.id)
+      expect(linksOf(orig)).toContain(umbrella.id)
+      // The merge PRESERVED the original's own steps (it only closed the interval).
+      expect(stepsOf(orig).length).toBeGreaterThan(0)
+    }
+
+    // The unrelated coffee skill is untouched and still active.
+    const coffee = mem.entries.find((e) => e.id === 'coffee')!
+    expect(validToOf(coffee)).toBeUndefined()
+    expect(supersedesOf(coffee)).toBeUndefined()
+
+    // "SQLite repoint" for free: only the umbrella + coffee remain in the active set.
+    expect(activeProcedures(mem.entries, NOW_U).map((e) => e.id).sort()).toEqual(
+      [umbrella.id, 'coffee'].sort(),
+    )
+  })
+
+  it('converged — dissimilar skills are not merged', async () => {
+    const mem = makeFakeMemory([
+      proc('p1', '申请加班费', ['x'], 100),
+      proc('coffee', '购买咖啡机', ['y'], 101),
+    ])
+    const merge = vi.fn<ProcedureDrafter>(merger({ name: 'z', steps: ['z'] }))
+
+    const out = await umbrellaReviewer({ merge })({ memory: mem, episodic: [], now: NOW_U })
+
+    expect(out).toEqual({})
+    expect(merge).not.toHaveBeenCalled()
+    expect(mem.entries.filter(isProcedure)).toHaveLength(2) // nothing merged
+  })
+
+  it('is idempotent — a second sweep over the merged set re-merges nothing', async () => {
+    const mem = makeFakeMemory([
+      proc('p1', '申请加班费', ['起草'], 100),
+      proc('p2', '加班费申请', ['提交'], 101),
+    ])
+    const merge = vi.fn<ProcedureDrafter>(merger({ name: '加班费总流程', steps: ['起草', '提交', '记录'] }))
+    const reviewer = umbrellaReviewer({ merge })
+
+    const first = await reviewer({ memory: mem, episodic: [], now: NOW_U })
+    expect(first.summary).toContain('merged 1')
+    expect(activeProcedures(mem.entries, NOW_U)).toHaveLength(1) // just the umbrella
+
+    // Second sweep: the lone umbrella can't form a cluster of >=2 → no-op.
+    const second = await reviewer({ memory: mem, episodic: [], now: NOW_U + 1 })
+    expect(second).toEqual({})
+    expect(merge).toHaveBeenCalledTimes(1) // not called again
+  })
+
+  it('honors a per-user filter (no-leak: another namespace is never merged or closed)', async () => {
+    const mem = makeFakeMemory([
+      proc('a1', '申请加班费', ['x'], 100, { user: 'alice' }),
+      proc('a2', '加班费申请', ['y'], 101, { user: 'alice' }),
+      proc('b1', '申请加班费', ['z'], 102, { user: 'bob' }), // same name as a1 — would cluster if unscoped
+    ])
+    const merge = vi.fn<ProcedureDrafter>(merger({ name: 'alice 的加班流程', steps: ['起草', '提交'] }))
+
+    await umbrellaReviewer({
+      merge,
+      filter: (e) => (e.meta as { user?: unknown }).user === 'alice',
+      procedureMeta: { user: 'alice' },
+    })({ memory: mem, episodic: [], now: NOW_U })
+
+    // bob's skill is never a member: not closed, not superseded.
+    const b1 = mem.entries.find((e) => e.id === 'b1')!
+    expect(validToOf(b1)).toBeUndefined()
+    expect(supersedesOf(b1)).toBeUndefined()
+    expect(isActive(b1, NOW_U)).toBe(true)
+    // alice's two were merged + closed.
+    expect(validToOf(mem.entries.find((e) => e.id === 'a1')!)).toBe(NOW_U)
+    expect(validToOf(mem.entries.find((e) => e.id === 'a2')!)).toBe(NOW_U)
+  })
+
+  it('refuses to merge without patchMeta (cannot retire originals → no stranded umbrella)', async () => {
+    // A backend that cannot amend meta: merging would strand a duplicate ACTIVE
+    // umbrella we could never retire the originals against. The reviewer must
+    // bail BEFORE writing anything.
+    const procs = [proc('p1', '申请加班费', ['x'], 100), proc('p2', '加班费申请', ['y'], 101)]
+    let created = 0
+    const stub: MemoryHandle = {
+      async recall(q) {
+        return procs.filter((e) => !q.kinds || q.kinds.includes(e.kind))
+      },
+      async remember(ne) {
+        created++
+        return { id: 'new', ts: 1, kind: ne.kind, text: ne.text, ...(ne.meta ? { meta: ne.meta } : {}) }
+      },
+      async list() {
+        return procs
+      },
+      async forget() {},
+      async clear() {},
+      // no patchMeta
+    }
+    const merge = vi.fn<ProcedureDrafter>(merger({ name: 'z', steps: ['z'] }))
+
+    const out = await umbrellaReviewer({ merge })({ memory: stub, episodic: [], now: NOW_U })
+
+    expect(out).toEqual({})
+    expect(created).toBe(0) // nothing written — refused before remembering an umbrella
+    expect(merge).not.toHaveBeenCalled()
   })
 })
