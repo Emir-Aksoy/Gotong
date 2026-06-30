@@ -32,6 +32,7 @@ import type {
 } from '@aipehub/llm'
 import type { MemoryEntry, MemoryHandle, MemoryKind } from '@aipehub/services-sdk'
 
+import { queryFingerprint, type MemoryQueryHitWriter } from './dreaming.js'
 import {
   clampImportance,
   importanceOf,
@@ -98,6 +99,14 @@ export interface MemoryToolsetOptions {
    */
   reinforce?: MemoryReinforcer
   /**
+   * Opt-in (MR2): after a recall WITH a query, record that query's fingerprint
+   * on each matched entry, bumping its query-DIVERSITY (how many distinct
+   * questions a fact has answered) for the dreaming sweep. Omit → no recording
+   * (default, byte-identical to pre-MR2). Like {@link reinforce}, the host wires
+   * a file-backed patch and it's best-effort. See {@link MemoryQueryHitWriter}.
+   */
+  queryHit?: MemoryQueryHitWriter
+  /**
    * Opt-in (E-M3): after a recall, expand ONE hop along the matched entries'
    * links and append the linked entries (marked `↪`). Omit → no expansion
    * (default, byte-identical to pre-E). See {@link MemoryLinkLookup}.
@@ -124,6 +133,7 @@ export class MemoryToolset implements LlmAgentToolset {
   private readonly writableKinds: ReadonlySet<MemoryKind>
   private readonly recallDefaultK: number
   private readonly reinforce: MemoryReinforcer | undefined
+  private readonly queryHit: MemoryQueryHitWriter | undefined
   private readonly linkLookup: MemoryLinkLookup | undefined
   private readonly expandK: number
   private readonly now: () => number
@@ -140,6 +150,7 @@ export class MemoryToolset implements LlmAgentToolset {
     )
     this.recallDefaultK = clamp(opts.recallDefaultK ?? DEFAULT_RECALL_K, 1, RECALL_HARD_CAP)
     this.reinforce = opts.reinforce
+    this.queryHit = opts.queryHit
     this.linkLookup = opts.linkLookup
     this.expandK = Math.max(0, Math.floor(opts.expandK ?? DEFAULT_LINK_EXPAND))
     this.now = opts.now ?? Date.now
@@ -418,6 +429,11 @@ export class MemoryToolset implements LlmAgentToolset {
       // neighbors are surfaced-by-association, not matched, so they're not
       // reinforced (that would flatten salience across whole neighborhoods).
       await this.reinforceEntries(entries)
+      // MR2: also stamp THIS query's fingerprint on the matched seeds, so the
+      // dreaming sweep can tell a fact that gets asked about in many different
+      // ways (high query-diversity) from one merely re-read often. Same
+      // best-effort / seeds-only / post-build discipline as reinforce.
+      await this.recordQueryHits(query, entries)
       return okResult(lines.join('\n'))
     } catch (err) {
       return errorResult(`recall failed: ${errMsg(err)}`)
@@ -463,6 +479,29 @@ export class MemoryToolset implements LlmAgentToolset {
         await this.reinforce(e, now)
       } catch {
         // best-effort: a reinforcement failure must never break recall
+      }
+    }
+  }
+
+  /**
+   * MR2: best-effort stamp of THIS recall's query fingerprint on the matched
+   * seeds (no-op when not opted in or the query is empty). The fingerprint is
+   * computed once for the whole call; the writer itself is idempotent (a
+   * re-asked query, already in the bounded set, is not a new hit), so a fact's
+   * query-DIVERSITY rises only when it's asked about in genuinely new ways.
+   */
+  private async recordQueryHits(
+    query: string | undefined,
+    entries: readonly MemoryEntry[],
+  ): Promise<void> {
+    if (!this.queryHit || query === undefined || entries.length === 0) return
+    const fingerprint = queryFingerprint(query)
+    if (fingerprint === '') return // no terms (e.g. punctuation-only) → nothing to record
+    for (const e of entries) {
+      try {
+        await this.queryHit(e, fingerprint)
+      } catch {
+        // best-effort: a query-hit failure must never break recall
       }
     }
   }

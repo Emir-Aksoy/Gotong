@@ -1782,6 +1782,8 @@
       meButlerMemForgetAll: '忘掉全部',
       meButlerMemProfile: '它对你的长期了解',
       meButlerMemRecent: '最近记下的',
+      meButlerMemLastDream: (promoted, pruned) =>
+        `上次复盘：提升 ${promoted} 条进画像 / 封存 ${pruned} 条陈旧记忆`,
       meButlerMemKindSemantic: '画像',
       meButlerMemKindEpisodic: '记录',
       meButlerMemForget: '忘掉这条',
@@ -3632,6 +3634,8 @@
       meButlerMemForgetAll: 'Forget all',
       meButlerMemProfile: 'What it knows about you long-term',
       meButlerMemRecent: 'Recently noted',
+      meButlerMemLastDream: (promoted, pruned) =>
+        `Last review: promoted ${promoted} into the profile / archived ${pruned} stale memories`,
       meButlerMemKindSemantic: 'Profile',
       meButlerMemKindEpisodic: 'Note',
       meButlerMemForget: 'Forget this',

@@ -82,6 +82,7 @@ export {
   DEFAULT_CONSOLIDATE_TRIGGER_BYTES,
   DEFAULT_CONSOLIDATE_KEEP_RECENT,
   DEFAULT_PROFILE_HARD_CAP,
+  isProfile,
   META_PROFILE,
   type MemorySummarizer,
   type ConsolidateOptions,
@@ -221,4 +222,25 @@ export {
   DEFAULT_REINFORCE_WEIGHT,
   type SalienceOptions,
 } from './salience.js'
+export {
+  dreamingReviewer,
+  dreamScore,
+  queryFingerprint,
+  queryHitMeta,
+  queryHitsOf,
+  queryDiversityOf,
+  META_QUERY_HITS,
+  DEFAULT_QUERY_HITS_CAP,
+  DEFAULT_FINGERPRINT_TERMS,
+  DEFAULT_DREAM_PROMOTE_GATE,
+  DEFAULT_DREAM_PRUNE_GATE,
+  DEFAULT_DREAM_STALE_MS,
+  DEFAULT_DREAM_MAX_CANDIDATES,
+  type MemoryQueryHitWriter,
+  type DreamScoreOptions,
+  type DreamedEntry,
+  type DreamRecord,
+  type DreamDiaryWriter,
+  type DreamingReviewerOptions,
+} from './dreaming.js'
 export { PersonalMemoryError, type PersonalMemoryErrorCode } from './errors.js'

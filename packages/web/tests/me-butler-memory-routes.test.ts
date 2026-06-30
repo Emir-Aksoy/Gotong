@@ -187,6 +187,24 @@ describe('/api/me/butler/memory — member butler-memory privacy view (M6c)', ()
     expect(flat.level).toBeUndefined()
   })
 
+  it('carries the dreaming sweep summary (lastDream) through the route (MR2)', async () => {
+    b = await boot()
+    // The "上次复盘" line is read-only counts; assert it survives the route echo,
+    // and that a snapshot without one simply omits the field (no bogus zeros).
+    b.stub!.snapshot = {
+      profile: [],
+      recent: [],
+      lastDream: { firedAt: 1_780_000_000_000, promoted: 3, pruned: 1 },
+    }
+    const withDream = await req(b, 'GET', '/api/me/butler/memory')
+    expect(withDream.status).toBe(200)
+    expect(withDream.json.lastDream).toEqual({ firedAt: 1_780_000_000_000, promoted: 3, pruned: 1 })
+
+    b.stub!.snapshot = { profile: [], recent: [] }
+    const noDream = await req(b, 'GET', '/api/me/butler/memory')
+    expect(noDream.json.lastDream).toBeUndefined()
+  })
+
   it('DELETE forgets one entry by path id (session user forced)', async () => {
     b = await boot()
     const r = await req(b, 'DELETE', '/api/me/butler/memory/e1')

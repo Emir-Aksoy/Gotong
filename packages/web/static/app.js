@@ -3220,6 +3220,18 @@
       const j = await r.json()
       const profile = Array.isArray(j?.profile) ? j.profile : []
       const recent = Array.isArray(j?.recent) ? j.recent : []
+      // MR2: read-only "上次复盘" line from the last dreaming sweep (counts only).
+      const dreamEl = document.getElementById('me-butler-mem-dream')
+      if (dreamEl) {
+        const d = j?.lastDream
+        if (d && typeof d.promoted === 'number' && typeof d.pruned === 'number') {
+          dreamEl.textContent = t('meButlerMemLastDream', d.promoted, d.pruned)
+          dreamEl.hidden = false
+        } else {
+          dreamEl.textContent = ''
+          dreamEl.hidden = true
+        }
+      }
       profileEl.innerHTML = profile.length
         ? profile.map(renderMemCard).join('')
         : `<p class="me-meta">${t('meButlerMemEmpty')}</p>`

@@ -519,12 +519,30 @@ export interface ButlerMemoryView {
   active?: boolean
 }
 
+/** A one-line summary of the butler's most recent background dreaming sweep (MR2). */
+export interface ButlerDreamSummary {
+  /** Epoch ms the sweep ran. */
+  firedAt: number
+  /** How many memories it promoted into the durable profile. */
+  promoted: number
+  /** How many stale memories it pruned. */
+  pruned: number
+  /** Size (chars) of the curated profile written, if any were promoted. */
+  profileBytes?: number
+}
+
 /** What the privacy panel shows: the distilled profile + recent captured turns. */
 export interface ButlerMemorySnapshot {
   /** Semantic entries — the durable "what the butler knows about me". */
   profile: ButlerMemoryView[]
   /** Episodic entries — recently captured turns, newest first. */
   recent: ButlerMemoryView[]
+  /**
+   * The last background "复盘" (dreaming sweep), if one has run. Read-only — the
+   * member sees that the butler tidies its own memory and what the last pass did
+   * ("提升 X 条 / 封存 Y 条"). Omitted when no sweep has run yet.
+   */
+  lastDream?: ButlerDreamSummary
 }
 
 export interface ButlerMemorySurface {

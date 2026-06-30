@@ -25,15 +25,17 @@
 
 import {
   closedMeta,
+  queryHitMeta,
   reinforcedMeta,
   META_LINKS,
   type MemoryLinkWriter,
+  type MemoryQueryHitWriter,
   type MemoryReinforcer,
   type MemoryValidityWriter,
 } from '@aipehub/personal-memory'
 import type { MemoryHandle } from '@aipehub/services-sdk'
 
-/** The three injected writers, all backed by one handle's `patchMeta`. */
+/** The four injected writers, all backed by one handle's `patchMeta`. */
 export interface ButlerMemoryWriters {
   /** D: close a fact's validity interval in place (stamp `validTo`). */
   readonly closeEntry: MemoryValidityWriter
@@ -41,6 +43,8 @@ export interface ButlerMemoryWriters {
   readonly reinforcer: MemoryReinforcer
   /** E: persist grown associative link lists. */
   readonly linkWriter: MemoryLinkWriter
+  /** MR2: record a recall query's fingerprint to grow a fact's query-diversity. */
+  readonly queryHit: MemoryQueryHitWriter
 }
 
 /**
@@ -75,6 +79,13 @@ export function butlerMemoryWriters(handle: MemoryHandle): ButlerMemoryWriters {
     // existing); replace the one key, leave the rest of meta untouched.
     linkWriter: (updates) =>
       Promise.all(updates.map((u) => patchMeta(u.id, { [META_LINKS]: u.links }))).then(noop),
+    // `queryHitMeta` returns the `{ queryHits }` delta — or null when the
+    // fingerprint is empty or already counted (idempotent: a re-asked query is
+    // not a new write). Skip the patch on null so a repeated query is a no-op.
+    queryHit: (entry, fingerprint) => {
+      const delta = queryHitMeta(entry, fingerprint)
+      return delta ? patchMeta(entry.id, delta).then(noop) : Promise.resolve()
+    },
   }
 }
 

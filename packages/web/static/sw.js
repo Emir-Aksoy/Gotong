@@ -19,11 +19,11 @@
  *
  * Bumping CACHE invalidates the old shell on the next activate.
  */
-// v2 (REL-9, 1.0): the precached shell (app-core.js, app.js, offline.html)
-// gained the full bilingual i18n engine + the `lang` cookie precedence.
-// Bumping forces returning members past the stale-while-revalidate window so
-// they get the new language machinery on the next activate, not one load later.
-const CACHE = 'aipehub-shell-v2'
+// v3 (MR2): the precached shell (app-core.js, app.js) gained the dreaming
+// "上次复盘" line + its i18n key. Bumping forces returning members past the
+// stale-while-revalidate window so they get the new shell on the next activate,
+// not one load later.
+const CACHE = 'aipehub-shell-v3'
 
 // Stable, role-agnostic static shell. app.html is excluded on purpose
 // (role-injected); admin.js / identity-ui.js etc. are left to the runtime

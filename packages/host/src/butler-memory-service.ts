@@ -40,6 +40,7 @@ import {
 import type { MemoryEntry, MemoryHandle } from '@aipehub/services-sdk'
 import type { WebServerOptions } from '@aipehub/web'
 
+import { openButlerDreamDiary, type ButlerDreamDiary } from './personal-butler-dreams.js'
 import { openButlerMemory } from './personal-butler-memory.js'
 
 // Derive the surface contract from the web opts — single source of truth, no
@@ -78,6 +79,8 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
    * this service writes through here.)
    */
   private readonly handles = new Map<string, MemoryHandle>()
+  /** Per-user dream diary (DREAMS.md) — read for the "上次复盘" line, removed on forget-all. */
+  private readonly diaries = new Map<string, ButlerDreamDiary>()
 
   constructor(opts: HostButlerMemoryServiceOpts) {
     this.rootDir = opts.rootDir
@@ -89,15 +92,18 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
     const mem = this.open(userId)
     // Semantic = the distilled profile ("what the butler knows about me");
     // episodic = recently captured turns. Both newest-first, content only.
-    const [profile, recent] = await Promise.all([
+    // The dream diary's latest sweep rides along — read-only "上次复盘" reassurance.
+    const [profile, recent, lastDream] = await Promise.all([
       mem.recall({ kinds: ['semantic'], k: 200 }),
       mem.recall({ kinds: ['episodic'], k: RECENT_CAPTURE_LIMIT }),
+      this.diary(userId).readLatest(),
     ])
     // One `now` per call so each entry's bitemporal `active` flag is consistent.
     const now = this.clock()
     return {
       profile: profile.map((e) => projectEntry(e, now)),
       recent: recent.map((e) => projectEntry(e, now)),
+      ...(lastDream ? { lastDream } : {}),
     }
   }
 
@@ -119,8 +125,10 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
   }
 
   async forgetAll(userId: string): Promise<void> {
-    // Right to be forgotten — clear every kind for this member's butler.
+    // Right to be forgotten — clear every kind for this member's butler AND the
+    // derived dream diary (§八: forget-all also wipes the per-user derived files).
     await this.open(userId).clear()
+    await this.diary(userId).remove()
     this.logger.info('member cleared all butler memory', { userId })
   }
 
@@ -135,6 +143,14 @@ export class HostButlerMemoryService implements ButlerMemorySurface {
     })
     this.handles.set(userId, handle)
     return handle
+  }
+
+  private diary(userId: string): ButlerDreamDiary {
+    const cached = this.diaries.get(userId)
+    if (cached) return cached
+    const diary = openButlerDreamDiary({ rootDir: this.rootDir, userId, logger: this.logger })
+    this.diaries.set(userId, diary)
+    return diary
   }
 
   /** The wall clock (injectable for deterministic tests) — used to flag each

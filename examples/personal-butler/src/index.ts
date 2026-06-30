@@ -34,22 +34,29 @@ import {
   consolidate,
   DEFAULT_REINFORCE_WEIGHT,
   DEFAULT_SALIENCE_HALF_LIFE_MS,
+  dreamingReviewer,
   effectiveSalience,
   invertedIndexRetriever,
   isActive,
   isClosed,
+  isProfile,
   lexicalRetriever,
   linkReviewer,
   linksOf,
   budgetReviewer,
   MemoryReviewParticipant,
+  MemoryToolset,
   META_LINKS,
+  queryDiversityOf,
+  queryHitMeta,
   reconcileReviewer,
   recallCountOf,
   reinforcedMeta,
   renderFrozenBlock,
   supersedesOf,
+  type DreamRecord,
   type MemoryLinkWriter,
+  type MemoryQueryHitWriter,
   type MemoryReinforcer,
   type MemoryRetriever,
   type MemorySummarizer,
@@ -441,6 +448,64 @@ async function main(): Promise<void> {
   )
   console.log('  [4f] MR1 默认召回索引: 60 条新记录埋住的「春水堂」, 窗口检索漏掉、倒排索引翻出 ✓\n')
 
+  // ── [4g] MR2 — the dreaming sweep promotes what gets asked-about, prunes chatter ──
+  // The full loop, end to end: recall STAMPS each question's fingerprint on the
+  // fact it matched (so a fact asked about in many DIFFERENT ways earns
+  // query-diversity), then the 6h "dreaming" sweep scores every episodic by
+  // salience × recall × diversity — promoting the high-value one into a distilled
+  // profile and pruning the stale, never-asked chatter. This is the OpenClaw-style
+  // background consolidation, but bounded and reversible (promote distills; prune
+  // only touches stale, zero-diversity, low-value entries).
+  const drMem = inMemoryHandle()
+  const drPatch = drMem.patchMeta!.bind(drMem)
+  const queryHit: MemoryQueryHitWriter = (e, fp) => {
+    const delta = queryHitMeta(e, fp)
+    return delta ? Promise.resolve(drPatch(e.id, delta)).then(() => {}) : Promise.resolve()
+  }
+  const hotFact = await drMem.remember({ kind: 'episodic', text: '主人最爱春水堂的珍珠奶茶', meta: { importance: 5 } })
+  await drMem.remember({ kind: 'episodic', text: '随口闲聊一句今天天气', meta: { importance: 1 } })
+
+  // The butler's own recall tool, wired with the query-hit writer (what the host
+  // wires as butlerMemoryWriters.queryHit). Two DIFFERENT questions about the same
+  // fact → its query-diversity rises to 2; a re-asked question would not count.
+  const drTools = new MemoryToolset({ memory: drMem, queryHit })
+  await drTools.callTool('recall', { query: '奶茶', kinds: ['episodic'] })
+  await drTools.callTool('recall', { query: '春水堂', kinds: ['episodic'] })
+  const hotAfterAsk = (await drMem.list({ limit: 50 })).find((e) => e.id === hotFact.id)!
+  assert(queryDiversityOf(hotAfterAsk) === 2, '[4g] MR2: two distinct questions must raise query-diversity to 2')
+
+  const DREAM_NOW = 5_000_000
+  const dreamLog: DreamRecord[] = []
+  const dreamSummarize: MemorySummarizer = async () => '主人偏好: 春水堂的珍珠奶茶(常被问起)'
+  // staleMs:1000 so the demo's small timestamps count as stale; promoteGate 8 lets
+  // the diversity-3 hot fact (5×1×3=15) through while the chatter (1×1×1=1) doesn't.
+  const dreamTick = new MemoryReviewParticipant({
+    memory: drMem,
+    reviewer: dreamingReviewer({
+      summarize: dreamSummarize,
+      promoteGate: 8,
+      pruneGate: 1,
+      staleMs: 1000,
+      diary: (rec) => {
+        dreamLog.push(rec)
+      },
+    }),
+    policy: { minEpisodic: 1 },
+    now: () => DREAM_NOW,
+  })
+  await dreamTick.review()
+
+  const afterDream = await drMem.list({ limit: 50 })
+  const dreamedProfile = afterDream.find((e) => isProfile(e) && e.text.includes('春水堂'))
+  assert(dreamedProfile !== undefined, '[4g] MR2: the asked-about fact must be promoted into a distilled profile')
+  assert(!afterDream.some((e) => e.id === hotFact.id), '[4g] MR2: the promoted episodic must be folded away')
+  assert(!afterDream.some((e) => e.text.includes('天气')), '[4g] MR2: the stale never-asked chatter must be pruned')
+  assert(
+    dreamLog.length === 1 && dreamLog[0]!.promoted.length === 1 && dreamLog[0]!.pruned.length === 1,
+    '[4g] MR2: the sweep must record one diary entry (1 promoted, 1 pruned)',
+  )
+  console.log('  [4g] MR2 后台复盘: 被反复问起的「春水堂」升进画像, 没人问的「天气」闲聊被封存, 复盘日记记下 1 升 1 封 ✓\n')
+
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
   console.log('✅ 管家不变量 + 长期记忆增强全部成立:')
   console.log('   [1] 跨会话记住了「奶茶店项目」')
@@ -448,6 +513,7 @@ async function main(): Promise<void> {
   console.log('   [3] 删除 agent 先 park 等批准 — 批准才删 mailer,拒绝则 billing 原封不动')
   console.log('   [4] 长期记忆: 中文召回(C) · 衰减强化(F) · 关联(E) · 程序(G) · 双时态(D) 全接通')
   console.log('   [MR1] 默认召回索引跨整个 store, 翻出窗口外的旧记忆')
+  console.log('   [MR2] 后台复盘把被问起的记忆升进画像、把没人问的闲聊封存')
   console.log(`   (剩余 agent: ${[...registry].join(', ')})`)
 }
 
