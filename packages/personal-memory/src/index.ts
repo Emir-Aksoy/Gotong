@@ -160,6 +160,16 @@ export {
   type SaveBeforeCompactOptions,
   type SaveBeforeCompactResult,
 } from './compaction.js'
+export {
+  cleanOutputs,
+  cleanOutputsReviewer,
+  DEFAULT_CLEAN_KINDS,
+  DEFAULT_CLEAN_STALE_MS,
+  CLEAN_SCAN_LIMIT,
+  type CleanOutputsOptions,
+  type CleanOutputsReviewerOptions,
+  type CleanOutputsResult,
+} from './clean-outputs.js'
 export { relevanceScore, extractTerms } from './relevance.js'
 export {
   linkRelated,
