@@ -236,6 +236,11 @@ import {
   ButlerMaintenanceSweeper,
   BUTLER_MAINTENANCE_INTERVAL_MS,
 } from './personal-butler-maintenance.js'
+import {
+  ButlerProactiveSweeper,
+  BUTLER_PROACTIVE_INTERVAL_MS,
+  buildButlerBriefComposer,
+} from './personal-butler-proactive.js'
 import { PersonalButlerAgent } from '@aipehub/personal-butler'
 import { HostMeImService } from './me-im-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
@@ -269,6 +274,7 @@ import {
 } from './personal-butler-workflows.js'
 import { buildButlerConsolidateToolset } from './personal-butler-consolidate.js'
 import { buildButlerRemindersToolset } from './personal-butler-reminders.js'
+import { buildButlerDailyBriefToolset } from './personal-butler-daily-brief.js'
 import { ReminderParticipant } from './reminder-participant.js'
 import type { LlmProvider } from '@aipehub/llm'
 import { HostOperatorAgentService } from './operator-agent-service.js'
@@ -1318,6 +1324,18 @@ async function main(): Promise<void> {
     24 * 60 * 60 * 1000,
     Math.max(60_000, Number(process.env.AIPE_BUTLER_MAINTENANCE_MS) || BUTLER_MAINTENANCE_INTERVAL_MS),
   )
+  // S3-M2 — the proactive daily-brief sweep: per member, on a ~15min poll, send a
+  // short morning brief IF they opted in (via `set_daily_brief`). ON whenever the
+  // butler is on; opt out with AIPE_BUTLER_PROACTIVE ∈ {0,false,off,no}. The FEATURE
+  // is still DEFAULT-OFF per member — the sweep does nothing until a member writes a
+  // `proactive.json`. Cadence via AIPE_BUTLER_PROACTIVE_MS (clamped [5min, 1h]).
+  const butlerProactiveEnv = (process.env.AIPE_BUTLER_PROACTIVE ?? '').trim().toLowerCase()
+  const butlerProactiveOn =
+    butlerDefaultOn && !['0', 'false', 'off', 'no'].includes(butlerProactiveEnv)
+  const butlerProactiveMs = Math.min(
+    60 * 60 * 1000,
+    Math.max(5 * 60 * 1000, Number(process.env.AIPE_BUTLER_PROACTIVE_MS) || BUTLER_PROACTIVE_INTERVAL_MS),
+  )
   const butlerFactory: ButlerFactory = (base) =>
     createButlerRouter({
       id: base.id,
@@ -1378,11 +1396,19 @@ async function main(): Promise<void> {
         // sweep fires it and pushes the text back to the member's IM. Only needs
         // `hub` (static broker capability), so no forward-ref — built unconditionally.
         const remindersToolset = buildButlerRemindersToolset({ userId, hub, logger: log })
+        // S3-M2 — benign "每天早上跟我说声早" tool. Writes THIS member's daily-brief
+        // opt-in file; the ButlerProactiveSweeper (below) polls it and sends. Gated on
+        // the SAME `butlerProactiveOn` flag as the sweep — if the proactive feature is
+        // off the tool isn't offered (writing a config that never fires would be a lie).
+        const dailyBriefToolset = butlerProactiveOn
+          ? buildButlerDailyBriefToolset({ userId, rootDir: butlerMemoryRoot, logger: log })
+          : undefined
         const benign = [
           ...(tools ? [tools] : []),
           ...(workflowsToolset ? [workflowsToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
+          ...(dailyBriefToolset ? [dailyBriefToolset] : []),
         ]
 
         return new PersonalButlerAgent({
@@ -2131,6 +2157,32 @@ async function main(): Promise<void> {
         logger: log,
       }),
     )
+  }
+
+  // S3-M2 — arm the proactive daily-brief sweep. Like the reminder broker it delivers
+  // via the F1 `pushToMember` (read LAZILY through `butlerPushRef`, assigned after the
+  // IM bridges start ~500 lines down — the first tick lands one interval later, well
+  // after that). It resolves the butler's OWN provider fresh per compose (a key added
+  // after boot is picked up; null ⇒ no brief). Off when the butler is off or
+  // AIPE_BUTLER_PROACTIVE opts out; even on, it does nothing until a member opts in via
+  // `set_daily_brief` (DEFAULT-OFF per member). Not-at-boot: first tick one interval in.
+  let butlerProactiveSweeper: ButlerProactiveSweeper | undefined
+  if (butlerProactiveOn) {
+    butlerProactiveSweeper = new ButlerProactiveSweeper({
+      rootDir: butlerMemoryRoot,
+      composeBrief: buildButlerBriefComposer({
+        rootDir: butlerMemoryRoot,
+        buildProvider: () => localAgents.buildButlerProvider(),
+        logger: log,
+      }),
+      push: (userId, msg) =>
+        butlerPushRef
+          ? butlerPushRef(userId, msg)
+          : Promise.resolve({ delivered: false, reason: 'no_bridge' }),
+      logger: log,
+      intervalMs: butlerProactiveMs,
+    })
+    butlerProactiveSweeper.start()
   }
 
   // Phase 18 C-M4 + Route B P1-M11b — outbound A2A agents. Each stored entry
@@ -2978,6 +3030,9 @@ async function main(): Promise<void> {
     }
     if (butlerMaintenanceSweeper) {
       try { butlerMaintenanceSweeper.stop() } catch (err) { log.error('butler maintenance stop error', { err }) }
+    }
+    if (butlerProactiveSweeper) {
+      try { butlerProactiveSweeper.stop() } catch (err) { log.error('butler proactive stop error', { err }) }
     }
     if (services) {
       try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }
