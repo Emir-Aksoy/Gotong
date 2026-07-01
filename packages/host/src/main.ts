@@ -232,6 +232,10 @@ import { createButlerRouter } from './butler-router.js'
 import { openButlerMemory } from './personal-butler-memory.js'
 import { openButlerRecallIndex } from './butler-recall-index.js'
 import { butlerApprovalItemFor } from './personal-butler-escalation.js'
+import {
+  ButlerMaintenanceSweeper,
+  BUTLER_MAINTENANCE_INTERVAL_MS,
+} from './personal-butler-maintenance.js'
 import { PersonalButlerAgent } from '@aipehub/personal-butler'
 import { HostMeImService } from './me-im-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
@@ -1281,6 +1285,19 @@ async function main(): Promise<void> {
   const butlerGovernedOn = !['0', 'false', 'off', 'no'].includes(butlerGovernedEnv)
   let butlerGovernedAgentsRef: StewardAgentDirectory | undefined
   let butlerGovernedWorkflowEditorRef: StewardWorkflowEditor | undefined
+  // BF-M8 — the background memory-maintenance sweep: per member, on a 6h cadence,
+  // consolidate captured episodic into the curated semantic profile (蒸馏) and
+  // record it to STATUS.md (/me's "上次维护" line). ON by default whenever the
+  // butler is on; opt out with AIPE_BUTLER_MAINTENANCE ∈ {0,false,off,no}. Cadence
+  // via AIPE_BUTLER_MAINTENANCE_MS (clamped [1min, 24h]). Constructed after the
+  // agent pool exists (it borrows the pool's provider-resolution); see below.
+  const butlerMaintenanceEnv = (process.env.AIPE_BUTLER_MAINTENANCE ?? '').trim().toLowerCase()
+  const butlerMaintenanceOn =
+    butlerDefaultOn && !['0', 'false', 'off', 'no'].includes(butlerMaintenanceEnv)
+  const butlerMaintenanceMs = Math.min(
+    24 * 60 * 60 * 1000,
+    Math.max(60_000, Number(process.env.AIPE_BUTLER_MAINTENANCE_MS) || BUTLER_MAINTENANCE_INTERVAL_MS),
+  )
   const butlerFactory: ButlerFactory = (base) =>
     createButlerRouter({
       id: base.id,
@@ -1316,11 +1333,13 @@ async function main(): Promise<void> {
           ...rest,
           memory,
           memoryRetriever: recallIndex.retriever({ activeOnly: true }),
-          // Until consolidation runs (episodic→semantic, deferred to BF-M8) the
-          // semantic profile is empty, so a fresh session would surface nothing.
-          // Seed the frozen block from episodic too, so captured turns are
-          // remembered IMMEDIATELY in the next session — the cross-session memory
-          // the member is asking for, without waiting on a maintenance pass.
+          // Keep BOTH kinds in the frozen block even though BF-M8 now runs
+          // consolidation (episodic→semantic) in the background: the curated
+          // `semantic` profile gives durable long-term facts, but a member's
+          // MOST RECENT captures (since the last 6h maintenance tick) only live
+          // in `episodic` — including it means the butler remembers what it
+          // heard minutes ago without waiting on the next sweep. Consolidation
+          // ADDS the distilled profile on top; it doesn't replace fresh recall.
           frozenMemoryKinds: ['semantic', 'episodic'],
           // An always-on butler instance serves many independent, history-less IM
           // messages — re-recall per message so it remembers what it just captured
@@ -1361,6 +1380,24 @@ async function main(): Promise<void> {
     peerLinkResolver: (peerId) => peerRegistryRef?.linkForHub(peerId) ?? null,
   })
   await localAgents.start()
+
+  // BF-M8 — arm the butler memory-maintenance sweep. It borrows the pool's
+  // provider-resolution (`buildButlerProvider`, resolved fresh each tick so a
+  // key added after boot is picked up) and walks the per-user namespaces under
+  // `<space>/butler/memory/user/*`, distilling each member's captured episodic
+  // into their curated profile + writing STATUS.md. Off when the butler is off
+  // or `AIPE_BUTLER_MAINTENANCE` opts out. First tick lands one interval in — a
+  // 6h job must not re-fire on every restart.
+  let butlerMaintenanceSweeper: ButlerMaintenanceSweeper | undefined
+  if (butlerMaintenanceOn) {
+    butlerMaintenanceSweeper = new ButlerMaintenanceSweeper({
+      rootDir: butlerMemoryRoot,
+      buildProvider: () => localAgents.buildButlerProvider(),
+      logger: log,
+      intervalMs: butlerMaintenanceMs,
+    })
+    butlerMaintenanceSweeper.start()
+  }
 
   // Growth-reports admin surface — only meaningful if the
   // personal-growth team is loaded. The accessor closure
@@ -2821,6 +2858,9 @@ async function main(): Promise<void> {
     try { await localAgents.stopAll() } catch (err) { log.error('local agents stop error', { err }) }
     if (sweeper) {
       try { await sweeper.stop() } catch (err) { log.error('sweeper stop error', { err }) }
+    }
+    if (butlerMaintenanceSweeper) {
+      try { butlerMaintenanceSweeper.stop() } catch (err) { log.error('butler maintenance stop error', { err }) }
     }
     if (services) {
       try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }

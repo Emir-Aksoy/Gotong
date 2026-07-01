@@ -1244,6 +1244,39 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
   }
 
   /**
+   * BF-M8 — build a fresh LLM provider for the resident butler's managed row,
+   * for the background memory-maintenance sweep (episodic→semantic 蒸馏 +
+   * STATUS.md). The sweep runs OUTSIDE any task, so it can't ride the provider
+   * the butler factory captured at spawn; it needs its own. Reuse the SAME
+   * {@link resolveApiKey} chain + {@link providerFactory} that spawn uses, so the
+   * maintenance model can never disagree with the model the butler actually
+   * talks to (and its usage bills to the same place). Resolve at CALL time (not
+   * boot) so a key added after start is picked up. Returns null when no
+   * butler-enabled row exists or its key can't resolve — the sweep then no-ops
+   * honestly rather than throwing on the interval.
+   */
+  async buildButlerProvider(): Promise<LlmProvider | null> {
+    const row = (await this.space.agents()).find((r) => this.butlerEnabledFor(r))
+    if (!row?.managed) return null
+    let resolution: LlmApiKeyResolution | undefined
+    try {
+      resolution = await this.resolveApiKey(row.id, row.managed.provider)
+    } catch {
+      return null // a key source threw (e.g. vault locked) — skip this tick
+    }
+    // mock needs no key; every real provider must resolve one (spawn's rule).
+    if (row.managed.provider !== 'mock' && !resolution?.apiKey) return null
+    try {
+      return this.providerFactory(row.managed, resolution?.apiKey, this.artifactResolver)
+    } catch {
+      // buildProvider throws on a misconfigured row (openai-compatible with no
+      // baseURL, etc.) — that fault already surfaces at spawn; the sweep just
+      // skips rather than crash the maintenance interval.
+      return null
+    }
+  }
+
+  /**
    * v5 A-M3 — find the member who OWNS `agentId` (the `perm='owner'`
    * resource grant with a user principal), or null. Used to scope the
    * per-user "bring your own key" fallback. Read-only; defensively
