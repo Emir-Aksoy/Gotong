@@ -44,6 +44,8 @@ import { LarkBridge } from '@aipehub/im-lark'
 import { SlackBridge, type WebSocketCtor as SlackWebSocketCtor } from '@aipehub/im-slack'
 import { WebSocket as NodeWebSocket } from 'ws'
 
+import { ButlerReachableRegistry, type ButlerPushResult } from './butler-reachable.js'
+
 /**
  * Minimal structural logger — the host's `@aipehub/core` `Logger`
  * satisfies it. Declaring it locally keeps this module from importing a
@@ -172,6 +174,19 @@ export interface HostImConfig {
    * behaves exactly as before.
    */
   setting?: HostImSettingConfig
+  /**
+   * F1 — outbound-push foundation. Called on every inbound message from a BOUND
+   * member so the reachable registry always knows the freshest chat to push a
+   * reminder / approval back to. Absent → reachability isn't tracked (the default
+   * for a host that hasn't wired the butler push foundation); every branch below
+   * runs byte-for-byte unchanged either way.
+   */
+  onReachable?: (info: {
+    userId: string
+    platform: string
+    from: ImUser
+    chatId?: string
+  }) => void
 }
 
 const HELP_TEXT = [
@@ -222,6 +237,8 @@ export async function handleImMessage(
     })
     if (result.ok) {
       config.log.info('im bind ok', { platform, userId: result.userId })
+      // F1 — this chat is now a known route for the member (reach them here later).
+      recordReachable(config, result.userId, platform, msg)
       await reply(bridge, msg, `✓ 已绑定 / Bound — signed in as ${result.userId}. Send /help for what you can do.`)
       return
     }
@@ -244,6 +261,10 @@ export async function handleImMessage(
     )
     return
   }
+
+  // F1 — the member is bound and just talked to us here; remember this chat as
+  // their reachable route so a later reminder / approval can be pushed back.
+  recordReachable(config, userId, platform, msg)
 
   switch (cmd.kind) {
     case 'unbind': {
@@ -477,10 +498,25 @@ export interface StartImBridgesOptions {
    * unaffected). `main.ts` builds it from ops-core once identity is available.
    */
   setting?: HostImSettingConfig
+  /**
+   * F1 — where to persist reachable routes (`<space>/butler/reachable`). When set,
+   * `startImBridges` builds a {@link ButlerReachableRegistry}, rehydrates it, and
+   * populates it on every bound member's inbound message; the returned handle
+   * exposes `pushToMember`. Absent → reachability isn't tracked and `pushToMember`
+   * is undefined (pure env-gated IM is byte-for-byte unchanged).
+   */
+  reachableDir?: string
 }
 
 export interface ImBridgesHandle {
   readonly bridges: ImBridge[]
+  /**
+   * F1 — deliver a line of text to a member's last known chat (reminder / approval
+   * push-back). Present only when `reachableDir` was configured; undefined
+   * otherwise. Returns a typed result so a caller can tell "never bound a chat"
+   * from "bridge down" from "send threw".
+   */
+  pushToMember?: (userId: string, text: string) => Promise<ButlerPushResult>
   stop(): Promise<void>
 }
 
@@ -586,6 +622,23 @@ export async function startImBridges(
 
   if (factories.length === 0) return undefined
 
+  // Declared before the registry so its `bridgeFor` closure reads the live array
+  // (populated in the loop below); `push` only fires out-of-band, well after.
+  const bridges: ImBridge[] = []
+
+  // F1 — the outbound-push foundation. Built + rehydrated only when the host
+  // wired `reachableDir`; without it reachability is off and `pushToMember` is
+  // undefined, leaving pure env-gated IM byte-for-byte unchanged.
+  let reachable: ButlerReachableRegistry | undefined
+  if (opts.reachableDir) {
+    reachable = new ButlerReachableRegistry({
+      dir: opts.reachableDir,
+      bridgeFor: (platform) => bridges.find((b) => b.platform === platform),
+      logger: opts.log,
+    })
+    await reachable.load()
+  }
+
   const resolver = makeIdentityImBindingResolver(opts.identity)
   const config: HostImConfig = {
     hub: opts.hub,
@@ -600,9 +653,19 @@ export async function startImBridges(
     resolveWorkflow: opts.resolveWorkflow,
     log: opts.log,
     ...(opts.setting ? { setting: opts.setting } : {}),
+    ...(reachable
+      ? {
+          onReachable: (info) =>
+            reachable!.record({
+              userId: info.userId,
+              platform: info.platform,
+              platformUserId: info.from.platformUserId,
+              displayName: info.from.displayName ?? null,
+              ...(info.chatId !== undefined ? { chatId: info.chatId } : {}),
+            }),
+        }
+      : {}),
   }
-
-  const bridges: ImBridge[] = []
   for (const make of factories) {
     const bridge = make()
     // A single bad message must not take down a bridge's receive loop. The
@@ -644,6 +707,7 @@ export async function startImBridges(
 
   return {
     bridges,
+    ...(reachable ? { pushToMember: (userId: string, text: string) => reachable!.push(userId, text) } : {}),
     async stop() {
       for (const b of bridges) {
         try {
@@ -706,6 +770,21 @@ function makeFromId(platform: string, platformUserId: string): string {
 async function reply(bridge: ImBridge, msg: ImMessage, text: string): Promise<void> {
   const to: ImUser = msg.from
   await bridge.sendMessage(to, text, { chatId: msg.chatId })
+}
+
+/** F1 — feed the reachable registry (if wired) this member's freshest chat. */
+function recordReachable(
+  config: HostImConfig,
+  userId: string,
+  platform: string,
+  msg: ImMessage,
+): void {
+  config.onReachable?.({
+    userId,
+    platform,
+    from: msg.from,
+    ...(msg.chatId !== undefined ? { chatId: msg.chatId } : {}),
+  })
 }
 
 function summariseResult(result: TaskResult): string {

@@ -2592,6 +2592,12 @@ async function main(): Promise<void> {
       hub,
       identity,
       log,
+      // F1 — outbound-push foundation. Every inbound message from a bound member
+      // records their freshest chat here; later milestones (approval push-back,
+      // reminders, morning brief) call the returned `pushToMember` to reach them
+      // out of band. A file per member (`<space>/butler/reachable/<userId>.json`),
+      // no identity-schema change.
+      reachableDir: join(space.root, 'butler', 'reachable'),
       setting: {
         isOperator: imIsOperator,
         mode: imSettingMode,
