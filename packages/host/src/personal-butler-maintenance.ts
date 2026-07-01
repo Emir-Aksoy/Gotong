@@ -133,6 +133,57 @@ export function buildButlerMaintenanceReviewer(
   })
 }
 
+export interface RunButlerMaintenanceOnceOptions {
+  /** Butler memory root (`<space>/butler/memory`). */
+  rootDir: string
+  /** The member whose namespace to maintain. */
+  userId: string
+  /** The distillation LLM call (built from the butler's provider via {@link butlerSummarizer}). */
+  summarize: MemorySummarizer
+  logger: Logger
+  /** Injectable clock (deterministic tests). Default `Date.now`. */
+  now?: () => number
+  tierConfig?: TierConfig
+  budgetBytes?: number
+  /** Recent episodic count handed to the review context. Default {@link DEFAULT_RECALL_K}. */
+  recallK?: number
+}
+
+/**
+ * Run ONE maintenance pass for ONE member: distil their captured episodic into the
+ * curated per-cluster profile and record what it did to STATUS.md. The single
+ * source of truth shared by the background {@link ButlerMaintenanceSweeper} (per
+ * tick, per member) and the on-demand "整理记忆" butler tool (S2-M2), so the two
+ * can never drift. Opens a fresh file-backed handle on the member's namespace —
+ * the butler's own handle points at the SAME jsonl, so its next-turn `refresh()`
+ * picks up whatever this pass consolidated. Returns the reviewer's summary (or '').
+ */
+export async function runButlerMaintenanceOnce(
+  opts: RunButlerMaintenanceOnceOptions,
+): Promise<string> {
+  const now = opts.now ?? Date.now
+  const memory: MemoryHandle = openButlerMemory({
+    rootDir: opts.rootDir,
+    userId: opts.userId,
+    logger: opts.logger,
+    ...(now !== Date.now ? { now } : {}),
+  })
+  const statusFile = openButlerStatusFile({
+    rootDir: opts.rootDir,
+    userId: opts.userId,
+    logger: opts.logger,
+  })
+  const reviewer = buildButlerMaintenanceReviewer({
+    summarize: opts.summarize,
+    statusFile,
+    ...(opts.tierConfig ? { tierConfig: opts.tierConfig } : {}),
+    ...(opts.budgetBytes !== undefined ? { budgetBytes: opts.budgetBytes } : {}),
+  })
+  const episodic = await memory.recall({ kinds: ['episodic'], k: opts.recallK ?? DEFAULT_RECALL_K })
+  const out = await reviewer({ memory, episodic, now: now() })
+  return out.summary ?? ''
+}
+
 export interface ButlerMaintenanceSweeperOptions {
   /** Butler memory root (`<space>/butler/memory`) — the same one the factory + /me view use. */
   rootDir: string
@@ -269,22 +320,16 @@ export class ButlerMaintenanceSweeper {
 
   /** Run the maintenance reviewer once for one member; returns its summary (or ''). */
   private async maintainOne(userId: string, summarize: MemorySummarizer): Promise<string> {
-    const memory: MemoryHandle = openButlerMemory({
+    return runButlerMaintenanceOnce({
       rootDir: this.rootDir,
       userId,
+      summarize,
       logger: this.log,
       ...(this.now !== Date.now ? { now: this.now } : {}),
-    })
-    const statusFile = openButlerStatusFile({ rootDir: this.rootDir, userId, logger: this.log })
-    const reviewer = buildButlerMaintenanceReviewer({
-      summarize,
-      statusFile,
       ...(this.tierConfig ? { tierConfig: this.tierConfig } : {}),
       ...(this.budgetBytes !== undefined ? { budgetBytes: this.budgetBytes } : {}),
+      recallK: this.recallK,
     })
-    const episodic = await memory.recall({ kinds: ['episodic'], k: this.recallK })
-    const out = await reviewer({ memory, episodic, now: this.now() })
-    return out.summary ?? ''
   }
 
   /**

@@ -267,6 +267,8 @@ import {
   buildButlerWorkflowsToolset,
   type ButlerWorkflowSurface,
 } from './personal-butler-workflows.js'
+import { buildButlerConsolidateToolset } from './personal-butler-consolidate.js'
+import type { LlmProvider } from '@aipehub/llm'
 import { HostOperatorAgentService } from './operator-agent-service.js'
 import { OperatorWorkflowEditService } from './operator-workflow-edit-service.js'
 import { operatorStewardWorkflowDirectory } from './operator-workflow-directory.js'
@@ -1295,6 +1297,12 @@ async function main(): Promise<void> {
   // because a per-user butler is built lazily on that member's first task). Absent
   // ⇒ the butler simply has no run-workflow tool.
   let butlerWorkflowsRef: ButlerWorkflowSurface | undefined
+  // S2-M2 — the benign "整理一下记忆" tool resolves the distillation provider
+  // (the butler's own model) through the agent pool, which is built further down.
+  // Forward-declared `let` read at butler-build time (same lazy pattern). Absent ⇒
+  // the butler simply has no consolidate tool; a null result at call time is a
+  // friendly refusal. Assigned right after `localAgents.start()`.
+  let butlerProviderBuilderRef: (() => Promise<LlmProvider | null>) | undefined
   // BF-M8 — the background memory-maintenance sweep: per member, on a 6h cadence,
   // consolidate captured episodic into the curated semantic profile (蒸馏) and
   // record it to STATUS.md (/me's "上次维护" line). ON by default whenever the
@@ -1348,9 +1356,24 @@ async function main(): Promise<void> {
         const workflowsToolset = butlerWorkflowsRef
           ? buildButlerWorkflowsToolset({ userId, workflows: butlerWorkflowsRef, hub, logger: log })
           : undefined
+        // S2-M2 — benign "整理一下记忆": run BF-M8's per-member maintenance pass
+        // (蒸馏 + STATUS.md) on demand. Gated on the SAME `butlerMaintenanceOn`
+        // flag as the 6h sweep — if distillation is off, the tool isn't offered.
+        // The provider is resolved fresh at call time via the pool ref; a null
+        // model is a friendly refusal, not a crash.
+        const consolidateToolset =
+          butlerMaintenanceOn && butlerProviderBuilderRef
+            ? buildButlerConsolidateToolset({
+                userId,
+                rootDir: butlerMemoryRoot,
+                buildProvider: butlerProviderBuilderRef,
+                logger: log,
+              })
+            : undefined
         const benign = [
           ...(tools ? [tools] : []),
           ...(workflowsToolset ? [workflowsToolset] : []),
+          ...(consolidateToolset ? [consolidateToolset] : []),
         ]
 
         return new PersonalButlerAgent({
@@ -1404,6 +1427,12 @@ async function main(): Promise<void> {
     peerLinkResolver: (peerId) => peerRegistryRef?.linkForHub(peerId) ?? null,
   })
   await localAgents.start()
+
+  // S2-M2 — the pool can now resolve the butler's own model. Bind the provider
+  // builder the on-demand "整理记忆" tool uses (same source as the 6h sweep's
+  // `buildProvider`), read lazily at butler-build time. Assigned unconditionally;
+  // the factory still gates the tool on `butlerMaintenanceOn`.
+  butlerProviderBuilderRef = () => localAgents.buildButlerProvider()
 
   // BF-M8 — arm the butler memory-maintenance sweep. It borrows the pool's
   // provider-resolution (`buildButlerProvider`, resolved fresh each tick so a
