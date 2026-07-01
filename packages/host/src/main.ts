@@ -268,6 +268,8 @@ import {
   type ButlerWorkflowSurface,
 } from './personal-butler-workflows.js'
 import { buildButlerConsolidateToolset } from './personal-butler-consolidate.js'
+import { buildButlerRemindersToolset } from './personal-butler-reminders.js'
+import { ReminderParticipant } from './reminder-participant.js'
 import type { LlmProvider } from '@aipehub/llm'
 import { HostOperatorAgentService } from './operator-agent-service.js'
 import { OperatorWorkflowEditService } from './operator-workflow-edit-service.js'
@@ -1370,10 +1372,17 @@ async function main(): Promise<void> {
                 logger: log,
               })
             : undefined
+        // S3-M1 — benign "set a reminder" tool, scoped to THIS member. Dispatches to
+        // the ReminderParticipant broker (registered below on the same butler-on
+        // gate), which parks a one-shot task with a finite resumeAt; the Phase 11
+        // sweep fires it and pushes the text back to the member's IM. Only needs
+        // `hub` (static broker capability), so no forward-ref — built unconditionally.
+        const remindersToolset = buildButlerRemindersToolset({ userId, hub, logger: log })
         const benign = [
           ...(tools ? [tools] : []),
           ...(workflowsToolset ? [workflowsToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
+          remindersToolset,
         ]
 
         return new PersonalButlerAgent({
@@ -2101,6 +2110,27 @@ async function main(): Promise<void> {
       },
     })
     log.info('member task inbox enabled', { capability: HUMAN_CAPABILITY })
+  }
+
+  // S3-M1 — the resident butler's reminder broker. Registered on the SAME
+  // butler-on gate as the `set_reminder` tool (a butler feature; disabling the
+  // butler disables it coherently). It needs neither identity nor the inbox — it
+  // parks a one-shot task with a FINITE resumeAt and the Phase 11 sweep fires it,
+  // pushing the text to the member's IM via the F1 `pushToMember`. That ref is
+  // assigned after the IM bridges start (~500 lines down), so the `push` closure
+  // reads it LAZILY — a reminder set before the bridges are up still delivers once
+  // they are, and one whose timer fires before any bridge exists logs a non-delivery
+  // (best-effort). Fixed id so the sweep re-finds it across a restart.
+  if (butlerDefaultOn) {
+    hub.register(
+      new ReminderParticipant({
+        push: (userId, msg) =>
+          butlerPushRef
+            ? butlerPushRef(userId, msg)
+            : Promise.resolve({ delivered: false, reason: 'no_bridge' }),
+        logger: log,
+      }),
+    )
   }
 
   // Phase 18 C-M4 + Route B P1-M11b — outbound A2A agents. Each stored entry
