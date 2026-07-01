@@ -255,7 +255,10 @@ import {
   resolveStewardConfig,
   OPERATOR_STEWARD_IDS,
   type StewardWorkflowDirectory,
+  type StewardAgentDirectory,
+  type StewardWorkflowEditor,
 } from './hub-steward-service.js'
+import { buildButlerGovernedToolset } from './personal-butler-governed.js'
 import { HostOperatorAgentService } from './operator-agent-service.js'
 import { OperatorWorkflowEditService } from './operator-workflow-edit-service.js'
 import { operatorStewardWorkflowDirectory } from './operator-workflow-directory.js'
@@ -1253,15 +1256,31 @@ async function main(): Promise<void> {
   // across sessions — the headline reason for the fold-in.
   //
   // ON by default (`AIPE_BUTLER` ∈ {0,false,off,no} turns it OFF; a per-agent
-  // `managed.butler: false` opts a single row out). The butler is currently
-  // PURE-MEMORY (no `governed` action set — BF-M7) so behaviour change for a live
-  // chat agent is near-zero: it gains cross-session memory + the benign tools the
-  // row already had, and never parks for approval. Memory lives under the SAME
-  // `<space>/butler/memory` subtree the /me privacy view reads (below), so "what
-  // the butler remembers" and "what a member can erase" are one and the same bytes.
+  // `managed.butler: false` opts a single row out). It gains cross-session memory +
+  // the benign tools the row already had (run inline), plus — when the member
+  // services exist — the BF-M7 governed action set (create / edit / delete the
+  // member's own agent + edit their own workflow), each APPROVAL-GATED to the
+  // member's /me inbox (`AIPE_BUTLER_GOVERNED` off ⇒ back to pure-memory). Memory
+  // lives under the SAME `<space>/butler/memory` subtree the /me privacy view reads
+  // (below), so "what the butler remembers" and "what a member can erase" are one
+  // and the same bytes.
   const butlerMemoryRoot = join(space.root, 'butler', 'memory')
   const butlerEnv = (process.env.AIPE_BUTLER ?? '').trim().toLowerCase()
   const butlerDefaultOn = !['0', 'false', 'off', 'no'].includes(butlerEnv)
+  // BF-M7 — the governed action set (create / edit / delete a member's own agent +
+  // edit their own workflow), each APPROVAL-GATED to the member's /me inbox. ON by
+  // default; opt out with AIPE_BUTLER_GOVERNED ∈ {0,false,off,no}. Wired only when
+  // the member services exist — the executors are the SAME `HostMeAgentService` /
+  // `MeWorkflowEditService` the /me hub-steward uses, so the butler is structurally
+  // incapable of exceeding what the member could do by hand (RBAC + the WFEDIT
+  // cross-hub lock apply). The services are constructed further down, so these are
+  // forward-declared `let`s (the peerRegistryRef pattern) read at butler-build time
+  // — safe because a per-user butler is built LAZILY on that member's first task,
+  // well after boot. Absent refs (no identity / no workflowAssist) ⇒ pure-memory.
+  const butlerGovernedEnv = (process.env.AIPE_BUTLER_GOVERNED ?? '').trim().toLowerCase()
+  const butlerGovernedOn = !['0', 'false', 'off', 'no'].includes(butlerGovernedEnv)
+  let butlerGovernedAgentsRef: StewardAgentDirectory | undefined
+  let butlerGovernedWorkflowEditorRef: StewardWorkflowEditor | undefined
   const butlerFactory: ButlerFactory = (base) =>
     createButlerRouter({
       id: base.id,
@@ -1274,11 +1293,25 @@ async function main(): Promise<void> {
         // Per-user memory namespace + recall index (whole-store inverted index,
         // active-only) — the no-leak boundary is the `<rootDir>/user/<userId>/`
         // tree itself. The base toolset the pool built (dispatch / mcp / …) moves
-        // to `benign` so those tools still run inline; only governed actions could
-        // park, and a pure-memory butler has none.
+        // to `benign` so those tools still run inline; the governed set below is the
+        // only path that can park the task for a /me approval.
         const memory = openButlerMemory({ rootDir: butlerMemoryRoot, userId, logger: log })
         const recallIndex = openButlerRecallIndex({ rootDir: butlerMemoryRoot, userId, logger: log })
         const { tools, ...rest } = base
+        // BF-M7 — the per-user governed action set, scoped to THIS member (the
+        // executor's RBAC keys off `userId`). Built only when the flag is on AND
+        // the member-agent service exists; the workflow editor is optional (a hub
+        // with no workflowAssist gets the agent tools but no `edit_workflow`).
+        const governed =
+          butlerGovernedOn && butlerGovernedAgentsRef
+            ? buildButlerGovernedToolset({
+                userId,
+                agents: butlerGovernedAgentsRef,
+                ...(butlerGovernedWorkflowEditorRef
+                  ? { workflowEditor: butlerGovernedWorkflowEditorRef }
+                  : {}),
+              })
+            : undefined
         return new PersonalButlerAgent({
           ...rest,
           memory,
@@ -1296,6 +1329,7 @@ async function main(): Promise<void> {
           frozenRefreshPerTask: true,
           captureMeta: { userId },
           ...(tools ? { benign: tools } : {}),
+          ...(governed ? { governed } : {}),
         })
       },
     })
@@ -1615,11 +1649,11 @@ async function main(): Promise<void> {
   if (identity) {
     inboxStore = new FileInboxStore(SPACE_DIR)
     inboxStore.ensureDirs()
-    // BF-M4 — wire the butler escalation sink now that the inbox exists. The
+    // BF-M4/M7 — wire the butler escalation sink now that the inbox exists. The
     // approver is the MEMBER who owns the parked task (`origin.userId`): a
-    // PERSONAL butler escalates to the very person it serves. Dormant for the
-    // current pure-memory butler (`butlerApprovalItemFor` returns null without a
-    // governed `pending`), but ready for the governed action set (BF-M7).
+    // PERSONAL butler escalates to the very person it serves. A governed action
+    // (BF-M7) parks with a `pending` gate → `butlerApprovalItemFor` shapes a /me
+    // approval item; a pure-memory / non-governed park returns null → no-op.
     const store = inboxStore
     butlerEscalationSink = async (task, by, state) => {
       const approver = task.origin?.userId
@@ -2072,6 +2106,14 @@ async function main(): Promise<void> {
   const meAgentAdmin = identity
     ? new HostMeAgentService({ space, hub, identity, lifecycle: localAgents })
     : undefined
+
+  // BF-M7 — hand the resident butler its governed executors now that the member
+  // services exist. The butlerFactory closure (above) reads these forward-refs at
+  // per-user build time, which happens LAZILY on that member's first task — long
+  // after this line runs. `meWorkflowEdit` may be null (no workflowAssist) ⇒ the
+  // butler still gets the agent tools, just no `edit_workflow`.
+  butlerGovernedAgentsRef = meAgentAdmin
+  butlerGovernedWorkflowEditorRef = meWorkflowEdit ?? undefined
 
   // v5 A-M3 — member API-credential ("bring your own key") management. Keys
   // live in the vault, so this is wired only when identity is present; the

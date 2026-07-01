@@ -191,7 +191,7 @@ lifecycle / 重启 / test-connection 全不变)。
 |---|---|---|
 | `@aipehub/personal-memory` | 既有 + `MemorySession.refresh()` 3 个新单测(再召回 / 清 pending / 重采 `now`) | **376** |
 | `@aipehub/personal-butler` | 既有(agent / governed / sensitive-memory-write) | **29** |
-| host | 既有 butler 套 + `butler-router` 10 + `local-agent-pool-butler` 7 + **`butler-im-e2e` 4**(本系列承重门) | **1355**(+4 skip) |
+| host | 既有 butler 套 + `butler-router` 10 + `local-agent-pool-butler` 7 + **`butler-im-e2e` 4** + **`personal-butler-governed` 13**(BF-M7-M1 单测)+ **`personal-butler-governed-e2e` 5**(BF-M7-M3 承重门) | **1373**(+4 skip) |
 | web | 既有(me-butler-memory-routes 等) | **1169** |
 
 `pnpm -r build` 干净;全量 `pnpm -r test` 绿(core 395 / protocol 127 / identity 612 /
@@ -211,10 +211,14 @@ packages/host/src/
   butler-router.ts            BF-M2 — createButlerRouter per-user 多路复用 (已 committed)
   local-agent-pool.ts         BF-M3 — butlerFactory 钩子 + 闸 (已 committed)
   main.ts                     BF-M4 — butlerFactory 闭包 + AIPE_BUTLER 默认开 + butlerEscalationSink
+                              BF-M7 — governed toolset 喂进工厂 (AIPE_BUTLER_GOVERNED + 前向引用)
+  personal-butler-governed.ts BF-M7-M1 — buildButlerGovernedToolset (steward 动作集 → GovernedActionToolset, 全 approve) (新)
 packages/host/tests/
   butler-im-e2e.test.ts       BF-M5 — §五 4-claim 承重门 (新)
   butler-router.test.ts       BF-M2 (已 committed)
   local-agent-pool-butler.test.ts  BF-M3 (已 committed)
+  personal-butler-governed.test.ts     BF-M7-M1 — builder 13 单测 (新)
+  personal-butler-governed-e2e.test.ts BF-M7-M3 — 生产形态承重门 5 (新)
 ```
 
 复用既有(零改):`personal-butler-memory.ts`(`openButlerMemory`)/ `butler-recall-index.ts`
@@ -225,16 +229,55 @@ packages/host/tests/
 
 ## 十、显式推迟
 
-- **BF-M7 完整 governed 动作集**:当前管家是纯记忆(无 `governed`)。补上后,管家能替成员
-  做敏感动作(删 / 花钱 / 对外发),每件走 `butlerEscalationSink` → `/me` 收件箱二次确认。
-  机制已就位(sink 已接 async suspendNotifier,纯记忆形态下休眠),只差把 governed toolset
-  喂进工厂 + 决定哪些动作分级成 approve。
+- ✅ **BF-M7 完整 governed 动作集**:**已补齐**,见下面 §十一。
 - **BF-M8 per-user heartbeat 蒸馏 / 维护**:episodic→semantic 蒸馏(`consolidate`)+ 6h 维护
   pass(dreaming / 清输出 / SKILL.md / STATUS.md)目前在 example 里按 example 接;per-user
   在生产 host 里跑还没接(现靠 `frozenMemoryKinds:['semantic','episodic']` 让 episodic 直接
   进冻结块,不必等蒸馏)。接上后画像会被策展、记忆会被分卷 / 衰减管理。
 - **可插拔沙箱终端后端**(Hermes 天花板)、**向量 / 图记忆当默认**、**管家主动发起对话**
   ——承 `PERSONAL-BUTLER-FINAL.md` §十,不在本系列范围。
+
+---
+
+## 十一、BF-M7 完整 governed 动作集(已补齐)
+
+BF-M4 把一个**纯记忆**管家 fold 进 IM 通道(记得你 / 良性工具内联 / 从不挂起)。BF-M7 给它
+补上治理的另一半:一个 `GovernedActionToolset`,让成员**用大白话跟管家说**,就能建 / 改 / 删
+**自己的**受管助手、改自己的工作流。每一件都是**审批门控**——管家有界 tool-loop 把任务挂起
+(`SuspendTaskError`),`butlerApprovalItemFor` 把这个 park 变成一个 `/me` 收件箱项,**在成员
+到 `/me` 批准之前什么都不会跑**(北极星:「敏感动作 → 成员的收件箱」)。
+
+**★ 复用 steward,而且比它更严 ★**:执行走**同一个** `performStewardAction` + 成员服务
+(`HostMeAgentService` / `MeWorkflowEditService`),跟 `/me` hub-steward 用的是同一套。所以管家
+**在构造上不可能越过成员本人手动能做的范围**:同一套 `resource_grants` RBAC 阶梯 + 成员上限
+门控每一次 create / edit / delete,`edit_workflow` 继承 WFEDIT 跨 hub 出入口锁(成员经管家也
+永远重指向不了跨 hub 出口)。但管家**故意比 steward 更严**:`/me` steward SPA 有 plan→apply
+**预览**(成员先看 `ClassifiedProposal` 再点 apply),所以它的 `safe` create/edit 是在那次审查
+**之后**才「内联」跑。常驻 IM 管家**没有这个预览**——一个 `safe` 裁决会从一条聊天消息零人工
+确认就跑。所以这里**每一个**暴露的动作都默认 `approve`:`/me` 收件箱**就是**执行前的审查步。
+
+**四个 operator-only 敏感写**(凭证 / peer / 安全)**根本不暴露**——成员 steward 把它们分级成
+`forbidden` 且从不拿到它们的执行器,所以管家干脆没有这些工具(结构性防御,不只是分级 forbidden)。
+
+### 里程碑
+
+| # | 动了什么 | commit |
+|---|---|---|
+| **BF-M7-M1** | `packages/host/src/personal-butler-governed.ts` — `buildButlerGovernedToolset(deps)` 把 hub-steward 动作词汇 + `validateStewardAction` + `performStewardAction` chokepoint 包成一个 `GovernedActionToolset`;四个成员级工具(create/edit/delete_agent + edit_workflow)全默认 `approve`;`describe` 复用 `summarizeStewardAction` 的 zh 摘要当收件箱标题。**Option B**:`workflowEditor?` 可选——有 identity 无 `workflowAssist` 的 hub 没有它,`edit_workflow` 就不暴露(诚实通告),agent 动作照常。+13 单测 | (本系列) |
+| **BF-M7-M2** | `main.ts` `createForUser(userId)` 里构 `buildButlerGovernedToolset({ userId, agents, workflowEditor? })` 喂进 `PersonalButlerAgent({ governed })`;前向引用 `let`(在成员服务 `meAgentAdmin` / `meWorkflowEdit` 构好后赋值,call-time 读,同 `peerRegistryRef` 先例);`AIPE_BUTLER_GOVERNED ∈ {0,false,off,no}` 才关(默认开)。**逃生开关**:关掉 governed 就退回纯记忆管家 | (本系列) |
+| **BF-M7-M3** | `packages/host/tests/personal-butler-governed-e2e.test.ts` — 生产形态承重门:真 Hub + 生产形态 async `suspendNotifier`→真 IdentityStore + `butlerApprovalItemFor` sink → 真 `FileInboxStore` + 真 `HostMeAgentService`(真 Space `upsertAgent` + 真 `resource_grants`,只 fake spawn)。5 剧情:agents-only 通告面 / **create 也 park**→批准建真 agent(Space + owner grant + spawn)/ delete park 在 NEVER 盲于 sweep 带 `/me` 项 / 批准真删(Space 空 + grant 清 + lifecycle.removed)/ 拒绝 fail-closed(agent 仍在 grant 仍在) | (本系列) |
+| **BF-M7-M4** | 本节 + §八/§九 更新 + CLAUDE.md 登记 + 记忆文件更新 | (本系列) |
+
+### 诚实边界
+
+- **纯记忆 vs governed 是配置态**:`AIPE_BUTLER_GOVERNED=0` 或成员服务缺失(无 identity)→ 管家
+  退回 BF-M4 纯记忆形态,行为逐字节不变。governed 只在 identity + `meAgentAdmin` 都在场时接上
+  (escalation sink 也在 `if (identity)` 里,两者天然共存)。
+- **爆炸半径**:一个新 host 文件(`personal-butler-governed.ts`)+ main.ts 三处接线 + 两个测试
+  文件。`core/protocol/identity/runner` 全程零改;`@aipehub/personal-butler` 叶包零改(builder
+  住 host,因为它要 host 的 `performStewardAction` + 成员服务)。
+- **云端**:BF-M7 **仅本地**——生产腾讯云实例仍跑纯记忆管家(`aipehub.env` 无 `AIPE_BUTLER_GOVERNED`
+  即默认开,但云端那台**尚未** rsync 本批;governed 上云需用户确认后单独走部署 + 飞书冒烟)。
 
 ---
 
