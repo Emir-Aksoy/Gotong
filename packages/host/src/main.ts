@@ -263,6 +263,10 @@ import {
   type StewardWorkflowEditor,
 } from './hub-steward-service.js'
 import { buildButlerGovernedToolset } from './personal-butler-governed.js'
+import {
+  buildButlerWorkflowsToolset,
+  type ButlerWorkflowSurface,
+} from './personal-butler-workflows.js'
 import { HostOperatorAgentService } from './operator-agent-service.js'
 import { OperatorWorkflowEditService } from './operator-workflow-edit-service.js'
 import { operatorStewardWorkflowDirectory } from './operator-workflow-directory.js'
@@ -1285,6 +1289,12 @@ async function main(): Promise<void> {
   const butlerGovernedOn = !['0', 'false', 'off', 'no'].includes(butlerGovernedEnv)
   let butlerGovernedAgentsRef: StewardAgentDirectory | undefined
   let butlerGovernedWorkflowEditorRef: StewardWorkflowEditor | undefined
+  // S1-M1 — the benign "run my workflow" catalog. The published workflow catalog
+  // (`WorkflowController`) is built further down, so this is a forward-declared
+  // `let` read at butler-build time (same pattern as the governed refs, safe
+  // because a per-user butler is built lazily on that member's first task). Absent
+  // ⇒ the butler simply has no run-workflow tool.
+  let butlerWorkflowsRef: ButlerWorkflowSurface | undefined
   // BF-M8 — the background memory-maintenance sweep: per member, on a 6h cadence,
   // consolidate captured episodic into the curated semantic profile (蒸馏) and
   // record it to STATUS.md (/me's "上次维护" line). ON by default whenever the
@@ -1329,6 +1339,20 @@ async function main(): Promise<void> {
                   : {}),
               })
             : undefined
+        // S1-M1 — benign "run my workflow" tools (list + run), scoped to THIS
+        // member. Runs one of their OWN published, member-facing workflows via the
+        // same gate as /me (published + surface.me + forced userScopeField). Runs
+        // inline (not governed): it's a member self-service action, and any risky
+        // step INSIDE the workflow gates itself downstream. Composed alongside the
+        // pool's base tools (`tools`) in the benign set.
+        const workflowsToolset = butlerWorkflowsRef
+          ? buildButlerWorkflowsToolset({ userId, workflows: butlerWorkflowsRef, hub, logger: log })
+          : undefined
+        const benign = [
+          ...(tools ? [tools] : []),
+          ...(workflowsToolset ? [workflowsToolset] : []),
+        ]
+
         return new PersonalButlerAgent({
           ...rest,
           memory,
@@ -1347,7 +1371,7 @@ async function main(): Promise<void> {
           // bot "forgets" mid-conversation). See MemorySession.refresh().
           frozenRefreshPerTask: true,
           captureMeta: { userId },
-          ...(tools ? { benign: tools } : {}),
+          ...(benign.length > 0 ? { benign } : {}),
           ...(governed ? { governed } : {}),
         })
       },
@@ -1526,6 +1550,10 @@ async function main(): Promise<void> {
     },
     workflowReport,
   )
+  // S1-M1 — hand the live published catalog to the resident butler's benign
+  // "run my workflow" tool (read lazily at butler-build time). The controller's
+  // `list()` returns exactly the member-facing summaries the run gate reads.
+  butlerWorkflowsRef = workflowController
 
   // Route B P0-M3-M2 — boot-time workflow-run retention. Prune old TERMINAL
   // runs into `runs/archive/` BEFORE the deferred resume scan (and every later
