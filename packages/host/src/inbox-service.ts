@@ -23,9 +23,23 @@
  * first just re-parks it (harmless, but no progress).
  */
 
-import type { Hub, Task } from '@aipehub/core'
+import type { Hub, Task, TaskResult } from '@aipehub/core'
 import { InboxError, type InboxDecision, type InboxItem, type InboxStore } from '@aipehub/inbox'
 import { AUDIT_ACTIONS, type WriteAuditLogInput } from '@aipehub/identity'
+
+/**
+ * Fired after an item is fully resolved (child — and, for a workflow parent, the
+ * parent — resumed). `childResult` is the resumed broker task's outcome (an
+ * approval-gated butler turn's closing message, say) or `null` when the child
+ * wasn't parked. The butler push-back (S1-M3) uses this to deliver the outcome to
+ * the member's IM. Best-effort by contract: the callback must never throw back
+ * into resolve (the decision is already committed).
+ */
+export type InboxResolvedHook = (ctx: {
+  item: InboxItem
+  decision: InboxDecision
+  childResult: TaskResult | null
+}) => void
 
 /** What HostInboxService needs from the identity store. */
 export interface SuspendedTaskLookup {
@@ -59,6 +73,13 @@ export interface HostInboxServiceOptions {
   store: InboxStore
   identity: SuspendedTaskLookup
   logger?: InboxLogger
+  /**
+   * Optional post-resolve hook (S1-M3). Fired once, after the child (and any
+   * workflow parent) resume, with the child's outcome. Used to push a butler
+   * governed-action outcome back to the member's IM. Best-effort — a throw is
+   * caught and logged; the decision is already committed.
+   */
+  onResolved?: InboxResolvedHook
 }
 
 /** Public projection of an inbox item — matches web's `InboxItemView`. */
@@ -83,12 +104,14 @@ export class HostInboxService {
   private readonly store: InboxStore
   private readonly identity: SuspendedTaskLookup
   private readonly log: InboxLogger | undefined
+  private readonly onResolved: InboxResolvedHook | undefined
 
   constructor(opts: HostInboxServiceOptions) {
     this.hub = opts.hub
     this.store = opts.store
     this.identity = opts.identity
     this.log = opts.logger
+    this.onResolved = opts.onResolved
   }
 
   async listPending(userId: string): Promise<InboxItemView[]> {
@@ -120,8 +143,22 @@ export class HostInboxService {
     this.recordResolveAudit(item, validated, userId)
 
     // Two-step resume — child strictly before parent.
-    const resumedChild = await this.resumeChild(item, validated)
-    if (resumedChild) await this.resumeParent(item)
+    const child = await this.resumeChild(item, validated)
+    if (child.resumed) await this.resumeParent(item)
+
+    // Post-resolve hook (S1-M3) — deliver a butler governed-action outcome back
+    // to the member's IM. Best-effort: a hook throw must never surface a failure
+    // for an already-committed decision.
+    if (this.onResolved) {
+      try {
+        this.onResolved({ item, decision: validated, childResult: child.result })
+      } catch (err) {
+        this.log?.warn('inbox resolve: onResolved hook threw; decision already committed', {
+          itemId: item.itemId,
+          err,
+        })
+      }
+    }
   }
 
   /** inbox-gov M1 — write one `inbox_resolve` audit row (best-effort). */
@@ -221,23 +258,28 @@ export class HostInboxService {
 
   /**
    * Resume the parked broker task, injecting the decision as its answer.
-   * Returns false when the child wasn't parked (nothing to resume → leave the
-   * parent alone too; the decision is still recorded).
+   * Returns `{ resumed: false, result: null }` when the child wasn't parked
+   * (nothing to resume → leave the parent alone too; the decision is still
+   * recorded), else the resumed broker's `result` (the outcome the post-resolve
+   * hook pushes back).
    */
-  private async resumeChild(item: InboxItem, decision: InboxDecision): Promise<boolean> {
+  private async resumeChild(
+    item: InboxItem,
+    decision: InboxDecision,
+  ): Promise<{ resumed: boolean; result: TaskResult | null }> {
     const row = this.identity.getSuspendedTask(item.itemId)
     if (!row || row.corrupt) {
       this.log?.warn('inbox resolve: child task not parked; decision recorded only', {
         itemId: item.itemId,
       })
-      return false
+      return { resumed: false, result: null }
     }
     let childTask: Task
     try {
       childTask = JSON.parse(row.taskJson) as Task
     } catch (err) {
       this.log?.error('inbox resolve: child task_json corrupt', { itemId: item.itemId, err })
-      return false
+      return { resumed: false, result: null }
     }
     // Merge the persisted park state UNDER `{ answer }`. The human-step broker /
     // approval gate only read `.answer` (returning the decision / forwarding the
@@ -258,7 +300,7 @@ export class HostInboxService {
     // for a workflow parent, resumeParent re-reads the (now re-suspended) child,
     // re-parks the run at that finite resumeAt, and the sweep converges both.
     if (result.kind !== 'suspended') this.identity.removeSuspendedTask(item.itemId)
-    return true
+    return { resumed: true, result }
   }
 
   /** Resume the parent workflow run, if the dispatcher was a workflow. */

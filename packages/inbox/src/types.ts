@@ -104,6 +104,14 @@ export interface InboxItem {
   itemId: string
   /** The user who must act. */
   userId: string
+  /**
+   * What created this item — a free-form tag the resolve layer can key off. A
+   * workflow human step leaves it unset; the resident butler's governed-action
+   * park sets `'butler'` so `HostInboxService` can push the outcome back to the
+   * member's IM once they resolve it. Additive + optional: unset everywhere else,
+   * so it is zero-behaviour-change for every existing item.
+   */
+  source?: string
   kind: InboxKind
   prompt: string
   title?: string

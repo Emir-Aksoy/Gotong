@@ -231,7 +231,7 @@ import { HostButlerMemoryService } from './butler-memory-service.js'
 import { createButlerRouter } from './butler-router.js'
 import { openButlerMemory } from './personal-butler-memory.js'
 import { openButlerRecallIndex } from './butler-recall-index.js'
-import { butlerApprovalItemFor } from './personal-butler-escalation.js'
+import { butlerApprovalItemFor, butlerResolvePushback } from './personal-butler-escalation.js'
 import {
   ButlerMaintenanceSweeper,
   BUTLER_MAINTENANCE_INTERVAL_MS,
@@ -2076,10 +2076,30 @@ async function main(): Promise<void> {
   // /me itself requires a v4 user — so without identity there is no inbox.
   // The store itself was built earlier (so the Phase 18 approval gate could
   // share it); here we register the human-step broker + the resume service.
+  // The butler push-back ref (S1-M3). HostInboxService is built here, but the IM
+  // bridges that expose `pushToMember` start ~500 lines below — forward-declare
+  // the ref so the resolve hook reads it lazily; assigned right after
+  // `startImBridges` returns. Until then undefined → the optional call is a no-op.
+  let butlerPushRef: ImBridgesHandle['pushToMember']
+
   let inboxService: HostInboxService | undefined
   if (identity && inboxStore) {
     hub.register(new HumanInboxParticipant({ store: inboxStore }))
-    inboxService = new HostInboxService({ hub, store: inboxStore, identity, logger: log })
+    inboxService = new HostInboxService({
+      hub,
+      store: inboxStore,
+      identity,
+      logger: log,
+      // S1-M3 — once a member resolves a butler governed-action approval, push the
+      // butler's own closing message back to their IM. `butlerResolvePushback`
+      // owns the discrimination (only `source:'butler'` items) + phrasing (the
+      // resumed turn's ok text, for approve AND reject); a workflow human step
+      // leaves `source` unset and returns null here, so it never pushes.
+      onResolved: ({ item, childResult }) => {
+        const text = butlerResolvePushback(item, childResult)
+        if (text) void butlerPushRef?.(item.userId, text)
+      },
+    })
     log.info('member task inbox enabled', { capability: HUMAN_CAPABILITY })
   }
 
@@ -2610,6 +2630,10 @@ async function main(): Promise<void> {
         },
       },
     })
+    // S1-M3 — now that the bridges are live, point the push-back ref at their
+    // `pushToMember` (undefined when no reachable dir / no bridge). The inbox
+    // resolve hook declared above reads this lazily on each resolve.
+    butlerPushRef = imBridges?.pushToMember
   }
 
   const web = await serveWeb(hub, {

@@ -189,6 +189,16 @@ export interface HostImConfig {
   }) => void
 }
 
+/**
+ * The "never resume on a timer" sentinel — a suspend that only a human resolves
+ * (`/me` inbox: a butler governed action, a workflow human step, an approval
+ * gate). Mirrors `@aipehub/inbox`'s `NEVER_RESUME_AT` / the butler's
+ * `BUTLER_NEVER_RESUME_AT`; duplicated as a local const so this module needs no
+ * dep just to phrase a friendlier reply. Any `resumeAt >= this` means "waiting on
+ * you", never "I'll get back to it at time T".
+ */
+const NEVER_RESUME_AT = 9_999_999_999_000
+
 const HELP_TEXT = [
   'AipeHub IM bridge — commands:',
   '',
@@ -810,7 +820,13 @@ function summariseResult(result: TaskResult): string {
     case 'cancelled':
       return `⚠️ Task cancelled: ${result.reason}`
     case 'suspended':
-      return `⏸ Task suspended; it will resume around ${new Date(result.resumeAt).toISOString()}.`
+      // A human-resolved park (butler governed action / workflow human step /
+      // approval gate) uses the NEVER_RESUME_AT sentinel — phrase it as "waiting
+      // on you in /me", not a nonsensical year-2286 timestamp. A finite resumeAt
+      // is a genuine timed suspend (e.g. a long-running poll) — keep the ETA.
+      return result.resumeAt >= NEVER_RESUME_AT
+        ? '这件事需要你先确认一下,我已经放进你的「我的 → 收件箱」了。你在那儿点确认或拒绝,处理好我再回来告诉你结果。'
+        : `⏸ 已安排,预计 ${new Date(result.resumeAt).toISOString()} 前后继续。`
     case 'no_participant':
       return `⚠️ No agent picked it up: ${result.reason}`
   }

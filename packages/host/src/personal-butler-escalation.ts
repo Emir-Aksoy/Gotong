@@ -23,7 +23,7 @@
  * gate, and ACP helper already write their own.
  */
 
-import type { Task } from '@aipehub/core'
+import type { Task, TaskResult } from '@aipehub/core'
 import { readButlerGateState } from '@aipehub/personal-butler'
 import type { InboxItem } from '@aipehub/inbox'
 
@@ -75,6 +75,10 @@ export function butlerApprovalItemFor(
   const item: InboxItem = {
     itemId: task.id,
     userId: approver,
+    // Tag the origin so HostInboxService can push the outcome back to the
+    // member's IM once they resolve it (S1-M3). A workflow human step leaves
+    // this unset — only a butler governed park opts into the push-back.
+    source: 'butler',
     kind: 'approval',
     prompt: buildButlerApprovalPrompt(by, gate.pending.approval),
     parentKind,
@@ -84,6 +88,43 @@ export function butlerApprovalItemFor(
   if (task.title !== undefined) item.title = task.title
   if (parentNode) item.parent = { taskId: parentNode.taskId, by: parentNode.by }
   return item
+}
+
+/**
+ * S1-M3 — the message (if any) to push back to a member's IM once they resolve
+ * an inbox item. This is the discriminator + phrasing for the push-back:
+ *
+ *   - only a BUTLER governed-action item opts in (`source === 'butler'`); a
+ *     workflow human step / ACP escalation / steward park leaves `source` unset
+ *     and returns null — they don't push;
+ *   - the resumed butler turn phrases its OWN outcome and returns
+ *     `{ kind:'ok', output:{ text } }` for BOTH approve (the action ran) and
+ *     reject (fail-closed), so forward that text verbatim;
+ *   - a failure AFTER approval still deserves a word (the butler promised to
+ *     come back with the result);
+ *   - a re-park (`suspended`) or an unparked child (`null`) is not a settled
+ *     outcome → null (stay silent; the next resolve / sweep settles it).
+ *
+ * Pure — the caller (HostInboxService's `onResolved` hook in main.ts) forwards
+ * the returned line to the reachable registry's push. Extracted (not inlined) so
+ * it is a named, unit-testable unit AND the e2e can wire the SAME function to a
+ * fake push exactly as production wires it to the real one.
+ */
+export function butlerResolvePushback(
+  item: InboxItem,
+  childResult: TaskResult | null,
+): string | null {
+  if (item.source !== 'butler' || !childResult) return null
+  if (childResult.kind === 'ok') {
+    const out = childResult.output
+    const text =
+      out && typeof out === 'object' && 'text' in out && typeof (out as { text: unknown }).text === 'string'
+        ? (out as { text: string }).text.trim()
+        : ''
+    return text.length > 0 ? text : '好了,我已经照你的意思处理完了。'
+  }
+  if (childResult.kind === 'failed') return `抱歉,刚才那件事没能完成:${childResult.error}`
+  return null
 }
 
 /** A short, human-readable (zh) approval prompt naming the butler + the action. */
