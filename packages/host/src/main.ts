@@ -294,6 +294,10 @@ import {
   type ButlerOwnedAgentSource,
   type ButlerAdaptationSource,
 } from './personal-butler-diagnose.js'
+import {
+  buildButlerAskAgentToolset,
+  type ButlerAskRosterSource,
+} from './personal-butler-ask-agent.js'
 import { ReminderParticipant } from './reminder-participant.js'
 import type { LlmProvider } from '@aipehub/llm'
 import { HostOperatorAgentService } from './operator-agent-service.js'
@@ -1344,6 +1348,10 @@ async function main(): Promise<void> {
   // panel). Refs assigned once the member-agent lister + adaptation service exist.
   let butlerDiagnoseOwnedRef: ButlerOwnedAgentSource | undefined
   let butlerDiagnoseAdaptRef: ButlerAdaptationSource | undefined
+  // BE-M4 — the butler's benign "问我自己的助手" switchboard: one-shot dispatch to
+  // an agent THIS member owns (no-leak via listOwned), awaiting the reply. Ref
+  // assigned once the member-agent lister exists. Absent ⇒ the tool isn't offered.
+  let butlerAskRosterRef: ButlerAskRosterSource | undefined
   // S2-M2 — the benign "整理一下记忆" tool resolves the distillation provider
   // (the butler's own model) through the agent pool, which is built further down.
   // Forward-declared `let` read at butler-build time (same lazy pattern). Absent ⇒
@@ -1476,6 +1484,12 @@ async function main(): Promise<void> {
                 logger: log,
               })
             : undefined
+        // BE-M4 — benign "问我自己的助手": one-shot dispatch to an agent THIS member
+        // owns (no-leak via listOwned), awaiting the reply. Inline (a member asking
+        // their own agent), scoped by userId. Needs the owned-agent roster, else off.
+        const askAgentToolset = butlerAskRosterRef
+          ? buildButlerAskAgentToolset({ userId, roster: butlerAskRosterRef, hub, logger: log })
+          : undefined
         // S2-M2 — benign "整理一下记忆": run BF-M8's per-member maintenance pass
         // (蒸馏 + STATUS.md) on demand. Gated on the SAME `butlerMaintenanceOn`
         // flag as the 6h sweep — if distillation is off, the tool isn't offered.
@@ -1517,6 +1531,7 @@ async function main(): Promise<void> {
           ...(workflowsToolset ? [workflowsToolset] : []),
           ...(observeToolset ? [observeToolset] : []),
           ...(diagnoseToolset ? [diagnoseToolset] : []),
+          ...(askAgentToolset ? [askAgentToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
@@ -2467,6 +2482,8 @@ async function main(): Promise<void> {
   // BE-M2 — same member-agent lister feeds the butler's benign "体检" tool the
   // member's OWNED agents (id + declared provider), scoped by userId (no-leak).
   butlerDiagnoseOwnedRef = meAgentAdmin
+  // BE-M4 — and the "问我自己的助手" switchboard's no-leak roster (owned agents only).
+  butlerAskRosterRef = meAgentAdmin
   butlerGovernedWorkflowEditorRef = meWorkflowEdit ?? undefined
   // BE-M3 — hand the butler the member 工作流架构师 so its governed create_workflow
   // gate can author. Null when there's no workflowAssist ⇒ the gate isn't composed
