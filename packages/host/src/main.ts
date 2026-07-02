@@ -279,6 +279,12 @@ import { buildButlerConsolidateToolset } from './personal-butler-consolidate.js'
 import { buildButlerRemindersToolset } from './personal-butler-reminders.js'
 import { buildButlerDailyBriefToolset } from './personal-butler-daily-brief.js'
 import { buildButlerProfileToolset } from './personal-butler-profile.js'
+import {
+  buildButlerObserveToolset,
+  type ButlerRunSurface,
+  type ButlerAgentSurface,
+  type ButlerUsageSurface,
+} from './personal-butler-observe.js'
 import { ReminderParticipant } from './reminder-participant.js'
 import type { LlmProvider } from '@aipehub/llm'
 import { HostOperatorAgentService } from './operator-agent-service.js'
@@ -1309,6 +1315,14 @@ async function main(): Promise<void> {
   // because a per-user butler is built lazily on that member's first task). Absent
   // ⇒ the butler simply has no run-workflow tool.
   let butlerWorkflowsRef: ButlerWorkflowSurface | undefined
+  // BE-M1 — the butler's benign READ "eyes": recent runs / helper roster / own
+  // usage. Same controller + agent projection + ledger the /me panels read; runs
+  // & usage are scoped to the member server-side (no-leak). Forward-declared
+  // `let`s read at butler-build time (same lazy pattern), assigned once the
+  // workflow controller / agent projection / identity ledger exist further down.
+  let butlerObserveRunsRef: ButlerRunSurface | undefined
+  let butlerObserveAgentsRef: ButlerAgentSurface | undefined
+  let butlerObserveUsageRef: ButlerUsageSurface | undefined
   // S2-M2 — the benign "整理一下记忆" tool resolves the distillation provider
   // (the butler's own model) through the agent pool, which is built further down.
   // Forward-declared `let` read at butler-build time (same lazy pattern). Absent ⇒
@@ -1400,6 +1414,21 @@ async function main(): Promise<void> {
         const workflowsToolset = butlerWorkflowsRef
           ? buildButlerWorkflowsToolset({ userId, workflows: butlerWorkflowsRef, hub, logger: log })
           : undefined
+        // BE-M1 — benign read-only "eyes" (recent runs / helper roster / own
+        // usage), each scoped to THIS member (agents is hub-wide but sanitized).
+        // Composed into `benign` so they run inline; the WRITE counterparts (fix
+        // an agent, create a workflow) stay governed. A tool whose surface is
+        // absent is dropped from `listTools` — never offered.
+        const observeToolset =
+          butlerObserveRunsRef || butlerObserveAgentsRef || butlerObserveUsageRef
+            ? buildButlerObserveToolset({
+                userId,
+                ...(butlerObserveRunsRef ? { runs: butlerObserveRunsRef } : {}),
+                ...(butlerObserveAgentsRef ? { agents: butlerObserveAgentsRef } : {}),
+                ...(butlerObserveUsageRef ? { usage: butlerObserveUsageRef } : {}),
+                logger: log,
+              })
+            : undefined
         // S2-M2 — benign "整理一下记忆": run BF-M8's per-member maintenance pass
         // (蒸馏 + STATUS.md) on demand. Gated on the SAME `butlerMaintenanceOn`
         // flag as the 6h sweep — if distillation is off, the tool isn't offered.
@@ -1439,6 +1468,7 @@ async function main(): Promise<void> {
           // events, …) runs inline; the WRITE half goes into `governed` below.
           ...(mcpSplit ? [mcpSplit.readBenign] : []),
           ...(workflowsToolset ? [workflowsToolset] : []),
+          ...(observeToolset ? [observeToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
@@ -1661,6 +1691,39 @@ async function main(): Promise<void> {
   // "run my workflow" tool (read lazily at butler-build time). The controller's
   // `list()` returns exactly the member-facing summaries the run gate reads.
   butlerWorkflowsRef = workflowController
+  // BE-M1 — wire the butler's benign read "eyes":
+  //  • runs   — the SAME controller `/api/me/runs` reads; `listRunsByUser` is
+  //             scoped to the caller's `triggeredByOrigin.userId` server-side.
+  //  • agents — the sanitized member-facing roster (below), shared verbatim with
+  //             `/api/me/agents` so there's ONE projection to keep leak-free.
+  //  • usage  — this member's usage ledger, aggregated per model, filtered by
+  //             `userId` in SQL so alice's butler can never sum bob's bill.
+  butlerObserveRunsRef = workflowController
+  // The sanitized "my AI helpers" projection — single source for the /me route
+  // and the butler's `list_my_agents` eye (id/label/capabilities/online only; a
+  // system prompt / model / provider config / per-agent key never leave here).
+  const meAgentsSurface = {
+    async listForMembers() {
+      const recs = await space.agents()
+      const liveIds = new Set(hub.participants().map((p) => p.id))
+      return recs.map((a) => ({
+        id: a.id,
+        label: a.displayName ?? a.id,
+        capabilities: [...a.allowedCapabilities],
+        online: liveIds.has(a.id),
+        // v5 D-M4 — expose only the on/off flag; interval + checklist stay host-side.
+        ...(a.managed?.heartbeat?.enabled ? { heartbeat: { enabled: true } } : {}),
+      }))
+    },
+  }
+  butlerObserveAgentsRef = meAgentsSurface
+  if (identity) {
+    const idStore = identity
+    butlerObserveUsageRef = {
+      aggregateForUser: (userId: string) =>
+        idStore.aggregateLedger({ groupBy: 'model', userId }),
+    }
+  }
 
   // Route B P0-M3-M2 — boot-time workflow-run retention. Prune old TERMINAL
   // runs into `runs/archive/` BEFORE the deferred resume scan (and every later
@@ -2830,20 +2893,10 @@ async function main(): Promise<void> {
     // the managed-agent roster to {id,label,capabilities,online}; the system
     // prompt / model / provider config / per-agent key never leave the host,
     // so a member's "my AI helpers" view can't read another agent's config.
-    meAgents: {
-      async listForMembers() {
-        const recs = await space.agents()
-        const liveIds = new Set(hub.participants().map((p) => p.id))
-        return recs.map((a) => ({
-          id: a.id,
-          label: a.displayName ?? a.id,
-          capabilities: [...a.allowedCapabilities],
-          online: liveIds.has(a.id),
-          // v5 D-M4 — expose only the on/off flag; interval + checklist stay host-side.
-          ...(a.managed?.heartbeat?.enabled ? { heartbeat: { enabled: true } } : {}),
-        }))
-      },
-    },
+    // BE-M1 — shared with the resident butler's `list_my_agents` eye (defined
+    // once, above, next to the butler-observe wiring): ONE sanitized projection
+    // so both surfaces stay leak-free together.
+    meAgents: meAgentsSurface,
     // v5 A-M2 — member agent ownership + self-service CRUD (undefined → 503).
     ...(meAgentAdmin ? { meAgentAdmin } : {}),
     // v5 A-M4 — member agent access-grant sharing (undefined → 503).
