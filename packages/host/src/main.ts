@@ -176,6 +176,7 @@ function findOwnerUserId(identity: IdentityStore): string | null {
 // registration block lives in main() where identity is in scope.
 
 import { createAdminHealthService } from './admin-health.js'
+import { createResourceInventoryService } from './resource-inventory.js'
 import { createSettingOpsService } from './setting-ops-service.js'
 // setting-ops M5 — the IM `/setting` console drives ops-core directly with an
 // `im` caller (surface='im', allowConfigWrite=false), so config-write AND
@@ -2690,6 +2691,17 @@ async function main(): Promise<void> {
     countRuns: async () => (await workflowController.countRuns()).total,
   })
 
+  // RES-M1 — read-only resource inventory for the "resource adaptation" panel.
+  // Deterministic + zero-LLM: env/vault EXISTENCE (never key values), a bounded
+  // localhost model-server probe, PATH existsSync for CLI agents, installed MCP
+  // servers. `listVaultProviders` reuses the pool's non-decrypting provider list
+  // (absent when no orgApiPool → vault side reports "none", honest degradation).
+  const resourceInventory = createResourceInventoryService({
+    env: process.env,
+    ...(orgApiPool ? { listVaultProviders: () => orgApiPool!.listProviders() } : {}),
+    listMcpServers: () => space.mcpServers(),
+  })
+
   // setting-ops M4 — the deterministic ops console surface (the WEB face of
   // ops-core). One host service, three surfaces (CLI / web / IM). It binds
   // ops-core's deps ONCE: the space root (env-knob + pricing files default off
@@ -2775,6 +2787,9 @@ async function main(): Promise<void> {
     // ease-of-use ❷-M1 — read-only "hub 体检" snapshot for the admin overview
     // panel (lifted to a const above so the setting-ops console reuses it).
     adminHealth,
+    // RES-M1 — read-only adaptable-resource inventory (built above). Absent
+    // surface → route 503s and the panel hides.
+    resourceInventory,
     // setting-ops M4 — deterministic ops console (status / check / fix-dirs /
     // config + owner config-write). No destructive routes; ops-core's chokepoint
     // refuses cold-start / restore / rotate-master-key (CLI-only by physics).

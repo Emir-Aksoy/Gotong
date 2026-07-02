@@ -264,6 +264,13 @@ export interface WebServerOptions {
    */
   adminHealth?: AdminHealthSurface
   /**
+   * RES-M1 — optional read-only resource inventory (LLM key sources / local
+   * model endpoints / CLI agents on PATH / installed MCP servers) for the
+   * "resource adaptation" admin panel. Host wires `createResourceInventoryService`.
+   * Absent → `GET /api/admin/resources` answers 503 and the panel hides.
+   */
+  resourceInventory?: ResourceInventorySurface
+  /**
    * v5 D-M4 — optional host callback to reconcile proactive-heartbeat rows
    * after a managed-agent create / edit / delete. The host wires this to its
    * HeartbeatScheduler (lazily spinning the engine up on first opt-in). When
@@ -830,6 +837,50 @@ export interface AdminHealthSurface {
 }
 
 /**
+ * RES-M1 — read-only resource inventory rows. Mirrored here (duck-typed) so the
+ * Web layer echoes the host snapshot with zero host runtime dependency, exactly
+ * like `HealthSnapshot`. EXISTENCE-only: `*Set` / `*Configured` are booleans, no
+ * secret key material ever crosses this boundary.
+ */
+export interface ResInventoryLlmKeyRow {
+  provider: string
+  envVar?: string
+  envSet: boolean
+  vaultConfigured: boolean
+}
+export interface ResInventoryEndpointRow {
+  label: string
+  url: string
+  reachable: boolean
+}
+export interface ResInventoryCliRow {
+  command: string
+  label: string
+  found: boolean
+  apiKeyEnv?: string
+  apiKeyEnvSet?: boolean
+}
+export interface ResInventoryMcpRow {
+  name: string
+}
+export interface ResInventorySnapshot {
+  llmKeys: ResInventoryLlmKeyRow[]
+  localEndpoints: ResInventoryEndpointRow[]
+  cliAgents: ResInventoryCliRow[]
+  mcpServers: ResInventoryMcpRow[]
+  checkedAt: string
+}
+
+/**
+ * RES-M1 — host-injected resource inventory surface. Absent when a host is
+ * embedded without it, in which case `GET /api/admin/resources` answers 503 and
+ * the admin resource-adaptation panel hides itself.
+ */
+export interface ResourceInventorySurface {
+  inventory(): Promise<ResInventorySnapshot>
+}
+
+/**
  * Phase 13 M3 — host-injected workflow assistant surface. Wraps a
  * registered `WorkflowAssistantAgent` so the Web layer can answer
  * `POST /api/admin/workflows/assist` without taking a runtime dep on
@@ -1187,6 +1238,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     lifecycle: opts.lifecycle,
     llmKeyProbe: opts.llmKeyProbe,
     adminHealth: opts.adminHealth,
+    resourceInventory: opts.resourceInventory,
     reconcileHeartbeats: opts.reconcileHeartbeats,
     workflows: opts.workflows,
     templatePersonnel: opts.templatePersonnel,
@@ -1337,6 +1389,8 @@ interface HandlerCtx {
   /** ease-of-use ③-M1 — see WebServerOptions.llmKeyProbe doc above. */
   llmKeyProbe: LlmKeyProbe | undefined
   adminHealth: AdminHealthSurface | undefined
+  /** RES-M1 — see WebServerOptions.resourceInventory doc above. */
+  resourceInventory: ResourceInventorySurface | undefined
   /** v5 D-M4 — see WebServerOptions.reconcileHeartbeats doc above. */
   reconcileHeartbeats: (() => Promise<void>) | undefined
   workflows: WorkflowSurface | undefined
@@ -2491,6 +2545,22 @@ async function handle(
       return
     }
     sendJson(res, await ctx.adminHealth.snapshot())
+    return
+  }
+
+  // --- admin: RES-M1 resource inventory (read-only) ---------------------
+  // Deterministic snapshot of adaptable local resources (LLM key sources /
+  // local model endpoints / CLI agents on PATH / installed MCP servers). The
+  // host owns the probe; this route just gates + echoes. EXISTENCE-only — no
+  // secret values cross here. 503 when the host didn't wire the surface.
+  if (method === 'GET' && path === '/api/admin/resources') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.resourceInventory) {
+      sendJson(res, { error: 'resource inventory surface unavailable' }, 503)
+      return
+    }
+    sendJson(res, await ctx.resourceInventory.inventory())
     return
   }
 
