@@ -338,6 +338,104 @@ describe('PersonalButlerAgent — mixed round parks the WHOLE round', () => {
   })
 })
 
+describe('PersonalButlerAgent — multiple governed gates coexist (steward + MCP writes)', () => {
+  // S1-M2: the butler can carry TWO self-contained governed toolsets — the
+  // steward action set (`delete_agent`) AND the write half of a notes/calendar
+  // MCP (`notes_create`). A tool routes to the FIRST gate that governs it; each
+  // gate keeps its OWN classify / describe / execute. This proves the park picks
+  // the RIGHT gate's title and the RIGHT gate's executor — and never touches the
+  // other gate.
+  function mcpWriteToolset(execLog: string[]): GovernedActionToolset {
+    return new GovernedActionToolset({
+      tools: [{ name: 'notes_create', description: 'create a note', inputSchema: { type: 'object', properties: { title: { type: 'string' } } } }],
+      classify: async () => ({ decision: 'approve', reason: '会在你的笔记上新建一条' }),
+      describe: (_name, args) => `在你的笔记上创建:${String(args.title)}`,
+      execute: async (_name, args) => {
+        execLog.push(`note:${String(args.title)}`)
+        return { text: `created ${String(args.title)}` }
+      },
+    })
+  }
+
+  it('parks an MCP-write via its OWN gate (title + executor), leaving the steward gate untouched', async () => {
+    const stewardExec: string[] = []
+    const mcpExec: string[] = []
+    const provider = new ScriptProvider([
+      toolTurn({ id: 't1', name: 'notes_create', input: { title: '买牛奶' } }),
+      textTurn('已帮你记下'),
+    ])
+    const agent = new PersonalButlerAgent({
+      id: 'butler',
+      provider,
+      memory: emptyMemory(),
+      system: 'base',
+      captureTurns: false,
+      // Two gates, in array order — steward first, MCP writes second.
+      governed: [governedToolset(stewardExec), mcpWriteToolset(mcpExec)],
+    })
+    const t = task('a', '帮我记一下买牛奶')
+
+    let state: unknown
+    try {
+      await agent.onTask(t)
+      throw new Error('expected a park')
+    } catch (e) {
+      if (!(e instanceof SuspendTaskError)) throw e
+      state = e.state
+    }
+    const gate = readButlerGateState(state)
+    // The inbox title came from the MCP gate's describe, not the steward gate's.
+    expect(gate!.pending!.approval.toolName).toBe('notes_create')
+    expect(gate!.pending!.approval.title).toBe('在你的笔记上创建:买牛奶')
+    expect(gate!.pending!.approval.reason).toContain('笔记')
+    expect(mcpExec).toEqual([]) // nothing ran before approval
+    expect(stewardExec).toEqual([])
+
+    const res = await agent.onResume(t, { ...(state as object), answer: { approved: true } })
+    expect(okText(res)).toBe('已帮你记下')
+    expect(mcpExec).toEqual(['note:买牛奶']) // executed via the MCP gate
+    expect(stewardExec).toEqual([]) // the steward gate was never involved
+  })
+
+  it('routes each gate independently — steward delete parks via the steward gate', async () => {
+    const stewardExec: string[] = []
+    const mcpExec: string[] = []
+    const provider = new ScriptProvider([
+      toolTurn({ id: 't1', name: 'delete_agent', input: { handle: 'mailer' } }),
+      textTurn('mailer is gone'),
+    ])
+    const agent = new PersonalButlerAgent({
+      id: 'butler',
+      provider,
+      memory: emptyMemory(),
+      system: 'base',
+      captureTurns: false,
+      governed: [
+        governedToolset(stewardExec, async () => ({ decision: 'approve', reason: 'destructive — deletes an agent' })),
+        mcpWriteToolset(mcpExec),
+      ],
+    })
+    const t = task('a', 'delete mailer')
+
+    let state: unknown
+    try {
+      await agent.onTask(t)
+      throw new Error('expected a park')
+    } catch (e) {
+      if (!(e instanceof SuspendTaskError)) throw e
+      state = e.state
+    }
+    const gate = readButlerGateState(state)
+    expect(gate!.pending!.approval.toolName).toBe('delete_agent')
+    expect(gate!.pending!.approval.reason).toContain('destructive')
+
+    const res = await agent.onResume(t, { ...(state as object), answer: { approved: true } })
+    expect(okText(res)).toBe('mailer is gone')
+    expect(stewardExec).toEqual(['delete:mailer'])
+    expect(mcpExec).toEqual([]) // the MCP gate stayed out of it
+  })
+})
+
 describe('PersonalButlerAgent — pure-memory (no governed toolset)', () => {
   // The IM fold-in's first cut: a butler that REMEMBERS across sessions but has
   // no approval-gated actions yet. With `governed` omitted the loop can never

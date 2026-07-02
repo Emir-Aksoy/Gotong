@@ -35,7 +35,7 @@ import {
 } from './pricing.js'
 import { AnthropicProvider } from '@aipehub/llm-anthropic'
 import { OpenAIProvider } from '@aipehub/llm-openai'
-import { McpToolset, type McpServerConfig } from '@aipehub/mcp-client'
+import { McpToolset, type McpServerConfig, type NamespacedTool } from '@aipehub/mcp-client'
 import {
   resolveMcpServerConfig,
   envSecretSource,
@@ -188,8 +188,20 @@ const BUTLER_CHAT_CAPABILITY = 'chat'
  *
  * Absent in tests and in hosts without identity+inbox — there the chat agent
  * stays a plain `LlmAgent` (near-zero behaviour change).
+ *
+ * S1-M2 — when the butler row declared MCP servers (notes / calendar / …), the
+ * pool hands the CONNECTED toolset + its resolved tool list over separately (NOT
+ * folded into `base.tools`), so the factory can split reads (benign, inline) from
+ * writes (governed → `/me` approval). `undefined` when the row has no MCP.
  */
-export type ButlerFactory = (base: LlmAgentOptions) => Participant
+export interface ButlerMcpHandoff {
+  /** The connected MCP toolset — reads AND writes run through its `callTool`. */
+  toolset: McpToolset
+  /** The resolved, namespaced tool list (`await toolset.listTools()`). */
+  tools: NamespacedTool[]
+}
+
+export type ButlerFactory = (base: LlmAgentOptions, mcp?: ButlerMcpHandoff) => Participant
 
 /**
  * `LocalAgentPool` is **not** a separate component — it is a small piece
@@ -1038,7 +1050,40 @@ export class LocalAgentPool implements ManagedAgentLifecycle {
     let agent: Participant
     if (this.butlerEnabledFor(record)) {
       // butlerFactory is non-null here (butlerEnabledFor checks it first).
-      agent = this.butlerFactory!(agentOpts)
+      //
+      // S1-M2 — hand the MCP toolset to the factory SEPARATELY (not folded into
+      // `tools`) so it can split reads (benign) from writes (governed → /me
+      // approval). The butler's base tools are dispatch + remote only — the
+      // factory re-adds the MCP read half and turns the write half into a gate.
+      const butlerParts: LlmAgentToolset[] = [
+        ...(dispatchToolset ? [dispatchToolset] : []),
+        ...remoteToolsets,
+      ]
+      const butlerBaseToolset =
+        butlerParts.length === 0
+          ? undefined
+          : butlerParts.length === 1
+            ? butlerParts[0]
+            : ComposedToolset.of(...butlerParts)
+      // Override the pool's MCP-inclusive `tools` with the butler-only set.
+      const butlerBase: LlmAgentOptions = { ...agentOpts, tools: butlerBaseToolset }
+      let mcpHandoff: ButlerMcpHandoff | undefined
+      if (mcpToolset) {
+        // Resolve the connected server's tools once so the factory can classify
+        // each as read/write. Best-effort: a listTools failure leaves the butler
+        // with no notes/calendar tools (same posture as a failed connect) rather
+        // than tanking the spawn.
+        try {
+          const mcpTools = await mcpToolset.listTools()
+          mcpHandoff = { toolset: mcpToolset, tools: mcpTools }
+        } catch (err) {
+          log.error('butler: mcp listTools failed (continuing without notes/calendar tools)', {
+            id: record.id,
+            err,
+          })
+        }
+      }
+      agent = this.butlerFactory!(butlerBase, mcpHandoff)
     } else {
       switch (record.managed.kind) {
         case 'personal-growth':

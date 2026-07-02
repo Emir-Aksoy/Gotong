@@ -49,15 +49,24 @@ import { GovernedActionToolset, type GovernedVerdict } from './governed-toolset.
 export interface PersonalButlerAgentOptions
   extends Omit<MemoryAugmentedAgentOptions, 'tools'> {
   /**
-   * The approval-gated sensitive-action toolset (change hub / spend / send /
+   * The approval-gated sensitive-action toolset(s) (change hub / spend / send /
    * delete). OPTIONAL: omit it for a PURE-MEMORY butler — one that remembers
    * across sessions and runs benign tools inline, but has no governed actions to
    * park. The host wires it this way for the IM fold-in's first cut (memory only,
    * near-zero behaviour change for a live chat agent), then injects the governed
    * steward action set in a later milestone. With no governed toolset the loop
    * simply never parks for approval — every tool is benign.
+   *
+   * Accepts an ARRAY so distinct governed sources compose without merging their
+   * internals: the steward action set (create/edit/delete agent, edit workflow)
+   * AND, say, the write half of a notes/calendar MCP each stay self-contained
+   * (own classify / execute / describe). A tool is gated by the FIRST gate that
+   * `governs` it; execution still routes through the composed `this.toolset`,
+   * which includes every gate — so each gate's names must be disjoint (both from
+   * each other and from the benign toolsets), the same rule `ComposedToolset`
+   * already enforces.
    */
-  governed?: GovernedActionToolset
+  governed?: GovernedActionToolset | GovernedActionToolset[]
   /**
    * Benign toolsets composed alongside memory + governed — e.g. a
    * `DispatchToolset` (sub-agents), a workflow-start toolset, an `McpToolset`.
@@ -68,9 +77,11 @@ export interface PersonalButlerAgentOptions
 
 export class PersonalButlerAgent extends MemoryAugmentedAgent {
   /** Held for GATING (governs / classify / describe). Execution routes through
-   *  the composed `this.toolset`, which already includes it. `undefined` for a
-   *  pure-memory butler — the loop then never parks (every tool is benign). */
-  private readonly governed: GovernedActionToolset | undefined
+   *  the composed `this.toolset`, which already includes them. Empty for a
+   *  pure-memory butler — the loop then never parks (every tool is benign). An
+   *  array so multiple self-contained gates coexist; `governedFor` picks the
+   *  first that governs a given tool. */
+  private readonly governedGates: readonly GovernedActionToolset[]
 
   constructor(opts: PersonalButlerAgentOptions) {
     const benignList = opts.benign
@@ -78,13 +89,16 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
         ? opts.benign
         : [opts.benign]
       : []
+    const governedList = opts.governed
+      ? Array.isArray(opts.governed)
+        ? opts.governed
+        : [opts.governed]
+      : []
     // Benign first, governed last (distinct names → a stable ordering). A
     // pure-memory butler (no `governed`) composes only its benign toolsets; with
     // neither, `tools` stays undefined and `MemoryAugmentedAgent` still composes
     // the memory tools in front — so the butler ALWAYS has memory either way.
-    const extras: LlmAgentToolset[] = opts.governed
-      ? [...benignList, opts.governed]
-      : benignList
+    const extras: LlmAgentToolset[] = [...benignList, ...governedList]
     const composed = extras.length > 0 ? ComposedToolset.of(...extras) : undefined
     // The resident butler keeps a multi-topic long-term memory, so its frozen
     // block is CLUSTERED by default (画像 / 项目 / 人物 / 承诺 / 其它). A caller
@@ -106,7 +120,15 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
       frozenShowLinks: opts.frozenShowLinks ?? true,
       frozenShowProcedures: opts.frozenShowProcedures ?? true,
     })
-    this.governed = opts.governed
+    this.governedGates = governedList
+  }
+
+  /** The first governed gate that governs `name`, or `undefined` if none does
+   *  (benign). With one gate this is just "the gate iff it governs"; with several
+   *  (steward + MCP writes) it resolves which gate owns a tool. Names are disjoint
+   *  across gates (ComposedToolset enforces it), so "first" is unambiguous. */
+  private governedFor(name: string): GovernedActionToolset | undefined {
+    return this.governedGates.find((g) => g.governs(name))
   }
 
   /**
@@ -167,12 +189,10 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
       // / side-effecting — don't double-call it across the park scan and the
       // execution pass).
       const verdicts = new Map<string, GovernedVerdict>()
-      const governed = this.governed
       for (const tu of toolUses) {
-        // No governed toolset → governs nothing → no verdicts → never parks.
-        if (governed?.governs(tu.name)) {
-          verdicts.set(tu.id, await governed.classify(tu.name, tu.input))
-        }
+        // No governed gate owns this tool → benign → no verdict → never parks.
+        const gate = this.governedFor(tu.name)
+        if (gate) verdicts.set(tu.id, await gate.classify(tu.name, tu.input))
       }
 
       const park = toolUses.find((tu) => verdicts.get(tu.id)?.decision === 'approve')
@@ -190,9 +210,9 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
               toolUses,
               approval: {
                 toolName: park.name,
-                // A park implies a governed 'approve' verdict, so `governed` is
-                // defined here (the verdict could only be set when it governs).
-                title: governed!.describe(park.name, park.input),
+                // A park implies a governed 'approve' verdict, so a gate governs
+                // `park.name` (the verdict could only be set when one does).
+                title: this.governedFor(park.name)!.describe(park.name, park.input),
                 reason: v.reason,
               },
             },
@@ -258,8 +278,8 @@ export class PersonalButlerAgent extends MemoryAugmentedAgent {
     const toolResultBlocks: LlmToolResultBlock[] = []
     for (const tu of gate.pending.toolUses) {
       // A pure-memory butler never reaches a governed park, but guard anyway:
-      // undefined governs nothing → the tool runs inline as benign.
-      if (this.governed?.governs(tu.name)) {
+      // no gate governs → the tool runs inline as benign.
+      if (this.governedFor(tu.name)) {
         if (decision.approved) {
           toolResultBlocks.push(await this.callOne(tu)) // cleared by a human → execute
         } else {

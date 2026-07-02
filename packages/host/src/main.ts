@@ -268,6 +268,7 @@ import {
   type StewardWorkflowEditor,
 } from './hub-steward-service.js'
 import { buildButlerGovernedToolset } from './personal-butler-governed.js'
+import { buildButlerMcpToolsets } from './personal-butler-mcp.js'
 import {
   buildButlerWorkflowsToolset,
   type ButlerWorkflowSurface,
@@ -1336,8 +1337,20 @@ async function main(): Promise<void> {
     60 * 60 * 1000,
     Math.max(5 * 60 * 1000, Number(process.env.AIPE_BUTLER_PROACTIVE_MS) || BUTLER_PROACTIVE_INTERVAL_MS),
   )
-  const butlerFactory: ButlerFactory = (base) =>
-    createButlerRouter({
+  const butlerFactory: ButlerFactory = (base, mcp) => {
+    // S1-M2 — split the row's attached MCP (notes / calendar / …) into a benign
+    // READ proxy (runs inline) and a governed WRITE toolset (parks for a /me
+    // approval). Partitioned ONCE per agent (the toolset is per-agent, not
+    // per-user) and captured in the closure below; both halves are stateless
+    // (they just delegate to the connected `callTool`), so every per-user butler
+    // reuses them. Absent MCP → both undefined → no behaviour change.
+    const mcpSplit = mcp
+      ? buildButlerMcpToolsets({
+          tools: mcp.tools,
+          callTool: (name, args) => mcp.toolset.callTool(name, args),
+        })
+      : undefined
+    return createButlerRouter({
       id: base.id,
       // The pool only consults this factory for a `chat`-capable row, so
       // `capabilities` is always set + includes 'chat'; `?? []` only satisfies
@@ -1347,9 +1360,10 @@ async function main(): Promise<void> {
       createForUser: (userId) => {
         // Per-user memory namespace + recall index (whole-store inverted index,
         // active-only) — the no-leak boundary is the `<rootDir>/user/<userId>/`
-        // tree itself. The base toolset the pool built (dispatch / mcp / …) moves
-        // to `benign` so those tools still run inline; the governed set below is the
-        // only path that can park the task for a /me approval.
+        // tree itself. The base toolset the pool built (dispatch / remote MCP; the
+        // row's own MCP arrives via `mcp` and is split above) moves to `benign` so
+        // those tools still run inline; the governed gates below are the only path
+        // that can park the task for a /me approval.
         const memory = openButlerMemory({ rootDir: butlerMemoryRoot, userId, logger: log })
         const recallIndex = openButlerRecallIndex({ rootDir: butlerMemoryRoot, userId, logger: log })
         const { tools, ...rest } = base
@@ -1357,7 +1371,7 @@ async function main(): Promise<void> {
         // executor's RBAC keys off `userId`). Built only when the flag is on AND
         // the member-agent service exists; the workflow editor is optional (a hub
         // with no workflowAssist gets the agent tools but no `edit_workflow`).
-        const governed =
+        const steward =
           butlerGovernedOn && butlerGovernedAgentsRef
             ? buildButlerGovernedToolset({
                 userId,
@@ -1405,10 +1419,21 @@ async function main(): Promise<void> {
           : undefined
         const benign = [
           ...(tools ? [tools] : []),
+          // S1-M2 — the READ half of the row's MCP servers (search notes, list
+          // events, …) runs inline; the WRITE half goes into `governed` below.
+          ...(mcpSplit ? [mcpSplit.readBenign] : []),
           ...(workflowsToolset ? [workflowsToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
+        ]
+        // Two self-contained gates: the steward action set (BF-M7) + the MCP
+        // write half (S1-M2). Tool names are disjoint (steward verbs vs
+        // `<server>__<tool>`), and the agent gates each call via whichever
+        // toolset governs that name.
+        const governed = [
+          ...(steward ? [steward] : []),
+          ...(mcpSplit?.writeGoverned ? [mcpSplit.writeGoverned] : []),
         ]
 
         return new PersonalButlerAgent({
@@ -1430,10 +1455,11 @@ async function main(): Promise<void> {
           frozenRefreshPerTask: true,
           captureMeta: { userId },
           ...(benign.length > 0 ? { benign } : {}),
-          ...(governed ? { governed } : {}),
+          ...(governed.length > 0 ? { governed } : {}),
         })
       },
     })
+  }
 
   const localAgents = new LocalAgentPool({
     butlerFactory,
