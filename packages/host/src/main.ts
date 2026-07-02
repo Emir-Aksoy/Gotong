@@ -243,6 +243,11 @@ import {
   BUTLER_PROACTIVE_INTERVAL_MS,
   buildButlerBriefComposer,
 } from './personal-butler-proactive.js'
+import {
+  ButlerRunBroadcastSweeper,
+  BUTLER_RUN_BROADCAST_INTERVAL_MS,
+  buildButlerRunBroadcastToolset,
+} from './personal-butler-run-broadcast.js'
 import { PersonalButlerAgent } from '@aipehub/personal-butler'
 import { HostMeImService } from './me-im-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
@@ -1390,6 +1395,18 @@ async function main(): Promise<void> {
     60 * 60 * 1000,
     Math.max(5 * 60 * 1000, Number(process.env.AIPE_BUTLER_PROACTIVE_MS) || BUTLER_PROACTIVE_INTERVAL_MS),
   )
+  // BE-M5 — proactively tell a member when a run THEY started finishes. Like the
+  // daily brief it rides a per-user poll (the `ButlerRunBroadcastSweeper` below) and
+  // the FEATURE is DEFAULT-OFF per member (nothing fires until they `set_run_broadcast`
+  // on). ON whenever the butler is on; opt out with AIPE_BUTLER_RUN_BROADCAST ∈
+  // {0,false,off,no}. Cadence via AIPE_BUTLER_RUN_BROADCAST_MS (clamped [1min, 1h]).
+  const butlerRunBroadcastEnv = (process.env.AIPE_BUTLER_RUN_BROADCAST ?? '').trim().toLowerCase()
+  const butlerRunBroadcastOn =
+    butlerDefaultOn && !['0', 'false', 'off', 'no'].includes(butlerRunBroadcastEnv)
+  const butlerRunBroadcastMs = Math.min(
+    60 * 60 * 1000,
+    Math.max(60_000, Number(process.env.AIPE_BUTLER_RUN_BROADCAST_MS) || BUTLER_RUN_BROADCAST_INTERVAL_MS),
+  )
   const butlerFactory: ButlerFactory = (base, mcp) => {
     // S1-M2 — split the row's attached MCP (notes / calendar / …) into a benign
     // READ proxy (runs inline) and a governed WRITE toolset (parks for a /me
@@ -1517,6 +1534,14 @@ async function main(): Promise<void> {
         const dailyBriefToolset = butlerProactiveOn
           ? buildButlerDailyBriefToolset({ userId, rootDir: butlerMemoryRoot, logger: log })
           : undefined
+        // BE-M5 — benign "工作流跑完了主动告诉我" opt-in. Writes THIS member's
+        // run-broadcast opt-in file; the ButlerRunBroadcastSweeper (below) polls it and
+        // pushes a notice per finished run. Gated on the SAME `butlerRunBroadcastOn` flag
+        // as the sweep — if the feature is off the tool isn't offered (a config that never
+        // fires would be a lie). Benign: flipping your OWN notices consequences nobody else.
+        const runBroadcastToolset = butlerRunBroadcastOn
+          ? buildButlerRunBroadcastToolset({ userId, rootDir: butlerMemoryRoot, logger: log })
+          : undefined
         // S2-M1 — benign "你记得我什么": the structured memory snapshot, read
         // through the SAME HostButlerMemoryService that backs the /me privacy
         // panel (同源 — never the model improvising from the frozen block).
@@ -1535,6 +1560,7 @@ async function main(): Promise<void> {
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
+          ...(runBroadcastToolset ? [runBroadcastToolset] : []),
           ...(profileToolset ? [profileToolset] : []),
         ]
         // Self-contained gates: the steward action set (BF-M7) + the governed
@@ -2353,6 +2379,29 @@ async function main(): Promise<void> {
       intervalMs: butlerProactiveMs,
     })
     butlerProactiveSweeper.start()
+  }
+
+  // BE-M5 — arm the run-result broadcast sweep. Same posture as the daily brief:
+  // delivers via the F1 `pushToMember` (read LAZILY through `butlerPushRef`, assigned
+  // after the IM bridges start below — the first tick lands one interval later). It
+  // reads each opted-in member's runs through the SAME `listRunsByUser` projection the
+  // BE-M1 `list_my_runs` eye uses (scoped + secret-scrubbed server-side). Off when the
+  // butler is off, AIPE_BUTLER_RUN_BROADCAST opts out, or the run surface is unwired;
+  // even on, it does nothing until a member opts in via `set_run_broadcast` (DEFAULT-OFF
+  // per member). Zero-LLM — the notice is assembled from the run row, no provider needed.
+  let butlerRunBroadcastSweeper: ButlerRunBroadcastSweeper | undefined
+  if (butlerRunBroadcastOn && butlerObserveRunsRef) {
+    butlerRunBroadcastSweeper = new ButlerRunBroadcastSweeper({
+      rootDir: butlerMemoryRoot,
+      runs: butlerObserveRunsRef,
+      push: (userId, msg) =>
+        butlerPushRef
+          ? butlerPushRef(userId, msg)
+          : Promise.resolve({ delivered: false, reason: 'no_bridge' }),
+      logger: log,
+      intervalMs: butlerRunBroadcastMs,
+    })
+    butlerRunBroadcastSweeper.start()
   }
 
   // Phase 18 C-M4 + Route B P1-M11b — outbound A2A agents. Each stored entry
@@ -3234,6 +3283,9 @@ async function main(): Promise<void> {
     }
     if (butlerProactiveSweeper) {
       try { butlerProactiveSweeper.stop() } catch (err) { log.error('butler proactive stop error', { err }) }
+    }
+    if (butlerRunBroadcastSweeper) {
+      try { butlerRunBroadcastSweeper.stop() } catch (err) { log.error('butler run-broadcast stop error', { err }) }
     }
     if (services) {
       try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }
