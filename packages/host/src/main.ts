@@ -177,6 +177,7 @@ function findOwnerUserId(identity: IdentityStore): string | null {
 
 import { createAdminHealthService } from './admin-health.js'
 import { createResourceInventoryService } from './resource-inventory.js'
+import { createResourceAdaptationService } from './resource-adaptation.js'
 import { createSettingOpsService } from './setting-ops-service.js'
 // setting-ops M5 — the IM `/setting` console drives ops-core directly with an
 // `im` caller (surface='im', allowConfigWrite=false), so config-write AND
@@ -2702,6 +2703,15 @@ async function main(): Promise<void> {
     listMcpServers: () => space.mcpServers(),
   })
 
+  // RES-M2 — adaptation proposal engine over the RES-M1 inventory. Pure: it
+  // turns "agent X has no key + Ollama is up" into a proposal to rewire X to the
+  // local endpoint, but enacts NOTHING — RES-M3 apply does, on explicit human
+  // approval. Reuses the same live inventory surface so proposals never disagree
+  // with what the resource panel shows.
+  const resourceAdaptation = createResourceAdaptationService({
+    inventory: () => resourceInventory.inventory(),
+  })
+
   // setting-ops M4 — the deterministic ops console surface (the WEB face of
   // ops-core). One host service, three surfaces (CLI / web / IM). It binds
   // ops-core's deps ONCE: the space root (env-knob + pricing files default off
@@ -2790,6 +2800,9 @@ async function main(): Promise<void> {
     // RES-M1 — read-only adaptable-resource inventory (built above). Absent
     // surface → route 503s and the panel hides.
     resourceInventory,
+    // RES-M2 — adaptation proposal engine over that inventory. Pure/read-only;
+    // proposals are enacted only by RES-M3 apply on explicit human approval.
+    resourceAdaptation,
     // setting-ops M4 — deterministic ops console (status / check / fix-dirs /
     // config + owner config-write). No destructive routes; ops-core's chokepoint
     // refuses cold-start / restore / rotate-master-key (CLI-only by physics).

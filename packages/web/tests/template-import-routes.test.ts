@@ -287,3 +287,90 @@ describe('POST /api/admin/templates/import — postInstallChecklist (ease-of-use
     expect(r.json.postInstallChecklist.agentsMissingKey).toEqual([])
   })
 })
+
+// ── RES-M2: adaptation proposals attached to the checklist ──────────────────
+// The real engine lives host-side (host/src/resource-adaptation.ts, unit-tested
+// in host/tests/resource-adaptation.test.ts). Here we pin only the web seam: the
+// import route consults the injected `resourceAdaptation` surface for the
+// freshly-created agents + KB slots and echoes its proposals verbatim under
+// `postInstallChecklist.adaptations`; absent surface → no `adaptations` field.
+describe('POST /api/admin/templates/import — RES-M2 adaptations', () => {
+  it('attaches the surface proposals for the created agents + KB slots', async () => {
+    await b.server.close()
+    const seen: { agents: { id: string; provider: string }[]; kbSlots?: { name: string; useMcpServer?: string }[] }[] = []
+    const resourceAdaptation = {
+      propose: async (input: { agents: { id: string; provider: string }[]; kbSlots?: { name: string; useMcpServer?: string }[] }) => {
+        seen.push(input)
+        // A canned proposal per keyless agent, echoed verbatim by the route.
+        return input.agents.map((a) => ({
+          kind: 'use_local_endpoint' as const,
+          id: `adapt:use_local_endpoint:${a.id}:Ollama`,
+          title: `让「${a.id}」改用本地 Ollama`,
+          detail: '……',
+          applicable: true,
+          agentId: a.id,
+          fromProvider: a.provider,
+          endpointLabel: 'Ollama',
+          suggestedBaseURL: 'http://127.0.0.1:11434/v1',
+        }))
+      },
+    }
+    const workflows = { importFromText: async () => ({ id: 'x' }) } as unknown as WorkflowSurface
+    b.server = await serveWeb(b.hub, { host: '127.0.0.1', port: 0, workflows, resourceAdaptation })
+
+    const r = await importReq({
+      template: templateText({
+        name: 'res-template',
+        // `anthropic` is a valid managed-agent provider (deepseek isn't a literal
+        // — it'd be openai-compatible + baseURL). The stub echoes proposals per
+        // agent regardless; provider validity is the manifest layer's concern.
+        agents: [
+          agentBlock({ id: 'mentor', capabilities: ['cap-a'], provider: 'anthropic' }),
+          agentBlock({ id: 'mock-agent', capabilities: ['cap-b'], provider: 'mock' }),
+        ],
+        knowledgeBases: [{ name: 'kb-slot', useMcpServer: 'kb-mcp', description: '待接线' }],
+      }),
+    })
+    expect(r.status).toBe(200)
+    // The surface saw the freshly-created agents + KB slots to wire.
+    expect(seen).toHaveLength(1)
+    expect(seen[0].agents.map((a) => a.id).sort()).toEqual(['mentor', 'mock-agent'])
+    expect(seen[0].kbSlots).toEqual([{ name: 'kb-slot', useMcpServer: 'kb-mcp' }])
+    // The proposals round-trip verbatim under the checklist.
+    const adaptations = r.json.postInstallChecklist.adaptations
+    expect(Array.isArray(adaptations)).toBe(true)
+    expect(adaptations).toHaveLength(2)
+    expect(adaptations.find((p: any) => p.agentId === 'mentor')).toMatchObject({
+      kind: 'use_local_endpoint',
+      applicable: true,
+      suggestedBaseURL: 'http://127.0.0.1:11434/v1',
+    })
+  })
+
+  it('a proposal fault never fails the import (best-effort → empty adaptations)', async () => {
+    await b.server.close()
+    const resourceAdaptation = {
+      propose: async () => {
+        throw new Error('inventory probe blew up')
+      },
+    }
+    const workflows = { importFromText: async () => ({ id: 'x' }) } as unknown as WorkflowSurface
+    b.server = await serveWeb(b.hub, { host: '127.0.0.1', port: 0, workflows, resourceAdaptation })
+
+    const r = await importReq({
+      template: templateText({ name: 't', agents: [agentBlock({ provider: 'anthropic' })] }),
+    })
+    expect(r.status).toBe(200)
+    expect(r.json.team.created.map((a: any) => a.id)).toEqual(['support-agent'])
+    expect(r.json.postInstallChecklist.adaptations).toEqual([])
+  })
+
+  it('no surface wired → adaptations is empty (zero regression)', async () => {
+    // Default beforeEach server has no resourceAdaptation surface.
+    const r = await importReq({
+      template: templateText({ name: 't', agents: [agentBlock({ provider: 'anthropic' })] }),
+    })
+    expect(r.status).toBe(200)
+    expect(r.json.postInstallChecklist.adaptations).toEqual([])
+  })
+})

@@ -271,6 +271,12 @@ export interface WebServerOptions {
    */
   resourceInventory?: ResourceInventorySurface
   /**
+   * RES-M2 — optional adaptation proposal engine. Host wires
+   * `createResourceAdaptationService`. Absent → the template-import response
+   * carries no `adaptations` and the resource panel shows no proposals.
+   */
+  resourceAdaptation?: ResourceAdaptationSurface
+  /**
    * v5 D-M4 — optional host callback to reconcile proactive-heartbeat rows
    * after a managed-agent create / edit / delete. The host wires this to its
    * HeartbeatScheduler (lazily spinning the engine up on first opt-in). When
@@ -881,6 +887,42 @@ export interface ResourceInventorySurface {
 }
 
 /**
+ * RES-M2 — adaptation proposal, mirrored (duck-typed) so the Web layer can carry
+ * host-produced proposals with zero host runtime dependency. Pure data: a
+ * proposal never enacts anything (RES-M3 apply does, on explicit human approval).
+ * `applicable` splits enactable (agent-update) from advisory (human action). The
+ * kind-specific fields are a permissive superset — web echoes them verbatim.
+ */
+export interface ResAdaptationProposal {
+  kind: 'use_local_endpoint' | 'switch_provider' | 'set_env_key' | 'wire_mcp_server'
+  id: string
+  title: string
+  detail: string
+  applicable: boolean
+  agentId?: string
+  fromProvider?: string
+  toProvider?: string
+  keySource?: 'env' | 'vault'
+  endpointLabel?: string
+  suggestedBaseURL?: string
+  provider?: string
+  envVar?: string
+  slotName?: string
+  candidateServer?: string
+}
+
+/**
+ * RES-M2 — host-injected adaptation proposal surface. Absent → the import
+ * checklist carries no `adaptations` and the resource panel omits proposals.
+ */
+export interface ResourceAdaptationSurface {
+  propose(input: {
+    agents: readonly { id: string; provider: string }[]
+    kbSlots?: readonly { name: string; useMcpServer?: string }[]
+  }): Promise<ResAdaptationProposal[]>
+}
+
+/**
  * Phase 13 M3 — host-injected workflow assistant surface. Wraps a
  * registered `WorkflowAssistantAgent` so the Web layer can answer
  * `POST /api/admin/workflows/assist` without taking a runtime dep on
@@ -1239,6 +1281,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     llmKeyProbe: opts.llmKeyProbe,
     adminHealth: opts.adminHealth,
     resourceInventory: opts.resourceInventory,
+    resourceAdaptation: opts.resourceAdaptation,
     reconcileHeartbeats: opts.reconcileHeartbeats,
     workflows: opts.workflows,
     templatePersonnel: opts.templatePersonnel,
@@ -1391,6 +1434,8 @@ interface HandlerCtx {
   adminHealth: AdminHealthSurface | undefined
   /** RES-M1 — see WebServerOptions.resourceInventory doc above. */
   resourceInventory: ResourceInventorySurface | undefined
+  /** RES-M2 — see WebServerOptions.resourceAdaptation doc above. */
+  resourceAdaptation: ResourceAdaptationSurface | undefined
   /** v5 D-M4 — see WebServerOptions.reconcileHeartbeats doc above. */
   reconcileHeartbeats: (() => Promise<void>) | undefined
   workflows: WorkflowSurface | undefined
@@ -2236,6 +2281,8 @@ async function handle(
         requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
         agentGrants,
         resolveActor: resolveResourceActor,
+        // RES-M2 — proposal engine for the import post-install checklist.
+        resourceAdaptation: ctx.resourceAdaptation,
       },
       req, res, method, path,
     )

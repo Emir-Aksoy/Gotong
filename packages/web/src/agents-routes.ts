@@ -68,6 +68,21 @@ export interface LlmKeyProbe {
   resolvesKey(agentId: string, provider: string): Promise<boolean>
 }
 
+/**
+ * RES-M2 — duck-typed adaptation proposal engine. The host wires
+ * `createResourceAdaptationService`; the template-import handler asks it for
+ * proposals about the freshly-created agents + unwired KB slots, and attaches
+ * them to the post-install checklist. Proposals are pure data (echoed opaquely
+ * here — the server owns their shape); nothing is enacted until RES-M3 apply on
+ * explicit human approval. Absent → the checklist carries no `adaptations`.
+ */
+export interface AgentsAdaptationSurface {
+  propose(input: {
+    agents: readonly { id: string; provider: string }[]
+    kbSlots?: readonly { name: string; useMcpServer?: string }[]
+  }): Promise<unknown[]>
+}
+
 /** v5 E4-M1 — grant levels on an agent resource (mirror of workflow perms). */
 export type AgentPermLiteral = 'viewer' | 'editor' | 'owner'
 
@@ -130,6 +145,12 @@ export interface AgentsRoutesCtx {
    * are still derived from the parsed template).
    */
   llmKeyProbe?: LlmKeyProbe
+  /**
+   * RES-M2 — optional adaptation proposal engine. The template-import handler
+   * asks it for proposals about the freshly-created agents + unwired KB slots.
+   * Absent → the checklist carries no `adaptations` (zero regression).
+   */
+  resourceAdaptation?: AgentsAdaptationSurface
 }
 
 // -- validation -----------------------------------------------------------
@@ -622,6 +643,24 @@ export async function handleAgentsRoute(
       }
     }
 
+    // RES-M2 — adaptation proposals: how the just-imported agents / KB slots
+    // could be wired to THIS machine's resources (use the local Ollama, switch
+    // to a provider that already has a key, …). Pure suggestions — nothing is
+    // enacted here; RES-M3 apply does that on explicit human approval. Scoped to
+    // the freshly-created agents so the importer sees proposals for what they
+    // just installed. Best-effort: a proposal fault never fails the import.
+    let adaptations: unknown[] = []
+    if (ctx.resourceAdaptation && createdProviders.length > 0) {
+      try {
+        adaptations = await ctx.resourceAdaptation.propose({
+          agents: createdProviders,
+          kbSlots: kbSlotsToWire,
+        })
+      } catch {
+        adaptations = []
+      }
+    }
+
     sendJson(res, {
       ok: true,
       template: { name: template.name, version: template.version, description: template.description },
@@ -639,7 +678,9 @@ export async function handleAgentsRoute(
       encryptedSkipped,
       personnelOmitted,
       // ease-of-use ③-M1 — the "what's left to do" checklist (see above).
-      postInstallChecklist: { kbSlotsToWire, agentsMissingKey },
+      // RES-M2 — `adaptations`: read-only proposals to wire agents/slots to
+      // local resources; each is applied only via explicit RES-M3 human approval.
+      postInstallChecklist: { kbSlotsToWire, agentsMissingKey, adaptations },
     })
     return true
   }
