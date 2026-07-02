@@ -276,6 +276,7 @@ import {
 import { buildButlerConsolidateToolset } from './personal-butler-consolidate.js'
 import { buildButlerRemindersToolset } from './personal-butler-reminders.js'
 import { buildButlerDailyBriefToolset } from './personal-butler-daily-brief.js'
+import { buildButlerProfileToolset } from './personal-butler-profile.js'
 import { ReminderParticipant } from './reminder-participant.js'
 import type { LlmProvider } from '@aipehub/llm'
 import { HostOperatorAgentService } from './operator-agent-service.js'
@@ -1312,6 +1313,13 @@ async function main(): Promise<void> {
   // the butler simply has no consolidate tool; a null result at call time is a
   // friendly refusal. Assigned right after `localAgents.start()`.
   let butlerProviderBuilderRef: (() => Promise<LlmProvider | null>) | undefined
+  // S2-M1 — the /me butler-memory privacy service doubles as the IM answer to
+  // "你记得我什么": the butler's `show_my_memory` tool reads through the SAME
+  // service (same bytes, same projection) so what it says it remembers and what
+  // the member can see / erase are one source of truth. Constructed with the
+  // other member services further down; forward-declared `let` read at
+  // butler-build time (same lazy pattern).
+  let butlerMemoryViewRef: HostButlerMemoryService | undefined
   // BF-M8 — the background memory-maintenance sweep: per member, on a 6h cadence,
   // consolidate captured episodic into the curated semantic profile (蒸馏) and
   // record it to STATUS.md (/me's "上次维护" line). ON by default whenever the
@@ -1417,6 +1425,12 @@ async function main(): Promise<void> {
         const dailyBriefToolset = butlerProactiveOn
           ? buildButlerDailyBriefToolset({ userId, rootDir: butlerMemoryRoot, logger: log })
           : undefined
+        // S2-M1 — benign "你记得我什么": the structured memory snapshot, read
+        // through the SAME HostButlerMemoryService that backs the /me privacy
+        // panel (同源 — never the model improvising from the frozen block).
+        const profileToolset = butlerMemoryViewRef
+          ? buildButlerProfileToolset({ userId, view: butlerMemoryViewRef, logger: log })
+          : undefined
         const benign = [
           ...(tools ? [tools] : []),
           // S1-M2 — the READ half of the row's MCP servers (search notes, list
@@ -1426,6 +1440,7 @@ async function main(): Promise<void> {
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
+          ...(profileToolset ? [profileToolset] : []),
         ]
         // Two self-contained gates: the steward action set (BF-M7) + the MCP
         // write half (S1-M2). Tool names are disjoint (steward verbs vs
@@ -2357,6 +2372,8 @@ async function main(): Promise<void> {
     rootDir: join(space.root, 'butler', 'memory'),
     logger: log,
   })
+  // S2-M1 — hand the same service to the butler factory's "你记得我什么" tool.
+  butlerMemoryViewRef = butlerMemory
 
   // GO-LIVE GL-1c — member IM-account linking. The binding code a member mints
   // here is what they DM to the bot as `/bind <code>`; bindings live in
