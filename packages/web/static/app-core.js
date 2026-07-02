@@ -903,6 +903,9 @@
       resAdaptApplied: (agentId) => `已应用到「${agentId}」（重启或重连后生效，模型可能需在 agent 面板微调）`,
       resAdaptFailed: (e) => `应用失败:${e}`,
       resAdaptManual: '需手动处理',
+      // RES-M4 — always-on resource-adaptation section in the hub-health panel.
+      resAdaptPanelTitle: '本机资源适配',
+      resAdaptPanelHint: '检测到本机资源，可一键让下面跑不起来的 agent 适配运行（点击即应用 — 这一步就是你的批准）:',
       admTemplateLoadFailedHttp: (s) => `加载内置模板失败:HTTP ${s}`,
       admGrowthBundleLoaded: '已加载个人成长 bundle。粘贴 DeepSeek key 后点"导入"。',
       admTemplateLoadFailedErr: (e) => `加载内置模板失败:${e}`,
@@ -2764,6 +2767,10 @@
         `Applied to "${agentId}" (takes effect after restart/reconnect; you may need to tune the model in the agents panel)`,
       resAdaptFailed: (e) => `Apply failed: ${e}`,
       resAdaptManual: 'manual step',
+      // RES-M4 — always-on resource-adaptation section in the hub-health panel.
+      resAdaptPanelTitle: 'Local resources',
+      resAdaptPanelHint:
+        "Detected local resources — one click makes the agents below runnable (clicking applies it; that click is your approval):",
       admTemplateLoadFailedHttp: (s) => `Failed to load builtin template: HTTP ${s}`,
       admGrowthBundleLoaded:
         'Loaded personal-growth bundle. Paste your DeepSeek key, then click "Import".',

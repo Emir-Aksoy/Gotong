@@ -3143,6 +3143,7 @@
     }
     let hubHealthBusy = false;
     let lastHealthSnap = null;
+    let lastAdaptations = null;
     function hubHealthSignalRow(level, text, btnHtml) {
       return `<li class="hh-signal hh-${level}">
       <span class="hh-dot" aria-hidden="true"></span>
@@ -3219,7 +3220,24 @@
             </li>`).join("")}
         </ul>
       </div>`;
-      return head + signalList + nextHtml + roster;
+      return head + signalList + nextHtml + roster + renderHealthAdaptationsHtml(lastAdaptations);
+    }
+    function renderHealthAdaptationsHtml(proposals) {
+      const applicable = (proposals || []).filter((p) => p && p.applicable === true);
+      if (!applicable.length) return "";
+      const rows = applicable.map((p) => {
+        const payload = encodeURIComponent(JSON.stringify(p));
+        return `<li class="hh-adapt-row">
+        <span class="hh-adapt-text">${escapeHtml5(p.title || p.id || "")}</span>
+        <button type="button" class="hh-btn" data-act="apply-adaptation" data-adapt="${payload}">${escapeHtml5(t5.resAdaptApply)}</button>
+        <span class="tg-adapt-result" role="status"></span>
+      </li>`;
+      }).join("");
+      return `<div class="hh-adapt">
+      <h3 class="hh-adapt-title">${escapeHtml5(t5.resAdaptPanelTitle)}</h3>
+      <p class="hh-adapt-hint">${escapeHtml5(t5.resAdaptPanelHint)}</p>
+      <ul class="hh-adapt-list">${rows}</ul>
+    </div>`;
     }
     async function renderHubHealth(opts = {}) {
       const host = document.getElementById("hub-health");
@@ -3247,6 +3265,12 @@
         if (!snap || (snap.managedCount || 0) === 0) {
           host.hidden = true;
           return;
+        }
+        try {
+          const a = await fetchJson4("/api/admin/resources/adaptations");
+          lastAdaptations = Array.isArray(a?.proposals) ? a.proposals : null;
+        } catch {
+          lastAdaptations = null;
         }
         host.innerHTML = renderHubHealthHtml(snap);
         host.hidden = false;
@@ -3992,6 +4016,8 @@
         }
         say(t5.resAdaptApplied(j.applied?.agentId || proposal.agentId || ""));
         await managedAgents.refreshManagedAgents().catch(() => {
+        });
+        renderHubHealth({}).catch(() => {
         });
       } catch (err) {
         say(t5.resAdaptFailed(err.message || String(err)));

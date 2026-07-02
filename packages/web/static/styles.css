@@ -1551,6 +1551,47 @@ body.admin[data-active-tab="activity"] main.admin-grid {
 }
 .hub-health .hh-test { margin-left: auto; }
 
+/* RES-M4 — always-on resource-adaptation section inside the hub-health panel:
+   one-click fixes derived from THIS machine's probed resources. Blue-neutral
+   (an option), distinct from the red/yellow "something is wrong" signals. */
+.hub-health .hh-adapt {
+  border-top: 1px solid #eceef1;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+.hub-health .hh-adapt-title {
+  margin: 0 0 4px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #175cd3;
+}
+.hub-health .hh-adapt-hint {
+  margin: 0 0 8px;
+  font-size: 0.76rem;
+  line-height: 1.45;
+  color: #667085;
+}
+.hub-health .hh-adapt-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.hub-health .hh-adapt-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 0.82rem;
+}
+.hub-health .hh-adapt-text { flex: 1; line-height: 1.4; color: #344054; }
+.hub-health .hh-adapt-row .tg-adapt-result {
+  flex: none;
+  font-size: 0.74rem;
+  color: #667085;
+}
+
 /* scripted steward demo overlay (appended to <body>, not under .start-here) */
 .sh-demo-overlay {
   position: fixed;

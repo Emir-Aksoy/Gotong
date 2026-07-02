@@ -1304,6 +1304,10 @@ import { createWorkflows } from './workflows.js'
   // 「测连接」button (reuses quick-chat via managedAgents.openAgentChat).
   let hubHealthBusy = false
   let lastHealthSnap = null
+  // RES-M4 — live resource-adaptation proposals for the CURRENT agents, cached
+  // alongside the health snapshot so a lang-change re-render (useCache) redraws
+  // them without a second round-trip. null = not fetched / none.
+  let lastAdaptations = null
 
   function hubHealthSignalRow(level, text, btnHtml) {
     return `<li class="hh-signal hh-${level}">
@@ -1410,7 +1414,33 @@ import { createWorkflows } from './workflows.js'
             </li>`).join('')}
         </ul>
       </div>`
-    return head + signalList + nextHtml + roster
+    return head + signalList + nextHtml + roster + renderHealthAdaptationsHtml(lastAdaptations)
+  }
+
+  // RES-M4 — the always-on plain-language entrance for resource adaptation. The
+  // health panel already flags "agent X can't run (missing key)"; right here we
+  // ALSO surface the one-click fixes RES-M2 proposes from THIS machine's probed
+  // resources (a local Ollama/LM Studio endpoint, a keyed sibling provider), so
+  // the operator fixes it exactly where the problem is shown. Only `applicable`
+  // proposals get a button — advisory ones are already implied by the missing-
+  // key signal + its 「去配密钥」 jump. Every apply still POSTs the human-approved
+  // /api/admin/resources/adapt (server re-checks `applicable`; never silent).
+  function renderHealthAdaptationsHtml(proposals) {
+    const applicable = (proposals || []).filter((p) => p && p.applicable === true)
+    if (!applicable.length) return ''
+    const rows = applicable.map((p) => {
+      const payload = encodeURIComponent(JSON.stringify(p))
+      return `<li class="hh-adapt-row">
+        <span class="hh-adapt-text">${escapeHtml(p.title || p.id || '')}</span>
+        <button type="button" class="hh-btn" data-act="apply-adaptation" data-adapt="${payload}">${escapeHtml(t.resAdaptApply)}</button>
+        <span class="tg-adapt-result" role="status"></span>
+      </li>`
+    }).join('')
+    return `<div class="hh-adapt">
+      <h3 class="hh-adapt-title">${escapeHtml(t.resAdaptPanelTitle)}</h3>
+      <p class="hh-adapt-hint">${escapeHtml(t.resAdaptPanelHint)}</p>
+      <ul class="hh-adapt-list">${rows}</ul>
+    </div>`
   }
 
   async function renderHubHealth(opts = {}) {
@@ -1440,6 +1470,15 @@ import { createWorkflows } from './workflows.js'
       // A fresh hub (no managed agents) is #start-here's domain — stay hidden
       // there so the two overview cards never both show.
       if (!snap || (snap.managedCount || 0) === 0) { host.hidden = true; return }
+      // RES-M4 — best-effort live adaptation proposals for the current agents
+      // (read-only). 503 (surface unwired) / network → no adaptations section;
+      // the health panel renders regardless.
+      try {
+        const a = await fetchJson('/api/admin/resources/adaptations')
+        lastAdaptations = Array.isArray(a?.proposals) ? a.proposals : null
+      } catch {
+        lastAdaptations = null
+      }
       host.innerHTML = renderHubHealthHtml(snap)
       host.hidden = false
     } finally {
@@ -2446,6 +2485,10 @@ import { createWorkflows } from './workflows.js'
       }
       say(t.resAdaptApplied(j.applied?.agentId || proposal.agentId || ''))
       await managedAgents.refreshManagedAgents().catch(() => {})
+      // RES-M4 — when applied from the hub-health panel, refresh it too so the
+      // resolved "agent can't run" signal clears in place (renderHubHealth is a
+      // hoisted decl; no-op on a fresh hub / when the panel isn't mounted).
+      renderHubHealth({}).catch(() => {})
     } catch (err) {
       say(t.resAdaptFailed(err.message || String(err)))
       if (btn instanceof HTMLButtonElement) btn.disabled = false

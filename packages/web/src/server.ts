@@ -2615,6 +2615,27 @@ async function handle(
     return
   }
 
+  // --- admin: RES-M2/M4 adaptation proposals for CURRENT agents ---------
+  // The always-on plain-language entrance: run the read-only RES-M2 engine over
+  // every managed LLM agent on this hub (not just freshly-imported ones) so the
+  // operator can see, any time, "agent X can't run — here's how to adapt it".
+  // Strictly read-only: proposals are suggestions; enacting one still requires an
+  // explicit per-item apply (POST /api/admin/resources/adapt) = human approval.
+  if (method === 'GET' && path === '/api/admin/resources/adaptations') {
+    const admin = await requireAdmin(ctx, req, res)
+    if (!admin) return
+    if (!ctx.resourceAdaptation) {
+      sendJson(res, { error: 'resource adaptation surface unavailable' }, 503)
+      return
+    }
+    const agents = (await ctx.space.agents())
+      .filter((a) => a.managed?.kind === 'llm')
+      .map((a) => ({ id: a.id, provider: a.managed!.provider }))
+    const proposals = await ctx.resourceAdaptation.propose({ agents })
+    sendJson(res, { proposals })
+    return
+  }
+
   // --- admin: SERVICE_CALL audit (v1.1 services-over-ws) ----------------
   // Returns the most recent `service_call` transcript entries (newest-first).
   // Caps default at 200 to keep the response small; admins who need more
