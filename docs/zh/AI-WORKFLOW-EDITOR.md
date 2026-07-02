@@ -174,9 +174,13 @@ Admin UI submitWorkflowAssist 把当前 hub 的 `participants() + workflow ids`
 ### 3.7 Provider 选择走 host env，跟 LocalAgentPool 同套 key 解析
 
 ```
-AIPE_ASSISTANT_PROVIDER  'anthropic' (默认) | 'openai' | 'mock'
+AIPE_ASSISTANT_PROVIDER  'anthropic' (默认) | 'openai' | 'openai-compatible' | 'mock'
 AIPE_ASSISTANT_MODEL     可选 provider-specific model id
+                         (openai-compatible 强烈建议设 — OpenAI 默认模型在别家端点不存在)
 AIPE_ASSISTANT_MAX_TOKENS 可选 (默认 4096)
+AIPE_ASSISTANT_BASE_URL  仅 openai-compatible — 兼容端点 (如 https://api.deepseek.com/v1)
+AIPE_ASSISTANT_API_KEY_ENV 仅 openai-compatible — 存放该厂商 key 的环境变量**名**
+                         (指针不是 key 本体，tokenEnv 纪律)
 AIPE_ASSISTANT_DISABLED  '1' / 'true' → 跳过注册，route 转 503
 ```
 
@@ -186,6 +190,11 @@ workspace 两层 — 这是 host 内置 agent 不是用户 agent）：
 1. `OrgApiPool`（如果有 vault 配过 entry）
 2. host env (`ANTHROPIC_API_KEY` / `OPENAI_API_KEY`)
 3. 都没有 → 不注册，log warn，route 自动 503
+
+`openai-compatible`（S1-M4，让 MiMo / DeepSeek 等端点也能跑 assistant，从而
+让常驻管家在这类 hub 上露出 `edit_workflow`）**跳过上面两层**：每个 baseURL
+是不同厂商，key 只从 `AIPE_ASSISTANT_API_KEY_ENV` 指名的环境变量读——绝不
+把 `OPENAI_API_KEY` 静默发给第三方端点。缺 baseURL 或 key → 同样不注册。
 
 Mock provider 不需要 key，永远可用（CI 跑、本地无 key 演示都靠它）。
 

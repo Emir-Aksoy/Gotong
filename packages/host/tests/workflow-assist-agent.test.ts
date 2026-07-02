@@ -35,6 +35,8 @@ describe('resolveWorkflowAssistConfig', () => {
     delete process.env.AIPE_ASSISTANT_PROVIDER
     delete process.env.AIPE_ASSISTANT_MODEL
     delete process.env.AIPE_ASSISTANT_MAX_TOKENS
+    delete process.env.AIPE_ASSISTANT_BASE_URL
+    delete process.env.AIPE_ASSISTANT_API_KEY_ENV
   })
   afterEach(() => {
     // Restore — vitest doesn't isolate process.env between tests.
@@ -81,6 +83,27 @@ describe('resolveWorkflowAssistConfig', () => {
     const cfg = resolveWorkflowAssistConfig()
     expect(cfg).toBeTruthy()
     expect(cfg!.maxTokens).toBeUndefined()
+  })
+
+  // S1-M4 — openai-compatible (MiMo / DeepSeek / …) via env.
+  it('reads openai-compatible + baseURL + apiKeyEnv (pointer, never the key)', () => {
+    process.env.AIPE_ASSISTANT_PROVIDER = 'openai-compatible'
+    process.env.AIPE_ASSISTANT_BASE_URL = 'https://vendor.example/v1'
+    process.env.AIPE_ASSISTANT_API_KEY_ENV = 'VENDOR_KEY'
+    process.env.AIPE_ASSISTANT_MODEL = 'mimo-v2.5-pro'
+    expect(resolveWorkflowAssistConfig()).toEqual({
+      provider: 'openai-compatible',
+      model: 'mimo-v2.5-pro',
+      baseURL: 'https://vendor.example/v1',
+      apiKeyEnv: 'VENDOR_KEY',
+    })
+  })
+
+  it('openai-compatible fields are ignored for other providers', () => {
+    process.env.AIPE_ASSISTANT_PROVIDER = 'openai'
+    process.env.AIPE_ASSISTANT_BASE_URL = 'https://vendor.example/v1'
+    process.env.AIPE_ASSISTANT_API_KEY_ENV = 'VENDOR_KEY'
+    expect(resolveWorkflowAssistConfig()).toEqual({ provider: 'openai' })
   })
 })
 
@@ -139,6 +162,66 @@ describe('createWorkflowAssistAgent', () => {
       logger,
     })
     expect(surface).not.toBeNull()
+  })
+
+  // S1-M4 — openai-compatible (MiMo / DeepSeek / …). Registration is offline
+  // (the provider client is constructed lazily, no network at boot), so these
+  // exercise the real wiring with a fake key in a fake env var.
+  describe('openai-compatible (S1-M4)', () => {
+    afterEach(() => {
+      delete process.env.TEST_VENDOR_KEY
+    })
+
+    it('registers when baseURL + the named key env var are set', () => {
+      process.env.TEST_VENDOR_KEY = 'sk-vendor-fake'
+      const surface = createWorkflowAssistAgent({
+        hub,
+        config: {
+          provider: 'openai-compatible',
+          baseURL: 'https://vendor.example/v1',
+          apiKeyEnv: 'TEST_VENDOR_KEY',
+          model: 'mimo-v2.5-pro',
+        },
+        logger,
+      })
+      expect(surface).not.toBeNull()
+      expect(hub.participants().some((p) => p.id === 'workflow-assistant')).toBe(true)
+    })
+
+    it('skips when the named key env var is unset (fail-closed, no boom)', () => {
+      const surface = createWorkflowAssistAgent({
+        hub,
+        config: {
+          provider: 'openai-compatible',
+          baseURL: 'https://vendor.example/v1',
+          apiKeyEnv: 'TEST_VENDOR_KEY',
+        },
+        logger,
+      })
+      expect(surface).toBeNull()
+      expect(hub.participants().some((p) => p.id === 'workflow-assistant')).toBe(false)
+    })
+
+    it('skips when no apiKeyEnv is configured — never falls back to OPENAI_API_KEY', () => {
+      // The real OpenAI key must NEVER be silently sent to a third-party endpoint.
+      process.env.OPENAI_API_KEY = 'sk-real-openai-fake'
+      const surface = createWorkflowAssistAgent({
+        hub,
+        config: { provider: 'openai-compatible', baseURL: 'https://vendor.example/v1' },
+        logger,
+      })
+      expect(surface).toBeNull()
+    })
+
+    it('skips when baseURL is missing (provider build fails → warn, boot survives)', () => {
+      process.env.TEST_VENDOR_KEY = 'sk-vendor-fake'
+      const surface = createWorkflowAssistAgent({
+        hub,
+        config: { provider: 'openai-compatible', apiKeyEnv: 'TEST_VENDOR_KEY' },
+        logger,
+      })
+      expect(surface).toBeNull()
+    })
   })
 
   it('mock surface.assist dispatches + returns draftStatus=valid output', async () => {

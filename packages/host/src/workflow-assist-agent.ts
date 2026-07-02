@@ -18,6 +18,9 @@
  * per-agent and workspace tiers — neither applies to a system agent):
  *   1. OrgApiPool (if wired) — picks any active vault entry for the provider
  *   2. host env (ANTHROPIC_API_KEY / OPENAI_API_KEY)
+ * `openai-compatible` (S1-M4) skips both tiers: each baseURL is a different
+ * vendor, so its key comes ONLY from the env var AIPE_ASSISTANT_API_KEY_ENV
+ * names (pointer-not-key, the tokenEnv discipline).
  * No key → return `null` from `createWorkflowAssistAgent`, log a warning;
  * caller leaves `workflowAssist` unset on the Web ctx.
  *
@@ -50,7 +53,7 @@ import {
 import type { OrgApiPool } from './org-api-pool.js'
 
 /** Concrete provider choice for the host-built-in assistant. */
-export type WorkflowAssistProviderKind = 'anthropic' | 'openai' | 'mock'
+export type WorkflowAssistProviderKind = 'anthropic' | 'openai' | 'openai-compatible' | 'mock'
 
 /**
  * Resolved configuration. Built by `resolveWorkflowAssistConfig` from
@@ -62,6 +65,18 @@ export interface WorkflowAssistAgentConfig {
   model?: string
   /** Optional maxTokens override. Default 4096 — plenty for one workflow draft. */
   maxTokens?: number
+  /**
+   * S1-M4 — OpenAI-compatible endpoint (DeepSeek / MiMo / Qwen / Ollama…).
+   * Required when `provider === 'openai-compatible'`; ignored otherwise.
+   */
+  baseURL?: string
+  /**
+   * S1-M4 — NAME of the env var holding the vendor's API key (the tokenEnv /
+   * headerEnv discipline: config points at the var, never carries the key).
+   * Each compatible baseURL is a different vendor, so the shared
+   * ANTHROPIC/OPENAI key tiers deliberately don't apply.
+   */
+  apiKeyEnv?: string
 }
 
 /** Duck-typed surface the Web layer consumes via `ServeWebOpts.workflowAssist`. */
@@ -114,9 +129,15 @@ export interface WorkflowAssistSurface {
  * Read env vars and pick a config. Returns null when the operator
  * explicitly disabled the assistant via `AIPE_ASSISTANT_DISABLED=1`.
  *
- *   AIPE_ASSISTANT_PROVIDER  'anthropic' (default) | 'openai' | 'mock'
- *   AIPE_ASSISTANT_MODEL     provider-specific model id (optional)
+ *   AIPE_ASSISTANT_PROVIDER  'anthropic' (default) | 'openai' | 'openai-compatible' | 'mock'
+ *   AIPE_ASSISTANT_MODEL     provider-specific model id (optional; strongly
+ *                            recommended for openai-compatible — the OpenAI
+ *                            default model won't exist on another vendor)
  *   AIPE_ASSISTANT_MAX_TOKENS  integer (optional, default 4096)
+ *   AIPE_ASSISTANT_BASE_URL  openai-compatible only — the vendor endpoint
+ *                            (e.g. https://api.deepseek.com/v1)
+ *   AIPE_ASSISTANT_API_KEY_ENV openai-compatible only — NAME of the env var
+ *                            holding that vendor's key (never the key itself)
  *   AIPE_ASSISTANT_DISABLED  '1' / 'true' → skip registration entirely
  *   AIPE_ASSISTANT_NO_EXAMPLES '1' / 'true' → skip few-shot examples
  *                              (consumed in createWorkflowAssistAgent, not here)
@@ -127,7 +148,13 @@ export function resolveWorkflowAssistConfig(): WorkflowAssistAgentConfig | null 
 
   const raw = process.env.AIPE_ASSISTANT_PROVIDER ?? 'anthropic'
   const provider: WorkflowAssistProviderKind =
-    raw === 'openai' ? 'openai' : raw === 'mock' ? 'mock' : 'anthropic'
+    raw === 'openai'
+      ? 'openai'
+      : raw === 'openai-compatible'
+        ? 'openai-compatible'
+        : raw === 'mock'
+          ? 'mock'
+          : 'anthropic'
 
   const model = process.env.AIPE_ASSISTANT_MODEL
   const maxTokensRaw = process.env.AIPE_ASSISTANT_MAX_TOKENS
@@ -140,6 +167,12 @@ export function resolveWorkflowAssistConfig(): WorkflowAssistAgentConfig | null 
   const cfg: WorkflowAssistAgentConfig = { provider }
   if (model) cfg.model = model
   if (maxTokens !== undefined) cfg.maxTokens = maxTokens
+  if (provider === 'openai-compatible') {
+    const baseURL = process.env.AIPE_ASSISTANT_BASE_URL?.trim()
+    const apiKeyEnv = process.env.AIPE_ASSISTANT_API_KEY_ENV?.trim()
+    if (baseURL) cfg.baseURL = baseURL
+    if (apiKeyEnv) cfg.apiKeyEnv = apiKeyEnv
+  }
   return cfg
 }
 
@@ -154,10 +187,19 @@ export function resolveWorkflowAssistConfig(): WorkflowAssistAgentConfig | null 
  * found in any tier — caller must skip registration.
  */
 function resolveAssistApiKey(
-  provider: WorkflowAssistProviderKind,
+  config: WorkflowAssistAgentConfig,
   orgApiPool: OrgApiPool | undefined,
 ): string | null | undefined {
+  const provider = config.provider
   if (provider === 'mock') return undefined
+  if (provider === 'openai-compatible') {
+    // Per-vendor key, read from the env var the config NAMES. The org pool /
+    // shared OPENAI_API_KEY tiers deliberately don't apply — each compatible
+    // baseURL is a different vendor, and silently sending the real OpenAI key
+    // to a third-party endpoint would be a leak, not a convenience.
+    if (!config.apiKeyEnv) return null
+    return process.env[config.apiKeyEnv] || null
+  }
   if (orgApiPool) {
     const hit = orgApiPool.resolveLlmKey(provider)
     if (hit) return hit.apiKey
@@ -170,9 +212,10 @@ function resolveAssistApiKey(
 }
 
 function buildAssistProvider(
-  kind: WorkflowAssistProviderKind,
+  config: WorkflowAssistAgentConfig,
   apiKey: string | undefined,
 ): LlmProvider {
+  const kind = config.provider
   switch (kind) {
     case 'mock':
       // Deterministic stub — emits a single ```yaml fence with a
@@ -225,6 +268,36 @@ function buildAssistProvider(
         )
       }
       return new OpenAIProvider({ apiKey, maxInlineBytes: readMultimodalInlineCapFromEnv() })
+    case 'openai-compatible': {
+      // S1-M4 — same two hard requirements as a managed 'openai-compatible'
+      // agent row (local-agent-pool.ts buildProvider), env-driven here.
+      if (!config.baseURL) {
+        throw new Error(
+          "WorkflowAssistantAgent provider 'openai-compatible' needs AIPE_ASSISTANT_BASE_URL — point it at an OpenAI-compatible /v1 endpoint",
+        )
+      }
+      if (!apiKey) {
+        throw new Error(
+          "WorkflowAssistantAgent provider 'openai-compatible' needs a key — set AIPE_ASSISTANT_API_KEY_ENV to the NAME of the env var holding it",
+        )
+      }
+      // Truthful provider name in logs/ledger: the vendor host, not 'openai'.
+      let name: string
+      try {
+        name = new URL(config.baseURL).host
+      } catch {
+        name = 'openai-compatible'
+      }
+      return new OpenAIProvider({
+        apiKey,
+        baseURL: config.baseURL,
+        name,
+        maxInlineBytes: readMultimodalInlineCapFromEnv(),
+        // Compatible vendors (DeepSeek, MiMo, Qwen, Ollama…) speak the legacy
+        // max_tokens field, not OpenAI's max_completion_tokens.
+        maxTokensField: 'max_tokens',
+      })
+    }
   }
 }
 
@@ -244,18 +317,28 @@ export function createWorkflowAssistAgent(deps: {
 }): WorkflowAssistSurface | null {
   const { hub, config, orgApiPool, logger } = deps
 
-  const keyOrNull = resolveAssistApiKey(config.provider, orgApiPool)
+  const keyOrNull = resolveAssistApiKey(config, orgApiPool)
   if (keyOrNull === null) {
     logger.warn('workflow-assistant: no API key resolved — skipping registration', {
       provider: config.provider,
+      ...(config.provider === 'openai-compatible'
+        ? { hint: 'set AIPE_ASSISTANT_API_KEY_ENV to the NAME of the env var holding the vendor key' }
+        : {}),
     })
     return null
   }
   const apiKey = keyOrNull // undefined for mock; string otherwise
 
+  // A compatible endpoint won't serve the OpenAI default model — without an
+  // explicit model every assist call would 404 confusingly. Warn, don't block:
+  // some endpoints (Ollama with a configured default) do work model-less.
+  if (config.provider === 'openai-compatible' && !config.model) {
+    logger.warn('workflow-assistant: openai-compatible without AIPE_ASSISTANT_MODEL — the OpenAI default model likely does not exist on this endpoint')
+  }
+
   let provider: LlmProvider
   try {
-    provider = buildAssistProvider(config.provider, apiKey)
+    provider = buildAssistProvider(config, apiKey)
   } catch (err) {
     logger.warn('workflow-assistant: provider build failed — skipping registration', {
       provider: config.provider,
