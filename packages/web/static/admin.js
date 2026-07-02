@@ -3923,7 +3923,8 @@
         const checklist = ib.postInstallChecklist || {};
         const kbTodos = Array.isArray(checklist.kbSlotsToWire) ? checklist.kbSlotsToWire : [];
         const keyTodos = Array.isArray(checklist.agentsMissingKey) ? checklist.agentsMissingKey : [];
-        if (card && (kbTodos.length || keyTodos.length)) {
+        const adaptTodos = Array.isArray(checklist.adaptations) ? checklist.adaptations : [];
+        if (card && (kbTodos.length || keyTodos.length || adaptTodos.length)) {
           const rows = [];
           for (const kb of kbTodos) {
             const text = kb.useMcpServer ? t5.templateGalleryKbSlotTodoRef(kb.name, kb.useMcpServer) : t5.templateGalleryKbSlotTodo(kb.name);
@@ -3935,6 +3936,18 @@
             rows.push(
               `<li>${escapeHtml5(t5.templateGalleryAgentNoKey(a.id, a.provider))} <button type="button" class="tg-todo-fix" data-act="goto-key">${escapeHtml5(t5.templateGalleryTodoGotoKey)}</button></li>`
             );
+          }
+          for (const p of adaptTodos) {
+            if (!p || typeof p !== "object") continue;
+            const title = escapeHtml5(String(p.title || ""));
+            if (p.applicable === true) {
+              const payload = encodeURIComponent(JSON.stringify(p));
+              rows.push(
+                `<li>${title} <button type="button" class="tg-todo-fix" data-act="apply-adaptation" data-adapt="${payload}">${escapeHtml5(t5.resAdaptApply)}</button><span class="tg-adapt-result" role="status"></span></li>`
+              );
+            } else {
+              rows.push(`<li>${title} <em class="tg-adapt-manual">(${escapeHtml5(t5.resAdaptManual)})</em></li>`);
+            }
           }
           card.className = "tg-card-result ok";
           card.innerHTML = `<div class="tg-result-summary">${escapeHtml5(summary)}</div><details class="tg-checklist" open><summary>${escapeHtml5(t5.templateGalleryChecklistTitle)}</summary><ul>${rows.join("")}</ul></details>`;
@@ -3948,6 +3961,40 @@
       } catch (err) {
         setResult(t5.admFailedReason(err.message || String(err)), "err");
       } finally {
+        if (btn instanceof HTMLButtonElement) btn.disabled = false;
+      }
+    }
+    async function applyAdaptation(btn) {
+      if (!(btn instanceof HTMLElement)) return;
+      let proposal;
+      try {
+        proposal = JSON.parse(decodeURIComponent(btn.dataset.adapt || ""));
+      } catch {
+        return;
+      }
+      const out = btn.parentElement?.querySelector(".tg-adapt-result");
+      const say = (msg) => {
+        if (out) out.textContent = " " + msg;
+      };
+      if (btn instanceof HTMLButtonElement) btn.disabled = true;
+      say(t5.resAdaptApplying);
+      try {
+        const r = await fetch("/api/admin/resources/adapt", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ proposal })
+        });
+        const j = await r.json().catch(() => ({}));
+        if (!r.ok || !j.ok) {
+          say(t5.resAdaptFailed(j.error || t5.admHttp(r.status)));
+          if (btn instanceof HTMLButtonElement) btn.disabled = false;
+          return;
+        }
+        say(t5.resAdaptApplied(j.applied?.agentId || proposal.agentId || ""));
+        await managedAgents.refreshManagedAgents().catch(() => {
+        });
+      } catch (err) {
+        say(t5.resAdaptFailed(err.message || String(err)));
         if (btn instanceof HTMLButtonElement) btn.disabled = false;
       }
     }
@@ -4314,6 +4361,10 @@
         if (act === "goto-key") {
           closeTemplateGalleryModal();
           dom.maKeysBtn?.click();
+          return;
+        }
+        if (act === "apply-adaptation") {
+          applyAdaptation(target.closest('[data-act="apply-adaptation"]') || target);
           return;
         }
         const id = target.dataset.id;

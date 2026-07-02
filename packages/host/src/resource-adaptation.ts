@@ -26,6 +26,15 @@
 
 import type { ResourceInventory } from './resource-inventory.js'
 
+/**
+ * Providers that map 1:1 to a native managed-agent provider literal, so a
+ * switch can be enacted by just setting `provider` (the key resolves from
+ * env / workspace / vault, no baseURL needed). Inventory tags outside this set
+ * (e.g. `deepseek`) are openai-compatible providers whose baseURL the inventory
+ * doesn't carry — a switch to them is advisory (the operator must fill baseURL).
+ */
+const NATIVE_MANAGED_PROVIDERS = new Set(['anthropic', 'openai'])
+
 /** The minimal agent shape the engine reasons over — id + declared provider. */
 export interface AdaptAgentLike {
   id: string
@@ -70,14 +79,19 @@ export interface AdaptUseLocalEndpoint extends AdaptBase {
   applicable: true
 }
 
-/** Switch a keyless agent to a provider that already has a resolvable key. */
+/**
+ * Switch a keyless agent to a provider that already has a resolvable key.
+ * `applicable` is true only when `toProvider` is a native managed literal
+ * (anthropic/openai) — a switch to an openai-compatible provider needs a
+ * baseURL the inventory can't supply, so it's advisory (see NATIVE_MANAGED_PROVIDERS).
+ */
 export interface AdaptSwitchProvider extends AdaptBase {
   kind: 'switch_provider'
   agentId: string
   fromProvider: string
   toProvider: string
   keySource: 'env' | 'vault'
-  applicable: true
+  applicable: boolean
 }
 
 /** Advisory: the agent's provider needs an env-var key that isn't set. */
@@ -156,9 +170,12 @@ export function proposeAdaptations(input: ProposeAdaptationsInput): AdaptationPr
       })
     }
 
-    // Option B — switch to the first provider that already has a key.
+    // Option B — switch to the first provider that already has a key. Only
+    // native providers (anthropic/openai) are one-click applicable; a switch to
+    // an openai-compatible provider needs a baseURL we don't have → advisory.
     const alt = providersWithKey.find((r) => r.provider !== agent.provider)
     if (alt) {
+      const native = NATIVE_MANAGED_PROVIDERS.has(alt.provider)
       out.push({
         kind: 'switch_provider',
         id: `adapt:switch_provider:${agent.id}:${alt.provider}`,
@@ -166,9 +183,11 @@ export function proposeAdaptations(input: ProposeAdaptationsInput): AdaptationPr
         fromProvider: agent.provider,
         toProvider: alt.provider,
         keySource: alt.envSet ? 'env' : 'vault',
-        applicable: true,
+        applicable: native,
         title: `把「${agent.id}」切到已配好密钥的 ${alt.provider}`,
-        detail: `${agent.id} 的 provider「${agent.provider}」没有密钥，而「${alt.provider}」已配好（${alt.envSet ? '环境变量' : 'vault'}）。可切过去直接用。`,
+        detail: native
+          ? `${agent.id} 的 provider「${agent.provider}」没有密钥，而「${alt.provider}」已配好（${alt.envSet ? '环境变量' : 'vault'}）。可一键切过去直接用。`
+          : `${agent.id} 的 provider「${agent.provider}」没有密钥，而「${alt.provider}」已配好（${alt.envSet ? '环境变量' : 'vault'}）。它是 openai-compatible 提供方，需要你手动填 baseURL 后编辑该 agent，不能一键切换。`,
       })
     }
 

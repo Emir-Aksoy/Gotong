@@ -233,6 +233,73 @@ function publicAgent(rec: AgentRecord, hub: Hub) {
   }
 }
 
+// -- RES-M3: adaptation apply --------------------------------------------------
+
+/**
+ * RES-M3 — the proposal shape the adapt-apply route accepts. A permissive mirror
+ * of the host `AdaptationProposal` (web keeps zero host runtime dep). Only the
+ * fields the apply needs are read; everything is treated as untrusted input.
+ */
+interface AdaptApplyProposal {
+  kind?: unknown
+  agentId?: unknown
+  applicable?: unknown
+  toProvider?: unknown
+  suggestedBaseURL?: unknown
+  endpointLabel?: unknown
+}
+
+/**
+ * RES-M3 — turn an APPLICABLE proposal + the target agent's current record into
+ * a PUT-shaped edit body (the exact contract `applyAgentEdit` validates). We
+ * rebuild the agent's own fields and override ONLY the provider bits, so an
+ * adaptation is a constrained edit that preserves system prompt / capabilities /
+ * MCP wiring / heartbeat. Returns null for anything that can't be cleanly enacted
+ * (advisory kinds, a non-native switch target, a non-managed agent) so the route
+ * fails closed — nothing is ever half-applied.
+ */
+function adaptEditBodyFromProposal(
+  existing: AgentRecord,
+  p: AdaptApplyProposal,
+): Record<string, unknown> | null {
+  const m = existing.managed
+  if (!m || m.kind !== 'llm') return null // only managed LLM agents can be adapted
+  const body: Record<string, unknown> = {
+    id: existing.id,
+    capabilities: existing.allowedCapabilities,
+    system: m.system ?? '',
+    provider: m.provider,
+  }
+  if (existing.displayName) body.displayName = existing.displayName
+  if (typeof m.model === 'string' && m.model) body.model = m.model
+  if (typeof m.weightDefault === 'number') body.weightDefault = m.weightDefault
+  if (m.uses) body.uses = m.uses
+  if (m.useMcpServers) body.useMcpServers = m.useMcpServers
+  if (m.heartbeat) body.heartbeat = m.heartbeat
+  if (typeof m.butler === 'boolean') body.butler = m.butler
+
+  if (p.kind === 'use_local_endpoint') {
+    if (typeof p.suggestedBaseURL !== 'string' || !p.suggestedBaseURL) return null
+    body.provider = 'openai-compatible'
+    body.baseURL = p.suggestedBaseURL
+    if (typeof p.endpointLabel === 'string' && p.endpointLabel) body.providerLabel = p.endpointLabel
+    // A local model server (e.g. Ollama) ignores the key, but openai-compatible
+    // validation requires a non-empty per-agent key — set a harmless placeholder.
+    body.apiKey = 'local'
+    return body
+  }
+  if (p.kind === 'switch_provider') {
+    // Only native literals are one-click applicable (RES-M2 sets `applicable`
+    // to match); a compat target would need a baseURL the inventory can't give.
+    if (p.toProvider !== 'anthropic' && p.toProvider !== 'openai') return null
+    body.provider = p.toProvider
+    delete body.baseURL // shed any compat-only fields carried from the old provider
+    delete body.providerLabel
+    return body
+  }
+  return null // advisory kinds (set_env_key / wire_mcp_server) are not enactable
+}
+
 // -- RBAC (v5 E4-M1) ------------------------------------------------------
 
 /**
@@ -295,6 +362,125 @@ export async function handleAgentsRoute(
     ctx.reconcileHeartbeats
       ? ctx.reconcileHeartbeats().catch((err) => log.warn('heartbeat reconcile failed', { at, err }))
       : Promise.resolve()
+
+  // Shared write path for editing ONE existing agent from a PUT-shaped body:
+  // validate → provider-key check → upsert → set/clear per-agent key →
+  // lifecycle.start → heartbeat reconcile. Both the PUT edit route and the
+  // RES-M3 adapt-apply route funnel through here so an "apply a proposal" write
+  // gets the exact same validation, lifecycle restart, and reconcile as a manual
+  // edit — the adaptation apply is nothing more than a constrained agent edit.
+  // Returns an outcome; the CALLER owns the HTTP response (and RBAC / auth).
+  const applyAgentEdit = async (
+    id: string,
+    body: Record<string, unknown>,
+    at: string,
+  ): Promise<{ ok: true; record: AgentRecord } | { ok: false; status: number; error: string }> => {
+    body.id = id
+    let parsed: ParsedAgent
+    try {
+      parsed = validateAgentBody(body)
+    } catch (err) {
+      return { ok: false, status: 400, error: err instanceof Error ? err.message : String(err) }
+    }
+    const existing = (await ctx.space.agents()).find((a) => a.id === id)
+    if (!existing) return { ok: false, status: 404, error: `unknown agent '${id}'` }
+    if (ctx.lifecycle) {
+      const avail = new Set(await ctx.lifecycle.availableProviders())
+      const hasInlineKey =
+        typeof (body as { apiKey?: unknown }).apiKey === 'string' && (body as { apiKey?: string }).apiKey!.length > 0
+      const hasStoredKey = (await ctx.space.getAgentApiKey(id).catch(() => null)) !== null
+      if (!avail.has(parsed.managed.provider) && !hasInlineKey && !hasStoredKey) {
+        return { ok: false, status: 400, error: `provider '${parsed.managed.provider}' has no API key` }
+      }
+      if (parsed.managed.provider === 'openai-compatible') {
+        const editKey = (body as { apiKey?: unknown }).apiKey
+        const willClear = editKey === ''
+        const willSet = typeof editKey === 'string' && editKey.length > 0
+        const willHaveKey = willSet || (!willClear && hasStoredKey)
+        if (!willHaveKey) {
+          return {
+            ok: false,
+            status: 400,
+            error: "provider 'openai-compatible' requires a per-agent apiKey (workspace keys don't apply)",
+          }
+        }
+      }
+    }
+    const record = await ctx.space.upsertAgent({
+      id,
+      allowedCapabilities: parsed.capabilities,
+      displayName: parsed.displayName,
+      managed: parsed.managed,
+    })
+    const editKey = (body as { apiKey?: string }).apiKey
+    if (typeof editKey === 'string') {
+      if (editKey.length === 0) {
+        await ctx.space.removeAgentApiKey(id).catch(() => { /* no-op */ })
+      } else {
+        await ctx.space.setAgentApiKey(id, editKey)
+      }
+    }
+    if (ctx.lifecycle) {
+      try {
+        await ctx.lifecycle.start(record)
+      } catch (err) {
+        return { ok: false, status: 500, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+    await reconcileHeartbeats(at)
+    return { ok: true, record }
+  }
+
+  // --- RES-M3: apply ONE adaptation proposal (human-approved) ---
+  // The operator submitting a SPECIFIC proposal IS the human approval — nothing
+  // is ever changed silently. Only `applicable` proposals (use_local_endpoint /
+  // switch_provider to a native provider) are enactable; advisory ones are
+  // rejected with a clear message. The write funnels through applyAgentEdit, so
+  // an apply is exactly a constrained agent edit (same validation + lifecycle +
+  // reconcile). RES-M1 probing and RES-M2 proposing stay strictly read-only.
+  if (method === 'POST' && path === '/api/admin/resources/adapt') {
+    const admin = await ctx.requireAdmin(req, res)
+    if (!admin) return true
+    const reqBody = (await readJsonBody(req).catch(() => ({}))) as { proposal?: AdaptApplyProposal }
+    const p = reqBody.proposal
+    if (!p || typeof p !== 'object') {
+      sendJson(res, { ok: false, error: 'body.proposal is required' }, 400)
+      return true
+    }
+    if (p.applicable !== true) {
+      // Advisory proposals (set env var, wire an MCP slot, fill a baseURL) are a
+      // human action outside the hub — fail closed, never guess.
+      sendJson(res, { ok: false, error: '该提议是建议性的，需要你手动处理，不能一键应用', code: 'not_applicable' }, 400)
+      return true
+    }
+    const agentId = typeof p.agentId === 'string' ? p.agentId : ''
+    if (!agentId) {
+      sendJson(res, { ok: false, error: 'proposal.agentId is required' }, 400)
+      return true
+    }
+    // Applying a proposal edits the agent → require editor on it (v5 E4-M1 RBAC).
+    if (denyIfNoAgentPerm(ctx, req, res, agentId, 'editor')) return true
+    const existing = (await ctx.space.agents()).find((a) => a.id === agentId)
+    if (!existing) {
+      sendJson(res, { ok: false, error: `unknown agent '${agentId}'` }, 404)
+      return true
+    }
+    const editBody = adaptEditBodyFromProposal(existing, p)
+    if (!editBody) {
+      // Defense in depth: a proposal that survived the applicable gate but can't
+      // be cleanly turned into an edit (advisory kind, non-native switch target,
+      // non-managed agent) is rejected — never half-applied.
+      sendJson(res, { ok: false, error: '该提议无法自动应用（不受支持的类型或目标）', code: 'not_applicable' }, 400)
+      return true
+    }
+    const outcome = await applyAgentEdit(agentId, editBody, 'adapt')
+    if (!outcome.ok) {
+      sendJson(res, { ok: false, error: outcome.error }, outcome.status)
+      return true
+    }
+    sendJson(res, { ok: true, applied: { kind: p.kind, agentId }, agent: publicAgent(outcome.record, ctx.hub) })
+    return true
+  }
 
   // --- list agents ---
   if (method === 'GET' && path === '/api/admin/agents') {
@@ -753,59 +939,12 @@ export async function handleAgentsRoute(
     // v5 E4-M1 — editing the agent needs editor on it (operators bypass).
     if (denyIfNoAgentPerm(ctx, req, res, id, 'editor')) return true
     const body = (await readJsonBody(req).catch(() => ({}))) as Record<string, unknown>
-    body.id = id
-    let parsed: ParsedAgent
-    try {
-      parsed = validateAgentBody(body)
-    } catch (err) {
-      sendJson(res, { error: err instanceof Error ? err.message : String(err) }, 400)
+    const outcome = await applyAgentEdit(id, body, 'edit')
+    if (!outcome.ok) {
+      sendJson(res, { ok: false, error: outcome.error }, outcome.status)
       return true
     }
-    const existing = (await ctx.space.agents()).find((a) => a.id === id)
-    if (!existing) { sendJson(res, { error: `unknown agent '${id}'` }, 404); return true }
-    if (ctx.lifecycle) {
-      const avail = new Set(await ctx.lifecycle.availableProviders())
-      const hasInlineKey = typeof (body as { apiKey?: unknown }).apiKey === 'string' && (body as { apiKey?: string }).apiKey!.length > 0
-      const hasStoredKey = (await ctx.space.getAgentApiKey(id).catch(() => null)) !== null
-      if (!avail.has(parsed.managed.provider) && !hasInlineKey && !hasStoredKey) {
-        sendJson(res, { error: `provider '${parsed.managed.provider}' has no API key` }, 400)
-        return true
-      }
-      if (parsed.managed.provider === 'openai-compatible') {
-        const editKey = (body as { apiKey?: unknown }).apiKey
-        const willClear = editKey === ''
-        const willSet = typeof editKey === 'string' && editKey.length > 0
-        const willHaveKey = willSet || (!willClear && hasStoredKey)
-        if (!willHaveKey) {
-          sendJson(res, { error: "provider 'openai-compatible' requires a per-agent apiKey (workspace keys don't apply)" }, 400)
-          return true
-        }
-      }
-    }
-    const record = await ctx.space.upsertAgent({
-      id,
-      allowedCapabilities: parsed.capabilities,
-      displayName: parsed.displayName,
-      managed: parsed.managed,
-    })
-    const editKey = (body as { apiKey?: string }).apiKey
-    if (typeof editKey === 'string') {
-      if (editKey.length === 0) {
-        await ctx.space.removeAgentApiKey(id).catch(() => { /* no-op */ })
-      } else {
-        await ctx.space.setAgentApiKey(id, editKey)
-      }
-    }
-    if (ctx.lifecycle) {
-      try {
-        await ctx.lifecycle.start(record)
-      } catch (err) {
-        sendJson(res, { ok: false, error: err instanceof Error ? err.message : String(err) }, 500)
-        return true
-      }
-    }
-    await reconcileHeartbeats('edit')
-    sendJson(res, { ok: true, agent: publicAgent(record, ctx.hub) })
+    sendJson(res, { ok: true, agent: publicAgent(outcome.record, ctx.hub) })
     return true
   }
 

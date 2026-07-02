@@ -74,22 +74,43 @@ describe('proposeAdaptations (RES-M2)', () => {
     expect(local[0]!.id).toBe('adapt:use_local_endpoint:mentor:Ollama')
   })
 
-  it('a keyless agent gets switch_provider to a provider that DOES have a key (applicable)', () => {
+  it('a keyless agent gets switch_provider to a NATIVE keyed provider (applicable)', () => {
+    // anthropic is a native managed literal → one-click switch is enactable.
     const props = proposeAdaptations({
       inventory: inv(),
-      agents: [{ id: 'mentor', provider: 'deepseek' }],
+      agents: [{ id: 'mentor', provider: 'openai-compatible' }],
     })
     const sw = byKind(props, 'switch_provider')
     expect(sw).toHaveLength(1)
     expect(sw[0]).toMatchObject({
       kind: 'switch_provider',
       agentId: 'mentor',
-      fromProvider: 'deepseek',
+      fromProvider: 'openai-compatible',
       toProvider: 'anthropic',
       keySource: 'env',
       applicable: true,
     })
     expect(sw[0]!.id).toBe('adapt:switch_provider:mentor:anthropic')
+  })
+
+  it('switch_provider to an openai-compatible provider (deepseek) is advisory, NOT applicable', () => {
+    // Only deepseek has a key; it's openai-compatible → needs a baseURL we don't
+    // have, so the switch is advisory (no one-click apply) though still surfaced.
+    const props = proposeAdaptations({
+      inventory: inv({
+        llmKeys: [
+          { provider: 'anthropic', envVar: 'ANTHROPIC_API_KEY', envSet: false, vaultConfigured: false },
+          { provider: 'deepseek', envVar: 'DEEPSEEK_API_KEY', envSet: true, vaultConfigured: false },
+        ],
+      }),
+      agents: [{ id: 'mentor', provider: 'openai' }],
+    })
+    const sw = byKind(props, 'switch_provider')
+    expect(sw).toHaveLength(1)
+    expect(sw[0]).toMatchObject({
+      toProvider: 'deepseek',
+      applicable: false, // openai-compatible target → manual baseURL required
+    })
   })
 
   it('keySource reflects vault when the alt provider is vault-configured only', () => {

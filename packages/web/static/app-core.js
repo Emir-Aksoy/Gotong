@@ -894,6 +894,15 @@
       // resolves it (KB slot → MCP tab; missing key → API-key modal).
       templateGalleryTodoGotoMcp: '去 MCP 面板 →',
       templateGalleryTodoGotoKey: '去配密钥 →',
+      // RES-M3 — resource-adaptation proposals in the post-install checklist. An
+      // `applicable` proposal gets a one-click apply button (the operator's click
+      // IS the approval — nothing is applied silently). Advisory proposals show a
+      // hint only; the fix is a human action outside the hub.
+      resAdaptApply: '一键应用',
+      resAdaptApplying: '应用中…',
+      resAdaptApplied: (agentId) => `已应用到「${agentId}」（重启或重连后生效，模型可能需在 agent 面板微调）`,
+      resAdaptFailed: (e) => `应用失败:${e}`,
+      resAdaptManual: '需手动处理',
       admTemplateLoadFailedHttp: (s) => `加载内置模板失败:HTTP ${s}`,
       admGrowthBundleLoaded: '已加载个人成长 bundle。粘贴 DeepSeek key 后点"导入"。',
       admTemplateLoadFailedErr: (e) => `加载内置模板失败:${e}`,
@@ -2745,6 +2754,16 @@
       // resolves it (KB slot → MCP tab; missing key → API-key modal).
       templateGalleryTodoGotoMcp: 'Go to MCP panel →',
       templateGalleryTodoGotoKey: 'Configure key →',
+      // RES-M3 — resource-adaptation proposals in the post-install checklist. An
+      // `applicable` proposal gets a one-click apply button (the operator's click
+      // IS the approval — nothing is applied silently). Advisory proposals show a
+      // hint only; the fix is a human action outside the hub.
+      resAdaptApply: 'Apply',
+      resAdaptApplying: 'Applying…',
+      resAdaptApplied: (agentId) =>
+        `Applied to "${agentId}" (takes effect after restart/reconnect; you may need to tune the model in the agents panel)`,
+      resAdaptFailed: (e) => `Apply failed: ${e}`,
+      resAdaptManual: 'manual step',
       admTemplateLoadFailedHttp: (s) => `Failed to load builtin template: HTTP ${s}`,
       admGrowthBundleLoaded:
         'Loaded personal-growth bundle. Paste your DeepSeek key, then click "Import".',

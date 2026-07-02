@@ -2260,7 +2260,11 @@ async function handle(
   if (
     path.startsWith('/api/admin/agents') ||
     path === '/api/admin/bundles/import' ||
-    path === '/api/admin/templates/import'
+    path === '/api/admin/templates/import' ||
+    // RES-M3 — apply ONE adaptation proposal (a human-approved constrained agent
+    // edit). Lives in agents-routes.ts because the write funnels through the same
+    // Space/lifecycle applyAgentEdit path as a manual agent edit.
+    path === '/api/admin/resources/adapt'
   ) {
     // v5 E4-M1 — agent resource RBAC mirrors the workflow block: ON only when
     // the identity store actually carries the agent-grant facade; otherwise the

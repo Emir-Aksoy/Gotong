@@ -2349,7 +2349,12 @@ import { createWorkflows } from './workflows.js'
       const checklist = ib.postInstallChecklist || {}
       const kbTodos = Array.isArray(checklist.kbSlotsToWire) ? checklist.kbSlotsToWire : []
       const keyTodos = Array.isArray(checklist.agentsMissingKey) ? checklist.agentsMissingKey : []
-      if (card && (kbTodos.length || keyTodos.length)) {
+      // RES-M2/M3 — adaptation proposals: how to make a keyless agent run on THIS
+      // machine's resources. `applicable` ones get a one-click apply button (the
+      // click IS the human approval — nothing is applied silently); advisory ones
+      // show a hint only (the fix is a human action outside the hub).
+      const adaptTodos = Array.isArray(checklist.adaptations) ? checklist.adaptations : []
+      if (card && (kbTodos.length || keyTodos.length || adaptTodos.length)) {
         // ⑧ — make each checklist row actionable: render a deep-link button next
         // to the text so the operator jumps straight to the panel that resolves
         // it (KB slot → MCP tab; missing key → API-key modal) instead of hunting
@@ -2371,6 +2376,25 @@ import { createWorkflows } from './workflows.js'
               `<button type="button" class="tg-todo-fix" data-act="goto-key">${escapeHtml(t.templateGalleryTodoGotoKey)}</button></li>`,
           )
         }
+        // RES-M3 — one applicable adaptation → one apply button. The proposal
+        // rides the button as a URI-encoded JSON payload (no data-id, so it
+        // dispatches before the `!id` guard, like goto-mcp/goto-key). Advisory
+        // proposals render as a hint with no button (never one-click, per the
+        // human-approval invariant — they need a human action outside the hub).
+        for (const p of adaptTodos) {
+          if (!p || typeof p !== 'object') continue
+          const title = escapeHtml(String(p.title || ''))
+          if (p.applicable === true) {
+            const payload = encodeURIComponent(JSON.stringify(p))
+            rows.push(
+              `<li>${title} ` +
+                `<button type="button" class="tg-todo-fix" data-act="apply-adaptation" data-adapt="${payload}">${escapeHtml(t.resAdaptApply)}</button>` +
+                `<span class="tg-adapt-result" role="status"></span></li>`,
+            )
+          } else {
+            rows.push(`<li>${title} <em class="tg-adapt-manual">(${escapeHtml(t.resAdaptManual)})</em></li>`)
+          }
+        }
         card.className = 'tg-card-result ok'
         card.innerHTML =
           `<div class="tg-result-summary">${escapeHtml(summary)}</div>` +
@@ -2387,6 +2411,43 @@ import { createWorkflows } from './workflows.js'
     } catch (err) {
       setResult(t.admFailedReason(err.message || String(err)), 'err')
     } finally {
+      if (btn instanceof HTMLButtonElement) btn.disabled = false
+    }
+  }
+
+  // RES-M3 — apply ONE adaptation proposal from a post-install checklist button.
+  // The operator clicking this specific button IS the human approval; the write
+  // funnels through POST /api/admin/resources/adapt (server re-checks applicable
+  // and never applies silently). On success we disable the button so the same
+  // proposal can't be double-applied and refresh the agents list.
+  async function applyAdaptation(btn) {
+    if (!(btn instanceof HTMLElement)) return
+    let proposal
+    try {
+      proposal = JSON.parse(decodeURIComponent(btn.dataset.adapt || ''))
+    } catch {
+      return
+    }
+    const out = btn.parentElement?.querySelector('.tg-adapt-result')
+    const say = (msg) => { if (out) out.textContent = ' ' + msg }
+    if (btn instanceof HTMLButtonElement) btn.disabled = true
+    say(t.resAdaptApplying)
+    try {
+      const r = await fetch('/api/admin/resources/adapt', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ proposal }),
+      })
+      const j = await r.json().catch(() => ({}))
+      if (!r.ok || !j.ok) {
+        say(t.resAdaptFailed(j.error || t.admHttp(r.status)))
+        if (btn instanceof HTMLButtonElement) btn.disabled = false
+        return
+      }
+      say(t.resAdaptApplied(j.applied?.agentId || proposal.agentId || ''))
+      await managedAgents.refreshManagedAgents().catch(() => {})
+    } catch (err) {
+      say(t.resAdaptFailed(err.message || String(err)))
       if (btn instanceof HTMLButtonElement) btn.disabled = false
     }
   }
@@ -2840,6 +2901,13 @@ import { createWorkflows } from './workflows.js'
       if (act === 'goto-key') {
         closeTemplateGalleryModal()
         dom.maKeysBtn?.click()
+        return
+      }
+      // RES-M3 — an adaptation apply button carries its proposal on data-adapt
+      // (no data-id), so dispatch it before the `!id` guard. The click IS the
+      // human approval; applyAdaptation POSTs it to the server, which re-checks.
+      if (act === 'apply-adaptation') {
+        applyAdaptation(target.closest('[data-act="apply-adaptation"]') || target)
         return
       }
       const id = target.dataset.id
