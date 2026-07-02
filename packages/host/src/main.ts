@@ -270,6 +270,10 @@ import {
   type StewardWorkflowEditor,
 } from './hub-steward-service.js'
 import { buildButlerGovernedToolset } from './personal-butler-governed.js'
+import {
+  buildButlerWorkflowCreateToolset,
+  type ButlerWorkflowCreateSource,
+} from './personal-butler-workflow-create.js'
 import { buildButlerMcpToolsets } from './personal-butler-mcp.js'
 import {
   buildButlerWorkflowsToolset,
@@ -1314,6 +1318,11 @@ async function main(): Promise<void> {
   const butlerGovernedOn = !['0', 'false', 'off', 'no'].includes(butlerGovernedEnv)
   let butlerGovernedAgentsRef: StewardAgentDirectory | undefined
   let butlerGovernedWorkflowEditorRef: StewardWorkflowEditor | undefined
+  // BE-M3 — the butler's governed "用大白话给我建个工作流" verb reuses the member
+  // 工作流架构师 (`MeWorkflowCreateService`): NL→YAML, local-only (cross-hub reject),
+  // draft-never-live. Ref assigned once that service exists (only when workflowAssist
+  // is present). Absent ⇒ the `create_workflow` gate isn't composed at all.
+  let butlerWorkflowCreateRef: ButlerWorkflowCreateSource | undefined
   // S1-M1 — the benign "run my workflow" catalog. The published workflow catalog
   // (`WorkflowController`) is built further down, so this is a forward-declared
   // `let` read at butler-build time (same pattern as the governed refs, safe
@@ -1417,6 +1426,19 @@ async function main(): Promise<void> {
                   : {}),
               })
             : undefined
+        // BE-M3 — the governed "用大白话建一个工作流" gate. A SEPARATE governed
+        // toolset (create_workflow isn't a StewardAction) composed alongside the
+        // steward gate; disjoint tool name, its own executor → the member service
+        // (cross-hub reject + draft-never-live live there). Same governed master
+        // switch; needs the member create service, else it isn't offered.
+        const workflowCreateGov =
+          butlerGovernedOn && butlerWorkflowCreateRef
+            ? buildButlerWorkflowCreateToolset({
+                userId,
+                create: butlerWorkflowCreateRef,
+                logger: log,
+              })
+            : undefined
         // S1-M1 — benign "run my workflow" tools (list + run), scoped to THIS
         // member. Runs one of their OWN published, member-facing workflows via the
         // same gate as /me (published + surface.me + forced userScopeField). Runs
@@ -1500,12 +1522,13 @@ async function main(): Promise<void> {
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
           ...(profileToolset ? [profileToolset] : []),
         ]
-        // Two self-contained gates: the steward action set (BF-M7) + the MCP
-        // write half (S1-M2). Tool names are disjoint (steward verbs vs
-        // `<server>__<tool>`), and the agent gates each call via whichever
-        // toolset governs that name.
+        // Self-contained gates: the steward action set (BF-M7) + the governed
+        // create_workflow (BE-M3) + the MCP write half (S1-M2). Tool names are
+        // disjoint (steward verbs vs `create_workflow` vs `<server>__<tool>`), and
+        // the agent gates each call via whichever toolset governs that name.
         const governed = [
           ...(steward ? [steward] : []),
+          ...(workflowCreateGov ? [workflowCreateGov] : []),
           ...(mcpSplit?.writeGoverned ? [mcpSplit.writeGoverned] : []),
         ]
 
@@ -2445,6 +2468,10 @@ async function main(): Promise<void> {
   // member's OWNED agents (id + declared provider), scoped by userId (no-leak).
   butlerDiagnoseOwnedRef = meAgentAdmin
   butlerGovernedWorkflowEditorRef = meWorkflowEdit ?? undefined
+  // BE-M3 — hand the butler the member 工作流架构师 so its governed create_workflow
+  // gate can author. Null when there's no workflowAssist ⇒ the gate isn't composed
+  // (main.ts's Option-B branch: agent verbs work, no workflow authoring/editing).
+  butlerWorkflowCreateRef = meWorkflowCreate ?? undefined
 
   // v5 A-M3 — member API-credential ("bring your own key") management. Keys
   // live in the vault, so this is wired only when identity is present; the
