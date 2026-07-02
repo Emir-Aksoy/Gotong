@@ -285,6 +285,11 @@ import {
   type ButlerAgentSurface,
   type ButlerUsageSurface,
 } from './personal-butler-observe.js'
+import {
+  buildButlerDiagnoseToolset,
+  type ButlerOwnedAgentSource,
+  type ButlerAdaptationSource,
+} from './personal-butler-diagnose.js'
 import { ReminderParticipant } from './reminder-participant.js'
 import type { LlmProvider } from '@aipehub/llm'
 import { HostOperatorAgentService } from './operator-agent-service.js'
@@ -1323,6 +1328,13 @@ async function main(): Promise<void> {
   let butlerObserveRunsRef: ButlerRunSurface | undefined
   let butlerObserveAgentsRef: ButlerAgentSurface | undefined
   let butlerObserveUsageRef: ButlerUsageSurface | undefined
+  // BE-M2 — the butler's benign "体检我的助手" diagnosis: runs the RES-M2 pure
+  // engine over the member's OWNED agents (scoped, no-leak) and reports what's
+  // wrong + how to fix. The FIX reuses the existing governed `edit_agent` (only a
+  // native provider-switch is butler-enactable; the rest is advisory → admin
+  // panel). Refs assigned once the member-agent lister + adaptation service exist.
+  let butlerDiagnoseOwnedRef: ButlerOwnedAgentSource | undefined
+  let butlerDiagnoseAdaptRef: ButlerAdaptationSource | undefined
   // S2-M2 — the benign "整理一下记忆" tool resolves the distillation provider
   // (the butler's own model) through the agent pool, which is built further down.
   // Forward-declared `let` read at butler-build time (same lazy pattern). Absent ⇒
@@ -1429,6 +1441,19 @@ async function main(): Promise<void> {
                 logger: log,
               })
             : undefined
+        // BE-M2 — benign "体检我的助手": run the RES-M2 engine over THIS member's
+        // owned agents. Read-only; the enactable fix is the existing governed
+        // `edit_agent` (park → /me approve). Needs both the owned-agent lister and
+        // the adaptation service, else the tool isn't offered.
+        const diagnoseToolset =
+          butlerDiagnoseOwnedRef && butlerDiagnoseAdaptRef
+            ? buildButlerDiagnoseToolset({
+                userId,
+                ownedAgents: butlerDiagnoseOwnedRef,
+                adaptation: butlerDiagnoseAdaptRef,
+                logger: log,
+              })
+            : undefined
         // S2-M2 — benign "整理一下记忆": run BF-M8's per-member maintenance pass
         // (蒸馏 + STATUS.md) on demand. Gated on the SAME `butlerMaintenanceOn`
         // flag as the 6h sweep — if distillation is off, the tool isn't offered.
@@ -1469,6 +1494,7 @@ async function main(): Promise<void> {
           ...(mcpSplit ? [mcpSplit.readBenign] : []),
           ...(workflowsToolset ? [workflowsToolset] : []),
           ...(observeToolset ? [observeToolset] : []),
+          ...(diagnoseToolset ? [diagnoseToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
@@ -2415,6 +2441,9 @@ async function main(): Promise<void> {
   // after this line runs. `meWorkflowEdit` may be null (no workflowAssist) ⇒ the
   // butler still gets the agent tools, just no `edit_workflow`.
   butlerGovernedAgentsRef = meAgentAdmin
+  // BE-M2 — same member-agent lister feeds the butler's benign "体检" tool the
+  // member's OWNED agents (id + declared provider), scoped by userId (no-leak).
+  butlerDiagnoseOwnedRef = meAgentAdmin
   butlerGovernedWorkflowEditorRef = meWorkflowEdit ?? undefined
 
   // v5 A-M3 — member API-credential ("bring your own key") management. Keys
@@ -2774,6 +2803,10 @@ async function main(): Promise<void> {
   const resourceAdaptation = createResourceAdaptationService({
     inventory: () => resourceInventory.inventory(),
   })
+  // BE-M2 — the SAME zero-LLM RES-M2 engine the admin 资源适配 panel uses now also
+  // backs the resident butler's benign "体检" tool (read-only; enactable fixes go
+  // through the existing governed edit_agent). Ref read lazily at butler-build time.
+  butlerDiagnoseAdaptRef = resourceAdaptation
 
   // setting-ops M4 — the deterministic ops console surface (the WEB face of
   // ops-core). One host service, three surfaces (CLI / web / IM). It binds
