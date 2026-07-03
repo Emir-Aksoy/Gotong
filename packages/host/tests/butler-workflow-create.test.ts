@@ -148,3 +148,87 @@ describe('butler-workflow-create — no-leak', () => {
     expect(f.reqs.every((r) => r.userId === 'alice')).toBe(true)
   })
 })
+
+// ---------------------------------------------------------------------------
+// WIZ-M4c — the plan_workflow → create_workflow hand-off: an optional `yaml`
+// lands the wizard-checked definition VERBATIM via createFromYaml (zero LLM),
+// never regenerating something the member didn't see.
+// ---------------------------------------------------------------------------
+
+describe('butler-workflow-create — wizard YAML hand-off (WIZ-M4c)', () => {
+  const WIZ_YAML = 'schema: aipehub.workflow/v1\nworkflow:\n  id: weekly-report\n'
+
+  function fakeWithYaml(fromYamlResult: MeWorkflowCreateResult): {
+    surface: ButlerWorkflowCreateSource
+    createReqs: Array<{ instruction: string; userId: string }>
+    yamlReqs: Array<{ yaml: string; userId: string }>
+  } {
+    const createReqs: Array<{ instruction: string; userId: string }> = []
+    const yamlReqs: Array<{ yaml: string; userId: string }> = []
+    return {
+      createReqs,
+      yamlReqs,
+      surface: {
+        async create(req) {
+          createReqs.push({ instruction: req.instruction, userId: req.userId })
+          return OK
+        },
+        async createFromYaml(req) {
+          yamlReqs.push({ yaml: req.yaml, userId: req.userId })
+          return fromYamlResult
+        },
+      },
+    }
+  }
+
+  it('yaml present → lands verbatim via createFromYaml with OWN member id; create() never runs', async () => {
+    const f = fakeWithYaml({ ok: true, workflowId: 'weekly-report', yaml: WIZ_YAML, explanation: '' })
+    const gate = buildButlerWorkflowCreateToolset({ userId: 'alice', create: f.surface })
+    const res = await gate.callTool('create_workflow', { instruction: '每周五发周报', yaml: WIZ_YAML })
+    expect(res.isError).toBeFalsy()
+    expect(f.yamlReqs).toEqual([{ yaml: WIZ_YAML, userId: 'alice' }])
+    expect(f.createReqs).toHaveLength(0)
+    const text = res.content.map((c) => c.text ?? '').join('')
+    expect(text).toContain('weekly-report')
+    expect(text).toContain('/me')
+    // createFromYaml returns explanation:'' — no dangling blank line in the reply.
+    expect(text).not.toContain('。\n\n去')
+  })
+
+  it('blank yaml falls back to the plain-language create path', async () => {
+    const f = fakeWithYaml({ ok: true, workflowId: 'x', yaml: WIZ_YAML, explanation: '' })
+    const gate = buildButlerWorkflowCreateToolset({ userId: 'alice', create: f.surface })
+    await gate.callTool('create_workflow', { instruction: '每周五发周报', yaml: '   ' })
+    expect(f.yamlReqs).toHaveLength(0)
+    expect(f.createReqs).toEqual([{ instruction: '每周五发周报', userId: 'alice' }])
+  })
+
+  it('yaml present but the surface lacks createFromYaml → honest refusal, NOTHING regenerated', async () => {
+    const f = fakeCreate(OK) // the legacy surface without createFromYaml
+    const gate = buildButlerWorkflowCreateToolset({ userId: 'alice', create: f.surface })
+    const res = await gate.callTool('create_workflow', { instruction: '每周五发周报', yaml: WIZ_YAML })
+    expect(res.isError).toBe(true)
+    // Silently re-authoring via create(instruction) would land a workflow the
+    // member never reviewed — the wrapper must refuse instead.
+    expect(f.reqs).toHaveLength(0)
+    expect(res.content.map((c) => c.text ?? '').join('')).not.toContain('已建好')
+  })
+
+  it('a denial through the yaml path is relayed as an error', async () => {
+    const f = fakeWithYaml({ ok: false, reason: 'id_exists', message: '已经有一个同名工作流了。' })
+    const gate = buildButlerWorkflowCreateToolset({ userId: 'alice', create: f.surface })
+    const res = await gate.callTool('create_workflow', { instruction: '每周五发周报', yaml: WIZ_YAML })
+    expect(res.isError).toBe(true)
+    expect(res.content.map((c) => c.text ?? '').join('')).toContain('同名')
+  })
+
+  it('describe marks the wizard path so the /me approval card is honest about what lands', () => {
+    const gate = buildButlerWorkflowCreateToolset({ userId: 'alice', create: fakeWithYaml(OK).surface })
+    expect(gate.describe('create_workflow', { instruction: '每周五发周报', yaml: WIZ_YAML })).toBe(
+      '新建工作流(按向导核对过的方案):每周五发周报',
+    )
+    expect(gate.describe('create_workflow', { instruction: '每周五发周报' })).toBe(
+      '新建工作流:每周五发周报',
+    )
+  })
+})

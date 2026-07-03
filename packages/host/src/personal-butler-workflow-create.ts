@@ -41,9 +41,12 @@ import type { MeWorkflowCreateResult } from './me-workflow-create-service.js'
  * The slice of `MeWorkflowCreateService` this tool needs: author a workflow from
  * a member's plain-language instruction. The real service satisfies it (its
  * request carries optional `detail`/`history`/`onChunk` the butler doesn't use).
+ * `createFromYaml` (WIZ-M4a) lands a wizard-checked YAML verbatim through the
+ * SAME gates, zero LLM — the plan_workflow → create_workflow hand-off path.
  */
 export interface ButlerWorkflowCreateSource {
   create(req: { instruction: string; userId: string }): Promise<MeWorkflowCreateResult>
+  createFromYaml?(req: { yaml: string; userId: string }): Promise<MeWorkflowCreateResult>
 }
 
 export interface ButlerWorkflowCreateDeps {
@@ -69,13 +72,18 @@ export function buildButlerWorkflowCreateToolset(
       {
         name: 'create_workflow',
         description:
-          '用大白话给这个成员新建一个工作流(例如「每天早上把我的待办整理一下发给我」)。会先送 /me 收件箱等你批准;批准后 AI 把描述写成 YAML 存成【草稿】——只用本 hub 的能力,不跨 hub;之后你可以在 /me 里看流程图、改或发布。',
+          '用大白话给这个成员新建一个工作流(例如「每天早上把我的待办整理一下发给我」)。会先送 /me 收件箱等你批准;批准后 AI 把描述写成 YAML 存成【草稿】——只用本 hub 的能力,不跨 hub;之后你可以在 /me 里看流程图、改或发布。如果刚用 plan_workflow 出过方案且成员满意,把方案里的 YAML 原样传进 yaml,批准后就按那份落盘,不再重新生成。',
         inputSchema: {
           type: 'object',
           properties: {
             instruction: {
               type: 'string',
               description: '你想让这个工作流做什么,用大白话说清楚:谁来做、按什么顺序、用什么数据。',
+            },
+            yaml: {
+              type: 'string',
+              description:
+                '(可选)plan_workflow 方案里的那份 YAML,原样传入。传了就按这份已核对的定义建,不再让 AI 重写。',
             },
           },
           required: ['instruction'],
@@ -91,9 +99,20 @@ export function buildButlerWorkflowCreateToolset(
       if (!instruction.trim()) {
         return { text: '你没说这个工作流要做什么,我没建。再描述一下?', isError: true }
       }
+      const yaml = typeof args.yaml === 'string' && args.yaml.trim() ? args.yaml : null
       let result: MeWorkflowCreateResult
       try {
-        result = await create.create({ instruction, userId })
+        if (yaml) {
+          // WIZ-M4c — the wizard hand-off: land the member-approved YAML verbatim
+          // (zero LLM). Falling back to create(instruction) here would silently
+          // regenerate something the member never saw — refuse instead.
+          if (!create.createFromYaml) {
+            return { text: '按现成 YAML 建流的通道没接线,先没建。', isError: true }
+          }
+          result = await create.createFromYaml({ yaml, userId })
+        } else {
+          result = await create.create({ instruction, userId })
+        }
       } catch (err) {
         logger?.error('butler create_workflow failed', { err })
         return { text: '新建工作流时出错了,没有保存,稍后再试。', isError: true }
@@ -104,16 +123,22 @@ export function buildButlerWorkflowCreateToolset(
         // member the reason instead of claiming success.
         return { text: `没能新建:${result.message}`, isError: true }
       }
+      // The YAML path returns explanation:'' — skip the blank line honestly.
+      const explanationLine = result.explanation.trim() ? `\n${result.explanation}` : ''
       return {
-        text: `工作流已建好(草稿:${result.workflowId})。\n${result.explanation}\n去 /me 可以看它的流程图、再改,或发布它。`,
+        text: `工作流已建好(草稿:${result.workflowId})。${explanationLine}\n去 /me 可以看它的流程图、再改,或发布它。`,
       }
     },
     // Human-readable (zh) title for the /me inbox item — the member sees WHAT they'd
-    // be creating before they approve.
+    // be creating before they approve, and whether it lands the wizard-checked YAML
+    // verbatim or asks the AI to author from scratch.
     describe: (_name, args) => {
       const instruction = typeof args.instruction === 'string' ? args.instruction.trim() : ''
       const brief = instruction.length > 40 ? instruction.slice(0, 39) + '…' : instruction
-      return `新建工作流:${brief || '(未描述)'}`
+      const viaWizard = typeof args.yaml === 'string' && args.yaml.trim().length > 0
+      return viaWizard
+        ? `新建工作流(按向导核对过的方案):${brief || '(未描述)'}`
+        : `新建工作流:${brief || '(未描述)'}`
     },
   })
 }

@@ -307,6 +307,10 @@ import {
   buildButlerAskAgentToolset,
   type ButlerAskRosterSource,
 } from './personal-butler-ask-agent.js'
+import {
+  buildButlerWorkflowWizardToolset,
+  type ButlerWizardSource,
+} from './personal-butler-workflow-wizard.js'
 import { ReminderParticipant } from './reminder-participant.js'
 import type { LlmProvider } from '@aipehub/llm'
 import { HostOperatorAgentService } from './operator-agent-service.js'
@@ -1361,6 +1365,12 @@ async function main(): Promise<void> {
   // an agent THIS member owns (no-leak via listOwned), awaiting the reply. Ref
   // assigned once the member-agent lister exists. Absent ⇒ the tool isn't offered.
   let butlerAskRosterRef: ButlerAskRosterSource | undefined
+  // WIZ-M4c — the butler's benign "帮我规划一个工作流" planner: the six-phase
+  // wizard's compose (组装→缺口→校验闭环), proposal-only, persists nothing. The
+  // save half hands off to the governed create_workflow with the wizard's YAML.
+  // Ref assigned once the wizard service exists (needs workflowAssist). Absent ⇒
+  // the tool isn't offered — same degradation as the /me wizard routes' 503.
+  let butlerWizardRef: ButlerWizardSource | undefined
   // S2-M2 — the benign "整理一下记忆" tool resolves the distillation provider
   // (the butler's own model) through the agent pool, which is built further down.
   // Forward-declared `let` read at butler-build time (same lazy pattern). Absent ⇒
@@ -1511,6 +1521,12 @@ async function main(): Promise<void> {
         const askAgentToolset = butlerAskRosterRef
           ? buildButlerAskAgentToolset({ userId, roster: butlerAskRosterRef, hub, logger: log })
           : undefined
+        // WIZ-M4c — benign "帮我规划一个工作流": wizard compose, proposal-only
+        // (explanation + gap checklist + validated YAML), persists nothing. Saving
+        // goes through the governed create_workflow above with the proposal's YAML.
+        const planWizardToolset = butlerWizardRef
+          ? buildButlerWorkflowWizardToolset({ userId, wizard: butlerWizardRef, logger: log })
+          : undefined
         // S2-M2 — benign "整理一下记忆": run BF-M8's per-member maintenance pass
         // (蒸馏 + STATUS.md) on demand. Gated on the SAME `butlerMaintenanceOn`
         // flag as the 6h sweep — if distillation is off, the tool isn't offered.
@@ -1561,6 +1577,7 @@ async function main(): Promise<void> {
           ...(observeToolset ? [observeToolset] : []),
           ...(diagnoseToolset ? [diagnoseToolset] : []),
           ...(askAgentToolset ? [askAgentToolset] : []),
+          ...(planWizardToolset ? [planWizardToolset] : []),
           ...(consolidateToolset ? [consolidateToolset] : []),
           remindersToolset,
           ...(dailyBriefToolset ? [dailyBriefToolset] : []),
@@ -2923,6 +2940,10 @@ async function main(): Promise<void> {
         existingWorkflowIds: async () => (await workflowController.list()).map((w) => w.id),
       })
     : null
+  // WIZ-M4c — hand the resident butler the same wizard for its benign
+  // plan_workflow (proposal-only; saving stays in the governed create_workflow).
+  // Ref read lazily at per-user butler-build time, long after this line.
+  butlerWizardRef = workflowWizard ?? undefined
 
   // setting-ops M4 — the deterministic ops console surface (the WEB face of
   // ops-core). One host service, three surfaces (CLI / web / IM). It binds
