@@ -123,6 +123,7 @@ import {
   parseOpenBrowserEnv,
   shouldOpenBrowser,
 } from './first-run-banner.js'
+import { resolveProfileEnv, profileBannerLines } from './profile.js'
 import { rotateMasterKey } from './rotate-master-key.js'
 import { applyRetentionPolicies, parseRetentionPolicies } from './retention.js'
 import { recoverMasterKeyRotation } from './master-key-recovery.js'
@@ -3194,6 +3195,22 @@ async function main(): Promise<void> {
           : 'DISABLED while network-exposed — AIPE_ALLOW_INSECURE set (see boot warnings)'
     }`,
   )
+  // PRO-M2 — deployment profile lens (presentation only). AIPE_PROFILE=hub|
+  // federation reorders/annotates the entry surface toward within-hub vs
+  // cross-hub work; it enables/disables NO code path. Unset → nothing printed
+  // here (byte-identical to before). A set-but-unknown value is surfaced as a
+  // likely typo and then ignored (still the byte-identical default).
+  const profile = resolveProfileEnv(process.env.AIPE_PROFILE)
+  if (profile.unrecognized) {
+    log.warn('AIPE_PROFILE not recognized — ignoring (expected hub|federation)', {
+      value: profile.unrecognized,
+    })
+    console.warn(
+      `  ⚠ AIPE_PROFILE="${profile.unrecognized}" 无法识别,已忽略 (可选 hub|federation) / unrecognized, ignored.`,
+    )
+  }
+  for (const line of profileBannerLines(profile)) console.log(line)
+
   // Friendly first-run nicety (presentation only): point a fresh local user
   // at the loopback setup wizard and optionally open their browser. Never
   // auto-opens when network-exposed (see shouldOpenBrowser). AIPE_OPEN_BROWSER
