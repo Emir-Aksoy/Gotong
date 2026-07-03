@@ -2,29 +2,31 @@
 #
 # cloud-quickstart.sh — provision an AipeHub host on a fresh Ubuntu/Debian VPS.
 #
-# One command turns a checkout on a clean box into a running systemd service:
-# install Node + pnpm → build → create the service user + data dir → drop in
-# /etc/aipehub.env (from deploy/.env.cloud) → install the systemd unit that
-# MIRRORS docs/zh/DEPLOY.md §C.4 verbatim. It then prints the safe last mile.
+# One command turns a FRESH box into a running systemd service: fetch the code
+# (--clone; the repo is public) → install Node + pnpm → build → create the
+# service user + data dir → drop in /etc/aipehub.env (from deploy/.env.cloud) →
+# install the systemd unit that MIRRORS docs/zh/DEPLOY.md §C.4 verbatim. It
+# then prints the safe last mile.
 #
-#   sudo bash deploy/cloud-quickstart.sh              # provision, don't start
+#   # bare VPS, no checkout needed — THE one-liner:
+#   curl -fsSL https://raw.githubusercontent.com/Emir-Aksoy/AipeHub/main/deploy/cloud-quickstart.sh \
+#     | sudo bash -s -- --clone
+#
+#   sudo bash deploy/cloud-quickstart.sh              # from a checkout you put there
+#   sudo bash deploy/cloud-quickstart.sh --clone      # fetch/refresh main into --prefix
 #   sudo bash deploy/cloud-quickstart.sh --start      # provision AND start
 #   bash deploy/cloud-quickstart.sh --dry-run         # print every step, mutate nothing
 #
 # ── What it deliberately does NOT do ──────────────────────────────────────────
 #
-#   • It does NOT `git clone` for you. The repo is private; you put the code on
-#     the box yourself (git clone with your key, or scp the checkout), then run
-#     this FROM that checkout. There is no public URL to pull, and faking one
-#     would just fail confusingly.
 #   • It does NOT auto-expose an unconfigured box. /etc/aipehub.env ships with
 #     the domain / master key / allowlist BLANK — starting before you fill them
 #     would be insecure. So provisioning stops one step short: it tells you to
 #     edit the env file and run scripts/cloud-harden.sh, then start. `--start`
 #     is opt-in for when you've already filled it in.
-#   • There is NO browser "one-click deploy" button. That needs a public repo or
-#     a provider account pre-linked to your git — out of scope while the repo is
-#     private. This copy-pasteable bootstrap is the real, testable equivalent.
+#   • --clone only fast-forwards an existing $PREFIX clone (never resets) and
+#     refuses a non-git, non-empty $PREFIX — your local edits are never
+#     silently destroyed; pass --source to build from your own checkout.
 #
 # It reads NO credentials and writes NO secrets of its own — /etc/aipehub.env is
 # a TEMPLATE with blank token/key fields you fill in afterward (from a systemd
@@ -42,16 +44,21 @@ ENV_FILE="/etc/aipehub.env"    # systemd EnvironmentFile
 SERVICE_USER="aipehub"
 NODE_MAJOR="20"                # repo engines: node >=20 (LTS)
 SOURCE_DIR=""                  # checkout to build from (default: this script's repo)
+REPO_URL="https://github.com/Emir-Aksoy/AipeHub.git"
+DO_CLONE=""                    # --clone: fetch the public repo into $PREFIX first
+CLONE_REF="main"
 DRY_RUN=""
 DO_START=""
 
-usage() { sed -n '2,42p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,48p' "$0" | sed 's/^# \{0,1\}//'; }
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     -h | --help) usage; exit 0 ;;
     --dry-run) DRY_RUN=1; shift ;;
     --start) DO_START=1; shift ;;
+    --clone) DO_CLONE=1; shift ;;
+    --clone=*) DO_CLONE=1; CLONE_REF="${1#--clone=}"; shift ;;
     --source) SOURCE_DIR="${2:-}"; shift 2 ;;
     --source=*) SOURCE_DIR="${1#--source=}"; shift ;;
     --prefix) PREFIX="${2:-}"; shift 2 ;;
@@ -67,9 +74,17 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-# Resolve the checkout to build from: explicit --source, else walk up from this
-# script for the monorepo root (pnpm-workspace.yaml + packages/host), same probe
-# the desktop launchers use.
+# Resolve the checkout to build from: --clone fetches the public repo straight
+# into $PREFIX (so a curl-piped run needs no checkout at all); else explicit
+# --source; else walk up from this script for the monorepo root
+# (pnpm-workspace.yaml + packages/host), same probe the desktop launchers use.
+if [ -n "$DO_CLONE" ]; then
+  if [ -n "$SOURCE_DIR" ]; then
+    echo "✖ --clone and --source are mutually exclusive (clone fills the source)." >&2
+    exit 1
+  fi
+  SOURCE_DIR="$PREFIX" # the clone lands where the build lives; step 4's sync self-skips
+fi
 if [ -z "$SOURCE_DIR" ]; then
   SELF="${BASH_SOURCE[0]}"
   while [ -h "$SELF" ]; do
@@ -85,10 +100,10 @@ if [ -z "$SOURCE_DIR" ]; then
     here="$(dirname "$here")"
   done
 fi
-if [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/pnpm-workspace.yaml" ]; then
+if [ -z "$DO_CLONE" ] && { [ -z "$SOURCE_DIR" ] || [ ! -f "$SOURCE_DIR/pnpm-workspace.yaml" ]; }; then
   echo "✖ no AipeHub checkout found." >&2
-  echo "  Put the code on this box (git clone with your key, or scp it), then run" >&2
-  echo "  this script from inside it — or pass --source=/path/to/checkout." >&2
+  echo "  Easiest: re-run with --clone (the repo is public; it fetches ${CLONE_REF} for you)," >&2
+  echo "  or put a checkout on this box and pass --source=/path/to/checkout." >&2
   exit 3
 fi
 
@@ -109,13 +124,39 @@ if [ -z "$DRY_RUN" ] && [ "$(id -u)" -ne 0 ]; then
 fi
 
 echo "── AipeHub cloud quickstart ──"
-echo "source   : $SOURCE_DIR"
+echo "source   : $SOURCE_DIR${DO_CLONE:+  (--clone ${CLONE_REF} from ${REPO_URL})}"
 echo "prefix   : $PREFIX        (WorkingDirectory / built code)"
 echo "space    : $SPACE   (AIPE_SPACE / persistent data)"
 echo "env file : $ENV_FILE"
 echo "user     : $SERVICE_USER"
 [ -n "$DRY_RUN" ] && echo "mode     : DRY-RUN (nothing will change)"
 echo
+
+# ── 0. fetch the code (--clone only) ──────────────────────────────────────────
+# The repo is PUBLIC (2026-06-28) — no key needed. Fast-forward-only on re-runs
+# so an operator's local edits in $PREFIX are never silently destroyed.
+if [ -n "$DO_CLONE" ]; then
+  echo "[0/6] fetch ${CLONE_REF} → $PREFIX"
+  if ! command -v git >/dev/null 2>&1; then
+    if command -v apt-get >/dev/null 2>&1; then
+      run apt-get install -y git
+    else
+      echo "  ✖ no git and no apt-get — install git yourself, then re-run." >&2
+      [ -z "$DRY_RUN" ] && exit 3
+    fi
+  fi
+  if [ -d "$PREFIX/.git" ]; then
+    note "  existing clone — fast-forwarding (never resets; local edits abort this)"
+    run git -c safe.directory="$PREFIX" -C "$PREFIX" fetch origin "$CLONE_REF"
+    run git -c safe.directory="$PREFIX" -C "$PREFIX" merge --ff-only "origin/$CLONE_REF"
+  elif [ -e "$PREFIX" ] && [ -n "$(ls -A "$PREFIX" 2>/dev/null)" ]; then
+    echo "  ✖ $PREFIX exists and is not a git clone — refusing to overwrite." >&2
+    echo "    Move it aside, or build from it explicitly with --source=$PREFIX." >&2
+    [ -z "$DRY_RUN" ] && exit 3
+  else
+    run git clone --depth 1 --branch "$CLONE_REF" "$REPO_URL" "$PREFIX"
+  fi
+fi
 
 # ── 1. Node.js (LTS) ──────────────────────────────────────────────────────────
 echo "[1/6] Node.js ${NODE_MAJOR}.x"

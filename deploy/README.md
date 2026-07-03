@@ -46,7 +46,10 @@ cp deploy/.env.home .env.local        # .env.local 已被 .gitignore — 真 tok
 $EDITOR .env.local                    # 至少填 AIPE_TELEGRAM_BOT_TOKEN
 set -a; . ./.env.local; set +a && pnpm host
 
-# T2/T3 云服务器（VPS）
+# T2/T3 云服务器（VPS）——裸机一条命令（fetch → build → env 模板 → systemd unit）：
+curl -fsSL https://raw.githubusercontent.com/Emir-Aksoy/AipeHub/main/deploy/cloud-quickstart.sh \
+  | sudo bash -s -- --clone
+# 或已有 checkout 时手动走同样五步：
 sudo cp deploy/.env.cloud /etc/aipehub.env
 sudo $EDITOR /etc/aipehub.env         # 域名 + master key（从 secret 注入）
 bash scripts/cloud-harden.sh /etc/aipehub.env   # 暴露前先跑周界自检，红项清零

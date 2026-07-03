@@ -222,6 +222,18 @@ AIPE_ALLOW_INSECURE=1                   # ★ 必须 ★ 见下
 
 ### T2/T3.1 用云端模板
 
+**最快路径 —— 裸 VPS 一条命令**（仓库已公开，机器上不需要先有 checkout）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Emir-Aksoy/AipeHub/main/deploy/cloud-quickstart.sh \
+  | sudo bash -s -- --clone
+```
+
+它把「取码 → Node/pnpm → 建服务用户 → build → 落 `/etc/aipehub.env`（就是下面这份模板）→
+装 systemd unit」一次做完，**不自动 start**（最后打印安全的收尾步骤：填 token → `cloud-harden.sh`
+→ `systemctl start`）。重跑 = `git fetch` + fast-forward 更新，绝不重置本地改动。先看不动手：
+加 `--dry-run`。以下是等价的手动步骤（或 quickstart 跑完后回来核对）：
+
 ```bash
 sudo cp deploy/.env.cloud /etc/aipehub.env
 sudo chown aipehub:aipehub /etc/aipehub.env && sudo chmod 640 /etc/aipehub.env
@@ -320,6 +332,7 @@ sudo -u aipehub -H AIPE_SPACE=/srv/aipehub-data \
 
 | 要做什么 | 用哪个 |
 |---|---|
+| T2/T3 裸 VPS 一条命令 provision | [`deploy/cloud-quickstart.sh`](../../deploy/cloud-quickstart.sh)（`--clone` 取码 + `--dry-run` 预览，§T2/T3.1） |
 | T1 家用 env | [`deploy/.env.home`](../../deploy/.env.home) |
 | T2/T3 云端 env | [`deploy/.env.cloud`](../../deploy/.env.cloud) |
 | 模板说明 | [`deploy/README.md`](../../deploy/README.md) |

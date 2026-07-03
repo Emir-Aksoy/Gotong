@@ -125,6 +125,10 @@ ws://192.168.1.42:4000            ← remote agent
 
 模式：AipeHub 仍然绑 `127.0.0.1`，所有外部请求只能通过 Caddy。Caddy 在 `:443` 做 TLS 终结然后反向代理到内部。下面假设 Debian/Ubuntu，其他发行版自行调整路径。
 
+> **懒人路径**：§C.1–C.4 的机械部分（取码 → Node/pnpm → 服务用户 → build → env 模板 →
+> systemd unit）有脚本一次做完——裸机 `curl -fsSL https://raw.githubusercontent.com/Emir-Aksoy/AipeHub/main/deploy/cloud-quickstart.sh | sudo bash -s -- --clone`
+> （先看不动手加 `--dry-run`）。unit 与本节 §C.4 逐字一致；跑完回来做 §C.5 Caddy + §C.6 防火墙。
+
 ### C.1 前置条件
 
 - Linux VPS（1 vCPU / 1 GB RAM 撑得住几十个用户）

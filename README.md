@@ -188,14 +188,14 @@ live gate's env contract (`OPENAI_API_KEY` + `OPENAI_BASE_URL=https://api.deepse
 
 ### Deploy to a cloud server (VPS)
 
-Got a fresh Ubuntu/Debian box? Put the checkout on it (`git clone` with your
-key, or `scp` it over — the repo is private, so there's no public pull), then
-provision a systemd service in one command:
+Got a fresh Ubuntu/Debian box? One command fetches the code (the repo is
+public) and provisions a systemd service:
 
 ```bash
-# from inside the checkout, on the VPS
-sudo bash deploy/cloud-quickstart.sh        # install Node+pnpm → build → user+unit
-#   preview first, mutates nothing:  bash deploy/cloud-quickstart.sh --dry-run
+curl -fsSL https://raw.githubusercontent.com/Emir-Aksoy/AipeHub/main/deploy/cloud-quickstart.sh \
+  | sudo bash -s -- --clone
+# already have a checkout on the box:  sudo bash deploy/cloud-quickstart.sh
+#   preview first, mutates nothing:    bash deploy/cloud-quickstart.sh --dry-run
 ```
 
 It installs Node + pnpm, builds, creates the `aipehub` service user and data
