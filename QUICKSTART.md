@@ -133,7 +133,7 @@ A ladder, not a pile — tutorial → reference → deep-dive:
 | Five example hubs to copy from | [`docs/zh/HANDS-ON-HUBS.md`](docs/zh/HANDS-ON-HUBS.md) |
 | To deploy for real (3 topologies) | [`docs/zh/GO-LIVE.md`](docs/zh/GO-LIVE.md) |
 | Why it's built this way (the charter) | [`CHARTER.md`](CHARTER.md) · [`docs/zh/CHARTER.md`](docs/zh/CHARTER.md) |
-| To write your own agent in ~20 lines | [`docs/zh/OVERVIEW.md`](docs/zh/OVERVIEW.md) → Participant |
+| To write your own agent in ~20 lines | [`docs/zh/PARTICIPANT.md`](docs/zh/PARTICIPANT.md) |
 
 ---
 

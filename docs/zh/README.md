@@ -32,7 +32,8 @@
 > 目标：把 agent / 工作流 / 模板 / 连接器真正接起来。
 
 **Agent 接入**
-- [`AGENT.md`](AGENT.md) — 自己写 agent 接入
+- [`PARTICIPANT.md`](PARTICIPANT.md) — **20 行写一个 Participant**（框架的唯一扩展面：agent / 人 / 服务同一个契约）
+- [`AGENT.md`](AGENT.md) — 把它接进已在跑的 hub（in-process vs remote SDK）
 - [`AGENT-ADAPTER-CONTRACT.md`](AGENT-ADAPTER-CONTRACT.md) — 主流 agent 适配器契约（双向 + 可快速接管验收门）
 - [`QUICK-CONNECT.md`](QUICK-CONNECT.md) — 入站快捷接入
 

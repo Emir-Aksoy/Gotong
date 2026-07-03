@@ -194,6 +194,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 想知道什么 | 读哪 |
 |---|---|
 | 上手案例（5 个开箱 hub 对照 + 确定性 demo + go-live） | `docs/zh/HANDS-ON-HUBS.md` |
+| 20 行写一个 Participant（框架唯一扩展面：agent / 人 / 服务同一契约；裸接口 + 基类两写法） | `docs/zh/PARTICIPANT.md` |
 | 模板画廊一键安装 | `docs/zh/TEMPLATE-GALLERY.md` |
 | 只读 DAG 可视化 | `docs/zh/WORKFLOW-DAG-VIZ.md` |
 | 工作流架构师（大白话→YAML + 讲解 + 配图 + 成员 `/me` 新建） | `docs/zh/WORKFLOW-ARCHITECT.md` |
