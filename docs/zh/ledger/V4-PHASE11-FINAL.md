@@ -246,4 +246,4 @@ DELETE FROM suspended_tasks WHERE resume_at < strftime('%s', 'now') * 1000 - 864
 机器人桥接（每个一个 `@aipehub/im-<platform>` 包），加 PWA manifest 让
 admin UI 能"添加到主屏幕"，加 `aipehub repl` 交互式 CLI。
 
-详见 `docs/zh/V4-PHASE7-13-PLAN.md` 第七节。
+详见 `docs/zh/ledger/V4-PHASE7-13-PLAN.md` 第七节。

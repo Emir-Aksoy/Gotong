@@ -34,9 +34,9 @@
    双边契约；撤销、配额、数据类都是 per-link 的，互不外溢。
 
 > 安全模型的「为什么」（token 写入即加密进 vault、对称登记、撤销语义）见
-> [`V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md`](V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md)；
+> [`V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md`](./ledger/V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md)；
 > per-link data-class / 配额 / 撤销的设计见
-> [`V4-PHASE19-P4-FINAL.md`](V4-PHASE19-P4-FINAL.md)。本文不重复那些，只讲操作。
+> [`V4-PHASE19-P4-FINAL.md`](./ledger/V4-PHASE19-P4-FINAL.md)。本文不重复那些，只讲操作。
 
 ---
 
@@ -259,8 +259,8 @@ owner 打开 `/me` → 收件箱 → 看到一条 approval 待办「批准把出
 
 ## 6. 延伸阅读
 
-- [`V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md`](V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md) — peer onboarding 的安全模型 + CLI/UI 由来。
-- [`V4-PHASE18-FINAL.md`](V4-PHASE18-FINAL.md) — 联邦能力 manifest + 入站 ACL + 出站审批闸 + A2A。
-- [`V4-PHASE19-P4-FINAL.md`](V4-PHASE19-P4-FINAL.md) — per-link data-class / 配额 / 撤销契约。
-- [`V5-G-FINAL.md`](V5-G-FINAL.md) — 跨 hub 工作流编排（北极星第 2 层；通告=授权 + 两步恢复 + 三不变量）。
-- [`V5-E5-FINAL.md`](V5-E5-FINAL.md) / [`V5-F-FINAL.md`](V5-F-FINAL.md) — 控制面摘要 + 历史趋势 + 告警。
+- [`V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md`](./ledger/V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md) — peer onboarding 的安全模型 + CLI/UI 由来。
+- [`V4-PHASE18-FINAL.md`](./ledger/V4-PHASE18-FINAL.md) — 联邦能力 manifest + 入站 ACL + 出站审批闸 + A2A。
+- [`V4-PHASE19-P4-FINAL.md`](./ledger/V4-PHASE19-P4-FINAL.md) — per-link data-class / 配额 / 撤销契约。
+- [`V5-G-FINAL.md`](./ledger/V5-G-FINAL.md) — 跨 hub 工作流编排（北极星第 2 层；通告=授权 + 两步恢复 + 三不变量）。
+- [`V5-E5-FINAL.md`](./ledger/V5-E5-FINAL.md) / [`V5-F-FINAL.md`](./ledger/V5-F-FINAL.md) — 控制面摘要 + 历史趋势 + 告警。

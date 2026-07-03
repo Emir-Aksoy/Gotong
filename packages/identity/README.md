@@ -31,7 +31,7 @@ This package is **deliberately small**. It is:
 
 - **Single-tenant per process.** One host = one organisation. Cross-org
   collaboration goes through `HubLink` federation, not a multi-tenant
-  schema. (See `docs/zh/V4-ARCH.md` for the full rationale.)
+  schema. (See `docs/zh/ledger/V4-ARCH.md` for the full rationale.)
 - **A pure library.** No HTTP, no cookies, no middleware. The web layer
   wraps it. This keeps it testable as pure functions over a SQLite file.
 - **Zero workspace deps.** Imports only `better-sqlite3` (peer) + node

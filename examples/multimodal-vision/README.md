@@ -54,7 +54,7 @@ call: roughly USD $0.001–0.003.
   (`translateBlock`)
 - OpenAI translator: `packages/llm-openai/src/provider.ts`
   (`translateImageBlock`)
-- Phase 9 RFC: `docs/zh/PHASE9-MULTIMODAL-RFC.md`
+- Phase 9 RFC: `docs/zh/ledger/PHASE9-MULTIMODAL-RFC.md`
 - Workflow + admin UI integration: Phase 9 M4 (`/api/admin/uploads`)
   and Phase 9 M5 (transcript multimodal render).
 

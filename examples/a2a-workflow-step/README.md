@@ -96,4 +96,4 @@ pnpm demo:a2a-workflow-step
 - **per-agent 持久配置（Route B P1-M11）**：把 `EXTERNAL_URL`/`tokenEnv` 落 identity
   `a2a_outbound_agents` 表，admin「联邦」tab 管理出站 agent。
 
-详见 [`docs/zh/V5-H-FINAL.md`](../../docs/zh/V5-H-FINAL.md)。
+详见 [`docs/zh/ledger/V5-H-FINAL.md`](../../docs/zh/ledger/V5-H-FINAL.md)。

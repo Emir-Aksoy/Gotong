@@ -201,8 +201,8 @@ packages/personal-butler/src/agent.ts     构造默认 tierConfig=DEFAULT_TIERS 
 
 ## 关联文档
 
-- [`docs/zh/PERSONAL-BUTLER-FINAL.md`](PERSONAL-BUTLER-FINAL.md) — 常驻管家 M1–M6 收口
+- [`docs/zh/ledger/PERSONAL-BUTLER-FINAL.md`](./PERSONAL-BUTLER-FINAL.md) — 常驻管家 M1–M6 收口
   (记忆 + 治理 tool-loop + 被遗忘权); 本文是其记忆层的纵深升级。
-- [`docs/zh/PERSONAL-BUTLER-DESIGN.md`](PERSONAL-BUTLER-DESIGN.md) — 建之前的设计。
-- [`docs/zh/V5-D-FINAL.md`](V5-D-FINAL.md) — 心跳 / 主动自治 (Stream D); `tieredReviewer`
+- [`docs/zh/PERSONAL-BUTLER-DESIGN.md`](../PERSONAL-BUTLER-DESIGN.md) — 建之前的设计。
+- [`docs/zh/ledger/V5-D-FINAL.md`](./V5-D-FINAL.md) — 心跳 / 主动自治 (Stream D); `tieredReviewer`
   接的就是这套心跳。

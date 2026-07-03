@@ -124,7 +124,7 @@ curl -X POST -H "Authorization: Bearer <admin-token>" \
 | 模板解析 + 逐条工作流 `parseWorkflow` 往返 | ✅ 已测 | `packages/web/tests/{cafe-ops,warband-club,...}-template.test.ts`(防腐门) |
 | `POST /api/admin/templates/import` 落 agent + 注册工作流 + 上报 KB | ✅ 已测 | 同上防腐门:真 `Space`+`Hub`+`serveWeb`+真 import 路由,断言 200 + agent 落库 + 工作流逐条注册 |
 | `human:` 挂起 → `/me` 收件箱 → 两步恢复 | ✅ 已测 | `pnpm demo:cafe-ops` / `demo:warband-club`(HITL 段);host `inbox-e2e` 无漂移验收门 |
-| 真 provider tool-use 往返 + 整栈工作流 live | ✅ 已测(独立 live 门) | [`V6-ROUTE-B-P1-M13-LIVE-GATE.md`](V6-ROUTE-B-P1-M13-LIVE-GATE.md)(夜间/手动 CI,key 从 secrets,缺 key 跳过) |
+| 真 provider tool-use 往返 + 整栈工作流 live | ✅ 已测(独立 live 门) | [`V6-ROUTE-B-P1-M13-LIVE-GATE.md`](./ledger/V6-ROUTE-B-P1-M13-LIVE-GATE.md)(夜间/手动 CI,key 从 secrets,缺 key 跳过) |
 | **你的模板 + 你的 DeepSeek key 真跑出答案** | ⏳ 需你的 key | 步骤 1–4;`AIPE_ASSISTANT_PROVIDER` 等 env 见各 example README |
 | **你的 Obsidian vault 真被检索** | ⏳ 需你的 vault | 步骤 2;Local REST API 插件 + `mcp-obsidian` |
 
@@ -222,10 +222,10 @@ demo 里把 mock provider 换成一个**情境感知的 `LlmProvider`**:它从 p
 |---|---|
 | 知识库连接器(Obsidian / Elasticsearch / 向量 RAG,全走 MCP)+ 读写治理 | [`KB-CONNECTORS.md`](KB-CONNECTORS.md) |
 | RAG 向量检索 via MCP(框架不存知识,`mcpServers` 完整 schema) | [`RAG-VIA-MCP.md`](RAG-VIA-MCP.md) |
-| 一键模板格式(`aipehub.template/v1`,一个文件装走一整套架构) | [`V5-B-FINAL.md`](V5-B-FINAL.md) |
-| 成员任务 inbox(`human:` HITL 工作流步骤) | [`V4-PHASE16-FINAL.md`](V4-PHASE16-FINAL.md) |
-| `/me` 成员工作台(我的 AI 桌面) | [`V4-PHASE19-P1-FINAL.md`](V4-PHASE19-P1-FINAL.md) |
-| 真 LLM 冒烟门进 CI(provider 往返 + 整栈工作流 live) | [`V6-ROUTE-B-P1-M13-LIVE-GATE.md`](V6-ROUTE-B-P1-M13-LIVE-GATE.md) |
-| 出站驱动 CLI agent(hub → Claude Code/Codex,personal-coding-hub 用) | [`V5-E2-CLI-ADAPTER.md`](V5-E2-CLI-ADAPTER.md) |
+| 一键模板格式(`aipehub.template/v1`,一个文件装走一整套架构) | [`V5-B-FINAL.md`](./ledger/V5-B-FINAL.md) |
+| 成员任务 inbox(`human:` HITL 工作流步骤) | [`V4-PHASE16-FINAL.md`](./ledger/V4-PHASE16-FINAL.md) |
+| `/me` 成员工作台(我的 AI 桌面) | [`V4-PHASE19-P1-FINAL.md`](./ledger/V4-PHASE19-P1-FINAL.md) |
+| 真 LLM 冒烟门进 CI(provider 往返 + 整栈工作流 live) | [`V6-ROUTE-B-P1-M13-LIVE-GATE.md`](./ledger/V6-ROUTE-B-P1-M13-LIVE-GATE.md) |
+| 出站驱动 CLI agent(hub → Claude Code/Codex,personal-coding-hub 用) | [`V5-E2-CLI-ADAPTER.md`](./ledger/V5-E2-CLI-ADAPTER.md) |
 | 跨组织联邦两机 onboarding(铸 token / 登记 peer / per-link 契约) | [`FEDERATION-RUNBOOK.md`](FEDERATION-RUNBOOK.md) |
 | 家庭学习 hub 上线 runbook(`family-learning-hub`:两台主权机 + 真 DeepSeek/Obsidian + 四道安全闸 + 分层审核 + 孩子 `/me` / 家长批准) | [`FAMILY-LEARNING-GO-LIVE.md`](FAMILY-LEARNING-GO-LIVE.md) |

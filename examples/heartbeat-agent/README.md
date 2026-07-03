@@ -107,6 +107,6 @@ just substitutes the `Map` + poll loop to stay one self-contained file.
 - Host boot wiring + resume sweep: `packages/host/src/main.ts`
   (search `heartbeat engine started`, `AIPE_RESUME_SWEEP_MS`)
 - Sibling demo (the engine this builds on): `examples/long-running-agent`
-- Stream D release notes: `docs/zh/V5-D-FINAL.md`
+- Stream D release notes: `docs/zh/ledger/V5-D-FINAL.md`
 
 Source: [`src/index.ts`](src/index.ts).

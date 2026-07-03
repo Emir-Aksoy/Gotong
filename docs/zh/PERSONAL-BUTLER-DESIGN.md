@@ -6,7 +6,7 @@
 > 本文是**建之前**的设计文档(对标 OpenClaw / Hermes 源码)。一里程碑一小 commit,
 > 每个里程碑带验收门。
 >
-> **状态:M1–M6 全完。** 收口见 [`docs/zh/PERSONAL-BUTLER-FINAL.md`](PERSONAL-BUTLER-FINAL.md)
+> **状态:M1–M6 全完。** 收口见 [`docs/zh/ledger/PERSONAL-BUTLER-FINAL.md`](./ledger/PERSONAL-BUTLER-FINAL.md)
 > (commit / 数据流 / §七 验收门结果 / 测试矩阵 / 显式推迟)。
 >
 > Last updated: 2026-06-29 · 状态:M1–M6 全完(收口已写)
@@ -161,7 +161,7 @@ MemoryReviewParticipant:蒸馏近段 episodic → semantic profile      ← M3 /
 
 ## 六、里程碑(M1–M6) — ✅ 全完
 
-> 收口表(commit / 产物)见 [`PERSONAL-BUTLER-FINAL.md` §三](PERSONAL-BUTLER-FINAL.md)。
+> 收口表(commit / 产物)见 [`PERSONAL-BUTLER-FINAL.md` §三](./ledger/PERSONAL-BUTLER-FINAL.md)。
 > M1 `5cc0d96` · M2 `c60a0f7` · M3 `d9a1189` · M4 `c13dab2` · M5 `d7649cd` ·
 > M6a `32b2556` · M6b `5e7ead1` · M6c `55c7ad4` · M6d `3b1be73` · M6e 本提交。
 
@@ -180,7 +180,7 @@ MemoryReviewParticipant:蒸馏近段 episodic → semantic profile      ← M3 /
 
 ## 七、验收门(E2E 承重测试) — ✅ 4 claims 全过
 
-> 结果详见 [`PERSONAL-BUTLER-FINAL.md` §五](PERSONAL-BUTLER-FINAL.md)。
+> 结果详见 [`PERSONAL-BUTLER-FINAL.md` §五](./ledger/PERSONAL-BUTLER-FINAL.md)。
 
 `packages/host/tests/personal-butler-e2e.test.ts`——真 Hub + 真 IdentityStore + 真 `FileInboxStore` + 真 `memory-file` + 真 `PersonalButlerAgent`(mock LLM 确定性按指令分支,不烧 key),一个测证清:
 
@@ -236,10 +236,10 @@ MemoryReviewParticipant:蒸馏近段 episodic → semantic profile      ← M3 /
 ## 关联文档
 
 - 竞争对标:`docs/zh/COMPETITIVE-LANDSCAPE.md` / `docs/zh/PRODUCT-MATRIX.md`(OpenClaw / Hermes / QwenPaw)
-- 现有管家:`docs/zh/V5-STEWARD-FINAL.md`(`HubStewardAgent` + 四级分级 + 收件箱审批)
+- 现有管家:`docs/zh/ledger/V5-STEWARD-FINAL.md`(`HubStewardAgent` + 四级分级 + 收件箱审批)
 - 主动节奏:Stream D heartbeat(`packages/host/src/heartbeat.ts`)
 - 持久任务:Phase 11(`SuspendTaskError` + `suspended_tasks` + resume sweep)
 - 记忆原语:`@aipehub/memory-file`(`packages/service-memory-file/src/`)+ worked 模式 `packages/host/src/services/personal-growth-context.ts`
-- 灵活调用:Phase 10 `DispatchToolset` / `ComposedToolset`(`docs/zh/V4-PHASE10-FINAL.md`)
-- 治理审批:Phase 16 inbox(`docs/zh/V4-PHASE16-FINAL.md`)+ ACP-HITL `dangerousToolGate`(`docs/zh/V5-ACP-ADAPTER.md`)
+- 灵活调用:Phase 10 `DispatchToolset` / `ComposedToolset`(`docs/zh/ledger/V4-PHASE10-FINAL.md`)
+- 治理审批:Phase 16 inbox(`docs/zh/ledger/V4-PHASE16-FINAL.md`)+ ACP-HITL `dangerousToolGate`(`docs/zh/ledger/V5-ACP-ADAPTER.md`)
 - 上手 / turnkey:`docs/zh/HANDS-ON-HUBS.md` / `docs/zh/TEMPLATE-GALLERY.md`

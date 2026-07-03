@@ -17,7 +17,7 @@
 > **跨 hub 告警聚合完**（见 §十四）: AGG-M1~M5——把告警状态折进 counts-only 摘要的
 > `alerts.openFirings` 计数族, 联邦聚合 + 趋势 + 元告警从既有摘要管线**免费**掉出, 零新 schema。
 >
-> 接 [`V5-E5-FINAL.md`](V5-E5-FINAL.md)（控制面 point-in-time 聚合）。E5 文档 §十明确把
+> 接 [`V5-E5-FINAL.md`](./V5-E5-FINAL.md)（控制面 point-in-time 聚合）。E5 文档 §十明确把
 > 「控制面历史趋势 + 告警阈值」列为 day-2 sanctioned 后续——Stream F 就是把它做实。
 >
 > Last updated: 2026-06-07
@@ -291,7 +291,7 @@ packages/host/tests/
   peer-summary-alert-delivery.test.ts    [新, day-3] 纯 differ + dispatcher 单测
   peer-summary-alert-delivery-e2e.test.ts[新, day-3] 双 hub 投递验收门 (open/幂等/resolve + best-effort + no-leak)
 
-docs/zh/V5-F-FINAL.md                  [新] 本文档 (含 §十二 day-3)
+docs/zh/ledger/V5-F-FINAL.md                  [新] 本文档 (含 §十二 day-3)
 ```
 
 ---

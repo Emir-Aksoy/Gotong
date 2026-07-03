@@ -101,4 +101,4 @@ real Bot API. See `tests/bridge.test.ts` for the pattern.
 - Phase 12 M2 — released (transport only; host integration pending).
 - Next milestones: M3 (Matrix) and the host-side `ImCommand` router.
 
-See `docs/zh/V4-PHASE7-13-PLAN.md` section 七 for the full roadmap.
+See `docs/zh/ledger/V4-PHASE7-13-PLAN.md` section 七 for the full roadmap.

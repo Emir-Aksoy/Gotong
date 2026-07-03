@@ -90,5 +90,5 @@ to handle it. Event emitters lose both.
 - Phase 12 M1 — released.
 - Next: M2 — `@aipehub/im-telegram` first concrete bridge.
 
-See `docs/zh/V4-PHASE7-13-PLAN.md` section 七 for the full Phase 12
+See `docs/zh/ledger/V4-PHASE7-13-PLAN.md` section 七 for the full Phase 12
 roadmap.

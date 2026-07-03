@@ -372,6 +372,6 @@ const coder = new SharedWorkspaceCli({
   的 `template/` 照它的字段写)。
 - `packages/cli-agent/` —— `CliParticipant` + `CLI_PRESETS` + 动作闸(core-only 叶包)。
 - `docs/zh/AGENT-ADAPTER-CONTRACT.md` —— 主流 agent 适配器「双向 + 可快速接管」契约。
-- `docs/zh/V5-E2-CLI-ADAPTER.md` —— 出站 CLI shell-out adapter 设计。
+- `docs/zh/ledger/V5-E2-CLI-ADAPTER.md` —— 出站 CLI shell-out adapter 设计。
 - `docs/zh/KB-CONNECTORS.md` —— 知识库连接器(Obsidian / ES / 向量 RAG)+ 读写治理
   + 跨 hub 两层闸 + 模板带引用不带内容。

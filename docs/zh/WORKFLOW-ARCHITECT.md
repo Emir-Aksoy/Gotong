@@ -274,8 +274,8 @@ DeepSeek 等：用 OpenAI provider + baseURL，见 `examples/workflow-assistant`
 - **底座 = Phase 13 AI 辅助 workflow 编辑** —— 架构师就是它的演进：见
   [`docs/zh/AI-WORKFLOW-EDITOR.md`](AI-WORKFLOW-EDITOR.md)。
 - **成员用大白话改工作流（WFEDIT）** —— 架构师的姊妹（那个**改**，这个还能
-  **造** + **讲** + **画**）：见 [`docs/zh/V5-WFEDIT-FINAL.md`](V5-WFEDIT-FINAL.md)。
+  **造** + **讲** + **画**）：见 [`docs/zh/ledger/V5-WFEDIT-FINAL.md`](./ledger/V5-WFEDIT-FINAL.md)。
 - **只读 DAG 可视化** —— 图投影 `projectWorkflowGraph` 的另一个消费者（admin
   工作流「流程图」按钮）：见 [`docs/zh/WORKFLOW-DAG-VIZ.md`](WORKFLOW-DAG-VIZ.md)。
 - **工作流生命周期 + 版本化** —— 架构师生成的 YAML 落进的治理根：见
-  [`docs/zh/V4-PHASE15-FINAL.md`](V4-PHASE15-FINAL.md)。
+  [`docs/zh/ledger/V4-PHASE15-FINAL.md`](./ledger/V4-PHASE15-FINAL.md)。

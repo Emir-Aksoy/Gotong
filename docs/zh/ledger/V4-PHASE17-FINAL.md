@@ -298,7 +298,7 @@ M3/M4 的 sink 用**带闸的** `checkAndIncrement` 记 token/成本。但
 | M5 | `dd1b727` | 账本 + 审计导出路由（CSV/JSONL） |
 | M6 | `eff891b` | admin UI 用量·成本看板 + 导出按钮 |
 | M7 | `4ecd180` | **E2E 验收门 + fail-OPEN 修复**（ungated `recordUsage`） |
-| M8 | （本文档） | `docs/zh/V4-PHASE17-FINAL.md` + CLAUDE.md 更新 |
+| M8 | （本文档） | `docs/zh/ledger/V4-PHASE17-FINAL.md` + CLAUDE.md 更新 |
 
 设计上账本是配额之下的**观测层**，跟 `audit_log` 同构（append-only / 无 FK /
 forensics 优先）；配额闸是其上的**执行层**。本 sprint 最关键的一课：**记账要

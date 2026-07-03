@@ -14,7 +14,7 @@ docker compose up -d
 Then on the **host**: set `AIPE_METRICS_TOKEN` to the **same** value you put in
 `secrets/aipehub.token` and (re)start the hub, so `GET /metrics` serves to a
 bearer holder. (That route is non-admin-gated by design — a scraper reads
-metrics, it does not get an admin session. See `docs/zh/V4-PHASE19-P3-FINAL.md`
+metrics, it does not get an admin session. See `docs/zh/ledger/V4-PHASE19-P3-FINAL.md`
 / Route B P0-M7.)
 
 | Service | URL | Notes |

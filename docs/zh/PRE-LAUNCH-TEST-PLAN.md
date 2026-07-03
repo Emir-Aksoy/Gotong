@@ -111,7 +111,7 @@
     ```
 - **预期 / 通过标准**：provider 往返绿 + 一条真 workflow 端到端跑通。缺 key →
   skip（绿，非红），但**本次上线既然要用 LLM，必须配 key 真跑一次、不能靠 skip 蒙混**。
-- **资产**：`.github/workflows/live.yml`、`docs/zh/V6-ROUTE-B-P1-M13-LIVE-GATE.md`。
+- **资产**：`.github/workflows/live.yml`、`docs/zh/ledger/V6-ROUTE-B-P1-M13-LIVE-GATE.md`。
 
 ### L2 — 真实凭证联调　【阻塞 · 人工】
 
@@ -194,7 +194,7 @@
     自动 provision，抓到 `/metrics`。
   - `/healthz` 接入监控（systemd/uptime）。
   - 造一条 breach → 告警**真投递**到一个通道（webhook 或 IM），确认 counts-only 不泄漏。
-- **资产**：`monitoring/`、`MONITORING.md`、`docs/zh/V5-F-FINAL.md`、`web/src/*metrics*`。
+- **资产**：`monitoring/`、`MONITORING.md`、`docs/zh/ledger/V5-F-FINAL.md`、`web/src/*metrics*`。
 - **备注**：非硬阻塞——可带「监控待补」上线，但限期补齐。
 
 ### L7 — 联邦真网络　【本次推迟】
@@ -218,7 +218,7 @@
   4. **管家改 agent**（若启用）：成员/operator 用大白话让管家建/改 agent →
      危险/跨 hub 动作走收件箱二次确认。
 - **通过标准**：每条旅程从成员视角真能走通，无「没人接」「卡住不动」「报错」。
-- **资产**：`GO-LIVE.md` §六、`packages/host/src/im-bridge.ts`、`docs/zh/V5-STEWARD-FINAL.md`。
+- **资产**：`GO-LIVE.md` §六、`packages/host/src/im-bridge.ts`、`docs/zh/ledger/V5-STEWARD-FINAL.md`。
 
 ### L9 — 验收 sign-off / go-no-go　【阻塞 · 人工】
 
@@ -249,7 +249,7 @@
 | 运维（数据目录、备份/恢复/校验） | [`OPERATIONS.md`](../OPERATIONS.md) |
 | 监控 / 指标 | [`MONITORING.md`](../MONITORING.md)、`monitoring/` |
 | IM 官方化（QQ/Lark/Slack transport + 方向表） | [`IM-OFFICIAL-REARCH.md`](IM-OFFICIAL-REARCH.md)、[`IM-BRIDGES.md`](IM-BRIDGES.md) |
-| 真 LLM 冒烟门 | `.github/workflows/live.yml`、[`V6-ROUTE-B-P1-M13-LIVE-GATE.md`](V6-ROUTE-B-P1-M13-LIVE-GATE.md) |
+| 真 LLM 冒烟门 | `.github/workflows/live.yml`、[`V6-ROUTE-B-P1-M13-LIVE-GATE.md`](./ledger/V6-ROUTE-B-P1-M13-LIVE-GATE.md) |
 | 联邦两机 runbook（L7 拉回时） | [`FEDERATION-RUNBOOK.md`](FEDERATION-RUNBOOK.md) |
 | 配置模板 | `deploy/.env.home`、`deploy/.env.cloud`、`deploy/README.md` |
 | 灾备 / 加固脚本 | `scripts/backup/`、`scripts/cloud-harden.sh` |

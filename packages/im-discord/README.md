@@ -174,4 +174,4 @@ pnpm --filter @aipehub/im-discord test
 - Phase 12 M5 — released（transport only；host integration pending）。
 - Next milestones: M6 (Slack), M7 (QQ / OneBot v11)。
 
-See `docs/zh/V4-PHASE7-13-PLAN.md` section 七 for the full roadmap.
+See `docs/zh/ledger/V4-PHASE7-13-PLAN.md` section 七 for the full roadmap.

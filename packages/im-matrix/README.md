@@ -191,4 +191,4 @@ don't tight-spin.
 - Phase 12 M3 — released (transport only; host integration pending).
 - Next milestones: M4 (飞书 Lark), M5 (Discord), M6 (Slack).
 
-See `docs/zh/V4-PHASE7-13-PLAN.md` section 七 for the full roadmap.
+See `docs/zh/ledger/V4-PHASE7-13-PLAN.md` section 七 for the full roadmap.

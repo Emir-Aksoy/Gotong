@@ -81,4 +81,4 @@ const retriever = chromaRetriever({ query })
 - `packages/personal-memory/src/embedding-retriever.ts` —— `embeddingRetriever` + `cosineSimilarity` + `Embedder` 接缝
 - `packages/personal-memory/src/relevance.ts` —— C-M1 中文 lexical scorer(对照)
 - `examples/rag-mcp/` —— chroma-mcp 起服务的完整配置(RAG)
-- `docs/zh/MEMORY-ADVANCED-FINAL.md` —— C/F/E/G/D 五个记忆增强方向收口
+- `docs/zh/ledger/MEMORY-ADVANCED-FINAL.md` —— C/F/E/G/D 五个记忆增强方向收口

@@ -82,7 +82,7 @@ based on the input, and to skip the steps that don't apply.
 
 - `DispatchToolset` source: `packages/llm/src/dispatch-toolset.ts`
 - Depth + cycle gates: `packages/core/src/hub.ts` (`checkDispatchGates`)
-- Phase 10 RFC: see roadmap in `docs/zh/V4-PHASE7-13-PLAN.md` section 5
+- Phase 10 RFC: see roadmap in `docs/zh/ledger/V4-PHASE7-13-PLAN.md` section 5
 - Wiring from YAML manifest: `packages/host/src/local-agent-pool.ts`
   (the `dispatch:` allow-list path).
 

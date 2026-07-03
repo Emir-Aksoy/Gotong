@@ -17,7 +17,7 @@
 拼图。DAG 可视化把那张图画出来——**纯呈现层,不碰执行、不碰存储、不碰 schema**。
 
 **严守「YAML 是治理/版本控制的根」**:这是**只读**的一张图,不是编辑器。改工作流仍
-走 YAML(admin import / 成员用大白话改,见 [`V5-WFEDIT-FINAL.md`](V5-WFEDIT-FINAL.md))。
+走 YAML(admin import / 成员用大白话改,见 [`V5-WFEDIT-FINAL.md`](./ledger/V5-WFEDIT-FINAL.md))。
 流程图只是一面镜子,照出当前已发布修订(没有就照 head 草稿)的形状。
 
 ---
@@ -77,7 +77,7 @@ sequence 边带箭头,容器→分支是肘形曲线。
 
 这是关键正确性约束:**流程图的跨 hub 标和 admin 启动前可见性的 `crossHubSteps`、
 成员编辑器的出入口锁——用的是同一个检测器,绝不会互相打架**(见
-[`V5-G-FINAL.md`](V5-G-FINAL.md) G2 + [`V5-WFEDIT-FINAL.md`](V5-WFEDIT-FINAL.md))。
+[`V5-G-FINAL.md`](./ledger/V5-G-FINAL.md) G2 + [`V5-WFEDIT-FINAL.md`](./ledger/V5-WFEDIT-FINAL.md))。
 `CrossHubStep.stepId` 是 `<stepId>`(简单步)或 `<stepId>/<branchId>`(parallel 分支)——
 正好是投影发出的两种 node-id 形状(`step:` / `branch:` 前缀),一次索引一遍标注。
 
@@ -118,6 +118,6 @@ host e2e 是 web 单测覆盖不到的那个缝:web 单测打桩 `graphOf`,host 
 - **无布局引擎**:手绘 SVG 按节点数组序竖直堆叠(骨架 col 0 / 分支 col 1),没引图表库、
   没做力导向/自动布局——工作流是浅 DAG,竖直堆叠足够读。
 - **不画运行态**:这是**定义**的图,不是某次 run 的执行轨迹。某次 run 实际去了哪个 peer、
-  哪一步挂在审批闸——那是运行详情的事(见 [`V5-G-FINAL.md`](V5-G-FINAL.md) G2 day-3/4/5)。
+  哪一步挂在审批闸——那是运行详情的事(见 [`V5-G-FINAL.md`](./ledger/V5-G-FINAL.md) G2 day-3/4/5)。
 - **governance / 风险**是另一套标(admin 卡片的琥珀风险摘要),流程图只画**结构 + 跨 hub 蓝标**,
   不重复 governance 的事。

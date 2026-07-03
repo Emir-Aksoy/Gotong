@@ -50,9 +50,9 @@
 
 > For the "why" of the security model (token encrypted into the vault
 > on write, symmetric registration, revocation semantics) see
-> [`zh/V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md`](zh/V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md);
+> [`zh/V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md`](./zh/ledger/V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md);
 > for the design of per-link data-class / quota / revocation see
-> [`zh/V4-PHASE19-P4-FINAL.md`](zh/V4-PHASE19-P4-FINAL.md). This page
+> [`zh/V4-PHASE19-P4-FINAL.md`](./zh/ledger/V4-PHASE19-P4-FINAL.md). This page
 > does not repeat those — it is operations only.
 
 ---
@@ -334,8 +334,8 @@ automated acceptance gate in the repo:
 
 ## 6. Further reading
 
-- [`zh/V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md`](zh/V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md) — the security model behind peer onboarding + where the CLI/UI came from.
-- [`zh/V4-PHASE18-FINAL.md`](zh/V4-PHASE18-FINAL.md) — federation capability manifest + inbound ACL + outbound approval gate + A2A.
-- [`zh/V4-PHASE19-P4-FINAL.md`](zh/V4-PHASE19-P4-FINAL.md) — per-link data-class / quota / revocation contracts.
-- [`zh/V5-G-FINAL.md`](zh/V5-G-FINAL.md) — cross-hub workflow orchestration (North Star layer 2; advertisement = authorization + two-step resume + the three invariants).
-- [`zh/V5-E5-FINAL.md`](zh/V5-E5-FINAL.md) / [`zh/V5-F-FINAL.md`](zh/V5-F-FINAL.md) — control-plane summaries + historical trends + alerts.
+- [`zh/V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md`](./zh/ledger/V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md) — the security model behind peer onboarding + where the CLI/UI came from.
+- [`zh/V4-PHASE18-FINAL.md`](./zh/ledger/V4-PHASE18-FINAL.md) — federation capability manifest + inbound ACL + outbound approval gate + A2A.
+- [`zh/V4-PHASE19-P4-FINAL.md`](./zh/ledger/V4-PHASE19-P4-FINAL.md) — per-link data-class / quota / revocation contracts.
+- [`zh/V5-G-FINAL.md`](./zh/ledger/V5-G-FINAL.md) — cross-hub workflow orchestration (North Star layer 2; advertisement = authorization + two-step resume + the three invariants).
+- [`zh/V5-E5-FINAL.md`](./zh/ledger/V5-E5-FINAL.md) / [`zh/V5-F-FINAL.md`](./zh/ledger/V5-F-FINAL.md) — control-plane summaries + historical trends + alerts.

@@ -1,6 +1,6 @@
 # Personal Hub Mode — RFC
 
-> Phase 7 M3 of `docs/zh/V4-PHASE7-13-PLAN.md`.
+> Phase 7 M3 of `docs/zh/ledger/V4-PHASE7-13-PLAN.md`.
 >
 > Status: 待用户拍板。M4 (实施) / M5 (SPA 分流) 都依赖本 RFC 的决议。
 >

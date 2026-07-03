@@ -283,5 +283,5 @@ pnpm --filter @aipehub/host test family-child-me-e2e
 
 详见 [`docs/zh/FAMILY-LEARNING-GO-LIVE.md`](../../docs/zh/FAMILY-LEARNING-GO-LIVE.md)(上线 runbook)、
 [`docs/zh/FAMILY-LEARNING-HUB-DESIGN.md`](../../docs/zh/FAMILY-LEARNING-HUB-DESIGN.md)(完整设计蓝图)、
-[`docs/zh/V5-G-FINAL.md`](../../docs/zh/V5-G-FINAL.md)(跨 hub 工作流编排)与
+[`docs/zh/ledger/V5-G-FINAL.md`](../../docs/zh/ledger/V5-G-FINAL.md)(跨 hub 工作流编排)与
 [`docs/zh/HANDS-ON-HUBS.md`](../../docs/zh/HANDS-ON-HUBS.md)(上手 hub 目录)。

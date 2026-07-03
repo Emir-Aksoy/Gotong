@@ -84,7 +84,7 @@ const DEFAULT_FROZEN_KINDS: readonly MemoryKind[] = ['semantic']
  * much accrues on disk in the first place, and the pluggable embedding retriever
  * (decision C-M3) scales `recall` past the default O(n) lexical scan. So the
  * frozen block stays a small, byte-stable prompt prefix no matter how large the
- * store grows. See docs/zh/MEMORY-ADVANCED-FINAL.md §八.
+ * store grows. See docs/zh/ledger/MEMORY-ADVANCED-FINAL.md §八.
  */
 const DEFAULT_FROZEN_K = 100
 

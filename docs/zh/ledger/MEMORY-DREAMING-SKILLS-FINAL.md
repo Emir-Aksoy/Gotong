@@ -2,10 +2,10 @@
 
 > **收口文档（已交付）**。学习 OpenClaw 与 Hermes，把「我们框架之上的管家智能体」的长
 > 期记忆补上四块能力，全部落地。本文是事后总结（commit / 落点 / 验收结果 / 显式推迟）；
-> 建之前的设计与契约见 [`MEMORY-DREAMING-SKILLS-DESIGN.md`](MEMORY-DREAMING-SKILLS-DESIGN.md)。
+> 建之前的设计与契约见 [`MEMORY-DREAMING-SKILLS-DESIGN.md`](../MEMORY-DREAMING-SKILLS-DESIGN.md)。
 >
 > Status: DONE · 2026-06-29/30 · 对应 reference：[[openclaw-hermes-reference]] ·
-> 接 [[butler-memory-roadmap]] / [`MEMORY-ADVANCED-FINAL.md`](MEMORY-ADVANCED-FINAL.md)
+> 接 [[butler-memory-roadmap]] / [`MEMORY-ADVANCED-FINAL.md`](./MEMORY-ADVANCED-FINAL.md)
 
 ---
 

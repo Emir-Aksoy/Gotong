@@ -279,7 +279,7 @@ follow-up。
 ## Item 2 — ACP 出站闸（per-step data-class + 配额，复用 P4-M4 纯函数）
 
 > 用户「做这两项，一项一项做」的第二项里 ACP 那半。A2A 那半（含**出站审批**）记在
-> [`V5-H-FINAL.md`](V5-H-FINAL.md) §十一;两半共用同一个 core 纯函数，**完整对照表见那节 §11.4**。
+> [`V5-H-FINAL.md`](./V5-H-FINAL.md) §十一;两半共用同一个 core 纯函数，**完整对照表见那节 §11.4**。
 
 **缺口（同 A2A）**: `AcpParticipant extends AgentParticipant` 是**本地参与者**，被派发时**就地** spawn
 本地子进程转发，**永不经过 `RemoteHubViaLink`** → P4-M4 的 data-class 闸 / 出站配额对它**结构上够不着**。
@@ -306,7 +306,7 @@ follow-up。
 这层不对称，不当 scope 问题处理。
 
 **显式推迟（ACP 半）**: ACP per-tool 级配额（现配额是 per-task send 计数，非 per-tool-call）/ 出站边
-redaction hook（同 A2A，独立增量）。完整推迟清单见 [`V5-H-FINAL.md`](V5-H-FINAL.md) §11.5。
+redaction hook（同 A2A，独立增量）。完整推迟清单见 [`V5-H-FINAL.md`](./V5-H-FINAL.md) §11.5。
 
 ---
 
@@ -344,6 +344,6 @@ redaction hook（同 A2A，独立增量）。完整推迟清单见 [`V5-H-FINAL.
 
 - `packages/acp-agent/` — `AcpParticipant` + `AcpSession` + `acp-connection`（NDJSON）+ 权限闸原语（core-only 叶包）
 - `examples/acp-coding-bridge/` — 五缝 + 长 session demo（mock）+ 真机 LIVE-RUNBOOK（M8）
-- `docs/zh/V5-E2-CLI-ADAPTER.md` — 一次性 shell-out 的姊妹 adapter（`@aipehub/cli-agent`）
+- `docs/zh/ledger/V5-E2-CLI-ADAPTER.md` — 一次性 shell-out 的姊妹 adapter（`@aipehub/cli-agent`）
 - `docs/zh/AGENT-ADAPTER-CONTRACT.md` — 双向 + 可快速接管的契约本体
 - `docs/zh/QUICK-CONNECT.md` — 入站方向（`aipehub connect <agent>`）

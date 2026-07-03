@@ -137,5 +137,5 @@ agent、补货工作流、供货商目录 KB 槽位、一次性 key 提示。
 - **可调用 KB 白名单(C-M1)**:若供货商还共享一个 MCP 目录,per-link
   `allowedKnowledgeBases` 决定奶茶店能不能查。
 
-详见 [`docs/zh/V5-G-FINAL.md`](../../docs/zh/V5-G-FINAL.md)(跨 hub 工作流编排)与
+详见 [`docs/zh/ledger/V5-G-FINAL.md`](../../docs/zh/ledger/V5-G-FINAL.md)(跨 hub 工作流编排)与
 [`docs/zh/HANDS-ON-HUBS.md`](../../docs/zh/HANDS-ON-HUBS.md)(上手 hub 目录)。

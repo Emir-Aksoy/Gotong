@@ -206,4 +206,4 @@ allow-list / sanitiser。
 
 agent 通过 `SuspendTaskError({ resumeAt, state })` 把当前 task 暂停；调度器持久化 state 到 SQLite，到点自动唤醒重派给原 agent，调 `onResume(state)`。结合 Phase 10 的 dispatch 链就能做"等 24 小时后让另一个 agent 继续"这种长流程。
 
-详见 `docs/zh/V4-PHASE7-13-PLAN.md` 第六节。
+详见 `docs/zh/ledger/V4-PHASE7-13-PLAN.md` 第六节。

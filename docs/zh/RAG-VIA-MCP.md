@@ -6,7 +6,7 @@
 >
 > Previous reading: `docs/zh/MCP.md`（Hub **作为** MCP server）+
 > `docs/zh/AGENT.md`（agent 数据模型 + `mcpServers` 字段）+
-> `docs/zh/V4-ARCH.md`（v4 整体架构）。
+> `docs/zh/ledger/V4-ARCH.md`（v4 整体架构）。
 
 ## 一、设计立场:不内置 RAG
 
@@ -286,5 +286,5 @@ stderr 全程。
 - `docs/zh/MCP.md` —— **Hub 作为** MCP server(被 Claude / Cursor 调进来),
   跟本文方向相反。
 - `docs/zh/AGENT.md` —— agent 数据模型完整定义,`mcpServers` 字段属于其中一部分。
-- `docs/zh/V4-ARCH.md` —— v4 整体架构;RAG 在 "B-tier (resources)" 这层,
+- `docs/zh/ledger/V4-ARCH.md` —— v4 整体架构;RAG 在 "B-tier (resources)" 这层,
   跟 LLM API pool / 配额 系统平行。

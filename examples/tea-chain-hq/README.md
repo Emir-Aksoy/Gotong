@@ -168,5 +168,5 @@ agent、下发工作流、连锁运营手册 KB 槽位、一次性 key 提示。
 - **多店扇出**:总部连多条加盟门店链路 → 同一条工作流用 capability / broadcast 策略一次
   下发到全部门店,每条链路的审批 / 出站放行各自独立。
 
-详见 [`docs/zh/V5-G-FINAL.md`](../../docs/zh/V5-G-FINAL.md)(跨 hub 工作流编排)与
+详见 [`docs/zh/ledger/V5-G-FINAL.md`](../../docs/zh/ledger/V5-G-FINAL.md)(跨 hub 工作流编排)与
 [`docs/zh/HANDS-ON-HUBS.md`](../../docs/zh/HANDS-ON-HUBS.md)(上手 hub 目录)。

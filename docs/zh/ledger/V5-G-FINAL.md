@@ -420,7 +420,7 @@ transcript 自己推断。day-3 补的就是这块**确认**：把「这一步**
 | M2 | `host/src/workflow-controller.ts` | `readRun` 用 `PeerCapabilityView` 把每步 `executedBy` 解析成 `crossHub:{peer,peerLabel,kind}`;**读时**派生不回写 run 文件，`enrichRunCrossHub` 只克隆被标注的步（不改 RunStore 读出的 state）;单 hub（无 view）原样返回零成本。新类型 `CrossHubStepRef`/`EnrichedStepRecord`/`EnrichedRunState` | `06ee512` |
 | M3 | `web/admin-src/workflows.js` + `static/app-core.js` | 运行详情 step header 加 `🔗 在对等 hub X 上执行` / `🔗 由外部 A2A agent X 执行` 徽章（新 i18n `workflowRunCrossHub(dest,kind)` zh+en，措辞是**确认**「执行」非预测「会去」）;复用 `.wf-xhub-peer` 样式;鸭子 verbatim echo 零路由改;重建 admin.js + static-assets.ts | `29ce654` |
 | M4 | `host/tests/cross-hub-workflow-e2e.test.ts` | 扩 G-M2 验收门: controller 挂生产形态 `peerCapabilities` view，三剧情都断言 `executedBy==='hubB'` + `readRun` 解出 `crossHub`（approve: **挂起在闸时**就有 + 完成后仍有;no-approval: ok 分支同步记） | `2c2f6cb` |
-| M5 | `docs/zh/V5-G-FINAL.md` + `CLAUDE.md` | 本节 + §六 把「启动后 transcript chain」从推迟移到已做 + 登记 | 本提交 |
+| M5 | `docs/zh/ledger/V5-G-FINAL.md` + `CLAUDE.md` | 本节 + §六 把「启动后 transcript chain」从推迟移到已做 + 登记 | 本提交 |
 
 ### 9.4 测试矩阵（day-3 增量）
 

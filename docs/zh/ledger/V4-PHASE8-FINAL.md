@@ -404,7 +404,7 @@ legacy fallback 测试 + 2 个 raw-only 测试 + 4 个 retry-loop 测试.
 - 协议外通路 IM bridges + PWA + REPL (Phase 12)
 - AI 辅助 workflow 编辑器 (Phase 13)
 
-详见 `docs/zh/V4-PHASE7-13-PLAN.md`.
+详见 `docs/zh/ledger/V4-PHASE7-13-PLAN.md`.
 
 Phase 7 RFC 段末尾的 3 个 open 问题里, 与 streaming 相关的:
 - **个人模式默认 system prompt + 自由对话框** — Phase 7 RFC 里写"建议
@@ -421,7 +421,7 @@ Phase 7 RFC 段末尾的 3 个 open 问题里, 与 streaming 相关的:
 
 **预备工作**:
 - `CLAUDE.md` § "现在在哪段" 更新 Phase 8 状态为完成, Phase 9 设为"下一步"
-- `docs/zh/V4-PHASE7-13-PLAN.md` Phase 9 段已经有详细 M1-M? milestone
+- `docs/zh/ledger/V4-PHASE7-13-PLAN.md` Phase 9 段已经有详细 M1-M? milestone
 - Stream contract 已落地 — Phase 9 的 chunk 类型扩展 (image_delta /
   audio_delta) 在 `LlmStreamChunk` 上加新 variant 就行, 不破坏 stream
   消费者

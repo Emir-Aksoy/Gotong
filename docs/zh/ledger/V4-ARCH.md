@@ -250,7 +250,7 @@ Phase 2 的 `/me` 只对**单一**工作流(`personal-growth-flow`)开放,allowl
 
 上面「安全契约」那段(case_id 由后端拍板、报告路径等值校验)**不变**,只是
 「case_id」现在泛化为「`userScopeField`」。growth-reports 的过滤 + 下载 ACL
-完全没碰。详见 `docs/zh/V4-PHASE14-FINAL.md`。
+完全没碰。详见 `docs/zh/ledger/V4-PHASE14-FINAL.md`。
 
 ## 五、Phase 3 + 计划(更远)
 

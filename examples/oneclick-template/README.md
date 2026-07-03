@@ -105,6 +105,6 @@ CI 立刻红 —— 示例永不腐烂。
 
 ## 参见
 
-- [`docs/zh/V5-B-FINAL.md`](../../docs/zh/V5-B-FINAL.md) — Stream B 模板系统完整设计
+- [`docs/zh/ledger/V5-B-FINAL.md`](../../docs/zh/ledger/V5-B-FINAL.md) — Stream B 模板系统完整设计
 - [`docs/zh/RAG-VIA-MCP.md`](../../docs/zh/RAG-VIA-MCP.md) — chroma-mcp 等知识库 server 选型
 - [`docs/zh/TEMPLATES.md`](../../docs/zh/TEMPLATES.md) — agent / team / bundle 模板格式

@@ -281,7 +281,7 @@ printf '%s' "$KEYHEX" | sudo systemd-creds encrypt --name=aipe_master_key - /etc
 1. admin 控制台 → **工作流** 面板 → 找到那条草稿 → 走生命周期按钮
    **提交审核 → 发布**（后端 `POST /api/admin/workflows/:id/publish`）。
 2. 想让成员能自助发起，确认工作流声明了 `surface.me.enabled`（见
-   [`V4-PHASE14-FINAL.md`](V4-PHASE14-FINAL.md)）。
+   [`V4-PHASE14-FINAL.md`](./ledger/V4-PHASE14-FINAL.md)）。
 
 ### 验证
 
@@ -350,7 +350,7 @@ sudo systemctl start aipehub
 - **KEK 彻底离盘**（KMS / 外部注入）——单盘 VPS 上 env provider + systemd-creds 已达
   实用线，KMS 是 T3+/多机才划算的终局。
 - **多管理员 RBAC 分级**——目前红2 给的是「再开一个等权 admin」当恢复冗余，不是细粒度
-  角色；细粒度走 [`V4-PHASE19-P2-FINAL.md`](V4-PHASE19-P2-FINAL.md) 的资源 RBAC。
+  角色；细粒度走 [`V4-PHASE19-P2-FINAL.md`](./ledger/V4-PHASE19-P2-FINAL.md) 的资源 RBAC。
 - **告警分组 / 静默 / 升级链**（Alertmanager 式）——看门狗是「活/死」边沿单告警；
-  业务级阈值告警走控制面 [`V5-F-FINAL.md`](V5-F-FINAL.md) 的 peer-summary 通道。
+  业务级阈值告警走控制面 [`V5-F-FINAL.md`](./ledger/V5-F-FINAL.md) 的 peer-summary 通道。
 - **自动重启 / 自愈**——本文只观察告警，重启权留给 systemd，避免和 `Restart=always` 打架。

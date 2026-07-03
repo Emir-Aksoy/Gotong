@@ -100,6 +100,6 @@ the production sweep handles.
   (search for `AIPE_RESUME_SWEEP_MS`)
 - `LlmAgent` working memory (Phase 11 M4):
   `packages/llm/src/agent.ts` (`runToolLoop` + `handleResume`)
-- Phase 11 plan: `docs/zh/V4-PHASE7-13-PLAN.md` section 六
+- Phase 11 plan: `docs/zh/ledger/V4-PHASE7-13-PLAN.md` section 六
 
 Source: [`src/index.ts`](src/index.ts).

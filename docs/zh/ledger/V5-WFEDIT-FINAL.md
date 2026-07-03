@@ -240,7 +240,7 @@ host 全量:   878 passed | 1 skipped (零回归, +5)
 - `packages/host/tests/cross-hub-marker.test.ts`(**S1** +7 标记 store)
 - `packages/web/tests/me-workflow-edit-routes.test.ts`(M3 +13)
 - `packages/host/tests/me-workflow-edit-e2e.test.ts`(M5 +5 真栈;**S3** +3 离线 peer)
-- `docs/zh/V5-WFEDIT-FINAL.md`(本文档)
+- `docs/zh/ledger/V5-WFEDIT-FINAL.md`(本文档)
 
 编辑(加性):
 - `packages/web/src/me-routes.ts`(M3 编辑/可编辑路由 + reason→HTTP)

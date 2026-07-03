@@ -163,7 +163,7 @@ POST /api/admin/identity/org-mode
 ## 跟其他文档的关系
 
 - **设计 RFC**: `docs/zh/PERSONAL-HUB-RFC.md` — 5 个决策的讨论
-- **整体 v4 路线**: `docs/zh/V4-PHASE7-13-PLAN.md` — Phase 7 是路线的第 1 步
+- **整体 v4 路线**: `docs/zh/ledger/V4-PHASE7-13-PLAN.md` — Phase 7 是路线的第 1 步
 - **北极星**: `CLAUDE.md` — 三层链接哲学, 个人模式实现"第 1 层 (人 ↔ 自己 AI)"
 - **5 min workflow demo**: `README.md` § "5-minute personal growth workflow"
 

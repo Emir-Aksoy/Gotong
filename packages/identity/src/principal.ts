@@ -8,7 +8,7 @@
  *   - workflow_grants — a user-id-only "principal" (Phase 19 P2-M5)
  *
  * v5's mental model collapses the "org vs hub" distinction — a hub IS its own
- * org; there is no separate org entity (see `docs/zh/V5-0-FINAL.md`). So we
+ * org; there is no separate org entity (see `docs/zh/ledger/V5-0-FINAL.md`). So we
  * name ONE principal type that everything authz/ownership related speaks:
  *
  *   - 'hub'   — the hub ITSELF (the artist formerly known as 'org'): a

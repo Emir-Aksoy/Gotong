@@ -84,5 +84,5 @@ profile 只决定**先展示什么、文档先读哪**，不碰运行时。
 - 概念 5 分钟总览：[`OVERVIEW.md`](OVERVIEW.md)
 - hub 内怎么玩：[`HANDS-ON-HUBS.md`](HANDS-ON-HUBS.md)（五个开箱 hub）
 - 跨 hub 怎么玩：[`FEDERATION-RUNBOOK.md`](FEDERATION-RUNBOOK.md)（两机操作员）+
-  [`V5-G-FINAL.md`](V5-G-FINAL.md)（跨 hub 工作流编排，北极星第 2 层）
+  [`V5-G-FINAL.md`](./ledger/V5-G-FINAL.md)（跨 hub 工作流编排，北极星第 2 层）
 - 为什么这么建：[`CHARTER.md`](../../CHARTER.md) · [`CHARTER.md`](CHARTER.md)

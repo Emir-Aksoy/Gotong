@@ -134,10 +134,10 @@ GET  /api/admin/identity/invites/count      (owner-gated, M156)
 ### 新文档
 
 - `CLAUDE.md` — 项目根级 agent 北极星
-- `docs/zh/V4-PHASE7-13-PLAN.md` — Phase 7-13 路线图 (51 milestone)
+- `docs/zh/ledger/V4-PHASE7-13-PLAN.md` — Phase 7-13 路线图 (51 milestone)
 - `docs/zh/PERSONAL-HUB-RFC.md` — M3 设计决策
 - `docs/zh/PERSONAL-MODE.md` — 终端用户文档
-- `docs/zh/V4-PHASE7-FINAL.md` — 本文
+- `docs/zh/ledger/V4-PHASE7-FINAL.md` — 本文
 
 ---
 
@@ -171,7 +171,7 @@ GET  /api/admin/identity/invites/count      (owner-gated, M156)
 - 协议外通路 IM bridges + PWA + REPL (Phase 12)
 - AI 辅助 workflow 编辑器 (Phase 13)
 
-详见 `docs/zh/V4-PHASE7-13-PLAN.md`.
+详见 `docs/zh/ledger/V4-PHASE7-13-PLAN.md`.
 
 Phase 7 RFC 段末尾的 3 个 open 问题留给后续:
 1. **Multi-personal-hub federation** — 个人 hub 之间互联的 IM-style
@@ -189,7 +189,7 @@ Phase 7 RFC 段末尾的 3 个 open 问题留给后续:
 
 **预备工作**:
 - `CLAUDE.md` § "现在在哪段" 更新 Phase 7 状态为完成
-- `docs/zh/V4-PHASE7-13-PLAN.md` Phase 8 段已有详细 M1-M8 milestone
+- `docs/zh/ledger/V4-PHASE7-13-PLAN.md` Phase 8 段已有详细 M1-M8 milestone
 - 用户决策已拍板: "直接全部改 stream, complete 删除"
 
 **Phase 8 开工时建议**:

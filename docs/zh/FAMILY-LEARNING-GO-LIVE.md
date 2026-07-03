@@ -291,6 +291,6 @@ member 就是孩子在 `/me` 的身份。**多孩子** = 同一孩子 hub 加多
 - [`FAMILY-LEARNING-HUB-DESIGN.md`](FAMILY-LEARNING-HUB-DESIGN.md) — 完整设计蓝图（管辖权 / 四道闸 / 产品形态）
 - [`FEDERATION-RUNBOOK.md`](FEDERATION-RUNBOOK.md) — 两机联邦 onboarding（铸 token / 登记 peer / per-link 契约）
 - [`HANDS-ON-HUBS.md`](HANDS-ON-HUBS.md) — 真 DeepSeek + Obsidian go-live + 验证锚点分层
-- [`V5-G-FINAL.md`](V5-G-FINAL.md) — 跨 hub 工作流编排（通告=授权 + 两步恢复）
+- [`V5-G-FINAL.md`](./ledger/V5-G-FINAL.md) — 跨 hub 工作流编排（通告=授权 + 两步恢复）
 - [`KB-CONNECTORS.md`](KB-CONNECTORS.md) — Obsidian / 向量 RAG 连接器 + 读写治理
 - [`examples/family-learning-hub/README.md`](../../examples/family-learning-hub/README.md) — 案例总览 + 拓扑

@@ -441,7 +441,7 @@ example-only 折进**生产 `a2a_outbound_agents` 配置路径**——运维在 
 ## 十一、Item 2 — A2A 出站边过 P4-M4 闸（per-step data-class + 配额 + 可选出站审批）
 
 > 用户「做这两项，一项一项做」的**第二项**（第一项 = 管家 SW-M9 A→D）。本节记 A2A 那半；
-> ACP 那半记在 [`V5-ACP-ADAPTER.md`](V5-ACP-ADAPTER.md)「ACP 出站闸」节。一里程碑一小 commit
+> ACP 那半记在 [`V5-ACP-ADAPTER.md`](./V5-ACP-ADAPTER.md)「ACP 出站闸」节。一里程碑一小 commit
 > （`f7a772a`→`5812d85`，9 个）。
 
 ### 11.1 为什么做（缺口 = 结构上够不着，不是没做）

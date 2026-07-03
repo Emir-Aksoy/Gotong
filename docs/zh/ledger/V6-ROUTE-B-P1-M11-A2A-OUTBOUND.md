@@ -172,4 +172,4 @@ HTTP body 里、admin UI 里, 全程只有 `tokenEnv` 这个**变量名**。
 
 - 出站 participant 本体: `@aipehub/a2a` `A2aRemoteParticipant` (Phase 18 C-M4)
 - 入站对侧: host `a2a-server.ts` (`AIPE_A2A_INBOUND_ENABLED`) + Route B P1-M8 task lifecycle
-- 同模式的联邦配置收口: [`V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md`](V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md)
+- 同模式的联邦配置收口: [`V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md`](./V6-ROUTE-B-P1-M7-PEER-ONBOARDING.md)

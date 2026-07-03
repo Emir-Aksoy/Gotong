@@ -229,7 +229,7 @@ docs/zh/
    hub HITL 的最小集成模式:scheduler 不依赖任何 transport / link 类
    型,host 用 closure 桥接 PeerRegistry。读完知道核心 vs 集成的分层
    决策。
-5. **`docs/zh/AUDIT-v4-phase5.md`** — F1 全量 audit 的总览矩阵 + 4 个
+5. **`docs/zh/ledger/AUDIT-v4-phase5.md`** — F1 全量 audit 的总览矩阵 + 4 个
    高优先级 called-out concern。读完知道安全 baseline。
 
 ---

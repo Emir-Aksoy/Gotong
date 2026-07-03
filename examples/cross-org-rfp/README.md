@@ -55,7 +55,7 @@ exposes (`createInprocHubLinkPair` + `installPeerLink`).
 ## Why this matters for v4
 
 The "single host = single organisation, cross-org via federation"
-architectural choice in `docs/zh/V4-ARCH.md` lives or dies on
+architectural choice in `docs/zh/ledger/V4-ARCH.md` lives or dies on
 federation actually being usable for cross-org work. This demo is the
 proof: **the wiring is already a few lines of code**. v4's identity
 layer is what gets bolted on top — every org runs its own

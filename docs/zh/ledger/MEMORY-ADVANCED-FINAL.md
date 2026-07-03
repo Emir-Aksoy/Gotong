@@ -3,8 +3,8 @@
 > 用户指令「C/D/E/F/G 都做, 一起做一个计划先」+「定了我就一路做到底不再打断」——
 > 一次把 Personal Butler 记忆引擎 `@aipehub/personal-memory` 还缺的五项长期能力做实,
 > 再用一个收口里程碑 **Z** 把它们接进 host + example + `/me` 隐私视图。承接
-> [`MEMORY-TIERS-FINAL.md`](MEMORY-TIERS-FINAL.md) (③ 多级长期 × ⑤ 重要性) 与
-> [`PERSONAL-BUTLER-FINAL.md`](PERSONAL-BUTLER-FINAL.md) (管家骨架)。
+> [`MEMORY-TIERS-FINAL.md`](./MEMORY-TIERS-FINAL.md) (③ 多级长期 × ⑤ 重要性) 与
+> [`PERSONAL-BUTLER-FINAL.md`](./PERSONAL-BUTLER-FINAL.md) (管家骨架)。
 >
 > 三处用户锁定决策 (均推荐项): **D 双时态 opt-in, 默认关** (overwrite/真删 字节不变) ·
 > **收口深度 = 包内原语 + 单测 + example + 一个 Z 收口里程碑接 host** · **顺序 C→F→E→G→D→Z**。
@@ -237,4 +237,4 @@ example `[4]` 六项自断言全确定性、无 key、改坏即红:
 选项就不驱逐 → 纯靠手动 `forget`); embeddings 默认仍是 lexical; append-only `episodic`
 没有保留窗 (蒸馏成 `semantic` 后旧 episodic 不自动清, 同 `PERSONAL-BUTLER-FINAL.md` 推迟项)。
 
-详见 [`MEMORY-TIERS-FINAL.md`](MEMORY-TIERS-FINAL.md) · [`PERSONAL-BUTLER-FINAL.md`](PERSONAL-BUTLER-FINAL.md) · [`PERSONAL-BUTLER-DESIGN.md`](PERSONAL-BUTLER-DESIGN.md)。
+详见 [`MEMORY-TIERS-FINAL.md`](./MEMORY-TIERS-FINAL.md) · [`PERSONAL-BUTLER-FINAL.md`](./PERSONAL-BUTLER-FINAL.md) · [`PERSONAL-BUTLER-DESIGN.md`](../PERSONAL-BUTLER-DESIGN.md)。

@@ -91,7 +91,7 @@
 ### M7 — 全量测试 + Phase 7 收尾
 - pnpm -r build && pnpm -r test 全绿
 - 手动 smoke: docker run personal mode → 第一次对话 → workflow → 升级到团队 → 邀请第二个用户
-- 写 `docs/zh/V4-PHASE7-FINAL.md`
+- 写 `docs/zh/ledger/V4-PHASE7-FINAL.md`
 
 → commit: `docs: V4 Phase 7 release notes (Phase 7 M7)`
 

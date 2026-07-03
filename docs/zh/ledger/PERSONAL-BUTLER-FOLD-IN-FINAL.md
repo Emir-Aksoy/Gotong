@@ -1,6 +1,6 @@
 # 常驻管家 fold 进生产 host + 接管 IM 通道 — 收口 (BF-M1–M8 全完)
 
-> 把 [`PERSONAL-BUTLER-FINAL.md`](PERSONAL-BUTLER-FINAL.md) §十**显式推迟**的那一条
+> 把 [`PERSONAL-BUTLER-FINAL.md`](./PERSONAL-BUTLER-FINAL.md) §十**显式推迟**的那一条
 > ——「fold 进 host main.ts 当一等公民」——做实:让生产 `aipehub start` 注册的
 > `chat` agent **本身就是**一个 per-user 常驻管家,接管 IM 通道(飞书等),而且
 > **GitHub 代码库默认如此**。
@@ -355,11 +355,11 @@ statusProjectingReviewer({                       // ④写状态 → STATUS.md (
 
 ## 关联文档
 
-- 常驻管家收口(M1–M6):[`docs/zh/PERSONAL-BUTLER-FINAL.md`](PERSONAL-BUTLER-FINAL.md)
-- 建之前设计:[`docs/zh/PERSONAL-BUTLER-DESIGN.md`](PERSONAL-BUTLER-DESIGN.md)
-- 记忆多级 × 重要性:[`docs/zh/MEMORY-TIERS-FINAL.md`](MEMORY-TIERS-FINAL.md)
-- 记忆五项长期增强:[`docs/zh/MEMORY-ADVANCED-FINAL.md`](MEMORY-ADVANCED-FINAL.md)
-- 管家记忆四块增强(dreaming / 召回索引 / 自创·Umbrella 技能 / 6h 维护):[`docs/zh/MEMORY-DREAMING-SKILLS-FINAL.md`](MEMORY-DREAMING-SKILLS-FINAL.md)
+- 常驻管家收口(M1–M6):[`docs/zh/ledger/PERSONAL-BUTLER-FINAL.md`](./PERSONAL-BUTLER-FINAL.md)
+- 建之前设计:[`docs/zh/PERSONAL-BUTLER-DESIGN.md`](../PERSONAL-BUTLER-DESIGN.md)
+- 记忆多级 × 重要性:[`docs/zh/ledger/MEMORY-TIERS-FINAL.md`](./MEMORY-TIERS-FINAL.md)
+- 记忆五项长期增强:[`docs/zh/ledger/MEMORY-ADVANCED-FINAL.md`](./MEMORY-ADVANCED-FINAL.md)
+- 管家记忆四块增强(dreaming / 召回索引 / 自创·Umbrella 技能 / 6h 维护):[`docs/zh/ledger/MEMORY-DREAMING-SKILLS-FINAL.md`](./MEMORY-DREAMING-SKILLS-FINAL.md)
 - 持久任务:Phase 11(`SuspendTaskError` + `suspended_tasks` + resume sweep)
 - 成员收件箱:Phase 16(`@aipehub/inbox` + `HostInboxService` 两步恢复)
-- IM 桥:[`docs/zh/IM-BRIDGES.md`](IM-BRIDGES.md) · [`docs/zh/IM-OFFICIAL-REARCH.md`](IM-OFFICIAL-REARCH.md)
+- IM 桥:[`docs/zh/IM-BRIDGES.md`](../IM-BRIDGES.md) · [`docs/zh/IM-OFFICIAL-REARCH.md`](../IM-OFFICIAL-REARCH.md)

@@ -181,7 +181,7 @@ async function main(): Promise<void> {
   console.log(`\nOK — ${checks} assertions passed.`)
   console.log('The framework computed no vectors: the embedder (Scene 1) and the')
   console.log('vector store (Scene 2) were injected. See chroma-retriever.ts for the')
-  console.log('production chroma-mcp wiring, and docs/zh/MEMORY-ADVANCED-FINAL.md.')
+  console.log('production chroma-mcp wiring, and docs/zh/ledger/MEMORY-ADVANCED-FINAL.md.')
 }
 
 main().catch((err) => {

@@ -97,4 +97,4 @@ pnpm demo:cross-hub-workflow
 - **可调用 KB 白名单（C-M1）**：若 org B 还共享一个 MCP 知识库，per-link `allowedKnowledgeBases`
   决定 org A 能不能查。
 
-详见 [`docs/zh/V5-G-FINAL.md`](../../docs/zh/V5-G-FINAL.md)。
+详见 [`docs/zh/ledger/V5-G-FINAL.md`](../../docs/zh/ledger/V5-G-FINAL.md)。
