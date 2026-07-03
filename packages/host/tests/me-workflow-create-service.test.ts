@@ -493,3 +493,64 @@ describe('MeWorkflowCreateService.explain', () => {
     expect(calls.assistInputs[0]?.description).toBe('这步为什么要审批?')
   })
 })
+
+// --- createFromYaml (WIZ-M4) --------------------------------------------------
+// 向导「用户已同意」的 YAML 走与 create() 完全相同的成员闸落草稿——唯一差别是
+// 零 LLM（组装 + 修复回路向导已经跑完）。钉死：闸一个不少 + assist 一次不调。
+
+describe('MeWorkflowCreateService.createFromYaml', () => {
+  it('persists an approved yaml as a member-owned draft WITHOUT any assist call', async () => {
+    const { service, calls } = buildDeps({ assist: new Error('must not be called') })
+    const r = await service.createFromYaml({ yaml: LOCAL_WF, userId: 'alice' })
+    expect(r.ok).toBe(true)
+    if (!r.ok) return
+    expect(r.workflowId).toBe('my-flow')
+    expect(calls.assist).toBe(0) // 关键：不重跑 LLM，不漂离用户同意的那版
+    expect(calls.saveDraft).toEqual([{ text: LOCAL_WF, by: 'alice' }])
+    expect(calls.grants).toEqual([{ workflowId: 'my-flow', userId: 'alice', perm: 'owner' }])
+  })
+
+  it('★ rejects cross-hub egress BEFORE persistence (same gate as create) ★', async () => {
+    const { service, calls } = buildDeps({
+      assist: new Error('unused'),
+      peerCapabilities: PEER_VIEW,
+    })
+    const r = await service.createFromYaml({ yaml: CROSS_HUB_WF, userId: 'alice' })
+    expect(r.ok).toBe(false)
+    if (r.ok) return
+    expect(r.reason).toBe('cross_hub')
+    expect(calls.saveDraft).toHaveLength(0)
+  })
+
+  it('refuses an id collision before it can clobber an existing workflow', async () => {
+    const { service } = buildDeps({ assist: new Error('unused'), existingIds: ['my-flow'] })
+    const r = await service.createFromYaml({ yaml: LOCAL_WF, userId: 'alice' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('id_exists')
+  })
+
+  it('honors the opt-in per-member draft cap (it creates a draft too)', async () => {
+    const { service } = buildDeps({
+      assist: new Error('unused'),
+      perMemberDraftCap: 1,
+      ownedDrafts: 1,
+    })
+    const r = await service.createFromYaml({ yaml: LOCAL_WF, userId: 'alice' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('draft_cap')
+  })
+
+  it('maps garbage yaml / persist failure to the same typed reasons as create', async () => {
+    const bad = await buildDeps({ assist: new Error('unused') }).service.createFromYaml({
+      yaml: 'not: [valid workflow',
+      userId: 'alice',
+    })
+    expect(bad.ok).toBe(false)
+    if (!bad.ok) expect(bad.reason).toBe('parse_failed')
+
+    const failing = buildDeps({ assist: new Error('unused'), failPersist: new Error('gate said no') })
+    const r = await failing.service.createFromYaml({ yaml: LOCAL_WF, userId: 'alice' })
+    expect(r.ok).toBe(false)
+    if (!r.ok) expect(r.reason).toBe('structure_failed')
+  })
+})

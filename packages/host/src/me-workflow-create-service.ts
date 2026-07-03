@@ -256,20 +256,8 @@ export class MeWorkflowCreateService {
     const history = sanitizeEditHistory(req.history)
 
     // 0. Optional anti-abuse cap — opt-in (both knobs must be wired).
-    if (typeof this.deps.perMemberDraftCap === 'number' && this.deps.countOwnedDrafts) {
-      let owned: number
-      try {
-        owned = await this.deps.countOwnedDrafts(userId)
-      } catch {
-        owned = 0 // a counting hiccup must never wrongly block creation
-      }
-      if (owned >= this.deps.perMemberDraftCap) {
-        return denyCreate(
-          'draft_cap',
-          `你已经有 ${owned} 个工作流了(上限 ${this.deps.perMemberDraftCap})。先删掉一些再新建。`,
-        )
-      }
-    }
+    const capDeny = await this.checkDraftCap(userId)
+    if (capDeny) return capDeny
 
     // 1. Ask the AI to author a workflow from the description (author mode).
     let assist: WorkflowAssistantOutput
@@ -295,10 +283,68 @@ export class MeWorkflowCreateService {
       )
     }
 
-    // 2. Parse (defensive — `draftStatus==='valid'` already parsed once).
+    // 2-6. Shared gate tail (parse → local-only → collision → save → owner seed).
+    const persisted = await this.gateAndPersist(assist.yaml, userId)
+    if (!persisted.ok) return persisted
+
+    return {
+      ok: true,
+      workflowId: persisted.workflowId,
+      yaml: assist.yaml,
+      explanation: assist.explanation,
+      ...(assist.graph ? { graph: assist.graph } : {}),
+      ...(assist.deepCheck ? { deepCheck: assist.deepCheck } : {}),
+    }
+  }
+
+  /**
+   * WIZ-M4 — persist an ALREADY-AUTHORED yaml (the wizard's user-approved
+   * proposal) through exactly the same member gates as `create()`: draft cap →
+   * parse → ★local-only★ → id-collision → saveDraft (structure hard-gate) →
+   * owner seed. Deliberately NO LLM call — the wizard already ran authoring +
+   * the bounded repair loop; re-running `create(instruction)` here would burn
+   * tokens AND could drift from the exact YAML the member approved.
+   */
+  async createFromYaml(req: { yaml: string; userId: string }): Promise<MeWorkflowCreateResult> {
+    const capDeny = await this.checkDraftCap(req.userId)
+    if (capDeny) return capDeny
+    const persisted = await this.gateAndPersist(req.yaml, req.userId)
+    if (!persisted.ok) return persisted
+    // explanation 由向导的 compose 结果携带（同意面已经给用户看过），这里不再复述。
+    return { ok: true, workflowId: persisted.workflowId, yaml: req.yaml, explanation: '' }
+  }
+
+  /** Optional anti-abuse cap — opt-in (both knobs must be wired). Null = pass. */
+  private async checkDraftCap(userId: string): Promise<MeWorkflowCreateDenied | null> {
+    if (typeof this.deps.perMemberDraftCap !== 'number' || !this.deps.countOwnedDrafts) return null
+    let owned: number
+    try {
+      owned = await this.deps.countOwnedDrafts(userId)
+    } catch {
+      owned = 0 // a counting hiccup must never wrongly block creation
+    }
+    if (owned >= this.deps.perMemberDraftCap) {
+      return denyCreate(
+        'draft_cap',
+        `你已经有 ${owned} 个工作流了(上限 ${this.deps.perMemberDraftCap})。先删掉一些再新建。`,
+      )
+    }
+    return null
+  }
+
+  /**
+   * The gate tail shared by `create()` and `createFromYaml()` — every member
+   * write lands through the SAME sequence so the two entrances cannot drift:
+   * parse (defensive) → ★LOCAL-ONLY★ → id collision → saveDraft → owner seed.
+   */
+  private async gateAndPersist(
+    yaml: string,
+    userId: string,
+  ): Promise<{ ok: true; workflowId: string } | MeWorkflowCreateDenied> {
+    // 2. Parse (defensive — assist paths already parsed once).
     let def: WorkflowDefinition
     try {
-      def = parseWorkflow(assist.yaml)
+      def = parseWorkflow(yaml)
     } catch (err) {
       return denyCreate('parse_failed', 'AI 生成的工作流解析失败,请重试。', { detail: errMsg(err) })
     }
@@ -331,7 +377,7 @@ export class MeWorkflowCreateService {
     //    hard-gate + writes the YAML mirror + appends the genesis revision.
     let saved: { id: string }
     try {
-      saved = await this.deps.workflows.saveDraft(assist.yaml, { by: userId })
+      saved = await this.deps.workflows.saveDraft(yaml, { by: userId })
     } catch (err) {
       return denyCreate(
         'structure_failed',
@@ -349,14 +395,7 @@ export class MeWorkflowCreateService {
       /* best-effort */
     }
 
-    return {
-      ok: true,
-      workflowId: saved.id,
-      yaml: assist.yaml,
-      explanation: assist.explanation,
-      ...(assist.graph ? { graph: assist.graph } : {}),
-      ...(assist.deepCheck ? { deepCheck: assist.deepCheck } : {}),
-    }
+    return { ok: true, workflowId: saved.id }
   }
 
   /**
