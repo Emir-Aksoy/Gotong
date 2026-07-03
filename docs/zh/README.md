@@ -42,6 +42,7 @@
 
 **工作流**
 - [`WORKFLOW-ARCHITECT.md`](WORKFLOW-ARCHITECT.md) — 大白话 → YAML + 讲解 + 配图
+- [`WORKFLOW-WIZARD.md`](WORKFLOW-WIZARD.md) — 六段建流向导（盘点组件 → 组装 → 衡量缺口 → 用户同意 → 校验闭环）
 - [`AI-WORKFLOW-EDITOR.md`](AI-WORKFLOW-EDITOR.md) — 成员大白话改工作流
 - [`WORKFLOW-DAG-VIZ.md`](WORKFLOW-DAG-VIZ.md) — 只读 DAG 可视化
 
