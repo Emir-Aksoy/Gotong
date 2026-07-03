@@ -134,7 +134,10 @@ export interface TemplateCatalogEntry {
 // projection through the real parseTemplate (zero drift vs install) is memoized.
 let catalogCache: TemplateCatalogEntry[] | null = null
 
-function buildTemplateCatalog(): TemplateCatalogEntry[] {
+// Exported (WIZ-M4): the host's wizard catalog reuses the SAME projection the
+// gallery install preview shows — the wizard can't advertise a template the
+// gallery wouldn't install.
+export function buildTemplateCatalog(): TemplateCatalogEntry[] {
   if (catalogCache) return catalogCache
   const out: TemplateCatalogEntry[] = []
   for (const t of BUILTIN_TEMPLATES) {

@@ -59,6 +59,7 @@ import {
   handleWorkflowRoute,
   type WorkflowGrantSink,
 } from './workflow-routes.js'
+import { handleWizardAdminRoute, type WorkflowWizardSurface } from './wizard-routes.js'
 import { handleAgentsRoute, type AgentGrantSink, type LlmKeyProbe } from './agents-routes.js'
 import { handleAdminStewardRoute } from './admin-steward-routes.js'
 import { handleServicesRoute } from './services-routes.js'
@@ -395,6 +396,12 @@ export interface WebServerOptions {
    * has no runtime dep on the host — `MeWorkflowCreateSurface` is a duck type.
    */
   workflowCreate?: MeWorkflowCreateSurface
+  /**
+   * WIZ-M4 — optional 六段建流向导 surface (host wires `WorkflowWizardService`).
+   * When absent, `/api/admin/workflows/wizard/*` and `/api/me/workflows/wizard/*`
+   * return 503. Duck type — web has no runtime dep on the host.
+   */
+  workflowWizard?: WorkflowWizardSurface
   /**
    * SW-M6 — optional hub steward ("管家") surface. The host wires a
    * `HostStewardService` here. When absent, `POST /api/me/steward/plan` and
@@ -1298,6 +1305,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     inbox: opts.inbox,
     workflowEdit: opts.workflowEdit,
     workflowCreate: opts.workflowCreate,
+    workflowWizard: opts.workflowWizard,
     hubSteward: opts.hubSteward,
     operatorSteward: opts.operatorSteward,
     readinessGate: opts.readinessGate,
@@ -1464,6 +1472,8 @@ interface HandlerCtx {
   workflowEdit: MeWorkflowEditSurface | undefined
   /** ARCH-M6 — see WebServerOptions.workflowCreate doc above. */
   workflowCreate: MeWorkflowCreateSurface | undefined
+  /** WIZ-M4 — see WebServerOptions.workflowWizard doc above. */
+  workflowWizard: WorkflowWizardSurface | undefined
   /** SW-M6 — see WebServerOptions.hubSteward doc above. */
   hubSteward: MeHubStewardSurface | undefined
   /** SW-M9 A-M6 — see WebServerOptions.operatorSteward doc above. */
@@ -2082,6 +2092,8 @@ async function handle(
         // ARCH-M6 — member NL workflow AUTHORING + explain; undefined →
         // /me/workflows/create + /me/workflows/:id/explain return 503.
         workflowCreate: ctx.workflowCreate,
+        // WIZ-M4 — 六段建流向导; undefined → /me/workflows/wizard/* returns 503.
+        workflowWizard: ctx.workflowWizard,
         // SW-M6 — the hub steward ("管家"); undefined → /me/steward/* returns 503.
         hubSteward: ctx.hubSteward,
         // ease-of-use ①TC-ME — member "test connection" for a BYO key; the SAME
@@ -2215,6 +2227,21 @@ async function handle(
       }
     }
     return { userId: null, isOperator: true }
+  }
+  // WIZ-M4 — 建流向导（admin 面）。必须先于 handleWorkflowRoute 拦截，否则
+  // `/api/admin/workflows/wizard/*` 的 `wizard` 段会被当成 workflow id。
+  if (path.startsWith('/api/admin/workflows/wizard/')) {
+    const handled = await handleWizardAdminRoute(
+      {
+        wizard: ctx.workflowWizard,
+        requireAdmin: (rq, rs) => requireAdmin(ctx, rq, rs),
+      },
+      req,
+      res,
+      method,
+      path,
+    )
+    if (handled) return
   }
   if (path.startsWith('/api/admin/workflows')) {
     // P2-M5b — workflow RBAC is ON only when the identity store actually

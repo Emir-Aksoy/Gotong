@@ -43,6 +43,7 @@
 
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { readJsonBody, sendJson } from './http-helpers.js'
+import { handleMeWizardRoute, type WorkflowWizardSurface } from './wizard-routes.js'
 import { readRawBody } from './uploads-routes.js'
 
 import type { Hub } from '@aipehub/core'
@@ -849,6 +850,13 @@ export interface MeWorkflowCreateSurface {
     focus?: string
     onChunk?: (chunk: string) => void
   }): Promise<MeWorkflowExplainResult>
+  /**
+   * WIZ-M4 — persist the wizard's user-approved YAML through exactly the same
+   * member gates as `create` (draft cap / local-only / id collision / structure
+   * hard-gate / owner seed), with NO LLM call. Optional: absent ⇒ the wizard
+   * approve route degrades to 503 while create/explain keep working.
+   */
+  createFromYaml?(req: { yaml: string; userId: string }): Promise<MeWorkflowCreateResult>
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,6 +1018,12 @@ export interface HandleMeRouteCtx {
    */
   workflowCreate: MeWorkflowCreateSurface | undefined
   /**
+   * WIZ-M4 — 六段建流向导（确认→盘点→组装→衡量→提议→校验闭环）。Undefined when
+   * the host wired no wizard (no AI assistant); the
+   * `/api/me/workflows/wizard/*` routes then return 503.
+   */
+  workflowWizard: WorkflowWizardSurface | undefined
+  /**
    * SW-M6 — the hub steward ("管家"). Undefined when the host wired no steward
    * service (disabled, or no LLM key for the configured provider); the
    * `/api/me/steward/{plan,apply}` routes then return 503 so the member UI can
@@ -1092,6 +1106,25 @@ export async function handleMeRoute(
     if (method === 'POST' && path === '/api/me/workflows/create') {
       await handleMeWorkflowCreate(ctx, req, res, userId)
       return
+    }
+    // WIZ-M4 — 六段建流向导（prepare/compose/approve）。两段路径不会被上面的
+    // `/:id/...` 单段正则误配；实现在 wizard-routes.ts（控本文件行数预算）。
+    if (path.startsWith('/api/me/workflows/wizard/')) {
+      const handled = await handleMeWizardRoute(
+        {
+          wizard: ctx.workflowWizard,
+          create: ctx.workflowCreate?.createFromYaml
+            ? { createFromYaml: (r) => ctx.workflowCreate!.createFromYaml!(r) }
+            : undefined,
+          rateOk: (action) => checkMeRateLimit(ctx, userId, action),
+        },
+        req,
+        res,
+        method,
+        path,
+        userId,
+      )
+      if (handled) return
     }
     const edit = /^\/api\/me\/workflows\/([^/]+)\/edit$/.exec(path)
     if (edit && method === 'POST') {

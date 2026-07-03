@@ -146,6 +146,8 @@ import { SamlLoginService } from './saml-login-service.js'
 import { buildSpMetadata, SamlError } from '@aipehub/saml'
 import {
   serveWeb,
+  buildTemplateCatalog,
+  BUILTIN_MCP_CONNECTORS,
   type WebServerOptions,
   type OidcLoginSurface,
   type OidcProviderAdminSurface,
@@ -224,6 +226,7 @@ import { HostInboxService } from './inbox-service.js'
 import { FileCrossHubMarkerStore } from './cross-hub-marker.js'
 import { MeWorkflowEditService } from './me-workflow-edit-service.js'
 import { MeWorkflowCreateService } from './me-workflow-create-service.js'
+import { createWorkflowWizard } from './wizard-wiring.js'
 import { HostMeAgentService } from './me-agent-service.js'
 import { HostMeAgentGrantsService } from './me-agent-grants-service.js'
 import { HostMeCredentialsService } from './me-credentials-service.js'
@@ -2902,6 +2905,25 @@ async function main(): Promise<void> {
   // through the existing governed edit_agent). Ref read lazily at butler-build time.
   butlerDiagnoseAdaptRef = resourceAdaptation
 
+  // WIZ-M4 — 六段建流向导（确认→盘点→组装→衡量缺口→提议→校验闭环）。目录五源
+  // 每次调用现聚合（participants / MCP 注册表 / RES 探测 / 画廊模板卡片 / 内置
+  // 连接器），组装压既有 workflow:assist 面。assist 缺席 → null → 路由 503，与
+  // 架构师同降级；缺口补法只提议、装模板走既有画廊安装（人批准），落盘走
+  // createFromYaml 同闸。
+  const workflowWizard = workflowAssist
+    ? createWorkflowWizard({
+        assist: workflowAssist,
+        sources: {
+          participants: () => hub.participants(),
+          mcpServers: () => space.mcpServers(),
+          inventory: () => resourceInventory.inventory(),
+          templateCards: () => buildTemplateCatalog(),
+          connectors: () => BUILTIN_MCP_CONNECTORS,
+        },
+        existingWorkflowIds: async () => (await workflowController.list()).map((w) => w.id),
+      })
+    : null
+
   // setting-ops M4 — the deterministic ops console surface (the WEB face of
   // ops-core). One host service, three surfaces (CLI / web / IM). It binds
   // ops-core's deps ONCE: the space root (env-knob + pricing files default off
@@ -2993,6 +3015,8 @@ async function main(): Promise<void> {
     // RES-M2 — adaptation proposal engine over that inventory. Pure/read-only;
     // proposals are enacted only by RES-M3 apply on explicit human approval.
     resourceAdaptation,
+    // WIZ-M4 — 建流向导（admin + /me 两组路由压同一个核）。null → 路由 503。
+    ...(workflowWizard ? { workflowWizard } : {}),
     // setting-ops M4 — deterministic ops console (status / check / fix-dirs /
     // config + owner config-write). No destructive routes; ops-core's chokepoint
     // refuses cold-start / restore / rotate-master-key (CLI-only by physics).

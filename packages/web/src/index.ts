@@ -1,5 +1,14 @@
 export { serveWeb } from './server.js'
 export type { WebServerOptions, WebServerHandle, UploadSurface } from './server.js'
+// WIZ-M4 — the host's wizard catalog consumes the SAME built-in preset lists the
+// admin UI shows: gallery template cards (per-agent capabilities included) + the
+// curated MCP connector directory. Exported so main.ts can feed them into
+// `collectCatalogInputs` without re-parsing manifests.
+export { buildTemplateCatalog } from './template-routes.js'
+export type { TemplateCatalogEntry } from './template-routes.js'
+export { BUILTIN_MCP_CONNECTORS } from './builtin-mcp-connectors.js'
+export type { BuiltinMcpConnector } from './builtin-mcp-connectors.js'
+export type { WorkflowWizardSurface } from './wizard-routes.js'
 // Route B P1-M4e/M4f — the host implements these duck-typed surfaces to wire
 // SSO login + the admin IdP-provider registry.
 export type { OidcLoginSurface } from './server.js'
