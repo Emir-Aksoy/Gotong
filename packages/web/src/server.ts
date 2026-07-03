@@ -64,7 +64,7 @@ import { handleAgentsRoute, type AgentGrantSink, type LlmKeyProbe } from './agen
 import { handleAdminStewardRoute } from './admin-steward-routes.js'
 import { handleServicesRoute } from './services-routes.js'
 import { handleUploadsRoute } from './uploads-routes.js'
-import { handleSetupRoute, isBootstrapPending, isLoopbackReq } from './setup-routes.js'
+import { handleSetupRoute, isBootstrapPending, isLoopbackReq, type SetupRoutesCtx } from './setup-routes.js'
 import { handleAdminRoute } from './admin-routes.js'
 import {
   handleMcpRoute,
@@ -356,6 +356,13 @@ export interface WebServerOptions {
    * endpoints return 503 and the UI can hide the 测试连接 button.
    */
   llmKeyTest?: LlmKeyTestSurface
+  /**
+   * DEPLOY-B2 — optional IM-bridge hot-start surface for the first-run
+   * wizard's IM step (duck-typed to the host's `startPlatform` seam).
+   * Absent → the setup route still saves the token to vault and reports
+   * "starts on next boot".
+   */
+  imHotStart?: SetupRoutesCtx['imHotStart']
   /**
    * Optional Hub Services admin surface (PR-11). The host wires
    * `hubServices.asAdminSurface()` here. When absent, all
@@ -1300,6 +1307,7 @@ export function serveWeb(hub: Hub, opts: WebServerOptions = {}): Promise<WebServ
     meIm: opts.meIm,
     workflowAssist: opts.workflowAssist,
     llmKeyTest: opts.llmKeyTest,
+    imHotStart: opts.imHotStart,
     services: opts.services,
     growthReports: opts.growthReports,
     inbox: opts.inbox,
@@ -1464,6 +1472,8 @@ interface HandlerCtx {
   workflowAssist: WorkflowAssistSurface | undefined
   /** ease-of-use ① — see WebServerOptions.llmKeyTest doc above. */
   llmKeyTest: LlmKeyTestSurface | undefined
+  /** DEPLOY-B2 — see WebServerOptions.imHotStart doc above. */
+  imHotStart: SetupRoutesCtx['imHotStart'] | undefined
   services: ServicesAdminSurface | undefined
   growthReports: GrowthReportsAdminSurface | undefined
   /** Phase 16 — see WebServerOptions.inbox doc above. */
@@ -2148,7 +2158,7 @@ async function handle(
   // any credential exists. See setup-routes.ts for the loopback trust model.
   if (path.startsWith('/api/setup/')) {
     const handled = await handleSetupRoute(
-      { identity: ctx.identity, llmKeyTest: ctx.llmKeyTest },
+      { identity: ctx.identity, llmKeyTest: ctx.llmKeyTest, imHotStart: ctx.imHotStart },
       req, res, method, path,
     )
     if (handled) return

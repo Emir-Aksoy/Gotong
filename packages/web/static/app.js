@@ -324,9 +324,10 @@
     }
     const status = document.getElementById('setup-key-status')
     const skipBtn = document.getElementById('setup-key-skip')
-    // Skip → straight to the login screen (empty cookie state).
+    // Skip → advance to the (also optional) IM step. DEPLOY-B2: the wizard
+    // ends at the IM step now, which reloads to the login screen.
     if (skipBtn) {
-      skipBtn.addEventListener('click', () => { window.location.reload() })
+      skipBtn.addEventListener('click', () => { revealImStep(keyForm) })
     }
     // ease-of-use ①TC — "test connection" probes the typed key WITHOUT saving
     // it, so a wrong key / wrong provider / empty balance is caught here. Maps
@@ -408,7 +409,94 @@
         }
         status.className = 'login-status ok'
         status.textContent = t('setupKeySaved')
-        setTimeout(() => { window.location.reload() }, 700)
+        setTimeout(() => { revealImStep(keyForm) }, 700)
+      } catch (err) {
+        status.className = 'login-status error'
+        status.textContent = t('meSetupFailedErr', err?.message || err)
+      }
+    })
+  }
+
+  // DEPLOY-B2 — first-run IM step (the third wizard panel). Saves the bot
+  // credential to the org vault and hot-starts the bridge, so "paste the
+  // token → the bot answers" happens inside the wizard, no restart. Both
+  // exits (save / skip) reload to the login screen.
+  function revealImStep(prevForm) {
+    const imForm = document.getElementById('setup-im-form')
+    if (!imForm) { window.location.reload(); return }
+    if (prevForm) prevForm.hidden = true
+    imForm.hidden = false
+    attachImForm(imForm)
+  }
+
+  function attachImForm(imForm) {
+    if (imForm.dataset.bound === '1') return
+    imForm.dataset.bound = '1'
+    const status = document.getElementById('setup-im-status')
+    const skipBtn = document.getElementById('setup-im-skip')
+    if (skipBtn) {
+      skipBtn.addEventListener('click', () => { window.location.reload() })
+    }
+    // Platform choice toggles which credential fields show: telegram is one
+    // token; lark is appId + appSecret (the same split the backend stores).
+    // style.display, not the hidden attribute — the login-card's `label {
+    // display:block }` rule outweighs the UA's `[hidden]` style.
+    const platSel = document.getElementById('setup-im-platform')
+    const tokenLabel = document.getElementById('setup-im-token-label')
+    const appIdLabel = document.getElementById('setup-im-appid-label')
+    const appSecretLabel = document.getElementById('setup-im-appsecret-label')
+    const syncFields = () => {
+      const lark = platSel && platSel.value === 'lark'
+      if (tokenLabel) tokenLabel.style.display = lark ? 'none' : ''
+      if (appIdLabel) appIdLabel.style.display = lark ? '' : 'none'
+      if (appSecretLabel) appSecretLabel.style.display = lark ? '' : 'none'
+    }
+    if (platSel) bindOnce(platSel, 'change', syncFields)
+    syncFields()
+    imForm.addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const fd = new FormData(imForm)
+      const platform = String(fd.get('platform') || 'telegram')
+      const body = { platform }
+      if (platform === 'telegram') {
+        const token = String(fd.get('token') || '').trim()
+        if (!token) {
+          status.className = 'login-status error'
+          status.textContent = t('setupImNeedToken')
+          return
+        }
+        body.token = token
+      } else {
+        const appId = String(fd.get('appId') || '').trim()
+        const appSecret = String(fd.get('appSecret') || '').trim()
+        if (!appId || !appSecret) {
+          status.className = 'login-status error'
+          status.textContent = t('setupImNeedLark')
+          return
+        }
+        body.appId = appId
+        body.appSecret = appSecret
+      }
+      status.className = 'login-status'
+      status.textContent = t('setupImSaving')
+      try {
+        const r = await fetch('/api/setup/owner-im', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!r.ok) {
+          const j = await r.json().catch(() => ({}))
+          status.className = 'login-status error'
+          status.textContent = j?.error || t('meSetupFailedHttp', r.status)
+          return
+        }
+        const j = await r.json().catch(() => ({}))
+        // Honest verdict: the token is saved either way; the difference is
+        // whether the bridge is ALREADY answering or needs the next restart.
+        status.className = 'login-status ok'
+        status.textContent = j?.bridge?.started ? t('setupImSavedLive') : t('setupImSavedRestart')
+        setTimeout(() => { window.location.reload() }, 1200)
       } catch (err) {
         status.className = 'login-status error'
         status.textContent = t('meSetupFailedErr', err?.message || err)

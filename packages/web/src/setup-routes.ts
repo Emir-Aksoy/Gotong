@@ -63,6 +63,18 @@ export interface SetupRoutesCtx {
       message?: string
     }>
   }
+  /**
+   * DEPLOY-B2 — optional "bring the IM bridge up now" surface, duck-typed to
+   * the host's hot-start seam (`ImBridgesHandle.startPlatform`). Absent →
+   * `/api/setup/owner-im` still writes the vault row and honestly reports the
+   * bridge starts on next boot.
+   */
+  imHotStart?: {
+    start(platform: 'telegram' | 'lark'): Promise<
+      | { ok: true; source?: string }
+      | { ok: false; reason: string; detail?: string }
+    >
+  }
 }
 
 // -- helpers --------------------------------------------------------------
@@ -304,6 +316,134 @@ export async function handleSetupRoute(
       } catch { /* audit failure is non-fatal */ }
     }
     sendJson(res, { ok: true, provider })
+    return true
+  }
+
+  // DEPLOY-B2 — optional first-run IM step. Mirrors the owner-llm-key gates
+  // (loopback + single-user bootstrap window) and writes the org vault row
+  // the host's `resolveImCreds` reads (`kind='im_bridge'`, metadata.platform
+  // as the resolution tag). Then asks the host — through the optional
+  // `imHotStart` surface — to bring the bridge up NOW, so the wizard's
+  // promise is "paste the token, the bot answers", not "…after a restart".
+  // The bridge result is reported honestly: `started: false` still means the
+  // token IS saved (a restart will pick it up via the same vault row).
+  if (path === '/api/setup/owner-im' && method === 'POST') {
+    const id = ctx.identity
+    if (
+      !id ||
+      typeof id.createVaultEntry !== 'function' ||
+      typeof id.listVaultEntries !== 'function'
+    ) {
+      sendJson(res, { error: 'v4 identity vault not enabled on this host' }, 503)
+      return true
+    }
+    const sockAddr = req.socket?.remoteAddress ?? ''
+    if (!isLoopbackReq(req)) {
+      sendJson(
+        res,
+        { error: 'setup-owner-im is loopback-only; configure IM via env vars on a remote host' },
+        403,
+      )
+      return true
+    }
+    const users = id.listUsers()
+    if (users.length !== 1) {
+      sendJson(res, { error: 'setup already complete (multi-user host)' }, 409)
+      return true
+    }
+    const owner = users[0]!
+    let body: unknown
+    try { body = await readJsonBody(req) }
+    catch { sendJson(res, { error: 'invalid JSON body' }, 400); return true }
+    const b = (body ?? {}) as {
+      platform?: unknown
+      token?: unknown
+      appId?: unknown
+      appSecret?: unknown
+    }
+    const platform = typeof b.platform === 'string' ? b.platform : ''
+    if (platform !== 'telegram' && platform !== 'lark') {
+      sendJson(res, { error: 'unsupported platform (allowed: telegram, lark)' }, 400)
+      return true
+    }
+    // Per-platform shape: telegram is one token; lark is appId (non-secret,
+    // goes to metadata) + appSecret (the vault secret). Same split
+    // `resolveImCreds` reads back.
+    let secret: string
+    let metadata: Record<string, unknown>
+    if (platform === 'telegram') {
+      const token = typeof b.token === 'string' ? b.token.trim() : ''
+      if (!token) { sendJson(res, { error: 'token is required' }, 400); return true }
+      secret = token
+      metadata = { platform, registeredBy: 'setup-wizard' }
+    } else {
+      const appId = typeof b.appId === 'string' ? b.appId.trim() : ''
+      const appSecret = typeof b.appSecret === 'string' ? b.appSecret.trim() : ''
+      if (!appId || !appSecret) {
+        sendJson(res, { error: 'appId and appSecret are required' }, 400)
+        return true
+      }
+      secret = appSecret
+      metadata = { platform, appId, registeredBy: 'setup-wizard' }
+    }
+    // Overwrite hygiene — same as owner-llm-key: revoke prior active rows for
+    // the platform so wizard re-runs don't stack stale tokens (resolveImCreds
+    // already picks newest; this just keeps the vault clean). Best-effort.
+    try {
+      const prior = id
+        .listVaultEntries({ kind: 'im_bridge', ownerKind: 'org', activeOnly: true })
+        .filter((e) => {
+          const m = e.metadata
+          return !!m && typeof m === 'object' && (m as Record<string, unknown>).platform === platform
+        })
+      if (typeof id.revokeVaultEntry === 'function') {
+        for (const e of prior) id.revokeVaultEntry(e.id)
+      }
+    } catch { /* overwrite cleanup is best-effort */ }
+    try {
+      id.createVaultEntry({
+        kind: 'im_bridge',
+        ownerKind: 'org',
+        ownerId: null,
+        secret,
+        label: null,
+        metadata,
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      sendJson(res, { error: `vault write failed: ${msg}` }, 400)
+      return true
+    }
+    // Hot-start AFTER the vault write (the host resolves creds at call time,
+    // so ordering is the contract). Absent surface / refusal / throw all
+    // degrade to "saved; starts on next boot" — never to a lost token.
+    let bridge: { started: boolean; source?: string; reason?: string; detail?: string }
+    if (ctx.imHotStart) {
+      try {
+        const r = await ctx.imHotStart.start(platform)
+        bridge = r.ok
+          ? { started: true, ...(r.source ? { source: r.source } : {}) }
+          : { started: false, reason: r.reason ?? 'start_failed', ...(r.detail ? { detail: r.detail } : {}) }
+      } catch (err) {
+        bridge = { started: false, reason: 'start_failed', detail: String(err) }
+      }
+    } else {
+      bridge = { started: false, reason: 'not_wired' }
+    }
+    // Audit: platform only — the token never appears anywhere but the vault.
+    if (typeof id.writeAuditLog === 'function') {
+      try {
+        id.writeAuditLog({
+          action: 'setup_owner_im',
+          actorSource: 'anonymous',
+          targetUserId: owner.id,
+          ip: sockAddr,
+          metadata: { platform, bridgeStarted: bridge.started },
+          success: true,
+        })
+      } catch { /* audit failure is non-fatal */ }
+    }
+    sendJson(res, { ok: true, platform, bridge })
     return true
   }
 

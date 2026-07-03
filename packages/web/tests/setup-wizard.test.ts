@@ -46,6 +46,13 @@ async function boot(opts: {
   withIdentity?: boolean
   preSetPassword?: boolean
   preCreateExtraUser?: boolean
+  /** DEPLOY-B2 — fake hot-start surface for the owner-im tests. */
+  imHotStart?: {
+    start(platform: 'telegram' | 'lark'): Promise<
+      | { ok: true; source?: string }
+      | { ok: false; reason: string; detail?: string }
+    >
+  }
 } = {}): Promise<BootResult> {
   const withIdentity = opts.withIdentity ?? true
   const tmp = await mkdtemp(join(tmpdir(), 'aipehub-web-setup-'))
@@ -88,6 +95,7 @@ async function boot(opts: {
     host: '127.0.0.1',
     port: 0,
     ...(identity ? { identity } : {}),
+    ...(opts.imHotStart ? { imHotStart: opts.imHotStart } : {}),
   })
 
   return {
@@ -386,6 +394,157 @@ describe('POST /api/setup/owner-llm-key', () => {
     try {
       const r = await postKey(b.baseUrl, '{not json')
       expect(r.status).toBe(400)
+    } finally { await teardown(b) }
+  })
+})
+
+// DEPLOY-B2 — the optional IM step. Same gates as owner-llm-key (loopback +
+// single-user window), writes the `im_bridge` org vault row `resolveImCreds`
+// reads, then asks the injected hot-start surface to bring the bridge up.
+describe('POST /api/setup/owner-im', () => {
+  async function postIm(baseUrl: string, body: unknown): Promise<Response> {
+    return fetch(`${baseUrl}/api/setup/owner-im`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: typeof body === 'string' ? body : JSON.stringify(body),
+    })
+  }
+
+  it('telegram happy path — vault row + hot-start called + audit', async () => {
+    const started: string[] = []
+    const b = await boot({
+      imHotStart: {
+        async start(platform) {
+          started.push(platform)
+          return { ok: true, source: 'vault' }
+        },
+      },
+    })
+    try {
+      const r = await postIm(b.baseUrl, { platform: 'telegram', token: 'tg-bot-token-123' })
+      expect(r.status).toBe(200)
+      expect(await r.json()).toEqual({
+        ok: true,
+        platform: 'telegram',
+        bridge: { started: true, source: 'vault' },
+      })
+      expect(started).toEqual(['telegram'])
+
+      // The vault row carries the platform tag; the token is the secret.
+      const rows = b.identity!.listVaultEntries!({ kind: 'im_bridge', ownerKind: 'org', activeOnly: true })
+      expect(rows.length).toBe(1)
+      expect(rows[0]!.metadata?.platform).toBe('telegram')
+      expect(rows[0]!.metadata?.registeredBy).toBe('setup-wizard')
+      if (typeof b.identity!.readVaultSecret === 'function') {
+        expect(b.identity!.readVaultSecret(rows[0]!.id)).toBe('tg-bot-token-123')
+      }
+
+      // Audit: platform + bridge outcome, never the token.
+      const audit = b.identity!.listAuditLog!({ action: 'setup_owner_im' })
+      expect(audit.length).toBe(1)
+      expect(audit[0]!.targetUserId).toBe(b.ownerUserId)
+      expect(audit[0]!.metadata?.platform).toBe('telegram')
+      expect(audit[0]!.metadata?.bridgeStarted).toBe(true)
+    } finally { await teardown(b) }
+  })
+
+  it('lark happy path — appId in metadata, appSecret is the secret', async () => {
+    const b = await boot({
+      imHotStart: { async start() { return { ok: true, source: 'vault' } } },
+    })
+    try {
+      const r = await postIm(b.baseUrl, { platform: 'lark', appId: 'cli_123', appSecret: 'lark-secret' })
+      expect(r.status).toBe(200)
+      const rows = b.identity!.listVaultEntries!({ kind: 'im_bridge', ownerKind: 'org', activeOnly: true })
+      expect(rows.length).toBe(1)
+      expect(rows[0]!.metadata?.platform).toBe('lark')
+      expect(rows[0]!.metadata?.appId).toBe('cli_123')
+      if (typeof b.identity!.readVaultSecret === 'function') {
+        expect(b.identity!.readVaultSecret(rows[0]!.id)).toBe('lark-secret')
+      }
+    } finally { await teardown(b) }
+  })
+
+  it('no hot-start surface → token saved, honest not_wired verdict', async () => {
+    const b = await boot()
+    try {
+      const r = await postIm(b.baseUrl, { platform: 'telegram', token: 'tg-token' })
+      expect(r.status).toBe(200)
+      expect(await r.json()).toEqual({
+        ok: true,
+        platform: 'telegram',
+        bridge: { started: false, reason: 'not_wired' },
+      })
+      const rows = b.identity!.listVaultEntries!({ kind: 'im_bridge', ownerKind: 'org', activeOnly: true })
+      expect(rows.length).toBe(1)
+    } finally { await teardown(b) }
+  })
+
+  it('hot-start refusal → 200 with started:false, vault row kept', async () => {
+    const b = await boot({
+      imHotStart: {
+        async start() { return { ok: false, reason: 'start_failed', detail: 'bad token' } },
+      },
+    })
+    try {
+      const r = await postIm(b.baseUrl, { platform: 'telegram', token: 'tg-token' })
+      expect(r.status).toBe(200)
+      const j = await r.json()
+      expect(j.bridge).toEqual({ started: false, reason: 'start_failed', detail: 'bad token' })
+      // The row survives — a restart still picks it up.
+      const rows = b.identity!.listVaultEntries!({ kind: 'im_bridge', ownerKind: 'org', activeOnly: true })
+      expect(rows.length).toBe(1)
+    } finally { await teardown(b) }
+  })
+
+  it('re-submitting the same platform revokes the prior row (overwrite hygiene)', async () => {
+    const b = await boot()
+    try {
+      await postIm(b.baseUrl, { platform: 'telegram', token: 'first' })
+      await postIm(b.baseUrl, { platform: 'telegram', token: 'second' })
+      const active = b.identity!.listVaultEntries!({ kind: 'im_bridge', ownerKind: 'org', activeOnly: true })
+      expect(active.length).toBe(1)
+      const all = b.identity!.listVaultEntries!({ kind: 'im_bridge', ownerKind: 'org', activeOnly: false })
+      expect(all.length).toBe(2)
+    } finally { await teardown(b) }
+  })
+
+  it('multi-user host → 409, nothing written', async () => {
+    const b = await boot({ preCreateExtraUser: true })
+    try {
+      const r = await postIm(b.baseUrl, { platform: 'telegram', token: 'tg-token' })
+      expect(r.status).toBe(409)
+      const rows = b.identity!.listVaultEntries!({ kind: 'im_bridge', ownerKind: 'org', activeOnly: true })
+      expect(rows.length).toBe(0)
+    } finally { await teardown(b) }
+  })
+
+  it('unsupported platform → 400', async () => {
+    const b = await boot()
+    try {
+      const r = await postIm(b.baseUrl, { platform: 'qq', token: 'x' })
+      expect(r.status).toBe(400)
+      expect((await r.json()).error).toMatch(/unsupported platform/)
+    } finally { await teardown(b) }
+  })
+
+  it('telegram without token / lark with half creds → 400', async () => {
+    const b = await boot()
+    try {
+      const r1 = await postIm(b.baseUrl, { platform: 'telegram', token: '  ' })
+      expect(r1.status).toBe(400)
+      const r2 = await postIm(b.baseUrl, { platform: 'lark', appId: 'cli_1' })
+      expect(r2.status).toBe(400)
+      const rows = b.identity!.listVaultEntries!({ kind: 'im_bridge', ownerKind: 'org', activeOnly: true })
+      expect(rows.length).toBe(0)
+    } finally { await teardown(b) }
+  })
+
+  it('identity unwired → 503', async () => {
+    const b = await boot({ withIdentity: false })
+    try {
+      const r = await postIm(b.baseUrl, { platform: 'telegram', token: 'tg-token' })
+      expect(r.status).toBe(503)
     } finally { await teardown(b) }
   })
 })

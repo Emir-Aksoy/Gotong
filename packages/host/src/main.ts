@@ -3115,6 +3115,20 @@ async function main(): Promise<void> {
     // the key the caller types, no host config. Powers the 测试连接 button
     // in the setup wizard and the agent-create form.
     llmKeyTest: createLlmKeyTestSurface(),
+    // DEPLOY-B2 — the setup wizard's IM step hot-starts the bridge it just
+    // wrote a token for, through the B1 seam. Reads `imBridges` lazily so
+    // the closure works regardless of construction order; no handle (or no
+    // seam) degrades to "saved; starts on next boot" inside the route.
+    imHotStart: {
+      start: async (platform) => {
+        const startPlatform = imBridges?.startPlatform
+        if (!startPlatform) return { ok: false as const, reason: 'not_wired' }
+        const r = await startPlatform(platform)
+        return r.ok
+          ? { ok: true as const, source: r.source }
+          : { ok: false as const, reason: r.reason, ...(r.detail ? { detail: r.detail } : {}) }
+      },
+    },
     // services may be undefined if bootstrap failed; serveWeb handles
     // that by responding 503 on the /api/admin/services/* routes.
     ...(services ? { services: services.asAdminSurface() } : {}),

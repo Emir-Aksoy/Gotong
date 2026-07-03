@@ -1689,7 +1689,24 @@
       setupKeySkip: '跳过,以后再配',
       setupKeyNeed: '请填入 API Key,或点「跳过」。',
       setupKeySaving: '保存中…',
-      setupKeySaved: 'Key 已保存,去登录…',
+      setupKeySaved: 'Key 已保存,进入下一步…',
+      // DEPLOY-B2 — first-run IM step (wizard step 3).
+      setupImTitle: '第三步 (可选) — 接一个 IM 机器人',
+      setupImIntro: '填一个机器人凭证,成员就能直接在聊天软件里用这个 hub(出站长连接,家里电脑不用公网)。token 只存本机加密保险库。也可以跳过,以后用环境变量配。',
+      setupImPlatform: '平台',
+      setupImPlatformTelegram: 'Telegram (找 @BotFather 建机器人)',
+      setupImPlatformLark: '飞书 / Lark (企业自建应用)',
+      setupImToken: 'Bot Token',
+      setupImTokenPlaceholder: '粘贴 BotFather 给的 token',
+      setupImAppId: 'App ID',
+      setupImAppSecret: 'App Secret',
+      setupImSubmit: '保存并启动机器人',
+      setupImSkip: '跳过,以后再配',
+      setupImNeedToken: '请填入 Bot Token,或点「跳过」。',
+      setupImNeedLark: '请填入 App ID 和 App Secret,或点「跳过」。',
+      setupImSaving: '保存并启动中…',
+      setupImSavedLive: '机器人已上线!去登录,然后在「我的」里领绑定码私信它。',
+      setupImSavedRestart: 'token 已保存,重启 host 后机器人上线。去登录…',
       // ease-of-use ①TC — "test connection" probe (shared by the setup wizard
       // key step AND the admin agent-create form). The verdict `code` → 人话
       // mapping lives in describeKeyTest() below; these are its strings.
@@ -3560,7 +3577,24 @@
       setupKeySkip: 'Skip, configure later',
       setupKeyNeed: 'Enter an API key, or click "Skip".',
       setupKeySaving: 'Saving…',
-      setupKeySaved: 'Key saved, heading to sign-in…',
+      setupKeySaved: 'Key saved, next step…',
+      // DEPLOY-B2 — first-run IM step (wizard step 3).
+      setupImTitle: 'Step 3 (optional) — connect an IM bot',
+      setupImIntro: 'Add a bot credential and members can use this hub straight from their chat app (outbound long-poll — a home machine needs no public endpoint). The token lives only in this machine\'s encrypted vault. You can skip and configure via env vars later.',
+      setupImPlatform: 'Platform',
+      setupImPlatformTelegram: 'Telegram (create a bot via @BotFather)',
+      setupImPlatformLark: 'Feishu / Lark (custom enterprise app)',
+      setupImToken: 'Bot token',
+      setupImTokenPlaceholder: 'Paste the token from BotFather',
+      setupImAppId: 'App ID',
+      setupImAppSecret: 'App Secret',
+      setupImSubmit: 'Save and start the bot',
+      setupImSkip: 'Skip, configure later',
+      setupImNeedToken: 'Enter the bot token, or click "Skip".',
+      setupImNeedLark: 'Enter both App ID and App Secret, or click "Skip".',
+      setupImSaving: 'Saving and starting…',
+      setupImSavedLive: 'Bot is live! Sign in, then grab a binding code under "Me" and DM it to the bot.',
+      setupImSavedRestart: 'Token saved — the bot starts on the next host restart. Heading to sign-in…',
       // ease-of-use ①TC — "test connection" probe (shared by the setup wizard
       // key step AND the admin agent-create form). The verdict `code` → words
       // mapping lives in describeKeyTest() below; these are its strings.

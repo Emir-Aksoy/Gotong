@@ -117,6 +117,40 @@
           <small class="login-meta" data-i18n="testConnHint">会用你填的 Key 向模型方发一次最小请求来验证。只用来测试,不保存、不外传。</small>
           <div id="setup-key-status" class="login-status"></div>
         </form>
+
+        <!-- DEPLOY-B2 — optional third step. Revealed after the key step
+             (saved or skipped). Writes the bot token to the org vault
+             (loopback-only POST /api/setup/owner-im) and hot-starts the
+             bridge — the promise is "paste the token, the bot answers".
+             "Skip" reloads straight to the login screen. -->
+        <form id="setup-im-form" hidden>
+          <h2 data-i18n="setupImTitle">第三步 (可选) — 接一个 IM 机器人</h2>
+          <p class="login-meta" data-i18n="setupImIntro">
+            填一个机器人凭证,成员就能直接在聊天软件里用这个 hub(出站长连接,家里电脑不用公网)。token 只存本机加密保险库。也可以跳过,以后用环境变量配。
+          </p>
+          <label><span data-i18n="setupImPlatform">平台</span>
+            <select name="platform" id="setup-im-platform">
+              <option value="telegram" data-i18n="setupImPlatformTelegram">Telegram (找 @BotFather 建机器人)</option>
+              <option value="lark" data-i18n="setupImPlatformLark">飞书 / Lark (企业自建应用)</option>
+            </select>
+          </label>
+          <label id="setup-im-token-label"><span data-i18n="setupImToken">Bot Token</span>
+            <input name="token" type="password" autocomplete="off" spellcheck="false" data-i18n-placeholder="setupImTokenPlaceholder" placeholder="粘贴 BotFather 给的 token" />
+          </label>
+          <!-- style not [hidden]: the card's `label{display:block}` rule
+               outweighs the UA hidden style; app.js syncFields toggles these. -->
+          <label id="setup-im-appid-label" style="display:none"><span data-i18n="setupImAppId">App ID</span>
+            <input name="appId" type="text" autocomplete="off" spellcheck="false" placeholder="cli_xxx" />
+          </label>
+          <label id="setup-im-appsecret-label" style="display:none"><span data-i18n="setupImAppSecret">App Secret</span>
+            <input name="appSecret" type="password" autocomplete="off" spellcheck="false" />
+          </label>
+          <div class="login-row">
+            <button type="submit" data-i18n="setupImSubmit">保存并启动机器人</button>
+            <button type="button" id="setup-im-skip" class="ghost" data-i18n="setupImSkip">跳过,以后再配</button>
+          </div>
+          <div id="setup-im-status" class="login-status"></div>
+        </form>
       </div>
     </section>
 
