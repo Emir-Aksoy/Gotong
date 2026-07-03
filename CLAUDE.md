@@ -185,6 +185,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 项目宪章（认知 / 北极星三不可破 / 三层用途 / 信任护城河 / 愿景；与代码冲突时宪章为源） | `CHARTER.md` · `docs/zh/CHARTER.md` |
 | 5 分钟总览 | `docs/zh/OVERVIEW.md` |
 | 框架设计哲学 + 模块边界 | `docs/zh/ARCHITECTURE.md` |
+| 给框架加能力而不加耦合（host↔web 鸭子 `*Surface` 注入；web 运行时不依赖 host；加新能力配方） | `docs/zh/SURFACE-PATTERN.md` |
 | 协议规约（v1.2） | `docs/PROTOCOL.md` |
 | 产品定位（赛道地图 + 产品级矩阵 + 目标用户） | `docs/zh/COMPETITIVE-LANDSCAPE.md` · `docs/zh/PRODUCT-MATRIX.md` |
 | 部署视角（`AIPE_PROFILE=hub\|federation` 入口先讲 hub 内 vs 跨 hub；呈现视角非行为开关；unset=字节不变） | `docs/zh/DEPLOYMENT-PROFILE.md` |
@@ -195,6 +196,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 |---|---|
 | 上手案例（5 个开箱 hub 对照 + 确定性 demo + go-live） | `docs/zh/HANDS-ON-HUBS.md` |
 | 20 行写一个 Participant（框架唯一扩展面：agent / 人 / 服务同一契约；裸接口 + 基类两写法） | `docs/zh/PARTICIPANT.md` |
+| 50 个 example 的分级索引（先跑哪个 → 深到哪；每行标前置，绝大多数零前置） | `docs/zh/EXAMPLES.md` |
 | 模板画廊一键安装 | `docs/zh/TEMPLATE-GALLERY.md` |
 | 只读 DAG 可视化 | `docs/zh/WORKFLOW-DAG-VIZ.md` |
 | 工作流架构师（大白话→YAML + 讲解 + 配图 + 成员 `/me` 新建） | `docs/zh/WORKFLOW-ARCHITECT.md` |

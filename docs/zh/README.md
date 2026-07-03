@@ -14,6 +14,7 @@
 - [`../../QUICKSTART.md`](../../QUICKSTART.md) — **do-this → see-that 上手漏斗**（零 key 先跑 `pnpm demo`）
 - [`OVERVIEW.md`](OVERVIEW.md) — 5 分钟读懂这是什么、为什么这么设计
 - [`HANDS-ON-HUBS.md`](HANDS-ON-HUBS.md) — 五个开箱即抄的 hub 对照
+- [`EXAMPLES.md`](EXAMPLES.md) — **50 个 demo 的分级索引**（先跑哪个 → 深到哪；绝大多数零前置）
 - [`LEARN.md`](LEARN.md) — 社区精选视频 / 教程
 
 ## ② 理解为什么这么建（设计心智）
@@ -22,6 +23,7 @@
 
 - [`CHARTER.md`](CHARTER.md) — 项目宪章（北极星三不可破 · 信任护城河；与代码冲突时宪章为源）
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — 框架设计哲学 + 模块边界
+- [`SURFACE-PATTERN.md`](SURFACE-PATTERN.md) — 给框架加能力而不加耦合（host↔web 鸭子 surface 注入；web 不依赖 host）
 - [`PROTOCOL.md`](PROTOCOL.md) — Wire 协议规约（写自己语言的 SDK 看这）
 - [`DEPLOYMENT-PROFILE.md`](DEPLOYMENT-PROFILE.md) — 部署视角 `AIPE_PROFILE=hub|federation`（hub 内 vs 跨 hub；呈现视角非行为开关）
 - [`PERSONAL-MODE.md`](PERSONAL-MODE.md) — 个人 / 主权 hub 心智
