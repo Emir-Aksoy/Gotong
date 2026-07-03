@@ -79,6 +79,7 @@
     "test:python": "cd python-sdk && PYTHONPATH=src .venv/bin/python -m pytest -q",
     "test:all": "pnpm -r test && pnpm -r typecheck && pnpm test:python",
     "check:onboarding": "node scripts/local-onboarding-check.mjs",
+    "check:first-result": "node scripts/first-result-smoke.mjs",
     "check:templates": "pnpm -C packages/web exec vitest run tests/all-templates-parse.test.ts",
     "build:site": "pnpm -C packages/web build:site",
     "build:leaderboard": "pnpm -C packages/web build:leaderboard"

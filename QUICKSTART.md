@@ -138,6 +138,12 @@ A ladder, not a pile — tutorial → reference → deep-dive:
 ---
 
 > **Honest timing.** The "~1 min / ~2 min" marks assume a warm `pnpm install`; the
-> very first `pnpm build` compiles the whole workspace and takes a few minutes. The
-> step-1 demo and the step-3 key-probe (`pnpm check:onboarding`) are runnable checks
-> committed in the repo, so you can re-verify this ladder yourself at any time.
+> very first `pnpm build` compiles the whole workspace and takes a few minutes.
+>
+> **This ladder is load-bearing, not decorative.** Step 1's promise is a committed
+> smoke gate — `pnpm check:first-result` spawns the exact `pnpm demo` above with
+> every API key stripped from its environment and fails unless the two agents *and*
+> the human all join, both results land, and the approval prints within a TTFR
+> budget. The step-3 key-probe (`pnpm check:onboarding`) is the same idea for the
+> rescue path. If either promise ever silently breaks, the gate goes red — so you can
+> re-verify this whole page yourself at any time.
