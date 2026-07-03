@@ -186,6 +186,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 5 分钟总览 | `docs/zh/OVERVIEW.md` |
 | 框架设计哲学 + 模块边界 | `docs/zh/ARCHITECTURE.md` |
 | 给框架加能力而不加耦合（host↔web 鸭子 `*Surface` 注入；web 运行时不依赖 host；加新能力配方） | `docs/zh/SURFACE-PATTERN.md` |
+| 防再膨胀惯例 + GUARD 承重门（依赖方向 / 旋钮登记 / 行数预算；`pnpm check:guards`） | `docs/zh/CONVENTIONS.md` |
 | 协议规约（v1.2） | `docs/PROTOCOL.md` |
 | 产品定位（赛道地图 + 产品级矩阵 + 目标用户） | `docs/zh/COMPETITIVE-LANDSCAPE.md` · `docs/zh/PRODUCT-MATRIX.md` |
 | 部署视角（`AIPE_PROFILE=hub\|federation` 入口先讲 hub 内 vs 跨 hub；呈现视角非行为开关；unset=字节不变） | `docs/zh/DEPLOYMENT-PROFILE.md` |

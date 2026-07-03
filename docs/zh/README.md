@@ -24,6 +24,7 @@
 - [`CHARTER.md`](CHARTER.md) — 项目宪章（北极星三不可破 · 信任护城河；与代码冲突时宪章为源）
 - [`ARCHITECTURE.md`](ARCHITECTURE.md) — 框架设计哲学 + 模块边界
 - [`SURFACE-PATTERN.md`](SURFACE-PATTERN.md) — 给框架加能力而不加耦合（host↔web 鸭子 surface 注入；web 不依赖 host）
+- [`CONVENTIONS.md`](CONVENTIONS.md) — 让 AipeHub 保持轻的惯例 + GUARD 承重门（依赖方向 / 旋钮登记 / 行数预算）
 - [`PROTOCOL.md`](PROTOCOL.md) — Wire 协议规约（写自己语言的 SDK 看这）
 - [`DEPLOYMENT-PROFILE.md`](DEPLOYMENT-PROFILE.md) — 部署视角 `AIPE_PROFILE=hub|federation`（hub 内 vs 跨 hub；呈现视角非行为开关）
 - [`PERSONAL-MODE.md`](PERSONAL-MODE.md) — 个人 / 主权 hub 心智

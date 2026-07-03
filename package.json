@@ -83,7 +83,8 @@
     "check:templates": "pnpm -C packages/web exec vitest run tests/all-templates-parse.test.ts",
     "check:kernel-deps": "node scripts/kernel-deps-gate.mjs",
     "check:env-registry": "node scripts/env-registry-gate.mjs",
-    "check:guards": "node scripts/kernel-deps-gate.mjs && node scripts/env-registry-gate.mjs",
+    "check:line-budget": "node scripts/line-budget-gate.mjs",
+    "check:guards": "node scripts/kernel-deps-gate.mjs && node scripts/env-registry-gate.mjs && node scripts/line-budget-gate.mjs",
     "build:site": "pnpm -C packages/web build:site",
     "build:leaderboard": "pnpm -C packages/web build:leaderboard"
   },
