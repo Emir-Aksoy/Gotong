@@ -1,53 +1,93 @@
-# AipeHub 中文文档
+# AipeHub 中文文档 · 阅读金字塔
 
-<!-- doc-version: 1.0 -->
-> **文档版本 1.0** · 中文译本 · 最后更新 2026-06-27 · 权威源：[English](../../README.md)。如译文与英文版冲突，以英文版为准。
+<!-- doc-version: 2.0 -->
+> **文档版本 2.0** · 2026-07-02 重排为「教程 → 理解 → 动手 → 上线 → 社区 → 出处」六级金字塔。
+> 逐里程碑账本（52 篇 `*-FINAL` / `V4-PHASE*` / `AUDIT-*`）已下沉到 [`ledger/`](ledger/README.md)，
+> 顶层只留当前该读的。**从上往下读**：越靠前越是新人先看的，越靠后越是深潜 / 历史。
 
-> 这里是 AipeHub 主要文档的中文镜像。**最新内容以
-> [英文版](../)为准**——当中英文出现不一致时，以英文版为准，并欢迎 PR
-> 同步中文版。
+---
 
-## 文档导航
+## ① 从这里开始（先跑起来）
 
-| 你想知道… | 看这一篇 |
-|---|---|
-| 🧭 项目整体概览（5 分钟读懂） | [`OVERVIEW.md`](OVERVIEW.md) |
-| 📹 看视频 / 教程学习（社区精选） | [`LEARN.md`](LEARN.md) |
-| 🙌 贡献者名册 + 认可传播（支柱 ⑤） | [`CONTRIBUTORS.md`](CONTRIBUTORS.md) · [`RECOGNITION-SYSTEM.md`](RECOGNITION-SYSTEM.md) |
-| 🧑 加入一个 room（admin 或 worker 视角） | [`HUMAN.md`](HUMAN.md) |
-| 🧩 不写代码导入 / 分享 LLM 智能体模板 | [`TEMPLATES.md`](TEMPLATES.md) |
-| 🧪 **真机测试指南**（本机 / 局域网 / 公网 VPS） | [`REAL-WORLD-TESTING.md`](REAL-WORLD-TESTING.md) |
-| 🤖 自己写 agent 接入 | [`AGENT.md`](AGENT.md) |
-| 🔧 在自己机器 / 服务器部署 | [`DEPLOY.md`](DEPLOY.md) |
-| 🪢 多团队 hub 联合 | [`FEDERATION.md`](FEDERATION.md)（中文，英文版 [`../FEDERATION.md`](../FEDERATION.md)） |
-| ⚖️ MIT 协议 / 商用 / 模板 license | [`LICENSE-FAQ.md`](LICENSE-FAQ.md)（中文，英文版 [`../LICENSE-FAQ.md`](../LICENSE-FAQ.md)） |
-| 🧠 整体架构 + 设计取舍 | [`../ARCHITECTURE.md`](../ARCHITECTURE.md)（英文） |
-| 📡 Wire 协议（写自己的语言 SDK） | [`../PROTOCOL.md`](../PROTOCOL.md)（英文） |
+> 目标：5 分钟从零到屏幕上一个真实的多方协作结果。
 
-## 翻译状态
+- [`../../QUICKSTART.md`](../../QUICKSTART.md) — **do-this → see-that 上手漏斗**（零 key 先跑 `pnpm demo`）
+- [`OVERVIEW.md`](OVERVIEW.md) — 5 分钟读懂这是什么、为什么这么设计
+- [`HANDS-ON-HUBS.md`](HANDS-ON-HUBS.md) — 五个开箱即抄的 hub 对照
+- [`LEARN.md`](LEARN.md) — 社区精选视频 / 教程
 
-| 文档 | 中文版状态 |
-|---|---|
-| OVERVIEW | ✅ 完整翻译 |
-| HUMAN | ✅ 完整翻译（原本就部分中文） |
-| TEMPLATES | ✅ 完整翻译 |
-| REAL-WORLD-TESTING | ✅ 中文原创（暂无英文版，欢迎 PR 翻译） |
-| AGENT | ✅ 完整翻译 |
-| DEPLOY | ✅ 完整翻译 |
-| FEDERATION | ✅ 完整翻译（REL-5） |
-| LICENSE-FAQ | ✅ 完整翻译（REL-5） |
-| ARCHITECTURE | ⏸️ 内部架构文档，优先级低 |
-| PROTOCOL | ⏸️ Wire 协议，原文够精确 |
+## ② 理解为什么这么建（设计心智）
 
-## 想贡献翻译？
+> 目标：读完知道 AipeHub 的立场，改代码不跑偏。
 
-非常欢迎。对照英文版翻译时请注意：
+- [`CHARTER.md`](CHARTER.md) — 项目宪章（北极星三不可破 · 信任护城河；与代码冲突时宪章为源）
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — 框架设计哲学 + 模块边界
+- [`PROTOCOL.md`](PROTOCOL.md) — Wire 协议规约（写自己语言的 SDK 看这）
+- [`DEPLOYMENT-PROFILE.md`](DEPLOYMENT-PROFILE.md) — 部署视角 `AIPE_PROFILE=hub|federation`（hub 内 vs 跨 hub；呈现视角非行为开关）
+- [`PERSONAL-MODE.md`](PERSONAL-MODE.md) — 个人 / 主权 hub 心智
+- [`COMPETITIVE-LANDSCAPE.md`](COMPETITIVE-LANDSCAPE.md) · [`PRODUCT-MATRIX.md`](PRODUCT-MATRIX.md) — 赛道地图 + 产品级矩阵
 
-1. **保留专业术语原文**：`Hub` / `Participant` / `Task` / `capability` /
-   `transcript` / `dispatch` 这些不翻译（代码里就这么写的）。
-2. **保留所有代码块和命令原样**。
-3. **保留所有链接路径**，相对路径用 `../FOO.md` 指向英文版即可。
-4. **加文件头注明同步版本**：`> 同步自英文版 docs/FOO.md @ <commit-sha 或日期>`，
-   方便下次同步知道差量。
+## ③ 动手用 / 建（能力 how-to）
 
-PR 流程见仓根的 [`CONTRIBUTING.md`](../../CONTRIBUTING.md)。
+> 目标：把 agent / 工作流 / 模板 / 连接器真正接起来。
+
+**Agent 接入**
+- [`AGENT.md`](AGENT.md) — 自己写 agent 接入
+- [`AGENT-ADAPTER-CONTRACT.md`](AGENT-ADAPTER-CONTRACT.md) — 主流 agent 适配器契约（双向 + 可快速接管验收门）
+- [`QUICK-CONNECT.md`](QUICK-CONNECT.md) — 入站快捷接入
+
+**工作流**
+- [`WORKFLOW-ARCHITECT.md`](WORKFLOW-ARCHITECT.md) — 大白话 → YAML + 讲解 + 配图
+- [`AI-WORKFLOW-EDITOR.md`](AI-WORKFLOW-EDITOR.md) — 成员大白话改工作流
+- [`WORKFLOW-DAG-VIZ.md`](WORKFLOW-DAG-VIZ.md) — 只读 DAG 可视化
+
+**模板 / 连接器 / 知识库**
+- [`TEMPLATES.md`](TEMPLATES.md) · [`TEMPLATE-GALLERY.md`](TEMPLATE-GALLERY.md) · [`FLAGSHIP-TEMPLATES.md`](FLAGSHIP-TEMPLATES.md) — 不写代码导入 / 分享模板
+- [`MCP.md`](MCP.md) · [`MCP-CONNECTOR-DIRECTORY.md`](MCP-CONNECTOR-DIRECTORY.md) — MCP client + server + 连接器目录
+- [`KB-CONNECTORS.md`](KB-CONNECTORS.md) · [`RAG-VIA-MCP.md`](RAG-VIA-MCP.md) — 知识库 / RAG（全走 MCP，框架不存知识）
+
+**运维 / 易用 / IM / 人在环**
+- [`SETTING-OPS-CONSOLE.md`](SETTING-OPS-CONSOLE.md) — 统一 `setting` 运维控制台
+- [`EASE-OF-USE-DEEPENING.md`](EASE-OF-USE-DEEPENING.md) — 失败修复入口 / 配置体检 / 启动兜底
+- [`RES-RESOURCE-ADAPTATION.md`](RES-RESOURCE-ADAPTATION.md) — 资源适配（只读探测 → 人批准）
+- [`IM-BRIDGES.md`](IM-BRIDGES.md) · [`IM-OFFICIAL-REARCH.md`](IM-OFFICIAL-REARCH.md) — IM 桥接
+- [`HUMAN.md`](HUMAN.md) · [`HITL-GLOSSARY.md`](HITL-GLOSSARY.md) — 人作为 Participant / HITL 术语
+- [`WORKSPACE-JAIL.md`](WORKSPACE-JAIL.md) · [`SIDECAR.md`](SIDECAR.md) — 文件围栏 / sidecar
+
+## ④ 上线 / 运维（把它跑到生产）
+
+> 目标：从本机走到真实部署，三拓扑 + 联邦。
+
+- [`GO-LIVE.md`](GO-LIVE.md) — 上线 runbook（T1 家用 / T2 云 / T3 联邦）
+- [`DEPLOY.md`](DEPLOY.md) · [`PORTABLE-BUNDLE.md`](PORTABLE-BUNDLE.md) — 部署 / 便携包分发
+- [`PROD-HARDENING-RUNBOOK.md`](PROD-HARDENING-RUNBOOK.md) · [`PRE-LAUNCH-TEST-PLAN.md`](PRE-LAUNCH-TEST-PLAN.md) · [`REAL-WORLD-TESTING.md`](REAL-WORLD-TESTING.md) — 生产加固 / 上线前测试 / 真机测试
+- [`CLOUD-RESOURCE-FOOTPRINT.md`](CLOUD-RESOURCE-FOOTPRINT.md) — 云资源占用
+- [`FEDERATION.md`](FEDERATION.md) · [`FEDERATION-RUNBOOK.md`](FEDERATION-RUNBOOK.md) · [`HUB-MESH.md`](HUB-MESH.md) — 跨 hub 联邦（两机操作员）
+- [`REPUTATION-ROUTING.md`](REPUTATION-ROUTING.md) · [`SECURITY.md`](SECURITY.md) — 信誉路由 / 安全
+
+**跟练一个完整场景**：[`FAMILY-LEARNING-HUB-DESIGN.md`](FAMILY-LEARNING-HUB-DESIGN.md) → [`FAMILY-LEARNING-GO-LIVE.md`](FAMILY-LEARNING-GO-LIVE.md)（家庭学习 hub，从设计到上线）
+
+## ⑤ 社区 / 治理
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) · [`GOVERNANCE.md`](GOVERNANCE.md) · [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) · [`MAINTAINERS.md`](MAINTAINERS.md) — 贡献 / 治理 / 行为准则 / 维护者
+- [`RECOGNITION-SYSTEM.md`](RECOGNITION-SYSTEM.md) · [`CONTRIBUTORS.md`](CONTRIBUTORS.md) — 荣誉激励 + 贡献者名册
+- [`COMMUNITY-SITE.md`](COMMUNITY-SITE.md) · [`COMMUNITY-DISCUSSIONS.md`](COMMUNITY-DISCUSSIONS.md) — 零算力社区站 / Discussions
+- [`LICENSE-FAQ.md`](LICENSE-FAQ.md) · [`I18N-PLAN.md`](I18N-PLAN.md) — 协议 FAQ / i18n
+
+## ⑥ 设计出处 · 深潜 · 历史
+
+> 读这些是为了解「怎么建的 / 当时怎么想的」，不是为了学怎么用。
+
+- **设计出处（建之前的 RFC / DESIGN）**：[`PERSONAL-BUTLER-DESIGN.md`](PERSONAL-BUTLER-DESIGN.md) · [`MEMORY-DREAMING-SKILLS-DESIGN.md`](MEMORY-DREAMING-SKILLS-DESIGN.md) · [`PERSONAL-HUB-RFC.md`](PERSONAL-HUB-RFC.md) · [`TECH-DEBT-2026-05.md`](TECH-DEBT-2026-05.md)
+- **逐里程碑账本（52 篇）** → [`ledger/`](ledger/README.md)（v4 phases / v5 streams / v6 route-B / 审计 / 能力深潜）
+- **全部里程碑逐字散文索引** → [`PROGRESS-LEDGER.md`](PROGRESS-LEDGER.md)
+
+---
+
+## 关于中英双语
+
+本仓文档以中文为主。少数文档镜像 `../` 下的英文原文（`OVERVIEW` / `HUMAN` / `AGENT` /
+`DEPLOY` / `FEDERATION` / `LICENSE-FAQ` 等）——**这几篇以英文版为权威**，中英冲突以英文为准，
+欢迎 PR 同步。翻译约定：`Hub` / `Participant` / `Task` / `capability` / `transcript` /
+`dispatch` 保留原文不译；代码块 / 命令 / 链接路径原样保留。PR 流程见
+[`../../CONTRIBUTING.md`](../../CONTRIBUTING.md)。
