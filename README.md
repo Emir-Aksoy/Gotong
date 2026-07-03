@@ -75,6 +75,11 @@ What this project is — and what it refuses to become: [`CHARTER.md`](CHARTER.m
 
 ## Quick start
 
+> **New here?** [`QUICKSTART.md`](QUICKSTART.md) is the do-this → see-that ladder:
+> clone → a real multi-participant result on screen in ~1 min (no key, no Docker) →
+> your own browser hub → a thinking LLM agent. The install matrix below is the
+> reference; the ladder is the fast path.
+
 ### Non-technical user? Double-click, zero Node/Docker
 
 The path that needs **no terminal, no Node, no Docker** on the machine that runs
