@@ -39,7 +39,19 @@ const FULL: CatalogInputs = {
       { command: 'codex', label: 'Codex CLI', found: false }, // 不在 PATH → 不进
     ],
   },
-  presetTemplates: [{ id: 'editorial-flow', name: '编辑部流程', description: '起草→评审一键跑' }],
+  presetTemplates: [
+    {
+      id: 'editorial-flow',
+      name: '编辑部流程',
+      description: '起草→评审一键跑',
+      agents: [
+        { name: '主笔', capabilities: ['revise', 'draft'] },
+        { name: '审批官', capabilities: ['publish', 'approve'] },
+        { name: '看板', capabilities: [] }, // 无能力的模板 agent 不进 providesAgents
+      ],
+    },
+    { id: 'bare-pack' }, // 没解析出 agents 的模板：无 providesAgents / capabilities 键
+  ],
   presetConnectors: [
     { id: 'obsidian', name: 'Obsidian 笔记', whatFor: '读你的笔记库', specName: 'obsidian', needsEnv: ['OBSIDIAN_API_KEY'] },
     { id: 'fs-preset', name: '文件系统', whatFor: '读写本地文件', specName: 'filesystem' }, // 已装同名 → 去重
@@ -62,6 +74,23 @@ describe('buildComponentCatalog', () => {
     expect(byId.get('template:editorial-flow')?.install).toEqual({ via: 'template', ref: 'editorial-flow' })
     expect(byId.get('connector:obsidian')?.install).toEqual({ via: 'connector', ref: 'obsidian' })
     expect(byId.get('connector:obsidian')?.note).toContain('OBSIDIAN_API_KEY')
+  })
+
+  it('templates keep per-agent capability sets; union is display-only and sorted', () => {
+    const cat = buildComponentCatalog(FULL)
+    const tpl = cat.find((e) => e.kind === 'template' && e.id === 'editorial-flow')
+    // 逐 agent 保真（缺口分析按「单 agent 覆盖全部」匹配），零能力的不进
+    expect(tpl?.providesAgents).toEqual([
+      { name: '主笔', capabilities: ['revise', 'draft'] },
+      { name: '审批官', capabilities: ['publish', 'approve'] },
+    ])
+    // 并集仅供展示，排序确定
+    expect(tpl?.capabilities).toEqual(['approve', 'draft', 'publish', 'revise'])
+    // 没解析出 agents 的模板两个键都不出现（而不是空数组假装有信息）
+    const bare = cat.find((e) => e.kind === 'template' && e.id === 'bare-pack')
+    expect(bare).toBeDefined()
+    expect(bare?.providesAgents).toBeUndefined()
+    expect(bare?.capabilities).toBeUndefined()
   })
 
   it('honest boundary: unusable resources are excluded', () => {

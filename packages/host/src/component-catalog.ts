@@ -50,6 +50,12 @@ export interface ComponentEntry {
   install?: { via: 'template' | 'connector'; ref: string }
   /** 资源类附注（端点 URL、CLI 命令名、连接器需自备的 env 等）。 */
   note?: string
+  /**
+   * 仅 kind==='template'：模板会带来的各 agent 及其能力集（逐 agent，不并集——
+   * 缺口分析要判断「装了它之后**某一个** agent 能否独自承接缺口」）。此时
+   * `capabilities` 存并集，仅供渲染展示。
+   */
+  providesAgents?: ReadonlyArray<{ name?: string; capabilities: readonly string[] }>
 }
 
 // ── 鸭子类型输入（真实来源见文件头；全部可缺省，缺 = 该源为空） ─────────────
@@ -75,6 +81,12 @@ export interface CatalogInputs {
     id: string
     name?: string
     description?: string
+    /**
+     * 模板带来的各 agent 及其能力集（从 manifest 解析）。缺口分析按「单个
+     * agent 覆盖全部所缺能力」匹配（镜像 deepCheck 的 all-caps 语义），所以
+     * 必须保留**逐 agent**的集合，不能只存并集。
+     */
+    agents?: ReadonlyArray<{ name?: string; capabilities?: readonly string[] }>
   }>
   /** 内置连接器目录（BUILTIN_MCP_CONNECTORS 的投影）。`specName` 用于已装去重。 */
   presetConnectors?: ReadonlyArray<{
@@ -135,14 +147,20 @@ export function buildComponentCatalog(inputs: CatalogInputs): ComponentEntry[] {
     out.push({ kind: 'llm-provider', id: k.provider, status: 'installed' })
   }
 
-  // 5. 预置模板（可装）。
+  // 5. 预置模板（可装）。逐 agent 能力集保真透传；并集只用于展示。
   for (const t of inputs.presetTemplates ?? []) {
+    const provides = (t.agents ?? [])
+      .filter((a) => a.capabilities && a.capabilities.length > 0)
+      .map((a) => ({ ...(a.name ? { name: a.name } : {}), capabilities: [...a.capabilities!] }))
+    const union = [...new Set(provides.flatMap((a) => a.capabilities))].sort()
     out.push({
       kind: 'template',
       id: t.id,
       ...(descOf(t.name, t.description) ? { description: descOf(t.name, t.description) } : {}),
+      ...(union.length > 0 ? { capabilities: union } : {}),
       status: 'available',
       install: { via: 'template', ref: t.id },
+      ...(provides.length > 0 ? { providesAgents: provides } : {}),
     })
   }
 
