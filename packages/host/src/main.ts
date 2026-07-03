@@ -2589,8 +2589,12 @@ async function main(): Promise<void> {
   // otherwise). `isEnabled` is a live read of the bridge handle declared above
   // — the panel hides "connect" when no bridge is running so a member isn't
   // handed a code nothing can consume.
+  // DEPLOY-B1: the handle now exists even with zero running bridges (hot-start
+  // seam), so "enabled" must count LIVE bridges, not handle presence — a member
+  // is never handed a bind code nothing can consume, and the panel flips on by
+  // itself the moment the wizard hot-starts a bridge.
   const meIm = identity
-    ? new HostMeImService({ identity, isEnabled: () => Boolean(imBridges) })
+    ? new HostMeImService({ identity, isEnabled: () => (imBridges?.bridges.length ?? 0) > 0 })
     : undefined
 
   // v5 A-M4 — member agent access-grant sharing (an owner shares their agent
@@ -2965,9 +2969,9 @@ async function main(): Promise<void> {
   // web overview, and the IM `status` command never disagrees with it. The
   // bridges' existing branches (/help, /bind, /unbind, /agents, /workflow,
   // free-text chat) are byte-for-byte unchanged; this only adds the
-  // owner/operator-gated `/setting` command mode. Still env-gated: with no
-  // bridge env set, `startImBridges` returns `undefined` and the `setting`
-  // config is simply never consumed.
+  // owner/operator-gated `/setting` command mode. Still gated per platform
+  // (env var or wizard-written vault row): with nothing configured the handle
+  // is inert — zero bridges, so the `setting` config is never consumed.
   if (identity) {
     const identityForIm = identity
     // D3 — the entry gate is the admin bar (owner OR admin), matching
@@ -2992,6 +2996,11 @@ async function main(): Promise<void> {
       hub,
       identity,
       log,
+      // DEPLOY-B1 — always hold a handle so the first-boot wizard can hot-start
+      // a bridge right after writing its token to vault (no restart between
+      // "pasted the token" and "bot answers"). With nothing configured the
+      // handle is inert: zero bridges, stop() a no-op.
+      hotStart: true,
       // F1 — outbound-push foundation. Every inbound message from a bound member
       // records their freshest chat here; later milestones (approval push-back,
       // reminders, morning brief) call the returned `pushToMember` to reach them

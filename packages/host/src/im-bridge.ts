@@ -2,11 +2,14 @@
  * Production IM bridge wiring — folds the example's IM router glue into
  * the host so a real Telegram bot can drive the hub.
  *
- * OFF by default: with `AIPE_TELEGRAM_BOT_TOKEN` unset, `startImBridges()`
- * returns `undefined` and nothing changes — exactly how the A2A / ACP
- * outbound managers stay inert without their env. That zero-behaviour-
- * change-when-unset property is the whole point of an env gate: an
- * existing deployment that doesn't want IM is byte-for-byte unaffected.
+ * OFF by default: with no platform configured (env vars unset AND no
+ * `im_bridge` vault rows), `startImBridges()` returns `undefined` and
+ * nothing changes — exactly how the A2A / ACP outbound managers stay
+ * inert without their config. That zero-behaviour-change-when-unset
+ * property is the whole point of the gate: an existing deployment that
+ * doesn't want IM is byte-for-byte unaffected. (The `hotStart` option
+ * relaxes only the RETURN contract — a handle exists so a bridge can be
+ * started later — never the "nothing runs uninvited" part.)
  *
  * Why inline the router here instead of importing from
  * `examples/im-bridge-host`:
@@ -494,6 +497,96 @@ function settingHelpText(setting: HostImSettingConfig): string {
 // Start — env-gated entry point wired from main.ts.
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// DEPLOY-B1 — vault-backed IM credentials (env-first, vault-fallback).
+//
+// The first-boot wizard writes an org vault row (`kind='im_bridge'`,
+// `metadata.platform` as the resolution tag — same convention llm_provider
+// rows use `metadata.provider` for) so a fresh box gets IM without anyone
+// hand-editing an env file. Env vars still WIN: an operator who set
+// AIPE_TELEGRAM_BOT_TOKEN keeps exactly today's behaviour, vault unread.
+// Only the two wizard-offered platforms resolve from vault; QQ/Slack stay
+// env-only — their multi-field + webhook tuning is operator-level config,
+// not a first-boot form.
+// ---------------------------------------------------------------------------
+
+/** Platforms whose credentials can live in the vault (setup-wizard set). */
+export type ImVaultPlatform = 'telegram' | 'lark'
+
+export interface ResolvedImCreds {
+  source: 'env' | 'vault'
+  /** telegram: `{ token }` · lark: `{ appId, appSecret }` */
+  fields: Record<string, string>
+}
+
+export function resolveImCreds(
+  platform: ImVaultPlatform,
+  identity: IdentityStore,
+  log?: ImLogger,
+): ResolvedImCreds | undefined {
+  if (platform === 'telegram') {
+    const token = process.env.AIPE_TELEGRAM_BOT_TOKEN?.trim()
+    if (token) return { source: 'env', fields: { token } }
+  } else {
+    // Both-or-nothing from env: a lone AIPE_LARK_APP_ID never pairs with a
+    // vault secret — mixed-source halves would make "which app is this?"
+    // undebuggable.
+    const appId = process.env.AIPE_LARK_APP_ID?.trim()
+    const appSecret = process.env.AIPE_LARK_APP_SECRET?.trim()
+    if (appId && appSecret) return { source: 'env', fields: { appId, appSecret } }
+  }
+  try {
+    const rows = identity
+      .listVaultEntries({ kind: 'im_bridge', ownerKind: 'org', activeOnly: true })
+      .filter((e) => (e.metadata as Record<string, unknown> | null)?.platform === platform)
+    // listVaultEntries returns newest-first — a re-run wizard's fresh token
+    // wins without requiring the old row to be revoked first.
+    const chosen = rows[0]
+    if (!chosen) return undefined
+    const secret = identity.readVaultSecret(chosen.id)
+    if (platform === 'telegram') return { source: 'vault', fields: { token: secret } }
+    const appId = (chosen.metadata as Record<string, unknown> | null)?.appId
+    if (typeof appId !== 'string' || appId.length === 0) {
+      // Half-written row (secret without its non-secret app id) — refuse
+      // rather than start a bridge that can only fail to authenticate.
+      log?.warn('im vault row missing appId; ignoring', { platform, entryId: chosen.id })
+      return undefined
+    }
+    return { source: 'vault', fields: { appId, appSecret: secret } }
+  } catch (err) {
+    // A vault read failure (master key mismatch, pre-vault store) must not
+    // take down env-only boot — IM just stays off for this platform, loudly.
+    log?.warn('im vault credential lookup failed', { platform, err: String(err) })
+    return undefined
+  }
+}
+
+/**
+ * Single construction point for the two vault-capable platforms — the boot
+ * loop and the hot-start seam must build byte-identical bridges.
+ */
+function buildVaultablePlatformBridge(
+  platform: ImVaultPlatform,
+  creds: ResolvedImCreds,
+  log: ImLogger,
+): ImBridge {
+  if (platform === 'telegram') {
+    return new TelegramBridge({
+      token: creds.fields.token!,
+      onError: (err) => log.warn('telegram bridge error', { err: String(err) }),
+    })
+  }
+  return new LarkBridge({
+    appId: creds.fields.appId!,
+    appSecret: creds.fields.appSecret!,
+    onError: (err) => log.warn('lark bridge error', { err: String(err) }),
+  })
+}
+
+export type ImHotStartResult =
+  | { ok: true; platform: ImVaultPlatform; source: 'env' | 'vault' }
+  | { ok: false; reason: 'already_running' | 'no_credentials' | 'start_failed'; detail?: string }
+
 export interface StartImBridgesOptions {
   hub: Hub
   identity: IdentityStore
@@ -502,6 +595,23 @@ export interface StartImBridgesOptions {
   freeTextCapability?: string
   listAgents?: ImAgentLister
   resolveWorkflow?: ImWorkflowResolver
+  /**
+   * DEPLOY-B1 — opt into the hot-start seam: return a handle even when no
+   * platform resolved credentials at boot, exposing `startPlatform` so the
+   * first-boot wizard can bring a bridge up right after writing its token to
+   * vault — no restart between "pasted the token" and "bot answers".
+   * Start-only by design (只热启不热改): a RUNNING bridge is never
+   * reconfigured or stopped here — rotating a token still means restart,
+   * same as every other knob (the setting console's no-hot-reload stance).
+   * Without this flag the boot contract is byte-identical to before.
+   */
+  hotStart?: boolean
+  /**
+   * Test seam — overrides bridge construction for the vault-capable
+   * platforms so hot-start tests stay hermetic (a real TelegramBridge
+   * long-polls the live API the moment it starts). Production never sets it.
+   */
+  makeBridge?: (platform: ImVaultPlatform, creds: ResolvedImCreds) => ImBridge
   /**
    * setting-ops M5 — owner/operator-only deterministic `/setting` command mode.
    * Absent → the `/setting` branch is inert (the default; pure env-gated IM is
@@ -527,6 +637,14 @@ export interface ImBridgesHandle {
    * from "bridge down" from "send threw".
    */
   pushToMember?: (userId: string, text: string) => Promise<ButlerPushResult>
+  /**
+   * DEPLOY-B1 — start ONE not-yet-running vault-capable platform, resolving
+   * credentials at call time (env first, then the vault row the caller just
+   * wrote). Present only when `hotStart` was requested. Refuses a platform
+   * that is already up (`already_running`) — this seam starts, never
+   * reconfigures.
+   */
+  startPlatform?: (platform: ImVaultPlatform) => Promise<ImHotStartResult>
   stop(): Promise<void>
 }
 
@@ -550,30 +668,28 @@ export interface ImBridgesHandle {
  *     cloud host. See docs/zh/IM-OFFICIAL-REARCH.md.
  *
  * Env per platform (a bridge needs ALL of its vars to activate):
- *   Telegram  AIPE_TELEGRAM_BOT_TOKEN
+ *   Telegram  AIPE_TELEGRAM_BOT_TOKEN   — or vault kind='im_bridge' (wizard)
  *   QQ        AIPE_QQ_BOT_APPID + AIPE_QQ_BOT_SECRET
  *             (+ AIPE_QQ_WEBHOOK_PORT / _HOST / _PATH to tune the listener)
- *   Lark      AIPE_LARK_APP_ID + AIPE_LARK_APP_SECRET
+ *   Lark      AIPE_LARK_APP_ID + AIPE_LARK_APP_SECRET — or vault (wizard)
  *   Slack     AIPE_SLACK_APP_TOKEN (xapp-) + AIPE_SLACK_BOT_TOKEN (xoxb-)
  */
 export async function startImBridges(
   opts: StartImBridgesOptions,
 ): Promise<ImBridgesHandle | undefined> {
-  // Defer construction behind each env gate. Building lazily (a factory
-  // per configured platform) keeps a bridge's start-time side effects —
+  // Defer construction behind each gate. Building lazily (a factory per
+  // configured platform) keeps a bridge's start-time side effects —
   // QQ's HTTP listener, Slack's apps.connections.open round trip — from
   // firing for a platform the operator never configured.
-  const factories: Array<() => ImBridge> = []
+  const factories: Array<{ make: () => ImBridge; source?: 'env' | 'vault' }> = []
+  const makeVaultable = (platform: ImVaultPlatform, creds: ResolvedImCreds): ImBridge =>
+    opts.makeBridge
+      ? opts.makeBridge(platform, creds)
+      : buildVaultablePlatformBridge(platform, creds, opts.log)
 
-  const telegramToken = process.env.AIPE_TELEGRAM_BOT_TOKEN?.trim()
-  if (telegramToken) {
-    factories.push(
-      () =>
-        new TelegramBridge({
-          token: telegramToken,
-          onError: (err) => opts.log.warn('telegram bridge error', { err: String(err) }),
-        }),
-    )
+  const telegram = resolveImCreds('telegram', opts.identity, opts.log)
+  if (telegram) {
+    factories.push({ source: telegram.source, make: () => makeVaultable('telegram', telegram) })
   }
 
   const qqAppId = process.env.AIPE_QQ_BOT_APPID?.trim()
@@ -586,8 +702,8 @@ export async function startImBridges(
     const webhookPort = parseImPort(process.env.AIPE_QQ_WEBHOOK_PORT)
     const webhookHost = process.env.AIPE_QQ_WEBHOOK_HOST?.trim()
     const webhookPath = process.env.AIPE_QQ_WEBHOOK_PATH?.trim()
-    factories.push(
-      () =>
+    factories.push({
+      make: () =>
         new QqBridge({
           appId: qqAppId,
           secret: qqSecret,
@@ -596,27 +712,19 @@ export async function startImBridges(
           ...(webhookPath ? { webhookPath } : {}),
           onError: (err) => opts.log.warn('qq bridge error', { err: String(err) }),
         }),
-    )
+    })
   }
 
-  const larkAppId = process.env.AIPE_LARK_APP_ID?.trim()
-  const larkAppSecret = process.env.AIPE_LARK_APP_SECRET?.trim()
-  if (larkAppId && larkAppSecret) {
-    factories.push(
-      () =>
-        new LarkBridge({
-          appId: larkAppId,
-          appSecret: larkAppSecret,
-          onError: (err) => opts.log.warn('lark bridge error', { err: String(err) }),
-        }),
-    )
+  const lark = resolveImCreds('lark', opts.identity, opts.log)
+  if (lark) {
+    factories.push({ source: lark.source, make: () => makeVaultable('lark', lark) })
   }
 
   const slackBotToken = process.env.AIPE_SLACK_BOT_TOKEN?.trim()
   const slackAppToken = process.env.AIPE_SLACK_APP_TOKEN?.trim()
   if (slackBotToken && slackAppToken) {
-    factories.push(
-      () =>
+    factories.push({
+      make: () =>
         new SlackBridge({
           token: slackBotToken,
           appToken: slackAppToken,
@@ -627,10 +735,12 @@ export async function startImBridges(
           webSocketImpl: NodeWebSocket as unknown as SlackWebSocketCtor,
           onError: (err) => opts.log.warn('slack bridge error', { err: String(err) }),
         }),
-    )
+    })
   }
 
-  if (factories.length === 0) return undefined
+  // Without the hot-start seam the boot contract is unchanged: nothing
+  // configured (env NOR vault) → undefined, no handle, no shutdown hook.
+  if (factories.length === 0 && !opts.hotStart) return undefined
 
   // Declared before the registry so its `bridgeFor` closure reads the live array
   // (populated in the loop below); `push` only fires out-of-band, well after.
@@ -676,8 +786,10 @@ export async function startImBridges(
         }
       : {}),
   }
-  for (const make of factories) {
-    const bridge = make()
+  // Shared by the boot loop and the hot-start seam so a hot-started bridge is
+  // wired byte-identically to a boot-started one (same router, same config,
+  // same failure tolerance).
+  const wireAndStart = async (bridge: ImBridge, source?: 'env' | 'vault'): Promise<boolean> => {
     // A single bad message must not take down a bridge's receive loop. The
     // concrete bridge already catches listener throws; this top-level net
     // also sends the user a friendly error instead of a silent drop.
@@ -701,23 +813,46 @@ export async function startImBridges(
       } catch {
         /* best-effort cleanup; the start failure is the real signal */
       }
-      continue
+      return false
     }
     opts.log.info('IM bridge enabled', {
       platform: bridge.platform,
       freeTextCapability: config.freeTextCapability,
+      ...(source ? { credSource: source } : {}),
     })
     bridges.push(bridge)
+    return true
+  }
+
+  for (const f of factories) {
+    await wireAndStart(f.make(), f.source)
   }
 
   // Every configured bridge failed to start → IM is effectively disabled.
   // Returning undefined keeps the "no shutdown hook" contract the caller
-  // relies on, same as the no-env path.
-  if (bridges.length === 0) return undefined
+  // relies on, same as the no-env path — unless the hot-start seam is on,
+  // in which case the (empty) handle IS the point: a bridge may arrive later.
+  if (bridges.length === 0 && !opts.hotStart) return undefined
+
+  // DEPLOY-B1 — bring ONE not-yet-running platform up after boot. Credential
+  // resolution happens at CALL time (the setup route writes the vault row,
+  // then calls this), through the same resolveImCreds the boot path uses.
+  const startPlatform = async (platform: ImVaultPlatform): Promise<ImHotStartResult> => {
+    if (bridges.some((b) => b.platform === platform)) {
+      return { ok: false, reason: 'already_running' }
+    }
+    const creds = resolveImCreds(platform, opts.identity, opts.log)
+    if (!creds) return { ok: false, reason: 'no_credentials' }
+    const started = await wireAndStart(makeVaultable(platform, creds), creds.source)
+    return started
+      ? { ok: true, platform, source: creds.source }
+      : { ok: false, reason: 'start_failed', detail: 'bridge start threw; see host log' }
+  }
 
   return {
     bridges,
     ...(reachable ? { pushToMember: (userId: string, text: string) => reachable!.push(userId, text) } : {}),
+    ...(opts.hotStart ? { startPlatform } : {}),
     async stop() {
       for (const b of bridges) {
         try {

@@ -731,6 +731,11 @@ export type VaultKind =
   // same envelope encryption + master-key rotation cover it for free. A public
   // (PKCE-only) client has no secret and therefore no vault entry at all.
   | 'oidc_client_secret'
+  // DEPLOY-B1 — an IM bridge credential (Telegram bot token / Lark app secret),
+  // ownerKind 'org' (the hub owns its bot registration). Written by the
+  // first-boot wizard so IM works without hand-editing env files; env vars
+  // still win at boot (metadata carries the platform tag + non-secret ids).
+  | 'im_bridge'
 
 export const VAULT_KINDS: readonly VaultKind[] = [
   'llm_provider',
@@ -739,6 +744,7 @@ export const VAULT_KINDS: readonly VaultKind[] = [
   'third_party_api',
   'totp',
   'oidc_client_secret',
+  'im_bridge',
 ] as const
 
 /**
