@@ -1443,6 +1443,38 @@ import { createWorkflows } from './workflows.js'
     </div>`
   }
 
+  // DEPLOY-B3 — the "IM 通道" status block on the admin 设置 page. Fed by the
+  // SAME /api/admin/health snapshot the 体检 panel fetches (its optional
+  // `imBridges` rows), but rendered into its own #im-status element so its
+  // visibility is NOT tied to the 体检 panel's managedCount>0 gate — IM is
+  // deployment state, meaningful even on a hub with zero agents. Honesty
+  // ladder: snapshot has no imBridges field (host didn't wire the IM dep) →
+  // hidden; `[]` → "未配置" hint; rows → platform + credential-source badges.
+  function renderImStatus(snap) {
+    const el = document.getElementById('im-status')
+    if (!el) return
+    const rows = snap?.imBridges
+    if (!Array.isArray(rows)) { el.hidden = true; return }
+    if (rows.length === 0) {
+      el.innerHTML = `<h3 class="im-status-title">${escapeHtml(t.imStatusTitle)}</h3>
+        <p class="im-status-none">${escapeHtml(t.imStatusNone)}</p>`
+      el.hidden = false
+      return
+    }
+    const items = rows.map((r) => {
+      const src = r.source === 'vault' ? t.imSourceVault : r.source === 'env' ? t.imSourceEnv : ''
+      return `<li class="im-status-row">
+        <span class="im-status-dot" aria-hidden="true"></span>
+        <span class="im-status-platform">${escapeHtml(r.platform || '')}</span>
+        ${src ? `<span class="im-status-source">${escapeHtml(src)}</span>` : ''}
+      </li>`
+    }).join('')
+    el.innerHTML = `<h3 class="im-status-title">${escapeHtml(t.imStatusTitle)}</h3>
+      <ul class="im-status-list">${items}</ul>
+      <p class="im-status-hint">${escapeHtml(t.imStatusHint)}</p>`
+    el.hidden = false
+  }
+
   async function renderHubHealth(opts = {}) {
     const host = document.getElementById('hub-health')
     if (!host) return
@@ -1450,6 +1482,7 @@ import { createWorkflows } from './workflows.js'
     // Lang change: re-render the cached snapshot with the new i18n strings — no
     // network round-trip. Falls through to a fetch if we have no cache yet.
     if (opts.useCache && lastHealthSnap) {
+      renderImStatus(lastHealthSnap)
       if ((lastHealthSnap.managedCount || 0) === 0) { host.hidden = true; return }
       host.innerHTML = renderHubHealthHtml(lastHealthSnap)
       host.hidden = false
@@ -1462,13 +1495,19 @@ import { createWorkflows } from './workflows.js'
         snap = await fetchJson('/api/admin/health')
       } catch {
         // 503 (host wired no health surface) / network — hide, never error the
-        // overview. The panel is advisory; its absence is silent.
+        // page. The panel is advisory; its absence is silent. The IM block
+        // rides the same surface, so it hides with it.
         host.hidden = true
+        renderImStatus(null)
         return
       }
       lastHealthSnap = snap
+      // DEPLOY-B3 — IM status renders from every successful snapshot, BEFORE
+      // the fresh-hub gate below: a wizard-configured telegram bridge on a
+      // zero-agent hub is exactly what the settings page must show.
+      renderImStatus(snap)
       // A fresh hub (no managed agents) is #start-here's domain — stay hidden
-      // there so the two overview cards never both show.
+      // there so the two cards never both show.
       if (!snap || (snap.managedCount || 0) === 0) { host.hidden = true; return }
       // RES-M4 — best-effort live adaptation proposals for the current agents
       // (read-only). 503 (surface unwired) / network → no adaptations section;
@@ -2697,7 +2736,11 @@ import { createWorkflows } from './workflows.js'
       // card is dismissed; the guard inside makes this a no-op after that).
       if (e.detail?.name === 'overview') {
         renderStartHere().catch(() => {})
-        renderHubHealth().catch(() => {}) // ❷-M2 — refresh health on overview focus
+      }
+      // ❷-M2 / DEPLOY-B3 — the 体检 panel (+ its IM-status sibling) now lives
+      // on the admin 设置 page, so its focus-refresh follows it there.
+      if (e.detail?.name === 'settings') {
+        renderHubHealth().catch(() => {})
       }
     })
 
@@ -3047,6 +3090,9 @@ import { createWorkflows } from './workflows.js'
     // delegated click survives innerHTML re-renders (host element is stable).
     renderHubHealth().catch(() => {})
     document.getElementById('hub-health')?.addEventListener('click', onHubHealthClick)
+    // DEPLOY-B3 — the settings page's standing 凭证 entry: same proven modal
+    // the agents tab / start-here / 体检 signals open.
+    document.getElementById('ops-keys-btn')?.addEventListener('click', () => dom.maKeysBtn?.click())
     if (dom.grRefreshBtn) {
       dom.grRefreshBtn.addEventListener('click', () => {
         refreshGrowthReports().catch((err) => console.warn('manual growth-reports refresh:', err))

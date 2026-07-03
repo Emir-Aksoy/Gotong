@@ -628,8 +628,25 @@ export interface StartImBridgesOptions {
   reachableDir?: string
 }
 
+/**
+ * DEPLOY-B3 — one live bridge's at-a-glance row for the admin settings page.
+ * `source` answers "换 token 该去哪": env → edit env + restart; vault → the
+ * setup wizard / a future admin write path owns it. Platforms with no vault
+ * path (QQ / Slack) always report 'env'.
+ */
+export interface ImBridgeStatusRow {
+  platform: string
+  source?: 'env' | 'vault'
+}
+
 export interface ImBridgesHandle {
   readonly bridges: ImBridge[]
+  /**
+   * DEPLOY-B3 — read-only projection of what is LIVE right now (platform +
+   * credential source). Pure snapshot of in-memory state; safe on every
+   * admin-settings open.
+   */
+  status(): ImBridgeStatusRow[]
   /**
    * F1 — deliver a line of text to a member's last known chat (reminder / approval
    * push-back). Present only when `reachableDir` was configured; undefined
@@ -703,6 +720,9 @@ export async function startImBridges(
     const webhookHost = process.env.AIPE_QQ_WEBHOOK_HOST?.trim()
     const webhookPath = process.env.AIPE_QQ_WEBHOOK_PATH?.trim()
     factories.push({
+      // QQ has no vault path — env is its only credential source, stated
+      // explicitly so the status() projection reads uniformly.
+      source: 'env',
       make: () =>
         new QqBridge({
           appId: qqAppId,
@@ -724,6 +744,8 @@ export async function startImBridges(
   const slackAppToken = process.env.AIPE_SLACK_APP_TOKEN?.trim()
   if (slackBotToken && slackAppToken) {
     factories.push({
+      // Slack likewise: env-only credentials, no vault path.
+      source: 'env',
       make: () =>
         new SlackBridge({
           token: slackBotToken,
@@ -745,6 +767,9 @@ export async function startImBridges(
   // Declared before the registry so its `bridgeFor` closure reads the live array
   // (populated in the loop below); `push` only fires out-of-band, well after.
   const bridges: ImBridge[] = []
+  // DEPLOY-B3 — credential source per LIVE platform, feeding the status()
+  // projection. Keyed by platform (one bridge per platform by construction).
+  const credSources = new Map<string, 'env' | 'vault'>()
 
   // F1 — the outbound-push foundation. Built + rehydrated only when the host
   // wired `reachableDir`; without it reachability is off and `pushToMember` is
@@ -821,6 +846,7 @@ export async function startImBridges(
       ...(source ? { credSource: source } : {}),
     })
     bridges.push(bridge)
+    if (source) credSources.set(bridge.platform, source)
     return true
   }
 
@@ -851,6 +877,11 @@ export async function startImBridges(
 
   return {
     bridges,
+    status: () =>
+      bridges.map((b) => {
+        const source = credSources.get(b.platform)
+        return { platform: b.platform, ...(source ? { source } : {}) }
+      }),
     ...(reachable ? { pushToMember: (userId: string, text: string) => reachable!.push(userId, text) } : {}),
     ...(opts.hotStart ? { startPlatform } : {}),
     async stop() {

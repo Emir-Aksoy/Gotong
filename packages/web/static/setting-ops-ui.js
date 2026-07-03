@@ -1,10 +1,11 @@
 /**
- * setting-ops M4 — the unified deterministic "运维 / 设置" console (overview tab,
- * panel #setting-ops-panel). The WEB surface of the one host `ops-core` engine
- * (CLI + admin web + IM command-mode all consume the same engine). Self-contained
- * module; same activation pattern as the federation panels (owner/admin,
- * MutationObserver on <body data-active-tab>, targets its own panel by id) — but
- * it sits on the OVERVIEW tab next to the steward / health panels, not federation.
+ * setting-ops M4 — the unified deterministic "运维 / 设置" console (admin 设置
+ * tab, panel #setting-ops-panel). The WEB surface of the one host `ops-core`
+ * engine (CLI + admin web + IM command-mode all consume the same engine).
+ * Self-contained module; same activation pattern as the federation panels
+ * (owner/admin, MutationObserver on <body data-active-tab>, targets its own
+ * panel by id). DEPLOY-B3 moved it from the overview tab onto the admin 设置
+ * page, next to the 体检 panel + IM channel status it belongs with.
  *
  *   GET  /api/admin/setting/commands   the full ops catalog, annotated for THIS
  *                                      actor (every tier LISTED so the operator
@@ -301,7 +302,9 @@
   }
 
   function isActive() {
-    return document.body.dataset.activeTab === 'overview'
+    // DEPLOY-B3 — the panel moved from the overview tab onto the admin 设置
+    // page (its data-tab in app.html changed in lockstep).
+    return document.body.dataset.activeTab === 'settings'
   }
   function maybeLoad(root) {
     if (!isActive()) return Promise.resolve()

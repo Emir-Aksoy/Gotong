@@ -532,12 +532,33 @@
            NO new capability/route. Pure launcher-layer nudge; zero host change. -->
       <section id="start-here" class="start-here" data-tab="overview" hidden></section>
 
-      <!-- ease-of-use ❷-M2 — "hub 体检" health-check panel. Shares the overview
-           slot with #start-here (mutually exclusive: start-here on a FRESH hub,
-           this once the hub has agents). Body is rendered by main.js renderHubHealth
-           from the read-only /api/admin/health snapshot; self-hides on a fresh hub
-           or when the host wires no health surface. -->
-      <section id="hub-health" class="hub-health" data-tab="overview" hidden></section>
+      <!-- DEPLOY-B3 — the admin half of the 设置 tab: everything deployment-
+           flavoured stitched onto ONE page (this lead-in card + IM channel
+           status + the 体检 panel + the setting-ops console below). Sections
+           here carry data-tab="settings" while living inside the role-gated
+           <main>, so member/viewer still see only the account block above.
+           The standing "API Key 管理" button opens the SAME modal the agents
+           tab owns (dom.maKeysBtn — proven cross-tab pattern); #im-status is
+           filled by main.js from the /api/admin/health snapshot's imBridges
+           rows and hides when the host wires no health surface. -->
+      <section id="ops-quick" class="ops-quick" data-tab="settings">
+        <h2 data-i18n="opsQuickTitle">Hub 运维</h2>
+        <p class="hint" data-i18n="opsQuickHint">部署相关的状态和配置都收在这一页：IM 通道 / 凭证 / 体检 / 运维控制台。</p>
+        <div id="im-status" class="im-status" hidden></div>
+        <div class="ops-quick-actions">
+          <button id="ops-keys-btn" type="button" data-i18n="opsKeysBtn">API Key 管理</button>
+        </div>
+      </section>
+
+      <!-- ease-of-use ❷-M2 — "hub 体检" health-check panel. Body is rendered by
+           main.js renderHubHealth from the read-only /api/admin/health snapshot;
+           self-hides on a fresh hub (#start-here's domain, which stays on the
+           overview tab) or when the host wires no health surface. DEPLOY-B3
+           moved it from the overview tab onto the admin 设置 page — it is
+           config-oriented (missing keys / unwired MCP / disk), and it carries
+           the RES adaptation one-click applies + the per-signal 去配密钥 jump,
+           which are two of the five pieces the settings page stitches. -->
+      <section id="hub-health" class="hub-health" data-tab="settings" hidden></section>
 
       <!-- setting-ops M4 — the unified deterministic "运维 / 设置" console. The
            WEB surface of the host ops-core engine (CLI + web + IM share it).
@@ -547,8 +568,9 @@
            wire the surface) it stays hidden, like #hub-health. Lists the FULL
            ops lifecycle but only runs the safe online subset — destructive ops
            (cold-start / restore / rotate-master-key) are listed with a "去 CLI
-           跑" hint and no button (CLI-only by physics). -->
-      <section id="setting-ops-panel" class="setting-ops-panel" data-tab="overview" hidden></section>
+           跑" hint and no button (CLI-only by physics). DEPLOY-B3 moved it
+           onto the admin 设置 page alongside the 体检 panel. -->
+      <section id="setting-ops-panel" class="setting-ops-panel" data-tab="settings" hidden></section>
 
       <!-- SW-M9 A-M8 — the OPERATOR-console hub steward ("站点管家"). The
            site-wide twin of the member steward (which sits atop the "我的" home

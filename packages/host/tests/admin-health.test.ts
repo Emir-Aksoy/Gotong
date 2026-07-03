@@ -29,6 +29,8 @@ function svc(opts: {
   // omits the counts entirely (honest "unknown", not a defaulted 0).
   countWorkflows?: () => Promise<{ total: number; published: number }>
   countRuns?: () => Promise<number>
+  // DEPLOY-B3 — live IM bridge rows; same optional-dep contract.
+  imStatus?: () => { platform: string; source?: string }[]
 }) {
   return createAdminHealthService({
     listAgents: async () => opts.agents,
@@ -39,6 +41,7 @@ function svc(opts: {
     probeWritable: async () => opts.writable ?? true,
     ...(opts.countWorkflows ? { countWorkflows: opts.countWorkflows } : {}),
     ...(opts.countRuns ? { countRuns: opts.countRuns } : {}),
+    ...(opts.imStatus ? { imStatus: opts.imStatus } : {}),
   })
 }
 
@@ -171,5 +174,46 @@ describe('createAdminHealthService.snapshot', () => {
     })
     expect(typeof s.checkedAt).toBe('string')
     expect(Number.isNaN(Date.parse(s.checkedAt))).toBe(false)
+  })
+
+  // DEPLOY-B3 — IM bridge rows share the optional-dep honesty ladder: absent
+  // dep → field absent ("host didn't wire IM" ≠ "no channels"); dep present →
+  // rows verbatim ([] means genuinely none); dep fault → [] (advisory, never
+  // breaks the snapshot).
+  describe('imBridges (DEPLOY-B3)', () => {
+    it('omits the field entirely when the dep is not injected', async () => {
+      const s = await svc({ agents: [] }).snapshot()
+      expect('imBridges' in s).toBe(false)
+    })
+
+    it('echoes live rows with platform + credential source', async () => {
+      const s = await svc({
+        agents: [],
+        imStatus: () => [
+          { platform: 'telegram', source: 'vault' },
+          { platform: 'slack', source: 'env' },
+        ],
+      }).snapshot()
+      expect(s.imBridges).toEqual([
+        { platform: 'telegram', source: 'vault' },
+        { platform: 'slack', source: 'env' },
+      ])
+    })
+
+    it('reports [] when the dep is wired but no bridge is live', async () => {
+      const s = await svc({ agents: [], imStatus: () => [] }).snapshot()
+      expect(s.imBridges).toEqual([])
+    })
+
+    it('degrades a dep fault to [] without breaking the snapshot', async () => {
+      const s = await svc({
+        agents: [managed('a1', 'openai')],
+        imStatus: () => {
+          throw new Error('bridges not up yet')
+        },
+      }).snapshot()
+      expect(s.imBridges).toEqual([])
+      expect(s.managedCount).toBe(1)
+    })
   })
 })

@@ -83,8 +83,22 @@ export interface HealthSnapshot {
   publishedWorkflowCount?: number
   /** 跑过的 run 总数 (active 集, archived 除外)。countRuns 未注入时缺席。 */
   runCount?: number
+  /**
+   * DEPLOY-B3 — 现在活着的 IM 桥 (platform + 凭证来源), 喂 admin 设置页的
+   * 「IM 通道」状态块。与 workflowCount 同一「可选 = 诚实的未知」约定:
+   * host 未注入 `imStatus` dep → 字段整个缺席 (前端隐藏该块), 注入了但列表
+   * 空 → `[]` (真的没有通道, 前端显示「未配置」提示)。
+   */
+  imBridges?: HealthImRow[]
   /** ISO timestamp the snapshot was taken. */
   checkedAt: string
+}
+
+/** DEPLOY-B3 — one live IM bridge row (mirrors host ImBridgeStatusRow). */
+export interface HealthImRow {
+  platform: string
+  /** 'env' | 'vault' — where the credential came from (换 token 该去哪). */
+  source?: string
 }
 
 /** Narrow view of an agent record — only the fields the snapshot reads. */
@@ -127,6 +141,11 @@ export interface AdminHealthDeps {
   countWorkflows?(): Promise<{ total: number; published: number }>
   /** EH-M1 — 跑过的 run 总数 (active 集)。可选: absent → 0。 */
   countRuns?(): Promise<number>
+  /**
+   * DEPLOY-B3 — 现在活着的 IM 桥。可选: absent → snapshot 不含 imBridges
+   * (host 未接 IM 子系统的诚实「未知」)。同步纯投影 (host 侧读内存数组)。
+   */
+  imStatus?(): HealthImRow[]
 }
 
 /** The duck-typed surface injected into `serveWeb`. */
@@ -211,6 +230,16 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
           runCount = 0
         }
       }
+      // DEPLOY-B3 — IM bridge rows, same best-effort contract: dep 在但抛错 →
+      // 当「无通道」([]), dep 不在 → 字段整个缺席。
+      let imRows: HealthImRow[] | undefined
+      if (deps.imStatus) {
+        try {
+          imRows = deps.imStatus()
+        } catch {
+          imRows = []
+        }
+      }
 
       return {
         agents: rows,
@@ -228,6 +257,7 @@ export function createAdminHealthService(deps: AdminHealthDeps): AdminHealthSurf
             }
           : {}),
         ...(runCount !== undefined ? { runCount } : {}),
+        ...(imRows !== undefined ? { imBridges: imRows } : {}),
         checkedAt: new Date().toISOString(),
       }
     },

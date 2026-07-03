@@ -973,6 +973,15 @@
       healthGoWorkflows: '去工作流 →',
       healthGoPublish: '去发布 →',
       healthGoRun: '去运行 →',
+      // --- DEPLOY-B3 — admin 设置页「Hub 运维」缝合区 (ops-quick + IM 通道状态) ---
+      opsQuickTitle: 'Hub 运维',
+      opsQuickHint: '部署相关的状态和配置都收在这一页:IM 通道 / 凭证 / 体检 / 运维控制台。',
+      opsKeysBtn: 'API Key 管理',
+      imStatusTitle: 'IM 通道',
+      imStatusNone: '还没有已连接的 IM 通道。可用首次启动向导粘贴 bot token,或设环境变量 (如 AIPE_TELEGRAM_BOT_TOKEN),重启 host 后生效。',
+      imStatusHint: '换 token:设置对应环境变量后重启 host 即可 — 环境变量永远优先于密钥库里存的 token。',
+      imSourceEnv: '环境变量',
+      imSourceVault: '密钥库',
       // --- peer-manifest-ui.js (联邦 tab — peer capability manifest) ---
       pmTitle: 'Peer 能力清单(federation manifest)',
       pmDesc: '每个已连接 peer 通过认证 mesh 链路广播的能力(<code>peer.manifest</code> RPC)。' +
@@ -2856,6 +2865,15 @@
       healthGoWorkflows: 'Go to Workflows →',
       healthGoPublish: 'Publish →',
       healthGoRun: 'Run it →',
+      // --- DEPLOY-B3 — admin settings page "Hub ops" stitched area (ops-quick + IM channel status) ---
+      opsQuickTitle: 'Hub ops',
+      opsQuickHint: 'Deployment-related status and settings live on this page: IM channels / credentials / health check / ops console.',
+      opsKeysBtn: 'Manage API keys',
+      imStatusTitle: 'IM channels',
+      imStatusNone: 'No IM channel connected yet. Paste a bot token in the first-boot wizard, or set an env var (e.g. AIPE_TELEGRAM_BOT_TOKEN) and restart the host.',
+      imStatusHint: 'To rotate a token: set the matching env var and restart — env vars always take precedence over vault-stored tokens.',
+      imSourceEnv: 'env var',
+      imSourceVault: 'vault',
       // --- peer-manifest-ui.js (federation tab — peer capability manifest) ---
       pmTitle: 'Peer capability manifest (federation manifest)',
       pmDesc: 'Capabilities each connected peer advertises over the authenticated mesh link (<code>peer.manifest</code> RPC). ' +

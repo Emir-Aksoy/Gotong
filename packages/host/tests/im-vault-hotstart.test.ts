@@ -210,6 +210,8 @@ describe('startImBridges — vault row activates a bridge at boot', () => {
       expect(handle!.bridges.map((b) => b.platform)).toEqual(['telegram'])
       expect(made[0]!.creds).toEqual({ source: 'vault', fields: { token: 'vault-token' } })
       expect(made[0]!.started).toBe(true)
+      // DEPLOY-B3 — the read-only projection the admin settings page shows.
+      expect(handle!.status()).toEqual([{ platform: 'telegram', source: 'vault' }])
       await handle!.stop()
       expect(made[0]!.started).toBe(false)
     } finally {
@@ -263,6 +265,7 @@ describe('startImBridges — hot-start seam', () => {
     expect(handle).toBeDefined()
     expect(handle!.bridges).toHaveLength(0)
     expect(handle!.startPlatform).toBeTypeOf('function')
+    expect(handle!.status()).toEqual([]) // DEPLOY-B3 — honest "no live channel"
     await handle!.stop() // no-op on empty must not throw
   })
 
@@ -279,6 +282,8 @@ describe('startImBridges — hot-start seam', () => {
     expect(res).toEqual({ ok: true, platform: 'telegram', source: 'vault' })
     expect(handle!.bridges.map((b) => b.platform)).toEqual(['telegram'])
     expect(made[0]!.started).toBe(true)
+    // DEPLOY-B3 — a hot-started bridge appears in the status projection too.
+    expect(handle!.status()).toEqual([{ platform: 'telegram', source: 'vault' }])
 
     // 只热启不热改 — a second call must refuse, not rebuild.
     expect(await handle!.startPlatform!('telegram')).toEqual({

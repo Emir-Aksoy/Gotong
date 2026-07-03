@@ -409,6 +409,12 @@ body.admin[data-active-tab="tasks"] #controls {
 body.admin[data-active-tab="activity"] main.admin-grid {
   grid-template-columns: 280px 1fr;
 }
+/* DEPLOY-B3 — the admin 设置 page stacks full-width ops cards (ops-quick /
+   体检 / setting-ops console); the default 3-col overview shape would cram
+   them into a 240px rail. */
+body.admin[data-active-tab="settings"] main.admin-grid {
+  grid-template-columns: 1fr;
+}
 .pending-apps {
   grid-column: 1 / -1;
   background: #fff;
@@ -1393,6 +1399,52 @@ body.admin[data-active-tab="activity"] main.admin-grid {
    card — it's a status readout, not the warm onboarding nudge — with
    red/yellow/green signal rows + a roster of agents each carrying a manual
    「测连接」button. */
+/* DEPLOY-B3 — the 设置 page's lead-in ops card + IM channel status block.
+   Chrome mirrors .hub-health so the stacked settings cards read as one family. */
+.ops-quick {
+  grid-column: 1 / -1;
+  overflow: visible;
+  margin: 14px 1.25rem 0;
+  padding: 16px 18px 18px;
+  background: #fff;
+  border: 1px solid #e4e7ec;
+  border-radius: 10px;
+}
+.ops-quick h2 { margin: 0 0 0.35rem; font-size: 1.05rem; }
+.ops-quick h2::before { content: "🛠 "; }
+.ops-quick .hint { margin: 0 0 0.6rem; color: #667085; font-size: 0.85rem; }
+.ops-quick-actions { margin-top: 0.6rem; }
+.ops-quick-actions button {
+  padding: 0.35rem 0.9rem;
+  border: 1px solid #cfd4dc;
+  border-radius: 6px;
+  background: #fff;
+  color: #344054;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.ops-quick-actions button:hover { background: #f5f6f8; }
+.im-status {
+  margin-top: 0.4rem;
+  padding: 0.6rem 0.75rem;
+  background: #f8fafc;
+  border: 1px solid #e8ecf1;
+  border-radius: 8px;
+}
+.im-status-title { margin: 0 0 0.4rem; font-size: 0.9rem; color: #344054; }
+.im-status-none, .im-status-hint { margin: 0.25rem 0 0; color: #667085; font-size: 0.82rem; }
+.im-status-list { list-style: none; margin: 0; padding: 0; }
+.im-status-row { display: flex; align-items: center; gap: 0.5rem; padding: 0.2rem 0; }
+.im-status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #12b76a; flex: 0 0 auto;
+}
+.im-status-platform { font-weight: 600; color: #1d2939; font-size: 0.88rem; }
+.im-status-source {
+  font-size: 0.75rem; color: #475467;
+  background: #eef2f6; border-radius: 999px; padding: 0.05rem 0.55rem;
+}
+
 .hub-health {
   grid-column: 1 / -1;
   /* Override the generic `section { overflow: auto }`: on a CSS-grid item,

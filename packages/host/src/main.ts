@@ -2900,6 +2900,11 @@ async function main(): Promise<void> {
       return { total: all.length, published: live.length }
     },
     countRuns: async () => (await workflowController.countRuns()).total,
+    // DEPLOY-B3 — live IM bridge rows for the admin settings page. `imBridges`
+    // is assigned well after this closure is BUILT but before any admin can
+    // fetch a snapshot in practice; the `?? []` keeps the boot window honest
+    // ("no live bridge yet" is literally true then).
+    imStatus: () => imBridges?.status() ?? [],
   })
 
   // RES-M1 — read-only resource inventory for the "resource adaptation" panel.

@@ -3239,11 +3239,39 @@
       <ul class="hh-adapt-list">${rows}</ul>
     </div>`;
     }
+    function renderImStatus(snap) {
+      const el = document.getElementById("im-status");
+      if (!el) return;
+      const rows = snap?.imBridges;
+      if (!Array.isArray(rows)) {
+        el.hidden = true;
+        return;
+      }
+      if (rows.length === 0) {
+        el.innerHTML = `<h3 class="im-status-title">${escapeHtml5(t5.imStatusTitle)}</h3>
+        <p class="im-status-none">${escapeHtml5(t5.imStatusNone)}</p>`;
+        el.hidden = false;
+        return;
+      }
+      const items = rows.map((r) => {
+        const src = r.source === "vault" ? t5.imSourceVault : r.source === "env" ? t5.imSourceEnv : "";
+        return `<li class="im-status-row">
+        <span class="im-status-dot" aria-hidden="true"></span>
+        <span class="im-status-platform">${escapeHtml5(r.platform || "")}</span>
+        ${src ? `<span class="im-status-source">${escapeHtml5(src)}</span>` : ""}
+      </li>`;
+      }).join("");
+      el.innerHTML = `<h3 class="im-status-title">${escapeHtml5(t5.imStatusTitle)}</h3>
+      <ul class="im-status-list">${items}</ul>
+      <p class="im-status-hint">${escapeHtml5(t5.imStatusHint)}</p>`;
+      el.hidden = false;
+    }
     async function renderHubHealth(opts = {}) {
       const host = document.getElementById("hub-health");
       if (!host) return;
       if (hubHealthBusy) return;
       if (opts.useCache && lastHealthSnap) {
+        renderImStatus(lastHealthSnap);
         if ((lastHealthSnap.managedCount || 0) === 0) {
           host.hidden = true;
           return;
@@ -3259,9 +3287,11 @@
           snap = await fetchJson4("/api/admin/health");
         } catch {
           host.hidden = true;
+          renderImStatus(null);
           return;
         }
         lastHealthSnap = snap;
+        renderImStatus(snap);
         if (!snap || (snap.managedCount || 0) === 0) {
           host.hidden = true;
           return;
@@ -4182,6 +4212,8 @@
         if (e.detail?.name === "overview") {
           renderStartHere().catch(() => {
           });
+        }
+        if (e.detail?.name === "settings") {
           renderHubHealth().catch(() => {
           });
         }
@@ -4479,6 +4511,7 @@
       renderHubHealth().catch(() => {
       });
       document.getElementById("hub-health")?.addEventListener("click", onHubHealthClick);
+      document.getElementById("ops-keys-btn")?.addEventListener("click", () => dom.maKeysBtn?.click());
       if (dom.grRefreshBtn) {
         dom.grRefreshBtn.addEventListener("click", () => {
           refreshGrowthReports().catch((err) => console.warn("manual growth-reports refresh:", err));
