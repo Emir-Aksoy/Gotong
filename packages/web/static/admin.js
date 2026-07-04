@@ -1409,6 +1409,7 @@
         wf.workflows = body.workflows || [];
         dom.wfSection.hidden = false;
         renderWorkflows();
+        void refreshSchedules();
       } catch (err) {
         console.warn("refreshWorkflows:", err);
       }
@@ -1510,6 +1511,194 @@
           return;
         }
         await refreshWorkflows();
+      } catch (err) {
+        alert(t4.failedAlert(err.message || String(err)));
+      }
+    }
+    let schedules = [];
+    let schedFormReady = false;
+    async function refreshSchedules() {
+      if (!dom?.wfSchedCard) return;
+      try {
+        const r = await fetch("/api/admin/workflow-schedules");
+        if (!r.ok) {
+          dom.wfSchedCard.hidden = true;
+          return;
+        }
+        schedules = (await r.json()).schedules || [];
+        dom.wfSchedCard.hidden = false;
+        renderSchedules();
+        populateScheduleForm();
+      } catch (err) {
+        console.warn("refreshSchedules:", err);
+      }
+    }
+    function schedCadenceText(c) {
+      if (!c || typeof c !== "object") return t4.wfSchedInvalid;
+      if (c.kind === "daily") {
+        return t4.wfSchedCadenceDaily(c.hour) + t4.wfSchedTz(c.tzOffsetMinutes ?? 480);
+      }
+      if (c.kind === "weekly") {
+        const wd = t4.wfSchedWeekdays[c.weekday] ?? String(c.weekday);
+        return t4.wfSchedCadenceWeekly(wd, c.hour) + t4.wfSchedTz(c.tzOffsetMinutes ?? 480);
+      }
+      if (c.kind === "interval") return t4.wfSchedCadenceInterval(Math.round(c.everyMs / 6e4));
+      return t4.wfSchedInvalid;
+    }
+    function renderSchedules() {
+      if (!dom.wfSchedList) return;
+      if (dom.wfSchedSummary) {
+        dom.wfSchedSummary.textContent = schedules.length === 0 ? "" : t4.wfSchedSummary(schedules.length);
+      }
+      if (schedules.length === 0) {
+        dom.wfSchedList.innerHTML = `<p class="empty">${escapeHtml4(t4.wfSchedEmpty)}</p>`;
+        return;
+      }
+      dom.wfSchedList.innerHTML = schedules.map((s) => {
+        const w = wf.workflows.find((x) => x.id === s.workflowId);
+        const name = escapeHtml4(w?.name || s.workflowId);
+        const idAttr = escapeHtml4(s.id);
+        const stateBadge = !s.valid ? `<span class="wf-state wf-state-archived">${escapeHtml4(t4.wfSchedInvalid)}</span>` : s.enabled ? `<span class="wf-state wf-state-published">${escapeHtml4(t4.wfSchedEnabled)}</span>` : `<span class="wf-state wf-state-draft">${escapeHtml4(t4.wfSchedDisabled)}</span>`;
+        const fired = s.lastFiredMark ? t4.wfSchedLastFired(s.lastFiredMark) : t4.wfSchedNeverFired;
+        const toggleBtn = s.valid ? `<button type="button" class="ma-btn ma-btn-secondary" data-act="toggle-schedule" data-id="${idAttr}">${escapeHtml4(s.enabled ? t4.wfSchedPauseBtn : t4.wfSchedResumeBtn)}</button>` : "";
+        return `<article class="ma-card">
+        <header>
+          <strong>${name}</strong>
+          <code>${escapeHtml4(s.userId)}</code>
+          ${stateBadge}
+          <button type="button" class="ma-btn" data-act="fire-schedule" data-id="${idAttr}">${escapeHtml4(t4.wfSchedFireBtn)}</button>
+          ${toggleBtn}
+          <button type="button" class="ma-btn ma-btn-secondary" data-act="remove-schedule" data-id="${idAttr}">${escapeHtml4(t4.wfSchedRemoveBtn)}</button>
+        </header>
+        <ul class="ma-meta">
+          <li>${escapeHtml4(schedCadenceText(s.cadence))}</li>
+          <li>${escapeHtml4(fired)}</li>
+          <li><code>${idAttr}</code></li>
+        </ul>
+      </article>`;
+      }).join("");
+    }
+    function populateScheduleForm() {
+      if (!dom.wfSchedWorkflow) return;
+      if (!schedFormReady) {
+        schedFormReady = true;
+        if (dom.wfSchedKind) {
+          dom.wfSchedKind.innerHTML = `<option value="daily">${escapeHtml4(t4.wfSchedKindDaily)}</option><option value="weekly">${escapeHtml4(t4.wfSchedKindWeekly)}</option><option value="interval">${escapeHtml4(t4.wfSchedKindInterval)}</option>`;
+        }
+        if (dom.wfSchedWeekday) {
+          dom.wfSchedWeekday.innerHTML = t4.wfSchedWeekdays.map((d, i) => `<option value="${i}"${i === 1 ? " selected" : ""}>${escapeHtml4(d)}</option>`).join("");
+        }
+        void fillScheduleUserOptions();
+      }
+      const prev = dom.wfSchedWorkflow.value;
+      const rows = wf.workflows.filter(
+        (w) => (w.state || "published") === "published" && w.surfaceMe && w.surfaceMe.enabled === true
+      );
+      dom.wfSchedWorkflow.innerHTML = rows.length === 0 ? `<option value="">${escapeHtml4(t4.wfSchedNoWorkflow)}</option>` : rows.map((w) => `<option value="${escapeHtml4(w.id)}">${escapeHtml4(w.name || w.id)}</option>`).join("");
+      if (prev && rows.some((w) => w.id === prev)) dom.wfSchedWorkflow.value = prev;
+    }
+    async function fillScheduleUserOptions() {
+      if (!dom.wfSchedUserOptions) return;
+      try {
+        const r = await fetch("/api/admin/identity/users");
+        if (!r.ok) return;
+        const users = (await r.json()).users || [];
+        dom.wfSchedUserOptions.innerHTML = users.map((u) => `<option value="${escapeHtml4(u.id)}">${escapeHtml4(u.displayName || u.email || u.id)}</option>`).join("");
+      } catch {
+      }
+    }
+    function onScheduleKindChange() {
+      const kind = dom.wfSchedKind?.value || "daily";
+      if (dom.wfSchedWeekdayWrap) dom.wfSchedWeekdayWrap.hidden = kind !== "weekly";
+      if (dom.wfSchedHourWrap) dom.wfSchedHourWrap.hidden = kind === "interval";
+      if (dom.wfSchedMinutesWrap) dom.wfSchedMinutesWrap.hidden = kind !== "interval";
+    }
+    function schedMsg(text, cls) {
+      if (!dom.wfSchedMsg) return;
+      dom.wfSchedMsg.textContent = text;
+      dom.wfSchedMsg.classList.remove("ok", "err");
+      if (cls) dom.wfSchedMsg.classList.add(cls);
+    }
+    async function createSchedule() {
+      schedMsg("");
+      const workflowId = dom.wfSchedWorkflow?.value || "";
+      const userId = (dom.wfSchedUser?.value || "").trim();
+      if (!workflowId || !userId) return;
+      const kind = dom.wfSchedKind?.value || "daily";
+      const cadence = kind === "interval" ? { kind, everyMs: Math.max(1, Number(dom.wfSchedMinutes?.value) || 0) * 6e4 } : kind === "weekly" ? { kind, weekday: Number(dom.wfSchedWeekday?.value) || 0, hour: Number(dom.wfSchedHour?.value) } : { kind, hour: Number(dom.wfSchedHour?.value) };
+      try {
+        const r = await fetch("/api/admin/workflow-schedules", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ workflowId, userId, cadence, enabled: true })
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          schedMsg(t4.failedAlert(body.error || `${r.status}`), "err");
+          return;
+        }
+        schedMsg(t4.wfSchedCreated(body.schedule?.id || ""), "ok");
+        if (dom.wfSchedUser) dom.wfSchedUser.value = "";
+        await refreshSchedules();
+      } catch (err) {
+        schedMsg(t4.failedAlert(err.message || String(err)), "err");
+      }
+    }
+    async function fireSchedule(id) {
+      schedMsg("");
+      try {
+        const r = await fetch(`/api/admin/workflow-schedules/${encodeURIComponent(id)}/fire`, {
+          method: "POST"
+        });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) {
+          schedMsg(t4.wfSchedFireFail(body.error || `${r.status}`), "err");
+          return;
+        }
+        schedMsg(t4.wfSchedFired(body.workflowId, body.userId), "ok");
+        await refreshSchedules();
+      } catch (err) {
+        schedMsg(t4.failedAlert(err.message || String(err)), "err");
+      }
+    }
+    async function toggleSchedule(id) {
+      const row = schedules.find((s) => s.id === id);
+      if (!row || !row.valid) return;
+      try {
+        const r = await fetch("/api/admin/workflow-schedules", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            id: row.id,
+            workflowId: row.workflowId,
+            userId: row.userId,
+            cadence: row.cadence,
+            inputs: row.inputs,
+            enabled: !row.enabled
+          })
+        });
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          alert(t4.failedAlert(body.error || `${r.status}`));
+          return;
+        }
+        await refreshSchedules();
+      } catch (err) {
+        alert(t4.failedAlert(err.message || String(err)));
+      }
+    }
+    async function removeSchedule(id) {
+      if (!confirm(t4.confirmRemoveSchedule(id))) return;
+      try {
+        const r = await fetch(`/api/admin/workflow-schedules/${encodeURIComponent(id)}`, {
+          method: "DELETE"
+        });
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          alert(t4.failedAlert(body.error || `${r.status}`));
+          return;
+        }
+        await refreshSchedules();
       } catch (err) {
         alert(t4.failedAlert(err.message || String(err)));
       }
@@ -2164,6 +2353,12 @@
       setDom,
       refreshWorkflows,
       renderWorkflows,
+      refreshSchedules,
+      onScheduleKindChange,
+      createSchedule,
+      fireSchedule,
+      toggleSchedule,
+      removeSchedule,
       removeWorkflow,
       lifecycleAction,
       openWorkflowRevisionsModal,
@@ -2389,6 +2584,22 @@
         wfList: $("workflows-list"),
         wfSummary: $("wf-summary"),
         wfImportBtn: $("wf-import-btn"),
+        // Workflow schedules (LIFE-L1-M3 —「定时」card)
+        wfSchedCard: $("wf-sched-card"),
+        wfSchedSummary: $("wf-sched-summary"),
+        wfSchedList: $("wf-sched-list"),
+        wfSchedForm: $("wf-sched-form"),
+        wfSchedWorkflow: $("wf-sched-workflow"),
+        wfSchedUser: $("wf-sched-user"),
+        wfSchedUserOptions: $("wf-sched-user-options"),
+        wfSchedKind: $("wf-sched-kind"),
+        wfSchedWeekday: $("wf-sched-weekday"),
+        wfSchedWeekdayWrap: $("wf-sched-weekday-wrap"),
+        wfSchedHourWrap: $("wf-sched-hour-wrap"),
+        wfSchedMinutesWrap: $("wf-sched-minutes-wrap"),
+        wfSchedHour: $("wf-sched-hour"),
+        wfSchedMinutes: $("wf-sched-minutes"),
+        wfSchedMsg: $("wf-sched-msg"),
         // Workflow start (v2.4) — payload-schema-driven dispatch form
         wfStartModal: $("wf-start-modal"),
         wfStartTitle: $("wf-start-title"),
@@ -4276,6 +4487,11 @@
       dom.wfImportBtn?.addEventListener("click", workflows.openWorkflowImportModal);
       dom.wfImportSubmit?.addEventListener("click", workflows.submitWorkflowImport);
       dom.wfStartSubmit?.addEventListener("click", submitWorkflowStart);
+      dom.wfSchedForm?.addEventListener("submit", (e) => {
+        e.preventDefault();
+        void workflows.createSchedule();
+      });
+      dom.wfSchedKind?.addEventListener("change", workflows.onScheduleKindChange);
       dom.bundleImportBtn?.addEventListener("click", openBundleImportModal);
       dom.bundleImportSubmit?.addEventListener("click", submitBundleImport);
       dom.templateGalleryBtn?.addEventListener("click", openTemplateGalleryModal);
@@ -4461,6 +4677,12 @@
           workflows.lifecycleAction(id, "draft");
         } else if (act === "archive-workflow") {
           workflows.lifecycleAction(id, "archive");
+        } else if (act === "fire-schedule") {
+          workflows.fireSchedule(id);
+        } else if (act === "toggle-schedule") {
+          workflows.toggleSchedule(id);
+        } else if (act === "remove-schedule") {
+          workflows.removeSchedule(id);
         } else if (act === "open-workflow-revisions") {
           workflows.openWorkflowRevisionsModal(id);
         } else if (act === "rollback-revision") {

@@ -48,6 +48,9 @@ export function createWorkflows({ wf }) {
       wf.workflows = body.workflows || []
       dom.wfSection.hidden = false
       renderWorkflows()
+      // LIFE-L1-M3 — the「定时」card rides every workflow refresh (its rows
+      // name workflows and its form lists them, so the two stay in step).
+      void refreshSchedules()
     } catch (err) {
       console.warn('refreshWorkflows:', err)
     }
@@ -189,6 +192,248 @@ export function createWorkflows({ wf }) {
         return
       }
       await refreshWorkflows()
+    } catch (err) {
+      alert(t.failedAlert(err.message || String(err)))
+    }
+  }
+
+  // --- workflow schedules (LIFE-L1-M3 —「定时」card) -----------------------
+  //
+  // Zero-LLM schedules over the M3 admin API: list + create + per-row
+  // 试跑/暂停/删除. The host surface is optional — any non-OK list response
+  // hides the whole card (503 surface-unwired, 404 pre-M3 host), so older
+  // hosts render exactly as before. A schedule fires through the SAME member
+  // gate as /me's "run", so the form only offers published + surface.me
+  // workflows (anything else would sit due-but-unrunnable).
+
+  let schedules = []
+  let schedFormReady = false
+
+  async function refreshSchedules() {
+    if (!dom?.wfSchedCard) return
+    try {
+      const r = await fetch('/api/admin/workflow-schedules')
+      if (!r.ok) {
+        dom.wfSchedCard.hidden = true
+        return
+      }
+      schedules = (await r.json()).schedules || []
+      dom.wfSchedCard.hidden = false
+      renderSchedules()
+      populateScheduleForm()
+    } catch (err) {
+      console.warn('refreshSchedules:', err)
+    }
+  }
+
+  function schedCadenceText(c) {
+    if (!c || typeof c !== 'object') return t.wfSchedInvalid
+    if (c.kind === 'daily') {
+      return t.wfSchedCadenceDaily(c.hour) + t.wfSchedTz(c.tzOffsetMinutes ?? 480)
+    }
+    if (c.kind === 'weekly') {
+      const wd = t.wfSchedWeekdays[c.weekday] ?? String(c.weekday)
+      return t.wfSchedCadenceWeekly(wd, c.hour) + t.wfSchedTz(c.tzOffsetMinutes ?? 480)
+    }
+    if (c.kind === 'interval') return t.wfSchedCadenceInterval(Math.round(c.everyMs / 60000))
+    return t.wfSchedInvalid
+  }
+
+  function renderSchedules() {
+    if (!dom.wfSchedList) return
+    if (dom.wfSchedSummary) {
+      dom.wfSchedSummary.textContent =
+        schedules.length === 0 ? '' : t.wfSchedSummary(schedules.length)
+    }
+    if (schedules.length === 0) {
+      dom.wfSchedList.innerHTML = `<p class="empty">${escapeHtml(t.wfSchedEmpty)}</p>`
+      return
+    }
+    dom.wfSchedList.innerHTML = schedules.map((s) => {
+      const w = wf.workflows.find((x) => x.id === s.workflowId)
+      const name = escapeHtml(w?.name || s.workflowId)
+      const idAttr = escapeHtml(s.id)
+      // An invalid row (hand-edited file / removed workflow schema) is shown,
+      // never auto-deleted — same round-trip posture as the host surface.
+      const stateBadge = !s.valid
+        ? `<span class="wf-state wf-state-archived">${escapeHtml(t.wfSchedInvalid)}</span>`
+        : s.enabled
+          ? `<span class="wf-state wf-state-published">${escapeHtml(t.wfSchedEnabled)}</span>`
+          : `<span class="wf-state wf-state-draft">${escapeHtml(t.wfSchedDisabled)}</span>`
+      const fired = s.lastFiredMark ? t.wfSchedLastFired(s.lastFiredMark) : t.wfSchedNeverFired
+      const toggleBtn = s.valid
+        ? `<button type="button" class="ma-btn ma-btn-secondary" data-act="toggle-schedule" data-id="${idAttr}">${escapeHtml(s.enabled ? t.wfSchedPauseBtn : t.wfSchedResumeBtn)}</button>`
+        : ''
+      return `<article class="ma-card">
+        <header>
+          <strong>${name}</strong>
+          <code>${escapeHtml(s.userId)}</code>
+          ${stateBadge}
+          <button type="button" class="ma-btn" data-act="fire-schedule" data-id="${idAttr}">${escapeHtml(t.wfSchedFireBtn)}</button>
+          ${toggleBtn}
+          <button type="button" class="ma-btn ma-btn-secondary" data-act="remove-schedule" data-id="${idAttr}">${escapeHtml(t.wfSchedRemoveBtn)}</button>
+        </header>
+        <ul class="ma-meta">
+          <li>${escapeHtml(schedCadenceText(s.cadence))}</li>
+          <li>${escapeHtml(fired)}</li>
+          <li><code>${idAttr}</code></li>
+        </ul>
+      </article>`
+    }).join('')
+  }
+
+  function populateScheduleForm() {
+    if (!dom.wfSchedWorkflow) return
+    if (!schedFormReady) {
+      // Static option sets — filled once (t is fixed for the page's lifetime).
+      schedFormReady = true
+      if (dom.wfSchedKind) {
+        dom.wfSchedKind.innerHTML =
+          `<option value="daily">${escapeHtml(t.wfSchedKindDaily)}</option>` +
+          `<option value="weekly">${escapeHtml(t.wfSchedKindWeekly)}</option>` +
+          `<option value="interval">${escapeHtml(t.wfSchedKindInterval)}</option>`
+      }
+      if (dom.wfSchedWeekday) {
+        dom.wfSchedWeekday.innerHTML = t.wfSchedWeekdays
+          .map((d, i) => `<option value="${i}"${i === 1 ? ' selected' : ''}>${escapeHtml(d)}</option>`)
+          .join('')
+      }
+      void fillScheduleUserOptions()
+    }
+    // Schedulable = the sweeper's own precondition (published + surface.me on).
+    const prev = dom.wfSchedWorkflow.value
+    const rows = wf.workflows.filter(
+      (w) => (w.state || 'published') === 'published' && w.surfaceMe && w.surfaceMe.enabled === true,
+    )
+    dom.wfSchedWorkflow.innerHTML = rows.length === 0
+      ? `<option value="">${escapeHtml(t.wfSchedNoWorkflow)}</option>`
+      : rows.map((w) => `<option value="${escapeHtml(w.id)}">${escapeHtml(w.name || w.id)}</option>`).join('')
+    if (prev && rows.some((w) => w.id === prev)) dom.wfSchedWorkflow.value = prev
+  }
+
+  // Best-effort member-id datalist off the identity surface; hosts without
+  // identity keep the free-text input (the fetch failing is not an error).
+  async function fillScheduleUserOptions() {
+    if (!dom.wfSchedUserOptions) return
+    try {
+      const r = await fetch('/api/admin/identity/users')
+      if (!r.ok) return
+      const users = (await r.json()).users || []
+      dom.wfSchedUserOptions.innerHTML = users
+        .map((u) => `<option value="${escapeHtml(u.id)}">${escapeHtml(u.displayName || u.email || u.id)}</option>`)
+        .join('')
+    } catch {
+      /* free-text input still works */
+    }
+  }
+
+  function onScheduleKindChange() {
+    const kind = dom.wfSchedKind?.value || 'daily'
+    if (dom.wfSchedWeekdayWrap) dom.wfSchedWeekdayWrap.hidden = kind !== 'weekly'
+    if (dom.wfSchedHourWrap) dom.wfSchedHourWrap.hidden = kind === 'interval'
+    if (dom.wfSchedMinutesWrap) dom.wfSchedMinutesWrap.hidden = kind !== 'interval'
+  }
+
+  function schedMsg(text, cls) {
+    if (!dom.wfSchedMsg) return
+    dom.wfSchedMsg.textContent = text
+    dom.wfSchedMsg.classList.remove('ok', 'err')
+    if (cls) dom.wfSchedMsg.classList.add(cls)
+  }
+
+  async function createSchedule() {
+    schedMsg('')
+    const workflowId = dom.wfSchedWorkflow?.value || ''
+    const userId = (dom.wfSchedUser?.value || '').trim()
+    if (!workflowId || !userId) return
+    const kind = dom.wfSchedKind?.value || 'daily'
+    const cadence =
+      kind === 'interval'
+        ? { kind, everyMs: Math.max(1, Number(dom.wfSchedMinutes?.value) || 0) * 60000 }
+        : kind === 'weekly'
+          ? { kind, weekday: Number(dom.wfSchedWeekday?.value) || 0, hour: Number(dom.wfSchedHour?.value) }
+          : { kind, hour: Number(dom.wfSchedHour?.value) }
+    try {
+      const r = await fetch('/api/admin/workflow-schedules', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ workflowId, userId, cadence, enabled: true }),
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        schedMsg(t.failedAlert(body.error || `${r.status}`), 'err')
+        return
+      }
+      schedMsg(t.wfSchedCreated(body.schedule?.id || ''), 'ok')
+      if (dom.wfSchedUser) dom.wfSchedUser.value = ''
+      await refreshSchedules()
+    } catch (err) {
+      schedMsg(t.failedAlert(err.message || String(err)), 'err')
+    }
+  }
+
+  // 试跑 — ignores the clock AND `enabled` (testing a parked row is the
+  // point), but the member gate still applies; the host writes the fired
+  // mark, so a daily row hand-fired today won't auto-fire again today.
+  async function fireSchedule(id) {
+    schedMsg('')
+    try {
+      const r = await fetch(`/api/admin/workflow-schedules/${encodeURIComponent(id)}/fire`, {
+        method: 'POST',
+      })
+      const body = await r.json().catch(() => ({}))
+      if (!r.ok) {
+        schedMsg(t.wfSchedFireFail(body.error || `${r.status}`), 'err')
+        return
+      }
+      schedMsg(t.wfSchedFired(body.workflowId, body.userId), 'ok')
+      await refreshSchedules() // the fired mark advanced
+    } catch (err) {
+      schedMsg(t.failedAlert(err.message || String(err)), 'err')
+    }
+  }
+
+  // 暂停/恢复 = upsert the same row with `enabled` flipped (the API's upsert
+  // stores whole rows; there is no PATCH on purpose — one write shape).
+  async function toggleSchedule(id) {
+    const row = schedules.find((s) => s.id === id)
+    if (!row || !row.valid) return
+    try {
+      const r = await fetch('/api/admin/workflow-schedules', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          id: row.id,
+          workflowId: row.workflowId,
+          userId: row.userId,
+          cadence: row.cadence,
+          inputs: row.inputs,
+          enabled: !row.enabled,
+        }),
+      })
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        alert(t.failedAlert(body.error || `${r.status}`))
+        return
+      }
+      await refreshSchedules()
+    } catch (err) {
+      alert(t.failedAlert(err.message || String(err)))
+    }
+  }
+
+  async function removeSchedule(id) {
+    if (!confirm(t.confirmRemoveSchedule(id))) return
+    try {
+      const r = await fetch(`/api/admin/workflow-schedules/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+      })
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        alert(t.failedAlert(body.error || `${r.status}`))
+        return
+      }
+      await refreshSchedules()
     } catch (err) {
       alert(t.failedAlert(err.message || String(err)))
     }
@@ -1093,6 +1338,12 @@ export function createWorkflows({ wf }) {
     setDom,
     refreshWorkflows,
     renderWorkflows,
+    refreshSchedules,
+    onScheduleKindChange,
+    createSchedule,
+    fireSchedule,
+    toggleSchedule,
+    removeSchedule,
     removeWorkflow,
     lifecycleAction,
     openWorkflowRevisionsModal,

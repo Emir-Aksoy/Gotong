@@ -785,6 +785,46 @@
           <button type="button" id="wf-assist-btn" class="ma-btn ma-btn-secondary" data-i18n="wfAssistBtn">AI 助手 (beta)</button>
         </h2>
         <div id="workflows-list" class="managed-agents-list"></div>
+        <!-- LIFE-L1-M3 — 定时(零 LLM 调度)卡。host 没接 workflowSchedules
+             surface 时(503)整卡保持 hidden;行渲染/操作在 admin-src/workflows.js,
+             选项(工作流/频率/星期)全在 JS 里填,HTML 只留骨架。 -->
+        <div id="wf-sched-card" class="ma-card" hidden>
+          <h3>
+            <span data-i18n="wfSchedTitle">定时</span>
+            <span id="wf-sched-summary" class="lb-summary"></span>
+          </h3>
+          <p class="hint" data-i18n="wfSchedHint">到点替成员自动跑一条工作流（调度环零大模型）。run 归属该成员，跟成员自己在 /me 点「运行」完全同一道闸；成员在 IM 对管家说「打开运行播报」即可收到结果。</p>
+          <div id="wf-sched-list"></div>
+          <form id="wf-sched-form" class="dispatch-form">
+            <label>
+              <span data-i18n="wfSchedWorkflow">工作流（已发布 + 成员可跑）</span>
+              <select id="wf-sched-workflow"></select>
+            </label>
+            <label>
+              <span data-i18n="wfSchedUser">成员 id</span>
+              <input id="wf-sched-user" autocomplete="off" required maxlength="80" list="wf-sched-user-options" placeholder="u-…" />
+              <datalist id="wf-sched-user-options"></datalist>
+            </label>
+            <label>
+              <span data-i18n="wfSchedKind">频率</span>
+              <select id="wf-sched-kind"></select>
+            </label>
+            <label id="wf-sched-weekday-wrap" hidden>
+              <span data-i18n="wfSchedWeekday">星期</span>
+              <select id="wf-sched-weekday"></select>
+            </label>
+            <label id="wf-sched-hour-wrap">
+              <span data-i18n="wfSchedHour">几点（0-23，默认时区 UTC+8）</span>
+              <input id="wf-sched-hour" type="number" min="0" max="23" value="8" />
+            </label>
+            <label id="wf-sched-minutes-wrap" hidden>
+              <span data-i18n="wfSchedMinutes">间隔分钟（≥1）</span>
+              <input id="wf-sched-minutes" type="number" min="1" value="60" />
+            </label>
+            <button type="submit" id="wf-sched-create" class="ma-btn" data-i18n="wfSchedCreateBtn">新建定时</button>
+          </form>
+          <p id="wf-sched-msg" class="form-msg"></p>
+        </div>
         <p class="hint">
           <span data-i18n="workflowsHint">工作流把多个 agent 按顺序串起来。admin 派一个任务到 workflow 的触发能力，整个流程自动跑完。模板：</span>
           <a href="https://github.com/AipeHub/AipeHub/tree/main/templates/workflows" target="_blank" rel="noopener">templates/workflows/</a>

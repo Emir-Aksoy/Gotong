@@ -101,6 +101,7 @@ pnpm demo                          # = hello-collab（官方第一步，见 QUIC
 | [`battle-monk-training`](../../examples/battle-monk-training) | 个人成长 hub：教官 router 驱动三支柱（身/心/识），各自写进持久 Codex | 零 |
 | [`personal-research-hub`](../../examples/personal-research-hub) | 个人研究/知识库 hub：Karpathy 的「LLM as compiler」循环，编纂 + 反查你的 wiki | 零 |
 | [`smart-home-hub`](../../examples/smart-home-hub) | 智能家居 hub 的一个小可跑样例 | 零 |
+| [`morning-brief-hub`](../../examples/morning-brief-hub) | 我的晨报：模板装晨报员 + 晨报流，补一条「定时」即每早自动跑、管家播到 IM（调度环零 LLM） | 装模板 + 填 key |
 
 ## ⑦ 模板 / 压测 / 参考
 

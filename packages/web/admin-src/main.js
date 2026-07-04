@@ -233,6 +233,22 @@ import { createWorkflows } from './workflows.js'
       wfList: $('workflows-list'),
       wfSummary: $('wf-summary'),
       wfImportBtn: $('wf-import-btn'),
+      // Workflow schedules (LIFE-L1-M3 —「定时」card)
+      wfSchedCard: $('wf-sched-card'),
+      wfSchedSummary: $('wf-sched-summary'),
+      wfSchedList: $('wf-sched-list'),
+      wfSchedForm: $('wf-sched-form'),
+      wfSchedWorkflow: $('wf-sched-workflow'),
+      wfSchedUser: $('wf-sched-user'),
+      wfSchedUserOptions: $('wf-sched-user-options'),
+      wfSchedKind: $('wf-sched-kind'),
+      wfSchedWeekday: $('wf-sched-weekday'),
+      wfSchedWeekdayWrap: $('wf-sched-weekday-wrap'),
+      wfSchedHourWrap: $('wf-sched-hour-wrap'),
+      wfSchedMinutesWrap: $('wf-sched-minutes-wrap'),
+      wfSchedHour: $('wf-sched-hour'),
+      wfSchedMinutes: $('wf-sched-minutes'),
+      wfSchedMsg: $('wf-sched-msg'),
       // Workflow start (v2.4) — payload-schema-driven dispatch form
       wfStartModal: $('wf-start-modal'),
       wfStartTitle: $('wf-start-title'),
@@ -2824,6 +2840,12 @@ import { createWorkflows } from './workflows.js'
     dom.wfImportBtn?.addEventListener('click', workflows.openWorkflowImportModal)
     dom.wfImportSubmit?.addEventListener('click', workflows.submitWorkflowImport)
     dom.wfStartSubmit?.addEventListener('click', submitWorkflowStart)
+    // LIFE-L1-M3 —「定时」card: create form + cadence-kind field visibility
+    dom.wfSchedForm?.addEventListener('submit', (e) => {
+      e.preventDefault()
+      void workflows.createSchedule()
+    })
+    dom.wfSchedKind?.addEventListener('change', workflows.onScheduleKindChange)
     dom.bundleImportBtn?.addEventListener('click', openBundleImportModal)
     dom.bundleImportSubmit?.addEventListener('click', submitBundleImport)
     // Template gallery — one-click install of shipped templates (G-M3)
@@ -3034,6 +3056,12 @@ import { createWorkflows } from './workflows.js'
         workflows.lifecycleAction(id, 'draft')
       } else if (act === 'archive-workflow') {
         workflows.lifecycleAction(id, 'archive')
+      } else if (act === 'fire-schedule') {
+        workflows.fireSchedule(id)
+      } else if (act === 'toggle-schedule') {
+        workflows.toggleSchedule(id)
+      } else if (act === 'remove-schedule') {
+        workflows.removeSchedule(id)
       } else if (act === 'open-workflow-revisions') {
         workflows.openWorkflowRevisionsModal(id)
       } else if (act === 'rollback-revision') {

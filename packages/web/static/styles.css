@@ -507,6 +507,9 @@ body.admin[data-active-tab="settings"] main.admin-grid {
   font-size: 0.72rem;
   color: #666;
 }
+/* display:flex above beats the UA's [hidden] — restore it for labels the
+   JS toggles off (e.g. the schedule card's cadence-specific fields). */
+.dispatch-form label[hidden] { display: none; }
 .dispatch-form input,
 .dispatch-form select,
 .dispatch-form textarea {

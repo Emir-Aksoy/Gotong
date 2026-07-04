@@ -1,0 +1,75 @@
+# =============================================================================
+# Workflow: 我的晨报(定时工作流示例)
+# Schema: aipehub.workflow/v1
+#
+# 「让 hub 每天替我干活」的最小骨架(LIFE-L2①):一位晨报员 agent 每早替你写
+# 一份中文晨报,跑完由管家播到你的 IM。**调度环零 LLM** —— 唤醒/判定/派发
+# 全程确定性,模型只在 compose 步里跑。
+#
+# 与 examples/morning-brief-hub 模板的关系:模板装的就是这条 workflow(外加
+# 晨报员 agent + key 提示)。本文件是**单装路径** —— 你已有 capability=
+# brief.compose 的 agent 时,admin「工作流 → 导入」贴这份即可,不必装整套。
+# host E2E (packages/host/tests/morning-brief-e2e.test.ts) 直接以本文件为
+# fixture 钉住整条调度环,所以它和模板内嵌块必须保持同形。
+#
+# # 它演示什么
+#
+# - surface.me.enabled: true + user_scope_field: reader_id —— 成员能从 /me
+#   一键跑,后端强制 payload.reader_id = 调用者本人;**定时调度走的是同一道
+#   闸**,调度行手写别人的 id 会被覆写。
+# - surface.me **不声明** input_schema —— 成员表单回退到 trigger 的
+#   payload_schema(只有 focus 一个可选项)。调度行 inputs 里可复制的字段
+#   也由这份回退决定。
+# - 配调度(admin「工作流 → 定时」卡,或一条 curl):
+#     {"workflowId":"morning-brief","userId":"<成员id>",
+#      "cadence":{"kind":"daily","hour":8},"enabled":true}
+#   细节见 docs/zh/WORKFLOW-SCHEDULES.md。
+#
+# 需要一个 capability=brief.compose 的 agent 才能真正出晨报;没有也能派
+# (fire-and-forget),只是没人接。
+# =============================================================================
+
+schema: aipehub.workflow/v1
+
+workflow:
+  id: morning-brief
+  name: 我的晨报
+  description: 写一份围绕 focus 主题的中文晨报;配好定时后每早自动跑, 跑完管家播到 IM。
+
+  # 不适用的 governance 键(required_human_roles/external_systems)按解析器约定
+  # 省略 —— 设了就必须非空。
+  governance:
+    data_sensitivity: internal
+    required_credentials: [deepseek]
+    notes: 开箱零外部系统;挂了日历/笔记 MCP 后晨报读真实数据, 数据留在本 hub。
+
+  trigger:
+    capability: brief.request
+    payload_schema:
+      - id: focus
+        label: 今天想重点关注什么?
+        type: text
+        required: false
+
+  # 成员工作台(/me)入口 —— 定时调度复用同一道闸。input_schema 省略,成员表单
+  # 回退到上面的 payload_schema(reader_id 是 scope key,不在表单里)。
+  surface:
+    me:
+      enabled: true
+      label: 给我来份晨报
+      description: 立刻写一份今日晨报;配好定时后每早自动送到 IM。
+      allowed_roles: [owner, admin, member]
+      user_scope_field: reader_id
+
+  steps:
+    - id: compose
+      description: 晨报员写今日晨报 (有 MCP 工具就读真实数据, 没有就按诚实模式)。
+      dispatch:
+        strategy: { kind: capability, capabilities: [brief.compose] }
+        title: 写今日晨报
+        payload:
+          focus: $trigger.payload.focus
+          reader_id: $trigger.payload.reader_id
+
+  output:
+    brief: $compose.output

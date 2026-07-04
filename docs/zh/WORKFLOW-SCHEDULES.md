@@ -75,6 +75,10 @@
 
 ## 三、admin API（`/api/admin/workflow-schedules`）
 
+**不想 curl**：admin「工作流」页有「定时」卡（LIFE-L2①）——列表 / 新建（工作流
+下拉只列「已发布 + surface.me 开」的，即 sweep 自己的可跑前提）/ 试跑 / 暂停恢复 /
+删除，全压下面这四条 API，无任何私有通路。
+
 ```bash
 TOKEN=<admin token>; B=http://127.0.0.1:3000/api/admin/workflow-schedules
 # 列表（意图 + lastFiredMark 并排，invalid 行带 valid:false）
@@ -122,6 +126,10 @@ curl -sX POST -H "Authorization: Bearer $TOKEN" $B/sched-morning/fire | jq
 
 ## 六、指针
 
+- **开箱案例（推荐第一站）**：[`examples/morning-brief-hub`](../../examples/morning-brief-hub)
+  ——「我的晨报」模板画廊一键装（晨报员 agent + morning-brief 流），补一条定时
+  即每早自动跑；host E2E `packages/host/tests/morning-brief-e2e.test.ts` 钉死整条环。
+  只要工作流不要 agent 的话，单装 [`templates/workflows/morning-brief-flow.yaml`](../../templates/workflows/morning-brief-flow.yaml)。
 - 工作流本身怎么建：[`WORKFLOW-ARCHITECT.md`](WORKFLOW-ARCHITECT.md) ·
   [`WORKFLOW-WIZARD.md`](WORKFLOW-WIZARD.md)
 - 管家播报 / 观察面：[`ledger/BUTLER-EMPOWER-FINAL.md`](ledger/BUTLER-EMPOWER-FINAL.md)

@@ -1,0 +1,113 @@
+# 我的晨报 — 定时工作流开箱包 (aipehub.template/v1)
+#
+# LIFE-L2①:「让 hub 每天替我干活」的第一个开箱案例。装走的是能干活的骨架:
+#   - 1 个托管 LLM agent (brief-writer 晨报员), 服务 brief.compose 能力;
+#   - 1 条声明式工作流 (morning-brief), surface.me 开着 —— 成员能在 /me 一键跑,
+#     而**定时调度走的就是这同一道成员闸** (见下), 装完补一条调度行即成「每早自动跑」。
+#
+# ── 装完两步, 从「能跑」到「每早自动到 IM」 ────────────────────────────────────
+#   1. 建调度 (admin「工作流 → 定时」卡, 或 curl):
+#        curl -X POST -H "Authorization: Bearer <admin-token>" -H 'content-type: application/json' \
+#          -d '{"workflowId":"morning-brief","userId":"<成员id>","cadence":{"kind":"daily","hour":8},"enabled":true}' \
+#          http://127.0.0.1:8745/api/admin/workflow-schedules
+#      调度环零 LLM (唤醒/判定/派发全程确定性), run 归属该成员 —— 语义 = 该成员每天
+#      8 点自己点了一次「运行」。手动试跑: POST /api/admin/workflow-schedules/<id>/fire。
+#   2. 开播报 (每成员默认关): 成员在 IM 里对管家说「打开运行播报」(set_run_broadcast)。
+#      跑完的晨报由管家零 LLM 播到 IM —— 本模板零播报代码, 全复用 BE-M5。
+#   细节: docs/zh/WORKFLOW-SCHEDULES.md
+#
+# ── 晨报的「料」从哪来 (模版/框架分离) ─────────────────────────────────────────
+#   模板不带知识内容。开箱状态下晨报员基于 focus 主题就常识展开 (诚实模式: 它拿不到
+#   你的日程就不会编造"你的日程")。要让晨报读你的真实日历 / 笔记 / 收件箱, 给
+#   brief-writer 挂对应的 MCP server (admin「Agent → 编辑 → mcpServers」, 或参考
+#   examples/rag-mcp / docs/zh/MCP-CONNECTOR-DIRECTORY.md) —— 接线是运行时配置,
+#   不在模板里写死。
+#
+# 导入: admin UI →「工作流 / 模板画廊」→ 安装, 或
+#   curl -X POST -H "Authorization: Bearer <admin-token>" \
+#     -H 'content-type: application/json' \
+#     -d "$(jq -Rs '{template: .}' examples/morning-brief-hub/template/morning-brief-hub.template.yaml)" \
+#     http://127.0.0.1:8745/api/admin/templates/import
+schema: aipehub.template/v1
+template:
+  name: 我的晨报(定时工作流)
+  description: |-
+    每天早上让 hub 替你跑一份中文晨报, 跑完由管家播到你的 IM。模板带 1 个托管 agent
+    (晨报员) + 1 条声明式工作流 (morning-brief, /me 一键跑) + 一次性 DeepSeek key 提示。
+    装完补一条调度行 (admin「定时」卡或一条 curl) 即成「每早 8 点自动跑」—— 调度环零
+    LLM, run 归属你本人, 播报走管家既有的运行播报 (IM 里说「打开运行播报」即可)。要读
+    真实日历 / 笔记, 给晨报员挂对应 MCP server (运行时配置, 模板不写死)。
+
+  version: 1
+
+  # ── 1 个 agent: 晨报员 ───────────────────────────────────────────────────────
+  agents:
+    - id: brief-writer
+      displayName: 晨报员
+      capabilities: [brief.compose]
+      kind: llm
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      providerLabel: DeepSeek
+      model: deepseek-chat
+      system: |
+        你是订阅者的晨报员, 每次被派到就写**一份**简短的中文晨报, 直接给正文,
+        不寒暄、不解释你在做什么。
+
+        结构 (全文 200-400 字, 用短小节):
+        1. 今日重点 —— 围绕 focus 主题给 2-3 条当下值得关注的要点或行动建议;
+        2. 提醒 —— 1-2 条通用的当日自查 (如"今天有没有要交付/要回复的事");
+        3. 今日一学 —— 1 条与主题相关的小知识或方法。
+
+        诚实规矩 (最重要):
+        - 你没有实时新闻和订阅者的日程/邮件。**没有的数据就不要编** —— 不要伪造
+          "今天的新闻"或"你的日程安排", 要点写成常识性、不依赖时效的建议。
+        - 如果你的工具列表里有日历 / 笔记 / 搜索类 MCP 工具, 先调它们拿真实数据,
+          晨报里的"提醒"一节改用真实条目; 没有工具就按上面的通用写法。
+        - focus 为空时, 主题取"高效开始这一天"。
+      # 要读真实数据, 运行时在这里挂 MCP server (日历 / Obsidian / 搜索),
+      # 见文件头「晨报的料从哪来」。模板不预挂 —— 接哪个源是使用者的运行时决定。
+
+  # ── 1 条声明式工作流: morning-brief ─────────────────────────────────────────
+  # surface.me enabled —— 成员 /me 一键跑; reader_id 由 /me 层(以及定时调度的
+  # 同一道闸)强制 = 发起成员自己, 调度行手写别人的 id 会被覆写。
+  workflows:
+    - id: morning-brief
+      name: 我的晨报
+      description: 写一份围绕 focus 主题的中文晨报;配好定时后每早自动跑, 跑完管家播到 IM。
+      governance:
+        data_sensitivity: internal
+        required_credentials: [deepseek]
+        notes: 开箱零外部系统;挂了日历/笔记 MCP 后晨报读真实数据, 数据留在本 hub。
+      trigger:
+        capability: brief.request
+        payload_schema:
+          - id: focus
+            label: 今天想重点关注什么?
+            type: text
+            required: false
+      surface:
+        me:
+          enabled: true
+          label: 给我来份晨报
+          description: 立刻写一份今日晨报;配好定时后每早自动送到 IM。
+          allowed_roles: [owner, admin, member]
+          user_scope_field: reader_id
+      steps:
+        - id: compose
+          description: 晨报员写今日晨报 (有 MCP 工具就读真实数据, 没有就按诚实模式)。
+          dispatch:
+            strategy: { kind: capability, capabilities: [brief.compose] }
+            title: 写今日晨报
+            payload:
+              focus: $trigger.payload.focus
+              reader_id: $trigger.payload.reader_id
+      output:
+        brief: $compose.output
+
+  # ── 一键: 导入时提示填一次 API key, 自动应用到晨报员 ─────────────────────────
+  defaults:
+    apiKeyPrompt:
+      provider: openai-compatible
+      baseURL: https://api.deepseek.com/v1
+      label: DeepSeek
