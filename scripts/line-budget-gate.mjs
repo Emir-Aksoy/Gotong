@@ -34,7 +34,7 @@ const REPO = resolve(HERE, '..')
  */
 const BUDGETS = [
   { file: 'packages/host/src/main.ts', max: 3500 }, // the assembly binary — split target
-  { file: 'packages/web/src/server.ts', max: 3300 }, // web route assembly
+  { file: 'packages/web/src/server.ts', max: 2350 }, // web route assembly (types → server-types.ts)
   { file: 'packages/web/src/me-routes.ts', max: 3500 }, // /me route sprawl
 ]
 
