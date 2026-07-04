@@ -167,12 +167,18 @@ export async function writeButlerProactiveConfig(
  * the HOST's timezone (we never touch the server's local zone), so a brief set for
  * 08:00 fires at the member's 08:00 whatever zone the host runs in.
  */
-export function memberLocalNow(nowMs: number, tzOffsetMinutes: number): { hour: number; date: string } {
+export function memberLocalNow(
+  nowMs: number,
+  tzOffsetMinutes: number,
+): { hour: number; date: string; weekday: number } {
   const shifted = new Date(nowMs + tzOffsetMinutes * 60_000)
   const y = shifted.getUTCFullYear()
   const m = String(shifted.getUTCMonth() + 1).padStart(2, '0')
   const d = String(shifted.getUTCDate()).padStart(2, '0')
-  return { hour: shifted.getUTCHours(), date: `${y}-${m}-${d}` }
+  // weekday (0=Sunday, JS convention) rides along for the LIFE-L1 workflow
+  // scheduler's weekly cadence — one shift-then-read implementation, two
+  // consumers, instead of a second copy of the same date math.
+  return { hour: shifted.getUTCHours(), date: `${y}-${m}-${d}`, weekday: shifted.getUTCDay() }
 }
 
 // ---------------------------------------------------------------------------
