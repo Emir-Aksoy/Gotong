@@ -21,7 +21,10 @@
 #
 #   docker compose -f docker-compose.prod.yml up -d
 #   docker compose -f docker-compose.prod.yml logs -f aipehub
-#       └─ grep for `First-run admin URL` once
+#       └─ logs mask the admin token; for the first login read the
+#          one-shot URL from the data volume instead:
+#          docker compose -f docker-compose.prod.yml exec aipehub \
+#            cat /data/runtime/admin-link.txt
 #
 # Backups: the `data` volume is the entire source of truth (transcript,
 # agents, secrets). The included `backup` service tars it once a day to

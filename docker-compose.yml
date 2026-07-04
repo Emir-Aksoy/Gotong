@@ -2,7 +2,11 @@
 #
 #   docker compose up         # foreground, Ctrl-C stops
 #   docker compose up -d      # detached
-#   docker compose logs -f    # tail the first-run admin URL
+#   cat data/runtime/admin-link.txt   # first login: one-shot admin URL
+#       └─ the setup wizard can't surface through Docker's port forward
+#          (requests arrive from the bridge gateway, not loopback, and the
+#          wizard trusts loopback only), and logs mask the token — this
+#          0600 file on the bind mount is the designed way in.
 #
 # The `./data` directory on the host is bind-mounted into the container as
 # /data and holds the workspace (transcript.jsonl, agents.json,
@@ -11,9 +15,9 @@
 # For a production deployment behind a TLS-terminating reverse proxy:
 #   - set AIPE_COOKIE_SECURE=1
 #   - set AIPE_ALLOWED_HOSTS=hub.example.com,hub-ws.example.com
-#   - bind ports to 127.0.0.1 (e.g. "127.0.0.1:3000:3000") so only the
-#     proxy can reach them
-#   - see docs/DEPLOY.md for the full Caddy + systemd pattern
+#   - drop AIPE_ALLOW_INSECURE (it is only for loopback-published dev)
+#   - see docker-compose.prod.yml / docs/DEPLOY.md for the full
+#     Caddy + systemd pattern
 
 services:
   aipehub:
@@ -24,12 +28,14 @@ services:
     container_name: aipehub-host
     restart: unless-stopped
 
-    # Web (browser) + WebSocket (remote agents). On a public deployment,
-    # change the host side to "127.0.0.1:3000" so only the local reverse
-    # proxy can reach them.
+    # Web (browser) + WebSocket (remote agents). Published to loopback
+    # only, so nothing outside this machine can reach the hub (the
+    # first-run wizard window included). For LAN access change to
+    # "3000:3000" — and understand AIPE_ALLOW_INSECURE below then
+    # applies to your whole LAN, not just this machine.
     ports:
-      - "3000:3000"
-      - "4000:4000"
+      - "127.0.0.1:3000:3000"
+      - "127.0.0.1:4000:4000"
 
     volumes:
       - ./data:/data
@@ -43,6 +49,14 @@ services:
       AIPE_WS_PORT: "4000"
       AIPE_GATING: admin-approval
       AIPE_COOKIE_SECURE: "0"
+
+      # Inside a container the host must bind 0.0.0.0 for published ports
+      # to work, which trips the network-exposed fail-closed gate (no
+      # AIPE_ALLOWED_HOSTS, no Secure cookie → FATAL). Downgrade it to a
+      # warning here: the loopback-only `ports:` above is what actually
+      # keeps this hub private. Production: use docker-compose.prod.yml,
+      # which satisfies the gate properly instead of waiving it.
+      AIPE_ALLOW_INSECURE: "1"
 
       # Optional — uncomment to give managed agents a default LLM key.
       # ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
