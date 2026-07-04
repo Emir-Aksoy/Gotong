@@ -111,8 +111,11 @@ interface MeSurfaceView {
   userScopeField?: string
 }
 
-/** A workflow resolved as runnable for a specific member. */
-interface RunnableWorkflow {
+/** A workflow resolved as runnable for a specific member. Exported (with
+ * {@link evaluateRunnable}) for the LIFE-L1 workflow-schedule sweeper — a
+ * scheduled run goes through the SAME member-facing gate as the butler tool,
+ * one implementation, two consumers. */
+export interface RunnableWorkflow {
   workflowId: string
   capability: string
   label: string
@@ -154,7 +157,10 @@ function fieldIds(schema: unknown[]): string[] {
  * workflow isn't published, isn't member-facing, or excludes the role. Pure
  * mirror of `evaluateMeSurface` — see file header.
  */
-function evaluateRunnable(summary: ButlerWorkflowSummary, role: string): RunnableWorkflow | null {
+export function evaluateRunnable(
+  summary: ButlerWorkflowSummary,
+  role: string,
+): RunnableWorkflow | null {
   // Phase 15: only a PUBLISHED workflow is member-facing. `state` absent only on
   // a legacy host predating lifecycle — there we let surface.me gate it.
   if (summary.state !== undefined && summary.state !== 'published') return null

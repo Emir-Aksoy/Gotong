@@ -252,6 +252,7 @@ import {
   BUTLER_RUN_BROADCAST_INTERVAL_MS,
   buildButlerRunBroadcastToolset,
 } from './personal-butler-run-broadcast.js'
+import { WorkflowScheduleSweeper } from './workflow-schedule-sweeper.js'
 import { PersonalButlerAgent } from '@aipehub/personal-butler'
 import { HostMeImService } from './me-im-service.js'
 import { ApprovalGatedParticipant } from './outbound-approval.js'
@@ -2425,6 +2426,11 @@ async function main(): Promise<void> {
     butlerRunBroadcastSweeper.start()
   }
 
+  // LIFE-L1 乙案 — zero-LLM workflow schedules; default-on, no knob (missing intent file = free no-op).
+  const workflowScheduleSweeper = new WorkflowScheduleSweeper(
+    { spaceDir: space.root, workflows: workflowController, hub, logger: log })
+  workflowScheduleSweeper.start()
+
   // Phase 18 C-M4 + Route B P1-M11b — outbound A2A agents. Each stored entry
   // (identity `a2a_outbound_agents`) becomes a local Participant, so a normal
   // capability dispatch reaches out over A2A message/send (the mirror of the
@@ -3377,6 +3383,7 @@ async function main(): Promise<void> {
     if (butlerRunBroadcastSweeper) {
       try { butlerRunBroadcastSweeper.stop() } catch (err) { log.error('butler run-broadcast stop error', { err }) }
     }
+    try { workflowScheduleSweeper.stop() } catch (err) { log.error('workflow schedule stop error', { err }) }
     if (services) {
       try { await services.shutdownAll() } catch (err) { log.error('services shutdown error', { err }) }
     }
