@@ -244,6 +244,10 @@ sudo $EDITOR /etc/aipehub.env            # 改域名；master key 从 secret 注
 `AIPE_TRUST_PROXY=1`）+ master key `env` provider + 保留策略。
 - **T2（云 + IM）**：填 `AIPE_TELEGRAM_BOT_TOKEN`，成员走 IM。Web 端口可以完全
   封在 loopback，连 Caddy/域名都不需要（admin 用 §八的 `mint-admin-token` 进）。
+  **注意**：模板三件套是按 T3（有域名）预填的 —— 纯 loopback 档要按 §T2/T3.1b
+  「步 2 开关分流」调整，否则你经 ssh 隧道做的一切写操作都会被 CSRF 闸 403。
+  token 也可以不进 env：留空走首启向导落**密钥库**（§T2/T3.1b 向导变体；换 token
+  时设回环境变量重启即可，env 永远优先于密钥库）。
 - **T3（云 + 直连）**：留空 IM token（或两者都要也行），按 [`DEPLOY.md`](DEPLOY.md)
   §C.4（systemd）+ §C.5（Caddyfile）+ §C.6（防火墙）起反向代理，成员浏览器开
   `https://hub.example.com`（PWA 可装到手机桌面）。
@@ -263,6 +267,66 @@ sudo $EDITOR /etc/aipehub.env            # 改域名；master key 从 secret 注
 > 控制台调过的旋钮。`setting` 白名单**按构造拒一切密钥键**，所以 `<space>/aipehub.env` 里永远不会
 > 有 token / master key —— 密钥仍走 §T2/T3.2 的 systemd secret。便携双击 launcher
 > （`deploy/AipeHub.command` / `.sh`）已自带同款 source，云端只需补这一行 systemd 配置。
+
+### T2/T3.1a 另一条快路 —— Docker Compose（宿主机零 Node/pnpm）
+
+不想在宿主机装 Node 工具链？仓库根目录自带完整容器化三件，等价于 quickstart 的
+另一条路（build 在容器里发生）：
+
+```bash
+git clone https://github.com/Emir-Aksoy/AipeHub.git && cd AipeHub
+docker compose up -d --build
+```
+
+- [`Dockerfile`](../../Dockerfile) —— 多阶段 build；运行时非 root（`node` 用户）、
+  默认 `AIPE_SPACE=/data`、内建 `/healthz` HEALTHCHECK。
+- [`docker-compose.yml`](../../docker-compose.yml) —— 本地 / 内网档：数据 bind-mount 到
+  `./data`，旋钮在 `environment:` 里加 `AIPE_*`。**默认把 3000/4000 发布到所有接口**——
+  上公网前按文件头注释把 host 侧改成 `127.0.0.1:3000:3000`，或直接换 prod 档。
+- [`docker-compose.prod.yml`](../../docker-compose.prod.yml) —— 公网档一条命令
+  （`docker compose -f docker-compose.prod.yml up -d`）：Caddy 自动 TLS + 容器只读
+  文件系统 + 每日备份 sidecar（`./backups/`，14 天保留）。域名 / 邮箱在文件头注释里改。
+
+首启 admin 入口与裸机一致（§八）：banner 会提示一次性 URL 写在
+`<AIPE_SPACE>/runtime/admin-link.txt`（容器内 `/data/runtime/…` = 宿主 `./data/runtime/…`），
+**故意不进 `docker logs`**。IM token / master key 同样经 env 注入；下面的 TTFR 分钟账
+同样适用，只是步 1 的 build 换成镜像构建。
+
+### T2/T3.1b 部署 TTFR —— 裸 VPS → 首条 IM 回复的分钟账
+
+「部署有多简单」的可测口径：**从一台裸 VPS 到你在 Telegram 里收到第一条回复，预算
+15 分钟**（build 占一半）。每步都给「看到什么才算过」，卡住直接跳 §十一排查。
+
+| # | 做什么 | 典型耗时 | 看到什么才算过 |
+|---|---|---|---|
+| 0 | Telegram 找 `@BotFather` 发 `/newbot` 拿 token | ~1 分钟 | 拿到 `123456:ABC…` 一串 |
+| 1 | §T2/T3.1 的 quickstart 一条命令（`--clone`） | 5–10 分钟 | 结尾打印收尾三步，无红字 |
+| 2 | 编辑 `/etc/aipehub.env`：填 token + master key + **按拓扑调开关（见下）** | 1–2 分钟 | — |
+| 3 | 跑 [`scripts/cloud-harden.sh`](../../scripts/cloud-harden.sh) | <1 分钟 | 无红项（纯 T2 档见下方注） |
+| 4 | `sudo systemctl start aipehub` | <1 分钟 | `curl -s 127.0.0.1:3000/healthz` 回 `ok`；journalctl 里出现 `IM bridge enabled`（`"platform":"telegram"`） |
+| 5 | §八 `mint-admin-token` → 本地 `ssh -L 3000:127.0.0.1:3000 <vps>` → 浏览器开一次性 URL → `/me` 领绑定码 | 1–2 分钟 | 页面出 6 位绑定码 |
+| 6 | Telegram 私信机器人 `/bind <码>`，再随便发一句 | ~1 分钟 | 机器人先确认绑定，然后**回答了你那句话** |
+
+**步 2 的开关按拓扑分流**（`.env.cloud` 模板是按 T3 预填的）：
+
+- **T3（有域名 + Caddy）**：照模板 —— `AIPE_ALLOWED_HOSTS` 填真域名，三件套全开。
+- **T2（无域名，web 全封 loopback、只经 ssh 隧道进）**：`AIPE_ALLOWED_HOSTS=127.0.0.1:3000`，
+  `AIPE_COOKIE_SECURE` / `AIPE_TRUST_PROXY` 留空不设。为什么：CSRF 闸按 Host/Origin
+  精确匹配、**没有 loopback 豁免** —— 留着 `hub.example.com` 白名单 + 强制 https Origin，
+  你经隧道做的一切写操作（admin UI / `/me` 出码 / 首启向导）都会 403。隧道档的传输加密
+  由 ssh 承担。代价：`cloud-harden.sh` 会红 cookie/hosts 两项 —— 它按「只要 loopback 之外
+  有人够得着」的最坏假设判，纯隧道档这两项是已知取舍，**其余项仍必须全绿**。
+
+**token 不想进 env？走首启向导（落密钥库）**：步 2 留空 token → 步 4 起服后 ——
+T3 直接开 `https://hub.example.com`（首启窗口内根路径就是向导），T2 开隧道后访问
+`http://127.0.0.1:3000` —— 设 owner 密码 → LLM key 可跳过 → IM 步选平台粘 token →
+页面报「机器人已上线!」、journalctl 出现 `"credSource":"vault"`。这条路顺带把步 5 的
+admin 认领也做了（向导本身就是 owner 认领）。**T3 注意**：同机反代的连接在 host 看来
+就是 loopback，首启向导在窗口期对公网可见 —— 起了 Caddy 就立刻走完认领，别把窗口晾着。
+之后换 token：设回对应环境变量重启即可，**env 永远优先于密钥库**。
+
+上线后复核：登录 admin 后开「设置」页（`/#settings`），「IM 通道」卡片会列出活着的
+平台 + 凭证来源（`环境变量` / `密钥库`）—— 没看到你配的平台 = 桥没起来，回 §十一。
 
 ### T2/T3.2 master key 挪出数据盘（云端关键）
 
@@ -326,6 +390,11 @@ sudo -u aipehub -H AIPE_SPACE=/srv/aipehub-data \
 （首次在本机直接跑、或 docker 首启时，banner 也会告诉你去哪读这个文件。完整说明见
 [`DEPLOY.md`](DEPLOY.md) §C.7。）
 
+另一条路：空间还**没认领过 owner**（全新盒子）时，首启向导本身就是 admin 入口 ——
+T3 起了反代后直接开 `https://域名`，T2 经 `ssh -L` 隧道开 `http://127.0.0.1:3000`，
+设完 owner 密码就有 admin 了（还能顺路把 IM token 落密钥库）。适用条件与 CSRF 开关
+的坑见 §T2/T3.1b 的向导变体。
+
 ---
 
 ## 九、配置模板与脚本索引
@@ -333,6 +402,7 @@ sudo -u aipehub -H AIPE_SPACE=/srv/aipehub-data \
 | 要做什么 | 用哪个 |
 |---|---|
 | T2/T3 裸 VPS 一条命令 provision | [`deploy/cloud-quickstart.sh`](../../deploy/cloud-quickstart.sh)（`--clone` 取码 + `--dry-run` 预览，§T2/T3.1） |
+| 容器化整套（宿主机零 Node） | 根目录 [`Dockerfile`](../../Dockerfile) + [`docker-compose.yml`](../../docker-compose.yml)（本地/内网）+ [`docker-compose.prod.yml`](../../docker-compose.prod.yml)（Caddy TLS + 每日备份，§T2/T3.1a） |
 | T1 家用 env | [`deploy/.env.home`](../../deploy/.env.home) |
 | T2/T3 云端 env | [`deploy/.env.cloud`](../../deploy/.env.cloud) |
 | 模板说明 | [`deploy/README.md`](../../deploy/README.md) |
@@ -347,7 +417,7 @@ sudo -u aipehub -H AIPE_SPACE=/srv/aipehub-data \
 ## 十、上线前检查清单
 
 ### T1 家用主机 + IM
-- [ ] `AIPE_TELEGRAM_BOT_TOKEN` 已填、真 token 放在 `.env.local`（不进 git）
+- [ ] IM token 已配：env（真 token 放 `.env.local`，不进 git）**或**首启向导落密钥库（env 优先）
 - [ ] 至少一个 agent 服务 `chat` capability（否则成员发消息没人接）
 - [ ] `AIPE_HOST=127.0.0.1`（或确认走了 §五 LAN 变体）
 - [ ] `AIPE_GATING=admin-approval`
@@ -358,7 +428,9 @@ sudo -u aipehub -H AIPE_SPACE=/srv/aipehub-data \
 - [ ] `AIPE_COOKIE_SECURE=1` + `AIPE_ALLOWED_HOSTS=<所有域名>` + `AIPE_TRUST_PROXY=1` 三件套
 - [ ] master key 走 `env` provider，key 从 secret 注入、**单独离线备份**
 - [ ] 主机绑 `127.0.0.1`，Caddy 终结 TLS（T3）；防火墙只开 443 + SSH
-- [ ] 跑过 [`scripts/cloud-harden.sh`](../../scripts/cloud-harden.sh)，无红项
+- [ ] 跑过 [`scripts/cloud-harden.sh`](../../scripts/cloud-harden.sh)，无红项（纯 T2 隧道档：cookie/hosts 两红是已知取舍，§T2/T3.1b）
+- [ ] admin「设置」页（`/#settings`）「IM 通道」卡片列出了所配平台 + 凭证来源
+- [ ] 部署 TTFR 达标：裸 VPS → 首条 IM 回复 ≤ 15 分钟（§T2/T3.1b 分钟账）
 - [ ] 异地备份在跑（`scripts/backup/` + cron）+ `/healthz` 被监控
 - [ ] ≥2 个 admin；确认 `mint-admin-token` 恢复路径可用
 - [ ] 证书签发跑通（谨慎先用 Let's Encrypt staging）

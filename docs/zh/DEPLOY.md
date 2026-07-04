@@ -128,6 +128,10 @@ ws://192.168.1.42:4000            ← remote agent
 > **懒人路径**：§C.1–C.4 的机械部分（取码 → Node/pnpm → 服务用户 → build → env 模板 →
 > systemd unit）有脚本一次做完——裸机 `curl -fsSL https://raw.githubusercontent.com/Emir-Aksoy/AipeHub/main/deploy/cloud-quickstart.sh | sudo bash -s -- --clone`
 > （先看不动手加 `--dry-run`）。unit 与本节 §C.4 逐字一致；跑完回来做 §C.5 Caddy + §C.6 防火墙。
+>
+> **容器路径**：宿主机不想装 Node 工具链的话，仓库根目录自带 `Dockerfile` +
+> `docker-compose.yml`（本地/内网）+ `docker-compose.prod.yml`（Caddy TLS + 每日备份），
+> 见 [`GO-LIVE.md`](GO-LIVE.md) §T2/T3.1a——本节的 systemd/Caddy 细节在容器档里由 compose 承担。
 
 ### C.1 前置条件
 
