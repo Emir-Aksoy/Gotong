@@ -268,6 +268,7 @@ docs(audit): v4 Phase 5 full audit — 15 modules, no P1/P2 hotfixes (F1)
 | 治理 + 行为准则 + 维护者名册 | `GOVERNANCE.md` · `CODE_OF_CONDUCT.md` · `MAINTAINERS.md` |
 | 旗舰模板策展索引 + 引用排行榜 | `docs/zh/FLAGSHIP-TEMPLATES.md` |
 | 零算力社区站生成器 · GitHub Discussions | `docs/zh/COMMUNITY-SITE.md` · `docs/zh/COMMUNITY-DISCUSSIONS.md` |
+| 前置部署 playbook（FDE 五段流水线：发现→构建→对接→部署验收→观察移交 + 两边界守则；方案包 schema 草案，FDE-M1 待建） | `docs/zh/FORWARD-DEPLOY.md` |
 | 上线 runbook（三拓扑 T1/T2/T3） | `docs/zh/GO-LIVE.md` |
 | 便携包分发（下载双击即跑，零 Node/Docker） | `docs/zh/PORTABLE-BUNDLE.md` |
 | 部署 / 运维 / 监控 | `docs/zh/DEPLOY.md` · `docs/OPERATIONS.md` · `docs/MONITORING.md` |
