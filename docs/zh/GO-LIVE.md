@@ -281,8 +281,10 @@ docker compose up -d --build
 - [`Dockerfile`](../../Dockerfile) —— 多阶段 build；运行时非 root（`node` 用户）、
   默认 `AIPE_SPACE=/data`、内建 `/healthz` HEALTHCHECK。
 - [`docker-compose.yml`](../../docker-compose.yml) —— 本地 / 内网档：数据 bind-mount 到
-  `./data`，旋钮在 `environment:` 里加 `AIPE_*`。**默认把 3000/4000 发布到所有接口**——
-  上公网前按文件头注释把 host 侧改成 `127.0.0.1:3000:3000`，或直接换 prod 档。
+  `./data`，旋钮在 `environment:` 里加 `AIPE_*`。端口**只发布到 loopback**
+  （`127.0.0.1:3000:3000`），配 `AIPE_ALLOW_INSECURE=1` 出厂即起（容器内必绑
+  `0.0.0.0`，网络暴露闸由 loopback-only 发布兜真，闸降级为警告）。要 LAN/公网
+  直连别改这份——换 prod 档正经过闸。
 - [`docker-compose.prod.yml`](../../docker-compose.prod.yml) —— 公网档一条命令
   （`docker compose -f docker-compose.prod.yml up -d`）：Caddy 自动 TLS + 容器只读
   文件系统 + 每日备份 sidecar（`./backups/`，14 天保留）。域名 / 邮箱在文件头注释里改。
